@@ -6,8 +6,7 @@ hmac_key_manager.py - HMAC鍵のローテーション管理 + 署名ユーティ
 鍵の保存先: user_data/hmac_keys.json (.gitignore 登録済み)
 グレースピリオド: デフォルト24時間（ローテーション後も旧鍵で検証可能）
 ローテーショントリガー:
-  - 環境変数 RUMI_HMAC_ROTATE=true で起動時にローテーション
-  - プログラムから rotate() / rotate_key() を呼び出し
+  - Host が明示的に rotate() / rotate_key() を呼び出す
 
 署名ユーティリティ (#65):
   - generate_or_load_signing_key(key_path) → bytes
@@ -17,7 +16,6 @@ hmac_key_manager.py - HMAC鍵のローテーション管理 + 署名ユーティ
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import json
@@ -25,9 +23,10 @@ import logging
 import os
 import secrets
 import shutil
+import stat
 import tempfile
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -73,6 +72,45 @@ def _parse_ts(ts: str) -> datetime:
 # 署名ユーティリティ関数 (#65)
 # ======================================================================
 
+
+class SigningKeyError(RuntimeError):
+    """Host-owned signing-key material failed a filesystem security check."""
+
+
+def _reject_symlink_key(key_path: Path) -> None:
+    """Reject a redirected key file without rejecting OS path aliases."""
+    if key_path.is_symlink():
+        raise SigningKeyError(f"signing-key path is symlinked: {key_path}")
+
+
+def _load_secure_signing_key(key_path: Path) -> bytes:
+    """Load one owner-only regular key file without silent recovery."""
+    _reject_symlink_key(key_path)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(key_path, flags)
+    except OSError as error:
+        raise SigningKeyError("signing-key file is unreadable") from error
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise SigningKeyError("signing-key path is not a regular file")
+        if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
+            raise SigningKeyError("signing-key file is not owned by the Host user")
+        if stat.S_IMODE(metadata.st_mode) & 0o077:
+            raise SigningKeyError("signing-key file must have mode 0600")
+        chunks = []
+        while chunk := os.read(descriptor, 4096):
+            chunks.append(chunk)
+        key_data = b"".join(chunks).decode("utf-8").strip()
+    except UnicodeError as error:
+        raise SigningKeyError("signing-key file is unreadable") from error
+    finally:
+        os.close(descriptor)
+    if len(key_data) < 32:
+        raise SigningKeyError("signing-key material is missing or weak")
+    return key_data.encode("utf-8")
+
 def generate_or_load_signing_key(
     key_path: Path,
     env_var: Optional[str] = None,
@@ -80,56 +118,38 @@ def generate_or_load_signing_key(
     """
     署名用秘密鍵をロードまたは生成する。
 
-    優先順位:
-    1. env_var が指定されていれば環境変数から取得
-    2. key_path ファイルから読み込み
-    3. 新規生成して key_path に atomic write (0o600)
+    Ambient environment values are deliberately never key authority. Existing
+    material must be a regular, owner-owned 0600 file. Missing material is
+    generated with an atomic owner-only write; malformed or redirected material
+    fails closed instead of being silently replaced.
 
     Args:
         key_path: 鍵ファイルのパス
-        env_var:  環境変数名（省略可）
+        env_var: Retained only as a compatibility label; its value is ignored.
 
     Returns:
         鍵データ (bytes)
     """
-    # 1. Explicit host contract; ambient process environment is not authority.
-    if env_var:
-        from .host_contract import host_contract_value
+    if env_var and os.environ.get(env_var):
+        logger.warning("Ignoring ambient signing-key environment variable %s", env_var)
+    _reject_symlink_key(key_path)
+    if key_path.exists() or key_path.is_symlink():
+        return _load_secure_signing_key(key_path)
 
-        env_val = host_contract_value(env_var)
-        if env_val and len(env_val) >= 32:
-            return env_val.encode("utf-8")
-
-    # 2. ファイルから読み込み
-    if key_path.exists():
-        try:
-            key_data = key_path.read_text(encoding="utf-8").strip()
-            if key_data and len(key_data) >= 32:
-                return key_data.encode("utf-8")
-            elif key_data:
-                logger.warning(
-                    "鍵ファイルの鍵長が不十分です（%d文字）。再生成します。",
-                    len(key_data),
-                )
-        except Exception:
-            pass
-
-    # 3. 新規生成 + atomic write
     key_str = hashlib.sha256(os.urandom(32)).hexdigest()
     key_path.parent.mkdir(parents=True, exist_ok=True)
+    _reject_symlink_key(key_path)
 
     fd, tmp_path = tempfile.mkstemp(
         dir=str(key_path.parent), prefix=".signing_key_tmp_"
     )
     try:
         os.write(fd, key_str.encode("utf-8"))
+        os.fchmod(fd, 0o600)
         os.close(fd)
         fd = -1
         os.replace(tmp_path, str(key_path))
-        try:
-            safe_chmod(str(key_path), 0o600)
-        except (OSError, AttributeError):
-            pass
+        safe_chmod(str(key_path), 0o600)
     except Exception:
         if fd >= 0:
             try:
@@ -265,13 +285,6 @@ class HMACKeyManager:
 
         # 鍵をロードまたは初回生成
         self._load_or_initialize()
-
-        # 環境変数によるローテーショントリガー
-        if os.environ.get("RUMI_HMAC_ROTATE", "").lower() == "true":
-            self.rotate()
-            # 一度ローテーションしたらフラグをクリア（同一プロセス内での再トリガー防止）
-            os.environ.pop("RUMI_HMAC_ROTATE", None)
-
 
     # ==================================================================
     # 暗号化関連メソッド (W21-B)

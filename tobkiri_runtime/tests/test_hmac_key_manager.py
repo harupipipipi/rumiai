@@ -61,11 +61,17 @@ sys.modules.setdefault(f"{_PKG}.pack_api_server", _dummy_pack_api)
 from tobkiri_runtime.core_runtime.hmac_key_manager import (  # noqa: E402
     HMACKeyManager,
     HMACKey,
+    SigningKeyError,
     generate_or_load_signing_key,
     compute_data_hmac,
     verify_data_hmac,
     DEFAULT_GRACE_PERIOD_SECONDS,
 )
+
+
+def _write_owner_key(path: Path, value: str, mode: int = 0o600) -> None:
+    path.write_text(value, encoding="utf-8")
+    path.chmod(mode)
 
 
 # ======================================================================
@@ -87,35 +93,33 @@ class TestGenerateOrLoadSigningKey:
         """既存の鍵ファイルからロードされること"""
         key_path = tmp_path / "signing.key"
         stored_key = "a" * 64  # 十分な長さ
-        key_path.write_text(stored_key, encoding="utf-8")
+        _write_owner_key(key_path, stored_key)
         result = generate_or_load_signing_key(key_path)
         assert result == stored_key.encode("utf-8")
 
-    def test_short_key_regenerated(self, tmp_path):
-        """鍵長が不十分なファイルからは再生成されること"""
+    def test_short_key_rejected(self, tmp_path):
+        """Weak existing material is rejected without silent rotation."""
         key_path = tmp_path / "signing.key"
-        key_path.write_text("short", encoding="utf-8")  # 5文字 < 32
-        result = generate_or_load_signing_key(key_path)
-        assert len(result) >= 32
-        # ファイルが上書きされていること
-        new_content = key_path.read_text(encoding="utf-8").strip()
-        assert len(new_content) >= 32
-        assert new_content != "short"
+        _write_owner_key(key_path, "short")
+        with pytest.raises(SigningKeyError, match="weak"):
+            generate_or_load_signing_key(key_path)
+        assert key_path.read_text(encoding="utf-8") == "short"
 
     def test_env_var_takes_priority(self, tmp_path, monkeypatch):
-        """環境変数が指定されている場合、それが優先されること"""
+        """Ambient environment injection cannot override Host-owned material."""
         key_path = tmp_path / "signing.key"
-        key_path.write_text("file_key_" + "x" * 40, encoding="utf-8")
+        file_key = "file_key_" + "x" * 40
+        _write_owner_key(key_path, file_key)
         env_key = "env_key_" + "y" * 40
         monkeypatch.setenv("TEST_SIGNING_KEY", env_key)
         result = generate_or_load_signing_key(key_path, env_var="TEST_SIGNING_KEY")
-        assert result == env_key.encode("utf-8")
+        assert result == file_key.encode("utf-8")
 
     def test_env_var_too_short_falls_through(self, tmp_path, monkeypatch):
         """環境変数の鍵長が不十分な場合、ファイルにフォールスルーすること"""
         key_path = tmp_path / "signing.key"
         stored_key = "b" * 64
-        key_path.write_text(stored_key, encoding="utf-8")
+        _write_owner_key(key_path, stored_key)
         monkeypatch.setenv("TEST_SIGNING_KEY", "short")
         result = generate_or_load_signing_key(key_path, env_var="TEST_SIGNING_KEY")
         assert result == stored_key.encode("utf-8")
@@ -124,7 +128,7 @@ class TestGenerateOrLoadSigningKey:
         """環境変数が未設定の場合、ファイルにフォールスルーすること"""
         key_path = tmp_path / "signing.key"
         stored_key = "c" * 64
-        key_path.write_text(stored_key, encoding="utf-8")
+        _write_owner_key(key_path, stored_key)
         result = generate_or_load_signing_key(key_path, env_var="NONEXISTENT_VAR")
         assert result == stored_key.encode("utf-8")
 
@@ -143,12 +147,32 @@ class TestGenerateOrLoadSigningKey:
         assert isinstance(result, bytes)
         assert key_path.exists()
 
-    def test_empty_file_regenerated(self, tmp_path):
-        """空ファイルからは再生成されること"""
+    def test_empty_file_rejected(self, tmp_path):
+        """Empty existing material fails closed."""
         key_path = tmp_path / "signing.key"
-        key_path.write_text("", encoding="utf-8")
-        result = generate_or_load_signing_key(key_path)
-        assert len(result) >= 32
+        _write_owner_key(key_path, "")
+        with pytest.raises(SigningKeyError, match="weak"):
+            generate_or_load_signing_key(key_path)
+
+    def test_symlink_key_rejected(self, tmp_path):
+        outside = tmp_path / "outside.key"
+        _write_owner_key(outside, "s" * 64)
+        key_path = tmp_path / "signing.key"
+        key_path.symlink_to(outside)
+        with pytest.raises(SigningKeyError, match="symlinked"):
+            generate_or_load_signing_key(key_path)
+
+    def test_world_readable_key_rejected(self, tmp_path):
+        key_path = tmp_path / "signing.key"
+        _write_owner_key(key_path, "w" * 64, mode=0o644)
+        with pytest.raises(SigningKeyError, match="0600"):
+            generate_or_load_signing_key(key_path)
+
+    def test_restart_loads_same_owner_key(self, tmp_path):
+        key_path = tmp_path / "signing.key"
+        first = generate_or_load_signing_key(key_path)
+        second = generate_or_load_signing_key(key_path)
+        assert second == first
 
 
 # ======================================================================
@@ -339,7 +363,7 @@ class TestHMACKeyManagerInit:
         assert bak_path.exists()
 
     def test_env_rotate_trigger(self, tmp_path, monkeypatch):
-        """RUMI_HMAC_ROTATE=true で起動時にローテーションされること"""
+        """Ambient rotation injection is ignored; explicit rotate remains required."""
         keys_path = str(tmp_path / "hmac_keys.json")
         mgr1 = HMACKeyManager(keys_path=keys_path)
         key1 = mgr1.get_active_key()
@@ -347,9 +371,8 @@ class TestHMACKeyManagerInit:
         monkeypatch.setenv("RUMI_HMAC_ROTATE", "true")
         mgr2 = HMACKeyManager(keys_path=keys_path)
         key2 = mgr2.get_active_key()
-        assert key1 != key2
-        # 環境変数がクリアされること
-        assert os.environ.get("RUMI_HMAC_ROTATE") is None
+        assert key1 == key2
+        assert os.environ.get("RUMI_HMAC_ROTATE") == "true"
 
     def test_grace_period_custom(self, tmp_path):
         """カスタムグレースピリオドが設定されること"""

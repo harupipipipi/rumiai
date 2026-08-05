@@ -7,17 +7,15 @@
 
 import json
 import shutil
-import uuid
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from .mounts import MountManager, get_mount_manager, get_mount_path, DEFAULT_MOUNTS
+from .mounts import MountManager, get_mount_manager
 from . import registry as registry_module
-from .registry import Registry, get_registry, reload_registry
+from .registry import Registry, get_registry
 from .active_ecosystem import (
     ActiveEcosystemManager,
     get_active_ecosystem_manager,
-    DEFAULT_CONFIG
 )
 
 
@@ -49,45 +47,27 @@ class EcosystemInitializer:
         self.active_ecosystem: Optional[ActiveEcosystemManager] = None
     
     def initialize(self) -> Dict[str, Any]:
+        """Reject legacy Registry activation without creating compatibility state.
+
+        Runtime activation is owned by the Authority Kernel and an immutable
+        captured v4 dispatch session.  This compatibility entry point must not
+        manufacture mounts, scan installed Packs, or create an implicit active
+        Pack configuration.
         """
-        エコシステムを初期化
-        
-        Returns:
-            初期化結果の辞書
-        """
-        result = {
-            "success": True,
+        return {
+            "success": False,
             "mounts_initialized": False,
             "directories_created": [],
             "registry_loaded": False,
             "packs_loaded": 0,
             "components_loaded": 0,
             "active_ecosystem_loaded": False,
-            "errors": []
+            "v4_dispatch_required": True,
+            "errors": [
+                "Legacy ecosystem initialization is disabled; "
+                "use an Authority-resolved Profile and captured v4 dispatch session"
+            ],
         }
-        
-        try:
-            # 1. ディレクトリ構造の作成
-            self._create_directories(result)
-            
-            # 2. マウント設定の初期化
-            self._initialize_mounts(result)
-            
-            # 3. レジストリの初期化
-            self._initialize_registry(result)
-            
-            # 4. アクティブエコシステムの初期化
-            self._initialize_active_ecosystem(result)
-            
-            
-            
-        except Exception as e:
-            result["success"] = False
-            result["errors"].append(f"初期化エラー: {str(e)}")
-            import traceback
-            traceback.print_exc()
-        
-        return result
     
     def _create_directories(self, result: Dict[str, Any]):
         """必要なディレクトリを作成"""

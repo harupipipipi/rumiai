@@ -176,12 +176,53 @@ def test_validate_candidates_reports_installed_pack_conflict(tmp_path):
 
 
 def test_bundled_setup_pack_metadata_validates_cleanly():
+    from core_runtime.pack_boundary import load_pack_catalog
+
     repo_root = Path(__file__).resolve().parent.parent
     selector = PackSelector(repo_root / "ecosystem")
+    catalog = load_pack_catalog()
+    resolved_packs = {
+        pack_id: {"version": str(record.get("version") or "")}
+        for pack_id, record in catalog.items()
+    }
 
-    issues = selector.validate_candidates(platform_name="darwin", python_version="3.11.0")
+    issues = selector.validate_candidates(
+        installed_packs=resolved_packs,
+        platform_name="darwin",
+        python_version="3.11.0",
+    )
 
     assert issues == []
+
+
+def test_validate_candidates_never_scans_sibling_installed_manifests(tmp_path):
+    ecosystem = tmp_path / "eco"
+    setup_pack_root = ecosystem / "setup_pack"
+    candidate_root = setup_pack_root / "candidate"
+    candidate_root.mkdir(parents=True)
+    (candidate_root / "pack.json").write_text(
+        json.dumps(
+            {
+                "pack_id": "candidate",
+                "depends_on": [{"pack_id": "dependency", "version": ">=1.0.0"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    sibling = ecosystem / "dependency"
+    sibling.mkdir()
+    (sibling / "ecosystem.json").write_text(
+        json.dumps({"pack_id": "dependency", "version": "9.9.9"}),
+        encoding="utf-8",
+    )
+
+    issues = PackSelector(setup_pack_root).validate_candidates()
+
+    assert any(
+        issue["type"] == "missing_dependency"
+        and issue["depends_on"] == "dependency"
+        for issue in issues
+    )
 
 
 def test_validate_candidates_rejects_invalid_conflict_metadata(tmp_path):

@@ -5,12 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from pathlib import Path
 from typing import Any, Dict
 
 from ..di_container import get_container
-from ..dependency_resolver import extract_dependency_specs
 from ..pack_function_runtime import invoke_pack_function
-from ..paths import discover_pack_locations
 from ..setup_pack import get_setup_pack_manager
 
 
@@ -33,67 +32,6 @@ class SetupHandlersMixin:
         initialize = getattr(approval_manager, "initialize", None)
         if callable(initialize):
             initialize()
-
-    @staticmethod
-    def _approve_defaults_profile_packs(pack_ids: list[str]) -> Dict[str, Any]:
-        """Approve the reviewed bundled pack set for Defaults Profile.
-
-        This is deliberately limited to the exact pack IDs shown in the
-        Defaults Profile review.  It is not an implicit startup-time approval:
-        callers must first validate the user's explicit review confirmation.
-        """
-        from ..approval_manager import get_approval_manager
-
-        manager = get_approval_manager()
-        scan_packs = getattr(manager, "scan_packs", None)
-        if callable(scan_packs):
-            scan_packs()
-
-        approved: list[str] = []
-        already_approved: list[str] = []
-        failed: list[Dict[str, str]] = []
-        verify = getattr(manager, "is_pack_approved_and_verified", None)
-        for pack_id in pack_ids:
-            is_verified = False
-            if callable(verify):
-                is_verified, _reason = verify(pack_id)
-            if is_verified:
-                already_approved.append(pack_id)
-                continue
-            result = manager.approve(pack_id)
-            if getattr(result, "success", False):
-                approved.append(pack_id)
-                continue
-            failed.append(
-                {
-                    "pack_id": pack_id,
-                    "error": str(getattr(result, "error", "approval_failed")),
-                }
-            )
-        return {
-            "requested_pack_ids": pack_ids,
-            "approved_pack_ids": approved,
-            "already_approved_pack_ids": already_approved,
-            "failed": failed,
-        }
-
-    @staticmethod
-    def _complete_local_defaults_setup() -> Dict[str, Any]:
-        """Mark the local, no-account setup path complete.
-
-        Choosing the recommended Defaults Profile is a complete local setup
-        path.  Without this marker the runtime returns to ``/setup`` on every
-        restart even after it has created and approved the profile.
-        """
-        from ..core_pack.core_setup.save_profile import save_profile
-
-        result = save_profile({"username": "User", "language": "ja"})
-        if not result.get("success"):
-            raise RuntimeError(
-                "; ".join(str(error) for error in result.get("errors") or [])
-                or "failed to save local setup profile"
-            )
-        return result
 
     @staticmethod
     def _pack_function_state(pack_id: str, function_id: str) -> Dict[str, Any]:
@@ -168,42 +106,87 @@ class SetupHandlersMixin:
 
     @staticmethod
     def _recommended_default_profile_preview() -> Dict[str, Any]:
-        """Describe the official bundled Pack set for Defaults Profile.
-
-        Setup-pack selection is intentionally separate from a startup profile:
-        selecting the recommended setup pack must not silently grant approval to
-        third-party or modified Packs.  The preview therefore includes every
-        repository-reviewed bundled Pack while excluding definitions that
-        explicitly identify another publisher, registry, trust status, or
-        signing mode.  The caller still requires one explicit review of this
-        exact list before approving it.
-        """
+        """Describe the exact, integrity-checked Defaults Profile v4 set."""
         try:
+            from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+
+            bundle_root = (
+                Path(__file__).resolve().parents[2]
+                / "ecosystem"
+                / "defaultspack"
+                / "v4"
+            )
+            catalog = BundledCatalog.load(bundle_root)
+            profile = catalog.profiles.get("defaults")
+            if not isinstance(profile, dict):
+                raise ValueError("Defaults Profile is absent from the v4 catalog")
+
+            base = profile.get("base")
+            shell = profile.get("shell")
+            if not isinstance(base, dict) or base.get("pack_id") != "defaults-basepack":
+                raise ValueError("Defaults Profile has an unexpected Base")
+            if "defaults-basepack" not in catalog.bases:
+                raise ValueError("Defaults Base artifact is absent from the v4 catalog")
+            if (
+                not isinstance(shell, dict)
+                or shell.get("provider_id") != "shell.tauri.default"
+                or shell.get("contract_id") != "app.shell.v1"
+                or "shell.tauri.default" not in catalog.shells
+            ):
+                raise ValueError("Defaults Profile has an unexpected Shell")
+
+            selected = profile.get("packs")
+            if not isinstance(selected, list):
+                raise ValueError("Defaults Profile Pack set is invalid")
+            pack_ids = [
+                str(item.get("pack_id") or "").strip()
+                for item in selected
+                if isinstance(item, dict)
+            ]
+            if (
+                len(pack_ids) != len(selected)
+                or len(pack_ids) != len(set(pack_ids))
+                or any(pack_id not in catalog.packs for pack_id in pack_ids)
+            ):
+                raise ValueError("Defaults Profile Pack set is not exact")
+
+            requested_edges = profile.get("requested_edges")
+            conversation_edges = [
+                edge
+                for edge in requested_edges
+                if isinstance(edge, dict)
+                and edge.get("contract_id") == "conversation.turn.v1"
+            ] if isinstance(requested_edges, list) else []
+            if len(conversation_edges) != 1:
+                raise ValueError(
+                    "Defaults Profile must select exactly one conversation provider"
+                )
+
             definitions = get_setup_pack_manager().list_packs().get("packs") or []
-            official = [
-                item
+            by_target_id = {
+                str(item.get("target_pack_id") or item.get("pack_id") or "").strip():
+                    item
                 for item in definitions
                 if isinstance(item, dict)
                 and SetupHandlersMixin._is_official_bundled_setup_pack(item)
                 and not item.get("schema_issues")
-            ]
-            by_target_id = {
-                str(item.get("target_pack_id") or item.get("pack_id") or "").strip(): item
-                for item in official
                 if str(item.get("target_pack_id") or item.get("pack_id") or "").strip()
             }
-            pack_ids = sorted(
-                SetupHandlersMixin._official_pack_dependency_closure(
-                    set(by_target_id)
+            missing = [pack_id for pack_id in pack_ids if pack_id not in by_target_id]
+            if missing:
+                raise ValueError(
+                    "Defaults Profile setup definitions are missing: "
+                    + ", ".join(missing)
                 )
-            )
-            if "defaultspack" in pack_ids:
-                pack_ids.remove("defaultspack")
-                pack_ids.insert(0, "defaultspack")
             return {
-                "profile_id": "default-profile",
-                "name": "Defaults Profile",
-                "base_pack": "defaultspack",
+                "available": True,
+                "profile_id": "defaults",
+                "name": str(profile.get("display_name") or "Tobkiri Defaults"),
+                "base_pack": "defaults-basepack",
+                "shell": {
+                    "provider_id": "shell.tauri.default",
+                    "contract_id": "app.shell.v1",
+                },
                 "pack_ids": pack_ids,
                 "packs": [
                     {
@@ -215,43 +198,22 @@ class SetupHandlersMixin:
                     }
                     for pack_id in pack_ids
                 ],
+                "conversation_provider": str(
+                    conversation_edges[0].get("target_provider_id") or ""
+                ),
             }
-        except Exception:
+        except Exception as exc:
             logger.warning("Unable to preview Defaults Profile", exc_info=True)
             return {
-                "profile_id": "default-profile",
-                "name": "Defaults Profile",
-                "base_pack": "defaultspack",
-                "pack_ids": ["defaultspack"],
-                "packs": [
-                    {"pack_id": "defaultspack", "display_name": "Defaultspack"}
-                ],
+                "available": False,
+                "profile_id": "defaults",
+                "name": "Tobkiri Defaults",
+                "base_pack": None,
+                "shell": None,
+                "pack_ids": [],
+                "packs": [],
+                "error": str(exc),
             }
-
-    @staticmethod
-    def _official_pack_dependency_closure(seed_pack_ids: set[str]) -> set[str]:
-        """Include bundled runtime dependencies required by reviewed Packs."""
-        locations = {
-            location.pack_id: location for location in discover_pack_locations()
-        }
-        included = set(seed_pack_ids)
-        pending = [pack_id for pack_id in included if pack_id in locations]
-        while pending:
-            pack_id = pending.pop()
-            manifest_path = locations[pack_id].pack_subdir / "ecosystem.json"
-            try:
-                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            for spec in extract_dependency_specs(manifest):
-                dependency_id = str(spec.get("pack_id") or "").strip()
-                if not dependency_id or dependency_id not in locations:
-                    continue
-                if dependency_id in included:
-                    continue
-                included.add(dependency_id)
-                pending.append(dependency_id)
-        return included
 
     @staticmethod
     def _is_official_bundled_setup_pack(pack: Dict[str, Any]) -> bool:
@@ -262,7 +224,7 @@ class SetupHandlersMixin:
         signing = signing if isinstance(signing, dict) else {}
         return (
             str(marketplace.get("publisher") or "rumi-ai").strip().lower()
-            == "rumi-ai"
+            in {"rumi-ai", "tobkiri"}
             and str(marketplace.get("registry") or "bundled").strip().lower()
             in {"bundled", "rumi_local_pack_registry"}
             and str(marketplace.get("status") or "verified").strip().lower()
@@ -421,6 +383,21 @@ class SetupHandlersMixin:
                     "error": "Defaults Profile requires explicit confirmation",
                     "status_code": 400,
                 }
+            return {
+                "error": (
+                    "Legacy Defaults Profile installation is disabled; use a "
+                    "captured v4 dispatch session"
+                ),
+                "status_code": 409,
+                "v4_dispatch_required": True,
+                "required_operations": [
+                    "pack.install",
+                    "approval.candidate",
+                    "approval.approve",
+                    "pack.enable",
+                    "profile.reload",
+                ],
+            }
 
         result = get_setup_pack_manager().install(setup_pack_ids)
         if "error" in result:
@@ -437,63 +414,6 @@ class SetupHandlersMixin:
                 installed_target_pack_ids = [active_target_pack_id]
 
         self._refresh_runtime_pack_approvals()
-
-        if install_defaults_profile:
-            default_profile_approval = self._approve_defaults_profile_packs(
-                default_profile_pack_ids
-            )
-            if default_profile_approval["failed"]:
-                return {
-                    "error": "Defaults Profile could not approve every included pack",
-                    "status_code": 500,
-                    "default_profile_approval": default_profile_approval,
-                }
-            result["default_profile_approval"] = default_profile_approval
-            try:
-                result["local_setup_profile"] = self._complete_local_defaults_setup()
-            except Exception as error:
-                return {
-                    "error": "Defaults Profile was approved but local setup could not complete",
-                    "status_code": 500,
-                    "default_profile_approval": default_profile_approval,
-                    "details": str(error),
-                }
-
-            from ..startup_profiles import StartupProfileManager
-
-            startup_profiles = StartupProfileManager()
-            default_profile_update = startup_profiles.update_profile(
-                "default-profile",
-                {
-                    "packs": default_profile_pack_ids,
-                    "metadata": {"default_profile_pack_mode": "all_available"},
-                },
-            )
-            if default_profile_update.get("error"):
-                return {
-                    "error": (
-                        "Defaults Profile was approved but its complete Pack set "
-                        "could not be saved"
-                    ),
-                    "status_code": int(
-                        default_profile_update.get("status_code") or 500
-                    ),
-                    "default_profile_approval": default_profile_approval,
-                    "default_profile_update": default_profile_update,
-                }
-            result["default_profile_update"] = default_profile_update
-
-            default_profile_launch = startup_profiles.launch_profile(
-                "default-profile"
-            )
-            if default_profile_launch.get("error"):
-                return {
-                    "error": "Defaults Profile was approved but could not launch",
-                    "status_code": int(default_profile_launch.get("status_code") or 500),
-                    "default_profile_approval": default_profile_approval,
-                    "default_profile_launch": default_profile_launch,
-                }
-            result["default_profile_launch"] = default_profile_launch
 
         migration_statuses: Dict[str, Dict[str, Any]] = {}
         migrations: Dict[str, Any] = {}

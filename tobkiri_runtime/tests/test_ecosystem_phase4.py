@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from backend_core.ecosystem.mounts import MountManager, DEFAULT_MOUNTS
+from backend_core.ecosystem.mounts import MountManager
 from backend_core.ecosystem.active_ecosystem import (
     ActiveEcosystemManager,
     ActiveEcosystemConfig,
@@ -191,7 +191,7 @@ class TestEcosystemInitializer:
         shutil.rmtree(temp_dir, ignore_errors=True)
     
     def test_initialization(self, temp_dirs):
-        """初期化が成功する"""
+        """Legacy initialization fails closed before runtime activation."""
         initializer = EcosystemInitializer(
             user_data_dir=str(temp_dirs["user_data"]),
             ecosystem_dir=str(temp_dirs["ecosystem"])
@@ -199,13 +199,15 @@ class TestEcosystemInitializer:
         
         result = initializer.initialize()
         
-        assert result["success"]
-        assert result["mounts_initialized"]
-        assert result["registry_loaded"]
-        assert result["active_ecosystem_loaded"]
+        assert not result["success"]
+        assert result["v4_dispatch_required"]
+        assert not result["mounts_initialized"]
+        assert not result["registry_loaded"]
+        assert not result["active_ecosystem_loaded"]
+        assert "Authority-resolved Profile" in result["errors"][0]
     
     def test_directories_created(self, temp_dirs):
-        """必要なディレクトリが作成される"""
+        """Legacy initialization creates no implicit runtime directories."""
         initializer = EcosystemInitializer(
             user_data_dir=str(temp_dirs["user_data"]),
             ecosystem_dir=str(temp_dirs["ecosystem"])
@@ -214,13 +216,10 @@ class TestEcosystemInitializer:
         initializer.initialize()
         
         user_data = temp_dirs["user_data"]
-        assert (user_data / "chats").exists()
-        assert (user_data / "settings").exists()
-        assert (user_data / "cache").exists()
-        assert (user_data / "shared").exists()
+        assert not user_data.exists()
     
     def test_config_files_created(self, temp_dirs):
-        """設定ファイルが作成される"""
+        """Legacy initialization writes no unbound compatibility config."""
         initializer = EcosystemInitializer(
             user_data_dir=str(temp_dirs["user_data"]),
             ecosystem_dir=str(temp_dirs["ecosystem"])
@@ -229,8 +228,8 @@ class TestEcosystemInitializer:
         initializer.initialize()
         
         user_data = temp_dirs["user_data"]
-        assert (user_data / "mounts.json").exists()
-        assert (user_data / "active_ecosystem.json").exists()
+        assert not (user_data / "mounts.json").exists()
+        assert not (user_data / "active_ecosystem.json").exists()
     
     def test_validation(self, temp_dirs):
         """Legacy initializer validation cannot activate a runtime Registry."""

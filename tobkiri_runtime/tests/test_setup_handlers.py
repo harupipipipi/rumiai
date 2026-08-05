@@ -96,6 +96,21 @@ class TestSetupHandlers(unittest.TestCase):
                         "schema_issues": [],
                     },
                     {
+                        "pack_id": "rumi_file_inspect_pack",
+                        "target_pack_id": "rumi_file_inspect_pack",
+                        "display_name": "File Inspect",
+                        "marketplace": {
+                            "registry": "bundled",
+                            "publisher": "rumi-ai",
+                            "status": "verified",
+                        },
+                        "signing": {
+                            "mode": "repository_reviewed",
+                            "verified": True,
+                        },
+                        "schema_issues": [],
+                    },
+                    {
                         "pack_id": "third-party",
                         "target_pack_id": "third-party",
                         "display_name": "Third party",
@@ -119,21 +134,32 @@ class TestSetupHandlers(unittest.TestCase):
             }
             preview = SetupHandlersMixin._recommended_default_profile_preview()
 
-        self.assertEqual(preview["base_pack"], "defaultspack")
+        self.assertTrue(preview["available"])
+        self.assertEqual(preview["profile_id"], "defaults")
+        self.assertEqual(preview["base_pack"], "defaults-basepack")
+        self.assertEqual(
+            preview["shell"],
+            {
+                "provider_id": "shell.tauri.default",
+                "contract_id": "app.shell.v1",
+            },
+        )
         self.assertEqual(
             preview["pack_ids"],
-            ["defaultspack", "rumi_conversation_store_pack", "tools"],
+            ["defaultspack", "rumi_file_inspect_pack"],
         )
         self.assertEqual(
             preview["packs"],
             [
                 {"pack_id": "defaultspack", "display_name": "Tobkiri"},
                 {
-                    "pack_id": "rumi_conversation_store_pack",
-                    "display_name": "rumi_conversation_store_pack",
+                    "pack_id": "rumi_file_inspect_pack",
+                    "display_name": "File Inspect",
                 },
-                {"pack_id": "tools", "display_name": "Tools"},
             ],
+        )
+        self.assertEqual(
+            preview["conversation_provider"], "defaultspack.conversation"
         )
 
     def test_official_bundled_setup_pack_accepts_legacy_first_party_metadata(self):
@@ -147,6 +173,21 @@ class TestSetupHandlers(unittest.TestCase):
                 }
             )
         )
+
+    def test_defaults_profile_preview_never_falls_back_when_setup_pack_is_missing(self):
+        from core_runtime.api.setup_handlers import SetupHandlersMixin
+
+        with patch(
+            "core_runtime.api.setup_handlers.get_setup_pack_manager"
+        ) as mocked:
+            mocked.return_value.list_packs.return_value = {"packs": []}
+            preview = SetupHandlersMixin._recommended_default_profile_preview()
+
+        self.assertFalse(preview["available"])
+        self.assertIsNone(preview["base_pack"])
+        self.assertIsNone(preview["shell"])
+        self.assertEqual(preview["pack_ids"], [])
+        self.assertEqual(preview["packs"], [])
         self.assertFalse(
             SetupHandlersMixin._is_official_bundled_setup_pack(
                 {
@@ -350,7 +391,7 @@ class TestSetupHandlers(unittest.TestCase):
 
         self.assertEqual(handler.approval_manager.initialize_count, 1)
 
-    def test_defaults_profile_install_approves_the_reviewed_profile_pack_set(self):
+    def test_defaults_profile_install_requires_captured_v4_dispatch(self):
         from core_runtime.api.setup_handlers import SetupHandlersMixin
 
         class _Handler(SetupHandlersMixin):
@@ -370,12 +411,6 @@ class TestSetupHandlers(unittest.TestCase):
             "active_target_pack_id": "defaultspack",
             "installed_target_pack_ids": [],
         }
-        approval_result = {
-            "requested_pack_ids": ["defaultspack", "tools"],
-            "approved_pack_ids": ["tools"],
-            "already_approved_pack_ids": ["defaultspack"],
-            "failed": [],
-        }
         with patch(
             "core_runtime.api.setup_handlers.get_setup_pack_manager"
         ) as mocked, patch.object(
@@ -385,11 +420,7 @@ class TestSetupHandlers(unittest.TestCase):
                 "pack_ids": ["defaultspack", "tools"],
                 "setup_pack_ids": ["defaultspack"],
             },
-        ), patch.object(
-            SetupHandlersMixin,
-            "_approve_defaults_profile_packs",
-            return_value=approval_result,
-        ) as approve, patch(
+        ), patch(
             "core_runtime.api.setup_handlers.get_container",
             return_value=self._FakeContainer(),
         ):
@@ -397,8 +428,19 @@ class TestSetupHandlers(unittest.TestCase):
             mocked.return_value.install.return_value = install_result
             result = handler._setup_install_pack(payload)
 
-        approve.assert_called_once_with(["defaultspack", "tools"])
-        self.assertEqual(result["default_profile_approval"], approval_result)
+        self.assertEqual(result["status_code"], 409)
+        self.assertTrue(result["v4_dispatch_required"])
+        self.assertEqual(
+            result["required_operations"],
+            [
+                "pack.install",
+                "approval.candidate",
+                "approval.approve",
+                "pack.enable",
+                "profile.reload",
+            ],
+        )
+        mocked.return_value.install.assert_not_called()
 
     def test_defaults_profile_install_rejects_an_unreviewed_profile_plan(self):
         from core_runtime.api.setup_handlers import SetupHandlersMixin

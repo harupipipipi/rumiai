@@ -27,11 +27,10 @@ class TestDefaultspackPrimarySetup(unittest.TestCase):
 
             result = initializer.initialize()
 
-            self.assertTrue(result["success"])
+            self.assertFalse(result["success"])
+            self.assertTrue(result["v4_dispatch_required"])
             active_path = base / "user_data" / "active_ecosystem.json"
-            data = json.loads(active_path.read_text(encoding="utf-8"))
-            self.assertIsNone(data["active_pack_identity"])
-            self.assertEqual(data["metadata"], {})
+            self.assertFalse(active_path.exists())
 
     def test_rumi_setup_initializer_leaves_active_pack_unselected(self):
         with tempfile.TemporaryDirectory() as tmp:
