@@ -36,7 +36,7 @@ class DomainController:
     初回アクセス時にキャッシュ。
     """
 
-    def __init__(self, ecosystem_dir: str = None):
+    def __init__(self, ecosystem_dir: str | None = None):
         self._ecosystem_dir = ecosystem_dir or _ECOSYSTEM_DIR
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
@@ -111,7 +111,7 @@ class DomainController:
 
         return False, f"Domain '{domain}' is not in egress allow list for pack '{pack_id}'"
 
-    def invalidate_cache(self, pack_id: str = None) -> None:
+    def invalidate_cache(self, pack_id: str | None = None) -> None:
         """キャッシュを無効化（設定変更時に呼び出し）"""
         with self._lock:
             if pack_id:

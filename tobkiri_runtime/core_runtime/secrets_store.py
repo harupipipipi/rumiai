@@ -148,7 +148,10 @@ class _CryptoBackend:
     def encrypt(self, plaintext: str) -> str:
         """平文を暗号化して文字列を返す"""
         self._ensure_initialized()
-        return self._fernet.encrypt(plaintext.encode("utf-8")).decode("utf-8")
+        fernet = self._fernet
+        if fernet is None:
+            raise RuntimeError("secrets encryption backend was not initialized")
+        return fernet.encrypt(plaintext.encode("utf-8")).decode("utf-8")
 
     def decrypt(self, ciphertext: str, *, allow_plaintext: bool = False) -> str:
         """暗号文を復号して平文を返す
@@ -159,8 +162,11 @@ class _CryptoBackend:
                              False の場合、非 Fernet 値は ValueError を発生。
         """
         self._ensure_initialized()
+        fernet = self._fernet
+        if fernet is None:
+            raise RuntimeError("secrets encryption backend was not initialized")
         if ciphertext.startswith(_FERNET_PREFIX):
-            return self._fernet.decrypt(ciphertext.encode("utf-8")).decode("utf-8")
+            return fernet.decrypt(ciphertext.encode("utf-8")).decode("utf-8")
         # 非 Fernet 値 — ポリシーに従う
         if allow_plaintext:
             logger.warning(
@@ -500,7 +506,7 @@ class SecretsStore:
             return SecretDeleteResult(success=True, key=key)
 
     def list_keys(self) -> List[SecretMeta]:
-        results = []
+        results: List[SecretMeta] = []
         with self._lock:
             if not self._secrets_dir.exists():
                 return results
@@ -677,7 +683,7 @@ def get_secrets_store() -> SecretsStore:
     return get_container().get("secrets_store")
 
 
-def reset_secrets_store(secrets_dir: str = None) -> SecretsStore:
+def reset_secrets_store(secrets_dir: str | None = None) -> SecretsStore:
     """
     SecretsStore をリセットする（テスト用）。
 
