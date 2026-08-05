@@ -83,6 +83,31 @@ def _pin_v4_projection(ecosystem: dict[str, Any], v4: dict[str, Any]) -> None:
     ecosystem["metadata"] = metadata
 
 
+def _mark_offline_projection(
+    ecosystem: dict[str, Any], v4: dict[str, Any], *, historical_format: str
+) -> None:
+    """Mark a compatibility document as a non-authoritative v4 projection."""
+
+    metadata = ecosystem.get("metadata")
+    metadata = dict(metadata) if isinstance(metadata, dict) else {}
+    metadata.update(
+        {
+            "manifest_authority": "v4-authoritative",
+            "format": "rumi.ecosystem.v1",
+            "generated": True,
+            "read_only_projection": True,
+            "projection_owner": "scripts/migrate_manifest_authority.py",
+            "generated_from": {
+                "source": "pack.v4.json",
+                "source_content_hash": v4["source_identity"],
+                "generator": V4_PROJECTION_GENERATOR,
+                "historical_format": historical_format,
+            },
+        }
+    )
+    ecosystem["metadata"] = metadata
+
+
 def _set_provenance(
     value: dict[str, Any],
     *,
@@ -357,15 +382,7 @@ def _normalize_legacy(data: dict[str, Any]) -> dict[str, Any]:
 def migrate(*, check: bool) -> None:
     pack_roots = sorted(path for path in ECOSYSTEM.iterdir() if path.is_dir())
     authorities = {
-        root.name: (
-            "v3-authoritative"
-            if (root / "rumi.pack.v3.json").is_file()
-            else (
-                "legacy-authoritative"
-                if (root / "ecosystem.json").is_file()
-                else "modern-only"
-            )
-        )
+        root.name: "v4-authoritative"
         for root in pack_roots
         if root.name != "setup_pack" and not root.name.startswith(".")
     }
@@ -425,6 +442,13 @@ def migrate(*, check: bool) -> None:
                 ecosystem.get("host_execution", False)
             )
             options["manifest"] = ecosystem
+            extensions["tobkiri.offline_projection"] = {
+                "owner": root.name,
+                "source": "pack.v4.json",
+                "source_identity": v4["source_identity"],
+                "generator": V4_PROJECTION_GENERATOR,
+                "runtime_executable": False,
+            }
             v3_text = json.dumps(
                 manifest, ensure_ascii=False, indent=2, sort_keys=True
             ) + "\n"
@@ -436,13 +460,23 @@ def migrate(*, check: bool) -> None:
             loaded = load_manifest(v3_path)
             if not loaded.ok:
                 raise SystemExit(f"invalid canonical v3 manifest {v3_path}: {loaded.diagnostics}")
-            ecosystem_text = render_legacy_ecosystem(loaded.value)
+            projected = json.loads(render_legacy_ecosystem(loaded.value))
+            _pin_v4_projection(projected, v4)
+            _mark_offline_projection(
+                projected, v4, historical_format="rumi.pack.v3.json"
+            )
+            ecosystem_text = json.dumps(
+                projected, ensure_ascii=False, indent=2, sort_keys=True
+            ) + "\n"
         else:
             _set_provenance(
                 ecosystem,
                 content_hash=v4["artifact_digest"],
                 build_identity=_v4_build_identity(v4),
                 existing=ecosystem.get("provenance"),
+            )
+            _mark_offline_projection(
+                ecosystem, v4, historical_format="ecosystem.json"
             )
             ecosystem_text = json.dumps(
                 ecosystem, ensure_ascii=False, indent=2, sort_keys=True

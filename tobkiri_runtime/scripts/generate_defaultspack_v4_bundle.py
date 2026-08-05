@@ -81,7 +81,7 @@ def _normalize_pack(document: dict[str, Any]) -> dict[str, Any]:
                     "owner": owner,
                     "contract_reference": contract["contract_id"],
                     "provider_id": function["id"],
-                    "source_kind": "v3_contract",
+                    "source_kind": "canonical_v4_contract",
                     "effect_ceiling": [],
                 }
             )

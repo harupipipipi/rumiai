@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from threading import RLock
 from typing import Any
 
@@ -18,10 +19,11 @@ from ..app_lifecycle_manager import (
     mark_runtime_ready,
     reset_runtime_readiness,
 )
+from ..authority.v4 import AuthorityStore
 from ..pack_api_server import PackAPIServer, initialize_pack_api_server
-from ..pack_control_v4 import capture_pack_control_session
 from tobkiri_host.runtime import install_dispatch_session
-from .profile_capture import capture_default_profile
+from .production_v4 import capture_production_dispatch
+from .profile_capture import capture_default_profile, runtime_user_data_root
 
 
 logger = logging.getLogger(__name__)
@@ -53,10 +55,21 @@ class Kernel:
             reset_runtime_readiness()
             from ..di_container import get_container
 
-            capture_default_profile()
+            active = capture_default_profile()
+            runtime_root = Path(__file__).resolve().parents[2]
+            user_data = runtime_user_data_root()
             install_dispatch_session(
                 get_container(),
-                capture_pack_control_session(),
+                capture_production_dispatch(
+                    active,
+                    bundle_root=(
+                        runtime_root / "ecosystem" / "defaultspack" / "v4"
+                    ),
+                    ecosystem_root=runtime_root / "ecosystem",
+                    authority_store=AuthorityStore(
+                        user_data / "authority" / "v4.sqlite3"
+                    ),
+                ),
             )
             port = int(os.environ.get("RUMI_PORT", "8765"))
             self._server = initialize_pack_api_server(

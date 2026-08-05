@@ -85,7 +85,14 @@ def capture_default_profile(
     user_data = runtime_user_data_root(base_dir)
     workspace = user_data / "workspaces" / "defaults"
     workspace.mkdir(parents=True, exist_ok=True)
-    store = ActivationStore(user_data / "profiles" / "defaults" / "v4", workspace)
+    authority = AuthorityStore(user_data / "authority" / "v4.sqlite3")
+    store = ActivationStore(
+        user_data / "profiles" / "defaults" / "v4",
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+    )
+    store.recover()
     active_pointer = store.state_root / "active.json"
     if active_pointer.is_file():
         return store.load_active_snapshot()
@@ -97,7 +104,6 @@ def capture_default_profile(
     bundle_lock_digest = "sha256:" + hashlib.sha256(
         (bundle_root / "bundle.lock.json").read_bytes()
     ).hexdigest()
-    authority = AuthorityStore(user_data / "authority" / "v4.sqlite3")
     snapshot_digest = _authority_snapshot_digest(authority, bundle_lock_digest)
     source_profile = catalog.profiles.get("defaults")
     if source_profile is None:
@@ -126,7 +132,6 @@ def capture_default_profile(
         resolved,
         activation_id=activation_id,
         created_at=created_at,
-        fencing_token=1,
     )
     return store.load_active_snapshot()
 

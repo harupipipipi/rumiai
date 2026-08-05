@@ -31,7 +31,6 @@ from .global_contracts.manifest import load_manifest
 from .global_contracts.registry import ContractRegistry
 from .paths import PackLocation, resolve_pack_locations
 from .pack_artifact_integrity import verify_declared_artifacts
-from .manifest_authority import load_manifest_authority_catalog
 
 RESOLVED_PROFILE_VERSION = "rumi.resolved-profile.v1"
 LOCKFILE_VERSION = "rumi.profile-lock.v1"
@@ -628,10 +627,28 @@ def rollback_legacy_selection_migration(
 def _read_manifests(
     locations: Iterable[PackLocation],
 ) -> tuple[dict[str, dict[str, Any]], list[ResolutionDiagnostic]]:
+    """Reject legacy projection loading from every runtime resolution path."""
+
+    locations = tuple(locations)
+    return {}, [
+        _diagnostic(
+            "offline_projection_not_authority",
+            "error",
+            "ecosystem.json and rumi.pack.v3.json are offline projections; use Pack v4",
+            location.pack_id,
+        )
+        for location in locations
+    ]
+
+
+def _read_legacy_projection_for_offline_migration_only(
+    locations: Iterable[PackLocation],
+) -> tuple[dict[str, dict[str, Any]], list[ResolutionDiagnostic]]:
+    """Retained offline migration reader; production callers never reference it."""
+
     manifests: dict[str, dict[str, Any]] = {}
     diagnostics: list[ResolutionDiagnostic] = []
     for location in locations:
-        authority = load_manifest_authority_catalog().get(location.pack_id)
         try:
             raw = location.ecosystem_json_path.read_bytes()
             payload = json.loads(raw)
@@ -655,28 +672,17 @@ def _read_manifests(
                 )
             )
             continue
-        if authority == "modern-only":
+        legacy_errors = validate_ecosystem(payload, raise_on_error=False)
+        if legacy_errors:
             diagnostics.append(
                 _diagnostic(
                     "invalid_manifest",
                     "error",
-                    "modern-only Pack cannot be resolved by the Pack runtime",
+                    "; ".join(legacy_errors),
                     location.pack_id,
                 )
             )
             continue
-        if authority is not None:
-            legacy_errors = validate_ecosystem(payload, raise_on_error=False)
-            if legacy_errors:
-                diagnostics.append(
-                    _diagnostic(
-                        "invalid_manifest",
-                        "error",
-                        "; ".join(legacy_errors),
-                        location.pack_id,
-                    )
-                )
-                continue
         manifest = dict(payload)
         manifest["_manifest_hash"] = "sha256:" + hashlib.sha256(raw).hexdigest()
         provenance = manifest.get("provenance")
@@ -709,26 +715,6 @@ def _read_manifests(
             )
             continue
         v3_path = location.pack_subdir / "rumi.pack.v3.json"
-        if authority == "v3-authoritative" and not v3_path.is_file():
-            diagnostics.append(
-                _diagnostic(
-                    "invalid_manifest",
-                    "error",
-                    "v3-authoritative Pack has no canonical manifest",
-                    location.pack_id,
-                )
-            )
-            continue
-        if authority == "legacy-authoritative" and v3_path.is_file():
-            diagnostics.append(
-                _diagnostic(
-                    "invalid_manifest",
-                    "error",
-                    "legacy-authoritative Pack unexpectedly has a v3 manifest",
-                    location.pack_id,
-                )
-            )
-            continue
         if v3_path.is_file():
             loaded = load_manifest(v3_path)
             if loaded.ok and isinstance(loaded.value, dict):

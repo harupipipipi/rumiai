@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from core_runtime.authority.v4 import AuthorityDenied, AuthorityStore
 from ecosystem.defaultspack.domain.runtime_v4 import (
     ActivationStore,
     BundleIntegrityError,
@@ -51,6 +52,13 @@ def _resolve(catalog: BundledCatalog | None = None):
         authority_bindings=AUTHORITY_BINDINGS,
         security_epoch=7,
     )
+
+
+def _authority(path: Path) -> AuthorityStore:
+    store = AuthorityStore(path)
+    while store.security_epoch < 7:
+        store.advance_security_epoch("test fixture epoch")
+    return store
 
 
 def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
@@ -195,13 +203,15 @@ def test_requested_pack_dependency_and_authority_references_are_mandatory() -> N
 def test_activation_restart_is_atomic_and_stale_records_deny(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    store = ActivationStore(tmp_path / "state", workspace)
+    authority = _authority(tmp_path / "authority.sqlite3")
+    store = ActivationStore(
+        tmp_path / "state", workspace, profile_id="defaults", authority=authority
+    )
     resolved = _resolve()
     activation = store.activate(
         resolved,
         activation_id="activation:defaults-0001",
         created_at="2026-08-05T00:00:00Z",
-        fencing_token=11,
     )
     assert activation["state"] == "active"
     assert store.load_active().plan == resolved.plan
@@ -215,6 +225,39 @@ def test_activation_restart_is_atomic_and_stale_records_deny(tmp_path: Path) -> 
         store.load_active()
 
 
+def test_new_activation_atomically_retires_the_previous_authority(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = _authority(tmp_path / "authority.sqlite3")
+    store = ActivationStore(
+        tmp_path / "state", workspace, profile_id="defaults", authority=authority
+    )
+    resolved = _resolve()
+
+    first = store.activate(
+        resolved,
+        activation_id="activation:defaults-first",
+        created_at="2026-08-05T00:00:00Z",
+    )
+    second = store.activate(
+        resolved,
+        activation_id="activation:defaults-second",
+        created_at="2026-08-05T00:01:00Z",
+    )
+
+    assert second["fencing_token"] > first["fencing_token"]
+    assert authority.active_activation_reservation(first["activation_id"]) is None
+    active = authority.active_activation_reservation(second["activation_id"])
+    assert active is not None
+    assert active["state"] == "active"
+    assert (
+        store.load_active_snapshot().activation["activation_id"]
+        == second["activation_id"]
+    )
+
+
 def test_workspace_traversal_symlink_escape_and_cross_workspace_restart_deny(
     tmp_path: Path,
 ) -> None:
@@ -222,7 +265,10 @@ def test_workspace_traversal_symlink_escape_and_cross_workspace_restart_deny(
     other = tmp_path / "other"
     workspace.mkdir()
     other.mkdir()
-    store = ActivationStore(tmp_path / "state", workspace)
+    authority = _authority(tmp_path / "authority.sqlite3")
+    store = ActivationStore(
+        tmp_path / "state", workspace, profile_id="defaults", authority=authority
+    )
     assert store.resolve_workspace_path("notes/item.txt") == workspace / "notes" / "item.txt"
     with pytest.raises(ProfileResolutionDenied, match="traversal-free"):
         store.resolve_workspace_path("../other/secret.txt")
@@ -238,8 +284,92 @@ def test_workspace_traversal_symlink_escape_and_cross_workspace_restart_deny(
         _resolve(),
         activation_id="activation:defaults-0002",
         created_at="2026-08-05T00:00:00Z",
-        fencing_token=12,
     )
-    other_store = ActivationStore(tmp_path / "state", other)
+    other_store = ActivationStore(
+        tmp_path / "state", other, profile_id="defaults", authority=authority
+    )
     with pytest.raises(ProfileResolutionDenied, match="another workspace"):
         other_store.load_active()
+
+
+def test_activation_journal_recovers_only_authority_committed_candidate(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = _authority(tmp_path / "authority.sqlite3")
+
+    def crash(stage: str) -> None:
+        if stage == "after_authority_commit":
+            raise RuntimeError("simulated crash after authority commit")
+
+    crashing = ActivationStore(
+        tmp_path / "state",
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        fault=crash,
+    )
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        crashing.activate(
+            _resolve(),
+            activation_id="activation:defaults-crash",
+            created_at="2026-08-05T00:00:00Z",
+        )
+    assert (tmp_path / "state" / "pending.json").is_file()
+
+    recovered = ActivationStore(
+        tmp_path / "state",
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+    ).load_active_snapshot()
+    assert recovered.activation["state"] == "active"
+    assert recovered.activation["state_generation"] == 4
+    assert not (tmp_path / "state" / "pending.json").exists()
+    states = [
+        event["event_state"]
+        for event in authority.audit_events()
+        if event["event_type"] == "activation"
+    ]
+    assert states == [
+        "prepared",
+        "ready_without_authority",
+        "committing",
+        "active",
+    ]
+
+
+def test_activation_candidate_aborts_on_epoch_revoke_and_token_is_not_reused(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = _authority(tmp_path / "authority.sqlite3")
+
+    def revoke(stage: str) -> None:
+        if stage == "ready_without_authority":
+            authority.advance_security_epoch("emergency revoke during activation")
+
+    store = ActivationStore(
+        tmp_path / "state",
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        fault=revoke,
+    )
+    with pytest.raises(AuthorityDenied, match="stale SecurityEpoch|state fence"):
+        store.activate(
+            _resolve(),
+            activation_id="activation:defaults-revoked",
+            created_at="2026-08-05T00:00:00Z",
+        )
+    assert not (tmp_path / "state" / "active.json").exists()
+    assert not (tmp_path / "state" / "pending.json").exists()
+    reservations = [
+        event["payload"]
+        for event in authority.audit_events()
+        if event["event_type"] == "activation"
+        and event["event_state"] == "prepared"
+    ]
+    assert reservations[0]["fencing_token"] == 1

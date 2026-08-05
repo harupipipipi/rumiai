@@ -10,6 +10,8 @@ from urllib.request import urlopen
 from core_runtime.bootstrap.runtime import Kernel
 from core_runtime.bootstrap.profile_capture import capture_default_profile
 from core_runtime.di_container import get_container
+from tobkiri_host.broker import RequestBroker
+from tobkiri_host.runtime import V4DispatchSession
 
 
 def _free_port() -> int:
@@ -68,6 +70,9 @@ def test_clean_bootstrap_captures_and_restarts_without_legacy_profile(
     try:
         kernel.run_startup_until("api_init")
         session = get_container().get("v4_dispatch_session")
+        assert isinstance(session, V4DispatchSession)
+        assert isinstance(session.broker, RequestBroker)
+        assert session.authority_control is not None
         assert session.profile_id == "defaults"
         assert session.plan_digest == first.resolved.plan["plan_digest"]
     finally:

@@ -12,14 +12,18 @@ from threading import RLock
 from typing import Mapping, Protocol
 
 from core_runtime.authority.v4 import (
+    ApprovalRecord,
     AuthorityDenied,
     AuthorityKernel,
     AuthorityScope,
     ExecutionDomain,
     FunctionPrincipal,
+    GrantRecord,
+    HostExtensionTrustRecord,
     InvocationContext,
     InvocationLease,
     LeaseState,
+    ProviderAuthorityRecord,
     authority_digest,
 )
 
@@ -107,6 +111,23 @@ class AuthorityV4Adapter:
             session_id=session_id,
             channel_digest=channel_digest,
             principal=self._resolve_exact(principal_ref),
+        )
+
+    def commit_approval_bundle(
+        self,
+        approval: ApprovalRecord,
+        *,
+        host_extension_trust: HostExtensionTrustRecord | None = None,
+        provider_authorities: tuple[ProviderAuthorityRecord, ...],
+        grants: tuple[GrantRecord, ...],
+    ) -> None:
+        """Commit explicit Approval/ProviderAuthority/Grant records atomically."""
+
+        self._kernel.commit_approval_bundle(
+            approval,
+            host_extension_trust=host_extension_trust,
+            provider_authorities=provider_authorities,
+            grants=grants,
         )
 
     def check_static_path(self, query: StaticAuthorityQuery) -> None:

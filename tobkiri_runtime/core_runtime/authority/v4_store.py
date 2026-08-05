@@ -171,7 +171,7 @@ class AuthorityStore:
             }
             existing_version: str | None = None
             if existing_tables:
-                required_tables = {
+                authority_tables = {
                     "authority_meta",
                     "authority_records",
                     "execution_sessions",
@@ -180,7 +180,11 @@ class AuthorityStore:
                     "revocations",
                     "authority_audit",
                 }
-                if existing_tables != required_tables:
+                supported_table_sets = {
+                    frozenset(authority_tables),
+                    frozenset({*authority_tables, "activation_reservations"}),
+                }
+                if frozenset(existing_tables) not in supported_table_sets:
                     raise AuthorityStoreError(
                         "authority database table set is partial or inconsistent"
                     )
@@ -190,7 +194,7 @@ class AuthorityStore:
                 if version_row is None:
                     raise AuthorityStoreError("authority database schema version is missing")
                 existing_version = str(version_row["value"])
-                if existing_version not in {"1", "2"}:
+                if existing_version not in {"1", "2", "3"}:
                     raise AuthorityStoreError("authority database schema version is unsupported")
             connection.executescript(
                 """
@@ -267,6 +271,23 @@ class AuthorityStore:
                     encrypted_payload BLOB NOT NULL,
                     created_at REAL NOT NULL
                 ) STRICT;
+                CREATE TABLE IF NOT EXISTS activation_reservations (
+                    reservation_id TEXT PRIMARY KEY,
+                    activation_id TEXT NOT NULL,
+                    profile_id TEXT NOT NULL,
+                    plan_digest TEXT NOT NULL,
+                    profile_authority_digest TEXT NOT NULL,
+                    security_epoch INTEGER NOT NULL,
+                    fencing_token INTEGER NOT NULL UNIQUE,
+                    state TEXT NOT NULL CHECK (
+                        state IN (
+                            'prepared', 'ready_without_authority', 'committing',
+                            'active', 'aborted', 'retired'
+                        )
+                    ),
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                ) STRICT;
                 """
             )
             connection.execute(
@@ -283,6 +304,10 @@ class AuthorityStore:
                     "security_epoch_reason_digest",
                     authority_digest({"reason": "genesis"}),
                 ),
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO authority_meta(key, value) VALUES"
+                " ('activation_fencing_token', '0')"
             )
             lease_columns = {
                 str(row["name"])
@@ -327,7 +352,7 @@ class AuthorityStore:
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS leases_request ON invocation_leases(request_id)"
             )
-            connection.execute("UPDATE authority_meta SET value='2' WHERE key='schema_version'")
+            connection.execute("UPDATE authority_meta SET value='3' WHERE key='schema_version'")
             if existing_version == "1":
                 connection.commit()
 
@@ -699,6 +724,13 @@ class AuthorityStore:
                     ),
                 )
                 connection.execute("UPDATE execution_sessions SET active=0")
+                connection.execute(
+                    "UPDATE activation_reservations SET"
+                    " state=CASE WHEN state='active' THEN 'retired' ELSE 'aborted' END,"
+                    " updated_at=? WHERE security_epoch < ? AND state IN"
+                    " ('prepared', 'ready_without_authority', 'committing', 'active')",
+                    (self._clock(), next_epoch),
+                )
                 self._append_audit(
                     connection,
                     event_id=f"epoch-{next_epoch}",
@@ -715,6 +747,237 @@ class AuthorityStore:
             raise
         except (sqlite3.Error, OSError) as exc:
             raise AuthorityStoreError("security epoch advance failed") from exc
+
+    def reserve_activation(
+        self,
+        *,
+        activation_id: str,
+        profile_id: str,
+        plan_digest: str,
+        profile_authority_digest: str,
+        security_epoch: int,
+    ) -> tuple[str, int]:
+        """Reserve one candidate activation and a never-reused fencing token."""
+
+        reservation_id = "activation-reservation:" + secrets.token_urlsafe(24)
+        try:
+            with self._lock, self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                epoch_row = connection.execute(
+                    "SELECT value FROM authority_meta WHERE key='security_epoch'"
+                ).fetchone()
+                token_row = connection.execute(
+                    "SELECT value FROM authority_meta"
+                    " WHERE key='activation_fencing_token'"
+                ).fetchone()
+                if epoch_row is None or int(epoch_row["value"]) != security_epoch:
+                    raise AuthorityDenied(
+                        "activation has a stale SecurityEpoch", code="stale_epoch"
+                    )
+                if token_row is None:
+                    raise AuthorityStoreError("activation fencing token is unavailable")
+                fencing_token = int(token_row["value"]) + 1
+                now = self._clock()
+                duplicate = connection.execute(
+                    "SELECT 1 FROM activation_reservations"
+                    " WHERE activation_id=? AND state NOT IN ('aborted', 'retired')",
+                    (activation_id,),
+                ).fetchone()
+                if duplicate is not None:
+                    raise AuthorityDenied("activation identity is already reserved")
+                connection.execute(
+                    "INSERT INTO activation_reservations"
+                    " (reservation_id, activation_id, profile_id, plan_digest,"
+                    " profile_authority_digest, security_epoch, fencing_token, state,"
+                    " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        reservation_id,
+                        activation_id,
+                        profile_id,
+                        plan_digest,
+                        profile_authority_digest,
+                        security_epoch,
+                        fencing_token,
+                        "prepared",
+                        now,
+                        now,
+                    ),
+                )
+                connection.execute(
+                    "UPDATE authority_meta SET value=?"
+                    " WHERE key='activation_fencing_token'",
+                    (str(fencing_token),),
+                )
+                self._append_audit(
+                    connection,
+                    event_id=f"activation-prepared-{reservation_id}",
+                    event_type="activation",
+                    event_state="prepared",
+                    payload={
+                        "reservation_id": reservation_id,
+                        "activation_id": activation_id,
+                        "profile_id": profile_id,
+                        "plan_digest": plan_digest,
+                        "profile_authority_digest": profile_authority_digest,
+                        "security_epoch": security_epoch,
+                        "fencing_token": fencing_token,
+                    },
+                )
+                connection.commit()
+                return reservation_id, fencing_token
+        except (AuthorityDenied, AuthorityStoreError, AuditUnavailable):
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise AuthorityDenied("activation identity was already reserved") from exc
+        except sqlite3.Error as exc:
+            raise AuthorityStoreError("activation reservation failed") from exc
+
+    def transition_activation(
+        self,
+        reservation_id: str,
+        *,
+        expected_state: str,
+        new_state: str,
+    ) -> Mapping[str, Any]:
+        """CAS one activation journal transition with an authoritative audit append."""
+
+        allowed = {
+            ("prepared", "ready_without_authority"),
+            ("ready_without_authority", "committing"),
+            ("committing", "active"),
+            ("prepared", "aborted"),
+            ("ready_without_authority", "aborted"),
+            ("committing", "aborted"),
+            ("active", "retired"),
+        }
+        if (expected_state, new_state) not in allowed:
+            raise ValueError("invalid activation state transition")
+        try:
+            with self._lock, self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT * FROM activation_reservations WHERE reservation_id=?",
+                    (reservation_id,),
+                ).fetchone()
+                if row is None or str(row["state"]) != expected_state:
+                    raise AuthorityDenied("activation reservation lost its state fence")
+                epoch_row = connection.execute(
+                    "SELECT value FROM authority_meta WHERE key='security_epoch'"
+                ).fetchone()
+                if (
+                    new_state not in {"aborted", "retired"}
+                    and (
+                        epoch_row is None
+                        or int(epoch_row["value"]) != row["security_epoch"]
+                    )
+                ):
+                    raise AuthorityDenied(
+                        "activation reservation has a stale SecurityEpoch",
+                        code="stale_epoch",
+                    )
+                updated = connection.execute(
+                    "UPDATE activation_reservations SET state=?, updated_at=?"
+                    " WHERE reservation_id=? AND state=?",
+                    (new_state, self._clock(), reservation_id, expected_state),
+                )
+                if updated.rowcount != 1:
+                    raise AuthorityDenied("activation transition lost a race")
+                payload = {
+                    key: row[key]
+                    for key in (
+                        "reservation_id",
+                        "activation_id",
+                        "profile_id",
+                        "plan_digest",
+                        "profile_authority_digest",
+                        "security_epoch",
+                        "fencing_token",
+                    )
+                }
+                if new_state == "active":
+                    superseded = connection.execute(
+                        "SELECT reservation_id, activation_id FROM activation_reservations"
+                        " WHERE profile_id=? AND state='active' AND reservation_id<>?",
+                        (row["profile_id"], reservation_id),
+                    ).fetchall()
+                    connection.execute(
+                        "UPDATE activation_reservations SET state='retired', updated_at=?"
+                        " WHERE profile_id=? AND state='active' AND reservation_id<>?",
+                        (self._clock(), row["profile_id"], reservation_id),
+                    )
+                    for old in superseded:
+                        self._append_audit(
+                            connection,
+                            event_id=f"activation-retired-{old['reservation_id']}",
+                            event_type="activation",
+                            event_state="retired",
+                            payload={
+                                "reservation_id": old["reservation_id"],
+                                "activation_id": old["activation_id"],
+                                "superseded_by": reservation_id,
+                            },
+                        )
+                self._append_audit(
+                    connection,
+                    event_id=f"activation-{new_state}-{reservation_id}",
+                    event_type="activation",
+                    event_state=new_state,
+                    payload=payload,
+                )
+                connection.commit()
+                return {**payload, "state": new_state}
+        except (AuthorityDenied, AuditUnavailable):
+            raise
+        except sqlite3.Error as exc:
+            raise AuthorityStoreError("activation transition failed") from exc
+
+    def activation_reservation(self, reservation_id: str) -> Mapping[str, Any] | None:
+        """Return one durable activation reservation for Host recovery."""
+
+        try:
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM activation_reservations WHERE reservation_id=?",
+                    (reservation_id,),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise AuthorityStoreError("activation reservation read failed") from exc
+        return dict(row) if row is not None else None
+
+    def incomplete_activation_reservations(
+        self, profile_id: str
+    ) -> tuple[Mapping[str, Any], ...]:
+        """Return candidate reservations that must be recovered before activation."""
+
+        try:
+            with self._lock, self._connect() as connection:
+                rows = connection.execute(
+                    "SELECT * FROM activation_reservations WHERE profile_id=?"
+                    " AND state IN ('prepared', 'ready_without_authority', 'committing')"
+                    " ORDER BY fencing_token",
+                    (profile_id,),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise AuthorityStoreError("activation recovery inventory failed") from exc
+        return tuple(dict(row) for row in rows)
+
+    def active_activation_reservation(
+        self, activation_id: str
+    ) -> Mapping[str, Any] | None:
+        """Return the sole authoritative active reservation for restart capture."""
+
+        try:
+            with self._lock, self._connect() as connection:
+                rows = connection.execute(
+                    "SELECT * FROM activation_reservations"
+                    " WHERE activation_id=? AND state='active'",
+                    (activation_id,),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise AuthorityStoreError("active activation read failed") from exc
+        if len(rows) > 1:
+            raise AuthorityStoreError("multiple active authority reservations exist")
+        return dict(rows[0]) if rows else None
 
     def bind_authenticated_session(
         self,

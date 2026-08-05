@@ -1863,7 +1863,7 @@ class PackAPIHandler(
 
             if path == "/api/v4/dispatch":
                 from .di_container import get_container
-                from .pack_control_v4 import PackControlDenied
+                from tobkiri_host.errors import HostCoreError
 
                 if self._request_auth_mode != "panel_session":
                     self._send_response(
@@ -1889,14 +1889,27 @@ class PackAPIHandler(
                 try:
                     dispatch_payload = body.get("payload")
                     if not isinstance(dispatch_payload, dict):
-                        raise PackControlDenied("dispatch payload must be an object")
+                        raise ValueError("dispatch payload must be an object")
                     result = session.invoke(
                         str(body.get("contract_id") or ""),
                         str(body.get("operation_id") or ""),
                         {**dispatch_payload, "_session_id": session_id},
                     )
-                except PackControlDenied as error:
-                    self._send_response(APIResponse(False, error=str(error)), 409)
+                except (HostCoreError, KeyError, ValueError) as error:
+                    code = getattr(error, "code", "invalid_dispatch")
+                    self._send_response(
+                        APIResponse(
+                            False,
+                            data={
+                                "code": code,
+                                "state": "broker_dispatch_denied",
+                                "profile_id": session.profile_id,
+                                "plan_digest": session.plan_digest,
+                            },
+                            error=str(error),
+                        ),
+                        409,
+                    )
                     return
                 self._send_response(APIResponse(True, data=dict(result)))
                 return

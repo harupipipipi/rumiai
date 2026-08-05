@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
@@ -11,6 +12,7 @@ from core_runtime.authority.v4 import AuthorityStore
 from .artifact_compiler import CompiledPack, compile_pack_root, routes_for_plan
 from .backends import BackendRegistry
 from .broker import RequestAdmissionPort, RequestBroker
+from .authority_v4 import AuthorityV4Adapter
 from .composition import AuthorityCeilings, HostV4Composition
 from .contracts import AdapterExecutor, AdapterPlanner
 from .effects import ReconciliationStore
@@ -72,9 +74,10 @@ class ProductionRuntimeV4:
         admission: RequestAdmissionPort,
         reconciliation: ReconciliationStore,
         terminate_domain: Callable[[str], None] | None = None,
+        authority_adapter: AuthorityV4Adapter | None = None,
     ) -> RequestBroker:
         """Build the sole request Broker using this captured authority adapter."""
-        authority = self.composition.authority_adapter(
+        authority = authority_adapter or self.composition.authority_adapter(
             authority_store, terminate_domain=terminate_domain
         )
         return RequestBroker(
@@ -93,11 +96,12 @@ class ProductionRuntimeV4:
         self,
         *,
         broker: RequestBroker,
-        context_for: Callable[[str, str], RequestContext],
+        context_for: Callable[..., RequestContext],
         effect_scope_for: Callable[
             [str, str, Mapping[str, Any]], Mapping[str, Any]
         ],
         providers: Mapping[str, tuple[Mapping[str, Any], ...]],
+        authority_control: AuthorityV4Adapter | None = None,
     ) -> "V4DispatchSession":
         """Bind request ports to identities from this captured composition."""
         return V4DispatchSession(
@@ -107,6 +111,7 @@ class ProductionRuntimeV4:
             providers=providers,
             profile_id=str(self.composition.profile["profile_id"]),
             plan_digest=str(self.composition.plan["plan_digest"]),
+            authority_control=authority_control,
         )
 
 
@@ -115,11 +120,12 @@ class V4DispatchSession:
     """Authenticated request adapter shared by worker, HTTP, and chat surfaces."""
 
     broker: RequestBroker
-    context_for: Callable[[str, str], RequestContext]
+    context_for: Callable[..., RequestContext]
     effect_scope_for: Callable[[str, str, Mapping[str, Any]], Mapping[str, Any]]
     providers: Mapping[str, tuple[Mapping[str, Any], ...]]
     profile_id: str
     plan_digest: str
+    authority_control: AuthorityV4Adapter | None = None
 
     def provider_metadata(
         self, contract_id: str
@@ -136,17 +142,25 @@ class V4DispatchSession:
         version_range: str = ">=1,<2",
     ) -> Mapping[str, Any]:
         """Dispatch through the captured Broker without identity from payload."""
-        context = self.context_for(contract_id, operation_id)
+        arguments = dict(payload)
+        session_id = str(arguments.pop("_session_id", "")).strip()
+        parameter_count = len(inspect.signature(self.context_for).parameters)
+        if parameter_count >= 3:
+            if not session_id:
+                raise ValueError("authenticated session binding is required")
+            context = self.context_for(contract_id, operation_id, session_id)
+        else:
+            context = self.context_for(contract_id, operation_id)
         return self.broker.invoke(
             InvocationFrame(
                 contract_id=contract_id,
                 version_range=version_range,
                 operation_id=operation_id,
-                payload=dict(payload),
+                payload=arguments,
             ),
             context,
             effect_scope=self.effect_scope_for(
-                contract_id, operation_id, payload
+                contract_id, operation_id, arguments
             ),
         )
 

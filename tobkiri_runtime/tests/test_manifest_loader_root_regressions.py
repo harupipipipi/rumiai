@@ -82,13 +82,9 @@ def test_repository_authority_catalog_is_exact_and_has_no_loader_gaps() -> None:
     assert len(locations) == 139
     assert len(catalog) == 141
     assert set(catalog) == direct_pack_ids
-    assert set(catalog.values()) == {
-        "legacy-authoritative",
-        "v3-authoritative",
-        "modern-only",
-    }
-    assert catalog["defaults"] == "modern-only"
-    assert catalog["defaultspack"] == "modern-only"
+    assert set(catalog.values()) == {"v4-authoritative"}
+    assert catalog["defaults"] == "v4-authoritative"
+    assert catalog["defaultspack"] == "v4-authoritative"
     assert direct_pack_ids - {location.pack_id for location in locations} == {
         "defaults",
         "defaultspack",
@@ -98,12 +94,15 @@ def test_repository_authority_catalog_is_exact_and_has_no_loader_gaps() -> None:
         manifest_path = location.pack_subdir / "ecosystem.json"
         v3_path = location.pack_subdir / "rumi.pack.v3.json"
         pack_authority = catalog[location.pack_id]
+        assert pack_authority == "v4-authoritative"
         assert manifest_path.is_file()
-        if pack_authority == "v3-authoritative":
+        assert (location.pack_subdir / "pack.v4.json").is_file()
+        assert (location.pack_subdir / "executables.v4.json").is_file()
+        if v3_path.is_file():
             assert v3_path.is_file(), location.pack_id
             legacy = json.loads(manifest_path.read_text(encoding="utf-8"))
             metadata = legacy.get("metadata", {})
-            assert metadata.get("manifest_authority") == "v3-authoritative"
+            assert metadata.get("manifest_authority") == "v4-authoritative"
             assert metadata.get("generated") is True
             assert metadata.get("read_only_projection") is True
 
@@ -241,7 +240,7 @@ def test_invalid_v3_manifest_is_not_available_or_effective(
     assert pack_id not in plan.available_pack_ids
     assert pack_id not in plan.effective_pack_set
     assert any(
-        item.code == "invalid_manifest"
+        item.code == "offline_projection_not_authority"
         and item.severity == "error"
         and item.subject == pack_id
         for item in plan.diagnostics

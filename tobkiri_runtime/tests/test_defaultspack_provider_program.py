@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from core_runtime.authority.v4 import AuthorityStore
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -138,12 +140,16 @@ def _v4_provider_fixture(
     )
     workspace = fixture_root / "workspace"
     workspace.mkdir(parents=True)
-    activation_store = ActivationStore(fixture_root / "activation", workspace)
+    activation_store = ActivationStore(
+        fixture_root / "activation",
+        workspace,
+        profile_id="defaults",
+        authority=AuthorityStore(fixture_root / "authority.sqlite3"),
+    )
     activation_store.activate(
         resolved,
         activation_id="activation:provider-v4",
         created_at="2026-08-05T00:00:00Z",
-        fencing_token=1,
     )
     active = activation_store.load_active_snapshot()
     effective_pack_ids = {

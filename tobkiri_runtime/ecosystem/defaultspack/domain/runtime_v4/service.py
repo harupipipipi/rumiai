@@ -13,7 +13,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping, Protocol
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
@@ -27,6 +27,7 @@ _ACTIVATION_RE = re.compile(r"^activation:[a-z0-9][a-z0-9._-]{7,127}$")
 _BUNDLE_SCHEMA = "io.tobkiri.defaultspack-bundle-lock.v1"
 _ENVELOPE_SCHEMA = "io.tobkiri.defaultspack-activation-envelope.v1"
 _POINTER_SCHEMA = "io.tobkiri.defaultspack-active-pointer.v1"
+_PENDING_SCHEMA = "io.tobkiri.defaultspack-pending-activation.v1"
 _FOUNDATIONAL_CONTRACT = "conversation.turn.v1"
 
 
@@ -40,6 +41,43 @@ class BundleIntegrityError(DefaultProfileV4Error):
 
 class ProfileResolutionDenied(DefaultProfileV4Error):
     """Raised when an exact, approved v4 composition cannot be produced."""
+
+
+class ActivationAuthority(Protocol):
+    """Host-owned authority/audit port used by the fenced activation journal."""
+
+    @property
+    def security_epoch(self) -> int: ...
+
+    def reserve_activation(
+        self,
+        *,
+        activation_id: str,
+        profile_id: str,
+        plan_digest: str,
+        profile_authority_digest: str,
+        security_epoch: int,
+    ) -> tuple[str, int]: ...
+
+    def transition_activation(
+        self,
+        reservation_id: str,
+        *,
+        expected_state: str,
+        new_state: str,
+    ) -> Mapping[str, Any]: ...
+
+    def activation_reservation(
+        self, reservation_id: str
+    ) -> Mapping[str, Any] | None: ...
+
+    def incomplete_activation_reservations(
+        self, profile_id: str
+    ) -> tuple[Mapping[str, Any], ...]: ...
+
+    def active_activation_reservation(
+        self, activation_id: str
+    ) -> Mapping[str, Any] | None: ...
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -470,9 +508,20 @@ def resolve_default_profile(
 class ActivationStore:
     """Atomic persistence for one workspace-bound default Profile activation."""
 
-    def __init__(self, state_root: Path, workspace_root: Path) -> None:
+    def __init__(
+        self,
+        state_root: Path,
+        workspace_root: Path,
+        *,
+        profile_id: str,
+        authority: ActivationAuthority,
+        fault: Callable[[str], None] | None = None,
+    ) -> None:
         self.state_root = state_root.resolve()
         self.workspace_root = workspace_root.resolve(strict=True)
+        self.profile_id = profile_id
+        self._authority = authority
+        self._fault = fault or (lambda _stage: None)
         if not self.workspace_root.is_dir():
             raise ProfileResolutionDenied("workspace_root must be a directory")
         self._workspace_digest = canonical_digest(
@@ -495,56 +544,327 @@ class ActivationStore:
         *,
         activation_id: str,
         created_at: str,
-        fencing_token: int,
     ) -> Mapping[str, Any]:
-        """Commit an active record and pointer after revalidating all v4 records."""
+        """Commit the complete fenced activation state machine and pointer swap."""
         if _ACTIVATION_RE.fullmatch(activation_id) is None:
             raise ProfileResolutionDenied("activation_id is not canonical")
         profile = validate_document(resolved.profile, "profile")
         lock = validate_document(resolved.lock, "profile_lock")
         plan = validate_document(resolved.plan, "resolved_plan")
         self._validate_record_graph(profile, lock, plan)
-        activation = validate_document(
-            {
-                "activation_api_version": "io.tobkiri.activation-record.v1",
-                "profile_id": profile["profile_id"],
-                "activation_id": activation_id,
-                "state": "active",
-                "state_generation": 1,
-                "plan_digest": plan["plan_digest"],
-                "profile_authority_snapshot_digest": profile[
-                    "profile_authority_snapshot_digest"
-                ],
-                "security_epoch": plan["security_epoch"],
-                "fencing_token": fencing_token,
-                "created_at": created_at,
-                "committed_at": created_at,
-            },
-            "activation",
+        if profile["profile_id"] != self.profile_id:
+            raise ProfileResolutionDenied("activation Profile identity does not match store")
+        self.recover()
+        reservation_id, fencing_token = self._authority.reserve_activation(
+            activation_id=activation_id,
+            profile_id=self.profile_id,
+            plan_digest=plan["plan_digest"],
+            profile_authority_digest=profile[
+                "profile_authority_snapshot_digest"
+            ],
+            security_epoch=plan["security_epoch"],
         )
-        envelope = {
+        envelope_path = self.state_root / "activations" / f"{activation_id[11:]}.json"
+        pending_path = self.state_root / "pending.json"
+        state = "prepared"
+        try:
+            activation = self._activation_record(
+                profile,
+                plan,
+                activation_id=activation_id,
+                state=state,
+                generation=1,
+                fencing_token=fencing_token,
+                created_at=created_at,
+            )
+            envelope = self._envelope(profile, lock, plan, activation)
+            _write_atomic(envelope_path, envelope)
+            _write_atomic(
+                pending_path,
+                self._pending_record(
+                    reservation_id,
+                    activation_id,
+                    envelope_path,
+                    canonical_digest(envelope),
+                    fencing_token,
+                ),
+            )
+            self._fault("prepared")
+
+            self._authority.transition_activation(
+                reservation_id,
+                expected_state=state,
+                new_state="ready_without_authority",
+            )
+            state = "ready_without_authority"
+            activation = self._activation_record(
+                profile,
+                plan,
+                activation_id=activation_id,
+                state=state,
+                generation=2,
+                fencing_token=fencing_token,
+                created_at=created_at,
+            )
+            envelope = self._envelope(profile, lock, plan, activation)
+            _write_atomic(envelope_path, envelope)
+            _write_atomic(
+                pending_path,
+                self._pending_record(
+                    reservation_id,
+                    activation_id,
+                    envelope_path,
+                    canonical_digest(envelope),
+                    fencing_token,
+                ),
+            )
+            self._fault("ready_without_authority")
+
+            self._authority.transition_activation(
+                reservation_id,
+                expected_state=state,
+                new_state="committing",
+            )
+            state = "committing"
+            activation = self._activation_record(
+                profile,
+                plan,
+                activation_id=activation_id,
+                state=state,
+                generation=3,
+                fencing_token=fencing_token,
+                created_at=created_at,
+            )
+            _write_atomic(envelope_path, self._envelope(profile, lock, plan, activation))
+            self._fault("committing")
+
+            activation = self._activation_record(
+                profile,
+                plan,
+                activation_id=activation_id,
+                state="active",
+                generation=4,
+                fencing_token=fencing_token,
+                created_at=created_at,
+                committed_at=created_at,
+            )
+            envelope = self._envelope(profile, lock, plan, activation)
+            envelope_digest = canonical_digest(envelope)
+            _write_atomic(envelope_path, envelope)
+            _write_atomic(
+                pending_path,
+                self._pending_record(
+                    reservation_id,
+                    activation_id,
+                    envelope_path,
+                    envelope_digest,
+                    fencing_token,
+                ),
+            )
+            self._fault("before_authority_commit")
+            self._authority.transition_activation(
+                reservation_id,
+                expected_state=state,
+                new_state="active",
+            )
+            state = "active"
+            self._fault("after_authority_commit")
+            _write_atomic(
+                self.state_root / "active.json",
+                self._active_pointer(
+                    activation_id, envelope_path, envelope_digest
+                ),
+            )
+            pending_path.unlink(missing_ok=True)
+            return activation
+        except Exception:
+            if state != "active":
+                try:
+                    reservation = self._authority.activation_reservation(
+                        reservation_id
+                    )
+                    if reservation is not None and reservation.get("state") == state:
+                        self._authority.transition_activation(
+                            reservation_id,
+                            expected_state=state,
+                            new_state="aborted",
+                        )
+                finally:
+                    pending_path.unlink(missing_ok=True)
+                    envelope_path.unlink(missing_ok=True)
+            raise
+
+    def recover(self) -> None:
+        """Recover a crash to the complete old or complete committed activation."""
+
+        pending_path = self.state_root / "pending.json"
+        if not pending_path.exists():
+            for reservation in self._authority.incomplete_activation_reservations(
+                self.profile_id
+            ):
+                self._authority.transition_activation(
+                    str(reservation["reservation_id"]),
+                    expected_state=str(reservation["state"]),
+                    new_state="aborted",
+                )
+            return
+        try:
+            pending = strict_loads(pending_path.read_bytes())
+        except (OSError, ProtocolError) as exc:
+            raise ProfileResolutionDenied(
+                f"pending activation journal is invalid: {exc}"
+            ) from exc
+        expected_keys = {
+            "schema",
+            "reservation_id",
+            "activation_id",
+            "envelope_path",
+            "envelope_digest",
+            "workspace_digest",
+            "fencing_token",
+        }
+        if (
+            not isinstance(pending, dict)
+            or set(pending) != expected_keys
+            or pending.get("schema") != _PENDING_SCHEMA
+            or pending.get("workspace_digest") != self._workspace_digest
+        ):
+            raise ProfileResolutionDenied("pending activation journal is invalid")
+        reservation_id = str(pending["reservation_id"])
+        loaded_reservation = self._authority.activation_reservation(reservation_id)
+        if loaded_reservation is None:
+            raise ProfileResolutionDenied("pending authority reservation is unavailable")
+        reservation = loaded_reservation
+        expected_binding = (
+            str(pending["activation_id"]),
+            int(pending["fencing_token"]),
+            self.profile_id,
+        )
+        actual_binding = (
+            str(reservation["activation_id"]),
+            int(reservation["fencing_token"]),
+            str(reservation["profile_id"]),
+        )
+        if actual_binding != expected_binding:
+            raise ProfileResolutionDenied("pending activation authority binding changed")
+        envelope_name = str(pending["envelope_path"])
+        if Path(envelope_name).name != envelope_name:
+            raise ProfileResolutionDenied("pending activation envelope path is invalid")
+        envelope_path = self.state_root / "activations" / envelope_name
+        state = str(reservation["state"])
+        if state == "active":
+            try:
+                envelope = strict_loads(envelope_path.read_bytes())
+            except (OSError, ProtocolError) as exc:
+                raise ProfileResolutionDenied(
+                    "committed activation envelope is unavailable"
+                ) from exc
+            if (
+                not isinstance(envelope, dict)
+                or canonical_digest(envelope) != pending["envelope_digest"]
+                or not isinstance(envelope.get("activation"), dict)
+                or envelope["activation"].get("state") != "active"
+            ):
+                raise ProfileResolutionDenied("committed activation envelope changed")
+            _write_atomic(
+                self.state_root / "active.json",
+                self._active_pointer(
+                    str(pending["activation_id"]),
+                    envelope_path,
+                    str(pending["envelope_digest"]),
+                ),
+            )
+            pending_path.unlink(missing_ok=True)
+            return
+        if state in {"prepared", "ready_without_authority", "committing"}:
+            self._authority.transition_activation(
+                reservation_id,
+                expected_state=state,
+                new_state="aborted",
+            )
+        elif state != "aborted":
+            raise ProfileResolutionDenied("pending activation has an invalid authority state")
+        pending_path.unlink(missing_ok=True)
+        envelope_path.unlink(missing_ok=True)
+
+    def _activation_record(
+        self,
+        profile: Mapping[str, Any],
+        plan: Mapping[str, Any],
+        *,
+        activation_id: str,
+        state: str,
+        generation: int,
+        fencing_token: int,
+        created_at: str,
+        committed_at: str | None = None,
+    ) -> Mapping[str, Any]:
+        record: dict[str, Any] = {
+            "activation_api_version": "io.tobkiri.activation-record.v1",
+            "profile_id": profile["profile_id"],
+            "activation_id": activation_id,
+            "state": state,
+            "state_generation": generation,
+            "plan_digest": plan["plan_digest"],
+            "profile_authority_snapshot_digest": profile[
+                "profile_authority_snapshot_digest"
+            ],
+            "security_epoch": plan["security_epoch"],
+            "fencing_token": fencing_token,
+            "created_at": created_at,
+        }
+        if committed_at is not None:
+            record["committed_at"] = committed_at
+        return validate_document(record, "activation")
+
+    def _envelope(
+        self,
+        profile: Mapping[str, Any],
+        lock: Mapping[str, Any],
+        plan: Mapping[str, Any],
+        activation: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return {
             "schema": _ENVELOPE_SCHEMA,
             "workspace_digest": self._workspace_digest,
-            "profile": profile,
-            "lock": lock,
-            "plan": plan,
-            "activation": activation,
+            "profile": dict(profile),
+            "lock": dict(lock),
+            "plan": dict(plan),
+            "activation": dict(activation),
         }
-        envelope_digest = canonical_digest(envelope)
-        envelope_path = self.state_root / "activations" / f"{activation_id[11:]}.json"
-        _write_atomic(envelope_path, envelope)
-        pointer = {
+
+    def _pending_record(
+        self,
+        reservation_id: str,
+        activation_id: str,
+        envelope_path: Path,
+        envelope_digest: str,
+        fencing_token: int,
+    ) -> dict[str, Any]:
+        return {
+            "schema": _PENDING_SCHEMA,
+            "reservation_id": reservation_id,
+            "activation_id": activation_id,
+            "envelope_path": envelope_path.name,
+            "envelope_digest": envelope_digest,
+            "workspace_digest": self._workspace_digest,
+            "fencing_token": fencing_token,
+        }
+
+    def _active_pointer(
+        self, activation_id: str, envelope_path: Path, envelope_digest: str
+    ) -> dict[str, Any]:
+        return {
             "schema": _POINTER_SCHEMA,
             "activation_id": activation_id,
             "envelope_path": envelope_path.name,
             "envelope_digest": envelope_digest,
             "workspace_digest": self._workspace_digest,
         }
-        _write_atomic(self.state_root / "active.json", pointer)
-        return activation
 
     def load_active_snapshot(self) -> ActiveDefaultProfile:
         """Load the exact activation snapshot and reject stale restart state."""
+        self.recover()
         try:
             pointer = strict_loads((self.state_root / "active.json").read_bytes())
         except (OSError, ProtocolError) as exc:
@@ -598,6 +918,30 @@ class ActivationStore:
             raise ProfileResolutionDenied("active pointer selects another activation")
         if activation["state"] != "active" or activation["plan_digest"] != plan["plan_digest"]:
             raise ProfileResolutionDenied("activation is stale or not active")
+        authority = self._authority.active_activation_reservation(
+            str(activation["activation_id"])
+        )
+        expected_authority = (
+            activation["profile_id"],
+            activation["plan_digest"],
+            activation["profile_authority_snapshot_digest"],
+            activation["security_epoch"],
+            activation["fencing_token"],
+        )
+        actual_authority = (
+            authority.get("profile_id"),
+            authority.get("plan_digest"),
+            authority.get("profile_authority_digest"),
+            authority.get("security_epoch"),
+            authority.get("fencing_token"),
+        ) if authority is not None else ()
+        if (
+            actual_authority != expected_authority
+            or activation["security_epoch"] != self._authority.security_epoch
+        ):
+            raise ProfileResolutionDenied(
+                "active activation authority, fence, or SecurityEpoch is stale"
+            )
         return ActiveDefaultProfile(
             resolved=ResolvedDefaultProfile(profile=profile, lock=lock, plan=plan),
             activation=activation,

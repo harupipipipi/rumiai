@@ -21,8 +21,6 @@ from core_runtime.manifest_authority import (
 from scripts.offline_legacy_projection import (
     ManifestProjectionError,
     generate_legacy_ecosystem_projection,
-    project_legacy_ecosystem,
-    source_manifest_identity,
 )
 from scripts.migrate_manifest_authority import _normalize_artifact_index
 from core_runtime.pack_artifact_integrity import verify_declared_artifacts
@@ -49,11 +47,9 @@ def test_every_repository_pack_has_one_explicit_authority() -> None:
         require_complete_catalog=True,
     )
     assert len(catalog) == 141
-    assert list(catalog.values()).count("v3-authoritative") == 95
-    assert list(catalog.values()).count("legacy-authoritative") == 44
-    assert list(catalog.values()).count("modern-only") == 2
-    assert catalog["defaults"] == "modern-only"
-    assert catalog["defaultspack"] == "modern-only"
+    assert set(catalog.values()) == {"v4-authoritative"}
+    assert catalog["defaults"] == "v4-authoritative"
+    assert catalog["defaultspack"] == "v4-authoritative"
 
 
 def test_authority_scope_rejects_missing_extra_and_implicit_inputs() -> None:
@@ -79,39 +75,37 @@ def test_all_authoritative_manifests_and_projections_are_valid() -> None:
     for pack_id, authority in sorted(catalog.items()):
         pack_root = ECOSYSTEM / pack_id
         ecosystem_path = pack_root / "ecosystem.json"
-        if authority == "modern-only":
+        assert authority == "v4-authoritative"
+        assert (pack_root / "pack.v4.json").is_file()
+        assert (pack_root / "contracts.v4.json").is_file()
+        assert (pack_root / "executables.v4.json").is_file()
+        assert (pack_root / "artifact-index.v4.json").is_file()
+        if pack_id in {"defaults", "defaultspack"}:
             assert pack_id in {"defaults", "defaultspack"}
             assert not ecosystem_path.exists()
             assert not (pack_root / "rumi.pack.v3.json").exists()
-            assert (pack_root / "pack.v4.json").is_file()
             continue
         ecosystem = json.loads(ecosystem_path.read_text(encoding="utf-8"))
         assert validate_ecosystem(ecosystem, raise_on_error=False) == [], pack_id
+        metadata = ecosystem["metadata"]
+        assert metadata["manifest_authority"] == "v4-authoritative"
+        assert metadata["read_only_projection"] is True
+        assert metadata["generated_from"]["source"] == "pack.v4.json"
+        assert metadata["generated_from"]["source_content_hash"]
         integrity_ok, integrity_diagnostics = verify_declared_artifacts(
             pack_root,
             ecosystem,
         )
         assert integrity_ok, (pack_id, integrity_diagnostics)
         v3_path = pack_root / "rumi.pack.v3.json"
-        if authority == "v3-authoritative":
+        if v3_path.is_file():
             loaded = load_manifest(v3_path)
             assert loaded.ok, (pack_id, loaded.diagnostics)
             canonical = json.loads(v3_path.read_text(encoding="utf-8"))
-            compatibility = canonical["extensions"]["rumi.legacy_projection"]["manifest"]
-            assert project_legacy_ecosystem(canonical) == ecosystem
-            generate_legacy_ecosystem_projection(
-                v3_path,
-                ecosystem_path,
-                check=True,
-            )
-            assert ecosystem["metadata"]["read_only_projection"] is True
-            assert ecosystem["metadata"]["generated_from"][
-                "source_content_hash"
-            ] == source_manifest_identity(canonical)
-            for key, value in compatibility.get("metadata", {}).items():
-                assert ecosystem["metadata"][key] == value
-        else:
-            assert not v3_path.exists()
+            projection = canonical["extensions"]["tobkiri.offline_projection"]
+            assert projection["owner"] == pack_id
+            assert projection["source"] == "pack.v4.json"
+            assert projection["runtime_executable"] is False
 
 
 def test_projection_and_artifact_tamper_fail_closed(
@@ -267,7 +261,10 @@ def test_invalid_v3_manifest_is_not_available_or_effective(tmp_path: Path) -> No
 
     assert plan.available_pack_ids == ()
     assert plan.effective_pack_set == ()
-    assert any(item.code == "invalid_manifest" for item in plan.diagnostics)
+    assert any(
+        item.code == "offline_projection_not_authority"
+        for item in plan.diagnostics
+    )
 
 
 def test_removed_binding_authorities_are_not_importable() -> None:

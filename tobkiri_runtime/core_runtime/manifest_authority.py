@@ -1,4 +1,4 @@
-"""Authoritative Pack-manifest classification shared by production loaders."""
+"""Offline inventory assertion for canonical Pack v4 authority."""
 
 from __future__ import annotations
 
@@ -7,20 +7,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Iterable, Literal
 
-ManifestAuthority = Literal[
-    "legacy-authoritative",
-    "v3-authoritative",
-    "modern-only",
-]
+ManifestAuthority = Literal["v4-authoritative"]
 
 CATALOG_PATH = (
     Path(__file__).parents[1] / "schemas" / "manifest_authority.v1.json"
 )
-_VALID_AUTHORITIES = {
-    "legacy-authoritative",
-    "v3-authoritative",
-    "modern-only",
-}
+_VALID_AUTHORITIES = {"v4-authoritative"}
 
 
 class ManifestAuthorityError(ValueError):
@@ -52,7 +44,7 @@ def load_manifest_authority_catalog() -> dict[str, ManifestAuthority]:
 
 
 def repository_manifest_authority(pack_id: str) -> ManifestAuthority:
-    """Return the explicit authority for a shipped Pack or fail closed."""
+    """Assert that a shipped Pack is owned by its canonical v4 artifacts."""
     authority = load_manifest_authority_catalog().get(pack_id)
     if authority is None:
         raise ManifestAuthorityError(

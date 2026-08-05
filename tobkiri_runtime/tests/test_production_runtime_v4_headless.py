@@ -13,7 +13,7 @@ from core_runtime.global_contract_dispatch import (
     invoke_global_contract,
 )
 from core_runtime.di_container import DIContainer
-from core_runtime.authority.v4 import AuthorityScope, FunctionPrincipal
+from core_runtime.authority.v4 import AuthorityScope, AuthorityStore, FunctionPrincipal
 from ecosystem.defaultspack.domain.runtime_v4 import (
     ActivationStore,
     BundledCatalog,
@@ -120,12 +120,16 @@ def test_headless_activation_compiles_exact_plan_and_reads_after_restart(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "proof.txt").write_text("verified-v4\n", encoding="utf-8")
-    activation_store = ActivationStore(tmp_path / "state", workspace)
+    activation_store = ActivationStore(
+        tmp_path / "state",
+        workspace,
+        profile_id="defaults",
+        authority=AuthorityStore(tmp_path / "authority.sqlite3"),
+    )
     activation_store.activate(
         resolved,
         activation_id="activation:headless-v4",
         created_at="2026-08-05T00:00:00Z",
-        fencing_token=1,
     )
     restarted = activation_store.load_active_snapshot()
     bindings = restarted.resolved.plan["bindings"]
@@ -221,12 +225,16 @@ def test_production_capture_rejects_unapproved_extra_and_stale_scope(
     resolved = _resolved(catalog)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    store = ActivationStore(tmp_path / "state", workspace)
+    store = ActivationStore(
+        tmp_path / "state",
+        workspace,
+        profile_id="defaults",
+        authority=AuthorityStore(tmp_path / "authority.sqlite3"),
+    )
     activation = store.activate(
         resolved,
         activation_id="activation:negative-v4",
         created_at="2026-08-05T00:00:00Z",
-        fencing_token=1,
     )
     effective = {
         item["identity"]: item["artifact_digest"]

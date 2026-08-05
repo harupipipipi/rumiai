@@ -108,7 +108,7 @@ FALLBACK_NAMES = frozenset(
 )
 OLD_COMPOSITION_MODULE = "domain.pack_architecture"
 VALID_MANIFEST_AUTHORITIES = frozenset(
-    {"legacy-authoritative", "v3-authoritative", "modern-only"}
+    {"v4-authoritative"}
 )
 
 AUTHORITY_ENV_NAMES = frozenset(
@@ -423,11 +423,7 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
         )
     catalog_delta = _source_set_delta(direct_ids, manifest_ids)
     expected_authority_counts = Counter(
-        {
-            "modern-only": len(v4_only_ids),
-            "v3-authoritative": 95,
-            "legacy-authoritative": 44,
-        }
+        {"v4-authoritative": EXPECTED_PRODUCTION_PACK_COUNT}
     )
     observed_authority_counts = (
         Counter(str(classified.get(pack_id)) for pack_id in direct_ids)
@@ -502,17 +498,10 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
     for pack_id in sorted(direct_ids & manifest_ids):
         pack_dir = ECOSYSTEM / pack_id
         authority = classified.get(pack_id) if isinstance(classified, Mapping) else None
-        has_v3_manifest = (pack_dir / "rumi.pack.v3.json").is_file()
-        if authority == "v3-authoritative" and not has_v3_manifest:
+        if authority != "v4-authoritative":
             add_scope_finding(
-                pack_dir / "rumi.pack.v3.json",
-                "v3_manifest_missing_for_authority",
-                pack_id,
-            )
-        if authority != "v3-authoritative" and has_v3_manifest:
-            add_scope_finding(
-                pack_dir / "rumi.pack.v3.json",
-                "unexpected_v3_manifest_for_authority",
+                pack_dir / "pack.v4.json",
+                "non_v4_production_authority",
                 pack_id,
             )
     for pack_id in sorted(v4_only_ids & direct_ids):
@@ -1331,43 +1320,43 @@ def _offline_projection_findings() -> list[dict[str, Any]]:
         ):
             continue
         legacy_path = pack_dir / "ecosystem.json"
-        source_path = pack_dir / "rumi.pack.v3.json"
         value = _load_json(legacy_path)
         metadata = value.get("metadata") if isinstance(value, Mapping) else None
         generated = metadata.get("generated_from") if isinstance(metadata, Mapping) else None
         authority = authorities.get(pack_dir.name)
-        if authority == "v3-authoritative":
-            expected = {
-                "format": "rumi.ecosystem.v1",
-                "generated": True,
-                "read_only_projection": True,
-                "manifest_authority": "v3-authoritative",
-            }
-            if not isinstance(metadata, Mapping) or any(
-                metadata.get(key) != expected_value
-                for key, expected_value in expected.items()
-            ):
-                findings.append(
-                    _finding(legacy_path, 1, "projection_marker_or_owner_missing")
-                )
-                continue
-            if (
-                not isinstance(generated, Mapping)
-                or generated.get("source") != "rumi.pack.v3.json"
-                or generated.get("generator")
-                != "tobkiri.core_runtime.manifest_projection/v2"
-            ):
-                findings.append(
-                    _finding(legacy_path, 1, "projection_source_marker_missing")
-                )
-            if (
-                not source_path.is_file()
-                or generated.get("source_content_hash")
-                != _source_identity(source_path)
-            ):
-                findings.append(
-                    _finding(legacy_path, 1, "projection_source_identity_mismatch")
-                )
+        expected = {
+            "format": "rumi.ecosystem.v1",
+            "generated": True,
+            "read_only_projection": True,
+            "manifest_authority": "v4-authoritative",
+            "projection_owner": "scripts/migrate_manifest_authority.py",
+        }
+        if authority != "v4-authoritative" or not isinstance(metadata, Mapping) or any(
+            metadata.get(key) != expected_value
+            for key, expected_value in expected.items()
+        ):
+            findings.append(
+                _finding(legacy_path, 1, "projection_marker_or_owner_missing")
+            )
+            continue
+        if (
+            not isinstance(generated, Mapping)
+            or generated.get("source") != "pack.v4.json"
+            or generated.get("generator") != V4_PROJECTION_GENERATOR
+        ):
+            findings.append(
+                _finding(legacy_path, 1, "projection_source_marker_missing")
+            )
+        v4 = _load_json(pack_dir / "pack.v4.json")
+        source_identity = (
+            v4.get("integrity", {}).get("source_identity")
+            if isinstance(v4, Mapping)
+            else None
+        )
+        if generated.get("source_content_hash") != source_identity:
+            findings.append(
+                _finding(legacy_path, 1, "projection_source_identity_mismatch")
+            )
         v4 = _load_json(pack_dir / "pack.v4.json")
         integrity = v4.get("integrity") if isinstance(v4, Mapping) else None
         canonical_v4 = (

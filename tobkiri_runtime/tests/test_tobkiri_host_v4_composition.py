@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from core_runtime.authority.v4 import AuthorityScope, FunctionPrincipal
+from core_runtime.authority.v4 import AuthorityScope, AuthorityStore, FunctionPrincipal
 from ecosystem.defaultspack.domain.runtime_v4 import (
     ActivationStore,
     BundledCatalog,
@@ -115,12 +115,16 @@ def _capture(tmp_path: Path):
     catalog, resolved = _resolved()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    store = ActivationStore(tmp_path / "state", workspace)
+    store = ActivationStore(
+        tmp_path / "state",
+        workspace,
+        profile_id="defaults",
+        authority=AuthorityStore(tmp_path / "authority.sqlite3"),
+    )
     activation = store.activate(
         resolved,
         activation_id="activation:defaults-v4",
         created_at="2026-08-05T00:00:00Z",
-        fencing_token=1,
     )
     restarted = store.load_active_snapshot()
     assert restarted.activation == activation

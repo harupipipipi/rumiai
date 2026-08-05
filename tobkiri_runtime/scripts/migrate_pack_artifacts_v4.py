@@ -219,6 +219,7 @@ def _migration_source_view(path: Path) -> dict[str, Any]:
                 "generated",
                 "generated_from",
                 "manifest_authority",
+                "projection_owner",
                 "read_only_projection",
             ):
                 metadata.pop(key, None)
@@ -227,6 +228,7 @@ def _migration_source_view(path: Path) -> dict[str, Any]:
         extensions = payload.get("extensions")
         if isinstance(extensions, dict):
             extensions.pop("rumi.legacy_projection", None)
+            extensions.pop("tobkiri.offline_projection", None)
     return payload
 
 
@@ -254,7 +256,7 @@ def _entrypoint_implementation_digest(entrypoint: Mapping[str, Any]) -> str | No
     return _file_digest(candidate)
 
 
-def _import_record(pack_root: Path, authority: str) -> dict[str, Any]:
+def _import_record(pack_root: Path) -> dict[str, Any]:
     legacy_path = pack_root / "ecosystem.json"
     v3_path = pack_root / "rumi.pack.v3.json"
     legacy = json.loads(legacy_path.read_text(encoding="utf-8"))
@@ -366,7 +368,15 @@ def _import_record(pack_root: Path, authority: str) -> dict[str, Any]:
             pack_data.get("display_name") or legacy.get("display_name") or pack_root.name
         ),
         "description": str(pack_data.get("description") or legacy.get("description") or ""),
-        "migrated_from": authority,
+        "authority": "v4-authoritative",
+        "source_provenance": {
+            "owner": pack_root.name,
+            "mode": "offline-one-way-import",
+            "source_format": "rumi.pack.v3.json" if v3 is not None else "ecosystem.json",
+            "historical_classification": (
+                "v3-authoritative" if v3 is not None else "legacy-authoritative"
+            ),
+        },
         "dependencies": dict(sorted((str(key), str(value)) for key, value in dependencies.items())),
         "required_contracts": sorted(required, key=lambda item: item["contract_id"]),
         "capabilities": sorted(capabilities),
@@ -403,7 +413,7 @@ def _import_record(pack_root: Path, authority: str) -> dict[str, Any]:
     return record
 
 
-def _import_bundled_record(pack_id: str, authority: str) -> dict[str, Any]:
+def _import_bundled_record(pack_id: str) -> dict[str, Any]:
     """Import the two finite Defaults v4 sources without legacy authority."""
     source_name = (
         "defaults-basepack.pack.v4.json"
@@ -464,7 +474,13 @@ def _import_bundled_record(pack_id: str, authority: str) -> dict[str, Any]:
         "kind": "base" if pack_id == "defaults" else pack["kind"],
         "display_name": pack["display_name"],
         "description": "Canonical Defaults v4 composition artifact.",
-        "migrated_from": authority,
+        "authority": "v4-authoritative",
+        "source_provenance": {
+            "owner": pack_id,
+            "mode": "canonical-v4",
+            "source_format": "pack.v4.json",
+            "historical_classification": "modern-only",
+        },
         "dependencies": {},
         "required_contracts": [],
         "capabilities": [],
@@ -522,9 +538,9 @@ def import_legacy(*, check: bool) -> None:
     pack_names = sorted(set(authorities) - EXCLUDED_PACKS)
     records = [
         (
-            _import_bundled_record(name, authorities[name])
+            _import_bundled_record(name)
             if name in {"defaults", "defaultspack"}
-            else _import_record(ECOSYSTEM / name, authorities[name])
+            else _import_record(ECOSYSTEM / name)
         )
         for name in pack_names
     ]
@@ -696,7 +712,7 @@ def _manifest_document(
                 "owner": record["pack_id"],
                 "contract_reference": source["contract_id"],
                 "provider_id": source["provider_id"],
-                "source_kind": "v3_contract",
+                "source_kind": "canonical_v4_contract",
                 "effect_ceiling": effects,
             }
             for operation in operations
@@ -907,12 +923,25 @@ def _validate_catalog_payload(payload: Mapping[str, Any]) -> list[Mapping[str, A
         "legacy_ids",
         "migration",
         "source_evidence",
+        "authority",
+        "source_provenance",
     }
     for record in records:
         missing = required - set(record)
         if missing:
             raise PackV4MigrationError(
                 f"malformed canonical Pack record {record['pack_id']}: {sorted(missing)}"
+            )
+        provenance = record.get("source_provenance")
+        if (
+            record.get("authority") != "v4-authoritative"
+            or not isinstance(provenance, Mapping)
+            or provenance.get("owner") != record["pack_id"]
+            or provenance.get("mode")
+            not in {"offline-one-way-import", "canonical-v4"}
+        ):
+            raise PackV4MigrationError(
+                f"canonical v4 authority provenance is invalid: {record['pack_id']}"
             )
     return records
 
