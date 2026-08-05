@@ -348,14 +348,7 @@
       },
       {
         "evidence": "host_execution",
-        "line": 277,
-        "message": "legacy execution or authority path is present",
-        "path": "tobkiri_runtime/core_runtime/pack_templates.py",
-        "rule_id": "legacy_host_execution"
-      },
-      {
-        "evidence": "host_execution",
-        "line": 529,
+        "line": 510,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/pack_templates.py",
         "rule_id": "legacy_host_execution"
@@ -6452,34 +6445,6 @@
       },
       {
         "evidence": "rumi.pack.v3",
-        "line": 352,
-        "message": "legacy execution or authority path is present",
-        "path": "tobkiri_runtime/core_runtime/pack_sdk.py",
-        "rule_id": "legacy_v3_manifest"
-      },
-      {
-        "evidence": "rumi.pack.v3",
-        "line": 386,
-        "message": "legacy execution or authority path is present",
-        "path": "tobkiri_runtime/core_runtime/pack_sdk.py",
-        "rule_id": "legacy_v3_manifest"
-      },
-      {
-        "evidence": "rumi.pack.v3",
-        "line": 137,
-        "message": "legacy execution or authority path is present",
-        "path": "tobkiri_runtime/core_runtime/pack_templates.py",
-        "rule_id": "legacy_v3_manifest"
-      },
-      {
-        "evidence": "rumi.pack.v3",
-        "line": 141,
-        "message": "legacy execution or authority path is present",
-        "path": "tobkiri_runtime/core_runtime/pack_templates.py",
-        "rule_id": "legacy_v3_manifest"
-      },
-      {
-        "evidence": "rumi.pack.v3",
         "line": 637,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/resolved_profile.py",
@@ -10334,14 +10299,8 @@
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:7354cd323be05a64733d5eff54ce9ebad134111b6d8ac6eeb386dc2db374d17e",
-        "line": 277,
-        "path": "tobkiri_runtime/core_runtime/pack_templates.py",
-        "rule_id": "legacy_host_execution"
-      },
-      {
-        "evidence_digest": "sha256:7354cd323be05a64733d5eff54ce9ebad134111b6d8ac6eeb386dc2db374d17e",
-        "line": 529,
+        "evidence_digest": "sha256:fe17313a78e5f3a7974187063df20719609327f21308512af2c7f28e0c3dc663",
+        "line": 510,
         "path": "tobkiri_runtime/core_runtime/pack_templates.py",
         "rule_id": "legacy_host_execution"
       },
@@ -15566,30 +15525,6 @@
         "rule_id": "legacy_v3_manifest"
       },
       {
-        "evidence_digest": "sha256:f1ffb7fae0474afd911d5545affe17f9d4f3037093d9f955d0a5c59c1de393d7",
-        "line": 352,
-        "path": "tobkiri_runtime/core_runtime/pack_sdk.py",
-        "rule_id": "legacy_v3_manifest"
-      },
-      {
-        "evidence_digest": "sha256:f1ffb7fae0474afd911d5545affe17f9d4f3037093d9f955d0a5c59c1de393d7",
-        "line": 386,
-        "path": "tobkiri_runtime/core_runtime/pack_sdk.py",
-        "rule_id": "legacy_v3_manifest"
-      },
-      {
-        "evidence_digest": "sha256:7354cd323be05a64733d5eff54ce9ebad134111b6d8ac6eeb386dc2db374d17e",
-        "line": 137,
-        "path": "tobkiri_runtime/core_runtime/pack_templates.py",
-        "rule_id": "legacy_v3_manifest"
-      },
-      {
-        "evidence_digest": "sha256:7354cd323be05a64733d5eff54ce9ebad134111b6d8ac6eeb386dc2db374d17e",
-        "line": 141,
-        "path": "tobkiri_runtime/core_runtime/pack_templates.py",
-        "rule_id": "legacy_v3_manifest"
-      },
-      {
         "evidence_digest": "sha256:07a0d46225130e981fe9428c23dbfb57fb49a3ca9a3d51061fa35f7d317042dc",
         "line": 637,
         "path": "tobkiri_runtime/core_runtime/resolved_profile.py",
@@ -18561,7 +18496,7 @@
     ]
   },
   "repository": {
-    "commit": "f5002c252081f2583c06b7094decbc9fa2e17a5e",
+    "commit": "8751f7c76f1fa77010859438c0565bc7d364430e",
     "tree_digest": "200da88015a60a4291fb89366592eb6333399fcf406de86f28a3c7e67de0ca63"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
