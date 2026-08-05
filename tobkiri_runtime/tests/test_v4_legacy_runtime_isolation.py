@@ -20,6 +20,10 @@ from ecosystem.defaultspack.domain.runtime_v4 import (  # noqa: E402
 )
 from core_runtime.api.route_handlers import RouteHandlersMixin  # noqa: E402
 from core_runtime.di_container import DIContainer  # noqa: E402
+from ecosystem.defaultspack.domain.ai_client.client import (  # noqa: E402
+    AIClient,
+    DirectProviderInvocationDenied,
+)
 from ecosystem.defaultspack.domain.ai_client.gateway import LLMGateway  # noqa: E402
 
 
@@ -46,10 +50,7 @@ def test_v4_container_rejects_removed_execution_authorities() -> None:
 def test_v4_profile_rejects_missing_authority_binding() -> None:
     """A v4 profile cannot resolve without its Host-captured authority edge."""
     catalog = BundledCatalog.load(DEFAULTSPACK_ROOT / "v4")
-    approved = {
-        str(manifest["pack"]["artifact_digest"])
-        for manifest in catalog.packs.values()
-    }
+    approved = {str(manifest["pack"]["artifact_digest"]) for manifest in catalog.packs.values()}
     with pytest.raises(ProfileResolutionDenied, match="Authority Kernel reference is missing"):
         resolve_default_profile(
             catalog,
@@ -92,11 +93,20 @@ def test_v4_admission_marker_cannot_be_injected_through_request_params() -> None
     )
     assert "_v4_authority_kernel_admitted" not in injected.params
 
-    admitted = Client()
-    LLMGateway(admitted, v4_authority_admitted=True).complete(
-        {"messages": [{"role": "user", "content": "hello"}]}
-    )
-    assert admitted.params["_v4_authority_kernel_admitted"] is True
+    with pytest.raises(TypeError):
+        LLMGateway(Client(), v4_authority_admitted=True)
+
+
+def test_direct_ai_client_call_rejects_forged_authority_callback() -> None:
+    client = AIClient()
+    client._check_authority_for_model_and_api_key_use = lambda **_kwargs: True
+
+    with pytest.raises(DirectProviderInvocationDenied, match="captured Pack v4"):
+        client.complete(
+            "attacker/model",
+            [{"role": "user", "content": "hello"}],
+            params={"_v4_authority_kernel_admitted": True},
+        )
 
 
 def test_production_roots_do_not_import_removed_runtime_modules() -> None:

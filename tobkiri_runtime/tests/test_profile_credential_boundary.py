@@ -44,12 +44,13 @@ def test_profile_ref_resolves_only_through_bound_host_broker(tmp_path: Path) -> 
     adapter = BrokerServiceAdapter(service)
 
     with bind_profile_credential_broker("profile-a", adapter):
-        assert resolve_profile_credential(
-            reference,
-            provider_id="provider-main",
-            scope="provider.invoke",
-            consumer_pack_id="provider-adapter-pack",
-        ) == {"api_key": "profile-secret"}
+        with pytest.raises(CredentialUnavailable, match="Host transport"):
+            resolve_profile_credential(
+                reference,
+                provider_id="provider-main",
+                scope="provider.invoke",
+                consumer_pack_id="provider-adapter-pack",
+            )
 
 
 def test_missing_or_foreign_profile_fails_closed(tmp_path: Path) -> None:
@@ -80,7 +81,7 @@ def test_explicit_profile_cannot_override_the_bound_profile(tmp_path: Path) -> N
     adapter = BrokerServiceAdapter(service)
 
     with bind_profile_credential_broker("profile-a", adapter):
-        with pytest.raises(CredentialUnavailable, match="profile"):
+        with pytest.raises(CredentialUnavailable, match="Host transport"):
             resolve_profile_credential(
                 reference,
                 provider_id="provider-main",
@@ -97,7 +98,7 @@ def test_tampered_broker_metadata_is_rejected(tmp_path: Path) -> None:
     payload["credentials"][handle]["profile_id"] = "profile-b"
     service.store.path.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(PermissionError, match="integrity"):
+    with pytest.raises(PermissionError, match="Host transport"):
         service.invoke(
             "resolve",
             {
@@ -120,7 +121,9 @@ def test_ambient_environment_cannot_inject_host_or_provider_credential(monkeypat
     )
 
     assert OpenAIProvider()._api_key == ""
-    with bind_host_contract({"profile_id": "profile-a", "values": {"desktop_api_token": "host-token"}}):
+    with bind_host_contract(
+        {"profile_id": "profile-a", "values": {"desktop_api_token": "host-token"}}
+    ):
         assert host_contract_value("desktop_api_token", profile_id="profile-a") == "host-token"
         assert host_contract_value("desktop_api_token", profile_id="profile-b") == ""
 
@@ -153,15 +156,9 @@ def test_host_contract_rejects_ambient_path_symlink_and_unsafe_permissions(
     assert host_contract_value("desktop_api_token", profile_id="profile-a") == ""
     os.chmod(user_data, 0o700)
     os.chmod(expected, 0o600)
+    assert host_contract_value("desktop_api_token", profile_id="profile-a") == "attacker-token"
     assert (
-        host_contract_value("desktop_api_token", profile_id="profile-a")
-        == "attacker-token"
-    )
-    assert (
-        host_contract_value(
-            "desktop_api_token", profile_id="profile-a", provider_id="github"
-        )
-        == ""
+        host_contract_value("desktop_api_token", profile_id="profile-a", provider_id="github") == ""
     )
 
 
@@ -210,7 +207,7 @@ def test_generic_process_channel_never_serializes_resolved_material(
 @pytest.mark.parametrize(
     ("case", "expected_error"),
     (
-        ("valid", False),
+        ("valid", True),
         ("missing_profile", True),
         ("foreign_profile", True),
         ("provider_mismatch", True),

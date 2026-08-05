@@ -34,10 +34,26 @@ class V4ContractDispatch(Protocol):
     ) -> Mapping[str, Any]:
         """Invoke one exact ResolvedPlan route."""
 
-    def provider_metadata(
-        self, contract_id: str
-    ) -> tuple[Mapping[str, Any], ...]:
+    def provider_metadata(self, contract_id: str) -> tuple[Mapping[str, Any], ...]:
         """Return non-executable metadata captured with the same activation."""
+
+
+class HostCredentialTransport(Protocol):
+    """Request-scoped Host capability that applies a credential at transport."""
+
+    def post_json(
+        self,
+        *,
+        endpoint: str,
+        headers: Mapping[str, str],
+        body: Mapping[str, Any],
+        credential_handle: str,
+        provider_instance_id: str,
+        credential_scope: str,
+        credential_scheme: str,
+        deadline: float,
+    ) -> Mapping[str, Any]:
+        """Perform exactly one Host-bound credentialed JSON request."""
 
 
 def _require_v4_session(value: object) -> V4ContractDispatch:
@@ -65,19 +81,14 @@ def selected_global_providers(
     contract_id: str,
 ) -> tuple[dict[str, Any], ...]:
     """Return immutable provider metadata from the captured activation."""
-    return tuple(
-        dict(item)
-        for item in _require_v4_session(session).provider_metadata(contract_id)
-    )
+    return tuple(dict(item) for item in _require_v4_session(session).provider_metadata(contract_id))
 
 
 def captured_profile_id(session: V4ContractDispatch) -> str:
     """Return the profile identity pinned to this exact activation snapshot."""
     value = str(getattr(_require_v4_session(session), "profile_id", "")).strip()
     if not value:
-        raise GlobalContractUnavailable(
-            "Pack v4 dispatch session has no captured profile identity"
-        )
+        raise GlobalContractUnavailable("Pack v4 dispatch session has no captured profile identity")
     return value
 
 
@@ -91,9 +102,7 @@ def invoke_selected_global_provider(
     """Invoke after exact provider identity confirmation from snapshot metadata."""
     providers = selected_global_providers(session, contract_id)
     matches = [
-        item
-        for item in providers
-        if item.get("provider_instance_id") == provider_instance_id
+        item for item in providers if item.get("provider_instance_id") == provider_instance_id
     ]
     if len(matches) != 1:
         raise GlobalContractUnavailable(
@@ -109,6 +118,7 @@ class GlobalContractClient:
     session: V4ContractDispatch
     allowed_contract_ids: frozenset[str]
     consumer_pack_id: str
+    host_credential_transport: HostCredentialTransport | None = None
 
     def providers(self, contract_id: str) -> tuple[dict[str, Any], ...]:
         """List selected metadata only for a manifest-declared requirement."""
@@ -126,9 +136,7 @@ class GlobalContractClient:
         """Invoke one declared requirement without registry or profile fallback."""
         self._require_declared(contract_id)
         if provider_instance_id is None:
-            return invoke_global_contract(
-                self.session, contract_id, operation, payload
-            )
+            return invoke_global_contract(self.session, contract_id, operation, payload)
         return invoke_selected_global_provider(
             self.session,
             contract_id,
@@ -137,11 +145,41 @@ class GlobalContractClient:
             payload,
         )
 
+    def post_json_with_credential(
+        self,
+        *,
+        endpoint: str,
+        headers: Mapping[str, str],
+        body: Mapping[str, Any],
+        credential_handle: str,
+        provider_instance_id: str,
+        credential_scope: str,
+        credential_scheme: str,
+        deadline: float,
+    ) -> dict[str, Any]:
+        """Use the finite Host transport capability; never resolve material."""
+        if (
+            self.consumer_pack_id != "rumi_provider_adapters_pack"
+            or self.host_credential_transport is None
+        ):
+            raise PermissionError("Host credential transport is unavailable")
+        value = self.host_credential_transport.post_json(
+            endpoint=endpoint,
+            headers=headers,
+            body=body,
+            credential_handle=credential_handle,
+            provider_instance_id=provider_instance_id,
+            credential_scope=credential_scope,
+            credential_scheme=credential_scheme,
+            deadline=deadline,
+        )
+        if not isinstance(value, Mapping):
+            raise RuntimeError("Host credential transport returned invalid data")
+        return dict(value)
+
     def _require_declared(self, contract_id: str) -> None:
         if contract_id not in self.allowed_contract_ids:
-            raise PermissionError(
-                f"contract was not declared by consumer: {contract_id}"
-            )
+            raise PermissionError(f"contract was not declared by consumer: {contract_id}")
 
 
 __all__ = [

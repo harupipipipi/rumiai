@@ -223,7 +223,7 @@
             {
               "entrypoint_id": "complete",
               "id": "complete",
-              "implementation_digest": "sha256:9b4e36e8b39ce680ada7d93071651058c3f920c98560ebd48ecfd4434c5e602d"
+              "implementation_digest": "sha256:aa1ab66d9f6c69307368d865d36ca1a6188a4e07480866e28dac6ee2cdfc1656"
             }
           ],
           "owner": "defaultspack",
@@ -294,7 +294,7 @@
       "required_contracts": [],
       "runtime_artifacts": [
         {
-          "digest": "sha256:9b4e36e8b39ce680ada7d93071651058c3f920c98560ebd48ecfd4434c5e602d",
+          "digest": "sha256:aa1ab66d9f6c69307368d865d36ca1a6188a4e07480866e28dac6ee2cdfc1656",
           "kind": "executable",
           "path": "runtime/conversation.py"
         }
@@ -5125,12 +5125,12 @@
           "path": "runtime/process.py"
         },
         {
-          "digest": "sha256:fb56e8e84effc371d415a76a1e2ac81a1dd96192cb748085f983970bf1cd0d9b",
+          "digest": "sha256:f824221576a951bf3003b387f47b6e225d62311ac6a15011bf9ded0c369b03a9",
           "kind": "executable",
           "path": "runtime/service.py"
         },
         {
-          "digest": "sha256:e28498f318693841051a56ed9c51a34c852b03ddd3dcc32ac3dd08b2ea1f8f64",
+          "digest": "sha256:cc0f64968efa5170dc4ba1e55b15aa5351aaf896374f81e28c617737a192aa20",
           "kind": "executable",
           "path": "runtime/store.py"
         }
@@ -10469,7 +10469,7 @@
             {
               "entrypoint_id": "provider-embedding",
               "id": "rumi_provider_adapters_pack.provider-embedding",
-              "implementation_digest": "sha256:ca4c116a1726974776b0cbd661c8a67fa87aa24cd6f68ecba29bac6aeb087471"
+              "implementation_digest": "sha256:310ba97abc2c5f4e16f9f84dbbfda45787b2df5cf7353e715df514c93fc072d6"
             }
           ],
           "owner": "rumi_provider_adapters_pack",
@@ -10505,7 +10505,7 @@
             {
               "entrypoint_id": "provider-generate",
               "id": "rumi_provider_adapters_pack.provider-generate",
-              "implementation_digest": "sha256:ca4c116a1726974776b0cbd661c8a67fa87aa24cd6f68ecba29bac6aeb087471"
+              "implementation_digest": "sha256:310ba97abc2c5f4e16f9f84dbbfda45787b2df5cf7353e715df514c93fc072d6"
             }
           ],
           "owner": "rumi_human_operator_provider_pack",
@@ -10541,7 +10541,7 @@
             {
               "entrypoint_id": "provider-image",
               "id": "rumi_provider_adapters_pack.provider-image",
-              "implementation_digest": "sha256:ca4c116a1726974776b0cbd661c8a67fa87aa24cd6f68ecba29bac6aeb087471"
+              "implementation_digest": "sha256:310ba97abc2c5f4e16f9f84dbbfda45787b2df5cf7353e715df514c93fc072d6"
             }
           ],
           "owner": "rumi_provider_adapters_pack",
@@ -10577,7 +10577,7 @@
             {
               "entrypoint_id": "provider-stream",
               "id": "rumi_provider_adapters_pack.provider-stream",
-              "implementation_digest": "sha256:ca4c116a1726974776b0cbd661c8a67fa87aa24cd6f68ecba29bac6aeb087471"
+              "implementation_digest": "sha256:310ba97abc2c5f4e16f9f84dbbfda45787b2df5cf7353e715df514c93fc072d6"
             }
           ],
           "owner": "rumi_human_operator_provider_pack",
@@ -10606,12 +10606,6 @@
           "contract_id": "tobkiri.resource.ai.provider.registry.v1",
           "optional": false,
           "version_range": ">=1.0.0 <2.0.0"
-        },
-        {
-          "cardinality": "one",
-          "contract_id": "tobkiri.service.credential.resolve.v1",
-          "optional": true,
-          "version_range": ">=1.0.0 <2.0.0"
         }
       ],
       "runtime_artifacts": [
@@ -10621,7 +10615,7 @@
           "path": "runtime/__init__.py"
         },
         {
-          "digest": "sha256:ca4c116a1726974776b0cbd661c8a67fa87aa24cd6f68ecba29bac6aeb087471",
+          "digest": "sha256:310ba97abc2c5f4e16f9f84dbbfda45787b2df5cf7353e715df514c93fc072d6",
           "kind": "executable",
           "path": "runtime/adapter.py"
         }
@@ -10629,12 +10623,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:9fa187e5ad91aa25309b83051f1c964c94fad9078fe2bf0bd28669a189864d3b",
+          "digest": "sha256:a658c77ac70a022dce9e6c48567656ee53cdcc2ce00d6b7e6c107c4ae55324c1",
           "path": "ecosystem/rumi_provider_adapters_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:b7b2dd9c1e9cdd4d7cf5c281e42cf4b8c736ec650a2d32e5d207aa9972815a27",
+          "digest": "sha256:351a1540c0353012b005958d0a5997387189045d2b932cc73ee10fbbcf24457f",
           "path": "ecosystem/rumi_provider_adapters_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }

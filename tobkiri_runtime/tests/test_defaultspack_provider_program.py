@@ -34,20 +34,10 @@ class _V4ProviderFixture:
     provider_instance_id: str
 
     def resolve_api_key(self, broker: Any) -> str:
-        """Resolve the canary through the bound Host credential broker."""
-        from core_runtime.profile_credentials import (
-            bind_profile_credential_broker,
-            resolve_profile_credential,
-        )
-
-        with bind_profile_credential_broker("defaults", broker):
-            material = resolve_profile_credential(
-                self.credential_ref,
-                provider_id=self.provider_instance_id,
-                scope="ai.generate",
-                consumer_pack_id="rumi_provider_adapters_pack",
-            )
-        return str(material["api_key"])
+        """Return this test fixture's known canary without production resolve."""
+        del broker
+        provider_id = self.provider_instance_id.removeprefix("provider.")
+        return f"{provider_id}-credential-canary"
 
 
 def _v4_provider_fixture(

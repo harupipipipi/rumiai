@@ -15,10 +15,8 @@ def exercise_captured_provider_send(
     model_id: str = "account-visible-model",
 ) -> dict[str, Any]:
     """Send through the public v4 adapter with exact registry and credential calls."""
-    from ecosystem.rumi_provider_adapters_pack.runtime import adapter as adapter_module
+    del monkeypatch
     from ecosystem.rumi_provider_adapters_pack.runtime.adapter import (
-        CREDENTIAL_CONTRACT,
-        CREDENTIAL_OPERATION,
         REGISTRY_CONTRACT,
         REGISTRY_OPERATION,
         create_generate_operation,
@@ -30,9 +28,7 @@ def exercise_captured_provider_send(
         provider_id,
         endpoint=endpoint,
     )
-    metadata = fixture.dispatch.provider_metadata(
-        "tobkiri.resource.ai.provider.registry.v1"
-    )
+    metadata = fixture.dispatch.provider_metadata("tobkiri.resource.ai.provider.registry.v1")
     assert len(metadata) == 1
     assert metadata[0]["provider_instance_id"] == f"provider.{provider_id}"
     canary = f"{provider_id}-credential-canary"
@@ -48,37 +44,30 @@ def exercise_captured_provider_send(
             calls.append((contract_id, operation, dict(payload)))
             if contract_id == REGISTRY_CONTRACT and operation == REGISTRY_OPERATION:
                 return {"providers": list(metadata)}
-            if (
-                contract_id == CREDENTIAL_CONTRACT
-                and operation == CREDENTIAL_OPERATION
-            ):
-                assert payload == {
-                    "handle": metadata[0]["credential_handle"],
-                    "provider_instance_id": f"provider.{provider_id}",
-                    "scope": "ai.generate",
-                }
-                resolved = fixture.resolve_api_key(broker)
-                assert resolved == canary
-                return {"secret_material": {"api_key": resolved}}
             raise AssertionError("unexpected captured Host operation")
 
+        def post_json_with_credential(self, **payload: Any) -> dict[str, Any]:
+            assert payload["credential_handle"] == metadata[0]["credential_handle"]
+            assert payload["provider_instance_id"] == f"provider.{provider_id}"
+            assert payload["credential_scope"] == "ai.generate"
+            captured.update(
+                url=payload["endpoint"],
+                headers={"Authorization": "<Host-bound>"},
+                body=dict(payload["body"]),
+                request={"credential_handle": payload["credential_handle"]},
+            )
+            assert fixture.resolve_api_key(broker) == canary
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {},
+            }
+
     captured: dict[str, Any] = {}
-
-    def fake_post(url, headers, body, request):
-        captured.update(
-            url=url,
-            headers=dict(headers),
-            body=dict(body),
-            request=dict(request),
-        )
-        return {
-            "choices": [
-                {"message": {"content": "ok"}, "finish_reason": "stop"}
-            ],
-            "usage": {},
-        }
-
-    monkeypatch.setattr(adapter_module, "_post", fake_post)
     result = create_generate_operation(CapturedHostClient())(
         "generate",
         {
@@ -92,13 +81,13 @@ def exercise_captured_provider_send(
     assert result["output"] == "ok"
     assert captured["url"] == f"{endpoint.rstrip('/')}/chat/completions"
     assert captured["body"]["model"] == model_id
-    assert captured["headers"]["Authorization"] == f"Bearer {canary}"
+    assert captured["headers"]["Authorization"] == "<Host-bound>"
     assert calls[0] == (
         REGISTRY_CONTRACT,
         REGISTRY_OPERATION,
         {"profile_id": "defaults"},
     )
-    assert calls[1][0:2] == (CREDENTIAL_CONTRACT, CREDENTIAL_OPERATION)
+    assert len(calls) == 1
     assert canary not in json.dumps(result, sort_keys=True)
     assert canary not in json.dumps(metadata, sort_keys=True)
     captured["headers"]["Authorization"] = "<redacted>"

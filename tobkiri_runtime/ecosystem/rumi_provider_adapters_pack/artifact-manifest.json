@@ -6,7 +6,7 @@
     },
     {
       "path": "runtime/adapter.py",
-      "sha256": "sha256:ca4c116a1726974776b0cbd661c8a67fa87aa24cd6f68ecba29bac6aeb087471"
+      "sha256": "sha256:310ba97abc2c5f4e16f9f84dbbfda45787b2df5cf7353e715df514c93fc072d6"
     }
   ],
   "version": "rumi.pack-artifacts.v1"

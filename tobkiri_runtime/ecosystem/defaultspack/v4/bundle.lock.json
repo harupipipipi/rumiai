@@ -9,7 +9,7 @@
     {
       "path": "packs/defaultspack.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:2bb6c5d31b9f255fd3845c5affbd6cb9df169743fa2cded9b9459660b26b7ddb"
+      "digest": "sha256:7464ee5bfa6cc68e6b9bfa40d98acfba284976980b2e073f9cd12e3c7aefd5f6"
     },
     {
       "path": "packs/dev.tauri.toolchain.default.pack.v4.json",

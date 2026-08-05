@@ -20,16 +20,14 @@ class CredentialBrokerService:
         consumer = str(data.pop("_contract_consumer_pack_id", "")).strip()
         if operation == "create":
             profile_id = _required_profile_id(data)
+            supplied_material = data.get("secret_material")
+            secret_material: Mapping[str, Any] = (
+                supplied_material if isinstance(supplied_material, Mapping) else {}
+            )
             result = self.store.create(
-                secret_material=(
-                    data.get("secret_material")
-                    if isinstance(data.get("secret_material"), Mapping)
-                    else {}
-                ),
+                secret_material=secret_material,
                 consumer_pack_id=str(data.get("consumer_pack_id") or ""),
-                provider_instance_id=str(
-                    data.get("provider_instance_id") or ""
-                ),
+                provider_instance_id=str(data.get("provider_instance_id") or ""),
                 profile_id=profile_id,
                 scopes=[str(item) for item in data.get("scopes", [])],
                 purpose=str(data.get("purpose") or "provider.invoke"),
@@ -62,26 +60,10 @@ class CredentialBrokerService:
                 expected_source_hash=str(data.get("expected_source_hash") or ""),
             )
         if operation == "migration.rollback":
-            return self.store.rollback_migration(
-                str(data.get("migration_id") or "")
-            )
+            return self.store.rollback_migration(str(data.get("migration_id") or ""))
         if operation == "resolve":
-            if not consumer:
-                raise PermissionError("credential consumer identity is missing")
-            profile_id = _required_profile_id(data)
-            return {
-                "secret_material": self.store.resolve(
-                    str(data.get("handle") or ""),
-                    consumer_pack_id=consumer,
-                    provider_instance_id=str(
-                        data.get("provider_instance_id") or ""
-                    ),
-                    profile_id=profile_id,
-                    scope=str(data.get("scope") or ""),
-                    key_version=str(data.get("key_version") or ""),
-                    purpose=str(data.get("purpose") or "provider.invoke"),
-                )
-            }
+            del consumer
+            raise PermissionError("credential resolution requires the bound Host transport")
         raise ValueError(f"unknown credential operation: {operation}")
 
 

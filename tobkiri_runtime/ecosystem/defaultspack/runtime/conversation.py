@@ -16,9 +16,11 @@ def invoke(payload: Mapping[str, Any]) -> dict[str, Any]:
     if any(not isinstance(item, Mapping) for item in messages):
         raise ValueError("every message must be an object")
 
-    from ecosystem.defaultspack.domain.ai_client.gateway import LLMGateway
+    from ecosystem.defaultspack.domain.ai_client.gateway_contract_client import (
+        ContractLLMGateway,
+    )
 
-    result = LLMGateway(v4_authority_admitted=True).complete(dict(payload))
+    result = ContractLLMGateway().complete(dict(payload))
     if not isinstance(result, Mapping):
         raise RuntimeError("conversation Provider returned a non-object result")
     return dict(result)

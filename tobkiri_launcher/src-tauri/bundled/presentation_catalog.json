@@ -218,7 +218,7 @@
   ],
   "source_manifest_digests": {
     "defaults-basepack": "sha256:eeb549d2a384b85ad805148da20ee1e37480b80751670ea9050202cd219b21a0",
-    "defaultspack": "sha256:2bb6c5d31b9f255fd3845c5affbd6cb9df169743fa2cded9b9459660b26b7ddb",
+    "defaultspack": "sha256:7464ee5bfa6cc68e6b9bfa40d98acfba284976980b2e073f9cd12e3c7aefd5f6",
     "rumi_file_inspect_pack": "sha256:62a93f58d7f051fddaffa048a3c7fd95bf7f8945f89e2be42b873c273de93f47",
     "rumi_host_authority_bridge_pack": "sha256:148a26429d5125a9757677f8ff618394377b48cbcd15a8d8cefc37f6bce79529",
     "rumi_workspace_mount_pack": "sha256:82d4a833716dd809894612b0172d4aa73cc25f0bb4e690aa0813de87189caf51",

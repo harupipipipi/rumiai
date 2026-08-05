@@ -3,10 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
-import time
-import urllib.error
-import urllib.request
 from typing import Any, Callable, Mapping
 
 from core_runtime.global_contract_dispatch import (
@@ -16,8 +12,6 @@ from core_runtime.global_contract_dispatch import (
 
 REGISTRY_CONTRACT = "rumi.resource.ai.provider.registry.v1"
 REGISTRY_OPERATION = "rumi_provider_registry_pack.provider-registry-resource"
-CREDENTIAL_CONTRACT = "rumi.service.credential.resolve.v1"
-CREDENTIAL_OPERATION = "rumi_credential_broker_pack.credential-resolve"
 DEFAULT_JSON_HEADERS = {
     "Content-Type": "application/json",
     "Accept": "application/json",
@@ -52,8 +46,7 @@ def _operation(client: GlobalContractClient, *, streaming: bool):
             raise ValueError(f"unknown provider adapter operation: {name}")
         request = dict(payload)
         connection = _connection(client, request)
-        credential = _credential(
-            client,
+        credential_handle = _credential_handle(
             request,
             connection,
             scope="ai.stream" if streaming else "ai.generate",
@@ -62,7 +55,14 @@ def _operation(client: GlobalContractClient, *, streaming: bool):
             str(connection.get("adapter_id") or ""),
             provider_id=str(request.get("provider_id") or ""),
         )
-        return adapter(request, connection, credential, streaming)
+        return adapter(
+            client,
+            request,
+            connection,
+            credential_handle,
+            "ai.stream" if streaming else "ai.generate",
+            streaming,
+        )
 
     return operation
 
@@ -74,8 +74,7 @@ def _modality_operation(client: GlobalContractClient, *, kind: str):
             raise ValueError(f"unknown provider modality operation: {name}")
         request = dict(payload)
         connection = _connection(client, request)
-        credential = _credential(
-            client,
+        credential_handle = _credential_handle(
             request,
             connection,
             scope=f"ai.{kind}",
@@ -86,8 +85,8 @@ def _modality_operation(client: GlobalContractClient, *, kind: str):
                 "incompatible", "provider modality protocol is unavailable"
             )
         if kind == "embedding":
-            return _openai_embedding(request, connection, credential)
-        return _openai_image(request, connection, credential)
+            return _openai_embedding(client, request, connection, credential_handle, "ai.embedding")
+        return _openai_image(client, request, connection, credential_handle, "ai.image")
 
     return operation
 
@@ -98,9 +97,7 @@ def _connection(
 ) -> dict[str, Any]:
     provider_id = str(request.get("provider_id") or "").strip()
     if not provider_id:
-        raise GlobalContractInvocationError(
-            "invalid_request", "provider_id is required"
-        )
+        raise GlobalContractInvocationError("invalid_request", "provider_id is required")
     registry_payload = {}
     profile_id = str(request.get("profile_id") or "").strip()
     if profile_id:
@@ -123,13 +120,13 @@ def _connection(
     return matches[0]
 
 
-def _credential(
-    client: GlobalContractClient,
+def _credential_handle(
     request: Mapping[str, Any],
     connection: Mapping[str, Any],
     *,
     scope: str,
-) -> dict[str, Any]:
+) -> str:
+    del scope
     supplied_handle = request.get("credential_handle")
     handle = connection.get("credential_handle")
     if supplied_handle is not None:
@@ -137,26 +134,14 @@ def _credential(
             "denied", "credential handle is bound by the Host provider registry"
         )
     if handle is None:
-        return {}
+        raise GlobalContractInvocationError(
+            "not_configured", "provider credential is not configured"
+        )
     if not str(handle).startswith(("credential:", "opaque:")):
         raise GlobalContractInvocationError(
             "denied", "provider adapter accepts only opaque credentials"
         )
-    result = client.invoke(
-        CREDENTIAL_CONTRACT,
-        CREDENTIAL_OPERATION,
-        {
-            "handle": handle,
-            "provider_instance_id": connection["provider_instance_id"],
-            "scope": scope,
-        },
-    )
-    material = result.get("secret_material") if isinstance(result, Mapping) else None
-    if not isinstance(material, Mapping):
-        raise GlobalContractInvocationError(
-            "denied", "credential resolution returned no material"
-        )
-    return dict(material)
+    return str(handle)
 
 
 def _adapter(
@@ -181,9 +166,11 @@ def _adapter(
 
 
 def _openai_compatible(
+    client: GlobalContractClient,
     request: Mapping[str, Any],
     connection: Mapping[str, Any],
-    credential: Mapping[str, Any],
+    credential_handle: str,
+    credential_scope: str,
     streaming: bool,
 ) -> dict[str, Any]:
     endpoint = _endpoint(connection, "/chat/completions")
@@ -197,33 +184,38 @@ def _openai_compatible(
     if isinstance(tools, list) and tools:
         body["tools"] = tools
     headers = dict(DEFAULT_JSON_HEADERS)
-    token = credential.get("api_key") or credential.get("token")
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    value = _post(endpoint, headers, body, request)
+    value = _post(
+        client,
+        endpoint,
+        headers,
+        body,
+        request,
+        connection=connection,
+        credential_handle=credential_handle,
+        credential_scope=credential_scope,
+        credential_scheme="bearer",
+    )
     choices = value.get("choices") if isinstance(value, Mapping) else None
     first = choices[0] if isinstance(choices, list) and choices else {}
     message = first.get("message") if isinstance(first, Mapping) else {}
     content = message.get("content") if isinstance(message, Mapping) else ""
-    result = {
+    result: dict[str, Any] = {
         "output": content if content is not None else "",
         "tool_intents": (
-            list(message.get("tool_calls") or [])
-            if isinstance(message, Mapping)
-            else []
+            list(message.get("tool_calls") or []) if isinstance(message, Mapping) else []
         ),
         "usage": dict(value.get("usage") or {}),
-        "finish_reason": (
-            first.get("finish_reason") if isinstance(first, Mapping) else None
-        ),
+        "finish_reason": (first.get("finish_reason") if isinstance(first, Mapping) else None),
     }
     return _stream_result(result) if streaming else result
 
 
 def _anthropic(
+    client: GlobalContractClient,
     request: Mapping[str, Any],
     connection: Mapping[str, Any],
-    credential: Mapping[str, Any],
+    credential_handle: str,
+    credential_scope: str,
     streaming: bool,
 ) -> dict[str, Any]:
     endpoint = _endpoint(connection, "/messages")
@@ -238,10 +230,17 @@ def _anthropic(
         **DEFAULT_JSON_HEADERS,
         "anthropic-version": "2023-06-01",
     }
-    token = credential.get("api_key") or credential.get("token")
-    if token:
-        headers["x-api-key"] = str(token)
-    value = _post(endpoint, headers, body, request)
+    value = _post(
+        client,
+        endpoint,
+        headers,
+        body,
+        request,
+        connection=connection,
+        credential_handle=credential_handle,
+        credential_scope=credential_scope,
+        credential_scheme="anthropic",
+    )
     blocks = value.get("content") if isinstance(value, Mapping) else None
     blocks = blocks if isinstance(blocks, list) else []
     text = "".join(
@@ -249,7 +248,7 @@ def _anthropic(
         for item in blocks
         if isinstance(item, Mapping) and item.get("type") == "text"
     )
-    result = {
+    result: dict[str, Any] = {
         "output": text,
         "tool_intents": [],
         "usage": dict(value.get("usage") or {}),
@@ -259,30 +258,35 @@ def _anthropic(
 
 
 def _openai_embedding(
+    client: GlobalContractClient,
     request: Mapping[str, Any],
     connection: Mapping[str, Any],
-    credential: Mapping[str, Any],
+    credential_handle: str,
+    credential_scope: str,
 ) -> dict[str, Any]:
     value = _post(
+        client,
         _endpoint(connection, "/embeddings"),
-        _bearer_headers(credential),
+        dict(DEFAULT_JSON_HEADERS),
         {"model": _provider_model_id(request), "input": request.get("input")},
         request,
+        connection=connection,
+        credential_handle=credential_handle,
+        credential_scope=credential_scope,
+        credential_scheme="bearer",
     )
     data = value.get("data")
     data = data if isinstance(data, list) else []
-    vectors = [
-        list(item.get("embedding") or [])
-        for item in data
-        if isinstance(item, Mapping)
-    ]
+    vectors = [list(item.get("embedding") or []) for item in data if isinstance(item, Mapping)]
     return {"vectors": vectors, "usage": dict(value.get("usage") or {})}
 
 
 def _openai_image(
+    client: GlobalContractClient,
     request: Mapping[str, Any],
     connection: Mapping[str, Any],
-    credential: Mapping[str, Any],
+    credential_handle: str,
+    credential_scope: str,
 ) -> dict[str, Any]:
     body = {
         "model": _provider_model_id(request),
@@ -290,10 +294,15 @@ def _openai_image(
         **dict(request.get("parameters") or {}),
     }
     value = _post(
+        client,
         _endpoint(connection, "/images/generations"),
-        _bearer_headers(credential),
+        dict(DEFAULT_JSON_HEADERS),
         body,
         request,
+        connection=connection,
+        credential_handle=credential_handle,
+        credential_scope=credential_scope,
+        credential_scheme="bearer",
     )
     data = value.get("data")
     artifacts = []
@@ -305,8 +314,7 @@ def _openai_image(
             continue
         artifacts.append(
             {
-                "artifact_id": "sha256:"
-                + hashlib.sha256(material.encode("utf-8")).hexdigest(),
+                "artifact_id": "sha256:" + hashlib.sha256(material.encode("utf-8")).hexdigest(),
                 "uri": item.get("url"),
                 "base64": item.get("b64_json"),
                 "revised_prompt": item.get("revised_prompt"),
@@ -315,20 +323,12 @@ def _openai_image(
     return {"artifacts": artifacts}
 
 
-def _bearer_headers(credential: Mapping[str, Any]) -> dict[str, str]:
-    headers = dict(DEFAULT_JSON_HEADERS)
-    token = credential.get("api_key") or credential.get("token")
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    return headers
-
-
 def _provider_model_id(request: Mapping[str, Any]) -> str:
     model_id = str(request.get("model_id") or "")
     provider_id = str(request.get("provider_id") or "")
     prefix = f"{provider_id}/"
     if provider_id and model_id.startswith(prefix):
-        return model_id[len(prefix):]
+        return model_id[len(prefix) :]
     return model_id
 
 
@@ -357,36 +357,36 @@ def _stream_result(result: Mapping[str, Any]) -> dict[str, Any]:
 def _endpoint(connection: Mapping[str, Any], suffix: str) -> str:
     endpoint = str(connection.get("endpoint") or "").rstrip("/")
     if not endpoint.startswith(("http://", "https://")):
-        raise GlobalContractInvocationError(
-            "not_configured", "provider endpoint is not configured"
-        )
+        raise GlobalContractInvocationError("not_configured", "provider endpoint is not configured")
     return endpoint + suffix
 
 
 def _post(
+    client: GlobalContractClient,
     endpoint: str,
     headers: Mapping[str, str],
     body: Mapping[str, Any],
     request: Mapping[str, Any],
+    *,
+    connection: Mapping[str, Any],
+    credential_handle: str,
+    credential_scope: str,
+    credential_scheme: str,
 ) -> dict[str, Any]:
     deadline = float(request.get("deadline") or 0)
-    timeout = min(60.0, max(0.1, deadline - time.time()))
-    http_request = urllib.request.Request(
-        endpoint,
-        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-        headers=dict(headers),
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(http_request, timeout=timeout) as response:
-            value = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        code = "quota" if exc.code == 429 else "provider_unavailable"
-        raise GlobalContractInvocationError(code, f"provider HTTP {exc.code}") from None
-    except (OSError, ValueError) as exc:
-        raise GlobalContractInvocationError(
-            "provider_unavailable", type(exc).__name__
-        ) from None
+        value = client.post_json_with_credential(
+            endpoint=endpoint,
+            headers=headers,
+            body=body,
+            credential_handle=credential_handle,
+            provider_instance_id=str(connection["provider_instance_id"]),
+            credential_scope=credential_scope,
+            credential_scheme=credential_scheme,
+            deadline=deadline,
+        )
+    except (OSError, PermissionError, RuntimeError, ValueError) as exc:
+        raise GlobalContractInvocationError("provider_unavailable", type(exc).__name__) from None
     if not isinstance(value, dict):
         raise GlobalContractInvocationError(
             "invalid_response", "provider returned a non-object response"

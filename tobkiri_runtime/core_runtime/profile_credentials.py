@@ -78,16 +78,12 @@ class CredentialBroker(Protocol):
         """Resolve one reference or raise :class:`CredentialUnavailable`."""
 
 
-_BROKER: ContextVar[CredentialBroker | None] = ContextVar(
-    "tobkiri_credential_broker", default=None
-)
+_BROKER: ContextVar[CredentialBroker | None] = ContextVar("tobkiri_credential_broker", default=None)
 _PROFILE_ID: ContextVar[str | None] = ContextVar("tobkiri_profile_id", default=None)
 
 
 @contextmanager
-def bind_profile_credential_broker(
-    profile_id: str, broker: CredentialBroker
-) -> Iterator[None]:
+def bind_profile_credential_broker(profile_id: str, broker: CredentialBroker) -> Iterator[None]:
     """Bind a broker to one request context and restore the prior binding."""
 
     normalized = str(profile_id or "").strip()
@@ -116,49 +112,13 @@ def resolve_profile_credential(
     consumer_pack_id: str,
     profile_id: str | None = None,
 ) -> Mapping[str, Any]:
-    """Resolve a typed reference through the bound host broker.
-
-    The profile and provider checks happen before the broker is called.  This
-    makes foreign-profile references and tampered metadata fail closed even if
-    an untrusted caller supplies a forged mapping or ambient environment data.
-    """
-
-    ref = (
-        reference
-        if isinstance(reference, ProfileCredentialRef)
-        else ProfileCredentialRef.from_mapping(reference)
-    )
-    bound_profile = str(active_profile_id() or "").strip()
-    requested_profile = str(profile_id or "").strip()
-    if requested_profile and requested_profile != bound_profile:
-        raise CredentialUnavailable("credential profile is not bound")
-    selected_profile = bound_profile
-    if not selected_profile or ref.profile_id != selected_profile:
-        raise CredentialUnavailable("credential profile is not bound")
-    if ref.provider_id != str(provider_id or "").strip():
-        raise CredentialUnavailable("credential provider is not bound")
-    normalized_scope = str(scope or "").strip()
-    if not normalized_scope:
-        raise CredentialUnavailable("credential scope is missing")
-    normalized_consumer = str(consumer_pack_id or "").strip()
-    if not normalized_consumer:
-        raise CredentialUnavailable("credential consumer is missing")
-    broker = _BROKER.get()
-    if broker is None:
-        raise CredentialUnavailable("credential broker is unavailable")
-    material = broker.resolve(
-        ref,
-        profile_id=selected_profile,
-        consumer_pack_id=normalized_consumer,
-        scope=normalized_scope,
-    )
-    if not isinstance(material, Mapping) or not material:
-        raise CredentialUnavailable("credential material is unavailable")
-    return dict(material)
+    """Reject generic material resolution outside the Host transport adapter."""
+    del reference, provider_id, scope, consumer_pack_id, profile_id
+    raise CredentialUnavailable("credential material is available only to the bound Host transport")
 
 
 class BrokerServiceAdapter:
-    """Adapter for the dedicated credential broker pack service."""
+    """Compatibility shell that cannot expose credential material."""
 
     def __init__(self, service: Any) -> None:
         self._service = service
@@ -171,24 +131,7 @@ class BrokerServiceAdapter:
         consumer_pack_id: str,
         scope: str,
     ) -> Mapping[str, Any]:
-        if reference.profile_id != profile_id:
-            raise CredentialUnavailable("credential profile is not bound")
-        try:
-            result = self._service.invoke(
-                "resolve",
-                {
-                    "_contract_consumer_pack_id": consumer_pack_id,
-                    "handle": reference.credential_id,
-                    "provider_instance_id": reference.provider_id,
-                    "profile_id": profile_id,
-                    "scope": scope,
-                    "key_version": reference.key_version,
-                    "purpose": reference.purpose,
-                },
-            )
-        except (KeyError, PermissionError, ValueError) as exc:
-            raise CredentialUnavailable("credential broker denied the request") from exc
-        material = result.get("secret_material") if isinstance(result, Mapping) else None
-        if not isinstance(material, Mapping) or not material:
-            raise CredentialUnavailable("credential broker returned no material")
-        return dict(material)
+        del reference, profile_id, consumer_pack_id, scope
+        raise CredentialUnavailable(
+            "credential material is available only to the bound Host transport"
+        )

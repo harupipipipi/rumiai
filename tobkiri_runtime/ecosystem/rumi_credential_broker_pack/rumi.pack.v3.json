@@ -167,9 +167,9 @@
           "authoritative_owner": true,
           "canonical_v4": {
             "artifact": "pack.v4.json",
-            "artifact_digest": "sha256:97182b6d69cff2e58ba9ce49bace79d7c81b43c28884fc16c939c9a53d12bd4f",
+            "artifact_digest": "sha256:563dc5e4d0c1a4dfc8ca1ed42f7b83515cea59d385855eb6ad0138e26b9b2de7",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:81fbee63dfbd994faedb0c70f128014e7a6bede9188030278f597ecc9d3afab9"
+            "source_identity": "sha256:112d83586603e703c42de4a597c113289a4f75a99f4931a76844a5dcd92ea581"
           },
           "executable_code": true,
           "integrity": {
@@ -197,7 +197,7 @@
         "pack_identity": "rumi:ecosystem/rumi_credential_broker_pack",
         "provenance": {
           "build_identity": "rumi_credential_broker_pack:1.0.0",
-          "content_hash": "sha256:e316ad664bdb06f7e7b02d1d50a0c218a74357aaf6da4a69112ec2d6b4798fe7",
+          "content_hash": "sha256:ee587f7c264f42cc25ef9fc57752884d8a634da2dd83a7ca72a76c7baf536ea4",
           "signature": null,
           "trust_class": "local"
         },
@@ -227,7 +227,7 @@
       "owner": "rumi_credential_broker_pack",
       "runtime_executable": false,
       "source": "pack.v4.json",
-      "source_identity": "sha256:81fbee63dfbd994faedb0c70f128014e7a6bede9188030278f597ecc9d3afab9"
+      "source_identity": "sha256:112d83586603e703c42de4a597c113289a4f75a99f4931a76844a5dcd92ea581"
     }
   },
   "migration": {
@@ -273,7 +273,7 @@
   ],
   "provenance": {
     "build_identity": "rumi_credential_broker_pack:1.0.0",
-    "content_hash": "sha256:e316ad664bdb06f7e7b02d1d50a0c218a74357aaf6da4a69112ec2d6b4798fe7",
+    "content_hash": "sha256:ee587f7c264f42cc25ef9fc57752884d8a634da2dd83a7ca72a76c7baf536ea4",
     "signature": null,
     "trust_class": "local"
   },

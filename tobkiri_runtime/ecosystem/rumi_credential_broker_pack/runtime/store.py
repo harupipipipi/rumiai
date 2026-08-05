@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 import hashlib
 import hmac
 import os
 import stat
+import subprocess
 import time
 import uuid
 from pathlib import Path
@@ -32,6 +34,7 @@ class CredentialBrokerStore:
         self.key_path = self.root / ".credential-store.key"
         self.lock_root = self.root / "locks"
         self.backup_root = self.root / "migration_backups"
+        self._windows_acl_secured = False
 
     def create(
         self,
@@ -74,13 +77,15 @@ class CredentialBrokerStore:
                 "expires_at": expires_at,
                 "created_at": _now(),
                 "updated_at": _now(),
-                "ciphertext": self._fernet().encrypt(
+                "ciphertext": self._fernet()
+                .encrypt(
                     json.dumps(
                         dict(secret_material),
                         ensure_ascii=False,
                         separators=(",", ":"),
                     ).encode("utf-8")
-                ).decode("ascii"),
+                )
+                .decode("ascii"),
             }
             record["record_mac"] = self._record_mac(record)
             state["credentials"][handle] = record
@@ -127,9 +132,7 @@ class CredentialBrokerStore:
         record = state["credentials"].get(str(handle))
         if not isinstance(record, dict):
             raise KeyError("credential handle is unknown")
-        if not hmac.compare_digest(
-            str(record.get("record_mac") or ""), self._record_mac(record)
-        ):
+        if not hmac.compare_digest(str(record.get("record_mac") or ""), self._record_mac(record)):
             raise PermissionError("credential record integrity check failed")
         if str(record.get("consumer_pack_id")) != consumer_pack_id:
             raise PermissionError("credential consumer is not bound")
@@ -147,9 +150,7 @@ class CredentialBrokerStore:
         if isinstance(expires_at, (int, float)) and float(expires_at) <= time.time():
             raise PermissionError("credential handle expired")
         try:
-            plaintext = self._fernet().decrypt(
-                str(record.get("ciphertext") or "").encode("ascii")
-            )
+            plaintext = self._fernet().decrypt(str(record.get("ciphertext") or "").encode("ascii"))
         except (InvalidToken, ValueError) as exc:
             raise RuntimeError("credential material cannot be decrypted") from exc
         material = json.loads(plaintext.decode("utf-8"))
@@ -192,7 +193,7 @@ class CredentialBrokerStore:
 
     def migrate(
         self,
-        records: list[Mapping[str, Any]],
+        records: builtins.list[Mapping[str, Any]],
         *,
         expected_source_hash: str,
     ) -> dict[str, Any]:
@@ -210,11 +211,9 @@ class CredentialBrokerStore:
             backup.mkdir(parents=True, exist_ok=False)
             os.chmod(backup, 0o700)
             self._write_backup(backup / "pre-migration.store.json", state)
-            handles: list[str] = []
+            handles: builtins.list[str] = []
             for item in records:
-                consumer_pack_id = _identifier(
-                    item.get("consumer_pack_id"), "consumer_pack_id"
-                )
+                consumer_pack_id = _identifier(item.get("consumer_pack_id"), "consumer_pack_id")
                 provider_instance_id = _identifier(
                     item.get("provider_instance_id"), "provider_instance_id"
                 )
@@ -236,13 +235,15 @@ class CredentialBrokerStore:
                     "expires_at": item.get("expires_at"),
                     "created_at": _now(),
                     "updated_at": _now(),
-                    "ciphertext": self._fernet().encrypt(
+                    "ciphertext": self._fernet()
+                    .encrypt(
                         json.dumps(
                             dict(material),
                             ensure_ascii=False,
                             separators=(",", ":"),
                         ).encode("utf-8")
-                    ).decode("ascii"),
+                    )
+                    .decode("ascii"),
                 }
                 record["record_mac"] = self._record_mac(record)
                 state["credentials"][handle] = record
@@ -259,9 +260,7 @@ class CredentialBrokerStore:
             return {
                 "migration_id": migration_id,
                 "source_hash": expected_source_hash,
-                "credentials": [
-                    self._public(state["credentials"][item]) for item in handles
-                ],
+                "credentials": [self._public(state["credentials"][item]) for item in handles],
             }
 
     def rollback_migration(self, migration_id: str) -> dict[str, Any]:
@@ -270,9 +269,7 @@ class CredentialBrokerStore:
         with NamedLock(self.lock_root, "credential-broker"):
             state = self._read()
             migration = state.get("migration")
-            if not isinstance(migration, Mapping) or migration.get(
-                "migration_id"
-            ) != migration_id:
+            if not isinstance(migration, Mapping) or migration.get("migration_id") != migration_id:
                 raise ValueError("credential migration marker mismatch")
             backup = Path(str(migration.get("backup") or ""))
             try:
@@ -283,10 +280,7 @@ class CredentialBrokerStore:
                 raise RuntimeError("credential migration backup is a symlink")
             backup_path = backup / "pre-migration.store.json"
             restored = json.loads(backup_path.read_text(encoding="utf-8"))
-            if (
-                not isinstance(restored, dict)
-                or restored.get("version") != STORE_VERSION
-            ):
+            if not isinstance(restored, dict) or restored.get("version") != STORE_VERSION:
                 raise RuntimeError("credential migration backup is invalid")
             self._write_backup(self.root / f"rollback-{migration_id}.json", state)
             self._write(restored)
@@ -313,11 +307,7 @@ class CredentialBrokerStore:
     def _record_mac(self, record: Mapping[str, Any]) -> str:
         """Authenticate handle metadata so profile tampering fails closed."""
 
-        unsigned = {
-            key: value
-            for key, value in record.items()
-            if key != "record_mac"
-        }
+        unsigned = {key: value for key, value in record.items() if key != "record_mac"}
         raw = json.dumps(
             unsigned,
             ensure_ascii=False,
@@ -390,13 +380,18 @@ class CredentialBrokerStore:
         self.root.mkdir(parents=True, exist_ok=True)
         if not self.root.is_dir():
             raise PermissionError("credential storage root is not a directory")
-        user_metadata = self.user_data_root.stat()
-        getuid = getattr(os, "geteuid", None)
-        if user_metadata.st_mode & 0o022 or (
-            callable(getuid) and user_metadata.st_uid != getuid()
-        ):
-            raise PermissionError("credential user-data root permissions are unsafe")
-        os.chmod(self.root, 0o700)
+        if os.name == "nt":
+            if not self._windows_acl_secured:
+                _secure_windows_directory(self.root)
+                self._windows_acl_secured = True
+        else:
+            user_metadata = self.user_data_root.stat()
+            getuid = getattr(os, "geteuid", None)
+            if user_metadata.st_mode & 0o022 or (
+                callable(getuid) and user_metadata.st_uid != getuid()
+            ):
+                raise PermissionError("credential user-data root permissions are unsafe")
+            os.chmod(self.root, 0o700)
         for path in (self.path, self.key_path, self.lock_root, self.backup_root):
             if path.is_symlink():
                 raise PermissionError(f"credential storage entry is a symlink: {path}")
@@ -404,30 +399,92 @@ class CredentialBrokerStore:
     @staticmethod
     def _require_owner_file(path: Path, label: str) -> None:
         metadata = path.stat()
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
+        if not stat.S_ISREG(metadata.st_mode) or path.is_symlink():
+            raise PermissionError(f"{label} permissions are unsafe")
+        if os.name == "nt":
+            return
+        if metadata.st_mode & 0o077:
             raise PermissionError(f"{label} permissions are unsafe")
         getuid = getattr(os, "geteuid", None)
         if callable(getuid) and metadata.st_uid != getuid():
             raise PermissionError(f"{label} owner is unsafe")
 
 
+def _secure_windows_directory(path: Path) -> None:
+    """Replace inherited ACLs with one verified current-user SID grant."""
+
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$target = $args[0]
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$sid = $identity.User
+$acl = Get-Acl -LiteralPath $target
+$acl.SetOwner($sid)
+$acl.SetAccessRuleProtection($true, $false)
+foreach ($entry in @($acl.Access)) {
+  [void]$acl.RemoveAccessRuleAll($entry)
+}
+$inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+$propagation = [Security.AccessControl.PropagationFlags]::None
+$allow = [Security.AccessControl.AccessControlType]::Allow
+$rule = [Security.AccessControl.FileSystemAccessRule]::new(
+  $sid, [Security.AccessControl.FileSystemRights]::FullControl,
+  $inheritance, $propagation, $allow
+)
+[void]$acl.AddAccessRule($rule)
+Set-Acl -LiteralPath $target -AclObject $acl
+$verified = Get-Acl -LiteralPath $target
+if (-not $verified.AreAccessRulesProtected) { throw 'credential ACL inherits' }
+if ($verified.Access.Count -ne 1) { throw 'credential ACL has extra principals' }
+$ownerSid = $verified.GetOwner(
+  [Security.Principal.SecurityIdentifier]
+).Value
+if ($ownerSid -ne $sid.Value) { throw 'credential ACL owner changed' }
+$actual = $verified.Access[0].IdentityReference.Translate(
+  [Security.Principal.SecurityIdentifier]
+).Value
+if ($actual -ne $sid.Value) { throw 'credential ACL owner grant changed' }
+if ($verified.Access[0].AccessControlType -ne $allow) {
+  throw 'credential ACL is not an allow grant'
+}
+if ($verified.Access[0].FileSystemRights -ne
+    [Security.AccessControl.FileSystemRights]::FullControl) {
+  throw 'credential ACL does not grant full control'
+}
+"""
+    try:
+        subprocess.run(
+            [
+                "powershell.exe",
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                script,
+                str(path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise PermissionError("credential Windows ACL could not be secured") from exc
+
+
 def _identifier(value: Any, label: str) -> str:
     normalized = str(value or "").strip()
-    if not normalized or len(normalized) > 200 or any(
-        item in normalized for item in ("\x00", "\r", "\n")
+    if (
+        not normalized
+        or len(normalized) > 200
+        or any(item in normalized for item in ("\x00", "\r", "\n"))
     ):
         raise ValueError(f"{label} is invalid")
     return normalized
 
 
 def _scopes(values: list[str]) -> list[str]:
-    return sorted(
-        {
-            _identifier(value, "scope")
-            for value in values
-            if str(value or "").strip()
-        }
-    )
+    return sorted({_identifier(value, "scope") for value in values if str(value or "").strip()})
 
 
 def _now() -> str:

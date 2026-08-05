@@ -407,6 +407,78 @@ def _import_record(pack_root: Path) -> dict[str, Any]:
 
 def _import_bundled_record(pack_id: str) -> dict[str, Any]:
     """Import the two finite Defaults v4 sources without legacy authority."""
+    if pack_id == "tobkiri_host_pack_control":
+        source_path = (
+            ECOSYSTEM / "defaultspack" / "v4" / "packs" / "tobkiri-host-pack-control.pack.v4.json"
+        )
+        source = json.loads(source_path.read_text(encoding="utf-8"))
+        executable = json.loads(
+            (ECOSYSTEM / pack_id / "executables.v4.json").read_text(encoding="utf-8")
+        )["variants"][0]
+        operation = executable["operations"][0]
+        function = source["functions"][0]
+        contract = source["contracts"][0]
+        return {
+            "pack_id": pack_id,
+            "version": source["pack"]["version"],
+            "kind": source["pack"]["kind"],
+            "display_name": source["pack"]["display_name"],
+            "description": (
+                "Finite read-only Pack catalog provider for the selected control-panel UI."
+            ),
+            "authority": "v4-authoritative",
+            "source_provenance": {
+                "owner": pack_id,
+                "mode": "canonical-v4",
+                "source_format": "pack.v4.json",
+                "historical_classification": "modern-only",
+            },
+            "dependencies": {},
+            "required_contracts": [],
+            "capabilities": ["pack.catalog.read"],
+            "network": {"allowed_domains": [], "allowed_ports": []},
+            "secrets": [],
+            "execution_boundary": "host_brokered",
+            "approval_policy": "capability_gated",
+            "workspace_boundary": "host_brokered",
+            "provided_contracts": [
+                {
+                    "contract_id": contract["contract_id"],
+                    "version": "1.0.0",
+                    "provider_id": function["id"],
+                    "operations": [
+                        {
+                            "id": operation["operation_id"],
+                            "entrypoint_id": operation["operation_id"],
+                            "implementation_digest": function["implementation_digest"],
+                        }
+                    ],
+                    "schemas": {
+                        "input": operation["input_schema"],
+                        "output": operation["output_schema"],
+                        "error": operation["error_schema"],
+                    },
+                    "cardinality": "one",
+                    "security": "sensitive",
+                    "failure": "fail_closed",
+                    "isolation": "in_process",
+                    "required_capabilities": ["pack.catalog.read"],
+                    "lifecycle": {
+                        "introduced": "1.0.0",
+                        "deprecated": False,
+                    },
+                }
+            ],
+            "legacy_operations": [],
+            "runtime_artifacts": list(source["artifacts"]),
+            "legacy_ids": [],
+            "migration": {
+                "compatibility": "none",
+                "removal_wave": 0,
+                "sunset_at": "2026-08-05",
+            },
+            "source_evidence": [],
+        }
     source_name = (
         "defaults-basepack.pack.v4.json" if pack_id == "defaults" else "defaultspack.pack.v4.json"
     )
@@ -527,7 +599,12 @@ def import_legacy(*, check: bool) -> None:
     records = [
         (
             _import_bundled_record(name)
-            if name in {"defaults", "defaultspack"}
+            if name
+            in {
+                "defaults",
+                "defaultspack",
+                "tobkiri_host_pack_control",
+            }
             else _import_record(ECOSYSTEM / name)
         )
         for name in pack_names

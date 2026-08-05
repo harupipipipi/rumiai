@@ -1,18 +1,18 @@
 {
-  "artifact_set_digest": "sha256:c133db0248ca653e76f30431437a1b3e01d2f2e3c52f9738978c2f8ef8667386",
+  "artifact_set_digest": "sha256:bf9e5bbdde2a121075f19c8f41b77eec24509f0798c0c0674b0128466820c2d5",
   "artifacts": [
     {
-      "digest": "sha256:2bb6c5d31b9f255fd3845c5affbd6cb9df169743fa2cded9b9459660b26b7ddb",
+      "digest": "sha256:7464ee5bfa6cc68e6b9bfa40d98acfba284976980b2e073f9cd12e3c7aefd5f6",
       "path": "pack.v4.json",
       "role": "canonical_manifest"
     },
     {
-      "digest": "sha256:c523781cc5f183b0a85f843210826e894e8a9e255364e26f1672288ac2471204",
+      "digest": "sha256:ee40d2d370d3884ede82754f0602f34b60541de7f4cc70f4dad6b911eb1c24b4",
       "path": "contracts.v4.json",
       "role": "contract_catalog"
     },
     {
-      "digest": "sha256:9b4e36e8b39ce680ada7d93071651058c3f920c98560ebd48ecfd4434c5e602d",
+      "digest": "sha256:aa1ab66d9f6c69307368d865d36ca1a6188a4e07480866e28dac6ee2cdfc1656",
       "path": "runtime/conversation.py",
       "role": "runtime"
     }
@@ -20,8 +20,8 @@
   "index_api_version": "io.tobkiri.pack-artifact-index.v4",
   "integrity_seal": {
     "algorithm": "sha256-canonical-v1",
-    "signed_digest": "sha256:f12e16c48d2f84f25919bd47167e8a076170b9425cf8b4a8dad8607d545fd054"
+    "signed_digest": "sha256:e4133a05953c7762052d7a413e8eeda580a7f5b07f7179a4e7c52e0a728c7c73"
   },
   "pack_id": "defaultspack",
-  "source_identity": "sha256:ea311cfa80b80cc1308c4c2a866077cd03142d8089a1dc7e428c97da6ad62a6f"
+  "source_identity": "sha256:901d413fc0c4803d300e177495bcf6ebbb0e6a24c0bd66a8c47029470737f274"
 }
