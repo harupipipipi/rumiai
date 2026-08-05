@@ -35,7 +35,6 @@ fn main() {
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/ecosystem");
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/flows");
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/lang");
-    println!("cargo:rerun-if-changed=../../tobkiri_runtime/rumi_setup");
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/requirements.txt");
     println!("cargo:rerun-if-changed=bundled");
     println!("cargo:rerun-if-changed=bundled/presentation_catalog.json");
