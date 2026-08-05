@@ -21,6 +21,11 @@
       "role": "provider"
     },
     {
+      "artifact_digest": null,
+      "pack_id": "tobkiri_host_pack_control",
+      "role": "provider"
+    },
+    {
       "pack_id": "runtime.tauri.application.default",
       "artifact_digest": null,
       "role": "application"
@@ -48,6 +53,16 @@
       "operation_id": "complete",
       "requested_scope_template": {},
       "target_provider_id": "defaultspack.conversation"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.pack-control.v4",
+      "operation_id": "catalog.read",
+      "requested_scope_template": {
+        "access": "read_only",
+        "resource_namespace": "pack.catalog"
+      },
+      "target_provider_id": "tobkiri.host.pack-control"
     },
     {
       "caller_function_id": "defaultspack.conversation",

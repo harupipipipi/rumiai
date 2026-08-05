@@ -44,7 +44,12 @@
     {
       "path": "packs/shell.tauri.default.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:afdaca4071f2d3697ee90f90cd0ee09eb99d46692eb01a5ec7c6a7ef94c00855"
+      "digest": "sha256:569c65ced37700ceebab93957adb504fc0273714c114f475604c13446a1ae624"
+    },
+    {
+      "path": "packs/tobkiri-host-pack-control.pack.v4.json",
+      "kind": "pack",
+      "digest": "sha256:2bb1b41472f64ae016c9b10a729729fd0bafa3628eec2c33052db477503d6732"
     },
     {
       "path": "defaults-basepack.base.v1.json",
@@ -64,7 +69,7 @@
     {
       "path": "defaults.profile.v4.json",
       "kind": "profile",
-      "digest": "sha256:5145adb8f5368b18a041aa212cf02a7532a23dbe83e22727cf19236e3f13a0d1"
+      "digest": "sha256:58a069f4fb9da0cc7ad5f5f56e29e5694aec610d9e726ad9a446ce49d50188e2"
     }
   ]
 }

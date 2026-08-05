@@ -17,6 +17,10 @@ BINDINGS = {
         "authority-ref:conversation.default"
     ),
     (
+        "shell.tauri.pack-control|tobkiri.host.pack-control|"
+        "tobkiri.host.pack-control.v4|catalog.read"
+    ): "authority-ref:pack.catalog.default",
+    (
         "defaultspack.conversation|rumi_file_inspect_pack.file-inspect.service|"
         "tobkiri.service.file.inspect.v1|rumi_file_inspect_pack.file-inspect"
     ): "authority-ref:file.inspect.default",
@@ -45,19 +49,20 @@ def test_resolved_plan_has_exact_profile_and_lock_digests() -> None:
 
 def test_resolved_plan_has_one_binding_per_selected_function() -> None:
     resolved = _resolved()
-    assert len(resolved.plan["bindings"]) == 2
-    assert {
-        item["function_principal"]["function_id"]
-        for item in resolved.plan["bindings"]
-    } == {"defaultspack.conversation", "rumi_file_inspect_pack.file-inspect.service"}
+    assert len(resolved.plan["bindings"]) == 3
+    assert {item["function_principal"]["function_id"] for item in resolved.plan["bindings"]} == {
+        "defaultspack.conversation",
+        "rumi_file_inspect_pack.file-inspect.service",
+        "tobkiri.host.pack-control",
+    }
 
 
 def test_resolved_plan_binds_exact_authority_references() -> None:
     resolved = _resolved()
     assert set(resolved.profile["authority_references"]) == set(BINDINGS.values())
-    assert {
-        edge["authority_reference"] for edge in resolved.profile["requested_edges"]
-    } == set(BINDINGS.values())
+    assert {edge["authority_reference"] for edge in resolved.profile["requested_edges"]} == set(
+        BINDINGS.values()
+    )
 
 
 def test_profile_resolver_denies_missing_authority_reference() -> None:

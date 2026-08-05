@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import secrets
+import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -27,13 +29,35 @@ from tobkiri_host.models import (
 from tobkiri_host.runtime import ProductionRuntimeV4, V4DispatchSession
 from tobkiri_protocol.canonical import canonical_digest
 
-from ..authority.v4 import AuthorityScope, AuthorityStore, FunctionPrincipal
+from ..authority.v4 import (
+    ApprovalRecord,
+    AuthorityDenied,
+    AuthorityMode,
+    AuthorityScope,
+    AuthorityStore,
+    DomainBoundary,
+    ExecutionDomain,
+    FunctionPrincipal,
+    GrantLifetime,
+    GrantRecord,
+    ProviderAuthorityRecord,
+    authority_digest,
+)
+from ..pack_catalog_backend_v4 import (
+    PACK_CATALOG_BACKEND_ID,
+    PackCatalogBackendV4,
+)
+from ..pack_control_v4 import (
+    PACK_CONTROL_CONTRACT,
+    capture_pack_catalog_reader,
+)
+
+
+_PACK_CATALOG_KEY = (PACK_CONTROL_CONTRACT, "catalog.read")
 
 
 class _NoAdapterExecution:
-    def execute(
-        self, adapter: StructuralAdapter, payload: Mapping[str, Any]
-    ) -> Mapping[str, Any]:
+    def execute(self, adapter: StructuralAdapter, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         raise RuntimeError(f"unexpected structural adapter: {adapter.adapter_id}")
 
 
@@ -126,6 +150,182 @@ def _shell_artifact(catalog: BundledCatalog, shell_id: str) -> PackArtifact:
     )
 
 
+def _operation_scope(
+    contract_id: str,
+    operation_id: str,
+    target: FunctionPrincipal,
+) -> AuthorityScope:
+    return AuthorityScope(
+        capability="operation.invoke",
+        semantics_digest=target.contract_revision_digest,
+        dimensions={
+            "contract": (contract_id,),
+            "operation": (operation_id,),
+        },
+    )
+
+
+def _execution_domain(
+    *,
+    domain_id: str,
+    principal: FunctionPrincipal,
+    active: ActiveDefaultProfile,
+    boundary: DomainBoundary,
+    channel_seed: str,
+) -> ExecutionDomain:
+    activation = active.activation
+    return ExecutionDomain(
+        domain_id=domain_id,
+        profile_id=str(active.resolved.profile["profile_id"]),
+        activation_id=str(activation["activation_id"]),
+        boot_epoch=1,
+        process_identity=f"process.{domain_id}",
+        authenticated_channel_digest=authority_digest(
+            {
+                "channel": channel_seed,
+                "activation_id": activation["activation_id"],
+                "principal_id": principal.principal_id,
+            }
+        ),
+        sandbox_profile_digest=authority_digest(
+            {
+                "boundary": boundary.value,
+                "provider": principal.principal_id,
+                "network": "denied",
+                "process": "denied",
+            }
+        ),
+        resource_namespace=f"resource.{domain_id}",
+        principals=(principal,),
+        boundary=boundary,
+        security_epoch=int(activation["security_epoch"]),
+        fencing_token=int(activation["fencing_token"]),
+    )
+
+
+def _register_exact_domain(
+    store: AuthorityStore,
+    control: Any,
+    domain: ExecutionDomain,
+    *,
+    session_id: str,
+    principal: FunctionPrincipal,
+) -> None:
+    existing = store.get_domain(domain.domain_id)
+    if existing is None:
+        control.register_execution_domain(
+            domain,
+            session_id=session_id,
+            channel_digest=domain.authenticated_channel_digest,
+            principal_ref=OpaqueAuthorityRef(principal.principal_id),
+        )
+        return
+    if existing != domain:
+        raise AuthorityDenied("captured execution domain identity changed")
+    try:
+        session_domain, principal_id = store.resolve_authenticated_session(session_id)
+    except AuthorityDenied:
+        store.bind_authenticated_session(
+            session_id=session_id,
+            domain=domain,
+            channel_digest=domain.authenticated_channel_digest,
+            principal_id=principal.principal_id,
+        )
+        return
+    if session_domain != domain or principal_id != principal.principal_id:
+        raise AuthorityDenied("authenticated session identity changed")
+
+
+def _commit_catalog_read_authority(
+    store: AuthorityStore,
+    control: Any,
+    *,
+    active: ActiveDefaultProfile,
+    caller: FunctionPrincipal,
+    target: FunctionPrincipal,
+    target_domain: ExecutionDomain,
+    scope: AuthorityScope,
+) -> None:
+    activation = active.activation
+    profile = active.resolved.profile
+    decided_at = datetime.fromisoformat(
+        str(activation["created_at"]).replace("Z", "+00:00")
+    ).timestamp()
+    identity_suffix = str(activation["activation_id"]).replace(":", ".")
+    approval = ApprovalRecord(
+        approval_id=f"approval.defaults.pack-catalog.{identity_suffix}",
+        snapshot_digest=canonical_digest(
+            {
+                "ceremony": "defaults.activate",
+                "activation_id": activation["activation_id"],
+                "plan_digest": activation["plan_digest"],
+                "profile_authority_snapshot_digest": activation[
+                    "profile_authority_snapshot_digest"
+                ],
+                "security_epoch": activation["security_epoch"],
+                "scope": scope.to_dict(),
+            }
+        ),
+        actor_id="user.defaults-confirmation",
+        decision="approved",
+        decided_at=decided_at,
+        caller=caller,
+        target=target,
+        profile_id=str(profile["profile_id"]),
+        effect_bundle_digest=scope.digest,
+        security_epoch=int(activation["security_epoch"]),
+    )
+    provider = ProviderAuthorityRecord(
+        record_id=f"provider.defaults.pack-catalog.{identity_suffix}",
+        provider=target,
+        execution_domain_id=target_domain.domain_id,
+        execution_domain_identity_digest=target_domain.identity_digest,
+        scope=scope,
+        authority_mode=AuthorityMode.LEASE_ONLY,
+        security_epoch=int(activation["security_epoch"]),
+        trust_provenance_digest=canonical_digest(
+            {
+                "source": "locked-defaults-profile",
+                "plan_digest": activation["plan_digest"],
+                "target": target.to_dict(),
+            }
+        ),
+        publisher_lineage="tobkiri.repository",
+        host_extension_id="runtime-tcb",
+        valid_from=decided_at,
+        host_broker_binding="tobkiri.request-broker.v4",
+    )
+    grant = GrantRecord(
+        grant_id=f"grant.defaults.pack-catalog.{identity_suffix}",
+        caller=caller,
+        target=target,
+        profile_id=str(profile["profile_id"]),
+        activation_id=str(activation["activation_id"]),
+        profile_authority_digest=str(activation["profile_authority_snapshot_digest"]),
+        caller_publisher_lineage="tobkiri.repository",
+        target_publisher_lineage="tobkiri.repository",
+        scope=scope,
+        lifetime=GrantLifetime.PERSISTENT_PROFILE,
+        security_epoch=int(activation["security_epoch"]),
+        approval_id=approval.approval_id,
+        issued_at=decided_at,
+    )
+    existing = (
+        store.get_approval(approval.approval_id),
+        store.get_provider_authority(provider.record_id),
+        store.get_grant(grant.grant_id),
+    )
+    expected = (approval, provider, grant)
+    if existing == (None, None, None):
+        control.commit_approval_bundle(
+            approval,
+            provider_authorities=(provider,),
+            grants=(grant,),
+        )
+    elif existing != expected:
+        raise AuthorityDenied("Pack catalog authority snapshot changed")
+
+
 def capture_production_dispatch(
     active: ActiveDefaultProfile,
     *,
@@ -160,8 +360,7 @@ def capture_production_dispatch(
 
     edges = catalog.profiles["defaults"]["requested_edges"]
     binding_by_key = {
-        (item["contract_id"], item["operation_id"]): item
-        for item in plan["bindings"]
+        (item["contract_id"], item["operation_id"]): item for item in plan["bindings"]
     }
     ceilings: dict[tuple[str, str], AuthorityCeilings] = {}
     caller_by_operation: dict[tuple[str, str], FunctionPrincipal] = {}
@@ -187,27 +386,85 @@ def capture_production_dispatch(
 
     binding_pack_ids = {str(item["pack_id"]) for item in plan["bindings"]}
     effective = {
-        str(item["identity"]): str(item["artifact_digest"])
-        for item in lock["effective_set"]
+        str(item["identity"]): str(item["artifact_digest"]) for item in lock["effective_set"]
     }
     runtime = ProductionRuntimeV4.capture(
         profile=profile,
         lock=lock,
         plan=plan,
         activation=active.activation,
-        pack_roots={
-            pack_id: ecosystem_root / pack_id for pack_id in binding_pack_ids
-        },
+        pack_roots={pack_id: ecosystem_root / pack_id for pack_id in binding_pack_ids},
         supporting_artifacts=(shell,),
         verified_effective_artifacts=effective,
         authority_ceilings=ceilings,
     )
     authority_control = runtime.composition.authority_adapter(authority_store)
+    catalog_backend: PackCatalogBackendV4 | None = None
+    catalog_target = None
+    if _PACK_CATALOG_KEY in binding_by_key:
+        catalog_binding = binding_by_key[_PACK_CATALOG_KEY]
+        catalog_target = FunctionPrincipal.from_dict(catalog_binding["function_principal"])
+        catalog_reader = capture_pack_catalog_reader()
+        target_suffix = catalog_target.principal_id.removeprefix("sha256:")[:24]
+        target_domain = _execution_domain(
+            domain_id=f"domain.provider.{target_suffix}",
+            principal=catalog_target,
+            active=active,
+            boundary=DomainBoundary.DEDICATED_PROCESS,
+            channel_seed="pack-catalog-provider",
+        )
+        _register_exact_domain(
+            authority_store,
+            authority_control,
+            target_domain,
+            session_id="session.provider.pack-catalog",
+            principal=catalog_target,
+        )
+        catalog_scope = _operation_scope(
+            PACK_CONTROL_CONTRACT,
+            "catalog.read",
+            catalog_target,
+        )
+        catalog_caller = caller_by_operation[_PACK_CATALOG_KEY]
+        _commit_catalog_read_authority(
+            authority_store,
+            authority_control,
+            active=active,
+            caller=catalog_caller,
+            target=catalog_target,
+            target_domain=target_domain,
+            scope=catalog_scope,
+        )
+        backend_digest = canonical_digest(
+            {
+                "backend": "tobkiri.host-pack-catalog.v4",
+                "implementation": catalog_target.function_implementation_digest,
+                "profile_id": profile["profile_id"],
+                "plan_digest": plan["plan_digest"],
+                "security_epoch": active.activation["security_epoch"],
+            }
+        )
+        catalog_backend = PackCatalogBackendV4(
+            reader=catalog_reader,
+            target_principal_id=catalog_target.principal_id,
+            implementation_digest=catalog_target.function_implementation_digest,
+            domain_id=target_domain.domain_id,
+            backend_digest=backend_digest,
+        )
+        target_backend_digests = {
+            **dict(target_backend_digests or {}),
+            catalog_target.principal_id: backend_digest,
+        }
+    registered_backends = tuple((backends or BackendRegistry(())).registered)
+    if catalog_backend is not None:
+        if any(item.status.backend_id == PACK_CATALOG_BACKEND_ID for item in registered_backends):
+            raise AuthorityDenied("Pack catalog backend identity is duplicated")
+        registered_backends += (catalog_backend,)
     broker = runtime.broker(
         authority_store=authority_store,
         adapters=AdapterPlanner(()),
         adapter_executor=_NoAdapterExecution(),
-        backends=backends or BackendRegistry(()),
+        backends=BackendRegistry(registered_backends),
         materialization=MaterializationCoordinator(),
         admission=_FiniteAdmission(),
         reconciliation=InMemoryReconciliationStore(),
@@ -221,9 +478,10 @@ def capture_production_dispatch(
         for item in plan["bindings"]
     }
 
-    def context_for(
-        contract_id: str, operation_id: str, session_id: str
-    ) -> RequestContext:
+    caller_sessions: set[str] = set()
+    caller_sessions_lock = threading.RLock()
+
+    def context_for(contract_id: str, operation_id: str, session_id: str) -> RequestContext:
         key = (contract_id, operation_id)
         caller = caller_by_operation[key]
         target = target_by_operation[key]
@@ -231,7 +489,7 @@ def capture_production_dispatch(
         caller_suffix = canonical_digest(
             {"session_id": session_id, "caller": caller.principal_id}
         ).removeprefix("sha256:")[:24]
-        return RequestContext(
+        context = RequestContext(
             request_id="request." + secrets.token_hex(16),
             trace_id="trace." + secrets.token_hex(16),
             caller_principal=OpaqueAuthorityRef(caller.principal_id),
@@ -245,9 +503,7 @@ def capture_production_dispatch(
             caller_boot_epoch=1,
             target_domain_id=f"domain.provider.{target_suffix}",
             target_boot_epoch=1,
-            target_backend_digest=(
-                target_backend_digests or {}
-            ).get(
+            target_backend_digest=(target_backend_digests or {}).get(
                 target.principal_id,
                 canonical_digest(
                     {
@@ -256,12 +512,29 @@ def capture_production_dispatch(
                     }
                 ),
             ),
-            profile_authority_digest=str(
-                active.activation["profile_authority_snapshot_digest"]
-            ),
+            profile_authority_digest=str(active.activation["profile_authority_snapshot_digest"]),
             fencing_token=int(active.activation["fencing_token"]),
             handle_namespace=f"activation.{target_suffix}",
         )
+        if key == _PACK_CATALOG_KEY:
+            with caller_sessions_lock:
+                if session_id not in caller_sessions:
+                    caller_domain = _execution_domain(
+                        domain_id=context.caller_domain_id,
+                        principal=caller,
+                        active=active,
+                        boundary=DomainBoundary.UNPRIVILEGED_WORKER,
+                        channel_seed=f"panel:{session_id}",
+                    )
+                    _register_exact_domain(
+                        authority_store,
+                        authority_control,
+                        caller_domain,
+                        session_id=session_id,
+                        principal=caller,
+                    )
+                    caller_sessions.add(session_id)
+        return context
 
     providers: dict[str, tuple[Mapping[str, Any], ...]] = {}
     for binding in plan["bindings"]:

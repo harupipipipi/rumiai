@@ -61,7 +61,7 @@ def test_catalog_install_approve_enable_and_restart_read_back(captured_session) 
     """The positive lifecycle survives a fresh captured session."""
     session, _state_path, _user_data = captured_session
     initial = _invoke(session, "catalog.read")
-    assert initial["count"] == 141
+    assert initial["count"] == 142
     target = next(item for item in initial["packs"] if item["pack_id"] == TARGET_PACK)
     assert target["installed"] is False
     assert target["enabled"] is False
@@ -157,13 +157,7 @@ def test_tampered_approval_and_symlinked_pack_fail_closed(
     """Approval signatures and Pack filesystem boundaries are authoritative."""
     session, _state_path, user_data = captured_session
     _approve_target(session)
-    approval_path = (
-        user_data
-        / "pack_control"
-        / "approvals"
-        / "defaults"
-        / f"{TARGET_PACK}.json"
-    )
+    approval_path = user_data / "pack_control" / "approvals" / "defaults" / f"{TARGET_PACK}.json"
     approval = json.loads(approval_path.read_text(encoding="utf-8"))
     approval["workspace_id"] = "forged-workspace"
     approval_path.write_text(json.dumps(approval), encoding="utf-8")
@@ -285,6 +279,7 @@ def test_real_http_local_auth_dispatch_lifecycle_has_zero_legacy_calls(
         )
         csrf = exchange["data"]["csrf_token"]
         assert_post_denied("/api/v4/dispatch", dispatch_body, 401)
+
         def dispatch(operation_id: str, payload: dict | None = None) -> dict:
             envelope = post(
                 "/api/v4/dispatch",
@@ -298,7 +293,7 @@ def test_real_http_local_auth_dispatch_lifecycle_has_zero_legacy_calls(
             assert envelope["success"] is True
             return envelope["data"]
 
-        assert dispatch("catalog.read")["count"] == 141
+        assert dispatch("catalog.read")["count"] == 142
         dispatch("pack.install", {"pack_id": TARGET_PACK})
         candidate = dispatch("approval.candidate", {"pack_id": TARGET_PACK})
         dispatch(

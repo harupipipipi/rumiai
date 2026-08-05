@@ -43,24 +43,17 @@ def test_manifest_authority_catalog_classifies_all_direct_pack_roots() -> None:
     roots = {
         path.name
         for path in ecosystem.iterdir()
-        if path.is_dir()
-        and path.name != "setup_pack"
-        and not path.name.startswith(".")
+        if path.is_dir() and path.name != "setup_pack" and not path.name.startswith(".")
     }
     catalog = json.loads(
-        (RUNTIME / "schemas" / "manifest_authority.v1.json").read_text(
-            encoding="utf-8"
-        )
+        (RUNTIME / "schemas" / "manifest_authority.v1.json").read_text(encoding="utf-8")
     )["packs"]
     assert set(catalog) == roots
-    assert len(catalog) == 141
+    assert len(catalog) == 142
     assert set(catalog.values()) == {"v4-authoritative"}
     assert catalog["defaults"] == "v4-authoritative"
     assert catalog["defaultspack"] == "v4-authoritative"
-    assert all(
-        (ecosystem / pack_id / "pack.v4.json").is_file()
-        for pack_id in roots
-    )
+    assert all((ecosystem / pack_id / "pack.v4.json").is_file() for pack_id in roots)
     assert not any(
         (ecosystem / pack_id / legacy_name).exists()
         for pack_id in ("defaults", "defaultspack")
@@ -106,17 +99,10 @@ def test_runtime_projection_module_is_metadata_only() -> None:
     from core_runtime import manifest_projection
 
     assert manifest_projection.PROJECTION_RUNTIME_EXECUTABLE is False
-    assert (
-        manifest_projection.PROJECTION_OWNER
-        == "scripts/offline_legacy_projection.py"
-    )
+    assert manifest_projection.PROJECTION_OWNER == "scripts/offline_legacy_projection.py"
     assert manifest_projection.PROJECTION_SOURCE == "rumi.pack.v3.json"
-    assert not hasattr(
-        manifest_projection, "generate_legacy_ecosystem_projection"
-    )
-    offline = (RUNTIME / "scripts" / "offline_legacy_projection.py").read_text(
-        encoding="utf-8"
-    )
+    assert not hasattr(manifest_projection, "generate_legacy_ecosystem_projection")
+    offline = (RUNTIME / "scripts" / "offline_legacy_projection.py").read_text(encoding="utf-8")
     assert 'PROJECTION_SOURCE = "rumi.pack.v3.json"' in offline
-    assert 'RUNTIME_EXECUTABLE = False' in offline
+    assert "RUNTIME_EXECUTABLE = False" in offline
     assert "def generate_legacy_ecosystem_projection(" in offline

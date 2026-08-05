@@ -31,6 +31,9 @@ CANONICAL_PACK_FILES = {
     "rumi-workspace-mount.pack.v4.json": (
         ROOT / "ecosystem" / "rumi_workspace_mount_pack" / "pack.v4.json"
     ),
+    "tobkiri-host-pack-control.pack.v4.json": (
+        ROOT / "ecosystem" / "tobkiri_host_pack_control" / "pack.v4.json"
+    ),
 }
 TAURI_ROLE_PACKS = {
     "runtime.tauri.application.default.pack.v4.json": {

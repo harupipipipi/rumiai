@@ -104,22 +104,21 @@ class BackendRegistry:
             if status.unavailable_reason is not None:
                 raise BackendUnavailableError(status.unavailable_reason)
             missing = sorted(REQUIRED_PRODUCTION_GATES - status.satisfied_gates)
-            raise BackendUnavailableError(
-                f"backend is feature-disabled; missing gates: {missing}"
-            )
-        if not production and not (
-            status.conformance_only or status.ready_for_production
-        ):
+            raise BackendUnavailableError(f"backend is feature-disabled; missing gates: {missing}")
+        if not production and not (status.conformance_only or status.ready_for_production):
             raise BackendUnavailableError("backend is disabled")
         return backend
 
     @property
     def statuses(self) -> tuple[BackendStatus, ...]:
         """Return registered backend status in deterministic ID order."""
-        return tuple(
-            self._backends[backend_id].status
-            for backend_id in sorted(self._backends)
-        )
+        return tuple(self._backends[backend_id].status for backend_id in sorted(self._backends))
+
+    @property
+    def registered(self) -> tuple[ExecutionBackend, ...]:
+        """Return exact registered backends for composition-root extension."""
+
+        return tuple(self._backends[backend_id] for backend_id in sorted(self._backends))
 
 
 def production_backend_registry(

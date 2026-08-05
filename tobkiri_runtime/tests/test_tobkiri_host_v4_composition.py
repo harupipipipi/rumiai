@@ -33,12 +33,15 @@ def _resolved():
     catalog = BundledCatalog.load(BUNDLE)
     bindings = {
         "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": "authority-ref:conversation.default",
+        "shell.tauri.pack-control|tobkiri.host.pack-control|tobkiri.host.pack-control.v4|catalog.read": "authority-ref:pack.catalog.default",
         "defaultspack.conversation|rumi_file_inspect_pack.file-inspect.service|tobkiri.service.file.inspect.v1|rumi_file_inspect_pack.file-inspect": "authority-ref:file.inspect.default",
     }
     resolved = resolve_default_profile(
         catalog,
         "defaults",
-        approved_artifact_digests={item["pack"]["artifact_digest"] for item in catalog.packs.values()},
+        approved_artifact_digests={
+            item["pack"]["artifact_digest"] for item in catalog.packs.values()
+        },
         authority_snapshot_digest=SNAPSHOT,
         authority_bindings=bindings,
         security_epoch=1,
@@ -129,9 +132,7 @@ def _capture(tmp_path: Path):
     restarted = store.load_active_snapshot()
     assert restarted.activation == activation
     resolved = restarted.resolved
-    effective_pack_ids = {
-        item["identity"] for item in resolved.lock["effective_set"]
-    }
+    effective_pack_ids = {item["identity"] for item in resolved.lock["effective_set"]}
     assert "shell.tauri.default" in effective_pack_ids
     assert "shell.cli.default" not in effective_pack_ids
     artifacts = _artifacts(catalog, effective_pack_ids)
@@ -177,15 +178,11 @@ def _capture(tmp_path: Path):
     )
     ceilings = {
         (
-            principals[
-                (
-                    edge["caller_function_id"],
-                    "present"
-                    if edge["caller_function_id"]
-                    == resolved.profile["shell"]["provider_id"]
-                    else "complete",
-                )
-            ].principal_id,
+            next(
+                principal
+                for (function_id, _operation_id), principal in principals.items()
+                if function_id == edge["caller_function_id"]
+            ).principal_id,
             principals[(edge["target_provider_id"], edge["operation_id"])].principal_id,
         ): AuthorityCeilings(scope, scope, scope)
         for edge in resolved.profile["requested_edges"]
@@ -207,9 +204,7 @@ def test_capture_uses_only_exact_effective_set_and_resolved_routes(tmp_path: Pat
     assert composition.plan["plan_digest"] == resolved.plan["plan_digest"]
     assert composition.activation["activation_id"] == activation["activation_id"]
     assert (
-        composition.catalog.resolve(
-            "conversation.turn.v1", "complete", ">=1"
-        ).artifact.digest
+        composition.catalog.resolve("conversation.turn.v1", "complete", ">=1").artifact.digest
         == resolved.plan["bindings"][0]["artifact_digest"]
     )
 

@@ -116,13 +116,13 @@ def test_profile_resolver_requires_authority_snapshot() -> None:
 
 def test_profile_resolver_uses_exact_v4_manifest_inventory() -> None:
     catalog = BundledCatalog.load(BUNDLE)
-    approved = {
-        str(manifest["pack"]["artifact_digest"])
-        for manifest in catalog.packs.values()
-    }
+    approved = {str(manifest["pack"]["artifact_digest"]) for manifest in catalog.packs.values()}
     bindings = {
         "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": (
             "authority-ref:conversation.default"
+        ),
+        "shell.tauri.pack-control|tobkiri.host.pack-control|tobkiri.host.pack-control.v4|catalog.read": (
+            "authority-ref:pack.catalog.default"
         ),
         (
             "defaultspack.conversation|rumi_file_inspect_pack.file-inspect.service|"
@@ -143,14 +143,14 @@ def test_profile_resolver_uses_exact_v4_manifest_inventory() -> None:
 
 def test_profile_resolver_rejects_artifact_not_in_approval_snapshot() -> None:
     catalog = BundledCatalog.load(BUNDLE)
-    approved = {
-        str(manifest["pack"]["artifact_digest"])
-        for manifest in catalog.packs.values()
-    }
+    approved = {str(manifest["pack"]["artifact_digest"]) for manifest in catalog.packs.values()}
     approved.remove(catalog.packs["rumi_file_inspect_pack"]["pack"]["artifact_digest"])
     bindings = {
         "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": (
             "authority-ref:conversation.default"
+        ),
+        "shell.tauri.pack-control|tobkiri.host.pack-control|tobkiri.host.pack-control.v4|catalog.read": (
+            "authority-ref:pack.catalog.default"
         ),
         (
             "defaultspack.conversation|rumi_file_inspect_pack.file-inspect.service|"

@@ -143,7 +143,8 @@
     "rumi_workflow_scheduler_pack",
     "rumi_workspace_mount_pack",
     "rumi_workspace_pack",
-    "search_home_pack"
+    "search_home_pack",
+    "tobkiri_host_pack_control"
   ],
   "packs": [
     {
@@ -15071,6 +15072,99 @@
       },
       "version": "0.1.0",
       "workspace_boundary": "pack_local"
+    },
+    {
+      "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
+      "capabilities": [
+        "pack.catalog.read"
+      ],
+      "dependencies": {},
+      "description": "Finite read-only Pack catalog provider for the selected control-panel UI.",
+      "display_name": "Tobkiri Host Pack Control",
+      "execution_boundary": "host_brokered",
+      "kind": "host_extension",
+      "legacy_ids": [],
+      "legacy_operations": [],
+      "migration": {
+        "compatibility": "none",
+        "removal_wave": 0,
+        "sunset_at": "2026-08-05"
+      },
+      "network": {
+        "allowed_domains": [],
+        "allowed_ports": []
+      },
+      "pack_id": "tobkiri_host_pack_control",
+      "provided_contracts": [
+        {
+          "cardinality": "one",
+          "contract_id": "tobkiri.host.pack-control.v4",
+          "failure": "fail_closed",
+          "isolation": "in_process",
+          "lifecycle": {
+            "deprecated": false,
+            "introduced": "1.0.0"
+          },
+          "operations": [
+            {
+              "entrypoint_id": "catalog.read",
+              "id": "catalog.read",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            }
+          ],
+          "owner": "tobkiri_host_pack_control",
+          "provider_id": "tobkiri.host.pack-control",
+          "required_capabilities": [
+            "pack.catalog.read"
+          ],
+          "schemas": {
+            "error": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "input": {
+              "additionalProperties": false,
+              "type": "object"
+            },
+            "output": {
+              "type": "object"
+            }
+          },
+          "security": "sensitive",
+          "version": "1.0.0"
+        }
+      ],
+      "required_contracts": [],
+      "runtime_artifacts": [
+        {
+          "digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7",
+          "kind": "executable",
+          "path": "runtime/catalog.py"
+        }
+      ],
+      "secrets": [],
+      "source_evidence": [],
+      "source_provenance": {
+        "historical_classification": "modern-only",
+        "mode": "canonical-v4",
+        "owner": "tobkiri_host_pack_control",
+        "source_format": "pack.v4.json"
+      },
+      "version": "1.0.0",
+      "workspace_boundary": "host_brokered"
     }
   ]
 }

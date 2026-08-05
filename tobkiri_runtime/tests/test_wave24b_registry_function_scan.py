@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog, ProfileResolutionDenied, resolve_default_profile
+from ecosystem.defaultspack.domain.runtime_v4 import (
+    BundledCatalog,
+    ProfileResolutionDenied,
+    resolve_default_profile,
+)
 from tests.v4_batch_support import assert_legacy_registry_fails_closed
 
 
@@ -17,6 +21,10 @@ BINDINGS = {
     "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": (
         "authority-ref:conversation.default"
     ),
+    (
+        "shell.tauri.pack-control|tobkiri.host.pack-control|"
+        "tobkiri.host.pack-control.v4|catalog.read"
+    ): "authority-ref:pack.catalog.default",
     (
         "defaultspack.conversation|rumi_file_inspect_pack.file-inspect.service|"
         "tobkiri.service.file.inspect.v1|rumi_file_inspect_pack.file-inspect"
@@ -72,6 +80,7 @@ def test_v4_profile_resolves_exact_effective_set() -> None:
         "runtime.tauri.application.default",
         "rumi_workspace_mount_pack",
         "shell.tauri.default",
+        "tobkiri_host_pack_control",
     }
 
 
@@ -112,5 +121,5 @@ def test_v4_plan_routes_are_exactly_the_selected_bindings() -> None:
         authority_bindings=BINDINGS,
         security_epoch=1,
     )
-    assert len(resolved.plan["bindings"]) == 2
+    assert len(resolved.plan["bindings"]) == 3
     assert resolved.lock["plan_digest"] == resolved.plan["plan_digest"]

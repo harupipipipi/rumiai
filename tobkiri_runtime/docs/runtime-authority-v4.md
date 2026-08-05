@@ -112,6 +112,25 @@ The Provider receives no `ApprovalRecord`, `ProviderAuthorityRecord`, or
 process. Multi-principal native co-location is rejected unless the domain has an
 explicit complete `AuthorityEquivalence` record and mutual principal approval.
 
+## Defaults Pack catalog read authority
+
+The control panel's Pack list is one selected v4 contribution, not an ambient
+Host API. The locked Defaults Profile contains exactly one edge from the
+`shell.tauri.pack-control` caller Function to the
+`tobkiri.host.pack-control.v4/catalog.read` Provider Function. Explicit Defaults
+activation confirmation commits only that read scope, bound to the exact Profile,
+activation, ResolvedPlan digest, ProfileAuthoritySnapshot digest, SecurityEpoch,
+caller and Provider principals, and dedicated Provider domain. Every request still
+receives a single-use InvocationLease and authoritative audit lifecycle.
+
+The Provider accepts an empty object and returns the canonical catalog projection.
+It has no network, process, secret, workspace-write, installation, approval,
+enablement, disablement, revocation, or restart operation. Those mutation
+ceremonies are separate operations and are absent from this Defaults authority;
+an authenticated panel session alone cannot invoke them. Missing confirmation,
+stale activation state, a changed epoch or principal/domain binding, revocation,
+or lease replay fails closed through the normal Broker and Authority Kernel path.
+
 ## Deliberate integration limits
 
 - This module does not define serialized Protocol JSON Schema; that remains owned by

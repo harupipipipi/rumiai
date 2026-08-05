@@ -35,6 +35,10 @@ def _bindings() -> dict[str, str]:
             "authority-ref:conversation.default"
         ),
         (
+            "shell.tauri.pack-control|tobkiri.host.pack-control|"
+            "tobkiri.host.pack-control.v4|catalog.read"
+        ): "authority-ref:pack.catalog.default",
+        (
             "defaultspack.conversation|rumi_file_inspect_pack.file-inspect.service|"
             "tobkiri.service.file.inspect.v1|rumi_file_inspect_pack.file-inspect"
         ): "authority-ref:file.inspect.default",

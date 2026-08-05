@@ -37,10 +37,7 @@ def _authority_module():
     try:
         return importlib.import_module("core_runtime.manifest_authority")
     except ModuleNotFoundError as exc:
-        pytest.fail(
-            "manifest authority catalog/loader is not present at the baseline: "
-            f"{exc}"
-        )
+        pytest.fail(f"manifest authority catalog/loader is not present at the baseline: {exc}")
 
 
 def _write_legacy_pack(root: Path, pack_id: str) -> Path:
@@ -69,9 +66,7 @@ def test_repository_authority_catalog_is_exact_and_has_no_loader_gaps() -> None:
     direct_pack_ids = {
         path.name
         for path in ECOSYSTEM.iterdir()
-        if path.is_dir()
-        and path.name != "setup_pack"
-        and not path.name.startswith(".")
+        if path.is_dir() and path.name != "setup_pack" and not path.name.startswith(".")
     }
     authority.validate_manifest_authority_scope(
         direct_pack_ids,
@@ -79,8 +74,8 @@ def test_repository_authority_catalog_is_exact_and_has_no_loader_gaps() -> None:
     )
     catalog = authority.load_manifest_authority_catalog()
 
-    assert len(locations) == 139
-    assert len(catalog) == 141
+    assert len(locations) == 140
+    assert len(catalog) == 142
     assert set(catalog) == direct_pack_ids
     assert set(catalog.values()) == {"v4-authoritative"}
     assert catalog["defaults"] == "v4-authoritative"
@@ -117,7 +112,7 @@ def test_all_repository_legacy_manifests_validate_without_silent_exclusion() -> 
         except (OSError, json.JSONDecodeError, SchemaValidationError) as exc:
             errors.append(f"{path.parent.name}: {exc}")
 
-    assert len(paths) == 139
+    assert len(paths) == 140
     assert not errors, "legacy manifest diagnostics: " + " | ".join(errors[:8])
 
 
@@ -163,10 +158,7 @@ def test_v3_projection_is_legacy_schema_valid_source_bound_and_deterministic(
     assert projection["metadata"]["manifest_authority"] == "v3-authoritative"
     assert projection["metadata"]["generated"] is True
     assert projection["metadata"]["read_only_projection"] is True
-    assert (
-        projection["metadata"]["generated_from"]["source_content_hash"]
-        == source_identity
-    )
+    assert projection["metadata"]["generated_from"]["source_content_hash"] == source_identity
 
 
 def test_repository_v3_projections_are_current_and_source_integrity_bound() -> None:
@@ -187,10 +179,7 @@ def test_repository_v3_projections_are_current_and_source_integrity_bound() -> N
                 check=True,
             )
             rendered = json.loads(projection.read_text(encoding="utf-8"))
-            if (
-                rendered["metadata"]["generated_from"]["source_content_hash"]
-                != source_identity
-            ):
+            if rendered["metadata"]["generated_from"]["source_content_hash"] != source_identity:
                 errors.append(f"{pack_id}: source hash mismatch")
         except Exception as exc:
             errors.append(f"{pack_id}: {exc}")

@@ -324,28 +324,20 @@ def _import_record(pack_root: Path) -> dict[str, Any]:
                 },
             }
         )
-    executable_sources = json.loads(
-        EXECUTABLE_SOURCES.read_text(encoding="utf-8")
-    )["packs"]
+    executable_sources = json.loads(EXECUTABLE_SOURCES.read_text(encoding="utf-8"))["packs"]
     executable_source = executable_sources.get(pack_root.name)
     if executable_source is not None:
         matches = [
-            item
-            for item in provided
-            if item["contract_id"] == executable_source["contract_id"]
+            item for item in provided if item["contract_id"] == executable_source["contract_id"]
         ]
         if len(matches) != 1:
-            raise PackV4MigrationError(
-                f"canonical executable Contract mismatch: {pack_root.name}"
-            )
+            raise PackV4MigrationError(f"canonical executable Contract mismatch: {pack_root.name}")
         matches[0]["schemas"] = {
             "input": executable_source["input_schema"],
             "output": executable_source["output_schema"],
             "error": executable_source["error_schema"],
         }
-        implementation_digest = _file_digest(
-            pack_root / executable_source["implementation_path"]
-        )
+        implementation_digest = _file_digest(pack_root / executable_source["implementation_path"])
         for operation in matches[0]["operations"]:
             operation["implementation_digest"] = implementation_digest
     required = []
@@ -416,9 +408,7 @@ def _import_record(pack_root: Path) -> dict[str, Any]:
 def _import_bundled_record(pack_id: str) -> dict[str, Any]:
     """Import the two finite Defaults v4 sources without legacy authority."""
     source_name = (
-        "defaults-basepack.pack.v4.json"
-        if pack_id == "defaults"
-        else "defaultspack.pack.v4.json"
+        "defaults-basepack.pack.v4.json" if pack_id == "defaults" else "defaultspack.pack.v4.json"
     )
     source_path = ECOSYSTEM / "defaultspack" / "v4" / "packs" / source_name
     source = json.loads(source_path.read_text(encoding="utf-8"))
@@ -434,9 +424,9 @@ def _import_bundled_record(pack_id: str) -> dict[str, Any]:
             "kind": "normal_sandbox",
             "display_name": "Tobkiri Defaults Providers",
         }
-        executable_source = json.loads(
-            EXECUTABLE_SOURCES.read_text(encoding="utf-8")
-        )["packs"][pack_id]
+        executable_source = json.loads(EXECUTABLE_SOURCES.read_text(encoding="utf-8"))["packs"][
+            pack_id
+        ]
         implementation_digest = _file_digest(
             ECOSYSTEM / pack_id / executable_source["implementation_path"]
         )
@@ -486,9 +476,7 @@ def _import_bundled_record(pack_id: str) -> dict[str, Any]:
         "capabilities": [],
         "network": {"allowed_domains": [], "allowed_ports": []},
         "secrets": [],
-        "execution_boundary": (
-            "declarative_only" if pack_id == "defaults" else "sandbox"
-        ),
+        "execution_boundary": ("declarative_only" if pack_id == "defaults" else "sandbox"),
         "approval_policy": "none",
         "workspace_boundary": "pack_local",
         "provided_contracts": provided,
@@ -770,9 +758,7 @@ def _manifest_document(
         },
         "provenance": _provenance(record, source_identity),
         "migration": {
-            "compatibility": record["migration"].get(
-                "compatibility", "read_only"
-            ),
+            "compatibility": record["migration"].get("compatibility", "read_only"),
             "legacy_ids": record["legacy_ids"],
             "removal_wave": record["migration"]["removal_wave"],
             "sunset_at": record["migration"]["sunset_at"],
@@ -903,8 +889,8 @@ def _validate_catalog_payload(payload: Mapping[str, Any]) -> list[Mapping[str, A
         raise PackV4MigrationError("canonical catalog contains duplicate Pack IDs")
     if pack_ids != sorted(pack_ids) or record_ids != pack_ids:
         raise PackV4MigrationError("canonical catalog has missing or unknown Pack IDs")
-    if len(records) != 141:
-        raise PackV4MigrationError("canonical catalog must contain exactly 141 Packs")
+    if len(records) != 142:
+        raise PackV4MigrationError("canonical catalog must contain exactly 142 Packs")
     required = {
         "version",
         "kind",
@@ -937,8 +923,7 @@ def _validate_catalog_payload(payload: Mapping[str, Any]) -> list[Mapping[str, A
             record.get("authority") != "v4-authoritative"
             or not isinstance(provenance, Mapping)
             or provenance.get("owner") != record["pack_id"]
-            or provenance.get("mode")
-            not in {"offline-one-way-import", "canonical-v4"}
+            or provenance.get("mode") not in {"offline-one-way-import", "canonical-v4"}
         ):
             raise PackV4MigrationError(
                 f"canonical v4 authority provenance is invalid: {record['pack_id']}"

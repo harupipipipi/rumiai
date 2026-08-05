@@ -9,6 +9,12 @@ from pathlib import Path
 
 import pytest
 
+from core_runtime.authority.v4 import AuthorityStore
+from core_runtime.bootstrap.production_v4 import capture_production_dispatch
+from core_runtime.bootstrap.profile_capture import (
+    capture_default_profile,
+    prepare_default_profile_confirmation,
+)
 from core_runtime.pack_api_server import (
     PackAPIHandler,
     PackAPIServer,
@@ -373,6 +379,70 @@ def test_dispatch_requires_panel_cookie_and_csrf(
     assert payload["data"]["operation_id"] == "catalog.read"
     assert dispatch.calls[0][0:2] == ("pack.control.v4", "catalog.read")
     assert dispatch.calls[0][2]["_session_id"]
+
+
+def test_authenticated_http_catalog_uses_production_broker_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real panel route reaches only the finite production catalog binding."""
+    user_data = tmp_path / "clean-home"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
+    dispatch = capture_production_dispatch(
+        active,
+        bundle_root=Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack" / "v4",
+        ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
+        authority_store=AuthorityStore(user_data / "authority" / "v4.sqlite3"),
+    )
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified-desktop"),
+        dispatch_session=dispatch,
+        app_lifecycle_manager=_Lifecycle(),
+    )
+    server.start()
+    try:
+        cookie, csrf, origin = _panel_session(server)
+        headers = {
+            "Cookie": cookie,
+            "Origin": origin,
+            "X-Rumi-CSRF": csrf,
+        }
+        status, payload, _ = _request(
+            server,
+            "POST",
+            "/api/v4/dispatch",
+            body={
+                "contract_id": "tobkiri.host.pack-control.v4",
+                "operation_id": "catalog.read",
+                "payload": {},
+            },
+            headers=headers,
+        )
+        assert status == 200
+        assert payload["data"]["count"] == 142
+        assert payload["data"]["profile_id"] == "defaults"
+
+        status, payload, _ = _request(
+            server,
+            "POST",
+            "/api/v4/dispatch",
+            body={
+                "contract_id": "tobkiri.host.pack-control.v4",
+                "operation_id": "pack.install",
+                "payload": {"pack_id": "rumi_git_read_pack"},
+            },
+            headers=headers,
+        )
+        assert status == 409
+        assert payload["data"] == {
+            "state": "broker_dispatch_denied",
+            "code": "invalid_dispatch",
+        }
+        assert payload["error"] == ("('tobkiri.host.pack-control.v4', 'pack.install')")
+    finally:
+        server.stop()
 
 
 @pytest.mark.parametrize("body", [[], "text", 1, None])

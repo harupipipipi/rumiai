@@ -38,9 +38,12 @@ async function renderPage(element: ReactNode) {
 
 test('Packs retains cached data and marks it stale after a refresh failure', async () => {
   useAppStore.setState({packs: [cachedPack], apiError: null, isLoading: false});
-  globalThis.fetch = (async () => new Response(JSON.stringify({success: false, data: null, error: 'Runtime connection failed'}), {status: 503})) as typeof fetch;
+  const dispatchError = "('tobkiri.host.pack-control.v4', 'catalog.read')";
+  globalThis.fetch = (async () => new Response(JSON.stringify({success: false, data: null, error: dispatchError}), {status: 409})) as typeof fetch;
   const {dom, root} = await renderPage(<MemoryRouter><Packs /></MemoryRouter>);
   assert.match(document.body.textContent ?? '', /Packs could not be loaded/);
+  assert.match(document.body.textContent ?? '', /tobkiri\.host\.pack-control\.v4/);
+  assert.match(document.body.textContent ?? '', /catalog\.read/);
   assert.match(document.body.textContent ?? '', /Showing the last successfully loaded data/);
   assert.match(document.body.textContent ?? '', /Cached Pack/);
   await act(async () => root.unmount());

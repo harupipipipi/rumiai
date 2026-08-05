@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog, ProfileResolutionDenied, resolve_default_profile
+from ecosystem.defaultspack.domain.runtime_v4 import (
+    BundledCatalog,
+    ProfileResolutionDenied,
+    resolve_default_profile,
+)
 from tests.v4_batch_support import assert_legacy_registry_fails_closed
 
 
@@ -17,6 +21,7 @@ BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 SNAPSHOT = "sha256:" + "9" * 64
 BINDINGS = {
     "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": "authority-ref:conversation.default",
+    "shell.tauri.pack-control|tobkiri.host.pack-control|tobkiri.host.pack-control.v4|catalog.read": "authority-ref:pack.catalog.default",
     "defaultspack.conversation|rumi_file_inspect_pack.file-inspect.service|tobkiri.service.file.inspect.v1|rumi_file_inspect_pack.file-inspect": "authority-ref:file.inspect.default",
 }
 
@@ -51,6 +56,7 @@ def test_profile_resolver_delegates_dependency_order_to_effective_set() -> None:
         "shell.tauri.default",
         "defaultspack",
         "rumi_file_inspect_pack",
+        "tobkiri_host_pack_control",
         "runtime.tauri.application.default",
         "rumi_workspace_mount_pack",
         "rumi_host_authority_bridge_pack",

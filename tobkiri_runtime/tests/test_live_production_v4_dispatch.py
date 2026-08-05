@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from core_runtime.authority.v4 import (
     ApprovalRecord,
+    AuthorityDenied,
     AuthorityMode,
     AuthorityScope,
     AuthorityStore,
@@ -25,6 +27,7 @@ from core_runtime.bootstrap.profile_capture import (
     capture_default_profile,
     prepare_default_profile_confirmation,
 )
+from ecosystem.defaultspack.domain.runtime_v4 import ProfileResolutionDenied
 from tobkiri_host.backends import (
     REQUIRED_PRODUCTION_GATES,
     BackendRegistry,
@@ -32,7 +35,13 @@ from tobkiri_host.backends import (
 )
 from tobkiri_host.effects import ProviderOutcome
 from tobkiri_host.errors import AuthorizationError
-from tobkiri_host.models import ExecutionKind, OpaqueAuthorityRef, RuntimeEvidence
+from tobkiri_host.models import (
+    ExecutionKind,
+    InvocationFrame,
+    OpaqueAuthorityRef,
+    RuntimeEvidence,
+)
+from tobkiri_host.ports import FinalAuthorizationQuery
 
 
 def _digest(seed: str) -> str:
@@ -104,9 +113,7 @@ def test_clean_home_broker_dispatches_then_revocation_fails_closed(
 ) -> None:
     user_data = tmp_path / "clean-home"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
-    active = capture_default_profile(
-        confirmation=prepare_default_profile_confirmation()
-    )
+    active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
     binding = next(
         item
         for item in active.resolved.plan["bindings"]
@@ -117,10 +124,7 @@ def test_clean_home_broker_dispatches_then_revocation_fails_closed(
     store = AuthorityStore(user_data / "authority" / "v4.sqlite3")
     session = capture_production_dispatch(
         active,
-        bundle_root=Path(__file__).resolve().parents[1]
-        / "ecosystem"
-        / "defaultspack"
-        / "v4",
+        bundle_root=Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack" / "v4",
         ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
         authority_store=store,
         backends=BackendRegistry((backend,)),
@@ -131,9 +135,7 @@ def test_clean_home_broker_dispatches_then_revocation_fails_closed(
     session_id = "session.panel.clean-home"
     context = session.context_for("conversation.turn.v1", "complete", session_id)
     caller = control._principals.resolve_principal(context.caller_principal)
-    resolved_target = control._principals.resolve_principal(
-        OpaqueAuthorityRef(target.principal_id)
-    )
+    resolved_target = control._principals.resolve_principal(OpaqueAuthorityRef(target.principal_id))
     assert resolved_target == target
     caller_domain = _domain(
         domain_id=context.caller_domain_id,
@@ -198,9 +200,7 @@ def test_clean_home_broker_dispatches_then_revocation_fails_closed(
         target=target,
         profile_id="defaults",
         activation_id=active.activation["activation_id"],
-        profile_authority_digest=active.activation[
-            "profile_authority_snapshot_digest"
-        ],
+        profile_authority_digest=active.activation["profile_authority_snapshot_digest"],
         caller_publisher_lineage="tobkiri.repository",
         target_publisher_lineage="tobkiri.repository",
         scope=scope,
@@ -216,27 +216,20 @@ def test_clean_home_broker_dispatches_then_revocation_fails_closed(
         grants=(grant,),
     )
     persisted = store.list_grants()
-    current_context = session.context_for(
-        "conversation.turn.v1", "complete", session_id
-    )
-    current_caller = control._principals.resolve_principal(
-        current_context.caller_principal
-    )
-    assert len(persisted) == 1
-    assert persisted[0].caller == current_caller
-    assert persisted[0].target == target
-    assert persisted[0].profile_id == current_context.profile_id
-    assert persisted[0].activation_id == current_context.activation_id
-    assert (
-        persisted[0].profile_authority_digest
-        == current_context.profile_authority_digest
-    )
-    assert persisted[0].security_epoch == current_context.security_epoch
-    assert persisted[0].issued_at <= time.time()
-    assert persisted[0].expires_at is None
-    assert persisted[0].revoked is False
+    current_context = session.context_for("conversation.turn.v1", "complete", session_id)
+    current_caller = control._principals.resolve_principal(current_context.caller_principal)
+    persisted_grant = next(item for item in persisted if item.grant_id == grant.grant_id)
+    assert persisted_grant.caller == current_caller
+    assert persisted_grant.target == target
+    assert persisted_grant.profile_id == current_context.profile_id
+    assert persisted_grant.activation_id == current_context.activation_id
+    assert persisted_grant.profile_authority_digest == current_context.profile_authority_digest
+    assert persisted_grant.security_epoch == current_context.security_epoch
+    assert persisted_grant.issued_at <= time.time()
+    assert persisted_grant.expires_at is None
+    assert persisted_grant.revoked is False
     assert not store.is_revoked("grant", grant.grant_id)
-    assert scope.is_subset_of(persisted[0].scope)
+    assert scope.is_subset_of(persisted_grant.scope)
     assert store.get_approval(approval.approval_id) == approval
     translated, translated_scope = control._translate_query(
         current_context,
@@ -245,7 +238,7 @@ def test_clean_home_broker_dispatches_then_revocation_fails_closed(
         scope.to_dict(),
     )
     assert translated.target == target
-    assert translated_scope.is_subset_of(persisted[0].scope)
+    assert translated_scope.is_subset_of(persisted_grant.scope)
     selected = control._kernel._select_grant(
         context=translated,
         caller=current_caller,
@@ -276,3 +269,136 @@ def test_clean_home_broker_dispatches_then_revocation_fails_closed(
         session.broker.close()
 
     assert not (user_data / "settings" / "startup_profiles.json").exists()
+
+
+def test_pack_catalog_read_is_profile_bound_audited_and_restart_safe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Defaults confirmation grants only the selected catalog read edge."""
+
+    user_data = tmp_path / "catalog-home"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    with pytest.raises(ProfileResolutionDenied, match="confirmation"):
+        capture_default_profile()
+
+    active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
+    store = AuthorityStore(user_data / "authority" / "v4.sqlite3")
+
+    def capture():
+        return capture_production_dispatch(
+            capture_default_profile(),
+            bundle_root=Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack" / "v4",
+            ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
+            authority_store=store,
+        )
+
+    session = capture()
+    providers = session.provider_metadata("tobkiri.host.pack-control.v4")
+    assert len(providers) == 1
+    assert providers[0]["provider_id"] == "tobkiri.host.pack-control"
+    assert providers[0]["operation_id"] == "catalog.read"
+    result = session.invoke(
+        "tobkiri.host.pack-control.v4",
+        "catalog.read",
+        {"_session_id": "session.panel.first-start"},
+    )
+    assert result["count"] == 142
+    assert result["profile_id"] == "defaults"
+    assert result["plan_digest"] == active.resolved.plan["plan_digest"]
+    assert [event["event_state"] for event in store.audit_events()][-3:] == [
+        "reserved",
+        "dispatched",
+        "committed",
+    ]
+
+    for denied_operation in (
+        "pack.install",
+        "approval.approve",
+        "pack.enable",
+        "pack.disable",
+    ):
+        with pytest.raises(KeyError):
+            session.invoke(
+                "tobkiri.host.pack-control.v4",
+                denied_operation,
+                {"_session_id": "session.panel.first-start"},
+            )
+
+    context = session.context_for(
+        "tobkiri.host.pack-control.v4",
+        "catalog.read",
+        "session.panel.first-start",
+    )
+    frame = InvocationFrame(
+        contract_id="tobkiri.host.pack-control.v4",
+        version_range=">=1,<2",
+        operation_id="catalog.read",
+        payload={},
+    )
+    scope = session.effect_scope_for("tobkiri.host.pack-control.v4", "catalog.read", {})
+    binding = session.broker._catalog.resolve(
+        "tobkiri.host.pack-control.v4", "catalog.read", ">=1,<2"
+    )
+    replay_request_digest = _digest("catalog-lease-replay")
+    lease = session.authority_control.authorize_and_issue_lease(
+        FinalAuthorizationQuery(
+            context=context,
+            target_principal=binding.principal_ref,
+            request_digest=replay_request_digest,
+            effect_scope=scope,
+            evidence=RuntimeEvidence(
+                domain_ref=OpaqueAuthorityRef(context.target_domain_id),
+                executable_digest=binding.function.implementation_digest,
+                backend_digest=context.target_backend_digest,
+                authenticated_channel=True,
+                nonce_fresh=True,
+            ),
+        )
+    )
+    reservation = session.authority_control.reserve_effect(context, binding, replay_request_digest)
+    session.authority_control.recheck_effect_boundary(context, binding.principal_ref, lease)
+    with pytest.raises(AuthorityDenied, match="already consumed"):
+        session.authority_control.recheck_effect_boundary(context, binding.principal_ref, lease)
+    session.authority_control.fail_effect(reservation, "replay-test", False)
+
+    for wrong_context in (
+        replace(context, profile_id="wrong-profile"),
+        replace(context, security_epoch=context.security_epoch + 1),
+        replace(
+            context,
+            caller_principal=OpaqueAuthorityRef(authority_digest({"wrong": "caller"})),
+        ),
+        replace(context, target_domain_id="domain.provider.wrong"),
+    ):
+        with pytest.raises(AuthorizationError):
+            session.broker.invoke(frame, wrong_context, effect_scope=scope)
+
+    restarted = capture()
+    assert (
+        restarted.invoke(
+            "tobkiri.host.pack-control.v4",
+            "catalog.read",
+            {"_session_id": "session.panel.restart"},
+        )["count"]
+        == 142
+    )
+
+    catalog_grant = next(
+        item
+        for item in store.list_grants()
+        if item.target.function_id == "tobkiri.host.pack-control"
+    )
+    restarted.authority_control.revoke(
+        target_kind="grant",
+        target_id=catalog_grant.grant_id,
+        reason="test catalog revocation",
+    )
+    with pytest.raises(AuthorizationError):
+        restarted.invoke(
+            "tobkiri.host.pack-control.v4",
+            "catalog.read",
+            {"_session_id": "session.panel.restart"},
+        )
+    session.broker.close()
+    restarted.broker.close()

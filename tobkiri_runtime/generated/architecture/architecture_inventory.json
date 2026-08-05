@@ -5667,6 +5667,13 @@
         "rule_id": "legacy_host_execution"
       },
       {
+        "evidence": "host_execution",
+        "line": 5,
+        "message": "legacy execution or authority path is present",
+        "path": "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/ecosystem.json",
+        "rule_id": "legacy_host_execution"
+      },
+      {
         "evidence": "RUMI_ALLOW_HOST_EXECUTION",
         "line": 225,
         "message": "legacy execution or authority path is present",
@@ -8069,6 +8076,7 @@
       "tobkiri_runtime/ecosystem/rumi_workspace_mount_pack/rumi.pack.v3.json",
       "tobkiri_runtime/ecosystem/rumi_workspace_pack/ecosystem.json",
       "tobkiri_runtime/ecosystem/search_home_pack/ecosystem.json",
+      "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/ecosystem.json",
       "tobkiri_runtime/tobkiri_protocol/README.md",
       "tobkiri_runtime/tobkiri_protocol/__init__.py",
       "tobkiri_runtime/tobkiri_protocol/canonical.py",
@@ -10005,6 +10013,14 @@
         "legacy": true,
         "path": "tobkiri_runtime/ecosystem/search_home_pack/ecosystem.json",
         "version": "0.1.0"
+      },
+      {
+        "digest": "sha256:19dc5243dff71ecce4ae9a8eb5c9402cb99765678bb53f3ca646975d4caec95f",
+        "identity": "tobkiri_host_pack_control",
+        "kind": "manifest",
+        "legacy": true,
+        "path": "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/ecosystem.json",
+        "version": "1.0.0"
       }
     ],
     "execution_routes": [
@@ -14863,6 +14879,12 @@
         "rule_id": "legacy_host_execution"
       },
       {
+        "evidence_digest": "sha256:19dc5243dff71ecce4ae9a8eb5c9402cb99765678bb53f3ca646975d4caec95f",
+        "line": 5,
+        "path": "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/ecosystem.json",
+        "rule_id": "legacy_host_execution"
+      },
+      {
         "evidence_digest": "sha256:499809f9ead5cde6c7e6a3b602d25999004f6efeef603d60d129a8387a4e03aa",
         "line": 225,
         "path": "tobkiri_runtime/core_runtime/pack_function_runtime.py",
@@ -18337,6 +18359,13 @@
         "pack_id": "search_home_pack",
         "path": "tobkiri_runtime/ecosystem/search_home_pack/ecosystem.json",
         "version": "0.1.0"
+      },
+      {
+        "legacy": true,
+        "manifest_digest": "sha256:19dc5243dff71ecce4ae9a8eb5c9402cb99765678bb53f3ca646975d4caec95f",
+        "pack_id": "tobkiri_host_pack_control",
+        "path": "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/ecosystem.json",
+        "version": "1.0.0"
       }
     ],
     "state_owners": [
@@ -18505,8 +18534,8 @@
     ]
   },
   "repository": {
-    "commit": "df4933861b269d3296bf4f7278ee9431f1fd186c",
-    "tree_digest": "41cbfea529928b93e211efac06131160eb6d454242040fee1700e48396762f90"
+    "commit": "b4c1c27f11690c64b0225b6e5c3b3145dbac1209",
+    "tree_digest": "1ec19eea8ab53c0826eec615dcd630974043d76067d93f1c5f47a48f385d1959"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
   "schema": "io.tobkiri.architecture.inventory.v1"

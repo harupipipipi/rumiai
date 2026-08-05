@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = ROOT / "tobkiri_runtime"
 ECOSYSTEM = RUNTIME / "ecosystem"
 
-EXPECTED_PRODUCTION_PACK_COUNT = 141
+EXPECTED_PRODUCTION_PACK_COUNT = 142
 V4_PROJECTION_GENERATOR = "tobkiri.scripts.migrate_manifest_authority/v2"
 PACK_ARTIFACTS = {
     "artifact-index.v4.json": "pack_artifact_index",
@@ -107,9 +107,7 @@ FALLBACK_NAMES = frozenset(
     }
 )
 OLD_COMPOSITION_MODULE = "domain.pack_architecture"
-VALID_MANIFEST_AUTHORITIES = frozenset(
-    {"v4-authoritative"}
-)
+VALID_MANIFEST_AUTHORITIES = frozenset({"v4-authoritative"})
 
 PACK_API_SOURCE = RUNTIME / "core_runtime" / "pack_api_server.py"
 PACK_API_AUTH_SOURCE = RUNTIME / "core_runtime" / "api" / "auth_gate.py"
@@ -286,7 +284,13 @@ def _v4_artifact_findings() -> list[dict[str, Any]]:
         source_identity = manifest.get("integrity", {}).get("source_identity")
         if pack_id != pack_dir.name:
             findings.append(
-                _finding(pack_dir / "pack.v4.json", 1, "pack_identity_mismatch", expected=pack_dir.name, actual=pack_id)
+                _finding(
+                    pack_dir / "pack.v4.json",
+                    1,
+                    "pack_identity_mismatch",
+                    expected=pack_dir.name,
+                    actual=pack_id,
+                )
             )
         if set((index.get("pack_id"), contracts.get("pack_id"), pack_id)) != {pack_dir.name}:
             findings.append(_finding(pack_dir / "pack.v4.json", 1, "artifact_pack_id_mismatch"))
@@ -306,13 +310,26 @@ def _v4_artifact_findings() -> list[dict[str, Any]]:
         indexed = {item.get("path"): item for item in index.get("artifacts", [])}
         for name, (role, digest) in expected_artifacts.items():
             item = indexed.get(name)
-            if not isinstance(item, Mapping) or item.get("role") != role or item.get("digest") != digest:
-                findings.append(_finding(pack_dir / "artifact-index.v4.json", 1, "artifact_digest_mismatch", artifact=name))
+            if (
+                not isinstance(item, Mapping)
+                or item.get("role") != role
+                or item.get("digest") != digest
+            ):
+                findings.append(
+                    _finding(
+                        pack_dir / "artifact-index.v4.json",
+                        1,
+                        "artifact_digest_mismatch",
+                        artifact=name,
+                    )
+                )
         if index.get("artifact_set_digest") != manifest.get("pack", {}).get("artifact_digest"):
             findings.append(_finding(pack_dir / "pack.v4.json", 1, "artifact_set_digest_mismatch"))
         integrity = manifest.get("integrity", {})
         if integrity.get("contract_catalog_digest") != _sha256(pack_dir / "contracts.v4.json"):
-            findings.append(_finding(pack_dir / "pack.v4.json", 1, "contract_catalog_digest_mismatch"))
+            findings.append(
+                _finding(pack_dir / "pack.v4.json", 1, "contract_catalog_digest_mismatch")
+            )
         try:
             from tobkiri_host.artifact_compiler import compile_pack_root
 
@@ -340,16 +357,16 @@ def _v4_profile_findings() -> list[dict[str, Any]]:
             continue
         if profile.get("profile_id") != "defaults" or profile.get("state") != "needs_resolution":
             findings.append(_finding(path, 1, "profile_scope_mismatch"))
-        if not isinstance(profile.get("base"), Mapping) or not isinstance(profile.get("shell"), Mapping):
+        if not isinstance(profile.get("base"), Mapping) or not isinstance(
+            profile.get("shell"), Mapping
+        ):
             findings.append(_finding(path, 1, "profile_selection_not_exact"))
     return findings
 
 
 def _authority_source_sets() -> dict[str, set[str]]:
     """Load canonical manifest and v4 catalog source sets without discovery."""
-    manifest_catalog = _load_json(
-        RUNTIME / "schemas" / "manifest_authority.v1.json"
-    )
+    manifest_catalog = _load_json(RUNTIME / "schemas" / "manifest_authority.v1.json")
     v4_catalog = _load_json(RUNTIME / "schemas" / "pack_v4_catalog.v1.json")
     manifest_ids = (
         set(manifest_catalog.get("packs", {}))
@@ -359,15 +376,12 @@ def _authority_source_sets() -> dict[str, set[str]]:
     )
     v4_ids = (
         set(v4_catalog.get("pack_ids", ()))
-        if isinstance(v4_catalog, Mapping)
-        and isinstance(v4_catalog.get("pack_ids"), list)
+        if isinstance(v4_catalog, Mapping) and isinstance(v4_catalog.get("pack_ids"), list)
         else set()
     )
     direct_ids = {path.name for path in _production_pack_dirs()}
     manifest_source_ids = {
-        path.name
-        for path in _production_pack_dirs()
-        if (path / "ecosystem.json").is_file()
+        path.name for path in _production_pack_dirs() if (path / "ecosystem.json").is_file()
     }
     return {
         "direct_ids": direct_ids,
@@ -418,26 +432,16 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
     v4_catalog = _load_json(v4_catalog_path)
     classified = manifest_catalog.get("packs", {}) if isinstance(manifest_catalog, Mapping) else {}
     v4_entries = v4_catalog.get("packs", ()) if isinstance(v4_catalog, Mapping) else ()
-    raw_v4_pack_id_list = (
-        v4_catalog.get("pack_ids") if isinstance(v4_catalog, Mapping) else None
-    )
-    v4_pack_id_list = (
-        raw_v4_pack_id_list if isinstance(raw_v4_pack_id_list, list) else []
-    )
+    raw_v4_pack_id_list = v4_catalog.get("pack_ids") if isinstance(v4_catalog, Mapping) else None
+    v4_pack_id_list = raw_v4_pack_id_list if isinstance(raw_v4_pack_id_list, list) else []
     sources = _authority_source_sets()
     direct_ids = sources["direct_ids"]
     manifest_ids = sources["manifest_ids"]
     manifest_source_ids = sources["manifest_source_ids"]
     v4_ids = sources["v4_ids"]
     v4_only_ids = sources["v4_only_ids"]
-    entry_ids = {
-        item.get("pack_id")
-        for item in v4_entries
-        if isinstance(item, Mapping)
-    }
-    entry_id_list = [
-        item.get("pack_id") for item in v4_entries if isinstance(item, Mapping)
-    ]
+    entry_ids = {item.get("pack_id") for item in v4_entries if isinstance(item, Mapping)}
+    entry_id_list = [item.get("pack_id") for item in v4_entries if isinstance(item, Mapping)]
 
     def add_scope_finding(path: Path, rule: str, symbol: str, **details: Any) -> None:
         findings.append(_finding(path, 1, rule, symbol=symbol, **details))
@@ -449,21 +453,18 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
             manifest_path,
             "authority_catalog_value_invalid",
             "manifest_authority",
-            classified=dict(sorted(classified.items())) if isinstance(classified, Mapping) else classified,
+            classified=dict(sorted(classified.items()))
+            if isinstance(classified, Mapping)
+            else classified,
         )
     catalog_delta = _source_set_delta(direct_ids, manifest_ids)
-    expected_authority_counts = Counter(
-        {"v4-authoritative": EXPECTED_PRODUCTION_PACK_COUNT}
-    )
+    expected_authority_counts = Counter({"v4-authoritative": EXPECTED_PRODUCTION_PACK_COUNT})
     observed_authority_counts = (
         Counter(str(classified.get(pack_id)) for pack_id in direct_ids)
         if isinstance(classified, Mapping)
         else Counter()
     )
-    if (
-        catalog_delta is not None
-        or observed_authority_counts != expected_authority_counts
-    ):
+    if catalog_delta is not None or observed_authority_counts != expected_authority_counts:
         add_scope_finding(
             manifest_path,
             "authority_catalog_scope_mismatch",
@@ -472,9 +473,7 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
             expected_authority_counts=dict(sorted(expected_authority_counts.items())),
             observed_authority_counts=dict(sorted(observed_authority_counts.items())),
         )
-    manifest_delta = _source_set_delta(
-        manifest_ids - v4_only_ids, manifest_source_ids
-    )
+    manifest_delta = _source_set_delta(manifest_ids - v4_only_ids, manifest_source_ids)
     if manifest_delta is not None:
         add_scope_finding(
             manifest_path,
@@ -498,8 +497,7 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
                 {
                     pack_id
                     for pack_id in list(v4_pack_id_list) + entry_id_list
-                    if list(v4_pack_id_list).count(pack_id) > 1
-                    or entry_id_list.count(pack_id) > 1
+                    if list(v4_pack_id_list).count(pack_id) > 1 or entry_id_list.count(pack_id) > 1
                 }
             ),
         )
@@ -571,13 +569,21 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
     try:
         tree = ast.parse(contracts_path.read_text(encoding="utf-8"), filename=str(contracts_path))
         operation_catalog = next(
-            node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "OperationCatalog"
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "OperationCatalog"
         )
-        methods = {node.name for node in operation_catalog.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        methods = {
+            node.name
+            for node in operation_catalog.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
         if not {"__init__", "resolve"}.issubset(methods):
             raise LookupError("OperationCatalog exact resolve scope is missing")
     except (OSError, SyntaxError, LookupError) as exc:
-        findings.append(_finding(contracts_path, 1, "resolved_plan_runtime_scope_missing", error=str(exc)))
+        findings.append(
+            _finding(contracts_path, 1, "resolved_plan_runtime_scope_missing", error=str(exc))
+        )
     return findings
 
 
@@ -703,9 +709,7 @@ def _legacy_aliases(tree: ast.AST) -> set[str]:
     return aliases
 
 
-def _ast_legacy_runtime_findings_for_tree(
-    path: Path, tree: ast.AST
-) -> list[dict[str, Any]]:
+def _ast_legacy_runtime_findings_for_tree(path: Path, tree: ast.AST) -> list[dict[str, Any]]:
     """Find executable legacy imports and calls in one reachable module."""
     findings: list[dict[str, Any]] = []
     parents = _parents(tree)
@@ -714,7 +718,10 @@ def _ast_legacy_runtime_findings_for_tree(
         if isinstance(node, ast.Import):
             for alias in node.names:
                 module = alias.name
-                if module in LEGACY_AUTHORITY_MODULES or module.rsplit(".", 1)[-1] in LEGACY_SYMBOLS:
+                if (
+                    module in LEGACY_AUTHORITY_MODULES
+                    or module.rsplit(".", 1)[-1] in LEGACY_SYMBOLS
+                ):
                     findings.append(
                         _finding(
                             path,
@@ -836,7 +843,9 @@ def _ast_authority_bypass_findings() -> list[dict[str, Any]]:
             if isinstance(node, ast.Call):
                 name = _called_name(node)
                 if name in LEGACY_SYMBOLS or name in aliases:
-                    findings.append(_finding(path, node.lineno, "authority_bypass_call", symbol=name))
+                    findings.append(
+                        _finding(path, node.lineno, "authority_bypass_call", symbol=name)
+                    )
                 if any(
                     keyword.arg == "approved"
                     and isinstance(keyword.value, ast.Constant)
@@ -853,7 +862,11 @@ def _ast_projection_findings() -> list[dict[str, Any]]:
     for path, tree in _reachable_python_trees().items():
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and _called_name(node) in PROJECTION_CALL_NAMES:
-                findings.append(_finding(path, node.lineno, "runtime_projection_call", symbol=_called_name(node)))
+                findings.append(
+                    _finding(
+                        path, node.lineno, "runtime_projection_call", symbol=_called_name(node)
+                    )
+                )
     return findings
 
 
@@ -863,7 +876,9 @@ def _ast_fallback_findings() -> list[dict[str, Any]]:
     for path, tree in _reachable_python_trees().items():
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and _called_name(node) in FALLBACK_NAMES:
-                findings.append(_finding(path, node.lineno, "implicit_fallback_call", symbol=_called_name(node)))
+                findings.append(
+                    _finding(path, node.lineno, "implicit_fallback_call", symbol=_called_name(node))
+                )
     return findings
 
 
@@ -874,10 +889,20 @@ def _ast_old_composition_findings() -> list[dict[str, Any]]:
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name == OLD_COMPOSITION_MODULE or alias.name.startswith(f"{OLD_COMPOSITION_MODULE}."):
-                        findings.append(_finding(path, node.lineno, "deleted_composition_import", module=alias.name))
-            elif isinstance(node, ast.ImportFrom) and (node.module or "").startswith(OLD_COMPOSITION_MODULE):
-                findings.append(_finding(path, node.lineno, "deleted_composition_import", module=node.module))
+                    if alias.name == OLD_COMPOSITION_MODULE or alias.name.startswith(
+                        f"{OLD_COMPOSITION_MODULE}."
+                    ):
+                        findings.append(
+                            _finding(
+                                path, node.lineno, "deleted_composition_import", module=alias.name
+                            )
+                        )
+            elif isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+                OLD_COMPOSITION_MODULE
+            ):
+                findings.append(
+                    _finding(path, node.lineno, "deleted_composition_import", module=node.module)
+                )
     return findings
 
 
@@ -921,7 +946,7 @@ def _strip_rust_comments_and_strings(source: str) -> str:
             continue
 
         quote_index = index + 1 if production_source.startswith('b"', index) else index
-        if production_source[quote_index:quote_index + 1] == '"':
+        if production_source[quote_index : quote_index + 1] == '"':
             end = quote_index + 1
             escaped = False
             while end < len(production_source):
@@ -994,9 +1019,7 @@ def _rust_item_end(source: str, start: int) -> int:
 def _strip_rust_test_items(source: str) -> str:
     """Remove ``cfg(test)`` modules/functions and ``#[test]`` items."""
     result = source
-    attribute_pattern = re.compile(
-        r"#\s*\[\s*(?:cfg\s*\(\s*test\s*\)|test)\s*\]"
-    )
+    attribute_pattern = re.compile(r"#\s*\[\s*(?:cfg\s*\(\s*test\s*\)|test)\s*\]")
     while True:
         masked = _strip_rust_comments(result)
         matches = list(attribute_pattern.finditer(masked))
@@ -1007,7 +1030,7 @@ def _strip_rust_test_items(source: str) -> str:
             end = _rust_item_end(result, match.end())
             if end <= match.start():
                 continue
-            replacement = _blank_rust_segment(result[match.start():end])
+            replacement = _blank_rust_segment(result[match.start() : end])
             result = result[: match.start()] + replacement + result[end:]
             changed = True
         if not changed:
@@ -1062,9 +1085,7 @@ def _rust_context_is_safe(function: str) -> bool:
     """Recognize safe lifecycle roles by symbol semantics, not file names."""
     lowered = function.lower()
     return any(
-        re.search(r"(?:^|_)uv(?:_|$)", lowered)
-        if context == "uv"
-        else context in lowered
+        re.search(r"(?:^|_)uv(?:_|$)", lowered) if context == "uv" else context in lowered
         for context in SAFE_LAUNCH_CONTEXTS
     )
 
@@ -1134,7 +1155,9 @@ def _rust_call_findings_for_source(path: Path, source: str) -> list[dict[str, An
         if _rust_context_is_safe(function):
             continue
         line = stripped.count("\n", 0, match.start()) + 1
-        findings.append(_finding(path, line, "launcher_env", symbol=literal or function, function=function))
+        findings.append(
+            _finding(path, line, "launcher_env", symbol=literal or function, function=function)
+        )
     for match in command_env_pattern.finditer(stripped):
         function = _rust_function_at(stripped, match.start())
         if not _rust_is_shell_root(function):
@@ -1204,24 +1227,13 @@ def _launcher_safety_findings() -> list[dict[str, Any]]:
             }:
                 continue
             module = str(entry.get("module") or "").strip()
-            candidate = (
-                RUNTIME.joinpath(*module.split(".")).with_suffix(".py")
-                if module
-                else None
-            )
-            actual = (
-                _sha256(candidate)
-                if candidate is not None and candidate.is_file()
-                else ""
-            )
+            candidate = RUNTIME.joinpath(*module.split(".")).with_suffix(".py") if module else None
+            actual = _sha256(candidate) if candidate is not None and candidate.is_file() else ""
             declared = str(entry.get("artifact_hash") or "")
             if (
                 not actual
                 or declared != actual
-                or (
-                    v4_implementation_digests
-                    and actual not in v4_implementation_digests
-                )
+                or (v4_implementation_digests and actual not in v4_implementation_digests)
             ):
                 findings.append(
                     _finding(
@@ -1236,27 +1248,20 @@ def _launcher_safety_findings() -> list[dict[str, Any]]:
                 )
         provenance = value.get("provenance")
         ecosystem = _load_json(pack_dir / "ecosystem.json")
-        expected_content_hash = _expected_v3_content_hash(
-            pack_dir, value, ecosystem
-        )
+        expected_content_hash = _expected_v3_content_hash(pack_dir, value, ecosystem)
         expected_build_identity = _expected_v4_build_identity(v4)
         if not isinstance(provenance, Mapping):
             findings.append(_finding(path, 1, "unverified_v3_provenance"))
             continue
         ecosystem_provenance = (
-            ecosystem.get("provenance")
-            if isinstance(ecosystem, Mapping)
-            else None
+            ecosystem.get("provenance") if isinstance(ecosystem, Mapping) else None
         )
         if (
             str(provenance.get("content_hash") or "") != expected_content_hash
-            or str(provenance.get("build_identity") or "")
-            != expected_build_identity
+            or str(provenance.get("build_identity") or "") != expected_build_identity
             or not isinstance(ecosystem_provenance, Mapping)
-            or str(ecosystem_provenance.get("content_hash") or "")
-            != expected_content_hash
-            or str(ecosystem_provenance.get("build_identity") or "")
-            != expected_build_identity
+            or str(ecosystem_provenance.get("content_hash") or "") != expected_content_hash
+            or str(ecosystem_provenance.get("build_identity") or "") != expected_build_identity
         ):
             findings.append(
                 _finding(
@@ -1289,14 +1294,8 @@ def _expected_v3_content_hash(
 ) -> str:
     """Resolve the actual content hash represented by one v3 projection."""
     metadata = ecosystem.get("metadata") if isinstance(ecosystem, Mapping) else None
-    integrity = (
-        metadata.get("integrity") if isinstance(metadata, Mapping) else None
-    )
-    relative = (
-        integrity.get("artifact_manifest")
-        if isinstance(integrity, Mapping)
-        else None
-    )
+    integrity = metadata.get("integrity") if isinstance(metadata, Mapping) else None
+    relative = integrity.get("artifact_manifest") if isinstance(integrity, Mapping) else None
     if relative:
         index_path = (pack_dir / str(relative)).resolve()
         if index_path.is_file():
@@ -1402,10 +1401,7 @@ def _offline_projection_findings() -> list[dict[str, Any]]:
     authorities = catalog.get("packs", {}) if isinstance(catalog, Mapping) else {}
     source_sets = _authority_source_sets()
     for pack_dir in _production_pack_dirs():
-        if (
-            pack_dir.name in source_sets["v4_only_ids"]
-            or pack_dir.name not in authorities
-        ):
+        if pack_dir.name in source_sets["v4_only_ids"] or pack_dir.name not in authorities:
             continue
         legacy_path = pack_dir / "ecosystem.json"
         value = _load_json(legacy_path)
@@ -1419,50 +1415,36 @@ def _offline_projection_findings() -> list[dict[str, Any]]:
             "manifest_authority": "v4-authoritative",
             "projection_owner": "scripts/migrate_manifest_authority.py",
         }
-        if authority != "v4-authoritative" or not isinstance(metadata, Mapping) or any(
-            metadata.get(key) != expected_value
-            for key, expected_value in expected.items()
+        if (
+            authority != "v4-authoritative"
+            or not isinstance(metadata, Mapping)
+            or any(metadata.get(key) != expected_value for key, expected_value in expected.items())
         ):
-            findings.append(
-                _finding(legacy_path, 1, "projection_marker_or_owner_missing")
-            )
+            findings.append(_finding(legacy_path, 1, "projection_marker_or_owner_missing"))
             continue
         if (
             not isinstance(generated, Mapping)
             or generated.get("source") != "pack.v4.json"
             or generated.get("generator") != V4_PROJECTION_GENERATOR
         ):
-            findings.append(
-                _finding(legacy_path, 1, "projection_source_marker_missing")
-            )
+            findings.append(_finding(legacy_path, 1, "projection_source_marker_missing"))
         v4 = _load_json(pack_dir / "pack.v4.json")
         source_identity = (
-            v4.get("integrity", {}).get("source_identity")
-            if isinstance(v4, Mapping)
-            else None
+            v4.get("integrity", {}).get("source_identity") if isinstance(v4, Mapping) else None
         )
         if generated.get("source_content_hash") != source_identity:
-            findings.append(
-                _finding(legacy_path, 1, "projection_source_identity_mismatch")
-            )
+            findings.append(_finding(legacy_path, 1, "projection_source_identity_mismatch"))
         v4 = _load_json(pack_dir / "pack.v4.json")
         integrity = v4.get("integrity") if isinstance(v4, Mapping) else None
-        canonical_v4 = (
-            metadata.get("canonical_v4")
-            if isinstance(metadata, Mapping)
-            else None
-        )
+        canonical_v4 = metadata.get("canonical_v4") if isinstance(metadata, Mapping) else None
         if not isinstance(integrity, Mapping) or not isinstance(canonical_v4, Mapping):
-            findings.append(
-                _finding(legacy_path, 1, "canonical_v4_projection_missing")
-            )
+            findings.append(_finding(legacy_path, 1, "canonical_v4_projection_missing"))
             continue
         pack = v4.get("pack") if isinstance(v4, Mapping) else None
         if (
             canonical_v4.get("artifact") != "pack.v4.json"
             or canonical_v4.get("generator") != V4_PROJECTION_GENERATOR
-            or canonical_v4.get("source_identity")
-            != integrity.get("source_identity")
+            or canonical_v4.get("source_identity") != integrity.get("source_identity")
             or canonical_v4.get("artifact_digest")
             != (pack.get("artifact_digest") if isinstance(pack, Mapping) else None)
         ):
@@ -1497,14 +1479,16 @@ def _audit_snapshot() -> dict[str, Any]:
     double_authority = _double_authority_findings()
     launcher = _launcher_safety_findings()
     projection = _offline_projection_findings()
-    head_sha = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
-    ).strip()
+    head_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     source_sets = _authority_source_sets()
     gates = {
         "artifact_contracts": artifact_findings,
         "authority_resolved_plan_scope": authority_findings,
-        "legacy_registry_and_installed_lookup": legacy_findings + bypass_findings + old_composition + fallback_findings + projection_calls,
+        "legacy_registry_and_installed_lookup": legacy_findings
+        + bypass_findings
+        + old_composition
+        + fallback_findings
+        + projection_calls,
         "double_authority": double_authority,
         "launcher_safety": launcher,
         "offline_projection": projection,
@@ -1517,7 +1501,10 @@ def _audit_snapshot() -> dict[str, Any]:
             "clean": all(not findings for findings in gates.values()),
             "expected_green": {name: 0 for name in gates},
         },
-        "gates": {name: {"status": "GREEN" if not findings else "RED", "findings": findings} for name, findings in gates.items()},
+        "gates": {
+            name: {"status": "GREEN" if not findings else "RED", "findings": findings}
+            for name, findings in gates.items()
+        },
         "pack_inventory": {
             "production_pack_directories": len(pack_dirs),
             "expected_production_pack_directories": EXPECTED_PRODUCTION_PACK_COUNT,
@@ -1527,9 +1514,7 @@ def _audit_snapshot() -> dict[str, Any]:
             "v4_profile_artifacts": [_relative(path) for path in _v4_profile_artifacts()],
             "authority_counts": dict(sorted(_manifest_authority_counts()[0].items())),
             "authority_records": _manifest_authority_counts()[1],
-            "authority_source_sets": {
-                name: sorted(values) for name, values in source_sets.items()
-            },
+            "authority_source_sets": {name: sorted(values) for name, values in source_sets.items()},
             "canonical_source_ids": sorted(
                 source_sets["manifest_ids"] | source_sets["v4_only_ids"]
             ),
@@ -1544,10 +1529,10 @@ def _assert_zero(name: str, findings: list[dict[str, Any]]) -> None:
 
 
 def test_production_v4_pack_and_profile_artifacts_are_complete() -> None:
-    """The exact direct artifact set is 141 Packs x 4 compiler inputs."""
+    """The exact direct artifact set is 142 Packs x 4 compiler inputs."""
     assert len(_production_pack_dirs()) == EXPECTED_PRODUCTION_PACK_COUNT
     assert len(_v4_pack_artifacts()) == EXPECTED_PRODUCTION_PACK_COUNT
-    assert len(_v4_pack_artifacts()) * len(PACK_ARTIFACTS) == 564
+    assert len(_v4_pack_artifacts()) * len(PACK_ARTIFACTS) == 568
     _assert_zero("v4 artifact contracts", _v4_artifact_findings())
 
 
@@ -1601,7 +1586,7 @@ def test_pack_api_has_no_hardcoded_legacy_handler_reachability() -> None:
 def test_fresh_home_legacy_api_probes_are_retired_without_manager_imports() -> None:
     """A clean local server yields only typed retirement for legacy probes."""
 
-    script = r'''
+    script = r"""
 import http.client
 import json
 import os
@@ -1682,7 +1667,7 @@ print(
         }
     )
 )
-'''
+"""
     completed = subprocess.run(
         [sys.executable, "-c", script],
         cwd=RUNTIME,
@@ -1716,9 +1701,7 @@ print(
             [],
         ],
     ]
-    assert evidence["observed"] == expected_cycle + [
-        [2, *item[1:]] for item in expected_cycle
-    ]
+    assert evidence["observed"] == expected_cycle + [[2, *item[1:]] for item in expected_cycle]
 
 
 def test_double_authority_is_zero_by_production_reachability() -> None:
@@ -1762,9 +1745,7 @@ fn launchservices() {
     std::process::Command::new("lsregister").status();
 }
 """
-    fixture_findings = _rust_call_findings_for_source(
-        Path("launcher_fixture.rs"), launcher_fixture
-    )
+    fixture_findings = _rust_call_findings_for_source(Path("launcher_fixture.rs"), launcher_fixture)
     assert [item["function"] for item in fixture_findings] == [
         "launch_shell",
         "launch_shell",
@@ -1775,9 +1756,7 @@ fn launchservices() {
         presentation_path, presentation_path.read_text(encoding="utf-8")
     )
     assert not [
-        item
-        for item in presentation_findings
-        if item["function"] == "launch_verified_artifact"
+        item for item in presentation_findings if item["function"] == "launch_verified_artifact"
     ]
     bad_launch = _rust_call_findings_for_source(
         Path("bad_launch_fixture.rs"),
@@ -1816,5 +1795,5 @@ def test_current_sha_green_evidence_reports_no_findings() -> None:
     assert report["head_sha"] == expected_head
     assert report["gate"]["status"] == "GREEN"
     assert report["gate"]["clean"] is True
-    assert report["pack_inventory"]["production_pack_directories"] == 141
-    assert report["pack_inventory"]["v4_artifact_files"] == 564
+    assert report["pack_inventory"]["production_pack_directories"] == 142
+    assert report["pack_inventory"]["v4_artifact_files"] == 568

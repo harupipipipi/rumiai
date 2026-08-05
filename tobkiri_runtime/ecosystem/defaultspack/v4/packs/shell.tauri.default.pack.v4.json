@@ -7,6 +7,13 @@
         "present"
       ],
       "revision_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    {
+      "contract_id": "app.shell.pack-control.v1",
+      "operations": [
+        "request"
+      ],
+      "revision_digest": "sha256:3434343434343434343434343434343434343434343434343434343434343434"
     }
   ],
   "functions": [
@@ -17,6 +24,16 @@
       "isolation": "dedicated_process",
       "operations": [
         "present"
+      ],
+      "role": "brokered"
+    },
+    {
+      "contract_revision_digest": "sha256:3434343434343434343434343434343434343434343434343434343434343434",
+      "id": "shell.tauri.pack-control",
+      "implementation_digest": "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "isolation": "dedicated_process",
+      "operations": [
+        "request"
       ],
       "role": "brokered"
     }
@@ -68,6 +85,14 @@
       "provider_id": "shell.tauri.default",
       "source_kind": "canonical_v4_contract",
       "effect_ceiling": []
+    },
+    {
+      "operation_id": "request",
+      "owner": "shell.tauri.default",
+      "contract_reference": "app.shell.pack-control.v1",
+      "provider_id": "shell.tauri.pack-control",
+      "source_kind": "canonical_v4_contract",
+      "effect_ceiling": []
     }
   ],
   "provider_catalog": [
@@ -78,11 +103,19 @@
       "operations": [
         "present"
       ]
+    },
+    {
+      "provider_id": "shell.tauri.pack-control",
+      "owner": "shell.tauri.default",
+      "contract_reference": "app.shell.pack-control.v1",
+      "operations": [
+        "request"
+      ]
     }
   ],
   "integrity": {
-    "source_identity": "sha256:ac867eae094924a502d227d9c0b84e5a1ccd6f1271be2314b92e4710afb699d6",
+    "source_identity": "sha256:42877474f6c9213787fed3ccf23a0602fe6e42acc617841a224e43c157f233bf",
     "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-    "contract_catalog_digest": "sha256:ba36ee3e7bb8d0a8cce3ceed290a5a68fd604bf7edb3be684bd4da0ed889b135"
+    "contract_catalog_digest": "sha256:f51dbfa1120d6407bc86a1cc888af22f515a39a55218f0d8efc9eb0eb786d335"
   }
 }

@@ -25,6 +25,10 @@ AUTHORITY_BINDINGS = {
         "authority-ref:conversation.default"
     ),
     (
+        "shell.tauri.pack-control|tobkiri.host.pack-control|"
+        "tobkiri.host.pack-control.v4|catalog.read"
+    ): "authority-ref:pack.catalog.default",
+    (
         "defaultspack.conversation|rumi_file_inspect_pack.file-inspect.service|"
         "tobkiri.service.file.inspect.v1|rumi_file_inspect_pack.file-inspect"
     ): "authority-ref:file.inspect.default",
@@ -36,10 +40,7 @@ def _catalog() -> BundledCatalog:
 
 
 def _approved(catalog: BundledCatalog) -> set[str]:
-    return {
-        str(manifest["pack"]["artifact_digest"])
-        for manifest in catalog.packs.values()
-    }
+    return {str(manifest["pack"]["artifact_digest"]) for manifest in catalog.packs.values()}
 
 
 def _resolve(catalog: BundledCatalog | None = None):
@@ -75,13 +76,12 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
         "dev.tauri.toolchain.default",
         "shell.cli.default",
         "shell.tauri.default",
+        "tobkiri_host_pack_control",
     }
     assert resolved.profile["profile_api_version"] == "io.tobkiri.profile.v4"
     assert resolved.profile["state"] == "resolved"
     assert resolved.profile["shell"]["provider_id"] == "shell.tauri.default"
-    assert "shell.cli.default" not in {
-        item["identity"] for item in resolved.lock["effective_set"]
-    }
+    assert "shell.cli.default" not in {item["identity"] for item in resolved.lock["effective_set"]}
     assert resolved.profile["profile_authority_snapshot_digest"] == SNAPSHOT_DIGEST
     assert {item["pack_id"] for item in resolved.profile["packs"]} == {
         "defaultspack",
@@ -89,16 +89,16 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
         "rumi_host_authority_bridge_pack",
         "rumi_workspace_mount_pack",
         "runtime.tauri.application.default",
+        "tobkiri_host_pack_control",
     }
-    roles = {
-        item["pack_id"]: item["role"] for item in resolved.profile["packs"]
-    }
+    roles = {item["pack_id"]: item["role"] for item in resolved.profile["packs"]}
     assert roles["runtime.tauri.application.default"] == "application"
     assert "dev.tauri.toolchain.default" not in {
         item["identity"] for item in resolved.lock["effective_set"]
     }
     assert [item["function_principal"]["function_id"] for item in resolved.plan["bindings"]] == [
         "defaultspack.conversation",
+        "tobkiri.host.pack-control",
         "rumi_file_inspect_pack.file-inspect.service",
     ]
     assert resolved.lock["plan_digest"] == resolved.plan["plan_digest"]
@@ -191,9 +191,7 @@ def test_requested_pack_dependency_and_authority_references_are_mandatory() -> N
     catalog = _catalog()
     profile = copy.deepcopy(catalog.profiles["defaults"])
     profile["packs"] = [
-        item
-        for item in profile["packs"]
-        if item["pack_id"] != "rumi_file_inspect_pack"
+        item for item in profile["packs"] if item["pack_id"] != "rumi_file_inspect_pack"
     ]
     missing_dependency = replace(catalog, profiles={"defaults": profile})
     with pytest.raises(ProfileResolutionDenied, match="must resolve exactly once; found 0"):
@@ -262,10 +260,7 @@ def test_new_activation_atomically_retires_the_previous_authority(
     active = authority.active_activation_reservation(second["activation_id"])
     assert active is not None
     assert active["state"] == "active"
-    assert (
-        store.load_active_snapshot().activation["activation_id"]
-        == second["activation_id"]
-    )
+    assert store.load_active_snapshot().activation["activation_id"] == second["activation_id"]
 
 
 def test_workspace_traversal_symlink_escape_and_cross_workspace_restart_deny(
@@ -379,7 +374,6 @@ def test_activation_candidate_aborts_on_epoch_revoke_and_token_is_not_reused(
     reservations = [
         event["payload"]
         for event in authority.audit_events()
-        if event["event_type"] == "activation"
-        and event["event_state"] == "prepared"
+        if event["event_type"] == "activation" and event["event_state"] == "prepared"
     ]
     assert reservations[0]["fencing_token"] == 1

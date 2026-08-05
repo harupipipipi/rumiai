@@ -164,40 +164,7 @@ class CapturedPackControlSession:
         self._candidates.clear()
 
     def _catalog_payload(self) -> dict[str, Any]:
-        installed = _read_control_state(self._binding.profile_id)
-        active = set(_active_profile()[1].get("packs") or [])
-        packs = []
-        for pack_id, record in sorted(load_pack_catalog().items()):
-            is_installed = pack_id in installed or pack_id in active
-            if pack_id in installed:
-                _require_install_binding(
-                    pack_id,
-                    record,
-                    installed[pack_id],
-                    self._binding,
-                )
-            approved, reason = _approval_status(pack_id, record, self._binding)
-            status = "approved" if approved else "installed"
-            packs.append(
-                {
-                    "pack_id": pack_id,
-                    "name": str(record.get("display_name") or pack_id),
-                    "version": str(record.get("version") or "0.0.0"),
-                    "description": str(record.get("description") or ""),
-                    "is_core": record.get("kind") == "base",
-                    "installed": is_installed,
-                    "enabled": pack_id in active and approved,
-                    "approved": bool(approved),
-                    "approval_status": status,
-                    "approval_reason": reason,
-                    "hash_valid": True if approved else None,
-                    "critical_changed": reason == "hash_mismatch",
-                    "approval_issues": [] if approved else [reason or "approval_required"],
-                    "artifact_digest": _record_digest(record),
-                    **self._binding_payload(),
-                }
-            )
-        return {"packs": packs, "count": len(packs), **self._binding_payload()}
+        return _catalog_payload(self._binding)
 
     def _install(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         pack_id, record, root = _pack(arguments)
@@ -210,9 +177,7 @@ class CapturedPackControlSession:
         _write_control_state(self._binding.profile_id, state)
         return {"pack_id": pack_id, "installed": True, **self._binding_payload()}
 
-    def _approval_candidate(
-        self, arguments: Mapping[str, Any], session_id: str
-    ) -> dict[str, Any]:
+    def _approval_candidate(self, arguments: Mapping[str, Any], session_id: str) -> dict[str, Any]:
         pack_id = _installed_pack(arguments, self._binding)
         snapshot_digest = _pack_snapshot(pack_id, resolve_pack_root(pack_id))
         candidate_id = secrets.token_urlsafe(32)
@@ -260,9 +225,7 @@ class CapturedPackControlSession:
             **self._binding_payload(),
         }
 
-    def _set_enabled(
-        self, arguments: Mapping[str, Any], enabled: bool
-    ) -> dict[str, Any]:
+    def _set_enabled(self, arguments: Mapping[str, Any], enabled: bool) -> dict[str, Any]:
         pack_id = _installed_pack(arguments, self._binding)
         record = load_pack_catalog()[pack_id]
         approved, reason = _approval_status(pack_id, record, self._binding)
@@ -307,6 +270,80 @@ def capture_pack_control_session() -> CapturedPackControlSession:
     return CapturedPackControlSession.capture()
 
 
+class CapturedPackCatalogReader:
+    """Finite read-only Pack catalog provider bound to one active Profile."""
+
+    def __init__(self, binding: _Binding) -> None:
+        self._binding = binding
+
+    @classmethod
+    def capture(cls) -> "CapturedPackCatalogReader":
+        """Capture the current committed Profile and catalog revisions."""
+
+        return cls(_capture_binding())
+
+    @property
+    def binding(self) -> _Binding:
+        """Return the immutable captured binding for Host authority wiring."""
+
+        return self._binding
+
+    def read(self) -> dict[str, Any]:
+        """Read the catalog only while the committed snapshot remains current."""
+
+        if _capture_binding() != self._binding:
+            raise PackControlDenied("captured Profile session is stale")
+        return _catalog_payload(self._binding)
+
+
+def capture_pack_catalog_reader() -> CapturedPackCatalogReader:
+    """Capture the finite catalog Provider used by production dispatch."""
+
+    return CapturedPackCatalogReader.capture()
+
+
+def _binding_payload(binding: _Binding) -> dict[str, str]:
+    return {
+        "profile_id": binding.profile_id,
+        "workspace_id": binding.workspace_id,
+        "profile_revision": binding.profile_revision,
+        "plan_digest": binding.plan_digest,
+        "catalog_revision": binding.catalog_revision,
+    }
+
+
+def _catalog_payload(binding: _Binding) -> dict[str, Any]:
+    installed = _read_control_state(binding.profile_id)
+    active = set(_active_profile()[1].get("packs") or [])
+    packs = []
+    for pack_id, record in sorted(load_pack_catalog().items()):
+        is_installed = pack_id in installed or pack_id in active
+        if pack_id in installed:
+            _require_install_binding(pack_id, record, installed[pack_id], binding)
+        approved, reason = _approval_status(pack_id, record, binding)
+        status = "approved" if approved else "installed"
+        packs.append(
+            {
+                "pack_id": pack_id,
+                "name": str(record.get("display_name") or pack_id),
+                "version": str(record.get("version") or "0.0.0"),
+                "description": str(record.get("description") or ""),
+                "is_core": record.get("kind") == "base",
+                "installed": is_installed,
+                "enabled": pack_id in active and approved,
+                "approved": bool(approved),
+                "approval_status": status,
+                "approval_reason": reason,
+                "hash_valid": True if approved else None,
+                "critical_changed": reason == "hash_mismatch",
+                "approval_issues": [] if approved else [reason or "approval_required"],
+                "artifact_digest": _record_digest(record),
+                **_binding_payload(binding),
+            }
+        )
+    return {"packs": packs, "count": len(packs), **_binding_payload(binding)}
+
+
 def _capture_binding() -> _Binding:
     state, profile = _active_profile()
     resolved_profile = state["resolved_profile"]
@@ -337,6 +374,7 @@ def _active_profile() -> tuple[dict[str, Any], dict[str, Any]]:
     except Exception as error:
         raise PackControlDenied("active v4 Profile session is missing or invalid") from error
     resolved = active.resolved.profile
+    installable_pack_ids = frozenset(load_pack_catalog())
     profile = {
         "profile_id": resolved["profile_id"],
         "workspace_id": resolved["profile_id"],
@@ -344,7 +382,7 @@ def _active_profile() -> tuple[dict[str, Any], dict[str, Any]]:
         "packs": [
             str(item["pack_id"])
             for item in resolved["packs"]
-            if item.get("role") != "application"
+            if item.get("role") != "application" and str(item["pack_id"]) in installable_pack_ids
         ],
     }
     _safe_identity(profile.get("profile_id"), "Profile ID")
@@ -361,9 +399,7 @@ def _active_profile() -> tuple[dict[str, Any], dict[str, Any]]:
 
 def _save_active_profile(state: dict[str, Any], profile: dict[str, Any]) -> None:
     del state, profile
-    raise PackControlDenied(
-        "active Profile is immutable; submit a finite v4 Profile transaction"
-    )
+    raise PackControlDenied("active Profile is immutable; submit a finite v4 Profile transaction")
 
 
 def _control_state_path(profile_id: str) -> Path:
@@ -404,10 +440,14 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.parent.is_symlink() or path.is_symlink():
         raise PackControlDenied("Pack control persistence boundary is symlinked")
-    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    descriptor, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(dict(value), handle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            json.dump(
+                dict(value), handle, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
@@ -449,34 +489,22 @@ def _require_install_binding(
         entry.get("artifact_digest") != _record_digest(record)
         or entry.get("catalog_revision") != binding.catalog_revision
     ):
-        raise PackControlDenied(
-            f"installed Pack binding is stale or tampered: {pack_id}"
-        )
+        raise PackControlDenied(f"installed Pack binding is stale or tampered: {pack_id}")
 
 
 def _approval_path(profile_id: str, pack_id: str) -> Path:
     _safe_identity(profile_id, "Profile ID")
     _safe_identity(pack_id, "Pack ID")
-    return (
-        Path(USER_DATA_DIR)
-        / "pack_control"
-        / "approvals"
-        / profile_id
-        / f"{pack_id}.json"
-    )
+    return Path(USER_DATA_DIR) / "pack_control" / "approvals" / profile_id / f"{pack_id}.json"
 
 
 def _authority_key() -> bytes:
     from .hmac_key_manager import generate_or_load_signing_key
 
-    return generate_or_load_signing_key(
-        Path(USER_DATA_DIR) / "pack_control" / ".authority_key"
-    )
+    return generate_or_load_signing_key(Path(USER_DATA_DIR) / "pack_control" / ".authority_key")
 
 
-def _persist_approval(
-    pack_id: str, content_digest: str, binding: _Binding
-) -> None:
+def _persist_approval(pack_id: str, content_digest: str, binding: _Binding) -> None:
     record = load_pack_catalog()[pack_id]
     payload = {
         "version": "io.tobkiri.pack-approval.v4",
@@ -622,9 +650,7 @@ def _required(value: object, label: str) -> str:
 
 def _safe_identity(value: object, label: str) -> str:
     normalized = _required(value, label)
-    allowed = frozenset(
-        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
-    )
+    allowed = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
     if (
         len(normalized) > 128
         or normalized in {".", ".."}
@@ -651,9 +677,11 @@ def _digest(value: object) -> str:
 
 
 __all__ = [
+    "CapturedPackCatalogReader",
     "CapturedPackControlSession",
     "PACK_CONTROL_CONTRACT",
     "PACK_CONTROL_OPERATIONS",
     "PackControlDenied",
+    "capture_pack_catalog_reader",
     "capture_pack_control_session",
 ]

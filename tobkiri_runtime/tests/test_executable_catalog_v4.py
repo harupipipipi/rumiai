@@ -15,23 +15,13 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_all_canonical_executable_catalogs_compile_without_exclusion() -> None:
-    pack_roots = sorted(
-        path.parent for path in (ROOT / "ecosystem").glob("*/pack.v4.json")
-    )
+    pack_roots = sorted(path.parent for path in (ROOT / "ecosystem").glob("*/pack.v4.json"))
     compiled = [compile_pack_root(path) for path in pack_roots]
-    assert len(compiled) == 141
-    assert {item.artifact.pack_id for item in compiled} == {
-        path.name for path in pack_roots
-    }
+    assert len(compiled) == 142
+    assert {item.artifact.pack_id for item in compiled} == {path.name for path in pack_roots}
 
-    conversation = next(
-        item for item in compiled if item.artifact.pack_id == "defaultspack"
-    )
-    inspect = next(
-        item
-        for item in compiled
-        if item.artifact.pack_id == "rumi_file_inspect_pack"
-    )
+    conversation = next(item for item in compiled if item.artifact.pack_id == "defaultspack")
+    inspect = next(item for item in compiled if item.artifact.pack_id == "rumi_file_inspect_pack")
     selected_operations = {
         (operation.contract_id, operation.operation_id)
         for artifact in (conversation.artifact, inspect.artifact)
@@ -122,9 +112,7 @@ def test_compiler_rejects_missing_stale_duplicate_and_unqualified_catalogs(
     shutil.copytree(source, copied)
     path = copied / "executables.v4.json"
     catalog = json.loads(path.read_text(encoding="utf-8"))
-    catalog["variants"][0]["operations"].append(
-        catalog["variants"][0]["operations"][0]
-    )
+    catalog["variants"][0]["operations"].append(catalog["variants"][0]["operations"][0])
     unsigned = {key: value for key, value in catalog.items() if key != "catalog_digest"}
     catalog["catalog_digest"] = canonical_digest(unsigned)
     path.write_text(json.dumps(catalog), encoding="utf-8")

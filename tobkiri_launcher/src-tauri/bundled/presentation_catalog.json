@@ -37,6 +37,12 @@
   ],
   "contract_revisions": [
     {
+      "contract_id": "app.shell.pack-control.v1",
+      "digest": "sha256:3434343434343434343434343434343434343434343434343434343434343434",
+      "revision": "1.0.0",
+      "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/shell.tauri.default.pack.v4.json"
+    },
+    {
       "contract_id": "app.shell.v1",
       "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
       "revision": "1.0.0",
@@ -61,6 +67,12 @@
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi-workspace-mount.pack.v4.json"
     },
     {
+      "contract_id": "tobkiri.host.pack-control.v4",
+      "digest": "sha256:c11130f0c00321def68baa9933dba47b1d742ade627dea8dbd97c246f67ee8d9",
+      "revision": "4.0.0",
+      "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/tobkiri-host-pack-control.pack.v4.json"
+    },
+    {
       "contract_id": "tobkiri.resource.workspace.v1",
       "digest": "sha256:71356e27c97eb72918a59d95fa91b06efaf3b759842080f5a59e91272e369b1a",
       "revision": "1.0.0",
@@ -79,7 +91,7 @@
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi-host-authority-bridge.pack.v4.json"
     }
   ],
-  "default_profile_digest": "sha256:5145adb8f5368b18a041aa212cf02a7532a23dbe83e22727cf19236e3f13a0d1",
+  "default_profile_digest": "sha256:58a069f4fb9da0cc7ad5f5f56e29e5694aec610d9e726ad9a446ce49d50188e2",
   "default_profile_id": "defaults",
   "default_profile_source": "tobkiri_runtime/ecosystem/defaultspack/v4/defaults.profile.v4.json",
   "default_selection": {
@@ -211,6 +223,7 @@
     "rumi_host_authority_bridge_pack": "sha256:148a26429d5125a9757677f8ff618394377b48cbcd15a8d8cefc37f6bce79529",
     "rumi_workspace_mount_pack": "sha256:82d4a833716dd809894612b0172d4aa73cc25f0bb4e690aa0813de87189caf51",
     "runtime.tauri.application.default": "sha256:b69b9a548cb3b606c2ab908caa5422a5d4886fa8b88abd7e8cce7ca2b7be8e6a",
-    "shell.tauri.default": "sha256:afdaca4071f2d3697ee90f90cd0ee09eb99d46692eb01a5ec7c6a7ef94c00855"
+    "shell.tauri.default": "sha256:569c65ced37700ceebab93957adb504fc0273714c114f475604c13446a1ae624",
+    "tobkiri_host_pack_control": "sha256:2bb1b41472f64ae016c9b10a729729fd0bafa3628eec2c33052db477503d6732"
   }
 }

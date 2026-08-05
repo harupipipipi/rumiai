@@ -36,9 +36,7 @@ def test_every_repository_pack_has_one_explicit_authority() -> None:
         sorted(
             path.name
             for path in ECOSYSTEM.iterdir()
-            if path.is_dir()
-            and path.name != "setup_pack"
-            and not path.name.startswith(".")
+            if path.is_dir() and path.name != "setup_pack" and not path.name.startswith(".")
         )
     )
 
@@ -46,7 +44,7 @@ def test_every_repository_pack_has_one_explicit_authority() -> None:
         direct_pack_ids,
         require_complete_catalog=True,
     )
-    assert len(catalog) == 141
+    assert len(catalog) == 142
     assert set(catalog.values()) == {"v4-authoritative"}
     assert catalog["defaults"] == "v4-authoritative"
     assert catalog["defaultspack"] == "v4-authoritative"
@@ -157,23 +155,30 @@ def test_v3_artifact_sidecar_generator_refreshes_hash_without_projection_rebind(
         encoding="utf-8",
     )
 
-    assert _normalize_artifact_index(
-        pack_root,
-        {},
-        check=False,
-        include_unreferenced_sidecar=True,
-    ) is None
+    assert (
+        _normalize_artifact_index(
+            pack_root,
+            {},
+            check=False,
+            include_unreferenced_sidecar=True,
+        )
+        is None
+    )
     first = artifact_index.read_bytes()
-    assert str(json.loads(first)["artifacts"][0]["sha256"]) == hashlib.sha256(
-        source.read_bytes()
-    ).hexdigest()
+    assert (
+        str(json.loads(first)["artifacts"][0]["sha256"])
+        == hashlib.sha256(source.read_bytes()).hexdigest()
+    )
 
-    assert _normalize_artifact_index(
-        pack_root,
-        {},
-        check=True,
-        include_unreferenced_sidecar=True,
-    ) is None
+    assert (
+        _normalize_artifact_index(
+            pack_root,
+            {},
+            check=True,
+            include_unreferenced_sidecar=True,
+        )
+        is None
+    )
     assert artifact_index.read_bytes() == first
 
 
@@ -200,11 +205,7 @@ def test_referenced_artifact_sidecar_persists_refreshed_hash(
         ),
         encoding="utf-8",
     )
-    ecosystem = {
-        "metadata": {
-            "integrity": {"artifact_manifest": "artifact-manifest.json"}
-        }
-    }
+    ecosystem = {"metadata": {"integrity": {"artifact_manifest": "artifact-manifest.json"}}}
 
     index_hash = _normalize_artifact_index(
         pack_root,
@@ -215,9 +216,7 @@ def test_referenced_artifact_sidecar_persists_refreshed_hash(
     expected = "sha256:" + hashlib.sha256(source.read_bytes()).hexdigest()
 
     assert payload["artifacts"][0]["sha256"] == expected
-    assert index_hash == "sha256:" + hashlib.sha256(
-        artifact_index.read_bytes()
-    ).hexdigest()
+    assert index_hash == "sha256:" + hashlib.sha256(artifact_index.read_bytes()).hexdigest()
     assert _normalize_artifact_index(pack_root, ecosystem, check=True) == index_hash
 
 
@@ -261,10 +260,7 @@ def test_invalid_v3_manifest_is_not_available_or_effective(tmp_path: Path) -> No
 
     assert plan.available_pack_ids == ()
     assert plan.effective_pack_set == ()
-    assert any(
-        item.code == "offline_projection_not_authority"
-        for item in plan.diagnostics
-    )
+    assert any(item.code == "offline_projection_not_authority" for item in plan.diagnostics)
 
 
 def test_removed_binding_authorities_are_not_importable() -> None:
