@@ -133,7 +133,12 @@ def compile_pack_root(pack_root: Path) -> CompiledPack:
                     idempotency=operation["idempotency"],
                 )
             )
-            route_metadata[(operation["contract_id"], operation["operation_id"])] = {
+            route_key = (operation["contract_id"], operation["operation_id"])
+            if route_key in route_metadata:
+                raise InvalidArtifactError(
+                    "executable Operation mapping is duplicated or unqualified"
+                )
+            route_metadata[route_key] = {
                 "variant_id": variant["variant_id"],
                 "materialization_mode": variant["materialization_mode"],
                 "execution_domain_profile": variant["execution_domain_profile"],

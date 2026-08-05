@@ -304,10 +304,10 @@ def capture_pack_control_session() -> CapturedPackControlSession:
 
 
 def _capture_binding() -> _Binding:
-    _state, profile = _active_profile()
-    catalog_path = Path(__file__).resolve().parents[1] / "schemas" / "pack_v4_catalog.v1.json"
-    catalog_revision = "sha256:" + hashlib.sha256(catalog_path.read_bytes()).hexdigest()
-    profile_revision = _digest(profile)
+    state, profile = _active_profile()
+    resolved_profile = state["resolved_profile"]
+    catalog_revision = str(resolved_profile["catalog_revision"])
+    profile_revision = "sha256:" + _digest(resolved_profile)
     catalog = load_pack_catalog()
     selected = tuple(str(item or "").strip() for item in profile.get("packs") or [])
     if not selected or len(selected) != len(set(selected)):
@@ -316,84 +316,46 @@ def _capture_binding() -> _Binding:
         raise PackControlDenied("active v4 Profile contains an unknown Pack")
     for pack_id in selected:
         resolve_pack_root(pack_id)
-    preliminary = _Binding(
-        profile_id=str(profile["profile_id"]),
-        workspace_id=str(profile.get("workspace_id") or profile["profile_id"]),
-        profile_revision=profile_revision,
-        plan_digest="",
-        catalog_revision=catalog_revision,
-    )
-    effective = tuple(
-        pack_id
-        for pack_id in selected
-        if _approval_status(pack_id, catalog[pack_id], preliminary)[0]
-    )
-    if str(profile.get("base_pack") or "") not in effective:
-        raise PackControlDenied("active Base Pack is absent from the effective set")
-    plan_digest = "sha256:" + _digest(
-        {
-            "profile_id": profile["profile_id"],
-            "workspace_id": profile.get("workspace_id") or profile["profile_id"],
-            "profile_revision": profile_revision,
-            "catalog_revision": catalog_revision,
-            "effective_set": effective,
-        }
-    )
     return _Binding(
         profile_id=str(profile["profile_id"]),
         workspace_id=str(profile.get("workspace_id") or profile["profile_id"]),
         profile_revision=profile_revision,
-        plan_digest=plan_digest,
+        plan_digest=str(state["resolved_plan"]["plan_digest"]),
         catalog_revision=catalog_revision,
     )
 
 
 def _active_profile() -> tuple[dict[str, Any], dict[str, Any]]:
-    path = Path(USER_DATA_DIR) / "settings" / "startup_profiles.json"
-    if path.is_symlink() or not path.is_file():
-        raise PackControlDenied("active v4 Profile session is missing")
     try:
-        state = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise PackControlDenied("active v4 Profile session is unreadable") from error
-    if not isinstance(state, Mapping):
-        raise PackControlDenied("active v4 Profile state is invalid")
-    profiles = state.get("profiles")
-    active_id = _safe_identity(state.get("active_profile_id"), "Profile ID")
-    matches = [
-        dict(item)
-        for item in profiles or []
-        if isinstance(item, Mapping) and item.get("profile_id") == active_id
-    ]
-    if len(matches) != 1:
-        raise PackControlDenied("active v4 Profile identity is missing or duplicated")
-    profile = matches[0]
+        from .bootstrap.profile_capture import capture_default_profile
+
+        active = capture_default_profile()
+    except Exception as error:
+        raise PackControlDenied("active v4 Profile session is missing or invalid") from error
+    resolved = active.resolved.profile
+    profile = {
+        "profile_id": resolved["profile_id"],
+        "workspace_id": resolved["profile_id"],
+        "base_pack": resolved["base"]["pack_id"],
+        "packs": [str(item["pack_id"]) for item in resolved["packs"]],
+    }
     _safe_identity(profile.get("profile_id"), "Profile ID")
     _safe_identity(
         profile.get("workspace_id") or profile.get("profile_id"),
         "workspace ID",
     )
-    return dict(state), profile
+    return {
+        "resolved_profile": dict(resolved),
+        "resolved_plan": dict(active.resolved.plan),
+        "activation": dict(active.activation),
+    }, profile
 
 
 def _save_active_profile(state: dict[str, Any], profile: dict[str, Any]) -> None:
-    profiles = list(state.get("profiles") or [])
-    if any(not isinstance(item, Mapping) for item in profiles):
-        raise PackControlDenied("active v4 Profile collection is invalid")
-    matches = [
-        index
-        for index, item in enumerate(profiles)
-        if item.get("profile_id") == profile["profile_id"]
-    ]
-    if len(matches) != 1:
-        raise PackControlDenied("active v4 Profile changed during mutation")
-    profiles[matches[0]] = profile
-    state["profiles"] = profiles
-    path = Path(USER_DATA_DIR) / "settings" / "startup_profiles.json"
-    _atomic_json(path, state)
-    from .resolved_profile_scope import invalidate_persisted_resolved_profile
-
-    invalidate_persisted_resolved_profile()
+    del state, profile
+    raise PackControlDenied(
+        "active Profile is immutable; submit a finite v4 Profile transaction"
+    )
 
 
 def _control_state_path(profile_id: str) -> Path:
@@ -545,8 +507,8 @@ def _persist_approval(
 def _approval_status(
     pack_id: str, record: Mapping[str, Any], binding: _Binding
 ) -> tuple[bool, str | None]:
-    base_pack = str(_active_profile()[1].get("base_pack") or "")
-    if base_pack and hmac.compare_digest(pack_id, base_pack):
+    active_packs = set(_active_profile()[1].get("packs") or [])
+    if pack_id in active_packs:
         return True, None
     path = _approval_path(binding.profile_id, pack_id)
     if path.is_symlink():

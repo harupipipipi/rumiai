@@ -120,28 +120,26 @@ class AppLifecycleManager:
         Returns:
             {"needs_setup": bool, "reason": str}
         """
-        try:
-            from .core_pack.core_setup.check_profile import check_profile
-            result = check_profile(base_dir=self.base_dir)
-        except ImportError:
-            logger.warning("core_setup.check_profile not available, assuming needs_setup=True")
-            result = {"needs_setup": True, "reason": "check_profile_unavailable"}
-        except Exception as e:
-            logger.error("check_setup_status failed: %s", e)
-            result = {"needs_setup": True, "reason": "check_error: {}".format(e)}
+        from .bootstrap.profile_capture import capture_default_profile
 
-        if result.get("needs_setup"):
-            setup_pack_status = self._check_setup_pack_selection_status()
-            if setup_pack_status.get("completed"):
-                result = {
-                    **result,
-                    "needs_setup": False,
-                    "reason": setup_pack_status.get("reason", "setup_pack_selection_valid"),
-                    "profile_reason": result.get("reason"),
-                    "setup_pack_selection": setup_pack_status,
-                }
-            else:
-                result["setup_pack_selection"] = setup_pack_status
+        try:
+            active = capture_default_profile(base_dir=self.base_dir)
+            result = {
+                "needs_setup": False,
+                "reason": "canonical_v4_profile_captured",
+                "setup_state": "complete",
+                "profile_id": active.resolved.profile["profile_id"],
+                "plan_digest": active.resolved.plan["plan_digest"],
+                "activation_id": active.activation["activation_id"],
+            }
+        except Exception as error:
+            logger.error("canonical v4 setup status failed: %s", error)
+            result = {
+                "needs_setup": True,
+                "reason": "canonical_v4_profile_unavailable",
+                "setup_state": "profile_transaction_required",
+                "error_type": type(error).__name__,
+            }
 
         result.update(get_runtime_readiness())
         return result
@@ -158,36 +156,26 @@ class AppLifecycleManager:
         Returns:
             {"success": bool, "errors": list, ...}
         """
+        del data
+        from .bootstrap.profile_capture import capture_default_profile
         try:
-            from .core_pack.core_setup.save_profile import save_profile
-        except ImportError:
-            logger.error("core_setup.save_profile not available")
-            return {"success": False, "errors": ["save_profile module not available"]}
-
-        try:
-            result = save_profile(data, base_dir=self.base_dir)
-        except Exception as e:
-            logger.error("complete_setup save_profile failed: %s", e)
-            return {"success": False, "errors": ["save_profile failed: {}".format(e)]}
-
-        if not result.get("success"):
-            return result
-
-        # 保存後に検証
-        try:
-            from .core_pack.core_setup.check_profile import check_profile
-            verify = check_profile(base_dir=self.base_dir)
-            if verify.get("needs_setup"):
-                return {
-                    "success": False,
-                    "errors": ["Post-save verification failed: {}".format(verify.get("reason", "unknown"))],
-                }
-        except ImportError:
-            pass  # 検証モジュールが無い場合は保存成功をそのまま返す
-        except Exception as e:
-            logger.warning("Post-save verification error: %s", e)
-
-        return result
+            active = capture_default_profile(base_dir=self.base_dir)
+        except Exception as error:
+            logger.error("canonical v4 setup transaction failed: %s", error)
+            return {
+                "success": False,
+                "errors": ["canonical v4 Profile transaction failed"],
+                "setup_state": "profile_transaction_failed",
+                "error_type": type(error).__name__,
+            }
+        return {
+            "success": True,
+            "setup_state": "complete",
+            "profile_id": active.resolved.profile["profile_id"],
+            "plan_digest": active.resolved.plan["plan_digest"],
+            "activation_id": active.activation["activation_id"],
+            "restart_required": False,
+        }
 
     def get_health(self) -> Dict[str, Any]:
         """
