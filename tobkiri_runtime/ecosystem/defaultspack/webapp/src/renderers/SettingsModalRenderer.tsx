@@ -4813,7 +4813,7 @@ export function SettingsModalRenderer({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={prefersReducedMotion ? { opacity: 1 } : { opacity: 0, scale: 0.98, y: 8 }}
             transition={prefersReducedMotion ? { duration: 0 } : { type: "spring", stiffness: 360, damping: 34 }}
-            className="relative flex h-[min(920px,calc(100dvh-20px))] w-[min(1480px,calc(100vw-16px))] min-w-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-[#0d0f11] shadow-2xl shadow-black/60 max-sm:h-dvh max-sm:w-screen max-sm:rounded-none max-sm:border-x-0"
+            className="relative flex h-[min(920px,calc(100dvh-20px))] w-[min(1480px,calc(100vw-16px))] min-w-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-[#0d0f11] shadow-2xl shadow-black/60 max-sm:h-[calc(100dvh-4px)] max-sm:w-screen max-sm:rounded-none max-sm:border-x-0"
           >
             <header
               className="flex min-w-0 items-center justify-between gap-4 border-b border-zinc-800 px-4 py-2 sm:px-5"

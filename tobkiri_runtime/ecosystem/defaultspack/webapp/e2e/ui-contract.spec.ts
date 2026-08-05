@@ -5,6 +5,7 @@ test.use({ viewport: { width: 1440, height: 900 } });
 // These specs exercise mocked UI contracts only. Live MCP proof is covered by
 // the Python integration tests that assert tool_logs and tool_call events.
 const now = 1_785_000_000_000;
+const approvalDigest = "a".repeat(64);
 const historyChatDropMime = "application/rumi-history-chat";
 
 function routeKey(path: string): string {
@@ -570,6 +571,40 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     localStorage.clear();
     sessionStorage.clear();
   });
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "__TAURI__", {
+      configurable: true,
+      value: {
+        core: {
+          invoke: async (command: string, args?: Record<string, unknown>) => {
+            if (command === "get_desktop_system_info") {
+              return {
+                source: "viewer_tauri",
+                reliable: true,
+                app_name: "Tobkiri",
+                display_version: "ui-contract",
+                viewer_version: "ui-contract",
+                build_channel: "test",
+                platform: "linux",
+                platform_release: "ui-contract",
+                permission_subject: "Tobkiri Launcher",
+                permissions: [],
+              };
+            }
+            if (command !== "coding_approval_operator") {
+              throw new Error(`Unexpected native command: ${command}`);
+            }
+            return {
+              request_id: args?.requestId,
+              expected_digest: args?.expectedDigest,
+              decision: args?.decision,
+              operator: "ui-contract-fixture",
+            };
+          },
+        },
+      },
+    });
+  });
 
   let currentSettingsValues: Record<string, Record<string, unknown>> = JSON.parse(JSON.stringify({
     ...settingsValues,
@@ -581,6 +616,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
   }));
   let conversationToolPreferences: Record<string, unknown> = {};
   let codingApprovalRequest: Record<string, unknown> | null = null;
+  const settledApprovalRequestIds = new Set<string>();
   const codingCheckpoints: Record<string, unknown>[] = options.codingApprovalAfterRestore
     ? [{ snapshot_id: "checkpoint-1", path: "/repo/.rumi/checkpoints/checkpoint-1" }]
     : [];
@@ -595,6 +631,28 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     const method = request.method();
     const conversation = smokeConversation();
     options.conversationMutator?.(conversation);
+    const conversationMessages = conversation.messages as Array<{ events?: Record<string, unknown>[] }>;
+    for (const message of conversationMessages) {
+      if (!message.events) continue;
+      message.events = message.events.filter((event) => (
+        !settledApprovalRequestIds.has(String(event.approval_request_id ?? "").trim())
+      ));
+    }
+    const approvalEvent = conversationMessages
+      .flatMap((message) => message.events ?? [])
+      .find((event) => String(event.approval_request_id ?? "").trim());
+    const approvalEventId = String(approvalEvent?.approval_request_id ?? "").trim();
+    if (!codingApprovalRequest && approvalEventId) {
+      codingApprovalRequest = {
+        request_id: approvalEventId,
+        operation: String(approvalEvent?.action ?? "browser.open_url"),
+        risk_level: String(approvalEvent?.risk_level ?? "medium"),
+        status: "pending",
+        display_summary: String(approvalEvent?.display_summary ?? "Browser action requires approval."),
+        created_at: now,
+        args_hash: approvalDigest,
+      };
+    }
 
     if (path === routeKey("api/health")) {
       return fulfill(route, { status: "ok", pack: "defaultspack", ts: "2026-05-20T00:00:00Z" });
@@ -922,6 +980,8 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     if (path === routeKey("api/coding/approvals/approve") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       options.onApprovalDecision?.("approve", payload);
+      const requestId = String(payload.approval_request_id ?? "").trim();
+      if (requestId) settledApprovalRequestIds.add(requestId);
       if (codingApprovalRequest?.request_id === payload.approval_request_id) {
         codingApprovalRequest = { ...codingApprovalRequest, status: "approved" };
       }
@@ -935,6 +995,11 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     if (path === routeKey("api/coding/approvals/deny") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       options.onApprovalDecision?.("deny", payload);
+      const requestId = String(payload.approval_request_id ?? "").trim();
+      if (requestId) settledApprovalRequestIds.add(requestId);
+      if (codingApprovalRequest?.request_id === requestId) {
+        codingApprovalRequest = { ...codingApprovalRequest, status: "denied" };
+      }
       return fulfill(route, { request_id: payload.approval_request_id, approved: false, status: "denied" });
     }
 
@@ -947,6 +1012,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
         status: "pending",
         display_summary: "terminal.exec: write qa-file.txt",
         created_at: now,
+        args_hash: approvalDigest,
       };
       return fulfill(route, {
         command: String(payload.command ?? ""),
@@ -973,6 +1039,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
         status: "pending",
         display_summary: `file.restore: ${snapshotId}`,
         created_at: now,
+        args_hash: approvalDigest,
       };
       return fulfill(route, {
         approval_required: true,
@@ -1051,6 +1118,25 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       const payload = request.postDataJSON() as Record<string, unknown>;
       const serverId = String(payload.server_id ?? payload.server_name ?? "contract_digest");
       if (!payload.approval_token) {
+        codingApprovalRequest = {
+          request_id: "apr-mcp-contract",
+          operation: "tool.mcp_connect",
+          risk_level: "high",
+          status: "pending",
+          display_summary: `Connect MCP server ${serverId}`,
+          created_at: now,
+          args_hash: approvalDigest,
+          details: {
+            mcp_review: {
+              executable: String(payload.command ?? "python"),
+              transport: "stdio",
+              args: Array.isArray(payload.args) ? payload.args : [],
+              cwd: "/repo",
+              redacted_env: [],
+              server_source: "Pack v4 UI contract fixture",
+            },
+          },
+        };
         return fulfill(route, {
           approval_required: true,
           approval_request_id: "apr-mcp-contract",
@@ -1215,7 +1301,7 @@ test("composer approval menu opens action permissions while selection modes live
 
   await page.getByRole("button", { name: "アクションの承認方法" }).click();
   const approvalMenu = page.getByRole("menu", { name: "アクションの承認方法" });
-  await expect(approvalMenu).toContainText("Codex アクションの承認方法");
+  await expect(approvalMenu).toHaveAccessibleName("アクションの承認方法");
   await expect(approvalMenu).toContainText("承認を求める");
   await expect(approvalMenu).toContainText("代理で承認");
   await expect(approvalMenu).toContainText("フルアクセス");
@@ -1224,13 +1310,12 @@ test("composer approval menu opens action permissions while selection modes live
 
   await approvalMenu.getByRole("button", { name: "詳細はこちら" }).click();
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Tools & MCP" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Tools & MCP" }).first()).toBeVisible();
-  await expect(page.getByText("Installed tools, MCP servers, discovered tools, visibility, and approval policy.")).toBeVisible();
-  await expect(page.getByText("Tools are not logins")).toBeVisible();
+  await page.getByRole("button", { name: "Tools", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Tools", exact: true })).toBeVisible();
+  await expect(page.getByText("ツールとログインは別に管理されます")).toBeVisible();
+  await expect(page.getByText("MCP servers and tool sources define callable actions. Account login, OAuth tokens, and access tokens remain in Accounts & Connections.")).toBeVisible();
   await expect(page.getByText("Safety rules")).toBeVisible();
   await expect(page.getByText("Tool source → Tools & MCP")).toBeVisible();
-  await expect(page.getByText("MCP servers can require a connection")).toBeVisible();
 });
 
 test("slash yolo toggles Full Access back to Ask without a duplicate status chip", async ({ page }) => {
@@ -1534,8 +1619,11 @@ test("composer removes semantic tool state after an escaped edit", async ({ page
   const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
 
   await composer.fill("Use @web");
+  await expect(page.getByRole("option", { name: /@web search/i })).toBeVisible();
   await composer.press("Enter");
   await composer.fill("Use \\@Web Search");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-selected-tool-ids")))
+    .toBe("[]");
   await page.getByRole("button", { name: "メッセージを送信" }).click();
   await expect.poll(() => escapedRequests.length).toBe(1);
 
@@ -1551,15 +1639,20 @@ test("composer removes semantic tool state after an escaped edit", async ({ page
   expect(escapedMetadata.dropped_widgets).toEqual([]);
 });
 
-test("composer removes semantic tool state after its chip is toggled off", async ({ page }) => {
+test("composer renders semantic tool mentions inline and clears state after an escaped edit", async ({ page }) => {
   const chipRequests: Record<string, unknown>[] = [];
   await openDefaultspack(page, "/chat", {
     onStreamRequest: (payload) => chipRequests.push(payload),
   });
   const chipComposer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
   await chipComposer.fill("Use @web");
+  await expect(page.getByRole("option", { name: /@web search/i })).toBeVisible();
   await chipComposer.press("Enter");
-  await page.locator('.rumi-composer-frame button[title="Search the web."]').click();
+  await expect(chipComposer).toHaveValue("Use @Web Search ");
+  await expect(page.locator('[data-composer-inline-mentions] .rumi-composer-inline-mention')).toContainText("@Web Search");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-selected-tool-ids")))
+    .toBe('["web_search"]');
+  await chipComposer.fill("Use \\@Web Search");
   await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-selected-tool-ids")))
     .toBe("[]");
   await page.getByRole("button", { name: "メッセージを送信" }).click();
@@ -1573,7 +1666,7 @@ test("composer removes semantic tool state after its chip is toggled off", async
   expect(chipMetadata.dropped_widgets).toEqual([]);
 });
 
-test("composer reconciles removed service tools before submit", async ({ page }) => {
+test("composer reconciles an escaped service mention before submit", async ({ page }) => {
   const serviceRequests: Record<string, unknown>[] = [];
   await openDefaultspack(page, "/chat", {
     onStreamRequest: (payload) => serviceRequests.push(payload),
@@ -1581,8 +1674,16 @@ test("composer reconciles removed service tools before submit", async ({ page })
   const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
 
   await composer.fill("Use @gith");
-  await page.getByRole("option").filter({ hasText: "@GitHub" }).filter({ hasText: "service" }).click();
-  await page.getByRole("button", { name: "GitHub Issues の今回指定を解除" }).click();
+  const githubOption = page.getByRole("option").filter({ hasText: "@GitHub" }).filter({ hasText: "service" });
+  await expect(githubOption).toBeVisible();
+  await githubOption.click();
+  await expect(composer).toHaveValue("Use @GitHub ");
+  await expect(page.locator('[data-composer-inline-mentions] .rumi-composer-inline-mention')).toContainText("@GitHub");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-selected-tool-ids")))
+    .toBe('["github_issue_search"]');
+  await composer.fill("Use \\@GitHub");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-selected-tool-ids")))
+    .toBe("[]");
   await page.getByRole("button", { name: "メッセージを送信" }).click();
   await expect.poll(() => serviceRequests.length).toBe(1);
   const serviceRequest = serviceRequests[0];
@@ -1900,10 +2001,24 @@ test("composer mention keyboard and ARIA contracts stay predictable at Unicode a
   await expect(composer).not.toBeFocused();
 
   await composer.focus();
+  await composer.evaluate((element) => {
+    const end = element.value.length;
+    element.setSelectionRange(end, end);
+  });
+  await expect.poll(() => composer.evaluate((element) => element.selectionStart)).toBe(
+    "@this_candidate_does_not_exist".length,
+  );
   await composer.press("Escape");
   await expect(mentions).toBeHidden();
 
   await composer.fill("@this_candidate_does_not_exist");
+  await composer.evaluate((element) => {
+    const end = element.value.length;
+    element.setSelectionRange(end, end);
+  });
+  await expect.poll(() => composer.evaluate((element) => element.selectionStart)).toBe(
+    "@this_candidate_does_not_exist".length,
+  );
   await composer.press("Shift+Enter");
   await expect(composer).toHaveValue("@this_candidate_does_not_exist\n");
   expect(streamRequests).toHaveLength(0);
@@ -1985,6 +2100,7 @@ test("composer controls are keyboard reachable, visibly named, and at least 44px
 test("composer uses a leading plus menu and accepts clipboard and workspace file drops", async ({ page }) => {
   await openDefaultspack(page, "/chat");
   await page.getByTitle("New Chat").first().click();
+  await expect(page.locator(".rumi-composer-new")).toHaveCSS("filter", "blur(0px)");
 
   const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
   const attach = page.getByRole("button", { name: "ファイルを添付" });
@@ -2372,7 +2488,10 @@ test("calendar mode opens quick add and renders new tasks in blue", async ({ pag
   await expect(page.getByText("Range task")).toHaveCount(0);
 
   await page.getByTitle("Settings").last().click();
-  await expect(page.getByRole("heading", { name: "Rumi Control Center" })).toBeVisible();
+  const settingsDialog = page.getByRole("dialog", { name: "Settings" });
+  await expect(settingsDialog).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Settings categories" })).toBeVisible();
 });
 
 test("history card drag uses rumi history MIME and sends dropped_widgets metadata", async ({ page }) => {
@@ -2507,6 +2626,10 @@ test("mocked coding cockpit registers approves and connects an MCP server", asyn
   await page.getByTitle("Connect MCP server").click();
 
   const mcpServers = page.getByLabel("MCP servers");
+  const approvals = page.getByLabel("Approval queue");
+  await expect(approvals).toContainText("tool.mcp_connect");
+  await expect(approvals).toContainText("contract_digest");
+  await approvals.getByRole("button", { name: /許可|Approve/ }).click();
   await expect(mcpServers).toContainText("contract_digest");
   await expect(mcpServers).toContainText("approved");
   await expect(page.getByText("MCP connected: contract_digest (1 tools)")).toBeVisible();
