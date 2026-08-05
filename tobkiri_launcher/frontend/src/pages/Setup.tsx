@@ -26,6 +26,7 @@ import {DefaultsReview} from './DefaultsReview';
 import tobkiriIconUrl from '../../../assets/app-icon/tobkiri-launcher-icon.png';
 
 function message(error: unknown, fallback: string): string {
+  if (typeof error === 'string' && error.trim()) return error;
   return error instanceof Error && error.message.trim() ? error.message : fallback;
 }
 

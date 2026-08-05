@@ -37,6 +37,7 @@ test('setup activation is explicit and followed by selected presentation materia
   assert.match(setupSource, /PresentationSelector/);
   assert.match(setupSource, /selectPresentation/);
   assert.match(setupSource, /navigate\(panelRoutes\.home\)/);
+  assert.match(setupSource, /typeof error === 'string' && error\.trim\(\)/);
 });
 
 test('the current GUI has no dependency on retired setup-pack routing', () => {

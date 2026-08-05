@@ -171,7 +171,7 @@ fn validate_application_pack(pack_root: &Path, pack: &Value) -> Result<GuardianL
         || functions.len() != 1
         || providers.len() != 1
         || operations.len() != 1
-        || artifacts.len() != 1
+        || artifacts.len() != 2
         || value_str(&functions[0], "/id") != Some(DEFAULT_RUNTIME_ID)
         || value_str(&functions[0], "/isolation") != Some("dedicated_process")
         || functions[0]["operations"] != serde_json::json!(["launch"])
@@ -185,6 +185,11 @@ fn validate_application_pack(pack_root: &Path, pack: &Value) -> Result<GuardianL
         || value_str(&operations[0], "/contract_reference") != Some("runtime.tauri.application.v1")
         || value_str(&artifacts[0], "/kind") != Some("executable")
         || value_str(&artifacts[0], "/platform") != Some("host")
+        || value_str(&artifacts[1], "/path") != Some("defaultspack/frontend_contract_map.v4.json")
+        || value_str(&artifacts[1], "/kind") != Some("asset")
+        || value_str(&artifacts[1], "/platform") != Some("host")
+        || artifacts[1].get("entrypoint").is_some()
+        || artifacts[1].get("argv").is_some()
     {
         bail!("application Pack launch identity is invalid");
     }
@@ -397,6 +402,7 @@ fn validate_profile(profile: &Value) -> Result<()> {
     let expected = BTreeSet::from([
         ("defaultspack", "provider"),
         ("rumi_file_inspect_pack", "provider"),
+        ("tobkiri_host_pack_control", "provider"),
         (DEFAULT_RUNTIME_ID, "application"),
     ]);
     if packs.len() != expected.len()

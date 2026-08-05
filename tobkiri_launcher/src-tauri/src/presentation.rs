@@ -6,7 +6,7 @@
 //! artifact. Development commands are deliberately not represented as a
 //! launch fallback.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -1366,8 +1366,29 @@ fn read_selection(
         .join(SELECTION_FILE);
     match fs::read_to_string(&path) {
         Ok(raw) => {
-            let stored: StoredProfileSelection =
+            let value: serde_json::Value =
                 serde_json::from_str(&raw).context("saved exact profile selection is malformed")?;
+            if let Some(object) = value.as_object() {
+                let legacy_keys = object.keys().map(String::as_str).collect::<BTreeSet<_>>();
+                if legacy_keys == BTreeSet::from(["base_pack_id", "shell_provider_id"])
+                    && object
+                        .get("base_pack_id")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some()
+                    && object
+                        .get("shell_provider_id")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some()
+                {
+                    // The pre-v4 Launcher persisted only two mutable identifiers. They carry no
+                    // catalog, artifact, platform, or digest binding and therefore grant nothing.
+                    // Treat this one exact legacy shape as unselected so the user must explicitly
+                    // materialize a verified v4 Shell; all other malformed state remains fatal.
+                    return Ok(None);
+                }
+            }
+            let stored: StoredProfileSelection = serde_json::from_value(value)
+                .context("saved exact profile selection is malformed")?;
             if stored.schema != SELECTION_SCHEMA {
                 bail!("saved selection is not a Profile v4 selection");
             }
@@ -1873,6 +1894,32 @@ mod tests {
         assert!(error.contains("is malformed and was rejected"));
         let catalog_path_text = catalog_path.to_string_lossy();
         assert!(error.contains(catalog_path_text.as_ref()));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn legacy_unbound_selection_requires_new_v4_materialization() {
+        let (root, mut config) = relocated_release_config("legacy-selection");
+        config.user_data_dir = root.join("Application Support").join("user_data");
+        let selection_path = config
+            .user_data_dir
+            .join(SELECTION_DIR)
+            .join(SELECTION_FILE);
+        fs::create_dir_all(selection_path.parent().unwrap()).unwrap();
+        fs::write(
+            &selection_path,
+            br#"{"base_pack_id":"defaults-basepack","shell_provider_id":"shell.tauri.default"}"#,
+        )
+        .unwrap();
+        let catalog = load_catalog(&config).unwrap();
+        assert_eq!(read_selection(&config, &catalog).unwrap(), None);
+
+        fs::write(
+            &selection_path,
+            br#"{"base_pack_id":"defaults-basepack","shell_provider_id":"shell.tauri.default","unexpected":true}"#,
+        )
+        .unwrap();
+        assert!(read_selection(&config, &catalog).is_err());
         fs::remove_dir_all(&root).unwrap();
     }
 
