@@ -4,7 +4,7 @@ import json
 import unittest
 from pathlib import Path
 
-from domain.ai_client.providers.google_provider import GoogleProvider
+from _defaultspack_test_isolation import is_pack_test_child, run_pack_test
 
 
 PACK_ROOT = Path(__file__).resolve().parents[1]
@@ -73,6 +73,15 @@ def _human_operator_payload_contract_failures(parameters, payload):
 
 class GoogleSchemaManifestTests(unittest.TestCase):
     def test_native_schema_normalizes_nullable_and_array_items(self):
+        if not is_pack_test_child():
+            run_pack_test(
+                Path(__file__),
+                "GoogleSchemaManifestTests::test_native_schema_normalizes_nullable_and_array_items",
+            )
+            return
+
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
         schema = {
             "type": "object",
             "properties": {
@@ -92,6 +101,13 @@ class GoogleSchemaManifestTests(unittest.TestCase):
         )
 
     def test_tool_and_ui_manifests_define_items_for_arrays(self):
+        if not is_pack_test_child():
+            run_pack_test(
+                Path(__file__),
+                "GoogleSchemaManifestTests::test_tool_and_ui_manifests_define_items_for_arrays",
+            )
+            return
+
         manifest_paths = sorted((PACK_ROOT / "tools").glob("*/manifest.json"))
         manifest_paths.extend(sorted((PACK_ROOT / "extensions" / "ui").glob("*/manifest.json")))
 
@@ -105,6 +121,13 @@ class GoogleSchemaManifestTests(unittest.TestCase):
         self.assertEqual(failures, [])
 
     def test_human_operator_array_items_match_payload_contract(self):
+        if not is_pack_test_child():
+            run_pack_test(
+                Path(__file__),
+                "GoogleSchemaManifestTests::test_human_operator_array_items_match_payload_contract",
+            )
+            return
+
         manifest = json.loads(HUMAN_OPERATOR_MANIFEST.read_text(encoding="utf-8"))
         parameters = manifest["config"]["schema"]["parameters"]
 
