@@ -13,17 +13,15 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
     ProfileResolutionDenied,
     resolve_default_profile,
 )
-from tests.v4_batch_support import assert_legacy_registry_fails_closed
+from tests.v4_batch_support import (
+    assert_legacy_registry_fails_closed,
+    authority_bindings_for_profile,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 SNAPSHOT = "sha256:" + "9" * 64
-BINDINGS = {
-    "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": "authority-ref:conversation.default",
-    "shell.tauri.pack-control|tobkiri.host.pack-control|tobkiri.host.pack-control.v4|catalog.read": "authority-ref:pack.catalog.default",
-    "defaultspack.conversation|rumi_file_inspect_pack.file-inspect.service|tobkiri.service.file.inspect.v1|rumi_file_inspect_pack.file-inspect": "authority-ref:file.inspect.default",
-}
 
 
 def _catalog() -> BundledCatalog:
@@ -40,7 +38,7 @@ def _resolve(catalog: BundledCatalog):
         "defaults",
         approved_artifact_digests=_approved(catalog),
         authority_snapshot_digest=SNAPSHOT,
-        authority_bindings=BINDINGS,
+        authority_bindings=authority_bindings_for_profile(catalog.profiles["defaults"]),
         security_epoch=1,
     )
 
@@ -84,7 +82,9 @@ def test_profile_resolver_fails_closed_for_unapproved_dependency() -> None:
             "defaults",
             approved_artifact_digests=approved,
             authority_snapshot_digest=SNAPSHOT,
-            authority_bindings=BINDINGS,
+            authority_bindings=authority_bindings_for_profile(
+                catalog.profiles["defaults"]
+            ),
             security_epoch=1,
         )
 
@@ -104,7 +104,9 @@ def test_profile_resolver_fails_closed_for_duplicate_selected_pack() -> None:
             "defaults",
             approved_artifact_digests=_approved(duplicate_catalog),
             authority_snapshot_digest=SNAPSHOT,
-            authority_bindings=BINDINGS,
+            authority_bindings=authority_bindings_for_profile(
+                duplicate_catalog.profiles["defaults"]
+            ),
             security_epoch=1,
             additional_pack_ids=("duplicate-defaultspack",),
         )

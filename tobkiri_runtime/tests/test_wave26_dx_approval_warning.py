@@ -14,6 +14,7 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
     resolve_default_profile,
 )
 from tests.legacy_authority_contracts import assert_retired_module_absent
+from tests.v4_batch_support import authority_bindings_for_profile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,19 +31,7 @@ def _approved(catalog: BundledCatalog) -> set[str]:
 
 
 def _bindings() -> dict[str, str]:
-    return {
-        "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": (
-            "authority-ref:conversation.default"
-        ),
-        (
-            "shell.tauri.pack-control|tobkiri.host.pack-control|"
-            "tobkiri.host.pack-control.v4|catalog.read"
-        ): "authority-ref:pack.catalog.default",
-        (
-            "defaultspack.conversation|rumi_file_inspect_pack.file-inspect.service|"
-            "tobkiri.service.file.inspect.v1|rumi_file_inspect_pack.file-inspect"
-        ): "authority-ref:file.inspect.default",
-    }
+    return authority_bindings_for_profile(_catalog().profiles["defaults"])
 
 
 def test_deleted_kernel_approval_scan_is_not_importable() -> None:

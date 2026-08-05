@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -16,6 +17,30 @@ from tests.test_authority_v4_lifecycle import _Harness, _digest
 def harness(tmp_path: Path, **kwargs: Any) -> _Harness:
     """Build the canonical two-domain Authority Kernel fixture."""
     return _Harness(tmp_path, **kwargs)
+
+
+def authority_bindings_for_profile(
+    profile: Mapping[str, Any],
+    *,
+    overrides: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Create one explicit, stable test reference for every requested edge."""
+
+    bindings: dict[str, str] = {}
+    for edge in profile["requested_edges"]:
+        key = "|".join(
+            str(edge[field])
+            for field in (
+                "caller_function_id",
+                "target_provider_id",
+                "contract_id",
+                "operation_id",
+            )
+        )
+        edge_digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:32]
+        bindings[key] = f"authority-ref:test.{edge_digest}"
+    bindings.update(dict(overrides or {}))
+    return bindings
 
 
 def bounded_scope(*, path: str = "/safe", max_bytes: int = 1024) -> AuthorityScope:
@@ -167,6 +192,7 @@ def assert_route_cutover(
 
 
 __all__ = [
+    "authority_bindings_for_profile",
     "assert_lease_is_single_use",
     "assert_payload_mutations_denied",
     "altered_context",

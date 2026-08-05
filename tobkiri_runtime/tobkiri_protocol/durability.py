@@ -89,23 +89,23 @@ def _flush_windows_directory(path: Path, *, kernel32: Any | None = None) -> None
     )
     invalid_handle = ctypes.c_void_p(-1).value
     if handle in (None, invalid_handle):
-        raise _windows_error()
+        raise _windows_error("CreateFileW")
 
     flush_error: OSError | None = None
     if not native.FlushFileBuffers(handle):
-        flush_error = _windows_error()
+        flush_error = _windows_error("FlushFileBuffers")
     close_succeeded = native.CloseHandle(handle)
     if flush_error is not None:
         raise flush_error
     if not close_succeeded:
-        raise _windows_error()
+        raise _windows_error("CloseHandle")
 
 
-def _windows_error() -> OSError:
+def _windows_error(operation: str) -> OSError:
     """Build the native Windows error, including in portable adapter tests."""
 
     error_code = getattr(ctypes, "get_last_error", lambda: 0)()
     win_error = getattr(ctypes, "WinError", None)
     if win_error is not None:
-        return win_error(error_code)
-    return OSError(error_code, f"Windows error {error_code}")
+        return OSError(f"{operation} failed: {win_error(error_code)}")
+    return OSError(error_code, f"{operation} failed with Windows error {error_code}")

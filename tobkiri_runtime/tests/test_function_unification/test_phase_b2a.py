@@ -7,35 +7,22 @@ from pathlib import Path
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog, resolve_default_profile
 from tobkiri_protocol.canonical import canonical_digest
 from tests.legacy_authority_contracts import assert_profile_resolver_requires_authority_snapshot
+from tests.v4_batch_support import authority_bindings_for_profile
 
 
 ROOT = Path(__file__).resolve().parents[2]
 BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 SNAPSHOT = "sha256:" + "9" * 64
-BINDINGS = {
-    "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": (
-        "authority-ref:conversation.default"
-    ),
-    (
-        "shell.tauri.pack-control|tobkiri.host.pack-control|"
-        "tobkiri.host.pack-control.v4|catalog.read"
-    ): "authority-ref:pack.catalog.default",
-    (
-        "defaultspack.conversation|rumi_file_inspect_pack.file-inspect.service|"
-        "tobkiri.service.file.inspect.v1|rumi_file_inspect_pack.file-inspect"
-    ): "authority-ref:file.inspect.default",
-}
-
-
 def _resolved():
     catalog = BundledCatalog.load(BUNDLE)
     approved = {str(item["pack"]["artifact_digest"]) for item in catalog.packs.values()}
+    bindings = authority_bindings_for_profile(catalog.profiles["defaults"])
     return resolve_default_profile(
         catalog,
         "defaults",
         approved_artifact_digests=approved,
         authority_snapshot_digest=SNAPSHOT,
-        authority_bindings=BINDINGS,
+        authority_bindings=bindings,
         security_epoch=1,
     )
 
@@ -49,7 +36,7 @@ def test_resolved_plan_has_exact_profile_and_lock_digests() -> None:
 
 def test_resolved_plan_has_one_binding_per_selected_function() -> None:
     resolved = _resolved()
-    assert len(resolved.plan["bindings"]) == 3
+    assert len(resolved.plan["bindings"]) == len(resolved.profile["requested_edges"])
     assert {item["function_principal"]["function_id"] for item in resolved.plan["bindings"]} == {
         "defaultspack.conversation",
         "rumi_file_inspect_pack.file-inspect.service",
@@ -59,9 +46,12 @@ def test_resolved_plan_has_one_binding_per_selected_function() -> None:
 
 def test_resolved_plan_binds_exact_authority_references() -> None:
     resolved = _resolved()
-    assert set(resolved.profile["authority_references"]) == set(BINDINGS.values())
+    bindings = authority_bindings_for_profile(
+        BundledCatalog.load(BUNDLE).profiles["defaults"]
+    )
+    assert set(resolved.profile["authority_references"]) == set(bindings.values())
     assert {edge["authority_reference"] for edge in resolved.profile["requested_edges"]} == set(
-        BINDINGS.values()
+        bindings.values()
     )
 
 

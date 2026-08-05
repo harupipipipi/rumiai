@@ -11,27 +11,15 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
     ProfileResolutionDenied,
     resolve_default_profile,
 )
-from tests.v4_batch_support import assert_legacy_registry_fails_closed
+from tests.v4_batch_support import (
+    assert_legacy_registry_fails_closed,
+    authority_bindings_for_profile,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 SNAPSHOT = "sha256:" + "9" * 64
-BINDINGS = {
-    "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": (
-        "authority-ref:conversation.default"
-    ),
-    (
-        "shell.tauri.pack-control|tobkiri.host.pack-control|"
-        "tobkiri.host.pack-control.v4|catalog.read"
-    ): "authority-ref:pack.catalog.default",
-    (
-        "defaultspack.conversation|rumi_file_inspect_pack.file-inspect.service|"
-        "tobkiri.service.file.inspect.v1|rumi_file_inspect_pack.file-inspect"
-    ): "authority-ref:file.inspect.default",
-}
-
-
 def _catalog() -> BundledCatalog:
     return BundledCatalog.load(BUNDLE)
 
@@ -64,12 +52,15 @@ def test_v4_function_ids_are_manifest_declared_and_unique() -> None:
 
 
 def test_v4_profile_resolves_exact_effective_set() -> None:
+    catalog = _catalog()
     resolved = resolve_default_profile(
-        _catalog(),
+        catalog,
         "defaults",
-        approved_artifact_digests=_approved(_catalog()),
+        approved_artifact_digests=_approved(catalog),
         authority_snapshot_digest=SNAPSHOT,
-        authority_bindings=BINDINGS,
+        authority_bindings=authority_bindings_for_profile(
+            catalog.profiles["defaults"]
+        ),
         security_epoch=1,
     )
     assert {item["identity"] for item in resolved.lock["effective_set"]} == {
@@ -95,7 +86,9 @@ def test_v4_profile_rejects_unapproved_manifest(tmp_path: Path) -> None:
             "defaults",
             approved_artifact_digests=approved,
             authority_snapshot_digest=SNAPSHOT,
-            authority_bindings=BINDINGS,
+            authority_bindings=authority_bindings_for_profile(
+                catalog.profiles["defaults"]
+            ),
             security_epoch=1,
         )
 
@@ -113,13 +106,16 @@ def test_v4_profile_rejects_missing_authority_reference() -> None:
 
 
 def test_v4_plan_routes_are_exactly_the_selected_bindings() -> None:
+    catalog = _catalog()
     resolved = resolve_default_profile(
-        _catalog(),
+        catalog,
         "defaults",
-        approved_artifact_digests=_approved(_catalog()),
+        approved_artifact_digests=_approved(catalog),
         authority_snapshot_digest=SNAPSHOT,
-        authority_bindings=BINDINGS,
+        authority_bindings=authority_bindings_for_profile(
+            catalog.profiles["defaults"]
+        ),
         security_epoch=1,
     )
-    assert len(resolved.plan["bindings"]) == 3
+    assert len(resolved.plan["bindings"]) == len(resolved.profile["requested_edges"])
     assert resolved.lock["plan_digest"] == resolved.plan["plan_digest"]

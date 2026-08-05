@@ -155,7 +155,12 @@ def test_windows_directory_flush_propagates_native_errors_and_closes_if_open(
         close_succeeds=failure != "close",
     )
 
-    with pytest.raises(OSError, match="Windows error"):
+    operation = {
+        "open": "CreateFileW",
+        "flush": "FlushFileBuffers",
+        "close": "CloseHandle",
+    }[failure]
+    with pytest.raises(OSError, match=rf"{operation} failed"):
         durability._flush_windows_directory(tmp_path, kernel32=native)
 
     call_names = [item[0] for item in native.calls]
