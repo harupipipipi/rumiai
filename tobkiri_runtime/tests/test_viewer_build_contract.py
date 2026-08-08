@@ -12,6 +12,9 @@ pytestmark = pytest.mark.contract
 ROOT = Path(__file__).resolve().parents[2]
 TAURI_ROOT = ROOT / "tobkiri_launcher" / "src-tauri"
 TAURI_CONFIG = TAURI_ROOT / "tauri.conf.json"
+SHELL_TAURI_CONFIG = TAURI_ROOT / "tauri.shell.conf.json"
+SHELL_RUNTIME = TAURI_ROOT / "src" / "shell_runtime.rs"
+LAUNCHER_RUNTIME = TAURI_ROOT / "src" / "lib.rs"
 RESOURCE_PREPARER = ROOT / ".github" / "scripts" / "prepare_tauri_resources.py"
 PACK_SHELL_SEALER = ROOT / ".github" / "scripts" / "seal_pack_shell.py"
 TEST_WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
@@ -52,6 +55,34 @@ def test_tauri_hooks_prepare_runtime_for_dev_and_release():
         "tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode release"
         in config["build"]["beforeBuildCommand"]
     )
+
+
+def test_shell_runtime_is_presentation_only_and_cannot_inherit_launcher_authority():
+    shell_config = _read_json(SHELL_TAURI_CONFIG)
+    assert shell_config["identifier"] == "io.tobkiri.shell.tauri"
+    assert shell_config["mainBinaryName"] == "tobkiri-shell"
+    assert shell_config["app"]["withGlobalTauri"] is False
+    assert shell_config["app"]["trayIcon"] is None
+    assert shell_config["bundle"]["resources"] is None
+    assert shell_config["build"]["beforeBuildCommand"] is None
+    assert shell_config["build"]["beforeDevCommand"] is None
+
+    shell_runtime = SHELL_RUNTIME.read_text(encoding="utf-8")
+    for forbidden in (
+        "HostBrokerRuntime",
+        "KernelManager",
+        "DefaultspackManager",
+        "invoke_handler",
+        "tray::",
+    ):
+        assert forbidden not in shell_runtime
+    assert "consume_shell_handoff" in shell_runtime
+    assert "navigation_is_allowed" in shell_runtime
+
+    launcher_runtime = LAUNCHER_RUNTIME.read_text(encoding="utf-8")
+    assert "context.config().identifier == shell_handoff::SHELL_BUNDLE_IDENTIFIER" in launcher_runtime
+    assert "shell_runtime::run(context)" in launcher_runtime
+    assert "run_launcher(context)" in launcher_runtime
 
 
 def test_installer_targets_are_selected_by_tauri_platform_overrides():

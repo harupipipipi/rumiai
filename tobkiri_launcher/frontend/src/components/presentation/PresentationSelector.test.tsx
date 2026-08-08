@@ -89,18 +89,27 @@ const state: ApiPresentationState = {
   },
 };
 
+const verifiedArtifact = {
+  ...state.catalog.shell_providers[0].artifact!,
+  path: 'bundled/presentation-artifacts/shell.tauri.default.test/Tobkiri.app',
+  sha256: 'sha256:' + '4'.repeat(64),
+  status: 'verified' as const,
+  status_detail: 'Pinned digest, prebuilt status, and production metadata verified.',
+};
+
 const verifiedState: ApiPresentationState = {
   ...state,
+  catalog: {
+    ...state.catalog,
+    shell_providers: state.catalog.shell_providers.map((shell) => ({
+      ...shell,
+      artifact: verifiedArtifact,
+    })),
+  },
   materialization: {
     ...state.materialization,
     status: 'materialized',
-    artifact: {
-      ...state.catalog.shell_providers[0].artifact!,
-      path: 'bundled/presentation-artifacts/shell.tauri.default.test/Tobkiri.app',
-      sha256: 'sha256:' + '4'.repeat(64),
-      status: 'verified',
-      status_detail: 'Pinned digest, prebuilt status, and production metadata verified.',
-    },
+    artifact: verifiedArtifact,
     reason: null,
   },
 };
@@ -162,6 +171,7 @@ test('PresentationSelector exposes exact selection and blocks unverified launch'
     );
     assert.equal(baseButton.getAttribute('aria-pressed'), 'true');
     assert.equal(shellButton.getAttribute('aria-pressed'), 'true');
+    assert.equal(saveButton.disabled, true);
     assert.equal(launchButton.disabled, true);
     assert.match(container.textContent ?? '', /Launch blocked/);
 
@@ -169,7 +179,7 @@ test('PresentationSelector exposes exact selection and blocks unverified launch'
     assert.deepEqual(changed, [state.selection]);
 
     await act(async () => saveButton.click());
-    assert.deepEqual(saved, [state.selection]);
+    assert.deepEqual(saved, []);
 
     await act(async () => {
       root.render(
@@ -182,8 +192,11 @@ test('PresentationSelector exposes exact selection and blocks unverified launch'
         />,
       );
     });
+    const verifiedSaveButton = container.querySelector<HTMLButtonElement>('[data-testid="save-presentation"]');
     const verifiedLaunchButton = container.querySelector<HTMLButtonElement>('[data-testid="launch-presentation"]');
+    assert.ok(verifiedSaveButton);
     assert.ok(verifiedLaunchButton);
+    assert.equal(verifiedSaveButton.disabled, false);
     assert.equal(verifiedLaunchButton.disabled, false);
     await act(async () => verifiedLaunchButton.click());
     assert.equal(launches, 1);

@@ -3,7 +3,13 @@
   "productName": "Tobkiri",
   "mainBinaryName": "tobkiri-shell",
   "identifier": "io.tobkiri.shell.tauri",
+  "build": {
+    "beforeBuildCommand": null,
+    "beforeDevCommand": null
+  },
   "app": {
+    "trayIcon": null,
+    "withGlobalTauri": false,
     "windows": [
       {
         "label": "main",
@@ -11,5 +17,8 @@
         "visible": true
       }
     ]
+  },
+  "bundle": {
+    "resources": null
   }
 }

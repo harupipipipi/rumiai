@@ -146,7 +146,12 @@ export function PresentationSelector({
     ? compatibleShellProviders(state.catalog, selectedBase.pack_id)
     : [];
   const compatibility = checkShellCompatibility(selectedBase, selectedShell);
-  const canSave = Boolean(selection && compatibility.compatible && !saving);
+  const canSave = Boolean(
+    selection
+      && compatibility.compatible
+      && selectedShell?.artifact?.status === 'verified'
+      && !saving,
+  );
   const launchReason = launchDisabledReasonForSelection(
     state.materialization,
     state.selection,

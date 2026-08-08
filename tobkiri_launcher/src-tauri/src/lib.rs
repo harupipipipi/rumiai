@@ -18,6 +18,8 @@ mod presentation;
 mod process_utils;
 mod python_env;
 mod runtime_resource_integrity;
+mod shell_handoff;
+mod shell_runtime;
 mod tray;
 mod updater;
 
@@ -2117,6 +2119,15 @@ pub(crate) fn debug_defaultspack_ports_from_env() -> Option<(u16, u16)> {
 }
 
 pub fn run() {
+    let context = tauri::generate_context!();
+    if context.config().identifier == shell_handoff::SHELL_BUNDLE_IDENTIFIER {
+        shell_runtime::run(context);
+        return;
+    }
+    run_launcher(context);
+}
+
+fn run_launcher(context: tauri::Context<tauri::Wry>) {
     env_logger::init();
 
     #[cfg(debug_assertions)]
@@ -2444,7 +2455,7 @@ pub fn run() {
             presentation::select_presentation,
             presentation::launch_selected_presentation
         ])
-        .build(tauri::generate_context!());
+        .build(context);
 
     let app = match app {
         Ok(app) => app,

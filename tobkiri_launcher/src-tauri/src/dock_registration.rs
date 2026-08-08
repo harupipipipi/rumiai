@@ -339,11 +339,18 @@ pub fn launch_defaultspack_desktop(
 }
 
 pub(crate) fn launch_defaultspack_desktop_window_impl(
-    _app: &AppHandle,
+    app: &AppHandle,
     config: &AppConfig,
 ) -> AnyResult<String> {
-    let result = crate::presentation::launch_selected_presentation_impl(config)?;
+    let result = crate::presentation::launch_selected_presentation_impl(app, config)?;
     Ok(result.message)
+}
+
+pub(crate) fn prepare_defaultspack_shell_runtime_url(
+    app: &AppHandle,
+    config: &AppConfig,
+) -> AnyResult<String> {
+    with_defaultspack_launch_coordination(|| ensure_defaultspack_desktop_ready(app, config))
 }
 
 /// Ensure the real Defaultspack listener is Launcher-owned and registered as

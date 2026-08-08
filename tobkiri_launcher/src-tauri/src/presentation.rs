@@ -311,10 +311,10 @@ pub fn select_presentation(
 
 #[tauri::command]
 pub fn launch_selected_presentation(
-    _app: AppHandle,
+    app: AppHandle,
     config: State<'_, AppConfig>,
 ) -> Result<PresentationLaunchResponse, String> {
-    launch_selected_presentation_impl(config.inner()).map_err(|error| {
+    launch_selected_presentation_impl(&app, config.inner()).map_err(|error| {
         error!("selected presentation launch blocked: {error:#}");
         format!("{error:#}")
     })
@@ -335,6 +335,7 @@ fn select_presentation_impl(
 }
 
 pub(crate) fn launch_selected_presentation_impl(
+    app: &AppHandle,
     config: &AppConfig,
 ) -> AnyResult<PresentationLaunchResponse> {
     let state = build_state(config)?;
@@ -365,8 +366,30 @@ pub(crate) fn launch_selected_presentation_impl(
         .context("selected Shell Provider has no platform artifact")?;
     validate_production_artifact(artifact)?;
     let artifact_path = artifact_path(config, artifact)?;
+    let catalog_revision = catalog_revision(&state.catalog)?;
 
-    launch_verified_artifact(&artifact_path)?;
+    // Runtime readiness and local authentication are resolved only after the
+    // exact verified Shell artifact has passed pre-admission. The authenticated
+    // URL never crosses argv or the environment; only an owner-only one-shot
+    // handoff path is passed to the presentation process.
+    let runtime_url =
+        crate::dock_registration::prepare_defaultspack_shell_runtime_url(app, config)?;
+    let handoff_path = crate::shell_handoff::create_shell_handoff(
+        config,
+        crate::shell_handoff::ShellHandoffBinding {
+            profile_id: &state.catalog.default_profile_id,
+            profile_digest: &state.catalog.default_profile_digest,
+            catalog_revision: &catalog_revision,
+            provider_id: &shell.provider_id,
+            artifact_id: &artifact.artifact_id,
+        },
+        &runtime_url,
+    )?;
+
+    if let Err(error) = launch_verified_artifact(&artifact_path, &handoff_path) {
+        crate::shell_handoff::discard_shell_handoff(&handoff_path);
+        return Err(error);
+    }
 
     Ok(PresentationLaunchResponse {
         status: "launched".to_string(),
@@ -385,30 +408,46 @@ struct VerifiedLaunchSpec {
     args: Vec<OsString>,
 }
 
-fn verified_launch_spec(platform: &str, artifact_path: &Path) -> AnyResult<VerifiedLaunchSpec> {
+fn verified_launch_spec(
+    platform: &str,
+    artifact_path: &Path,
+    handoff_path: &Path,
+) -> AnyResult<VerifiedLaunchSpec> {
     if !artifact_path.is_absolute() {
         bail!("verified Shell artifact launch path must be absolute");
     }
+    if !handoff_path.is_absolute() {
+        bail!("verified Shell handoff path must be absolute");
+    }
+    let handoff_flag = OsString::from(crate::shell_handoff::HANDOFF_ARGUMENT);
+    let handoff_value = handoff_path.as_os_str().to_owned();
     match platform {
-        // LaunchServices is required to open an application bundle. Its client
-        // is an absolute system path; PATH and caller-provided launchers are
-        // deliberately not consulted.
+        // LaunchServices is required to open an application bundle. `-n`
+        // guarantees that the handoff path reaches a process; the Shell's own
+        // single-instance plugin forwards that path to an existing Shell when
+        // needed. The authenticated URL itself never appears in argv.
         "macos" => Ok(VerifiedLaunchSpec {
             program: PathBuf::from("/usr/bin/open"),
-            args: vec![OsString::from("--"), artifact_path.as_os_str().to_owned()],
+            args: vec![
+                OsString::from("-n"),
+                artifact_path.as_os_str().to_owned(),
+                OsString::from("--args"),
+                handoff_flag,
+                handoff_value,
+            ],
         }),
         // Linux AppImages and Windows executables are the verified artifacts,
-        // so execute their exact absolute paths without a shell or opener.
+        // so execute their exact absolute paths without a shell or PATH lookup.
         "linux" | "windows" => Ok(VerifiedLaunchSpec {
             program: artifact_path.to_path_buf(),
-            args: Vec::new(),
+            args: vec![handoff_flag, handoff_value],
         }),
         other => bail!("verified Shell artifact launch is unsupported on {other}"),
     }
 }
 
-fn launch_verified_artifact(artifact_path: &Path) -> AnyResult<()> {
-    let spec = verified_launch_spec(current_platform(), artifact_path)?;
+fn launch_verified_artifact(artifact_path: &Path, handoff_path: &Path) -> AnyResult<()> {
+    let spec = verified_launch_spec(current_platform(), artifact_path, handoff_path)?;
     Command::new(&spec.program)
         .args(&spec.args)
         .stdin(Stdio::null())
@@ -1392,36 +1431,44 @@ fn read_selection(
             if stored.schema != SELECTION_SCHEMA {
                 bail!("saved selection is not a Profile v4 selection");
             }
+            // A previously valid v4 selection is an exact authority binding,
+            // not a durable preference. If any authenticated catalog binding
+            // changes, drop to an unselected state so the user must explicitly
+            // materialize a new verified Shell. This is fail-closed: stale
+            // state grants nothing, while malformed or unknown-schema state
+            // above remains fatal instead of being normalized away.
             if stored.catalog_revision != catalog_revision(catalog)? {
-                bail!("saved selection is stale for the verified catalog revision");
+                return Ok(None);
             }
-            let base = catalog
+            let Some(base) = catalog
                 .base_packs
                 .iter()
                 .find(|item| item.pack_id == stored.base_pack_id)
-                .context("saved Base is missing from the verified catalog")?;
+            else {
+                return Ok(None);
+            };
             if base.artifact_digest != stored.base_artifact_digest {
-                bail!("saved Base artifact binding is stale");
+                return Ok(None);
             }
-            let shell = catalog
+            let Some(shell) = catalog
                 .shell_providers
                 .iter()
                 .find(|item| item.provider_id == stored.shell_provider_id)
-                .context("saved Shell is missing from the verified catalog")?;
+            else {
+                return Ok(None);
+            };
             if shell.contract_revision_digest != stored.shell_contract_revision_digest {
-                bail!("saved Shell definition binding is stale");
+                return Ok(None);
             }
-            let variant = shell
-                .artifact_variants
-                .iter()
-                .find(|item| {
-                    item.platform == stored.platform
-                        && item.architecture == stored.architecture
-                        && item.artifact_id == stored.shell_artifact_id
-                })
-                .context("saved exact Shell platform artifact is missing")?;
+            let Some(variant) = shell.artifact_variants.iter().find(|item| {
+                item.platform == stored.platform
+                    && item.architecture == stored.architecture
+                    && item.artifact_id == stored.shell_artifact_id
+            }) else {
+                return Ok(None);
+            };
             if variant.sha256.as_deref() != Some(stored.shell_artifact_digest.as_str()) {
-                bail!("saved Shell artifact digest is stale");
+                return Ok(None);
             }
             Ok(Some(PresentationSelection {
                 base_pack_id: stored.base_pack_id,
@@ -1924,6 +1971,80 @@ mod tests {
     }
 
     #[test]
+    fn stale_exact_v4_selection_drops_to_unselected_without_reusing_authority() {
+        let (root, mut config) = relocated_release_config("stale-v4-selection");
+        config.user_data_dir = root.join("Application Support").join("user_data");
+        let selection_path = config
+            .user_data_dir
+            .join(SELECTION_DIR)
+            .join(SELECTION_FILE);
+        fs::create_dir_all(selection_path.parent().unwrap()).unwrap();
+
+        let mut catalog = load_catalog(&config).unwrap();
+        let base = catalog.base_packs.first().unwrap().clone();
+        let bound_digest = "sha256:".to_string() + &"c".repeat(64);
+        let (
+            shell_provider_id,
+            shell_contract_revision_digest,
+            shell_artifact_id,
+            platform,
+            architecture,
+        ) = {
+            let shell = catalog.shell_providers.first_mut().unwrap();
+            let variant = shell
+                .artifact_variants
+                .iter_mut()
+                .find(|variant| {
+                    variant.platform == current_platform()
+                        && variant.architecture == current_architecture()
+                })
+                .unwrap();
+            variant.sha256 = Some(bound_digest.clone());
+            (
+                shell.provider_id.clone(),
+                shell.contract_revision_digest.clone(),
+                variant.artifact_id.clone(),
+                variant.platform.clone(),
+                variant.architecture.clone(),
+            )
+        };
+        let stored = StoredProfileSelection {
+            schema: SELECTION_SCHEMA.to_string(),
+            catalog_revision: catalog_revision(&catalog).unwrap(),
+            base_pack_id: base.pack_id.clone(),
+            base_artifact_digest: base.artifact_digest.clone(),
+            shell_provider_id,
+            shell_contract_revision_digest,
+            shell_artifact_id,
+            shell_artifact_digest: bound_digest,
+            platform,
+            architecture,
+        };
+        fs::write(&selection_path, serde_json::to_vec_pretty(&stored).unwrap()).unwrap();
+        assert_eq!(
+            read_selection(&config, &catalog).unwrap(),
+            Some(PresentationSelection {
+                base_pack_id: stored.base_pack_id.clone(),
+                shell_provider_id: stored.shell_provider_id.clone(),
+            })
+        );
+
+        // Any authenticated catalog revision change invalidates the stored
+        // authority binding, but must not trap the user in a retry loop. It
+        // becomes unselected and therefore cannot launch until re-materialized.
+        catalog.generator_version.push_str("-new");
+        assert_eq!(read_selection(&config, &catalog).unwrap(), None);
+        assert!(selection_path.is_file());
+
+        // The same fail-closed recovery applies when an exact Base/Shell
+        // identity disappears from a newer verified catalog.
+        let mut missing_base = catalog.clone();
+        missing_base.base_packs.clear();
+        assert_eq!(read_selection(&config, &missing_base).unwrap(), None);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn verified_installed_variant_materializes_only_selected_contributions() {
         let root = std::env::temp_dir().join(format!(
             "tobkiri-presentation-installed-test-{}",
@@ -2097,30 +2218,57 @@ mod tests {
     }
 
     #[test]
-    fn verified_launch_spec_never_uses_path_or_a_runtime_opener() {
+    fn verified_launch_spec_passes_only_the_one_shot_handoff_path() {
         let artifact = Path::new("/verified/release/Tobkiri Shell.app");
-        let macos = verified_launch_spec("macos", artifact).unwrap();
+        let handoff = Path::new("/private/launcher/shell_handoff/handoff-ABC.json");
+        let macos = verified_launch_spec("macos", artifact, handoff).unwrap();
         assert_eq!(macos.program, Path::new("/usr/bin/open"));
         assert_eq!(
             macos.args,
-            vec![OsString::from("--"), artifact.as_os_str().to_owned()]
+            vec![
+                OsString::from("-n"),
+                artifact.as_os_str().to_owned(),
+                OsString::from("--args"),
+                OsString::from(crate::shell_handoff::HANDOFF_ARGUMENT),
+                handoff.as_os_str().to_owned(),
+            ]
         );
 
         for platform in ["linux", "windows"] {
-            let direct = verified_launch_spec(platform, artifact).unwrap();
+            let direct = verified_launch_spec(platform, artifact, handoff).unwrap();
             assert_eq!(direct.program, artifact);
-            assert!(direct.args.is_empty());
+            assert_eq!(
+                direct.args,
+                vec![
+                    OsString::from(crate::shell_handoff::HANDOFF_ARGUMENT),
+                    handoff.as_os_str().to_owned(),
+                ]
+            );
         }
+        assert!(macos
+            .args
+            .iter()
+            .all(|arg| !arg.to_string_lossy().contains("rumi_local_auth")));
     }
 
     #[test]
     fn verified_launch_spec_rejects_relative_and_unsupported_targets() {
-        let relative = verified_launch_spec("linux", Path::new("Tobkiri.AppImage"))
+        let handoff = Path::new("/private/launcher/handoff.json");
+        let relative = verified_launch_spec("linux", Path::new("Tobkiri.AppImage"), handoff)
             .unwrap_err()
             .to_string();
-        assert!(relative.contains("must be absolute"));
+        assert!(relative.contains("artifact launch path must be absolute"));
 
-        let unsupported = verified_launch_spec("fixture-os", Path::new("/verified/shell"))
+        let relative_handoff = verified_launch_spec(
+            "linux",
+            Path::new("/verified/shell"),
+            Path::new("handoff.json"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(relative_handoff.contains("handoff path must be absolute"));
+
+        let unsupported = verified_launch_spec("fixture-os", Path::new("/verified/shell"), handoff)
             .unwrap_err()
             .to_string();
         assert!(unsupported.contains("unsupported"));
