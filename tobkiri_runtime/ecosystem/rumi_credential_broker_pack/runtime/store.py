@@ -413,9 +413,15 @@ class CredentialBrokerStore:
 def _secure_windows_directory(path: Path) -> None:
     """Replace inherited ACLs with one verified current-user SID grant."""
 
+    # Keep the target path out of the PowerShell command text. Windows PowerShell
+    # treats tokens after ``-Command`` as part of the command invocation rather
+    # than as a stable argv contract, so relying on ``$args[0]`` is not portable
+    # across the hosted Windows runner and desktop hosts. stdin is an inert data
+    # channel and therefore also avoids quoting or command-injection ambiguity.
     script = r"""
 $ErrorActionPreference = 'Stop'
-$target = $args[0]
+$target = [Console]::In.ReadToEnd()
+if ([string]::IsNullOrWhiteSpace($target)) { throw 'credential ACL target missing' }
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $sid = $identity.User
 $acl = Get-Acl -LiteralPath $target
@@ -461,12 +467,12 @@ if ($verified.Access[0].FileSystemRights -ne
                 "-NonInteractive",
                 "-Command",
                 script,
-                str(path),
             ],
             check=True,
             capture_output=True,
             text=True,
             timeout=15,
+            input=str(path),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise PermissionError("credential Windows ACL could not be secured") from exc
