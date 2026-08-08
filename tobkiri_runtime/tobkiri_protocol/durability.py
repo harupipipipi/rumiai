@@ -1,43 +1,92 @@
-"""Cross-platform durable atomic file replacement primitives."""
+"""Cross-platform durable atomic file publication primitives."""
 
 from __future__ import annotations
 
 import ctypes
+import errno
 import os
 import secrets
 from pathlib import Path
 from typing import Any
 
+_MOVEFILE_REPLACE_EXISTING = 0x00000001
+_MOVEFILE_WRITE_THROUGH = 0x00000008
+_WINDOWS_ALREADY_EXISTS = frozenset({80, 183})
+
 
 def write_bytes_atomic(path: Path, data: bytes) -> None:
     """Durably replace ``path`` with ``data`` or propagate the exact failure.
 
-    The temporary file is created beside the destination so ``os.replace`` is
-    a same-filesystem atomic rename. File contents are flushed before the
-    rename and parent-directory metadata is flushed after it. A failure after
-    replacement is deliberately reported: the bytes are present, but their
-    durability was not established.
+    The temporary file is created beside the destination so publication stays
+    on one filesystem. File contents are flushed before publication. POSIX then
+    performs ``os.replace`` followed by a parent-directory fsync; Windows uses
+    MoveFileExW with REPLACE_EXISTING | WRITE_THROUGH because FlushFileBuffers
+    is not a documented directory-handle durability primitive.
     """
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp")
+    temporary = path.with_name(
+        f".{path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
+    )
     try:
         with temporary.open("xb") as stream:
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
-        flush_directory(path.parent)
+        replace_file_durable(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
 
 
-def flush_directory(path: Path) -> None:
-    """Flush directory metadata using the platform's native directory handle."""
+def replace_file_durable(source: Path, destination: Path) -> None:
+    """Replace ``destination`` with the strongest documented metadata durability."""
 
     if os.name == "nt":
-        _flush_windows_directory(path)
+        _move_windows_file_write_through(
+            source,
+            destination,
+            replace_existing=True,
+        )
         return
+    os.replace(source, destination)
+    flush_directory(destination.parent)
+
+
+def publish_file_durable(source: Path, destination: Path) -> None:
+    """Publish ``source`` at a new destination without replacing an existing file.
+
+    ``source`` must already contain flushed bytes. On success this function
+    consumes ``source``. A pre-existing destination raises ``FileExistsError``.
+    """
+
+    if os.name == "nt":
+        _move_windows_file_write_through(
+            source,
+            destination,
+            replace_existing=False,
+        )
+        return
+    os.link(source, destination)
+    source.unlink()
+    flush_directory(destination.parent)
+
+
+def flush_directory(path: Path) -> None:
+    """Flush POSIX directory metadata.
+
+    Windows callers must use ``replace_file_durable`` or
+    ``publish_file_durable`` so metadata publication goes through the documented
+    MoveFileExW write-through path instead of attempting FlushFileBuffers on a
+    directory handle.
+    """
+
+    if os.name == "nt":
+        raise OSError(
+            errno.ENOTSUP,
+            "directory fsync is not exposed as a documented Win32 primitive; "
+            "use a durable file publication helper",
+            str(path),
+        )
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
     descriptor = os.open(path, flags)
     try:
@@ -46,66 +95,51 @@ def flush_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-def _flush_windows_directory(path: Path, *, kernel32: Any | None = None) -> None:
-    """Flush a Windows directory opened with backup-semantics support.
-
-    ``os.open`` routes through the Microsoft C runtime, which rejects directory
-    paths. CreateFileW is the documented Win32 route for obtaining a directory
-    handle; FILE_FLAG_BACKUP_SEMANTICS is required for that use.
-    """
+def _move_windows_file_write_through(
+    source: Path,
+    destination: Path,
+    *,
+    replace_existing: bool,
+    kernel32: Any | None = None,
+) -> None:
+    """Move one file with the documented Win32 write-through contract."""
 
     native = kernel32
     if native is None:
         win_dll: Any = getattr(ctypes, "WinDLL")
         native = win_dll("kernel32", use_last_error=True)
-        native.CreateFileW.argtypes = (
+        native.MoveFileExW.argtypes = (
+            ctypes.c_wchar_p,
             ctypes.c_wchar_p,
             ctypes.c_uint32,
-            ctypes.c_uint32,
-            ctypes.c_void_p,
-            ctypes.c_uint32,
-            ctypes.c_uint32,
-            ctypes.c_void_p,
         )
-        native.CreateFileW.restype = ctypes.c_void_p
-        native.FlushFileBuffers.argtypes = (ctypes.c_void_p,)
-        native.FlushFileBuffers.restype = ctypes.c_int
-        native.CloseHandle.argtypes = (ctypes.c_void_p,)
-        native.CloseHandle.restype = ctypes.c_int
+        native.MoveFileExW.restype = ctypes.c_int
 
-    generic_read = 0x80000000
-    generic_write = 0x40000000
-    share_read_write_delete = 0x00000001 | 0x00000002 | 0x00000004
-    open_existing = 3
-    file_flag_backup_semantics = 0x02000000
-    handle = native.CreateFileW(
-        str(path),
-        generic_read | generic_write,
-        share_read_write_delete,
-        None,
-        open_existing,
-        file_flag_backup_semantics,
-        None,
-    )
-    invalid_handle = ctypes.c_void_p(-1).value
-    if handle in (None, invalid_handle):
-        raise _windows_error("CreateFileW")
+    flags = _MOVEFILE_WRITE_THROUGH
+    if replace_existing:
+        flags |= _MOVEFILE_REPLACE_EXISTING
+    if native.MoveFileExW(str(source), str(destination), flags):
+        return
 
-    flush_error: OSError | None = None
-    if not native.FlushFileBuffers(handle):
-        flush_error = _windows_error("FlushFileBuffers")
-    close_succeeded = native.CloseHandle(handle)
-    if flush_error is not None:
-        raise flush_error
-    if not close_succeeded:
-        raise _windows_error("CloseHandle")
+    error_code = _windows_last_error()
+    if not replace_existing and error_code in _WINDOWS_ALREADY_EXISTS:
+        raise FileExistsError(
+            errno.EEXIST,
+            "destination already exists",
+            str(destination),
+        )
+    raise _windows_error("MoveFileExW", error_code=error_code)
 
 
-def _windows_error(operation: str) -> OSError:
+def _windows_last_error() -> int:
+    return int(getattr(ctypes, "get_last_error", lambda: 0)())
+
+
+def _windows_error(operation: str, *, error_code: int | None = None) -> OSError:
     """Build the native Windows error, including in portable adapter tests."""
 
-    error_code = getattr(ctypes, "get_last_error", lambda: 0)()
+    code = _windows_last_error() if error_code is None else int(error_code)
     win_error = getattr(ctypes, "WinError", None)
     if win_error is not None:
-        return OSError(f"{operation} failed: {win_error(error_code)}")
-    return OSError(error_code, f"{operation} failed with Windows error {error_code}")
+        return OSError(f"{operation} failed: {win_error(code)}")
+    return OSError(code, f"{operation} failed with Windows error {code}")

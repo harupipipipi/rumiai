@@ -603,6 +603,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -672,6 +677,24 @@ jobs:
           chmod +x tobkiri_runtime/bundled/uv
           echo "Bundled uv at:"
           ls -la tobkiri_runtime/bundled/
+
+      - name: Resolve Rust host target
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="$(rustc -vV | sed -n 's/^host: //p')"
+          test -n "$target"
+          echo "TOBKIRI_RUST_HOST_TARGET=$target" >> "$GITHUB_ENV"
+
+      - name: Build debug Pack Shell for viewer Rust checks
+        run: cargo build --locked --manifest-path pack-shell/Cargo.toml --target "$TOBKIRI_RUST_HOST_TARGET"
+
+      - name: Seal debug Pack Shell for viewer Rust checks
+        run: >-
+          python .github/scripts/seal_pack_shell.py
+          --repo-root .
+          --target "$TOBKIRI_RUST_HOST_TARGET"
+          --profile debug
 
       - name: Build rumi viewer
         working-directory: tobkiri_launcher/src-tauri

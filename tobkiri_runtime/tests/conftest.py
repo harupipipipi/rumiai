@@ -1268,6 +1268,115 @@ def defaultspack_conversation_owner(request, monkeypatch, tmp_path):
 
 
 @pytest.fixture
+def defaultspack_v4_tool_dispatch(defaultspack_conversation_owner):
+    """Bind a test-only v4 tool-definition session to the active Defaults Profile.
+
+    Production intentionally fails closed when no captured v4 dispatch session exists.
+    These compatibility-heavy chat tests still exercise the checked-in legacy tool
+    fixtures, so project those fixtures through the finite v4 definition contract
+    instead of reviving a production registry fallback.
+    """
+
+    del defaultspack_conversation_owner
+
+    from core_runtime.di_container import get_container
+    from core_runtime.global_contract_dispatch import GlobalContractUnavailable
+    from ecosystem.rumi_default_tool_projection_pack.runtime.projection import (
+        create_source_operation,
+    )
+
+    snapshot = _defaultspack_v4_snapshot()
+    definition_contract = "rumi.resource.tool.definition.v1"
+
+    class _ToolDefinitionDispatchSession:
+        profile_id = snapshot.profile_id
+        plan_digest = snapshot.plan_hash
+
+        @staticmethod
+        def _catalog():
+            return create_source_operation(None)("list", {})
+
+        def invoke(
+            self,
+            contract_id,
+            operation_id,
+            payload,
+            *,
+            version_range=">=1,<2",
+        ):
+            del version_range
+            if contract_id != definition_contract:
+                raise GlobalContractUnavailable(
+                    f"test v4 tool dispatch does not provide {contract_id}"
+                )
+            request_profile_id = str(payload.get("profile_id") or self.profile_id)
+            if request_profile_id != self.profile_id:
+                raise GlobalContractUnavailable(
+                    "test v4 tool dispatch profile identity mismatch"
+                )
+
+            source = self._catalog()
+            definitions = [
+                dict(item)
+                for item in source.get("definitions", [])
+                if isinstance(item, dict)
+            ]
+            aliases = {
+                str(alias): str(target)
+                for alias, target in dict(source.get("aliases") or {}).items()
+            }
+            if operation_id in {"list", "catalog"}:
+                return {
+                    "profile_id": self.profile_id,
+                    "revision": 0,
+                    "definitions": definitions,
+                    "aliases": aliases,
+                    "migration": None,
+                }
+            if operation_id in {"get", "resolve"}:
+                requested = str(payload.get("tool_id") or "").strip()
+                resolved = aliases.get(requested, requested)
+                definition = next(
+                    (
+                        item
+                        for item in definitions
+                        if str(item.get("tool_id") or "") == resolved
+                    ),
+                    None,
+                )
+                return {
+                    "requested_tool_id": requested,
+                    "resolved_tool_id": resolved,
+                    "aliased": requested != resolved,
+                    "definition": definition,
+                    "registry_revision": 0,
+                }
+            raise GlobalContractUnavailable(
+                f"test v4 tool definition operation is unavailable: {operation_id}"
+            )
+
+        def provider_metadata(self, contract_id):
+            if contract_id == definition_contract:
+                return ()
+            raise GlobalContractUnavailable(
+                f"test v4 tool dispatch does not provide {contract_id}"
+            )
+
+    container = get_container()
+    marker = object()
+    previous = container._instances.get("v4_dispatch_session", marker)
+    session = _ToolDefinitionDispatchSession()
+    container.set_instance("v4_dispatch_session", session)
+    try:
+        yield session
+    finally:
+        if previous is marker:
+            container._instances.pop("v4_dispatch_session", None)
+        else:
+            container._instances["v4_dispatch_session"] = previous
+
+
+@pytest.fixture
 def defaultspack_capability_plan_context():
     """Build a signed detached CapabilityPlan for selected tool-contract tests."""
 

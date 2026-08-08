@@ -229,6 +229,36 @@ fn validate_application_pack(pack_root: &Path, pack: &Value) -> Result<GuardianL
     if !canonical.starts_with(pack_root) || sha256(&bytes) != artifact_digest {
         bail!("application Pack entrypoint escaped or failed artifact verification");
     }
+
+    let contract_map_path = value_str(&artifacts[1], "/path")
+        .context("application Pack frontend contract map path is missing")?;
+    let contract_map_digest = value_str(&artifacts[1], "/digest")
+        .context("application Pack frontend contract map digest is missing")?;
+    let contract_map_candidate = pack_root.join(safe_relative(contract_map_path)?);
+    let contract_map_bytes = read_regular_file(
+        &contract_map_candidate,
+        "application Pack frontend contract map",
+    )?;
+    let contract_map_canonical = contract_map_candidate
+        .canonicalize()
+        .context("failed to canonicalize application Pack frontend contract map")?;
+    if !contract_map_canonical.starts_with(pack_root)
+        || sha256(&contract_map_bytes) != contract_map_digest
+    {
+        bail!("application Pack frontend contract map escaped or failed artifact verification");
+    }
+    let contract_map: Value = serde_json::from_slice(&contract_map_bytes)
+        .context("application Pack frontend contract map is malformed")?;
+    if value_str(&contract_map, "/schema") != Some("io.tobkiri.frontend-contract-map.v4")
+        || value_str(&contract_map, "/pack_id") != Some("defaultspack")
+        || contract_map
+            .get("routes")
+            .and_then(Value::as_array)
+            .is_none()
+    {
+        bail!("application Pack frontend contract map identity is invalid");
+    }
+
     Ok(GuardianLaunch {
         entrypoint: canonical,
         argv: Vec::new(),
@@ -595,6 +625,7 @@ mod tests {
             "artifact-index.v4.json",
             "runtime/conversation.py",
             "defaultspack/desktop_app.py",
+            "defaultspack/frontend_contract_map.v4.json",
         ] {
             let source = source_pack.join(relative);
             let destination = destination_pack.join(relative);
@@ -725,6 +756,17 @@ mod tests {
         .unwrap();
         assert!(resolve(&tamper_config).is_err());
         fs::remove_dir_all(tamper_root).unwrap();
+
+        let (contract_map_root, contract_map_config) = fixture("frontend-contract-map-tamper");
+        fs::write(
+            contract_map_config
+                .app_dir
+                .join("ecosystem/defaultspack/defaultspack/frontend_contract_map.v4.json"),
+            b"{}",
+        )
+        .unwrap();
+        assert!(resolve(&contract_map_config).is_err());
+        fs::remove_dir_all(contract_map_root).unwrap();
     }
 
     #[test]
@@ -795,5 +837,15 @@ mod tests {
         symlink(&outside_entrypoint, &entrypoint).unwrap();
         assert!(resolve(&artifact_config).is_err());
         fs::remove_dir_all(artifact_root).unwrap();
+
+        let (contract_map_root, contract_map_config) = fixture("frontend-contract-map-symlink");
+        let contract_map = contract_map_config
+            .app_dir
+            .join("ecosystem/defaultspack/defaultspack/frontend_contract_map.v4.json");
+        let outside_contract_map = contract_map_root.join("outside.frontend-contract-map.json");
+        fs::rename(&contract_map, &outside_contract_map).unwrap();
+        symlink(&outside_contract_map, &contract_map).unwrap();
+        assert!(resolve(&contract_map_config).is_err());
+        fs::remove_dir_all(contract_map_root).unwrap();
     }
 }

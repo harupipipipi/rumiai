@@ -23,7 +23,10 @@ _APPROVAL_MODULE_NAMES = (
 
 pytestmark = [
     pytest.mark.contract,
-    pytest.mark.usefixtures("defaultspack_conversation_owner"),
+    pytest.mark.usefixtures(
+        "defaultspack_conversation_owner",
+        "defaultspack_v4_tool_dispatch",
+    ),
 ]
 
 
@@ -944,13 +947,17 @@ def test_prepare_chat_run_does_not_trust_runtime_yaml_as_profile_authority(tmp_p
 
     assert prepared.tool_context["agent_id"] == "agent"
     assert prepared.tool_context["runtime_profile"]["profile_id"] == "defaults"
-    assert {
-        item["tool_name"] for item in prepared.tool_context["unselected_requested_tools"]
-    } == {"coding_terminal_exec"}
+    assert "unselected_requested_tools" not in prepared.tool_context
     assert _external_provider_tool_names(prepared) == {
         "coding_file_read",
+        "coding_terminal_exec",
         "coding_file_write",
     }
+    filter_entries = {
+        entry["tool_name"]: entry
+        for entry in prepared.metadata["tool_filter_result"]
+    }
+    assert filter_entries["coding_terminal_exec"]["status"] == "approval_required"
     ChatStore._instance = None
 
 
@@ -987,12 +994,14 @@ def test_prepare_chat_run_infers_raw_tool_mentions_as_turn_tools(tmp_path, monke
     assert prepared.input_data["tools"] == ["coding_terminal_exec"]
     assert prepared.tool_context["requested_tool_ids"] == ["coding_terminal_exec"]
     assert prepared.tool_context["agent_id"] == "agent"
-    assert [
-        item["tool_name"] for item in prepared.tool_context["unselected_requested_tools"]
-    ] == ["coding_terminal_exec"]
+    assert "unselected_requested_tools" not in prepared.tool_context
     assert not prepared.request_context.get("user_requested_computer_use")
-    assert _external_provider_tool_names(prepared) == set()
-    assert "coding_terminal_exec" not in prepared.connected_tool_names
+    assert prepared.request_context.get("user_requested_shell_tool") is True
+    assert _external_provider_tool_names(prepared) == {"coding_terminal_exec"}
+    assert "coding_terminal_exec" in prepared.connected_tool_names
+    [filter_entry] = prepared.metadata["tool_filter_result"]
+    assert filter_entry["tool_name"] == "coding_terminal_exec"
+    assert filter_entry["status"] == "approval_required"
     ChatStore._instance = None
 
 
@@ -1016,10 +1025,13 @@ def test_prepare_chat_run_allows_explicit_shell_tool_request_to_attach(tmp_path,
     assert prepared.input_data["tools"] == ["coding_terminal_exec"]
     assert prepared.request_context.get("profile_policy", {}).get("allow_shell") is not True
     assert prepared.request_context.get("user_requested_shell_tool") is True
-    assert prepared.tool_context["unselected_requested_tools"][0]["tool_name"] == "coding_terminal_exec"
+    assert "unselected_requested_tools" not in prepared.tool_context
     tool_names = _external_provider_tool_names(prepared)
-    assert "coding_terminal_exec" not in tool_names
-    assert "coding_terminal_exec" not in prepared.connected_tool_names
+    assert "coding_terminal_exec" in tool_names
+    assert "coding_terminal_exec" in prepared.connected_tool_names
+    [filter_entry] = prepared.metadata["tool_filter_result"]
+    assert filter_entry["tool_name"] == "coding_terminal_exec"
+    assert filter_entry["status"] == "approval_required"
     ChatStore._instance = None
 
 
@@ -1065,10 +1077,15 @@ def test_prepare_chat_run_infers_coding_pr_tools_from_broad_request(tmp_path, mo
         entry["tool_name"]
         for entry in prepared.tool_context.get("unselected_requested_tools", [])
     }
-    assert "coding_terminal_exec" in unselected_names
+    assert "coding_terminal_exec" not in unselected_names
     tool_names = _external_provider_tool_names(prepared)
-    assert (expected_tools - {"coding_terminal_exec"}).issubset(tool_names)
-    assert "coding_terminal_exec" not in prepared.connected_tool_names
+    assert expected_tools.issubset(tool_names)
+    assert "coding_terminal_exec" in prepared.connected_tool_names
+    filter_entries = {
+        entry["tool_name"]: entry
+        for entry in prepared.metadata["tool_filter_result"]
+    }
+    assert filter_entries["coding_terminal_exec"]["status"] == "approval_required"
     ChatStore._instance = None
 
 
@@ -1121,10 +1138,16 @@ def test_prepare_chat_run_keeps_inferred_pr_tools_with_auto_tool_selection(tmp_p
         entry["tool_name"]
         for entry in prepared.tool_context.get("unselected_requested_tools", [])
     }
-    assert "coding_terminal_exec" in unselected_names
+    assert "coding_terminal_exec" not in unselected_names
     tool_names = _external_provider_tool_names(prepared)
     assert "coding_file_read" in tool_names
-    assert "coding_terminal_exec" not in tool_names
+    assert "coding_terminal_exec" in tool_names
+    assert "coding_terminal_exec" in prepared.connected_tool_names
+    filter_entries = {
+        entry["tool_name"]: entry
+        for entry in prepared.metadata["tool_filter_result"]
+    }
+    assert filter_entries["coding_terminal_exec"]["status"] == "approval_required"
     ChatStore._instance = None
 
 

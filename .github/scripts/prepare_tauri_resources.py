@@ -452,31 +452,42 @@ def resolve_cargo_target_dir(
     return target_dir
 
 
-def _validate_target_component(target: str) -> None:
+def _validate_path_component(value: str, *, label: str) -> None:
     if (
-        not target
-        or target in {".", ".."}
-        or "/" in target
-        or "\\" in target
+        not value
+        or value in {".", ".."}
+        or "/" in value
+        or "\\" in value
     ):
-        raise ValueError(f"invalid Rust target path component: {target!r}")
+        raise ValueError(f"invalid {label} path component: {value!r}")
+
+
+def _validate_target_component(target: str) -> None:
+    _validate_path_component(target, label="Rust target")
+
+
+def _validate_profile_component(profile: str) -> None:
+    _validate_path_component(profile, label="Cargo profile")
 
 
 def resolve_pack_shell_binary(
     repo_root: Path,
     target: str,
     environ: Mapping[str, str] | None = None,
+    *,
+    profile: str = "release",
 ) -> Path:
-    """Resolve the exact, canonical release pack-shell binary.
+    """Resolve the exact, canonical pack-shell binary for one Cargo profile.
 
-    The target triple and release profile are fixed path components. The
+    The target triple and profile are validated as single path components. The
     target-dir environment variable selects only Cargo's output root; it does
-    not authorize profile changes or fallback searches.
+    not authorize fallback searches or path traversal.
     """
     _validate_target_component(target)
+    _validate_profile_component(profile)
     binary_name = pack_shell_binary_name(target)
     target_dir = resolve_cargo_target_dir(repo_root, environ)
-    candidate = target_dir / target / "release" / binary_name
+    candidate = target_dir / target / profile / binary_name
     try:
         metadata = candidate.lstat()
     except FileNotFoundError as exc:
@@ -619,9 +630,16 @@ def seal_pack_shell_binary(
     repo_root: Path,
     target: str,
     environ: Mapping[str, str] | None = None,
+    *,
+    profile: str = "release",
 ) -> tuple[Path, bytes, int, Path]:
-    """Validate and seal the canonical target release pack-shell artifact."""
-    binary = resolve_pack_shell_binary(repo_root, target, environ)
+    """Validate and seal the canonical target/profile pack-shell artifact."""
+    binary = resolve_pack_shell_binary(
+        repo_root,
+        target,
+        environ,
+        profile=profile,
+    )
     payload, source_mode = _read_verified_pack_shell(binary, target)
     digest_path = _write_pack_shell_digest(binary, payload)
     return binary, payload, source_mode, digest_path

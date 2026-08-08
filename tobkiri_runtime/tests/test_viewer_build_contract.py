@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[2]
 TAURI_ROOT = ROOT / "tobkiri_launcher" / "src-tauri"
 TAURI_CONFIG = TAURI_ROOT / "tauri.conf.json"
 RESOURCE_PREPARER = ROOT / ".github" / "scripts" / "prepare_tauri_resources.py"
+PACK_SHELL_SEALER = ROOT / ".github" / "scripts" / "seal_pack_shell.py"
+TEST_WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
 DEV_REQUIREMENTS = ROOT / "tobkiri_runtime" / "requirements-dev.txt"
 DEV_PYPROJECT = ROOT / "tobkiri_runtime" / "pyproject.toml"
 VIEWER_BUILD_WORKFLOWS = (
@@ -71,6 +73,44 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
         assert "cargo tauri build" in contents
         assert "Prepare bundled Rumi runtime" not in contents
         assert "python .github/scripts/prepare_tauri_resources.py" not in contents
+
+
+def test_debug_pack_shell_is_built_and_sealed_before_launcher_rust_checks():
+    assert PACK_SHELL_SEALER.is_file()
+    expectations = (
+        (
+            ROOT / ".github" / "workflows" / "desktop-installers.yml",
+            "Build debug Pack Shell for viewer Rust tests",
+            "Seal debug Pack Shell for viewer Rust tests",
+            "Run rumi viewer Rust tests",
+        ),
+        (
+            TEST_WORKFLOW,
+            "Build debug Pack Shell for viewer Rust checks",
+            "Seal debug Pack Shell for viewer Rust checks",
+            "Run rumi viewer tests",
+        ),
+    )
+    for workflow, build_name, seal_name, test_name in expectations:
+        contents = workflow.read_text(encoding="utf-8")
+        build_at = contents.index(build_name)
+        seal_at = contents.index(seal_name)
+        test_at = contents.index(test_name)
+        assert build_at < seal_at < test_at
+        relevant = contents[build_at:test_at]
+        assert "cargo build --locked --manifest-path pack-shell/Cargo.toml" in relevant
+        assert "python .github/scripts/seal_pack_shell.py" in relevant
+        assert "--profile debug" in relevant
+
+
+def test_pack_shell_profile_is_a_single_safe_path_component():
+    preparer = _load_resource_preparer()
+    preparer._validate_profile_component("debug")
+    preparer._validate_profile_component("release")
+
+    for invalid in ("", ".", "..", "../debug", "debug/child", "debug\\child"):
+        with pytest.raises(ValueError):
+            preparer._validate_profile_component(invalid)
 
 
 def test_dev_uv_version_matches_release_bundle_pin():

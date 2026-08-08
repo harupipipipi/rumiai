@@ -169,6 +169,16 @@ jobs:
         working-directory: tobkiri_runtime/ecosystem/defaultspack/webapp
         run: npm run build
 
+      - name: Build debug Pack Shell for viewer Rust tests
+        run: cargo build --locked --manifest-path pack-shell/Cargo.toml --target ${{ matrix.target }}
+
+      - name: Seal debug Pack Shell for viewer Rust tests
+        run: >-
+          python .github/scripts/seal_pack_shell.py
+          --repo-root .
+          --target ${{ matrix.target }}
+          --profile debug
+
       - name: Run rumi viewer Rust tests
         working-directory: tobkiri_launcher/src-tauri
         run: cargo test --locked

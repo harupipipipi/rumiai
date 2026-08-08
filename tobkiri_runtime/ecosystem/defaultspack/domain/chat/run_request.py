@@ -3575,7 +3575,22 @@ def _requested_tool_ids_include_shell(tool_ids: list[str]) -> bool:
         metadata = tool_def.get("metadata") if isinstance(tool_def.get("metadata"), dict) else {}
         category = str(tool_def.get("category") or metadata.get("category") or "").strip()
         action_type = str(tool_def.get("action_type") or metadata.get("action_type") or "").strip()
-        if category == "shell" or action_type == "shell":
+        capability_grants = tool_def.get("capability_grants")
+        capability_grants = capability_grants if isinstance(capability_grants, list) else []
+        tags = tool_def.get("tags")
+        tags = tags if isinstance(tags, list) else []
+        if (
+            category == "shell"
+            or action_type == "shell"
+            or any(
+                str(grant).strip().startswith(("shell.", "terminal."))
+                for grant in capability_grants
+            )
+            or any(
+                str(tag).strip().lower() in {"shell", "terminal", "command"}
+                for tag in tags
+            )
+        ):
             return True
     return False
 

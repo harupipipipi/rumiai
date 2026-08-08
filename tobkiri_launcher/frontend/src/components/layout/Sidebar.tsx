@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
@@ -6,8 +5,6 @@ import { cn } from '@/src/lib/utils';
 import { panelRouteMeta, panelRoutes, viewerNavGroups, type PanelRouteKey } from '@/src/lib/routes';
 import { Avatar } from '@/src/components/ui/Avatar';
 import { LAUNCHER_DISPLAY_NAME } from '@/src/lib/launcherBrand';
-import { fetchStartupProfiles } from '@/src/lib/api';
-import type { ApiStartupProfile } from '@/src/lib/apiTypes';
 import { preloadPanelRoute } from '@/src/lib/routeModules';
 import { BrainCircuit, Folder, FolderCog, LayoutGrid, Network, Settings, PanelLeft, Home, GitBranch, Share2, Route, Rocket } from 'lucide-react';
 
@@ -40,32 +37,6 @@ export function Sidebar() {
   const profile = useAppStore(state => state.profile);
   const isSidebarOpen = useAppStore(state => state.isSidebarOpen);
   const setSidebarOpen = useAppStore(state => state.setSidebarOpen);
-  const selectedStartupProfileId = useAppStore(state => state.selectedStartupProfileId);
-  const setSelectedStartupProfileId = useAppStore(state => state.setSelectedStartupProfileId);
-  const [startupProfiles, setStartupProfiles] = useState<ApiStartupProfile[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void fetchStartupProfiles()
-      .then((response) => {
-        if (cancelled) return;
-        setStartupProfiles(response.profiles);
-        const selectedExists = response.profiles.some(
-          (startupProfile) => startupProfile.profile_id === selectedStartupProfileId,
-        );
-        if (!selectedExists) {
-          setSelectedStartupProfileId(
-            response.active_profile_id ?? response.profiles[0]?.profile_id ?? '',
-          );
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setStartupProfiles([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedStartupProfileId, setSelectedStartupProfileId]);
 
   const navGroups: NavGroup[] = viewerNavGroups.map((group) => ({
     id: group.id,
@@ -161,23 +132,6 @@ export function Sidebar() {
               >
                 {group.label}
               </div>
-              {group.id === 'advanced' && isSidebarOpen && startupProfiles.length > 0 ? (
-                <label className="mx-2 mb-1 block">
-                  <span className="sr-only">Advanced profile</span>
-                  <select
-                    aria-label="Advanced profile"
-                    className="rumi-select h-9 w-full rounded-lg border border-border bg-bg-main px-2.5 pr-8 text-xs text-text-main"
-                    onChange={(event) => setSelectedStartupProfileId(event.target.value)}
-                    value={selectedStartupProfileId}
-                  >
-                    {startupProfiles.map((startupProfile) => (
-                      <option key={startupProfile.profile_id} value={startupProfile.profile_id}>
-                        {startupProfile.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
               <ul
                 className={cn(
                   "flex flex-col transition-[gap]",

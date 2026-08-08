@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 from pathlib import Path
 
@@ -26,17 +27,12 @@ def test_atomic_write_creates_and_replaces_only_after_file_fsync(
         events.append("file_fsync")
         real_fsync(descriptor)
 
-    def replace(source: Path, destination: Path) -> None:
-        events.append("replace")
+    def replace_durable(source: Path, destination: Path) -> None:
+        events.append("replace_durable")
         real_replace(source, destination)
 
     monkeypatch.setattr(durability.os, "fsync", fsync)
-    monkeypatch.setattr(durability.os, "replace", replace)
-    monkeypatch.setattr(
-        durability,
-        "flush_directory",
-        lambda _path: events.append("directory_flush"),
-    )
+    monkeypatch.setattr(durability, "replace_file_durable", replace_durable)
 
     durability.write_bytes_atomic(target, b"first")
     durability.write_bytes_atomic(target, b"second")
@@ -44,11 +40,9 @@ def test_atomic_write_creates_and_replaces_only_after_file_fsync(
     assert target.read_bytes() == b"second"
     assert events == [
         "file_fsync",
-        "replace",
-        "directory_flush",
+        "replace_durable",
         "file_fsync",
-        "replace",
-        "directory_flush",
+        "replace_durable",
     ]
     assert _temporary_files(tmp_path) == []
 
@@ -62,7 +56,7 @@ def test_atomic_write_failure_before_replace_preserves_target_and_cleans_temp(
     def fail_replace(_source: Path, _destination: Path) -> None:
         raise PermissionError("replace denied")
 
-    monkeypatch.setattr(durability.os, "replace", fail_replace)
+    monkeypatch.setattr(durability, "replace_file_durable", fail_replace)
     with pytest.raises(PermissionError, match="replace denied"):
         durability.write_bytes_atomic(target, b"new")
 
@@ -92,82 +86,164 @@ def test_atomic_write_failure_after_replace_is_reported_and_cleans_temp(
 ) -> None:
     target = tmp_path / "state.json"
     target.write_bytes(b"old")
+    real_replace = durability.os.replace
 
-    def fail_flush(_path: Path) -> None:
-        raise PermissionError("directory flush denied")
+    def replace_then_fail(source: Path, destination: Path) -> None:
+        real_replace(source, destination)
+        raise PermissionError("publication durability failed")
 
-    monkeypatch.setattr(durability, "flush_directory", fail_flush)
-    with pytest.raises(PermissionError, match="directory flush denied"):
+    monkeypatch.setattr(durability, "replace_file_durable", replace_then_fail)
+    with pytest.raises(PermissionError, match="publication durability failed"):
         durability.write_bytes_atomic(target, b"new")
 
     assert target.read_bytes() == b"new"
     assert _temporary_files(tmp_path) == []
 
 
-class _WindowsDirectoryApi:
-    def __init__(
-        self,
-        *,
-        handle: int | None = 73,
-        flush_succeeds: bool = True,
-        close_succeeds: bool = True,
-    ) -> None:
-        self.handle = handle
-        self.flush_succeeds = flush_succeeds
-        self.close_succeeds = close_succeeds
-        self.calls: list[tuple[str, object]] = []
-
-    def CreateFileW(self, *arguments: object) -> int | None:
-        self.calls.append(("create", arguments))
-        return self.handle
-
-    def FlushFileBuffers(self, handle: int) -> bool:
-        self.calls.append(("flush", handle))
-        return self.flush_succeeds
-
-    def CloseHandle(self, handle: int) -> bool:
-        self.calls.append(("close", handle))
-        return self.close_succeeds
-
-
-def test_windows_directory_flush_uses_backup_semantics_and_closes_handle(
-    tmp_path: Path,
+def test_posix_durable_replace_flushes_parent_after_replace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    native = _WindowsDirectoryApi()
+    if os.name == "nt":
+        pytest.skip("POSIX durable replacement contract")
 
-    durability._flush_windows_directory(tmp_path, kernel32=native)
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.write_bytes(b"new")
+    destination.write_bytes(b"old")
+    events: list[str] = []
+    real_replace = durability.os.replace
 
-    create_arguments = native.calls[0][1]
-    assert isinstance(create_arguments, tuple)
-    assert create_arguments[0] == str(tmp_path)
-    assert create_arguments[2] == 0x00000001 | 0x00000002 | 0x00000004
-    assert create_arguments[5] == 0x02000000
-    assert native.calls[1:] == [("flush", 73), ("close", 73)]
+    def replace(source_path: Path, destination_path: Path) -> None:
+        events.append("replace")
+        real_replace(source_path, destination_path)
+
+    def flush(path: Path) -> None:
+        events.append(f"flush:{path.name}")
+
+    monkeypatch.setattr(durability.os, "replace", replace)
+    monkeypatch.setattr(durability, "flush_directory", flush)
+
+    durability.replace_file_durable(source, destination)
+
+    assert destination.read_bytes() == b"new"
+    assert events == ["replace", f"flush:{tmp_path.name}"]
 
 
-@pytest.mark.parametrize("failure", ["open", "flush", "close"])
-def test_windows_directory_flush_propagates_native_errors_and_closes_if_open(
-    tmp_path: Path, failure: str
+def test_posix_durable_publish_is_no_replace_and_consumes_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    native = _WindowsDirectoryApi(
-        handle=None if failure == "open" else 73,
-        flush_succeeds=failure != "flush",
-        close_succeeds=failure != "close",
+    if os.name == "nt":
+        pytest.skip("POSIX durable publication contract")
+
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.write_bytes(b"payload")
+    flushed: list[Path] = []
+    monkeypatch.setattr(durability, "flush_directory", flushed.append)
+
+    durability.publish_file_durable(source, destination)
+
+    assert not source.exists()
+    assert destination.read_bytes() == b"payload"
+    assert flushed == [tmp_path]
+
+    second = tmp_path / "second"
+    second.write_bytes(b"other")
+    with pytest.raises(FileExistsError):
+        durability.publish_file_durable(second, destination)
+    assert second.exists()
+    assert destination.read_bytes() == b"payload"
+
+
+class _WindowsMoveApi:
+    def __init__(self, *, succeeds: bool = True) -> None:
+        self.succeeds = succeeds
+        self.calls: list[tuple[str, str, int]] = []
+
+    def MoveFileExW(self, source: str, destination: str, flags: int) -> bool:
+        self.calls.append((source, destination, flags))
+        return self.succeeds
+
+
+def test_windows_replace_uses_replace_existing_and_write_through(tmp_path: Path) -> None:
+    native = _WindowsMoveApi()
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+
+    durability._move_windows_file_write_through(
+        source,
+        destination,
+        replace_existing=True,
+        kernel32=native,
     )
 
-    operation = {
-        "open": "CreateFileW",
-        "flush": "FlushFileBuffers",
-        "close": "CloseHandle",
-    }[failure]
-    with pytest.raises(OSError, match=rf"{operation} failed"):
-        durability._flush_windows_directory(tmp_path, kernel32=native)
+    assert native.calls == [
+        (
+            str(source),
+            str(destination),
+            durability._MOVEFILE_REPLACE_EXISTING | durability._MOVEFILE_WRITE_THROUGH,
+        )
+    ]
 
-    call_names = [item[0] for item in native.calls]
-    if failure == "open":
-        assert call_names == ["create"]
-    else:
-        assert call_names == ["create", "flush", "close"]
+
+def test_windows_publish_uses_write_through_without_replace(tmp_path: Path) -> None:
+    native = _WindowsMoveApi()
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+
+    durability._move_windows_file_write_through(
+        source,
+        destination,
+        replace_existing=False,
+        kernel32=native,
+    )
+
+    assert native.calls == [
+        (str(source), str(destination), durability._MOVEFILE_WRITE_THROUGH)
+    ]
+
+
+def test_windows_move_failure_propagates_native_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    native = _WindowsMoveApi(succeeds=False)
+    monkeypatch.setattr(durability, "_windows_last_error", lambda: 5)
+
+    with pytest.raises(OSError, match=r"MoveFileExW failed"):
+        durability._move_windows_file_write_through(
+            tmp_path / "source",
+            tmp_path / "destination",
+            replace_existing=True,
+            kernel32=native,
+        )
+
+
+def test_windows_publish_maps_existing_destination_to_file_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    native = _WindowsMoveApi(succeeds=False)
+    monkeypatch.setattr(durability, "_windows_last_error", lambda: 183)
+
+    with pytest.raises(FileExistsError) as exc_info:
+        durability._move_windows_file_write_through(
+            tmp_path / "source",
+            tmp_path / "destination",
+            replace_existing=False,
+            kernel32=native,
+        )
+
+    assert exc_info.value.errno == errno.EEXIST
+
+
+def test_windows_flush_directory_fails_closed_instead_of_using_unsupported_api(
+    tmp_path: Path,
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows directory durability contract")
+
+    with pytest.raises(OSError) as exc_info:
+        durability.flush_directory(tmp_path)
+    assert exc_info.value.errno == errno.ENOTSUP
 
 
 def test_posix_directory_open_error_is_not_silenced(

@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Iterator, TypeAlias
 
 from cryptography.fernet import Fernet, InvalidToken
-from tobkiri_protocol.durability import flush_directory
+from tobkiri_protocol.durability import publish_file_durable
 
 from .v4_models import (
     ApprovalRecord,
@@ -126,14 +126,13 @@ class AuthorityStore:
                 handle.flush()
                 os.fsync(handle.fileno())
             try:
-                os.link(temporary, self.key_path)
+                publish_file_durable(temporary, self.key_path)
             except FileExistsError:
                 existing = self.key_path.read_bytes().strip()
                 Fernet(existing)
                 return existing
             finally:
                 temporary.unlink(missing_ok=True)
-            flush_directory(self.key_path.parent)
         except (OSError, ValueError):
             temporary.unlink(missing_ok=True)
             raise

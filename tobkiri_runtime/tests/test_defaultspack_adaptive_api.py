@@ -644,16 +644,14 @@ def test_adaptive_pack_skill_automation_and_event_state_are_not_placeholders(
     )
     assert recommendations["status"] == "ok"
     assert "degraded" not in recommendations["data"]
-    recommended_pack_ids = {item["pack_id"] for item in recommendations["data"]["recommendations"]}
-    assert recommended_pack_ids >= {
-        "defaultspack",
-        "rumi_default_tools_pack",
-        "rumi_local_agent_pack",
-        "rumi_code_ide_pack",
-        "rumi_workflow_scheduler_pack",
-    }
-    assert all(item["source"] == "setup_pack" for item in recommendations["data"]["recommendations"])
-    assert all(item["setup_pack_id"] == item["pack_id"] for item in recommendations["data"]["recommendations"])
+    # Legacy Setup Pack recommendation authority is retired. Pack discovery and
+    # selection now come from the finite v4 Host Pack Control catalog, so this
+    # compatibility endpoint must not synthesize recommendations from mutable
+    # setup state or legacy ecosystem manifests.
+    assert recommendations["data"]["recommendations"] == []
+    assert recommendations["data"]["pack_recommendations"] == []
+    assert recommendations["data"]["count"] == 0
+    assert recommendations["data"]["local_only"] is True
 
     prepared = dispatch(
         "prepared_action_prepare",
