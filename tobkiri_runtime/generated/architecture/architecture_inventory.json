@@ -8612,7 +8612,7 @@
         "version": "1.0.0"
       },
       {
-        "digest": "sha256:16aa8566d27f8f33ca11a097e0c936d973f0ac9ea9291bb6ba48b90324199c33",
+        "digest": "sha256:a8b7b81494f7d2c90f683589d177b72a3ffd10d70f5e1ad278fb1e6c6ccd8b9b",
         "identity": "rumi_credential_broker_pack",
         "kind": "manifest",
         "legacy": true,
@@ -8620,7 +8620,7 @@
         "version": "1.0.0"
       },
       {
-        "digest": "sha256:ea448c982cb01a38507303aaaebea96449d7c3943cfab9a372ab07c69de7ba63",
+        "digest": "sha256:995818ed7b7cfc007efb8398d8ae87ae574f33efa1b37190b6905b6d0964cb94",
         "identity": "rumi.credential_broker",
         "kind": "manifest",
         "legacy": true,
@@ -13374,19 +13374,19 @@
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:16aa8566d27f8f33ca11a097e0c936d973f0ac9ea9291bb6ba48b90324199c33",
+        "evidence_digest": "sha256:a8b7b81494f7d2c90f683589d177b72a3ffd10d70f5e1ad278fb1e6c6ccd8b9b",
         "line": 14,
         "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/ecosystem.json",
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:ea448c982cb01a38507303aaaebea96449d7c3943cfab9a372ab07c69de7ba63",
+        "evidence_digest": "sha256:995818ed7b7cfc007efb8398d8ae87ae574f33efa1b37190b6905b6d0964cb94",
         "line": 151,
         "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/rumi.pack.v3.json",
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:ea448c982cb01a38507303aaaebea96449d7c3943cfab9a372ab07c69de7ba63",
+        "evidence_digest": "sha256:995818ed7b7cfc007efb8398d8ae87ae574f33efa1b37190b6905b6d0964cb94",
         "line": 165,
         "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/rumi.pack.v3.json",
         "rule_id": "legacy_host_execution"
@@ -15750,13 +15750,13 @@
         "rule_id": "legacy_v3_manifest"
       },
       {
-        "evidence_digest": "sha256:16aa8566d27f8f33ca11a097e0c936d973f0ac9ea9291bb6ba48b90324199c33",
+        "evidence_digest": "sha256:a8b7b81494f7d2c90f683589d177b72a3ffd10d70f5e1ad278fb1e6c6ccd8b9b",
         "line": 28,
         "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/ecosystem.json",
         "rule_id": "legacy_v3_manifest"
       },
       {
-        "evidence_digest": "sha256:ea448c982cb01a38507303aaaebea96449d7c3943cfab9a372ab07c69de7ba63",
+        "evidence_digest": "sha256:995818ed7b7cfc007efb8398d8ae87ae574f33efa1b37190b6905b6d0964cb94",
         "line": 251,
         "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/rumi.pack.v3.json",
         "rule_id": "legacy_v3_manifest"
@@ -17052,14 +17052,14 @@
       },
       {
         "legacy": true,
-        "manifest_digest": "sha256:16aa8566d27f8f33ca11a097e0c936d973f0ac9ea9291bb6ba48b90324199c33",
+        "manifest_digest": "sha256:a8b7b81494f7d2c90f683589d177b72a3ffd10d70f5e1ad278fb1e6c6ccd8b9b",
         "pack_id": "rumi_credential_broker_pack",
         "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/ecosystem.json",
         "version": "1.0.0"
       },
       {
         "legacy": true,
-        "manifest_digest": "sha256:ea448c982cb01a38507303aaaebea96449d7c3943cfab9a372ab07c69de7ba63",
+        "manifest_digest": "sha256:995818ed7b7cfc007efb8398d8ae87ae574f33efa1b37190b6905b6d0964cb94",
         "pack_id": "rumi.credential_broker",
         "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/rumi.pack.v3.json",
         "version": "1.0.0"
@@ -18379,8 +18379,8 @@
     ]
   },
   "repository": {
-    "commit": "1631b79e87beb38b5b21071bc2bfcf447b05586e",
-    "tree_digest": "241d1f81cec60b9277f319d37cb2d0748c7e2fc1ee953b00de9eaed2be6b87df"
+    "commit": "66e5070ddc0f812238c633abeee0e530563559e8",
+    "tree_digest": "560c872e45bd7fa15df037c0a4ef2a619fcf3d2afbb87d5828d1796a538d0ab7"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
   "schema": "io.tobkiri.architecture.inventory.v1"

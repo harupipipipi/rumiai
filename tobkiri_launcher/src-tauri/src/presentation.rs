@@ -2219,8 +2219,16 @@ mod tests {
 
     #[test]
     fn verified_launch_spec_passes_only_the_one_shot_handoff_path() {
-        let artifact = Path::new("/verified/release/Tobkiri Shell.app");
-        let handoff = Path::new("/private/launcher/shell_handoff/handoff-ABC.json");
+        let artifact = if cfg!(windows) {
+            Path::new(r"C:\verified\release\tobkiri-shell.exe")
+        } else {
+            Path::new("/verified/release/Tobkiri Shell.app")
+        };
+        let handoff = if cfg!(windows) {
+            Path::new(r"C:\private\launcher\shell_handoff\handoff-ABC.json")
+        } else {
+            Path::new("/private/launcher/shell_handoff/handoff-ABC.json")
+        };
         let macos = verified_launch_spec("macos", artifact, handoff).unwrap();
         assert_eq!(macos.program, Path::new("/usr/bin/open"));
         assert_eq!(
@@ -2253,22 +2261,29 @@ mod tests {
 
     #[test]
     fn verified_launch_spec_rejects_relative_and_unsupported_targets() {
-        let handoff = Path::new("/private/launcher/handoff.json");
-        let relative = verified_launch_spec("linux", Path::new("Tobkiri.AppImage"), handoff)
-            .unwrap_err()
-            .to_string();
+        let absolute_shell = if cfg!(windows) {
+            Path::new(r"C:\verified\tobkiri-shell.exe")
+        } else {
+            Path::new("/verified/shell")
+        };
+        let absolute_handoff = if cfg!(windows) {
+            Path::new(r"C:\private\launcher\handoff.json")
+        } else {
+            Path::new("/private/launcher/handoff.json")
+        };
+        let relative =
+            verified_launch_spec("linux", Path::new("Tobkiri.AppImage"), absolute_handoff)
+                .unwrap_err()
+                .to_string();
         assert!(relative.contains("artifact launch path must be absolute"));
 
-        let relative_handoff = verified_launch_spec(
-            "linux",
-            Path::new("/verified/shell"),
-            Path::new("handoff.json"),
-        )
-        .unwrap_err()
-        .to_string();
+        let relative_handoff =
+            verified_launch_spec("linux", absolute_shell, Path::new("handoff.json"))
+                .unwrap_err()
+                .to_string();
         assert!(relative_handoff.contains("handoff path must be absolute"));
 
-        let unsupported = verified_launch_spec("fixture-os", Path::new("/verified/shell"), handoff)
+        let unsupported = verified_launch_spec("fixture-os", absolute_shell, absolute_handoff)
             .unwrap_err()
             .to_string();
         assert!(unsupported.contains("unsupported"));

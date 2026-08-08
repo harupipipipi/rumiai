@@ -6,7 +6,7 @@
     },
     {
       "path": "runtime/store.py",
-      "sha256": "sha256:58b2e68c5b62852c01234d805e7025ddf5018ca3043dcbe1bf46d66e8b36f1b2"
+      "sha256": "sha256:2d68155b0997669bbf569715d31baa1bddb3caf15d305b1bc0bad1e3d2b238f9"
     },
     {
       "path": "runtime/service.py",

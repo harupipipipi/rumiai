@@ -359,9 +359,37 @@ const WINDOWS_PRIVATE_DACL_SDDL: &str = "D:P(A;;FA;;;OW)(A;;FA;;;SY)";
 
 #[cfg(any(windows, test))]
 fn windows_private_dacl_sddl_is_valid(value: &str) -> bool {
-    let Some(mut rest) = value.strip_prefix("D:P") else {
+    let Some(rest) = value.strip_prefix("D:") else {
         return false;
     };
+    let Some(ace_start) = rest.find('(') else {
+        return false;
+    };
+    let mut flags = &rest[..ace_start];
+    let mut protected = false;
+    let mut auto_inherited = false;
+    while !flags.is_empty() {
+        if let Some(remaining) = flags.strip_prefix("AI") {
+            if auto_inherited {
+                return false;
+            }
+            auto_inherited = true;
+            flags = remaining;
+        } else if let Some(remaining) = flags.strip_prefix('P') {
+            if protected {
+                return false;
+            }
+            protected = true;
+            flags = remaining;
+        } else {
+            return false;
+        }
+    }
+    if !protected {
+        return false;
+    }
+
+    let mut rest = &rest[ace_start..];
     let mut aces = Vec::new();
     while !rest.is_empty() {
         if !rest.starts_with('(') {
@@ -712,8 +740,17 @@ mod tests {
         assert!(windows_private_dacl_sddl_is_valid(
             "D:P(A;;FA;;;SY)(A;;FA;;;OW)"
         ));
+        assert!(windows_private_dacl_sddl_is_valid(
+            "D:PAI(A;;FA;;;OW)(A;;FA;;;SY)"
+        ));
         assert!(!windows_private_dacl_sddl_is_valid(
             "D:(A;;FA;;;OW)(A;;FA;;;SY)"
+        ));
+        assert!(!windows_private_dacl_sddl_is_valid(
+            "D:AI(A;;FA;;;OW)(A;;FA;;;SY)"
+        ));
+        assert!(!windows_private_dacl_sddl_is_valid(
+            "D:PAR(A;;FA;;;OW)(A;;FA;;;SY)"
         ));
         assert!(!windows_private_dacl_sddl_is_valid(
             "D:P(A;;FA;;;OW)(A;;FA;;;SY)(A;;FR;;;WD)"

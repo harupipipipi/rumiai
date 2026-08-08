@@ -183,6 +183,16 @@ jobs:
         working-directory: tobkiri_launcher/src-tauri
         run: cargo test --locked
 
+      - name: Build release Pack Shell for verified Tauri Shell artifact
+        run: cargo build --release --locked --manifest-path pack-shell/Cargo.toml --target ${{ matrix.target }}
+
+      - name: Seal release Pack Shell for verified Tauri Shell artifact
+        run: >-
+          python .github/scripts/seal_pack_shell.py
+          --repo-root .
+          --target ${{ matrix.target }}
+          --profile release
+
       - name: Build verified Tauri Shell artifact
         working-directory: tobkiri_launcher
         run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.shell.conf.json --bundles ${{ matrix.shell_bundles }} --ci

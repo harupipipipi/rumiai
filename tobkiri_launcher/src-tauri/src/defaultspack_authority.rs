@@ -123,7 +123,7 @@ pub(crate) fn resolve(config: &AppConfig) -> Result<GuardianAuthority> {
     )?;
 
     let profile = read_json(&bundle_root.join(PROFILE_PATH), "Defaults Profile v4")?;
-    validate_profile(&profile)?;
+    validate_profile(&profile, &catalog)?;
     validate_defaultspack_pack(&read_json(
         &bundle_root.join(DEFAULTSPACK_PACK_PATH),
         "Defaultspack Pack v4",
@@ -403,16 +403,37 @@ fn value_str<'a>(value: &'a Value, pointer: &str) -> Option<&'a str> {
     value.pointer(pointer).and_then(Value::as_str)
 }
 
-fn validate_profile(profile: &Value) -> Result<()> {
+fn validate_profile(
+    profile: &Value,
+    catalog: &crate::presentation::PresentationCatalog,
+) -> Result<()> {
+    let shell_platform = value_str(profile, "/shell/platform")
+        .context("Defaults Profile Shell platform is missing")?;
+    let shell_architecture = value_str(profile, "/shell/architecture")
+        .context("Defaults Profile Shell architecture is missing")?;
+    let declared_production_variant = catalog
+        .shell_providers
+        .iter()
+        .find(|shell| shell.provider_id == DEFAULT_SHELL_ID)
+        .and_then(|shell| {
+            shell.artifact_variants.iter().find(|variant| {
+                variant.platform == shell_platform
+                    && variant.architecture == shell_architecture
+                    && variant.production
+                    && variant.prebuilt
+                    && variant.development_command.is_none()
+            })
+        })
+        .is_some();
     if value_str(profile, "/profile_api_version") != Some("io.tobkiri.profile.v4")
         || value_str(profile, "/profile_id") != Some(DEFAULT_PROFILE_ID)
         || value_str(profile, "/mode") != Some("interactive")
+        || value_str(profile, "/state") != Some("needs_resolution")
         || value_str(profile, "/base/pack_id") != Some(DEFAULT_BASE_ID)
         || value_str(profile, "/shell/provider_id") != Some(DEFAULT_SHELL_ID)
         || value_str(profile, "/shell/pack_id") != Some(DEFAULT_SHELL_ID)
         || value_str(profile, "/shell/contract_id") != Some("app.shell.v1")
-        || value_str(profile, "/shell/platform") != Some(current_platform())
-        || value_str(profile, "/shell/architecture") != Some(current_architecture())
+        || !declared_production_variant
     {
         bail!("Defaults Profile does not bind the exact Base and Tauri Shell");
     }
@@ -522,28 +543,6 @@ fn verify_pack_artifact_index(pack_root: &Path, bundle_root: &Path) -> Result<()
         bail!("Defaultspack artifact index is stale for its Pack v4 authority");
     }
     Ok(())
-}
-
-fn current_platform() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "macos"
-    } else if cfg!(target_os = "windows") {
-        "windows"
-    } else if cfg!(target_os = "linux") {
-        "linux"
-    } else {
-        "unsupported"
-    }
-}
-
-fn current_architecture() -> &'static str {
-    if cfg!(target_arch = "aarch64") {
-        "arm64"
-    } else if cfg!(target_arch = "x86_64") {
-        "x86_64"
-    } else {
-        "unsupported"
-    }
 }
 
 #[cfg(test)]

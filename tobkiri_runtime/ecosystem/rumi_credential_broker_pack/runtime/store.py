@@ -424,38 +424,42 @@ $target = [Console]::In.ReadToEnd()
 if ([string]::IsNullOrWhiteSpace($target)) { throw 'credential ACL target missing' }
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $sid = $identity.User
-$acl = Get-Acl -LiteralPath $target
+$acl = [System.Security.AccessControl.DirectorySecurity]::new()
 $acl.SetOwner($sid)
 $acl.SetAccessRuleProtection($true, $false)
-foreach ($entry in @($acl.Access)) {
-  [void]$acl.RemoveAccessRuleAll($entry)
-}
-$inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
-$propagation = [Security.AccessControl.PropagationFlags]::None
-$allow = [Security.AccessControl.AccessControlType]::Allow
-$rule = [Security.AccessControl.FileSystemAccessRule]::new(
-  $sid, [Security.AccessControl.FileSystemRights]::FullControl,
-  $inheritance, $propagation, $allow
+$inheritance = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+$propagation = [System.Security.AccessControl.PropagationFlags]::None
+$allow = [System.Security.AccessControl.AccessControlType]::Allow
+$fullControl = [System.Security.AccessControl.FileSystemRights]::FullControl
+$rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+  $sid, $fullControl, $inheritance, $propagation, $allow
 )
 [void]$acl.AddAccessRule($rule)
-Set-Acl -LiteralPath $target -AclObject $acl
-$verified = Get-Acl -LiteralPath $target
+$directory = [System.IO.DirectoryInfo]::new($target)
+$directory.SetAccessControl($acl)
+$sections = [System.Security.AccessControl.AccessControlSections]::Access -bor
+  [System.Security.AccessControl.AccessControlSections]::Owner
+$verified = $directory.GetAccessControl($sections)
 if (-not $verified.AreAccessRulesProtected) { throw 'credential ACL inherits' }
-if ($verified.Access.Count -ne 1) { throw 'credential ACL has extra principals' }
+$rules = @($verified.GetAccessRules(
+  $true, $false, [System.Security.Principal.SecurityIdentifier]
+))
+if ($rules.Count -ne 1) { throw 'credential ACL has extra principals' }
 $ownerSid = $verified.GetOwner(
-  [Security.Principal.SecurityIdentifier]
+  [System.Security.Principal.SecurityIdentifier]
 ).Value
 if ($ownerSid -ne $sid.Value) { throw 'credential ACL owner changed' }
-$actual = $verified.Access[0].IdentityReference.Translate(
-  [Security.Principal.SecurityIdentifier]
-).Value
+$actual = $rules[0].IdentityReference.Value
 if ($actual -ne $sid.Value) { throw 'credential ACL owner grant changed' }
-if ($verified.Access[0].AccessControlType -ne $allow) {
+if ($rules[0].AccessControlType -ne $allow) {
   throw 'credential ACL is not an allow grant'
 }
-if ($verified.Access[0].FileSystemRights -ne
-    [Security.AccessControl.FileSystemRights]::FullControl) {
+if ($rules[0].FileSystemRights -ne $fullControl) {
   throw 'credential ACL does not grant full control'
+}
+if ($rules[0].InheritanceFlags -ne $inheritance -or
+    $rules[0].PropagationFlags -ne $propagation) {
+  throw 'credential ACL propagation changed'
 }
 """
     try:

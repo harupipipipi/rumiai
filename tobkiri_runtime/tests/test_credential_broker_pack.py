@@ -74,8 +74,10 @@ def test_windows_credential_root_acl_is_hardened_with_argument_vector(
     assert len(argv) == 6
     assert str(tmp_path) not in argv
     assert "$target = [Console]::In.ReadToEnd()" in argv[-1]
+    assert "DirectorySecurity]::new()" in argv[-1]
     assert "SetAccessRuleProtection($true, $false)" in argv[-1]
-    assert "Access.Count -ne 1" in argv[-1]
+    assert ".SetAccessControl($acl)" in argv[-1]
+    assert "$rules.Count -ne 1" in argv[-1]
     assert kwargs == {
         "check": True,
         "capture_output": True,
