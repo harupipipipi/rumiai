@@ -382,7 +382,9 @@ def test_provision_doctor_stop_and_cleanup_are_authenticated(provisioner) -> Non
     assert doctor.backend_id == PACKVM_BACKEND_ID
     assert doctor.attestation_digest
     assert manager.doctor().ready is True
-    manager.stop()
+    with pytest.raises(ValueError, match="exact confirmation"):
+        manager.stop("STOP something-else")
+    manager.stop(f"STOP {PACKVM_LIMA_INSTANCE}")
     assert manager.doctor().ready is False
     fake.running = True
     with pytest.raises(ValueError, match="exact confirmation"):

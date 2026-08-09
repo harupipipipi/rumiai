@@ -241,6 +241,10 @@ export function cleanupConfirmationForInstance(instance: string): string {
   return `DELETE ${instance}`;
 }
 
+export function stopConfirmationForInstance(instance: string): string {
+  return `STOP ${instance}`;
+}
+
 export function readPackVMOperationId(): string | null {
   try {
     const value = sessionStorage.getItem(PACKVM_OPERATION_STORAGE_KEY);

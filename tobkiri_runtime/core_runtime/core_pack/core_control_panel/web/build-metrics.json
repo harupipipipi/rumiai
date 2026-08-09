@@ -3,52 +3,52 @@
   "initial_javascript": {
     "files": [
       {
-        "file": "assets/index-xyLMbL7J.js",
-        "raw_bytes": 376565,
-        "gzip_bytes": 115275
+        "file": "assets/index-7nAZQ3kD.js",
+        "raw_bytes": 385504,
+        "gzip_bytes": 117550
       }
     ],
-    "raw_bytes": 376565,
-    "gzip_bytes": 115275
+    "raw_bytes": 385504,
+    "gzip_bytes": 117550
   },
   "initial_css": {
     "files": [
       {
-        "file": "assets/index-BP7XWm-b.css",
-        "raw_bytes": 60107,
-        "gzip_bytes": 11420
+        "file": "assets/index-kZE3Hf9H.css",
+        "raw_bytes": 61383,
+        "gzip_bytes": 11619
       }
     ],
-    "raw_bytes": 60107,
-    "gzip_bytes": 11420
+    "raw_bytes": 61383,
+    "gzip_bytes": 11619
   },
   "initial_assets": {
     "files": [
       {
-        "file": "assets/index-xyLMbL7J.js",
-        "raw_bytes": 376565,
-        "gzip_bytes": 115275
+        "file": "assets/index-7nAZQ3kD.js",
+        "raw_bytes": 385504,
+        "gzip_bytes": 117550
       },
       {
-        "file": "assets/index-BP7XWm-b.css",
-        "raw_bytes": 60107,
-        "gzip_bytes": 11420
+        "file": "assets/index-kZE3Hf9H.css",
+        "raw_bytes": 61383,
+        "gzip_bytes": 11619
       }
     ],
-    "raw_bytes": 436672,
-    "gzip_bytes": 126695
+    "raw_bytes": 446887,
+    "gzip_bytes": 129169
   },
   "all_javascript": {
     "files": [
       {
-        "file": "assets/InlineLoadError-D3k_l8Id.js",
-        "raw_bytes": 2246,
-        "gzip_bytes": 1066
+        "file": "assets/Input-C-PTuTYZ.js",
+        "raw_bytes": 3439,
+        "gzip_bytes": 1413
       },
       {
-        "file": "assets/index-xyLMbL7J.js",
-        "raw_bytes": 376565,
-        "gzip_bytes": 115275
+        "file": "assets/index-7nAZQ3kD.js",
+        "raw_bytes": 385504,
+        "gzip_bytes": 117550
       },
       {
         "file": "assets/core-SwWLTXZB.js",
@@ -56,18 +56,18 @@
         "gzip_bytes": 1054
       },
       {
-        "file": "assets/PackDetail-DZF5qtpP.js",
-        "raw_bytes": 15196,
-        "gzip_bytes": 4337
+        "file": "assets/PackDetail-Cu4iyQLb.js",
+        "raw_bytes": 31037,
+        "gzip_bytes": 7997
       },
       {
-        "file": "assets/Packs-XTguGcfF.js",
-        "raw_bytes": 7626,
-        "gzip_bytes": 2762
+        "file": "assets/Packs-CNUGij30.js",
+        "raw_bytes": 6577,
+        "gzip_bytes": 2421
       }
     ],
-    "raw_bytes": 404339,
-    "gzip_bytes": 124494
+    "raw_bytes": 429263,
+    "gzip_bytes": 130435
   },
   "routes": {
     "src/pages/Setup.tsx": {
@@ -80,45 +80,45 @@
       "present": true,
       "files": [
         {
-          "file": "assets/Packs-XTguGcfF.js",
-          "raw_bytes": 7626,
-          "gzip_bytes": 2762
+          "file": "assets/Packs-CNUGij30.js",
+          "raw_bytes": 6577,
+          "gzip_bytes": 2421
         },
         {
-          "file": "assets/index-xyLMbL7J.js",
-          "raw_bytes": 376565,
-          "gzip_bytes": 115275
+          "file": "assets/index-7nAZQ3kD.js",
+          "raw_bytes": 385504,
+          "gzip_bytes": 117550
         },
         {
-          "file": "assets/InlineLoadError-D3k_l8Id.js",
-          "raw_bytes": 2246,
-          "gzip_bytes": 1066
+          "file": "assets/Input-C-PTuTYZ.js",
+          "raw_bytes": 3439,
+          "gzip_bytes": 1413
         }
       ],
-      "raw_bytes": 386437,
-      "gzip_bytes": 119103
+      "raw_bytes": 395520,
+      "gzip_bytes": 121384
     },
     "src/pages/PackDetail.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/PackDetail-DZF5qtpP.js",
-          "raw_bytes": 15196,
-          "gzip_bytes": 4337
+          "file": "assets/PackDetail-Cu4iyQLb.js",
+          "raw_bytes": 31037,
+          "gzip_bytes": 7997
         },
         {
-          "file": "assets/index-xyLMbL7J.js",
-          "raw_bytes": 376565,
-          "gzip_bytes": 115275
+          "file": "assets/index-7nAZQ3kD.js",
+          "raw_bytes": 385504,
+          "gzip_bytes": 117550
         },
         {
-          "file": "assets/InlineLoadError-D3k_l8Id.js",
-          "raw_bytes": 2246,
-          "gzip_bytes": 1066
+          "file": "assets/Input-C-PTuTYZ.js",
+          "raw_bytes": 3439,
+          "gzip_bytes": 1413
         }
       ],
-      "raw_bytes": 394007,
-      "gzip_bytes": 120678
+      "raw_bytes": 419980,
+      "gzip_bytes": 126960
     }
   }
 }

@@ -193,6 +193,52 @@ def test_guest_materialization_rejects_storage_quota_overflow(
         packvm_guest_runner._materialize(captured.request_payload(nonce="a" * 64))
 
 
+def test_guest_materialization_enforces_cumulative_storage_quota(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, binding = _copied_binding(tmp_path)
+    captured = capture_materialized_artifact(root, binding)
+    guest_root = tmp_path / "guest-artifacts"
+    monkeypatch.setattr(packvm_guest_runner, "ARTIFACT_ROOT", guest_root)
+    monkeypatch.setattr(packvm_guest_runner.os, "geteuid", lambda: 0)
+    first = captured.request_payload(nonce="a" * 64)
+    packvm_guest_runner._materialize(first)
+
+    second = dict(captured.request_payload(nonce="b" * 64))
+    second["pack_id"] = "alternate-pack"
+    files = second["files"]
+    assert isinstance(files, list)
+    total = sum(len(base64.b64decode(str(item["content"]))) for item in files)
+    second["materialization_digest"] = canonical_digest(
+        {
+            "pack_id": second["pack_id"],
+            "artifact_digest": second["artifact_digest"],
+            "function_id": second["function_id"],
+            "implementation_digest": second["implementation_digest"],
+            "implementation_path": second["implementation_path"],
+            "files": [
+                {
+                    "path": item["path"],
+                    "digest": item["digest"],
+                    "executable": item["executable"],
+                    "size": len(base64.b64decode(str(item["content"]))),
+                }
+                for item in files
+            ],
+        }
+    )
+    stored = packvm_guest_runner._artifact_storage_bytes()
+    monkeypatch.setattr(
+        packvm_guest_runner,
+        "MAX_ARTIFACT_STORAGE_BYTES",
+        stored + total + packvm_guest_runner.MAX_ARTIFACT_METADATA_BYTES - 1,
+    )
+
+    with pytest.raises(ValueError, match="storage quota exceeded"):
+        packvm_guest_runner._materialize(second)
+
+
 def test_guest_materialization_preserves_free_space_reserve(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

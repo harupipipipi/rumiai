@@ -319,7 +319,11 @@ test('PackVM GUI cancels only a queued operation', {concurrency: false}, async (
 test('PackVM GUI stops and cleans only the authenticated instance', {concurrency: false}, async () => {
   configureStore(notReadyDoctor);
   const {routes, bodies} = installFetch(async (route, init) => {
-    if (route === '/api/v4/packvm/stop') return jsonResponse(notReadyDoctor);
+    if (route === '/api/v4/packvm/stop') {
+      const body = JSON.parse(String(init?.body)) as {confirmation: string};
+      assert.equal(body.confirmation, 'STOP tobkiri-packvm-v4');
+      return jsonResponse(notReadyDoctor);
+    }
     if (route === '/api/v4/packvm/cleanup') {
       const body = JSON.parse(String(init?.body)) as {confirmation: string};
       assert.equal(body.confirmation, 'DELETE tobkiri-packvm-v4');
@@ -357,7 +361,7 @@ test('PackVM GUI stops and cleans only the authenticated instance', {concurrency
   await settle();
   assert.equal(routes.at(-1), '/api/v4/packvm/cleanup');
   assert.deepEqual(bodies, [
-    {},
+    {confirmation: 'STOP tobkiri-packvm-v4'},
     {confirmation: 'DELETE tobkiri-packvm-v4'},
   ]);
   assert.doesNotMatch(surface.container.textContent ?? '', /Confirm PackVM cleanup/);

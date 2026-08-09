@@ -22,6 +22,7 @@ import {
   operationIsPolling,
   operationStatusLabel,
   readPackVMOperationId,
+  stopConfirmationForInstance,
   userSafePackVMError,
   writePackVMOperationId,
 } from '@/src/lib/packvmLifecycle';
@@ -243,7 +244,7 @@ export function PackVMLifecyclePanel() {
   const handleStop = async () => {
     if (!doctor || !beginAction('stop')) return;
     try {
-      const nextDoctor = await stopPackVM();
+      const nextDoctor = await stopPackVM(stopConfirmationForInstance(doctor.instance));
       setPackVMDoctor(nextDoctor);
       setCleanupRequested(false);
       setCleanupText('');

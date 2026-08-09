@@ -41,6 +41,7 @@ PACKVM_GUEST_RUNNER = "/usr/local/libexec/tobkiri-packvm-supervisor"
 PACKVM_PROTOCOL = "io.tobkiri.packvm-supervisor.v1"
 PACKVM_ATTESTATION_VERSION = 2
 PACKVM_CONFIRMATION_PREFIX = "PROVISION"
+PACKVM_STOP_PREFIX = "STOP"
 PACKVM_CLEANUP_PREFIX = "DELETE"
 MAX_PACKVM_ARTIFACT_REQUEST_BYTES = 700 * 1024 * 1024
 PACKVM_PINNED_IMAGE_VIRTUAL_SIZE_BYTES = 2_361_393_152
@@ -715,9 +716,12 @@ class PackVMLimaProvisioner:
                 False, PACKVM_BACKEND_ID, platform_id, self._instance, reason=str(exc)
             )
 
-    def stop(self) -> None:
-        """Stop only the authenticated Tobkiri-owned instance."""
+    def stop(self, confirmation: str) -> None:
+        """Stop only the authenticated instance after exact confirmation."""
         self._load_authenticated_state()
+        expected = f"{PACKVM_STOP_PREFIX} {self._instance}"
+        if not hmac.compare_digest(confirmation, expected):
+            raise ValueError(f"PackVM stop requires exact confirmation: {expected}")
         limactl = self._require_command()
         self._checked_call((limactl, "stop", "--force", self._instance), timeout=60)
         self._audit("stopped", None)

@@ -9,6 +9,7 @@ import {
   normalizePackVMDoctor,
   normalizePackVMOperation,
   normalizePackVMPlan,
+  stopConfirmationForInstance,
 } from './packvmLifecycle';
 import {preparePackVM} from './api';
 import type {ApiPackVMDoctor} from './apiTypes';
@@ -170,6 +171,10 @@ test('PackVM API denial is surfaced and never treated as a plan', async () => {
 });
 
 test('PackVM cleanup confirmation stays bound to the authenticated instance', () => {
+  assert.equal(
+    stopConfirmationForInstance('tobkiri-packvm-v4'),
+    'STOP tobkiri-packvm-v4',
+  );
   assert.equal(
     cleanupConfirmationForInstance('tobkiri-packvm-v4'),
     'DELETE tobkiri-packvm-v4',

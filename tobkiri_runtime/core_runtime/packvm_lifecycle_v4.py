@@ -173,12 +173,12 @@ class PackVMLifecycleV4:
             return asdict(self._provisioner.doctor())
 
     def stop(self, payload: Mapping[str, object]) -> Mapping[str, Any]:
-        """Stop only the authenticated v4 instance."""
+        """Stop only the authenticated v4 instance after exact confirmation."""
 
-        if payload:
-            raise ValueError("PackVM stop payload must be empty")
+        if set(payload) != {"confirmation"} or not isinstance(payload.get("confirmation"), str):
+            raise ValueError("PackVM stop payload does not match the typed contract")
         with self._lock:
-            self._provisioner.stop()
+            self._provisioner.stop(str(payload["confirmation"]))
             return asdict(self._provisioner.doctor())
 
     def cleanup(self, payload: Mapping[str, object]) -> Mapping[str, Any]:

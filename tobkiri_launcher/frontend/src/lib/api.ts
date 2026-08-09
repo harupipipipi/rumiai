@@ -525,8 +525,8 @@ export function fetchPackVMDoctor(): Promise<ApiPackVMDoctor> {
   return apiFetch<unknown>(`${PACKVM_API_ROOT}/doctor`).then(normalizePackVMDoctor);
 }
 
-export function stopPackVM(): Promise<ApiPackVMDoctor> {
-  return packVMLifecyclePost<unknown>('stop', {}).then(normalizePackVMDoctor);
+export function stopPackVM(confirmation: string): Promise<ApiPackVMDoctor> {
+  return packVMLifecyclePost<unknown>('stop', {confirmation}).then(normalizePackVMDoctor);
 }
 
 export function cleanupPackVM(confirmation: string): Promise<ApiPackVMCleanupResult> {

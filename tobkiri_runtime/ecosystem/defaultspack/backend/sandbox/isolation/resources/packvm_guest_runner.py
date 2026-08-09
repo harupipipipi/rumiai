@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import base64
 import binascii
+from collections.abc import Iterator
+from contextlib import contextmanager
+import fcntl
 import hashlib
 import importlib.util
 import json
@@ -208,6 +211,13 @@ def _execute_staged_module(path: Path) -> int:
 def _materialize(request: dict[str, object]) -> dict[str, object]:
     if os.geteuid() != 0:
         raise ValueError("artifact materialization requires the root-owned supervisor")
+    with _artifact_storage_lock():
+        return _materialize_locked(request)
+
+
+def _materialize_locked(request: dict[str, object]) -> dict[str, object]:
+    """Materialize one artifact while holding the cumulative quota lock."""
+
     required = {
         "operation",
         "pack_id",
@@ -289,8 +299,6 @@ def _materialize(request: dict[str, object]) -> dict[str, object]:
 
     artifact_hex = artifact_digest.removeprefix("sha256:")
     materialization_hex = materialization_digest.removeprefix("sha256:")
-    ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(ARTIFACT_ROOT, 0o700)
     parent = ARTIFACT_ROOT / artifact_hex
     parent.mkdir(mode=0o700, exist_ok=True)
     if parent.is_symlink():
@@ -399,6 +407,35 @@ def _materialize(request: dict[str, object]) -> dict[str, object]:
         "materialization_digest": materialization_digest,
         "guest_artifact_identity": identity,
     }
+
+
+@contextmanager
+def _artifact_storage_lock() -> Iterator[None]:
+    """Serialize staging and quota accounting without following links."""
+
+    ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+    root_metadata = ARTIFACT_ROOT.lstat()
+    if ARTIFACT_ROOT.is_symlink() or not stat.S_ISDIR(root_metadata.st_mode):
+        raise ValueError("PackVM artifact storage root is unsafe")
+    os.chmod(ARTIFACT_ROOT, 0o700)
+    lock_path = ARTIFACT_ROOT / ".quota.lock"
+    descriptor = os.open(
+        lock_path,
+        os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise ValueError("PackVM artifact quota lock is unsafe")
+        os.fchmod(descriptor, 0o600)
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
 
 
 def _verify_invocation_artifact(request: dict[str, object]) -> str:
