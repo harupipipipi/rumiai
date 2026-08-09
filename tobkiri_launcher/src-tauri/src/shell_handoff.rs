@@ -30,6 +30,8 @@ const HANDOFF_DIRECTORY: &str = "shell_handoff";
 const HANDOFF_TTL_SECONDS: u64 = 60;
 const HANDOFF_MAX_LIFETIME_SECONDS: u64 = 120;
 const HANDOFF_MAX_BYTES: u64 = 16 * 1024;
+#[cfg(any(windows, test))]
+const WINDOWS_FILE_ALL_ACCESS: u32 = 0x001f_01ff;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -417,7 +419,7 @@ fn windows_private_security_sddl_is_valid(value: &str) -> bool {
         if fields.len() != 6
             || fields[0] != "A"
             || !fields[1].is_empty()
-            || fields[2] != "FA"
+            || !windows_sddl_rights_are_file_all_access(fields[2])
             || !fields[3].is_empty()
             || !fields[4].is_empty()
         {
@@ -440,6 +442,15 @@ fn windows_private_security_sddl_is_valid(value: &str) -> bool {
     actual.sort_unstable();
     expected.sort_unstable();
     actual == expected
+}
+
+#[cfg(any(windows, test))]
+fn windows_sddl_rights_are_file_all_access(value: &str) -> bool {
+    value == "FA"
+        || value
+            .strip_prefix("0x")
+            .and_then(|mask| u32::from_str_radix(mask, 16).ok())
+            == Some(WINDOWS_FILE_ALL_ACCESS)
 }
 
 #[cfg(any(windows, test))]
@@ -527,7 +538,6 @@ fn apply_windows_private_dacl(path: &Path) -> Result<()> {
 #[cfg(windows)]
 fn windows_owner_sid(path: &Path) -> Result<String> {
     use std::ptr::null_mut;
-    use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
     use windows_sys::Win32::Security::GetSecurityDescriptorOwner;
     use windows_sys::Win32::Security::OWNER_SECURITY_INFORMATION;
 
@@ -545,15 +555,23 @@ fn windows_owner_sid(path: &Path) -> Result<String> {
             )
         });
     }
+    windows_sid_string(owner).with_context(|| {
+        format!(
+            "failed to translate the Windows owner SID for {}",
+            path.display()
+        )
+    })
+}
+
+#[cfg(windows)]
+fn windows_sid_string(sid: *mut core::ffi::c_void) -> Result<String> {
+    use std::ptr::null_mut;
+    use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
+
     let mut text = null_mut();
-    let converted = unsafe { ConvertSidToStringSidW(owner, &mut text) };
+    let converted = unsafe { ConvertSidToStringSidW(sid, &mut text) };
     if converted == 0 || text.is_null() {
-        return Err(std::io::Error::last_os_error()).with_context(|| {
-            format!(
-                "failed to translate the Windows owner SID for {}",
-                path.display()
-            )
-        });
+        return Err(std::io::Error::last_os_error()).context("failed to translate Windows SID");
     }
     let _text = WindowsLocalAllocation(text.cast());
     let mut len = 0;
@@ -604,51 +622,107 @@ fn windows_security_descriptor(path: &Path, information: u32) -> Result<Vec<u8>>
 }
 
 #[cfg(windows)]
-fn windows_private_security_sddl(path: &Path) -> Result<String> {
-    use std::ptr::null_mut;
-    use windows_sys::Win32::Security::Authorization::{
-        ConvertSecurityDescriptorToStringSecurityDescriptorW, SDDL_REVISION_1,
-    };
-    use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION};
-
-    let information = DACL_SECURITY_INFORMATION | OWNER_SECURITY_INFORMATION;
-    let mut descriptor = windows_security_descriptor(path, information)?;
-
-    let mut text = null_mut();
-    let mut text_len = 0_u32;
-    let converted = unsafe {
-        ConvertSecurityDescriptorToStringSecurityDescriptorW(
-            descriptor.as_mut_ptr().cast(),
-            SDDL_REVISION_1,
-            information,
-            &mut text,
-            &mut text_len,
-        )
-    };
-    if converted == 0 || text.is_null() {
-        return Err(std::io::Error::last_os_error()).with_context(|| {
-            format!(
-                "failed to inspect the Windows Shell handoff DACL for {}",
-                path.display()
-            )
-        });
-    }
-    let _text = WindowsLocalAllocation(text.cast());
-    let utf16 = unsafe { std::slice::from_raw_parts(text, text_len as usize) };
-    let utf16 = utf16.strip_suffix(&[0]).unwrap_or(utf16);
-    String::from_utf16(utf16).context("Windows Shell handoff DACL is not valid UTF-16")
-}
-
-#[cfg(windows)]
 fn validate_windows_private_dacl(path: &Path) -> Result<()> {
-    let descriptor = windows_private_security_sddl(path)?;
-    if !windows_private_security_sddl_is_valid(&descriptor) {
+    if !windows_private_security_descriptor_is_valid(path)? {
         bail!(
             "Windows Shell handoff ACL is not owner-and-system-only for {}",
             path.display()
         );
     }
     Ok(())
+}
+
+#[cfg(windows)]
+fn windows_private_security_descriptor_is_valid(path: &Path) -> Result<bool> {
+    use std::mem::size_of;
+    use std::ptr::{addr_of, null_mut};
+    use windows_sys::Win32::Security::{
+        AclSizeInformation, GetAce, GetAclInformation, GetSecurityDescriptorControl,
+        GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, ACCESS_ALLOWED_ACE,
+        ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+        SE_DACL_PROTECTED,
+    };
+
+    let information = DACL_SECURITY_INFORMATION | OWNER_SECURITY_INFORMATION;
+    let mut descriptor = windows_security_descriptor(path, information)?;
+    let descriptor_ptr = descriptor.as_mut_ptr().cast();
+    let mut control = 0_u16;
+    let mut _revision = 0_u32;
+    if unsafe { GetSecurityDescriptorControl(descriptor_ptr, &mut control, &mut _revision) } == 0 {
+        return Err(std::io::Error::last_os_error())
+            .context("failed to inspect Windows security descriptor control flags");
+    }
+    if control & SE_DACL_PROTECTED == 0 {
+        return Ok(false);
+    }
+
+    let mut owner = null_mut();
+    let mut _owner_defaulted = 0;
+    if unsafe { GetSecurityDescriptorOwner(descriptor_ptr, &mut owner, &mut _owner_defaulted) } == 0
+        || owner.is_null()
+    {
+        return Err(std::io::Error::last_os_error())
+            .context("failed to inspect Windows security descriptor owner");
+    }
+    let owner = windows_sid_string(owner)?;
+
+    let mut dacl_present = 0;
+    let mut dacl = null_mut();
+    let mut _dacl_defaulted = 0;
+    if unsafe {
+        GetSecurityDescriptorDacl(
+            descriptor_ptr,
+            &mut dacl_present,
+            &mut dacl,
+            &mut _dacl_defaulted,
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error())
+            .context("failed to inspect Windows security descriptor DACL");
+    }
+    if dacl_present == 0 || dacl.is_null() {
+        return Ok(false);
+    }
+
+    let mut size = ACL_SIZE_INFORMATION::default();
+    if unsafe {
+        GetAclInformation(
+            dacl,
+            (&mut size as *mut ACL_SIZE_INFORMATION).cast(),
+            size_of::<ACL_SIZE_INFORMATION>() as u32,
+            AclSizeInformation,
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error()).context("failed to inspect Windows DACL size");
+    }
+    if size.AceCount != 2 {
+        return Ok(false);
+    }
+
+    let mut trustees = Vec::with_capacity(2);
+    for index in 0..size.AceCount {
+        let mut raw_ace = null_mut();
+        if unsafe { GetAce(dacl, index, &mut raw_ace) } == 0 || raw_ace.is_null() {
+            return Err(std::io::Error::last_os_error())
+                .context("failed to inspect Windows DACL ACE");
+        }
+        let ace = unsafe { &*(raw_ace.cast::<ACCESS_ALLOWED_ACE>()) };
+        if ace.Header.AceType != 0
+            || ace.Header.AceFlags != 0
+            || usize::from(ace.Header.AceSize) < size_of::<ACCESS_ALLOWED_ACE>()
+            || ace.Mask != WINDOWS_FILE_ALL_ACCESS
+        {
+            return Ok(false);
+        }
+        let sid = addr_of!(ace.SidStart).cast_mut().cast();
+        trustees.push(windows_sid_string(sid)?);
+    }
+    trustees.sort_unstable();
+    let mut expected = vec![owner, "S-1-5-18".to_string()];
+    expected.sort_unstable();
+    Ok(trustees == expected)
 }
 
 #[cfg(windows)]
@@ -834,6 +908,9 @@ mod tests {
         assert!(windows_private_security_sddl_is_valid(
             "O:SYD:P(A;;FA;;;S-1-5-18)(A;;FA;;;SY)"
         ));
+        assert!(windows_private_security_sddl_is_valid(&format!(
+            "O:{owner}D:P(A;;0x001F01FF;;;{owner})(A;;0x1f01ff;;;SY)"
+        )));
     }
 
     #[test]
