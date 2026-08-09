@@ -139,6 +139,12 @@ def test_package_rejects_missing_symlink_wrong_platform_and_dev_metadata() -> No
         with pytest.raises(RuntimeError, match="platform/architecture"):
             package_artifact(catalog, manifest, key, "key", root / "platform-output")
 
+        build["platform"] = "linux"
+        build["architecture"] = "arm64"
+        manifest.write_text(json.dumps(build))
+        with pytest.raises(RuntimeError, match="unsupported platform/architecture"):
+            package_artifact(catalog, manifest, key, "key", root / "architecture-output")
+
         untrusted = _catalog()
         untrusted["shell_providers"][0]["artifact_variants"][0][
             "development_command"
@@ -220,3 +226,54 @@ def test_package_rejects_unknown_stale_profile_and_wrong_bundle_identity() -> No
         catalog.write_text(json.dumps(mac_catalog))
         with pytest.raises(RuntimeError, match="no declared bundle identity"):
             package_artifact(catalog, manifest, key, "key", root / "missing-bundle-output")
+
+
+def test_package_rejects_stale_catalog_and_artifact_path_escape() -> None:
+    with TemporaryDirectory(prefix="tobkiri-presentation-package-path-negative-") as temp:
+        root = Path(temp)
+        catalog, manifest, key = _fixture(root)
+        stale = json.loads(catalog.read_text())
+        stale["shell_providers"][0]["artifact_variants"][0]["path"] = (
+            "bundled/presentation-artifacts/old/true"
+        )
+        catalog.write_text(json.dumps(stale))
+        with pytest.raises(RuntimeError, match="stale installed metadata"):
+            package_artifact(catalog, manifest, key, "key", root / "stale-output")
+
+        catalog.write_text(json.dumps(_catalog()))
+        build = json.loads(manifest.read_text())
+        build["artifact_path"] = "../outside/true"
+        manifest.write_text(json.dumps(build))
+        with pytest.raises(RuntimeError, match="escapes its manifest"):
+            package_artifact(catalog, manifest, key, "key", root / "escape-output")
+
+
+def test_package_rejects_source_revision_from_another_checkout() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    with TemporaryDirectory(prefix="tobkiri-presentation-source-stale-") as temp:
+        root = Path(temp)
+        catalog, manifest, key = _fixture(root)
+        build = json.loads(manifest.read_text())
+        build["source_identity"] = MODULE.source_identity_for_repository(repository_root)
+        build["source_revision"] = MODULE.source_revision_for_repository(repository_root)
+        manifest.write_text(json.dumps(build))
+        package_artifact(
+            catalog,
+            manifest,
+            key,
+            "key",
+            root / "current-output",
+            repository_root,
+        )
+
+        build["source_revision"] = "0" * 40
+        manifest.write_text(json.dumps(build))
+        with pytest.raises(RuntimeError, match="source revision is stale"):
+            package_artifact(
+                catalog,
+                manifest,
+                key,
+                "key",
+                root / "stale-output",
+                repository_root,
+            )

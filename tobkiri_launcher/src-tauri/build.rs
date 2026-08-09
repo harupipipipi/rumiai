@@ -3,6 +3,10 @@ use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+#[cfg(test)]
+use ed25519_dalek::Signer;
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
 
 const APP_SOURCE_DIR: &str = "tobkiri_runtime";
@@ -21,6 +25,10 @@ const GENERATED_RESOURCE_DIRS: &[&str] = &[
 ];
 const CANONICAL_HOST_INVENTORY: &str = "canonical-files.v1.json";
 const CANONICAL_HOST_INVENTORY_SCHEMA: &str = "io.tobkiri.host-file-inventory.v1";
+const PRESENTATION_CATALOG_SCHEMA: &str = "io.tobkiri.launcher.presentation-catalog.v1";
+const PRESENTATION_RELEASE_SCHEMA: &str = "io.tobkiri.shell.release.v4";
+const PRESENTATION_INDEX_SCHEMA: &str = "io.tobkiri.shell.artifact-index.v4";
+const PRESENTATION_LOCK_SCHEMA: &str = "io.tobkiri.shell.profile-lock.v4";
 
 #[cfg(not(test))]
 fn main() {
@@ -349,8 +357,605 @@ fn write_runtime_resource_manifest(staged_root: &Path) -> io::Result<()> {
     )
 }
 
+struct VerifiedPresentationRelease {
+    public_key: String,
+    key_id: String,
+}
+
+fn invalid_release(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message.into())
+}
+
+fn object_field<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    label: &str,
+) -> io::Result<&'a serde_json::Value> {
+    object
+        .get(field)
+        .ok_or_else(|| invalid_release(format!("{label} is missing field {field}")))
+}
+
+fn text_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    label: &str,
+) -> io::Result<String> {
+    object_field(object, field, label)?
+        .as_str()
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| invalid_release(format!("{label} field {field} is not non-empty text")))
+}
+
+fn digest_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    label: &str,
+) -> io::Result<String> {
+    let value = text_field(object, field, label)?;
+    if value.len() != 71
+        || !value.starts_with("sha256:")
+        || !value[7..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(invalid_release(format!(
+            "{label} field {field} is not a canonical sha256 digest"
+        )));
+    }
+    Ok(value)
+}
+
+fn byte_digest(bytes: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+fn canonical_value_digest(value: &serde_json::Value, label: &str) -> io::Result<String> {
+    let bytes = serde_json::to_vec(value)
+        .map_err(|error| invalid_release(format!("{label} cannot be canonicalized: {error}")))?;
+    Ok(byte_digest(&bytes))
+}
+
+fn safe_release_relative_path(value: &str, label: &str) -> io::Result<PathBuf> {
+    let path = Path::new(value);
+    if value.is_empty()
+        || value.starts_with('~')
+        || value.contains('\\')
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, Component::ParentDir | Component::RootDir))
+    {
+        return Err(invalid_release(format!("{label} is unsafe: {value}")));
+    }
+    Ok(path.to_path_buf())
+}
+
+fn require_release_path(root: &Path, relative: &str, label: &str) -> io::Result<PathBuf> {
+    let relative_path = safe_release_relative_path(relative, label)?;
+    let candidate = root.join(&relative_path);
+    let mut current = root.to_path_buf();
+    for component in relative_path.components() {
+        let Component::Normal(part) = component else {
+            return Err(invalid_release(format!("{label} is unsafe: {relative}")));
+        };
+        current.push(part);
+        if fs::symlink_metadata(&current)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err(invalid_release(format!(
+                "{label} contains a symlink: {}",
+                current.display()
+            )));
+        }
+    }
+    let root_resolved = root.canonicalize().map_err(|error| {
+        invalid_release(format!("{label} release root cannot be resolved: {error}"))
+    })?;
+    let candidate_resolved = candidate.canonicalize().map_err(|error| {
+        invalid_release(format!(
+            "{label} is missing at {}: {error}",
+            candidate.display()
+        ))
+    })?;
+    if !candidate_resolved.starts_with(&root_resolved) {
+        return Err(invalid_release(format!(
+            "{label} escapes the release root: {relative}"
+        )));
+    }
+    Ok(candidate)
+}
+
+fn hash_release_artifact(
+    path: &Path,
+    relative: &Path,
+    digest: &mut Sha256,
+    size: &mut u64,
+) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        return Err(invalid_release(format!(
+            "release artifact contains a symlink: {}",
+            path.display()
+        )));
+    }
+    if metadata.is_file() {
+        digest.update(portable_relative_path(relative).as_bytes());
+        digest.update([0]);
+        let mut file = fs::File::open(path)?;
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let count = file.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            digest.update(&buffer[..count]);
+            *size = size
+                .checked_add(count as u64)
+                .ok_or_else(|| invalid_release("release artifact size overflow"))?;
+        }
+        return Ok(());
+    }
+    if !metadata.is_dir() {
+        return Err(invalid_release(format!(
+            "release artifact entry is not a file or directory: {}",
+            path.display()
+        )));
+    }
+    let mut children =
+        fs::read_dir(path).and_then(|entries| entries.collect::<Result<Vec<_>, io::Error>>())?;
+    children.sort_by_key(|entry| entry.file_name());
+    for child in children {
+        hash_release_artifact(
+            &child.path(),
+            &relative.join(child.file_name()),
+            digest,
+            size,
+        )?;
+    }
+    Ok(())
+}
+
+fn release_artifact_digest(path: &Path) -> io::Result<(String, u64)> {
+    let mut digest = Sha256::new();
+    let mut size = 0_u64;
+    hash_release_artifact(path, Path::new(""), &mut digest, &mut size)?;
+    Ok((format!("sha256:{:x}", digest.finalize()), size))
+}
+
+fn git_value(repo_root: &Path, args: &[&str], label: &str) -> io::Result<String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(repo_root)
+        .output()
+        .map_err(|error| invalid_release(format!("failed to read {label}: {error}")))?;
+    if !output.status.success() {
+        return Err(invalid_release(format!(
+            "failed to read {label}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if value.is_empty() {
+        return Err(invalid_release(format!("Git returned an empty {label}")));
+    }
+    Ok(value)
+}
+
+fn source_identity_from_remote(remote: &str) -> String {
+    let without_suffix = remote.trim_end_matches('/').trim_end_matches(".git");
+    for prefix in [
+        "https://github.com/",
+        "http://github.com/",
+        "git@github.com:",
+    ] {
+        if let Some(repository) = without_suffix.strip_prefix(prefix) {
+            return format!("github:{repository}");
+        }
+    }
+    format!("git:{remote}")
+}
+
+fn current_source_provenance() -> io::Result<(String, String)> {
+    let project_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = project_dir
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| invalid_release("src-tauri has no repository root"))?;
+    let revision = git_value(
+        repo_root,
+        &["rev-parse", "--verify", "HEAD"],
+        "source revision",
+    )?;
+    if revision.len() != 40
+        || !revision
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(invalid_release(format!(
+            "source revision is not a full lowercase commit SHA: {revision}"
+        )));
+    }
+    let remote = git_value(
+        repo_root,
+        &["config", "--get", "remote.origin.url"],
+        "source identity",
+    )?;
+    Ok((source_identity_from_remote(&remote), revision))
+}
+
+fn expected_target() -> io::Result<(String, String)> {
+    let target = std::env::var("TARGET")
+        .map_err(|_| invalid_release("Cargo TARGET is missing for a release package"))?;
+    let value = match target.as_str() {
+        "aarch64-apple-darwin" => ("macos", "arm64"),
+        "x86_64-apple-darwin" => ("macos", "x86_64"),
+        "x86_64-pc-windows-msvc" => ("windows", "x86_64"),
+        "x86_64-unknown-linux-gnu" => ("linux", "x86_64"),
+        _ => {
+            return Err(invalid_release(format!(
+                "unsupported release target: {target}"
+            )))
+        }
+    };
+    Ok((value.0.to_string(), value.1.to_string()))
+}
+
+fn verify_presentation_release(release_root: &Path) -> io::Result<VerifiedPresentationRelease> {
+    require_directory(release_root, "release presentation root")?;
+    let catalog_path = release_root.join(PRESENTATION_CATALOG_FILENAME);
+    let index_path = release_root
+        .join("bundled")
+        .join(PRESENTATION_INDEX_FILENAME);
+    let lock_path = release_root
+        .join("bundled")
+        .join(PRESENTATION_LOCK_FILENAME);
+    let release_path = release_root
+        .join("bundled")
+        .join(PRESENTATION_RELEASE_FILENAME);
+    let catalog_raw = read_regular_file(&catalog_path, "release presentation catalog")?;
+    let index_raw = read_regular_file(&index_path, "release presentation artifact index")?;
+    let lock_raw = read_regular_file(&lock_path, "release presentation profile lock")?;
+    let release_raw = read_regular_file(&release_path, "release presentation manifest")?;
+    let catalog = serde_json::from_slice::<serde_json::Value>(&catalog_raw)
+        .map_err(|error| invalid_release(format!("presentation catalog is malformed: {error}")))?;
+    let index = serde_json::from_slice::<serde_json::Value>(&index_raw)
+        .map_err(|error| invalid_release(format!("artifact index is malformed: {error}")))?;
+    let lock = serde_json::from_slice::<serde_json::Value>(&lock_raw)
+        .map_err(|error| invalid_release(format!("profile lock is malformed: {error}")))?;
+    let release = serde_json::from_slice::<serde_json::Value>(&release_raw)
+        .map_err(|error| invalid_release(format!("release manifest is malformed: {error}")))?;
+    let catalog_object = catalog
+        .as_object()
+        .ok_or_else(|| invalid_release("presentation catalog must be an object"))?;
+    let index_object = index
+        .as_object()
+        .ok_or_else(|| invalid_release("artifact index must be an object"))?;
+    let lock_object = lock
+        .as_object()
+        .ok_or_else(|| invalid_release("profile lock must be an object"))?;
+    let release_object = release
+        .as_object()
+        .ok_or_else(|| invalid_release("release manifest must be an object"))?;
+
+    if text_field(catalog_object, "schema", "presentation catalog")? != PRESENTATION_CATALOG_SCHEMA
+    {
+        return Err(invalid_release("presentation catalog schema is invalid"));
+    }
+    if text_field(release_object, "schema", "release manifest")? != PRESENTATION_RELEASE_SCHEMA
+        || text_field(index_object, "schema", "artifact index")? != PRESENTATION_INDEX_SCHEMA
+        || text_field(lock_object, "schema", "profile lock")? != PRESENTATION_LOCK_SCHEMA
+    {
+        return Err(invalid_release("v4 release binding schema is invalid"));
+    }
+
+    let release_catalog_path = text_field(release_object, "catalog_path", "release manifest")?;
+    let release_index_path = text_field(release_object, "artifact_index_path", "release manifest")?;
+    let release_lock_path = text_field(release_object, "profile_lock_path", "release manifest")?;
+    if release_catalog_path != "bundled/presentation_catalog.json"
+        || release_index_path != "bundled/shell_artifact_index.v4.json"
+        || release_lock_path != "bundled/shell_profile_lock.v4.json"
+    {
+        return Err(invalid_release(
+            "release manifest uses non-canonical v4 paths",
+        ));
+    }
+    let catalog_digest = digest_field(release_object, "catalog_sha256", "release manifest")?;
+    let index_file_digest =
+        digest_field(release_object, "artifact_index_sha256", "release manifest")?;
+    let lock_file_digest = digest_field(release_object, "profile_lock_sha256", "release manifest")?;
+    if catalog_digest != byte_digest(&catalog_raw)
+        || index_file_digest != byte_digest(&index_raw)
+        || lock_file_digest != byte_digest(&lock_raw)
+    {
+        return Err(invalid_release("release manifest byte digest mismatch"));
+    }
+
+    let binding = object_field(catalog_object, "release_binding", "presentation catalog")?
+        .as_object()
+        .ok_or_else(|| invalid_release("production catalog has no v4 release binding"))?;
+    if text_field(binding, "schema", "catalog release binding")? != PRESENTATION_RELEASE_SCHEMA
+        || text_field(binding, "artifact_index_path", "catalog release binding")?
+            != "bundled/shell_artifact_index.v4.json"
+        || text_field(binding, "profile_lock_path", "catalog release binding")?
+            != "bundled/shell_profile_lock.v4.json"
+    {
+        return Err(invalid_release("catalog release binding is not canonical"));
+    }
+    let index_digest = digest_field(binding, "artifact_index_sha256", "catalog release binding")?;
+    let lock_digest = digest_field(binding, "profile_lock_sha256", "catalog release binding")?;
+    if index_digest != canonical_value_digest(&index, "artifact index")?
+        || lock_digest != canonical_value_digest(&lock, "profile lock")?
+    {
+        return Err(invalid_release(
+            "catalog v4 binding does not match index or lock",
+        ));
+    }
+    let mut catalog_without_binding = catalog.clone();
+    catalog_without_binding
+        .as_object_mut()
+        .expect("catalog object was checked above")
+        .remove("release_binding");
+    if text_field(binding, "catalog_revision", "catalog release binding")?
+        != canonical_value_digest(&catalog_without_binding, "catalog")?
+    {
+        return Err(invalid_release("catalog revision mismatch"));
+    }
+
+    let mut lock_without_revision = lock.clone();
+    lock_without_revision
+        .as_object_mut()
+        .expect("lock object was checked above")
+        .remove("lock_revision");
+    if text_field(lock_object, "lock_revision", "profile lock")?
+        != canonical_value_digest(&lock_without_revision, "profile lock")?
+    {
+        return Err(invalid_release("profile lock revision mismatch"));
+    }
+
+    let artifact_id = text_field(release_object, "artifact_id", "release manifest")?;
+    let platform = text_field(release_object, "platform", "release manifest")?;
+    let architecture = text_field(release_object, "architecture", "release manifest")?;
+    let source_identity = text_field(release_object, "source_identity", "release manifest")?;
+    let source_revision = text_field(release_object, "source_revision", "release manifest")?;
+    for field in [
+        "artifact_id",
+        "platform",
+        "architecture",
+        "source_identity",
+        "source_revision",
+    ] {
+        let release_value = text_field(release_object, field, "release manifest")?;
+        if text_field(binding, field, "catalog release binding")? != release_value
+            || text_field(index_object, field, "artifact index")? != release_value
+            || text_field(lock_object, field, "profile lock")? != release_value
+        {
+            return Err(invalid_release(format!(
+                "v4 release field mismatch: {field}"
+            )));
+        }
+    }
+    #[cfg(not(test))]
+    {
+        let (expected_platform, expected_architecture) = expected_target()?;
+        if (platform.as_str(), architecture.as_str())
+            != (expected_platform.as_str(), expected_architecture.as_str())
+        {
+            return Err(invalid_release(
+                "v4 release targets the wrong platform or architecture",
+            ));
+        }
+    }
+
+    let index_path_value = text_field(index_object, "path", "artifact index")?;
+    let artifact_relative = safe_release_relative_path(&index_path_value, "artifact index path")?;
+    if !index_path_value.starts_with("bundled/presentation-artifacts/") {
+        return Err(invalid_release(
+            "artifact index path is outside presentation-artifacts",
+        ));
+    }
+    if text_field(binding, "artifact_id", "catalog release binding")? != artifact_id
+        || text_field(index_object, "path", "artifact index")? != index_path_value
+    {
+        return Err(invalid_release("artifact identity/path binding mismatch"));
+    }
+    let artifact_path = require_release_path(
+        release_root,
+        artifact_relative.to_str().unwrap_or_default(),
+        "release artifact",
+    )?;
+    let (artifact_digest, artifact_size) = release_artifact_digest(&artifact_path)?;
+    if digest_field(index_object, "sha256", "artifact index")? != artifact_digest
+        || object_field(index_object, "size", "artifact index")?.as_u64() != Some(artifact_size)
+    {
+        return Err(invalid_release("artifact digest or size mismatch"));
+    }
+
+    let default_selection =
+        object_field(catalog_object, "default_selection", "presentation catalog")?
+            .as_object()
+            .ok_or_else(|| invalid_release("presentation catalog default selection is missing"))?;
+    let shell_provider_id =
+        text_field(default_selection, "shell_provider_id", "default selection")?;
+    let shells = object_field(catalog_object, "shell_providers", "presentation catalog")?
+        .as_array()
+        .ok_or_else(|| invalid_release("presentation catalog Shell Providers are invalid"))?;
+    let selected_shell = shells
+        .iter()
+        .filter_map(serde_json::Value::as_object)
+        .find(|shell| {
+            shell.get("provider_id").and_then(serde_json::Value::as_str)
+                == Some(shell_provider_id.as_str())
+        })
+        .ok_or_else(|| invalid_release("default Profile Shell is missing"))?;
+    let variants = object_field(selected_shell, "artifact_variants", "default Profile Shell")?
+        .as_array()
+        .ok_or_else(|| invalid_release("default Profile Shell artifact variants are invalid"))?;
+    let selected_variant = variants
+        .iter()
+        .filter_map(serde_json::Value::as_object)
+        .find(|variant| {
+            variant
+                .get("artifact_id")
+                .and_then(serde_json::Value::as_str)
+                == Some(artifact_id.as_str())
+        })
+        .ok_or_else(|| {
+            invalid_release("signed artifact does not match the default Profile Shell")
+        })?;
+    for field in ["path", "sha256", "source_identity", "source_revision"] {
+        if text_field(selected_variant, field, "selected artifact variant")?
+            != text_field(index_object, field, "artifact index")?
+        {
+            return Err(invalid_release(format!(
+                "catalog variant differs from artifact index: {field}"
+            )));
+        }
+    }
+    if object_field(selected_variant, "size", "selected artifact variant")?.as_u64()
+        != Some(artifact_size)
+    {
+        return Err(invalid_release(
+            "catalog artifact size differs from artifact index",
+        ));
+    }
+    if selected_variant
+        .get("production")
+        .and_then(serde_json::Value::as_bool)
+        != Some(true)
+        || selected_variant
+            .get("prebuilt")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
+        || selected_variant
+            .get("development_command")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+    {
+        return Err(invalid_release(
+            "selected Shell artifact is not production-prebuilt",
+        ));
+    }
+    if platform == "macos" {
+        let bundle_identifier = text_field(
+            selected_variant,
+            "bundle_identifier",
+            "selected artifact variant",
+        )?;
+        if !artifact_path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension == "app")
+        {
+            return Err(invalid_release(
+                "macOS Shell artifact is not an .app bundle",
+            ));
+        }
+        let plist_path = artifact_path.join("Contents").join("Info.plist");
+        require_regular_file(&plist_path, "macOS Shell Info.plist")?;
+        let output = Command::new("/usr/bin/plutil")
+            .args([
+                "-extract",
+                "CFBundleIdentifier",
+                "raw",
+                "-o",
+                "-",
+                &plist_path.to_string_lossy(),
+            ])
+            .output()
+            .map_err(|error| {
+                invalid_release(format!("failed to read macOS bundle identity: {error}"))
+            })?;
+        if !output.status.success()
+            || String::from_utf8_lossy(&output.stdout).trim() != bundle_identifier
+        {
+            return Err(invalid_release(
+                "macOS Shell bundle identifier differs from the v4 catalog",
+            ));
+        }
+    }
+
+    let public_key = text_field(release_object, "public_key", "release manifest")?;
+    let signature = text_field(release_object, "signature", "release manifest")?;
+    let key_id = text_field(release_object, "key_id", "release manifest")?;
+    let public_key_bytes: [u8; 32] = BASE64
+        .decode(&public_key)
+        .map_err(|error| invalid_release(format!("release public key is invalid: {error}")))?
+        .try_into()
+        .map_err(|_| invalid_release("release public key must be 32 bytes"))?;
+    let signature_bytes: [u8; 64] = BASE64
+        .decode(&signature)
+        .map_err(|error| invalid_release(format!("release signature is invalid: {error}")))?
+        .try_into()
+        .map_err(|_| invalid_release("release signature must be 64 bytes"))?;
+    let message = [
+        PRESENTATION_RELEASE_SCHEMA,
+        catalog_digest.as_str(),
+        index_file_digest.as_str(),
+        lock_file_digest.as_str(),
+        source_identity.as_str(),
+        source_revision.as_str(),
+        platform.as_str(),
+        architecture.as_str(),
+        artifact_id.as_str(),
+        key_id.as_str(),
+    ]
+    .join("\0");
+    VerifyingKey::from_bytes(&public_key_bytes)
+        .map_err(|error| invalid_release(format!("release public key is invalid: {error}")))?
+        .verify(
+            &message.into_bytes(),
+            &Signature::from_bytes(&signature_bytes),
+        )
+        .map_err(|error| {
+            invalid_release(format!("release signature verification failed: {error}"))
+        })?;
+
+    #[cfg(not(test))]
+    {
+        let (expected_identity, expected_revision) = current_source_provenance()?;
+        if source_identity != expected_identity || source_revision != expected_revision {
+            return Err(invalid_release(
+                "v4 release source identity/revision is stale for this checkout",
+            ));
+        }
+    }
+    Ok(VerifiedPresentationRelease { public_key, key_id })
+}
+
+fn is_intermediate_shell_build() -> bool {
+    let Ok(raw_config) = std::env::var("TAURI_CONFIG") else {
+        return false;
+    };
+    let Ok(config) = serde_json::from_str::<serde_json::Value>(&raw_config) else {
+        return false;
+    };
+    config.get("identifier").and_then(serde_json::Value::as_str) == Some("io.tobkiri.shell.tauri")
+        && config
+            .get("mainBinaryName")
+            .and_then(serde_json::Value::as_str)
+            == Some("tobkiri-shell")
+}
+
 fn stage_presentation_release(staged_root: &Path) -> io::Result<Option<PathBuf>> {
     let Some(raw_root) = std::env::var_os(PRESENTATION_RELEASE_ROOT_ENV) else {
+        if is_intermediate_shell_build() {
+            println!(
+                "cargo:warning=intermediate Tauri Shell build has no Launcher Presentation release; this binary is only an input to the sealed outer package"
+            );
+            println!("cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_B64=");
+            println!("cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_ID=");
+            return Ok(None);
+        }
+        if std::env::var("DEP_TAURI_DEV").ok().as_deref() != Some("true") {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("production package requires {PRESENTATION_RELEASE_ROOT_ENV}; a null-metadata presentation catalog is never a package input"),
+            ));
+        }
+        println!("cargo:warning=development build has no sealed Presentation release; the uninstalled catalog is debug-only and cannot be packaged");
         println!("cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_B64=");
         println!("cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_ID=");
         return Ok(None);
@@ -381,31 +986,15 @@ fn stage_presentation_release_at(
         )?;
     }
 
-    let release_manifest = read_regular_file(
-        &release_bundled.join(PRESENTATION_RELEASE_FILENAME),
-        "release presentation manifest",
-    )?;
-    let release: serde_json::Value =
-        serde_json::from_slice(&release_manifest).map_err(|error| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("release presentation manifest is malformed: {error}"),
-            )
-        })?;
-    let public_key = release
-        .get("public_key")
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "release public key is missing")
-        })?;
-    let key_id = release
-        .get("key_id")
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "release key id is missing"))?;
-    println!("cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_B64={public_key}");
-    println!("cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_ID={key_id}");
+    let verified = verify_presentation_release(release_root)?;
+    println!(
+        "cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_B64={}",
+        verified.public_key
+    );
+    println!(
+        "cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_ID={}",
+        verified.key_id
+    );
 
     let staged_bundled = staged_root.join("bundled");
     copy_file(
@@ -1287,6 +1876,12 @@ mod tests {
             std::env::set_var(key, value);
             Self { key, previous }
         }
+
+        fn clear(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
     }
 
     impl Drop for EnvironmentGuard {
@@ -1588,37 +2183,187 @@ mod tests {
         assert!(error.to_string().contains("may not build source"));
     }
 
+    #[test]
+    fn package_never_falls_back_without_an_explicit_dev_build() {
+        let _environment_lock = environment_lock();
+        let _release_root = EnvironmentGuard::clear(PRESENTATION_RELEASE_ROOT_ENV);
+        let _dev = EnvironmentGuard::clear("DEP_TAURI_DEV");
+        let _profile = EnvironmentGuard::set_value("PROFILE", "debug");
+        let tree = TestTree::new("presentation-no-fallback");
+        let error = stage_presentation_release(&tree.path().join("staged"))
+            .expect_err("packaging without a sealed root must fail even when Cargo selects debug");
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert!(error.to_string().contains(PRESENTATION_RELEASE_ROOT_ENV));
+    }
+
     fn release_fixture(tree: &TestTree) -> (PathBuf, PathBuf, PathBuf) {
         let release_root = tree.path().join("release");
-        let artifacts = release_root.join("bundled").join("presentation-artifacts");
+        let artifact_id = "shell.tauri.default.linux-x86_64";
+        let artifact_path = Path::new("bundled")
+            .join("presentation-artifacts")
+            .join(artifact_id)
+            .join("verified-shell");
+        let artifacts = release_root.join(&artifact_path);
         let staged_root = tree.path().join("staged");
-        let catalog = release_root.join(PRESENTATION_CATALOG_FILENAME);
-        fs::create_dir_all(&artifacts).expect("release artifacts should be creatable");
+        let catalog_path = release_root.join(PRESENTATION_CATALOG_FILENAME);
+        fs::create_dir_all(artifacts.parent().expect("artifact should have a parent"))
+            .expect("release artifacts should be creatable");
         fs::create_dir_all(staged_root.join("bundled")).expect("staged bundle should be creatable");
-        fs::write(&catalog, b"verified presentation catalog")
-            .expect("release catalog should be writable");
-        fs::write(
-            release_root.join("bundled").join(PRESENTATION_RELEASE_FILENAME),
-            br#"{"key_id":"fixture-key","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}"#,
-        )
-        .expect("release manifest should be writable");
-        fs::write(
-            release_root
+        let artifact_payload = b"verified shell artifact";
+        fs::write(&artifacts, artifact_payload).expect("release artifact should be writable");
+        let (artifact_digest, artifact_size) =
+            release_artifact_digest(&artifacts).expect("fixture artifact should hash");
+        let source_identity = "test:source";
+        let source_revision = "a".repeat(40);
+        let index = serde_json::json!({
+            "schema": PRESENTATION_INDEX_SCHEMA,
+            "artifact_id": artifact_id,
+            "path": artifact_path.to_string_lossy().replace('\\', "/"),
+            "sha256": artifact_digest,
+            "size": artifact_size,
+            "platform": "linux",
+            "architecture": "x86_64",
+            "source_identity": source_identity,
+            "source_revision": source_revision,
+        });
+        let index_digest =
+            canonical_value_digest(&index, "fixture artifact index").expect("index should hash");
+        let mut catalog = serde_json::json!({
+            "schema": PRESENTATION_CATALOG_SCHEMA,
+            "default_selection": {
+                "base_pack_id": "fixture-base",
+                "shell_provider_id": "shell.tauri.default",
+            },
+            "shell_providers": [{
+                "provider_id": "shell.tauri.default",
+                "artifact_variants": [{
+                    "artifact_id": artifact_id,
+                    "platform": "linux",
+                    "architecture": "x86_64",
+                    "path": artifact_path.to_string_lossy().replace('\\', "/"),
+                    "sha256": artifact_digest,
+                    "size": artifact_size,
+                    "source_identity": source_identity,
+                    "source_revision": source_revision,
+                    "production": true,
+                    "prebuilt": true,
+                    "development_command": serde_json::Value::Null,
+                }],
+            }],
+        });
+        let catalog_revision =
+            canonical_value_digest(&catalog, "fixture catalog").expect("catalog should hash");
+        let lock_body = serde_json::json!({
+            "schema": PRESENTATION_LOCK_SCHEMA,
+            "catalog_revision": catalog_revision,
+            "artifact_index_sha256": index_digest,
+            "artifact_id": artifact_id,
+            "artifact_sha256": artifact_digest,
+            "platform": "linux",
+            "architecture": "x86_64",
+            "source_identity": source_identity,
+            "source_revision": source_revision,
+        });
+        let lock_revision =
+            canonical_value_digest(&lock_body, "fixture lock").expect("lock should hash");
+        let mut lock = lock_body;
+        lock["lock_revision"] = serde_json::Value::String(lock_revision);
+        catalog["release_binding"] = serde_json::json!({
+            "schema": PRESENTATION_RELEASE_SCHEMA,
+            "artifact_index_path": "bundled/shell_artifact_index.v4.json",
+            "artifact_index_sha256": index_digest,
+            "profile_lock_path": "bundled/shell_profile_lock.v4.json",
+            "profile_lock_sha256": canonical_value_digest(&lock, "fixture lock").expect("lock should hash"),
+            "catalog_revision": catalog_revision,
+            "artifact_id": artifact_id,
+            "source_identity": source_identity,
+            "source_revision": source_revision,
+            "platform": "linux",
+            "architecture": "x86_64",
+        });
+        fn write_json(path: &Path, value: &serde_json::Value) {
+            fs::write(
+                path,
+                [
+                    serde_json::to_vec_pretty(value).expect("fixture JSON should serialize"),
+                    b"\n".to_vec(),
+                ]
+                .concat(),
+            )
+            .expect("fixture JSON should be writable");
+        }
+        write_json(&catalog_path, &catalog);
+        write_json(
+            &release_root
                 .join("bundled")
                 .join(PRESENTATION_INDEX_FILENAME),
-            b"fixture index",
-        )
-        .expect("release index should be writable");
-        fs::write(
-            release_root
+            &index,
+        );
+        write_json(
+            &release_root
                 .join("bundled")
                 .join(PRESENTATION_LOCK_FILENAME),
-            b"fixture lock",
-        )
-        .expect("release lock should be writable");
-        fs::write(artifacts.join("verified-shell"), b"verified shell artifact")
-            .expect("release artifact should be writable");
-        (release_root, staged_root, catalog)
+            &lock,
+        );
+        let catalog_file_digest =
+            byte_digest(&fs::read(&catalog_path).expect("catalog should exist"));
+        let index_file_digest = byte_digest(
+            &fs::read(
+                release_root
+                    .join("bundled")
+                    .join(PRESENTATION_INDEX_FILENAME),
+            )
+            .expect("index should exist"),
+        );
+        let lock_file_digest = byte_digest(
+            &fs::read(
+                release_root
+                    .join("bundled")
+                    .join(PRESENTATION_LOCK_FILENAME),
+            )
+            .expect("lock should exist"),
+        );
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[7_u8; 32]);
+        let public_key = BASE64.encode(signing_key.verifying_key().to_bytes());
+        let key_id = "fixture-key";
+        let message = [
+            PRESENTATION_RELEASE_SCHEMA,
+            catalog_file_digest.as_str(),
+            index_file_digest.as_str(),
+            lock_file_digest.as_str(),
+            source_identity,
+            source_revision.as_str(),
+            "linux",
+            "x86_64",
+            artifact_id,
+            key_id,
+        ]
+        .join("\0");
+        let signature = BASE64.encode(signing_key.sign(message.as_bytes()).to_bytes());
+        let release = serde_json::json!({
+            "schema": PRESENTATION_RELEASE_SCHEMA,
+            "catalog_path": "bundled/presentation_catalog.json",
+            "catalog_sha256": catalog_file_digest,
+            "artifact_index_path": "bundled/shell_artifact_index.v4.json",
+            "artifact_index_sha256": index_file_digest,
+            "profile_lock_path": "bundled/shell_profile_lock.v4.json",
+            "profile_lock_sha256": lock_file_digest,
+            "artifact_id": artifact_id,
+            "platform": "linux",
+            "architecture": "x86_64",
+            "source_identity": source_identity,
+            "source_revision": source_revision,
+            "key_id": key_id,
+            "public_key": public_key,
+            "signature": signature,
+        });
+        write_json(
+            &release_root
+                .join("bundled")
+                .join(PRESENTATION_RELEASE_FILENAME),
+            &release,
+        );
+        (release_root, staged_root, catalog_path)
     }
 
     fn host_fixture(tree: &TestTree) -> (PathBuf, PathBuf) {
@@ -1688,6 +2433,7 @@ mod tests {
         assert!(staged_root
             .join("bundled")
             .join("presentation-artifacts")
+            .join("shell.tauri.default.linux-x86_64")
             .join("verified-shell")
             .is_file());
     }
@@ -1774,6 +2520,7 @@ mod tests {
     fn stage_rejects_symlinked_catalog_and_artifact_paths() {
         let tree = TestTree::new("symlink-paths");
         let (release_root, staged_root, catalog) = release_fixture(&tree);
+        let valid_catalog = fs::read(&catalog).expect("fixture catalog should be readable");
         let outside_catalog = tree.path().join("outside-catalog.json");
         fs::write(&outside_catalog, b"outside catalog").expect("outside catalog should exist");
         fs::remove_file(&catalog).expect("fixture catalog should be removable");
@@ -1785,8 +2532,7 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
 
         fs::remove_file(&catalog).expect("catalog symlink should be removable");
-        fs::write(&catalog, b"verified presentation catalog")
-            .expect("catalog should be restorable");
+        fs::write(&catalog, valid_catalog).expect("catalog should be restorable");
         let outside_artifact = tree.path().join("outside-shell");
         fs::write(&outside_artifact, b"outside shell").expect("outside artifact should exist");
         let artifact_link = release_root

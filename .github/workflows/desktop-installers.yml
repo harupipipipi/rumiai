@@ -216,6 +216,7 @@ jobs:
             --build-output-manifest "$RUNNER_TEMP/shell-build-output.v4.json" \
             --signing-key "$RUNNER_TEMP/tobkiri-presentation-signing-key.raw" \
             --signing-key-id 'github-actions:${{ github.run_id }}:${{ matrix.target }}' \
+            --repository-root "$GITHUB_WORKSPACE" \
             --output-dir "$RELEASE_ROOT"
 
       - name: Stage verified Linux Tauri Shell artifact
@@ -237,6 +238,7 @@ jobs:
             --build-output-manifest "$RUNNER_TEMP/shell-build-output.v4.json" \
             --signing-key "$RUNNER_TEMP/tobkiri-presentation-signing-key.raw" \
             --signing-key-id 'github-actions:${{ github.run_id }}:${{ matrix.target }}' \
+            --repository-root "$GITHUB_WORKSPACE" \
             --output-dir "$RELEASE_ROOT"
 
       - name: Stage verified Windows Tauri Shell artifact
@@ -258,6 +260,7 @@ jobs:
             --catalog tobkiri_launcher/src-tauri/bundled/presentation_catalog.json `
             --build-output-manifest $manifest --signing-key $key `
             --signing-key-id 'github-actions:${{ github.run_id }}:${{ matrix.target }}' `
+            --repository-root $env:GITHUB_WORKSPACE `
             --output-dir $env:RELEASE_ROOT
 
       - name: Build signed macOS application

@@ -119,3 +119,57 @@ def test_release_scanner_rejects_catalog_index_lock_and_signature_tampering() ->
                 target.write_bytes(target.read_bytes() + b" ")
             with pytest.raises(RuntimeError, match=message):
                 VERIFY.verify_catalog(catalog, resource_root)
+
+
+def test_release_scanner_rejects_null_metadata_wrong_size_and_path_escape() -> None:
+    with TemporaryDirectory(prefix="tobkiri-presentation-null-package-") as temp:
+        root = Path(temp)
+        repository_root = Path(__file__).resolve().parents[3]
+        source_catalog = json.loads(
+            (
+                repository_root
+                / "tobkiri_launcher/src-tauri/bundled/presentation_catalog.json"
+            ).read_text()
+        )
+        with pytest.raises(RuntimeError, match="sealed Shell artifact"):
+            VERIFY.verify_catalog(source_catalog, root, require_production=True)
+
+    with TemporaryDirectory(prefix="tobkiri-presentation-size-negative-") as temp:
+        resource_root, _ = _release(Path(temp))
+        catalog_path = resource_root / "bundled/presentation_catalog.json"
+        catalog = VERIFY.load_catalog(catalog_path)
+        variant = catalog["shell_providers"][0]["artifact_variants"][0]
+        variant["size"] += 1
+        with pytest.raises(RuntimeError, match="size mismatch"):
+            VERIFY.verify_catalog(catalog, resource_root)
+
+    with TemporaryDirectory(prefix="tobkiri-presentation-escape-negative-") as temp:
+        resource_root, report = _release(Path(temp))
+        catalog_path = resource_root / "bundled/presentation_catalog.json"
+        catalog = VERIFY.load_catalog(catalog_path)
+        artifact = resource_root / str(report["path"])
+        outside = Path(temp) / "outside-shell"
+        outside.write_bytes(artifact.read_bytes())
+        artifact.unlink()
+        artifact.symlink_to(outside)
+        with pytest.raises(RuntimeError, match="symlink"):
+            VERIFY.verify_catalog(catalog, resource_root)
+
+
+def test_release_scanner_rejects_cross_document_identity_and_target_mismatch() -> None:
+    with TemporaryDirectory(prefix="tobkiri-presentation-binding-cross-negative-") as temp:
+        resource_root, _ = _release(Path(temp))
+        catalog_path = resource_root / "bundled/presentation_catalog.json"
+        catalog = VERIFY.load_catalog(catalog_path)
+        catalog["release_binding"]["artifact_id"] = "shell.tauri.default.windows-x86_64"
+        with pytest.raises(RuntimeError, match="release exact field mismatch"):
+            VERIFY.verify_catalog(catalog, resource_root)
+
+    with TemporaryDirectory(prefix="tobkiri-presentation-target-negative-") as temp:
+        resource_root, _ = _release(Path(temp))
+        catalog_path = resource_root / "bundled/presentation_catalog.json"
+        catalog = VERIFY.load_catalog(catalog_path)
+        variant = catalog["shell_providers"][0]["artifact_variants"][0]
+        variant["architecture"] = "arm64"
+        with pytest.raises(RuntimeError, match="identity does not match its target"):
+            VERIFY.verify_catalog(catalog, resource_root)

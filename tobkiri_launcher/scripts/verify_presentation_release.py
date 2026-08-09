@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import argparse
 import base64
+import binascii
 import hashlib
 import json
 import os
+import plistlib
 import signal
+import sys
 import subprocess
 import tempfile
 import time
@@ -31,6 +34,12 @@ PRESENTATION_PERMISSIONS = (
     "allow-launch-selected-presentation",
 )
 RELEASE_SCHEMA = "io.tobkiri.shell.release.v4"
+VALID_TARGETS = {
+    ("macos", "arm64"),
+    ("macos", "x86_64"),
+    ("windows", "x86_64"),
+    ("linux", "x86_64"),
+}
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -118,6 +127,78 @@ def _regular_bytes(path: Path, label: str) -> bytes:
     return path.read_bytes()
 
 
+def _safe_resource_path(root: Path, relative: str, label: str) -> Path:
+    """Resolve one package-relative path without following symlink components."""
+    if (
+        not isinstance(relative, str)
+        or not relative
+        or relative.startswith("~")
+        or "\\" in relative
+    ):
+        raise RuntimeError(f"{label} is unsafe: {relative!r}")
+    if root.is_symlink():
+        raise RuntimeError(f"Resources/app root may not be a symlink: {root}")
+    candidate = root / relative
+    current = root
+    try:
+        parts = candidate.relative_to(root).parts
+    except ValueError as error:
+        raise RuntimeError(f"{label} escapes Resources/app: {relative}") from error
+    for part in parts:
+        current = current / part
+        if current.is_symlink():
+            raise RuntimeError(f"{label} contains a symlink: {current}")
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(root.resolve()):
+        raise RuntimeError(f"{label} escapes Resources/app: {relative}")
+    return resolved
+
+
+def _artifact_size(path: Path) -> int:
+    """Return the deterministic payload size while rejecting links."""
+    if path.is_symlink():
+        raise RuntimeError(f"packaged artifact contains a symlink: {path}")
+    if path.is_file():
+        return path.stat().st_size
+    if not path.is_dir():
+        raise RuntimeError(f"packaged artifact is not a file or directory: {path}")
+    return sum(_artifact_size(child) for child in path.iterdir())
+
+
+def _validate_bundle_identity(artifact: Path, expected: object) -> None:
+    """Verify the bundle id recorded by the v4 Shell descriptor."""
+    if artifact.suffix != ".app":
+        return
+    if not isinstance(expected, str) or not expected.strip():
+        raise RuntimeError("packaged macOS artifact has no bundle identifier")
+    plist_path = artifact / "Contents" / "Info.plist"
+    try:
+        with plist_path.open("rb") as handle:
+            plist = plistlib.load(handle)
+    except (OSError, plistlib.InvalidFileException) as error:
+        raise RuntimeError(f"packaged macOS artifact Info.plist is invalid: {plist_path}") from error
+    if plist.get("CFBundleIdentifier") != expected:
+        raise RuntimeError(
+            "packaged macOS artifact bundle identifier mismatch: "
+            f"expected {expected!r}, got {plist.get('CFBundleIdentifier')!r}"
+        )
+
+
+def _host_target() -> tuple[str, str]:
+    """Return the platform/architecture of the verifier host."""
+    if sys.platform == "darwin":
+        platform_name = "macos"
+    elif sys.platform == "win32":
+        platform_name = "windows"
+    elif sys.platform.startswith("linux"):
+        platform_name = "linux"
+    else:
+        raise RuntimeError(f"unsupported verifier platform: {sys.platform}")
+    machine = os.uname().machine.lower() if hasattr(os, "uname") else ""
+    architecture = "arm64" if machine in {"arm64", "aarch64"} else "x86_64"
+    return platform_name, architecture
+
+
 def _release_signature_message(release: dict[str, Any]) -> bytes:
     fields = (
         RELEASE_SCHEMA,
@@ -141,7 +222,9 @@ def verify_release_binding(catalog: dict[str, Any], root: Path) -> dict[str, Any
         raise RuntimeError(
             "installed artifact metadata requires a Shell v4 release binding"
         )
-    release_path = root / "bundled" / "presentation_release.v4.json"
+    release_path = _safe_resource_path(
+        root, "bundled/presentation_release.v4.json", "release manifest path"
+    )
     release = json.loads(_regular_bytes(release_path, "release manifest"))
     if release.get("schema") != RELEASE_SCHEMA:
         raise RuntimeError("release manifest schema is invalid")
@@ -153,11 +236,20 @@ def verify_release_binding(catalog: dict[str, Any], root: Path) -> dict[str, Any
     for field, expected in fixed_paths.items():
         if release.get(field) != expected:
             raise RuntimeError(f"release manifest {field} is not canonical")
-    catalog_bytes = _regular_bytes(root / fixed_paths["catalog_path"], "catalog")
-    index_bytes = _regular_bytes(
-        root / fixed_paths["artifact_index_path"], "artifact index"
+    catalog_bytes = _regular_bytes(
+        _safe_resource_path(root, fixed_paths["catalog_path"], "catalog path"),
+        "catalog",
     )
-    lock_bytes = _regular_bytes(root / fixed_paths["profile_lock_path"], "profile lock")
+    index_bytes = _regular_bytes(
+        _safe_resource_path(root, fixed_paths["artifact_index_path"], "artifact index path"),
+        "artifact index",
+    )
+    lock_bytes = _regular_bytes(
+        _safe_resource_path(root, fixed_paths["profile_lock_path"], "profile lock path"),
+        "profile lock",
+    )
+    if not isinstance(release, dict):
+        raise RuntimeError("release manifest must be an object")
     if _byte_digest(catalog_bytes) != release.get("catalog_sha256"):
         raise RuntimeError("signed catalog digest mismatch")
     if _byte_digest(index_bytes) != release.get("artifact_index_sha256"):
@@ -166,6 +258,10 @@ def verify_release_binding(catalog: dict[str, Any], root: Path) -> dict[str, Any
         raise RuntimeError("signed profile lock digest mismatch")
     index = json.loads(index_bytes)
     lock = json.loads(lock_bytes)
+    if not isinstance(index, dict) or index.get("schema") != "io.tobkiri.shell.artifact-index.v4":
+        raise RuntimeError("artifact index schema is invalid")
+    if not isinstance(lock, dict) or lock.get("schema") != "io.tobkiri.shell.profile-lock.v4":
+        raise RuntimeError("profile lock schema is invalid")
     if _canonical_digest(index) != binding.get("artifact_index_sha256"):
         raise RuntimeError("catalog artifact index binding mismatch")
     if _canonical_digest(lock) != binding.get("profile_lock_sha256"):
@@ -173,6 +269,11 @@ def verify_release_binding(catalog: dict[str, Any], root: Path) -> dict[str, Any
     lock_body = {key: value for key, value in lock.items() if key != "lock_revision"}
     if _canonical_digest(lock_body) != lock.get("lock_revision"):
         raise RuntimeError("profile lock revision mismatch")
+    catalog_without_binding = {
+        key: value for key, value in catalog.items() if key != "release_binding"
+    }
+    if _canonical_digest(catalog_without_binding) != binding.get("catalog_revision"):
+        raise RuntimeError("catalog revision mismatch")
     exact_fields = (
         "artifact_id",
         "platform",
@@ -185,8 +286,11 @@ def verify_release_binding(catalog: dict[str, Any], root: Path) -> dict[str, Any
             field
         ):
             raise RuntimeError(f"release exact field mismatch: {field}")
-    public_key = base64.b64decode(release["public_key"], validate=True)
-    signature = base64.b64decode(release["signature"], validate=True)
+    try:
+        public_key = base64.b64decode(release["public_key"], validate=True)
+        signature = base64.b64decode(release["signature"], validate=True)
+    except (KeyError, TypeError, ValueError, binascii.Error) as error:
+        raise RuntimeError("Shell release signing fields are invalid") from error
     try:
         Ed25519PublicKey.from_public_bytes(public_key).verify(
             signature, _release_signature_message(release)
@@ -203,7 +307,11 @@ def verify_release_binding(catalog: dict[str, Any], root: Path) -> dict[str, Any
 
 
 def verify_catalog(
-    catalog: dict[str, Any], resource_root_path: Path | None = None
+    catalog: dict[str, Any],
+    resource_root_path: Path | None = None,
+    *,
+    require_production: bool = False,
+    require_target: bool = False,
 ) -> dict[str, Any]:
     """Verify Base Pack/Shell compatibility, fail-closed artifacts, and identity."""
     base_packs = catalog.get("base_packs")
@@ -260,15 +368,18 @@ def verify_catalog(
                 raise RuntimeError(
                     "installed artifact metadata requires a package resource root"
                 )
-            relative = Path(str(path_value))
+            if not isinstance(path_value, str):
+                raise RuntimeError("packaged artifact path must be text")
+            if not path_value.startswith("bundled/presentation-artifacts/"):
+                raise RuntimeError(
+                    f"packaged artifact path is outside presentation-artifacts: {path_value}"
+                )
+            relative = Path(path_value)
             if relative.is_absolute() or ".." in relative.parts:
                 raise RuntimeError(f"packaged artifact path is unsafe: {path_value}")
-            artifact = (resource_root_path / relative).resolve()
-            resource_root_resolved = resource_root_path.resolve()
-            if not artifact.is_relative_to(resource_root_resolved):
-                raise RuntimeError(
-                    f"packaged artifact path escapes Resources/app: {path_value}"
-                )
+            artifact = _safe_resource_path(
+                resource_root_path, path_value, "packaged artifact path"
+            )
             if not artifact.exists():
                 raise RuntimeError(f"packaged artifact is missing: {artifact}")
             actual_digest = _artifact_digest(artifact)
@@ -276,11 +387,7 @@ def verify_catalog(
                 raise RuntimeError(
                     f"packaged artifact digest mismatch for {variant['artifact_id']}"
                 )
-            actual_size = sum(
-                item.stat().st_size
-                for item in ([artifact] if artifact.is_file() else artifact.rglob("*"))
-                if item.is_file()
-            )
+            actual_size = _artifact_size(artifact)
             if variant.get("size") != actual_size:
                 raise RuntimeError(
                     f"packaged artifact size mismatch for {variant['artifact_id']}"
@@ -289,8 +396,21 @@ def verify_catalog(
                 raise RuntimeError(
                     "packaged artifact source identity/revision is incomplete"
                 )
+            if variant.get("artifact_id") != (
+                f"{shell.get('provider_id')}.{variant.get('platform')}-"
+                f"{variant.get('architecture')}"
+            ):
+                raise RuntimeError("packaged artifact identity does not match its target")
+            if (variant.get("platform"), variant.get("architecture")) not in VALID_TARGETS:
+                raise RuntimeError("packaged artifact platform/architecture is invalid")
+            _validate_bundle_identity(artifact, variant.get("bundle_identifier"))
             verified_artifacts.append(str(variant["artifact_id"]))
 
+    if require_production and not has_installed_artifact:
+        raise RuntimeError(
+            "production package must contain a sealed Shell artifact; "
+            "null-metadata catalog is not packageable"
+        )
     release_report = (
         verify_release_binding(catalog, resource_root_path)
         if has_installed_artifact and resource_root_path
@@ -321,6 +441,44 @@ def verify_catalog(
             raise RuntimeError(
                 "signed artifact does not match the default Profile Shell"
             )
+        selected_shell = next(
+            shell
+            for shell in shells
+            if shell.get("provider_id") == default_selection.get("shell_provider_id")
+        )
+        try:
+            selected_variant = next(
+                variant
+                for variant in selected_shell.get("artifact_variants", [])
+                if isinstance(variant, dict)
+                and variant.get("artifact_id") == release_report["artifact_id"]
+            )
+        except StopIteration as error:
+            raise RuntimeError(
+                "signed artifact does not match the default Profile Shell"
+            ) from error
+        index_path = resource_root_path / "bundled" / "shell_artifact_index.v4.json"
+        index = json.loads(_regular_bytes(index_path, "artifact index"))
+        for field in ("path", "sha256", "size"):
+            if selected_variant.get(field) != index.get(field):
+                raise RuntimeError(
+                    f"catalog artifact metadata differs from artifact index: {field}"
+                )
+
+        if require_target:
+            target = _host_target()
+            release = json.loads(
+                _regular_bytes(
+                    _safe_resource_path(
+                        resource_root_path,
+                        "bundled/presentation_release.v4.json",
+                        "release manifest path",
+                    ),
+                    "release manifest",
+                )
+            )
+            if (release.get("platform"), release.get("architecture")) != target:
+                raise RuntimeError("packaged Shell release targets the wrong host")
 
     return {
         "base_pack_id": base.get("pack_id"),
@@ -450,7 +608,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     catalog_path = root / "bundled" / "presentation_catalog.json"
     binary = app / "Contents" / "MacOS" / "tobkiri-launcher"
     report = {
-        "catalog": verify_catalog(load_catalog(catalog_path), root),
+        "catalog": verify_catalog(
+            load_catalog(catalog_path),
+            root,
+            require_production=True,
+            require_target=True,
+        ),
         "ipc": verify_binary(binary),
         "launch": launch_from_relocated_cwd(binary, args.launch_seconds),
     }

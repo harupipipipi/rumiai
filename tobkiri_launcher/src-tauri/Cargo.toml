@@ -9,6 +9,8 @@ crate-type = ["lib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+base64 = "0.22"
+ed25519-dalek = "2"
 serde_json = "1"
 sha2 = "0.10"
 

@@ -5,7 +5,27 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
+
+
+VALID_TARGETS = {
+    ("macos", "arm64"),
+    ("macos", "x86_64"),
+    ("windows", "x86_64"),
+    ("linux", "x86_64"),
+}
+FULL_REVISION = re.compile(r"^[0-9a-f]{40}$")
+
+
+def reject_symlink_components(path: Path) -> None:
+    """Reject a build output reached through a symlinked parent directory."""
+    current = Path(path.anchor) if path.is_absolute() else Path()
+    parts = path.parts[1:] if path.is_absolute() else path.parts
+    for part in parts:
+        current /= part
+        if current.is_symlink():
+            raise SystemExit(f"build artifact path contains a symlink: {current}")
 
 
 def main() -> int:
@@ -21,12 +41,27 @@ def main() -> int:
     parser.add_argument("--source-revision", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    artifact = args.artifact.expanduser().resolve()
+    artifact_input = args.artifact.expanduser()
+    reject_symlink_components(artifact_input)
+    artifact = artifact_input.resolve()
     if args.artifact.is_symlink() or not artifact.exists():
         raise SystemExit(f"build artifact is missing or symlinked: {args.artifact}")
+    if (args.platform, args.architecture) not in VALID_TARGETS:
+        raise SystemExit(
+            "unsupported release target: "
+            f"{args.platform}/{args.architecture}"
+        )
     for name in ("artifact_id", "source_identity", "source_revision"):
         if not getattr(args, name).strip():
             raise SystemExit(f"{name} must not be empty")
+    expected_suffix = f".{args.platform}-{args.architecture}"
+    if not args.artifact_id.endswith(expected_suffix):
+        raise SystemExit(
+            "artifact_id must identify the exact platform/architecture: "
+            f"expected suffix {expected_suffix!r}"
+        )
+    if FULL_REVISION.fullmatch(args.source_revision) is None:
+        raise SystemExit("source_revision must be a full 40-character Git commit SHA")
     value = {
         "schema": "io.tobkiri.shell.build-output.v4",
         "artifact_id": args.artifact_id,
