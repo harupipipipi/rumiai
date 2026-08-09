@@ -29,6 +29,7 @@ PACK_CONTROL_OPERATIONS = frozenset(
         "pack.install",
         "approval.candidate",
         "approval.approve",
+        "approval.revoke",
         "pack.enable",
         "pack.disable",
         "pack.status",
@@ -117,6 +118,8 @@ class CapturedPackControlSession:
         arguments = dict(payload)
         session_id = _required(arguments.pop("_session_id", None), "session binding")
         self._reject_identity_override(arguments)
+        if "approved" in arguments:
+            raise PackControlDenied("client approval assertions are not trusted")
         with self._lock:
             if operation_id == "profile.reload":
                 self._recapture()
@@ -132,6 +135,8 @@ class CapturedPackControlSession:
                 return self._approval_candidate(arguments, session_id)
             if operation_id == "approval.approve":
                 return self._approve(arguments, session_id)
+            if operation_id == "approval.revoke":
+                return self._revoke_approval(arguments)
             if operation_id == "pack.enable":
                 return self._set_enabled(arguments, True)
             if operation_id == "pack.disable":
@@ -220,12 +225,68 @@ class CapturedPackControlSession:
         current_digest = _pack_snapshot(pack_id, resolve_pack_root(pack_id))
         if not hmac.compare_digest(current_digest, candidate.snapshot_digest):
             raise PackControlDenied("Pack contents changed after approval was requested")
-        _persist_approval(pack_id, current_digest, self._binding)
+        _persist_approval(
+            pack_id,
+            current_digest,
+            self._binding,
+            approval_nonce=candidate.candidate_id,
+        )
         self._recapture()
         return {
             "pack_id": pack_id,
             "approved": True,
             "approval_status": "approved",
+            **self._binding_payload(),
+        }
+
+    def _revoke_approval(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        pack_id = _installed_pack(arguments, self._binding)
+        record = load_pack_catalog()[pack_id]
+        approval = _load_valid_approval(pack_id, record, self._binding)
+        approval_revision = str(approval["approval_revision"])
+        state, profile = _active_profile()
+        active_pack_ids = [str(item) for item in profile.get("packs") or []]
+        if pack_id == str(profile.get("base_pack") or ""):
+            raise PackControlDenied("the active Base Pack approval cannot be revoked")
+        artifact_digest = _pack_manifest_artifact_digest(pack_id)
+        from .authority.v4 import AuthorityStore
+
+        authority_path = _user_data_root() / "authority" / "v4.sqlite3"
+        try:
+            with AuthorityStore(authority_path) as authority:
+                revocation_id, grant_ids = authority.revoke_pack_approval(
+                    pack_id=pack_id,
+                    approval_revision=approval_revision,
+                    profile_id=self._binding.profile_id,
+                    activation_id=str(state["activation"]["activation_id"]),
+                    artifact_digest=artifact_digest,
+                    reason=f"Pack approval revoked: {pack_id}",
+                )
+        except Exception as error:
+            raise PackControlDenied("Pack approval revocation was not committed") from error
+
+        if pack_id in active_pack_ids:
+            active_pack_ids.remove(pack_id)
+            try:
+                _activate_pack_set(state, active_pack_ids)
+            except Exception as error:
+                raise PackControlDenied(
+                    "Pack approval was fenced but Profile deactivation failed"
+                ) from error
+        _persist_revoked_approval(
+            pack_id,
+            approval,
+            revocation_id=revocation_id,
+        )
+        self._recapture()
+        return {
+            "pack_id": pack_id,
+            "approved": False,
+            "enabled": False,
+            "approval_status": "revoked",
+            "approval_revision": approval_revision,
+            "revocation_id": revocation_id,
+            "revoked_grant_count": len(grant_ids),
             **self._binding_payload(),
         }
 
@@ -687,7 +748,13 @@ def _user_data_root() -> Path:
     return runtime_user_data_root()
 
 
-def _persist_approval(pack_id: str, content_digest: str, binding: _Binding) -> None:
+def _persist_approval(
+    pack_id: str,
+    content_digest: str,
+    binding: _Binding,
+    *,
+    approval_nonce: str,
+) -> None:
     record = load_pack_catalog()[pack_id]
     payload = {
         "version": "io.tobkiri.pack-approval.v4",
@@ -699,6 +766,7 @@ def _persist_approval(pack_id: str, content_digest: str, binding: _Binding) -> N
         "artifact_digest": _record_digest(record),
         "content_digest": content_digest,
         "captured_profile_revision": binding.profile_revision,
+        "approval_nonce": approval_nonce,
         "approved_at": int(time.time()),
     }
     payload["approval_revision"] = "sha256:" + _digest(
@@ -712,6 +780,7 @@ def _persist_approval(pack_id: str, content_digest: str, binding: _Binding) -> N
                 "catalog_revision",
                 "artifact_digest",
                 "content_digest",
+                "approval_nonce",
             )
         }
     )
@@ -723,23 +792,49 @@ def _persist_approval(pack_id: str, content_digest: str, binding: _Binding) -> N
     _atomic_json(_approval_path(binding.profile_id, pack_id), payload)
 
 
+def _persist_revoked_approval(
+    pack_id: str,
+    approval: Mapping[str, Any],
+    *,
+    revocation_id: str,
+) -> None:
+    payload = {
+        key: value for key, value in approval.items() if key != "signature"
+    }
+    payload.update(
+        {
+            "revoked": True,
+            "revoked_at": int(time.time()),
+            "revocation_id": revocation_id,
+        }
+    )
+    payload["signature"] = hmac.new(
+        _authority_key(),
+        _canonical_bytes(payload),
+        hashlib.sha256,
+    ).hexdigest()
+    _atomic_json(_approval_path(str(payload["profile_id"]), pack_id), payload)
+
+
 def _approval_status(
     pack_id: str, record: Mapping[str, Any], binding: _Binding
 ) -> tuple[bool, str | None]:
     active_packs = set(_active_profile()[1].get("packs") or [])
-    if pack_id in active_packs:
-        return True, None
     path = _approval_path(binding.profile_id, pack_id)
     if path.is_symlink():
         return False, "approval_symlinked"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
+        if pack_id in active_packs:
+            return True, None
         return False, "approval_required"
     except (OSError, json.JSONDecodeError):
         return False, "approval_unreadable"
     if not isinstance(payload, dict):
         return False, "approval_invalid"
+    if payload.get("revoked") is True:
+        return False, "approval_revoked"
     signature = str(payload.pop("signature", ""))
     expected_signature = hmac.new(
         _authority_key(),
@@ -758,22 +853,19 @@ def _approval_status(
     }
     if any(payload.get(key) != value for key, value in expected.items()):
         return False, "approval_binding_invalid"
-    revision = "sha256:" + _digest(
-        {
-            key: payload.get(key)
-            for key in (
-                "pack_id",
-                "owner",
-                "profile_id",
-                "workspace_id",
-                "catalog_revision",
-                "artifact_digest",
-                "content_digest",
-            )
-        }
-    )
+    revision = _approval_revision(payload)
     if payload.get("approval_revision") != revision:
         return False, "approval_revision_invalid"
+    from .authority.v4 import AuthorityStore
+
+    try:
+        with AuthorityStore(
+            _user_data_root() / "authority" / "v4.sqlite3"
+        ) as authority:
+            if authority.is_revoked("approval", revision):
+                return False, "approval_revoked"
+    except Exception:
+        return False, "approval_authority_unavailable"
     try:
         current = _pack_snapshot(pack_id, resolve_pack_root(pack_id))
     except PackControlDenied:
@@ -781,6 +873,58 @@ def _approval_status(
     if not hmac.compare_digest(str(payload.get("content_digest") or ""), current):
         return False, "hash_mismatch"
     return True, None
+
+
+def _load_valid_approval(
+    pack_id: str,
+    record: Mapping[str, Any],
+    binding: _Binding,
+) -> dict[str, Any]:
+    path = _approval_path(binding.profile_id, pack_id)
+    try:
+        raw = path.read_bytes()
+    except OSError as error:
+        raise PackControlDenied("Pack approval is unreadable") from error
+    approved, reason = _approval_status(pack_id, record, binding)
+    if not approved:
+        raise PackControlDenied(reason or "Pack approval is unavailable")
+    try:
+        if not hmac.compare_digest(raw, path.read_bytes()):
+            raise PackControlDenied("Pack approval changed during revocation")
+        payload = json.loads(raw)
+    except OSError as error:
+        raise PackControlDenied("Pack approval is unreadable") from error
+    except json.JSONDecodeError as error:
+        raise PackControlDenied("Pack approval is invalid") from error
+    if not isinstance(payload, dict):
+        raise PackControlDenied("Pack approval is invalid")
+    return payload
+
+
+def _approval_revision(payload: Mapping[str, Any]) -> str:
+    keys = [
+        "pack_id",
+        "owner",
+        "profile_id",
+        "workspace_id",
+        "catalog_revision",
+        "artifact_digest",
+        "content_digest",
+    ]
+    if payload.get("approval_nonce") is not None:
+        keys.append("approval_nonce")
+    return "sha256:" + _digest({key: payload.get(key) for key in keys})
+
+
+def _pack_manifest_artifact_digest(pack_id: str) -> str:
+    manifest_path = resolve_pack_root(pack_id) / "pack.v4.json"
+    try:
+        manifest = validate_document(manifest_path.read_bytes(), "pack")
+    except Exception as error:
+        raise PackControlDenied("Pack v4 manifest is invalid") from error
+    if manifest["pack"]["id"] != pack_id:
+        raise PackControlDenied("Pack v4 manifest identity is inconsistent")
+    return str(manifest["pack"]["artifact_digest"])
 
 
 def _pack_snapshot(pack_id: str, root: Path) -> str:

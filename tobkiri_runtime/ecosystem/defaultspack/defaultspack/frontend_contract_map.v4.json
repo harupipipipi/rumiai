@@ -79,6 +79,21 @@
     },
     {
       "method": "POST",
+      "path": "/api/pack-control/approval-revoke",
+      "presentation": "broker_result",
+      "targets": [
+        {
+          "contribution_id": "defaults.pack.approval-revoke",
+          "contract_id": "tobkiri.host.pack-control.v4",
+          "operation_id": "approval.revoke",
+          "provider_id": "tobkiri.host.pack-control",
+          "function_id": "tobkiri.host.pack-control",
+          "allowed_payload_keys": ["pack_id"]
+        }
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/pack-control/enable",
       "presentation": "broker_result",
       "targets": [
@@ -165,6 +180,14 @@
           "provider_id": "tobkiri.host.pack-control",
           "function_id": "tobkiri.host.pack-control",
           "allowed_payload_keys": ["candidate_id", "pack_id"]
+        },
+        {
+          "contribution_id": "defaults.pack.approval-revoke",
+          "contract_id": "tobkiri.host.pack-control.v4",
+          "operation_id": "approval.revoke",
+          "provider_id": "tobkiri.host.pack-control",
+          "function_id": "tobkiri.host.pack-control",
+          "allowed_payload_keys": ["pack_id"]
         },
         {
           "contribution_id": "defaults.pack.enable",

@@ -467,6 +467,7 @@ class PackAPIHandler(
         if refresh is not None and operation_id in {
             "pack.enable",
             "pack.disable",
+            "approval.revoke",
             "runtime.restart",
         }:
             refresh(None)

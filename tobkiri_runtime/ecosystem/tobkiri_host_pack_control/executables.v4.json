@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:b8c9349c04bfb7e308c646b55eef70f8cd8a2b2bf1f7c057193369e79602237a",
+  "catalog_digest": "sha256:3e934ab1c8467c5b18a94678912dffb698cae68c93823fcb53f8340bad04b0dc",
   "pack_id": "tobkiri_host_pack_control",
-  "source_identity": "sha256:855b5078e8aba8c181113a50a47a1874f0f5c8b5726f116a04f8983065f91bda",
+  "source_identity": "sha256:e9d36e6cff56a6b3e8c0d0f68227c486d419744716209b78d4ecdb7803215147",
   "variants": [
     {
       "architecture": "any",
@@ -51,7 +51,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -92,7 +92,48 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.pack-control.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "candidate_id": {
+                "type": "string"
+              },
+              "pack_id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "operation_id": "approval.revoke",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -133,7 +174,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -174,7 +215,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -215,7 +256,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -256,7 +297,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -297,7 +338,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -338,7 +379,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -379,7 +420,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -420,7 +461,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         }

@@ -15,6 +15,7 @@ from core_runtime.pack_control_v4 import (
     PackControlDenied,
     capture_pack_control_session,
 )
+from core_runtime.authority.v4 import AuditUnavailable, AuthorityStore
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
 from core_runtime.bootstrap.profile_capture import (
@@ -143,6 +144,126 @@ def test_approval_is_session_bound_one_shot_and_not_implicit(captured_session) -
             "approval.approve",
             {"pack_id": TARGET_PACK, "candidate_id": candidate["candidate_id"]},
         )
+    with pytest.raises(PackControlDenied, match="not trusted"):
+        _invoke(
+            session,
+            "pack.enable",
+            {"pack_id": TARGET_PACK, "approved": True},
+        )
+
+
+def test_revoke_persists_audit_and_rejects_revision_replay_after_restart(
+    captured_session,
+) -> None:
+    """Disable and explicit revoke are distinct, durable ceremonies."""
+
+    session, _state_path, user_data = captured_session
+    _approve_target(session)
+    assert _invoke(session, "pack.enable", {"pack_id": TARGET_PACK})["enabled"]
+
+    restarted = capture_pack_control_session()
+    assert _invoke(restarted, "pack.status", {"pack_id": TARGET_PACK})["enabled"]
+    assert not _invoke(
+        restarted, "pack.disable", {"pack_id": TARGET_PACK}
+    )["enabled"]
+    approval_path = (
+        user_data
+        / "pack_control"
+        / "approvals"
+        / "defaults"
+        / f"{TARGET_PACK}.json"
+    )
+    approved_payload = approval_path.read_bytes()
+    revoked = _invoke(restarted, "approval.revoke", {"pack_id": TARGET_PACK})
+    assert revoked["approved"] is False
+    assert revoked["enabled"] is False
+    assert revoked["approval_status"] == "revoked"
+
+    after_restart = capture_pack_control_session()
+    status = _invoke(after_restart, "pack.status", {"pack_id": TARGET_PACK})
+    assert status["approved"] is False
+    assert status["enabled"] is False
+    assert status["approval_reason"] == "approval_revoked"
+    with pytest.raises(PackControlDenied, match="approval_revoked"):
+        _invoke(after_restart, "approval.revoke", {"pack_id": TARGET_PACK})
+
+    approval_path.write_bytes(approved_payload)
+    replayed = capture_pack_control_session()
+    assert (
+        _invoke(replayed, "pack.status", {"pack_id": TARGET_PACK})[
+            "approval_reason"
+        ]
+        == "approval_revoked"
+    )
+    with pytest.raises(PackControlDenied, match="approval_revoked"):
+        _invoke(replayed, "pack.enable", {"pack_id": TARGET_PACK})
+
+    replacement = _invoke(
+        replayed,
+        "approval.candidate",
+        {"pack_id": TARGET_PACK},
+    )
+    _invoke(
+        replayed,
+        "approval.approve",
+        {
+            "pack_id": TARGET_PACK,
+            "candidate_id": replacement["candidate_id"],
+        },
+    )
+    replacement_payload = json.loads(approval_path.read_text(encoding="utf-8"))
+    assert replacement_payload["approval_revision"] != revoked["approval_revision"]
+    assert _invoke(replayed, "pack.status", {"pack_id": TARGET_PACK})[
+        "approved"
+    ]
+
+    with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
+        event = next(
+            item
+            for item in reversed(authority.audit_events())
+            if item["event_type"] == "pack_approval_revoked"
+        )
+    assert event["event_state"] == "committed"
+    assert event["payload"]["pack_id"] == TARGET_PACK
+    assert event["payload"]["approval_revision"] == revoked["approval_revision"]
+
+
+def test_revoke_audit_failure_rolls_back_and_leaves_approval_usable(
+    captured_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unavailable authoritative audit leaves no partial revocation."""
+
+    session, _state_path, user_data = captured_session
+    _approve_target(session)
+    assert _invoke(session, "pack.enable", {"pack_id": TARGET_PACK})["enabled"]
+    approval_path = (
+        user_data
+        / "pack_control"
+        / "approvals"
+        / "defaults"
+        / f"{TARGET_PACK}.json"
+    )
+    approval_before = approval_path.read_bytes()
+    original_append = AuthorityStore._append_audit
+
+    def fail_revoke_audit(self, connection, **kwargs):
+        if kwargs.get("event_type") == "pack_approval_revoked":
+            raise AuditUnavailable("injected audit failure")
+        return original_append(self, connection, **kwargs)
+
+    monkeypatch.setattr(AuthorityStore, "_append_audit", fail_revoke_audit)
+    with pytest.raises(PackControlDenied, match="not committed"):
+        _invoke(session, "approval.revoke", {"pack_id": TARGET_PACK})
+    assert approval_path.read_bytes() == approval_before
+    with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
+        assert not authority.is_revoked(
+            "approval",
+            json.loads(approval_before)["approval_revision"],
+        )
+    status = _invoke(session, "pack.status", {"pack_id": TARGET_PACK})
+    assert status["approved"] is True
+    assert status["enabled"] is True
 
 
 @pytest.mark.parametrize("pack_id", ["unknown-pack", "../defaultspack", "a/b"])

@@ -318,6 +318,16 @@
     {
       "caller_function_id": "shell.tauri.pack-control",
       "contract_id": "tobkiri.host.pack-control.v4",
+      "operation_id": "approval.revoke",
+      "requested_scope_template": {
+        "ceremony": "approval_revoke",
+        "resource_namespace": "pack.approval"
+      },
+      "target_provider_id": "tobkiri.host.pack-control"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.pack-control.v4",
       "operation_id": "pack.enable",
       "requested_scope_template": {
         "ceremony": "profile_activation",

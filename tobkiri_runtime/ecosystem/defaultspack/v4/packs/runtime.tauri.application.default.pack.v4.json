@@ -4,7 +4,7 @@
     "id": "runtime.tauri.application.default",
     "version": "1.0.0",
     "kind": "application",
-    "artifact_digest": "sha256:c12997b839651e266d2dbe0ddb6a652297bb1d55bcd6259a5baad1fda12ef280",
+    "artifact_digest": "sha256:9a10c404e4603654995586c4b7f2e418646dc7e2d62444fd3b599657a972b01b",
     "display_name": "Tobkiri Tauri Application Runtime"
   },
   "functions": [
@@ -39,7 +39,7 @@
     },
     {
       "path": "defaultspack/frontend_contract_map.v4.json",
-      "digest": "sha256:2159251ea47f539340ea3143c876e7018ca82255343439895ebbdac467872bc9",
+      "digest": "sha256:2dcc46a9a5bc902b1cffff82972f1ab01bb16b0adc4ff517d310c2faf087308c",
       "kind": "asset",
       "platform": "host"
     }
@@ -96,8 +96,8 @@
     }
   ],
   "integrity": {
-    "source_identity": "sha256:f86b13a5035334b59f6752479c5754a6540fad26e25ccfde677eff505cc3d30e",
-    "artifact_set_digest": "sha256:c12997b839651e266d2dbe0ddb6a652297bb1d55bcd6259a5baad1fda12ef280",
+    "source_identity": "sha256:47cb5c9ec3d1b0c8e82a40f0239004c953ad3003c57b37493da81e945e5e8173",
+    "artifact_set_digest": "sha256:9a10c404e4603654995586c4b7f2e418646dc7e2d62444fd3b599657a972b01b",
     "contract_catalog_digest": "sha256:0df46117366f419dbad8685b74340a655d45e46e71fc5a0c1eb30c9fce00f614"
   }
 }

@@ -10,6 +10,7 @@
             "capability:dashboard.read",
             "capability:pack.approval.commit",
             "capability:pack.approval.prepare",
+            "capability:pack.approval.revoke",
             "capability:pack.catalog.read",
             "capability:pack.disable",
             "capability:pack.enable",
@@ -33,6 +34,7 @@
             "capability:dashboard.read",
             "capability:pack.approval.commit",
             "capability:pack.approval.prepare",
+            "capability:pack.approval.revoke",
             "capability:pack.catalog.read",
             "capability:pack.disable",
             "capability:pack.enable",
@@ -56,6 +58,31 @@
             "capability:dashboard.read",
             "capability:pack.approval.commit",
             "capability:pack.approval.prepare",
+            "capability:pack.approval.revoke",
+            "capability:pack.catalog.read",
+            "capability:pack.disable",
+            "capability:pack.enable",
+            "capability:pack.install",
+            "capability:pack.status.read",
+            "capability:profile.reload",
+            "capability:runtime.restart",
+            "host:brokered-execution"
+          ],
+          "error_schema_digest": "sha256:d2c0d03b1db2ba4a62bc179015423a9ac6a3fdcb9ddb903b830e8768da8fdb44",
+          "idempotency": {
+            "mode": "none"
+          },
+          "input_schema_digest": "sha256:a1efa8f0cb64bb0c43e818f6385b63539318083ea92e94cc05f632ef17afb5e5",
+          "operation_id": "approval.revoke",
+          "output_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+          "scope_semantics": "host_broker"
+        },
+        {
+          "effect_ceiling": [
+            "capability:dashboard.read",
+            "capability:pack.approval.commit",
+            "capability:pack.approval.prepare",
+            "capability:pack.approval.revoke",
             "capability:pack.catalog.read",
             "capability:pack.disable",
             "capability:pack.enable",
@@ -79,6 +106,7 @@
             "capability:dashboard.read",
             "capability:pack.approval.commit",
             "capability:pack.approval.prepare",
+            "capability:pack.approval.revoke",
             "capability:pack.catalog.read",
             "capability:pack.disable",
             "capability:pack.enable",
@@ -102,6 +130,7 @@
             "capability:dashboard.read",
             "capability:pack.approval.commit",
             "capability:pack.approval.prepare",
+            "capability:pack.approval.revoke",
             "capability:pack.catalog.read",
             "capability:pack.disable",
             "capability:pack.enable",
@@ -125,6 +154,7 @@
             "capability:dashboard.read",
             "capability:pack.approval.commit",
             "capability:pack.approval.prepare",
+            "capability:pack.approval.revoke",
             "capability:pack.catalog.read",
             "capability:pack.disable",
             "capability:pack.enable",
@@ -148,6 +178,7 @@
             "capability:dashboard.read",
             "capability:pack.approval.commit",
             "capability:pack.approval.prepare",
+            "capability:pack.approval.revoke",
             "capability:pack.catalog.read",
             "capability:pack.disable",
             "capability:pack.enable",
@@ -171,6 +202,7 @@
             "capability:dashboard.read",
             "capability:pack.approval.commit",
             "capability:pack.approval.prepare",
+            "capability:pack.approval.revoke",
             "capability:pack.catalog.read",
             "capability:pack.disable",
             "capability:pack.enable",
@@ -194,6 +226,7 @@
             "capability:dashboard.read",
             "capability:pack.approval.commit",
             "capability:pack.approval.prepare",
+            "capability:pack.approval.revoke",
             "capability:pack.catalog.read",
             "capability:pack.disable",
             "capability:pack.enable",
@@ -217,6 +250,7 @@
             "capability:dashboard.read",
             "capability:pack.approval.commit",
             "capability:pack.approval.prepare",
+            "capability:pack.approval.revoke",
             "capability:pack.catalog.read",
             "capability:pack.disable",
             "capability:pack.enable",
@@ -240,7 +274,7 @@
       "provenance": {
         "evidence": [
           {
-            "digest": "sha256:855b5078e8aba8c181113a50a47a1874f0f5c8b5726f116a04f8983065f91bda",
+            "digest": "sha256:e9d36e6cff56a6b3e8c0d0f68227c486d419744716209b78d4ecdb7803215147",
             "path": "schemas/pack_v4_catalog.v1.json",
             "rule_id": "canonical-pack-v4-source-record"
           }
@@ -251,7 +285,7 @@
         "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
         "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
         "schema": "io.tobkiri.provenance.v1",
-        "source_digest": "sha256:855b5078e8aba8c181113a50a47a1874f0f5c8b5726f116a04f8983065f91bda",
+        "source_digest": "sha256:e9d36e6cff56a6b3e8c0d0f68227c486d419744716209b78d4ecdb7803215147",
         "source_kind": "migration",
         "source_path": "schemas/pack_v4_catalog.v1.json#/packs/tobkiri_host_pack_control"
       },
@@ -268,6 +302,7 @@
           "dashboard.read",
           "pack.approval.commit",
           "pack.approval.prepare",
+          "pack.approval.revoke",
           "pack.catalog.read",
           "pack.disable",
           "pack.enable",
@@ -278,7 +313,7 @@
         ],
         "security": "sensitive"
       },
-      "revision_digest": "sha256:b226d4203ee29416328337a26ac8e918fabe46ef498eb11d90228b8d7f72b6da",
+      "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
       "schema_catalog": {
         "sha256:a1efa8f0cb64bb0c43e818f6385b63539318083ea92e94cc05f632ef17afb5e5": {
           "additionalProperties": false,
@@ -317,5 +352,5 @@
     }
   ],
   "pack_id": "tobkiri_host_pack_control",
-  "source_identity": "sha256:855b5078e8aba8c181113a50a47a1874f0f5c8b5726f116a04f8983065f91bda"
+  "source_identity": "sha256:e9d36e6cff56a6b3e8c0d0f68227c486d419744716209b78d4ecdb7803215147"
 }

@@ -263,7 +263,43 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
     assert status == 200, persisted
     assert persisted["data"]["enabled"] is True
     assert post("/api/pack-control/disable", {"pack_id": target_pack})[0] == 200
+    revoke_status, revoked = post(
+        "/api/pack-control/approval-revoke", {"pack_id": target_pack}
+    )
+    assert revoke_status == 200, revoked
+    assert revoked["data"]["approved"] is False
+    assert revoked["data"]["approval_status"] == "revoked"
     assert post("/api/pack-control/restart", {})[0] == 200
+    catalog_status, after_revoke, _ = _request(
+        server,
+        "GET",
+        _contract("GET", "/api/pack-control/catalog"),
+        headers={
+            "Cookie": cookie,
+            "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+        },
+    )
+    assert catalog_status == 200, after_revoke
+    revoked_pack = next(
+        item
+        for item in after_revoke["data"]["packs"]
+        if item["pack_id"] == target_pack
+    )
+    assert revoked_pack["approved"] is False
+    assert revoked_pack["enabled"] is False
+    assert revoked_pack["approval_reason"] == "approval_revoked"
+    enable_status, denied = post(
+        "/api/pack-control/enable", {"pack_id": target_pack}
+    )
+    assert enable_status == 409
+    assert denied["data"]["code"] == "provider_failed"
+
+    with AuthorityStore(authority_path) as current_authority:
+        assert any(
+            event["event_type"] == "pack_approval_revoked"
+            and event["event_state"] == "committed"
+            for event in current_authority.audit_events()
+        )
 
     with AuthorityStore(authority_path) as current_authority:
         audit_before_legacy = len(current_authority.audit_events())

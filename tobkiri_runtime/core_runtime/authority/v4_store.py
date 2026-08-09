@@ -1371,6 +1371,131 @@ class AuthorityStore:
             raise AuthorityStoreError("revocation commit failed") from exc
         return revocation_id
 
+    def revoke_pack_approval(
+        self,
+        *,
+        pack_id: str,
+        approval_revision: str,
+        profile_id: str,
+        activation_id: str,
+        artifact_digest: str,
+        reason: str,
+    ) -> tuple[str, tuple[str, ...]]:
+        """Atomically revoke one Pack approval and its active exact Grants.
+
+        The approval revision is a replay fence. Grants are selected from the
+        authenticated authority records by exact Profile, activation, and target
+        artifact, so a Pack-control caller cannot name arbitrary Grant IDs.
+        """
+
+        if not all(
+            str(value or "").strip()
+            for value in (
+                approval_revision,
+                pack_id,
+                profile_id,
+                activation_id,
+                artifact_digest,
+                reason,
+            )
+        ):
+            raise ValueError("Pack approval revocation fields are required")
+        revocation_id = "rev-" + secrets.token_hex(16)
+        reason_digest = authority_digest({"reason": str(reason)})
+        epoch = self.security_epoch
+        try:
+            with self._lock, self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                if self._is_revoked(connection, "approval", approval_revision):
+                    raise AuthorityDenied(
+                        "Pack approval revision is already revoked",
+                        code="revoked",
+                    )
+                rows = connection.execute(
+                    "SELECT record_id, record_digest, encrypted_payload"
+                    " FROM authority_records WHERE record_type='grant'"
+                    " ORDER BY record_id"
+                ).fetchall()
+                grant_ids: list[str] = []
+                for row in rows:
+                    value = self._decrypt(row["encrypted_payload"])
+                    if not hmac.compare_digest(
+                        str(row["record_digest"]), authority_digest(value)
+                    ):
+                        raise AuthorityStoreError("authority record digest mismatch")
+                    grant = GrantRecord.from_dict(value)
+                    if (
+                        grant.profile_id == profile_id
+                        and grant.activation_id == activation_id
+                        and grant.target.parent_artifact_digest == artifact_digest
+                    ):
+                        grant_ids.append(grant.grant_id)
+                now = self._clock()
+                connection.execute(
+                    "INSERT INTO revocations"
+                    " (revocation_id, target_kind, target_id, security_epoch,"
+                    " reason_digest, created_at) VALUES (?, 'approval', ?, ?, ?, ?)",
+                    (
+                        revocation_id,
+                        approval_revision,
+                        epoch,
+                        reason_digest,
+                        now,
+                    ),
+                )
+                for grant_id in grant_ids:
+                    connection.execute(
+                        "INSERT OR IGNORE INTO revocations"
+                        " (revocation_id, target_kind, target_id, security_epoch,"
+                        " reason_digest, created_at) VALUES (?, 'grant', ?, ?, ?, ?)",
+                        (
+                            "rev-" + secrets.token_hex(16),
+                            grant_id,
+                            epoch,
+                            reason_digest,
+                            now,
+                        ),
+                    )
+                if grant_ids:
+                    placeholders = ",".join("?" for _item in grant_ids)
+                    connection.execute(
+                        "UPDATE invocation_leases SET state=?"
+                        f" WHERE grant_id IN ({placeholders}) AND state IN (?, ?)",
+                        (
+                            LeaseState.REVOKED.value,
+                            *grant_ids,
+                            LeaseState.ISSUED.value,
+                            LeaseState.DISPATCHED.value,
+                        ),
+                    )
+                self._append_audit(
+                    connection,
+                    event_id=revocation_id,
+                    event_type="pack_approval_revoked",
+                    event_state="committed",
+                    payload={
+                        "approval_revision": approval_revision,
+                        "pack_id": pack_id,
+                        "profile_id": profile_id,
+                        "activation_id": activation_id,
+                        "artifact_digest": artifact_digest,
+                        "grant_ids": grant_ids,
+                        "security_epoch": epoch,
+                        "reason_digest": reason_digest,
+                    },
+                )
+                connection.commit()
+        except (AuthorityDenied, AuditUnavailable, AuthorityStoreError):
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise AuthorityDenied(
+                "Pack approval or active Grant is already revoked",
+                code="revoked",
+            ) from exc
+        except sqlite3.Error as exc:
+            raise AuthorityStoreError("Pack approval revocation failed") from exc
+        return revocation_id, tuple(grant_ids)
+
     def is_revoked(self, target_kind: str, target_id: str) -> bool:
         """Return whether an exact target has an active Host revocation."""
 

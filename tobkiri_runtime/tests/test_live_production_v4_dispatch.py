@@ -254,17 +254,23 @@ def test_clean_home_broker_dispatches_then_revocation_fails_closed(
             {"_session_id": session_id, "messages": [{"role": "user"}]},
         ) == {"ok": True}
         assert store.grant_usage(grant.grant_id) == (0, 1)
-        control.revoke(
-            target_kind="grant",
-            target_id=grant.grant_id,
-            reason="test explicit revoke",
+        _revocation_id, revoked_grants = store.revoke_pack_approval(
+            pack_id="test-conversation-pack",
+            approval_revision=_digest("pack-approval-revision"),
+            profile_id="defaults",
+            activation_id=active.activation["activation_id"],
+            artifact_digest=target.parent_artifact_digest,
+            reason="test exact Pack approval revoke",
         )
+        assert revoked_grants == (grant.grant_id,)
         with pytest.raises(AuthorizationError, match="static authorization failed"):
             session.invoke(
                 "conversation.turn.v1",
                 "complete",
                 {"_session_id": session_id, "messages": [{"role": "user"}]},
             )
+        assert store.is_revoked("grant", grant.grant_id)
+        assert store.audit_events()[-1]["event_type"] == "pack_approval_revoked"
     finally:
         session.broker.close()
 
@@ -298,6 +304,7 @@ def test_pack_catalog_read_is_profile_bound_audited_and_restart_safe(
     assert {provider["operation_id"] for provider in providers} == {
         "approval.approve",
         "approval.candidate",
+        "approval.revoke",
         "catalog.read",
         "dashboard.read",
         "pack.disable",
