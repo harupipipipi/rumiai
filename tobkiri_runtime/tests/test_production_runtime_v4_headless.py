@@ -46,41 +46,52 @@ def _principal(binding: Mapping[str, Any]) -> FunctionPrincipal:
 
 def _shell_artifact(catalog: BundledCatalog) -> PackArtifact:
     manifest = catalog.packs["shell.tauri.default"]
-    function = manifest["functions"][0]
-    contract = manifest["contracts"][0]
-    operation = ContractOperation(
-        contract_id=contract["contract_id"],
-        contract_version="1.0.0",
-        revision_digest=contract["revision_digest"],
-        operation_id=function["operations"][0],
-        input_schema={"type": "object"},
-        output_schema={"type": "object"},
-    )
-    return PackArtifact(
-        pack_id=manifest["pack"]["id"],
-        version=manifest["pack"]["version"],
-        digest=manifest["pack"]["artifact_digest"],
-        publisher_lineage="tobkiri.repository",
-        package_kind=PackageKind.NORMAL,
-        functions=(
+    functions: list[FunctionArtifact] = []
+    variants: list[ArtifactVariant] = []
+    for index, function in enumerate(manifest["functions"]):
+        contract = next(
+            item
+            for item in manifest["contracts"]
+            if item["revision_digest"] == function["contract_revision_digest"]
+        )
+        variant_id = f"shell.test.verified.{index}"
+        functions.append(
             FunctionArtifact(
                 function_id=function["id"],
                 implementation_digest=function["implementation_digest"],
-                variant_id="shell.test.verified",
-                operations=(operation,),
-            ),
-        ),
-        variants=(
+                variant_id=variant_id,
+                operations=tuple(
+                    ContractOperation(
+                        contract_id=contract["contract_id"],
+                        contract_version="1.0.0",
+                        revision_digest=contract["revision_digest"],
+                        operation_id=operation_id,
+                        input_schema={"type": "object"},
+                        output_schema={"type": "object"},
+                    )
+                    for operation_id in function["operations"]
+                ),
+            )
+        )
+        variants.append(
             ArtifactVariant(
-                variant_id="shell.test.verified",
+                variant_id=variant_id,
                 digest=function["implementation_digest"],
                 execution_kind=ExecutionKind.HOST_EXTENSION,
                 os="test",
                 architecture="test",
                 runtime_abi="test-v1",
                 backend="verified.shell.test",
-            ),
-        ),
+            )
+        )
+    return PackArtifact(
+        pack_id=manifest["pack"]["id"],
+        version=manifest["pack"]["version"],
+        digest=manifest["pack"]["artifact_digest"],
+        publisher_lineage="tobkiri.repository",
+        package_kind=PackageKind.NORMAL,
+        functions=tuple(functions),
+        variants=tuple(variants),
     )
 
 
@@ -134,27 +145,39 @@ def test_headless_activation_compiles_exact_plan_and_reads_after_restart(
     restarted = activation_store.load_active_snapshot()
     bindings = restarted.resolved.plan["bindings"]
     shell = _shell_artifact(catalog)
-    shell_principal = FunctionPrincipal(
-        shell.digest,
-        shell.functions[0].implementation_digest,
-        shell.functions[0].function_id,
-        shell.functions[0].operations[0].revision_digest,
-        shell.functions[0].operations[0].operation_id,
-    )
-    conversation = _principal(bindings[0])
-    inspect = _principal(bindings[1])
+    shell_principals = {
+        function.function_id: FunctionPrincipal(
+            shell.digest,
+            function.implementation_digest,
+            function.function_id,
+            operation.revision_digest,
+            operation.operation_id,
+        )
+        for function in shell.functions
+        for operation in function.operations
+    }
+    binding_by_operation = {
+        (binding["contract_id"], binding["operation_id"]): binding
+        for binding in bindings
+    }
+    provider_principals = {
+        binding["function_principal"]["function_id"]: _principal(binding)
+        for binding in bindings
+    }
     scope = AuthorityScope(
         capability="operation.invoke",
         semantics_digest="sha256:" + "7" * 64,
     )
-    ceilings = {
-        (shell_principal.principal_id, conversation.principal_id): AuthorityCeilings(
+    caller_principals = {**shell_principals, **provider_principals}
+    ceilings = {}
+    for edge in catalog.profiles["defaults"]["requested_edges"]:
+        target = _principal(
+            binding_by_operation[(edge["contract_id"], edge["operation_id"])]
+        )
+        caller = caller_principals[edge["caller_function_id"]]
+        ceilings[(caller.principal_id, target.principal_id)] = AuthorityCeilings(
             scope, scope, scope
-        ),
-        (conversation.principal_id, inspect.principal_id): AuthorityCeilings(
-            scope, scope, scope
-        ),
-    }
+        )
     effective = {
         item["identity"]: item["artifact_digest"]
         for item in restarted.resolved.lock["effective_set"]
@@ -165,10 +188,8 @@ def test_headless_activation_compiles_exact_plan_and_reads_after_restart(
         plan=restarted.resolved.plan,
         activation=restarted.activation,
         pack_roots={
-            "defaultspack": ROOT / "ecosystem" / "defaultspack",
-            "rumi_file_inspect_pack": (
-                ROOT / "ecosystem" / "rumi_file_inspect_pack"
-            ),
+            binding["pack_id"]: ROOT / "ecosystem" / binding["pack_id"]
+            for binding in bindings
         },
         supporting_artifacts=(shell,),
         verified_effective_artifacts=effective,

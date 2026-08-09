@@ -108,8 +108,13 @@ class BundledCatalog:
     @classmethod
     def load(cls, root: Path) -> "BundledCatalog":
         """Load only files named by ``bundle.lock.json`` and verify every byte."""
-        root = root.resolve(strict=True)
+        requested_root = Path(root)
+        if requested_root.is_symlink():
+            raise BundleIntegrityError("bundle root must not be a symlink")
+        root = requested_root.resolve(strict=True)
         lock_path = root / "bundle.lock.json"
+        if lock_path.is_symlink():
+            raise BundleIntegrityError("bundle lock must not be a symlink")
         try:
             lock = strict_loads(lock_path.read_bytes())
         except (OSError, ProtocolError) as exc:
@@ -150,6 +155,14 @@ class BundledCatalog:
             candidate = (root / relative).resolve(strict=True)
             if candidate == root or root not in candidate.parents:
                 raise BundleIntegrityError(f"bundle entry escapes root: {relative}")
+            relative_path = Path(relative)
+            current = root
+            for part in relative_path.parts:
+                current /= part
+                if current.is_symlink():
+                    raise BundleIntegrityError(
+                        f"bundle entry contains a symlink: {relative}"
+                    )
             raw = candidate.read_bytes()
             actual_digest = _sha256_bytes(raw)
             if actual_digest != expected_digest:
@@ -509,8 +522,14 @@ class ActivationStore:
         authority: ActivationAuthority,
         fault: Callable[[str], None] | None = None,
     ) -> None:
-        self.state_root = state_root.resolve()
-        self.workspace_root = workspace_root.resolve(strict=True)
+        requested_state_root = Path(state_root)
+        requested_workspace_root = Path(workspace_root)
+        if requested_state_root.is_symlink():
+            raise ProfileResolutionDenied("state_root must not be a symlink")
+        if requested_workspace_root.is_symlink():
+            raise ProfileResolutionDenied("workspace_root must not be a symlink")
+        self.state_root = requested_state_root.resolve()
+        self.workspace_root = requested_workspace_root.resolve(strict=True)
         self.profile_id = profile_id
         self._authority = authority
         self._fault = fault or (lambda _stage: None)
@@ -558,6 +577,10 @@ class ActivationStore:
         )
         envelope_path = self.state_root / "activations" / f"{activation_id[11:]}.json"
         pending_path = self.state_root / "pending.json"
+        self._reject_symlink(self.state_root / "activations", "activation directory")
+        self._reject_symlink(envelope_path, "activation envelope")
+        self._reject_symlink(pending_path, "pending activation journal")
+        self._reject_symlink(self.state_root / "active.json", "active pointer")
         state = "prepared"
         try:
             activation = self._activation_record(
@@ -690,6 +713,7 @@ class ActivationStore:
         """Recover a crash to the complete old or complete committed activation."""
 
         pending_path = self.state_root / "pending.json"
+        self._reject_symlink(pending_path, "pending activation journal")
         if not pending_path.exists():
             for reservation in self._authority.incomplete_activation_reservations(
                 self.profile_id
@@ -743,6 +767,8 @@ class ActivationStore:
         if Path(envelope_name).name != envelope_name:
             raise ProfileResolutionDenied("pending activation envelope path is invalid")
         envelope_path = self.state_root / "activations" / envelope_name
+        self._reject_symlink(self.state_root / "activations", "activation directory")
+        self._reject_symlink(envelope_path, "activation envelope")
         state = str(reservation["state"])
         if state == "active":
             try:
@@ -857,8 +883,10 @@ class ActivationStore:
     def load_active_snapshot(self) -> ActiveDefaultProfile:
         """Load the exact activation snapshot and reject stale restart state."""
         self.recover()
+        pointer_path = self.state_root / "active.json"
+        self._reject_symlink(pointer_path, "active pointer")
         try:
-            pointer = strict_loads((self.state_root / "active.json").read_bytes())
+            pointer = strict_loads(pointer_path.read_bytes())
         except (OSError, ProtocolError) as exc:
             raise ProfileResolutionDenied(f"active activation is unavailable: {exc}") from exc
         expected_pointer_keys = {
@@ -877,10 +905,12 @@ class ActivationStore:
         envelope_name = pointer["envelope_path"]
         if not isinstance(envelope_name, str) or Path(envelope_name).name != envelope_name:
             raise ProfileResolutionDenied("active envelope path is invalid")
+        activation_directory = self.state_root / "activations"
+        envelope_path = activation_directory / envelope_name
+        self._reject_symlink(activation_directory, "activation directory")
+        self._reject_symlink(envelope_path, "activation envelope")
         try:
-            envelope = strict_loads(
-                (self.state_root / "activations" / envelope_name).read_bytes()
-            )
+            envelope = strict_loads(envelope_path.read_bytes())
         except (OSError, ProtocolError) as exc:
             raise ProfileResolutionDenied(f"activation envelope is unavailable: {exc}") from exc
         if not isinstance(envelope, dict) or canonical_digest(envelope) != pointer["envelope_digest"]:
@@ -938,6 +968,13 @@ class ActivationStore:
             resolved=ResolvedDefaultProfile(profile=profile, lock=lock, plan=plan),
             activation=activation,
         )
+
+    @staticmethod
+    def _reject_symlink(path: Path, label: str) -> None:
+        """Reject direct symlink indirection at an authoritative state path."""
+
+        if path.is_symlink():
+            raise ProfileResolutionDenied(f"{label} must not be a symlink")
 
     def load_active(self) -> ResolvedDefaultProfile:
         """Load validated Profile/Lock/Plan records for compatibility callers."""

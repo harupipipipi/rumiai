@@ -210,6 +210,8 @@ def capture_default_profile(
     user_data = runtime_user_data_root(base_dir)
     state_root = user_data / "workspaces" / "defaults" / "activation"
     active_pointer = state_root / "active.json"
+    if state_root.is_symlink() or active_pointer.is_symlink():
+        raise ProfileResolutionDenied("Defaults activation state must not be symlinked")
     if active_pointer.is_file():
         if confirmation is not None:
             raise ProfileResolutionDenied("Defaults activation confirmation was replayed")

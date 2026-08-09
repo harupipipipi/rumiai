@@ -8,7 +8,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
-from ecosystem.defaultspack.domain.runtime_v4 import ActiveDefaultProfile, BundledCatalog
+from ecosystem.defaultspack.domain.runtime_v4 import (
+    ActivationStore,
+    ActiveDefaultProfile,
+    BundledCatalog,
+)
 from tobkiri_host.admission import AdmissionEstimate, QueueScope, ResourceReservation
 from tobkiri_host.backends import BackendRegistry
 from tobkiri_host.broker import AdmissionTicket, RequestAdmissionPort
@@ -338,6 +342,34 @@ def capture_production_dispatch(
 ) -> V4DispatchSession:
     """Capture ProductionRuntimeV4 and its RequestBroker from verified records."""
 
+    authority_path = authority_store.path.resolve()
+    if authority_path.name != "v4.sqlite3" or authority_path.parent.name != "authority":
+        raise AuthorityDenied("Authority store path is not canonical")
+    authority_user_data = authority_path.parent.parent
+    authority_workspace = authority_user_data / "workspaces" / "defaults"
+    try:
+        activation_store = ActivationStore(
+            authority_workspace / "activation",
+            authority_workspace,
+            profile_id="defaults",
+            authority=authority_store,
+        )
+        persisted_active = activation_store.load_active_snapshot()
+    except Exception as exc:
+        raise AuthorityDenied(
+            "Authority store is not bound to the captured Defaults activation"
+        ) from exc
+    if (
+        dict(persisted_active.activation) != dict(active.activation)
+        or dict(persisted_active.resolved.profile) != dict(active.resolved.profile)
+        or dict(persisted_active.resolved.lock) != dict(active.resolved.lock)
+        or dict(persisted_active.resolved.plan) != dict(active.resolved.plan)
+    ):
+        raise AuthorityDenied(
+            "Authority store is not bound to the captured Defaults activation"
+        )
+    active = persisted_active
+
     catalog = BundledCatalog.load(bundle_root)
     profile = active.resolved.profile
     lock = active.resolved.lock
@@ -584,9 +616,7 @@ def capture_production_dispatch(
     captured_plan = dict(active.resolved.plan)
 
     def assert_current_capture() -> None:
-        from .profile_capture import capture_default_profile
-
-        current = capture_default_profile()
+        current = activation_store.load_active_snapshot()
         if (
             dict(current.activation) != captured_activation
             or dict(current.resolved.profile) != captured_profile

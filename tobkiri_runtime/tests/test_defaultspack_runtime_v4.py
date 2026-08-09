@@ -180,6 +180,19 @@ def test_bundle_rejects_manifest_hash_drift_and_unlisted_artifacts(tmp_path: Pat
         )
 
 
+def test_bundle_rejects_symlinked_locked_artifact(tmp_path: Path) -> None:
+    copied = tmp_path / "v4"
+    shutil.copytree(BUNDLE_ROOT, copied)
+    manifest = copied / "packs" / "defaultspack.pack.v4.json"
+    redirected = copied / "redirected.pack.v4.json"
+    redirected.write_bytes(manifest.read_bytes())
+    manifest.unlink()
+    manifest.symlink_to(redirected)
+
+    with pytest.raises(BundleIntegrityError, match="contains a symlink"):
+        BundledCatalog.load(copied)
+
+
 def test_foundational_conversation_provider_is_exactly_one() -> None:
     catalog = _catalog()
     missing_manifest = copy.deepcopy(catalog.packs["defaultspack"])
@@ -319,6 +332,44 @@ def test_workspace_traversal_symlink_escape_and_cross_workspace_restart_deny(
     )
     with pytest.raises(ProfileResolutionDenied, match="another workspace"):
         other_store.load_active()
+
+
+def test_activation_state_and_pointer_symlinks_fail_closed(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    redirected_state = tmp_path / "redirected-state"
+    redirected_state.mkdir()
+    state_link = tmp_path / "state-link"
+    state_link.symlink_to(redirected_state, target_is_directory=True)
+    authority = _authority(tmp_path / "authority.sqlite3")
+
+    with pytest.raises(ProfileResolutionDenied, match="state_root.*symlink"):
+        ActivationStore(
+            state_link,
+            workspace,
+            profile_id="defaults",
+            authority=authority,
+        )
+
+    state = tmp_path / "state"
+    store = ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+    )
+    store.activate(
+        _resolve(),
+        activation_id="activation:defaults-symlink",
+        created_at="2026-08-05T00:00:00Z",
+    )
+    pointer = state / "active.json"
+    redirected_pointer = tmp_path / "redirected-active.json"
+    pointer.replace(redirected_pointer)
+    pointer.symlink_to(redirected_pointer)
+
+    with pytest.raises(ProfileResolutionDenied, match="active pointer.*symlink"):
+        store.load_active_snapshot()
 
 
 def test_activation_journal_recovers_only_authority_committed_candidate(

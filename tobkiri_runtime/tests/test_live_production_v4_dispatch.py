@@ -400,3 +400,31 @@ def test_pack_catalog_read_is_profile_bound_audited_and_restart_safe(
         )
     session.broker.close()
     restarted.broker.close()
+
+
+def test_dispatch_rejects_authority_store_from_another_state_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_data = tmp_path / "canonical-home"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
+    alternate_store = AuthorityStore(
+        tmp_path / "alternate-home" / "authority" / "v4.sqlite3"
+    )
+
+    try:
+        with pytest.raises(AuthorityDenied, match="not bound to the captured"):
+            capture_production_dispatch(
+                active,
+                bundle_root=(
+                    Path(__file__).resolve().parents[1]
+                    / "ecosystem"
+                    / "defaultspack"
+                    / "v4"
+                ),
+                ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
+                authority_store=alternate_store,
+            )
+    finally:
+        alternate_store.close()
