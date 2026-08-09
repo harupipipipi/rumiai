@@ -24,6 +24,9 @@ MAX_REQUEST_BYTES = 700 * 1024 * 1024
 MAX_FILES = 10_000
 MAX_FILE_BYTES = 128 * 1024 * 1024
 MAX_TOTAL_BYTES = 512 * 1024 * 1024
+MAX_ARTIFACT_STORAGE_BYTES = 768 * 1024 * 1024
+MIN_GUEST_FREE_RESERVE_BYTES = 512 * 1024 * 1024
+MAX_ARTIFACT_METADATA_BYTES = 16 * 1024 * 1024
 MAX_RESULT_BYTES = 16 * 1024 * 1024
 _DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
 _IDENTIFIER = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
@@ -310,6 +313,22 @@ def _materialize(request: dict[str, object]) -> dict[str, object]:
             "guest_artifact_identity": identity,
         }
 
+    stored_bytes = _artifact_storage_bytes()
+    projected_bytes = stored_bytes + total + MAX_ARTIFACT_METADATA_BYTES
+    if projected_bytes > MAX_ARTIFACT_STORAGE_BYTES:
+        raise ValueError(
+            "PackVM artifact storage quota exceeded: "
+            f"{projected_bytes} bytes projected, "
+            f"{MAX_ARTIFACT_STORAGE_BYTES} bytes allowed"
+        )
+    free_bytes = int(shutil.disk_usage(ARTIFACT_ROOT).free)
+    required_free = total + MAX_ARTIFACT_METADATA_BYTES + MIN_GUEST_FREE_RESERVE_BYTES
+    if free_bytes < required_free:
+        raise ValueError(
+            "PackVM guest free space is insufficient: "
+            f"{required_free} bytes required, {free_bytes} bytes available"
+        )
+
     temporary = parent / f".{materialization_hex}.{nonce}.tmp"
     if temporary.exists() or temporary.is_symlink():
         raise ValueError("artifact staging temporary path already exists")
@@ -411,6 +430,33 @@ def _make_tree_writable(root: Path) -> None:
             path = current_path / filename
             if not path.is_symlink():
                 os.chmod(path, 0o600)
+
+
+def _artifact_storage_bytes() -> int:
+    """Measure retained root-owned artifacts without following filesystem links."""
+
+    if not ARTIFACT_ROOT.exists():
+        return 0
+    root_metadata = ARTIFACT_ROOT.lstat()
+    if ARTIFACT_ROOT.is_symlink() or not stat.S_ISDIR(root_metadata.st_mode):
+        raise ValueError("PackVM artifact storage root is unsafe")
+    total = 0
+    for current, directories, files in os.walk(ARTIFACT_ROOT, followlinks=False):
+        current_path = Path(current)
+        for directory in directories:
+            path = current_path / directory
+            metadata = path.lstat()
+            if path.is_symlink() or not stat.S_ISDIR(metadata.st_mode):
+                raise ValueError("PackVM artifact storage contains an unsafe directory")
+        for filename in files:
+            path = current_path / filename
+            metadata = path.lstat()
+            if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+                raise ValueError("PackVM artifact storage contains an unsafe file")
+            total += metadata.st_size
+            if total > MAX_ARTIFACT_STORAGE_BYTES:
+                raise ValueError("PackVM artifact storage quota is already exceeded")
+    return total
 
 
 def _verify_staged_artifact(

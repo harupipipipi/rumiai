@@ -25,6 +25,7 @@ from core_runtime.hmac_key_manager import generate_or_load_signing_key
 
 
 LimaRunner = Callable[[Sequence[str], str | None, float | None], Any]
+DiskUsage = Callable[[Path], Any]
 
 
 DEFAULT_LIMA_INSTANCE = "rumi-managed-runtime"
@@ -42,6 +43,18 @@ PACKVM_ATTESTATION_VERSION = 2
 PACKVM_CONFIRMATION_PREFIX = "PROVISION"
 PACKVM_CLEANUP_PREFIX = "DELETE"
 MAX_PACKVM_ARTIFACT_REQUEST_BYTES = 700 * 1024 * 1024
+PACKVM_PINNED_IMAGE_VIRTUAL_SIZE_BYTES = 2_361_393_152
+PACKVM_ARTIFACT_STORAGE_BUDGET_BYTES = 768 * 1024 * 1024
+PACKVM_GUEST_FREE_RESERVE_BYTES = 512 * 1024 * 1024
+PACKVM_SYSTEM_GROWTH_BUDGET_BYTES = 512 * 1024 * 1024
+PACKVM_MIN_DISK_SIZE_BYTES = (
+    PACKVM_PINNED_IMAGE_VIRTUAL_SIZE_BYTES
+    + PACKVM_ARTIFACT_STORAGE_BUDGET_BYTES
+    + PACKVM_GUEST_FREE_RESERVE_BYTES
+    + PACKVM_SYSTEM_GROWTH_BUDGET_BYTES
+)
+PACKVM_DISK_SIZE_BYTES = 4 * 1024 * 1024 * 1024
+PACKVM_HOST_STORAGE_RESERVE_BYTES = 512 * 1024 * 1024
 _PACKVM_RESOURCE_ROOT = Path(__file__).with_name("resources")
 _PACKVM_CONFIG = _PACKVM_RESOURCE_ROOT / "packvm-lima.v1.yaml"
 _PACKVM_RUNNER = _PACKVM_RESOURCE_ROOT / "packvm_guest_runner.py"
@@ -51,12 +64,14 @@ _PACKVM_IMAGES = {
         "url": "https://cloud-images.ubuntu.com/jammy/20260807/jammy-server-cloudimg-arm64.img",
         "digest": "sha256:b17d9ac9b6249ab30f8c95630acdab3b7a51d76050229ab0ce6c013e303f5ccd",
         "size_bytes": 703_594_496,
+        "virtual_size_bytes": PACKVM_PINNED_IMAGE_VIRTUAL_SIZE_BYTES,
     },
     "amd64": {
         "lima_arch": "x86_64",
         "url": "https://cloud-images.ubuntu.com/jammy/20260807/jammy-server-cloudimg-amd64.img",
         "digest": "sha256:ff271290a23279ce764561dbe2e9c3ec29da899535b571a987c37b47970c2ad9",
         "size_bytes": 734_327_808,
+        "virtual_size_bytes": PACKVM_PINNED_IMAGE_VIRTUAL_SIZE_BYTES,
     },
 }
 
@@ -74,6 +89,12 @@ class PackVMProvisioningPlan:
     image_digest: str
     image_size_bytes: int
     image_download_required: bool
+    image_cache_status: str
+    image_cache_reason: str | None
+    disk_size_bytes: int
+    host_free_space_required_bytes: int
+    host_free_space_available_bytes: int
+    host_free_space_reason: str | None
     config_digest: str
     guest_runner_digest: str
     host_build_digest: str
@@ -487,12 +508,14 @@ class PackVMLimaProvisioner:
         state_dir: Path | None = None,
         machine: str | None = None,
         instance: str = PACKVM_LIMA_INSTANCE,
+        disk_usage: DiskUsage | None = None,
     ) -> None:
         self._command_path = command_path
         self._runner = runner
         self._state_dir = (state_dir or lima_state_path().parent).resolve()
         self._machine = _normalize_packvm_machine(machine or platform.machine())
         self._instance = instance
+        self._disk_usage = disk_usage or shutil.disk_usage
         self._pending: dict[str, str] = {}
 
     @property
@@ -508,6 +531,12 @@ class PackVMLimaProvisioner:
         image = _PACKVM_IMAGES[self._machine]
         limactl = self._resolve_command()
         config = self._rendered_config()
+        image_cache_status, image_cache_reason = self._pinned_image_cache_status()
+        image_download_required = not self._instance_exists(limactl) and (
+            image_cache_status == "absent"
+        )
+        required_space = self._required_host_space(image_download_required)
+        available_space, storage_reason = self._host_free_space(required_space)
         nonce = secrets.token_hex(16)
         facts = {
             "backend_id": PACKVM_BACKEND_ID,
@@ -517,7 +546,10 @@ class PackVMLimaProvisioner:
             "image_source": image["url"],
             "image_digest": image["digest"],
             "image_size_bytes": image["size_bytes"],
-            "image_download_required": not self._instance_exists(limactl),
+            "image_download_required": image_download_required,
+            "image_cache_status": image_cache_status,
+            "disk_size_bytes": PACKVM_DISK_SIZE_BYTES,
+            "host_free_space_required_bytes": required_space,
             "config_digest": _sha256(config),
             "guest_runner_digest": _file_digest(_PACKVM_RUNNER),
             "host_build_digest": _file_digest(Path(__file__)),
@@ -537,6 +569,12 @@ class PackVMLimaProvisioner:
             image_digest=str(image["digest"]),
             image_size_bytes=int(str(image["size_bytes"])),
             image_download_required=bool(facts["image_download_required"]),
+            image_cache_status=image_cache_status,
+            image_cache_reason=image_cache_reason,
+            disk_size_bytes=PACKVM_DISK_SIZE_BYTES,
+            host_free_space_required_bytes=required_space,
+            host_free_space_available_bytes=available_space,
+            host_free_space_reason=storage_reason,
             config_digest=str(facts["config_digest"]),
             guest_runner_digest=str(facts["guest_runner_digest"]),
             host_build_digest=str(facts["host_build_digest"]),
@@ -567,6 +605,12 @@ class PackVMLimaProvisioner:
             raise ValueError(
                 "unattested managed Lima instance already exists; explicit cleanup is required"
             )
+        current_cache_status, current_cache_reason = self._pinned_image_cache_status()
+        if current_cache_status != plan.image_cache_status:
+            raise ValueError("PackVM provisioning plan changed; review it again")
+        if current_cache_status == "unsafe":
+            raise ValueError(current_cache_reason or "PackVM image cache is unsafe")
+        self._require_host_capacity(plan.image_download_required)
 
         self._state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         created = False
@@ -754,6 +798,12 @@ class PackVMLimaProvisioner:
         image = _PACKVM_IMAGES[self._machine]
         limactl = self._resolve_command()
         config = self._rendered_config()
+        image_cache_status, image_cache_reason = self._pinned_image_cache_status()
+        image_download_required = not self._instance_exists(limactl) and (
+            image_cache_status == "absent"
+        )
+        required_space = self._required_host_space(image_download_required)
+        available_space, storage_reason = self._host_free_space(required_space)
         facts = {
             "backend_id": PACKVM_BACKEND_ID,
             "instance": self._instance,
@@ -762,7 +812,10 @@ class PackVMLimaProvisioner:
             "image_source": image["url"],
             "image_digest": image["digest"],
             "image_size_bytes": image["size_bytes"],
-            "image_download_required": not self._instance_exists(limactl),
+            "image_download_required": image_download_required,
+            "image_cache_status": image_cache_status,
+            "disk_size_bytes": PACKVM_DISK_SIZE_BYTES,
+            "host_free_space_required_bytes": required_space,
             "config_digest": _sha256(config),
             "guest_runner_digest": _file_digest(_PACKVM_RUNNER),
             "host_build_digest": _file_digest(Path(__file__)),
@@ -770,32 +823,161 @@ class PackVMLimaProvisioner:
         }
         digest = _canonical_digest(facts)
         return PackVMProvisioningPlan(
-            PACKVM_BACKEND_ID,
-            self._instance,
-            limactl,
-            self._launcher_reason(limactl),
-            self._machine,
-            str(image["url"]),
-            str(image["digest"]),
-            int(str(image["size_bytes"])),
-            bool(facts["image_download_required"]),
-            str(facts["config_digest"]),
-            str(facts["guest_runner_digest"]),
-            str(facts["host_build_digest"]),
-            nonce,
-            digest,
-            f"{PACKVM_CONFIRMATION_PREFIX} {self._instance} {digest[7:19]}",
+            backend_id=PACKVM_BACKEND_ID,
+            instance=self._instance,
+            limactl=limactl,
+            launcher_reason=self._launcher_reason(limactl),
+            architecture=self._machine,
+            image_source=str(image["url"]),
+            image_digest=str(image["digest"]),
+            image_size_bytes=int(str(image["size_bytes"])),
+            image_download_required=bool(facts["image_download_required"]),
+            image_cache_status=image_cache_status,
+            image_cache_reason=image_cache_reason,
+            disk_size_bytes=PACKVM_DISK_SIZE_BYTES,
+            host_free_space_required_bytes=required_space,
+            host_free_space_available_bytes=available_space,
+            host_free_space_reason=storage_reason,
+            config_digest=str(facts["config_digest"]),
+            guest_runner_digest=str(facts["guest_runner_digest"]),
+            host_build_digest=str(facts["host_build_digest"]),
+            ceremony_nonce=nonce,
+            plan_digest=digest,
+            confirmation=f"{PACKVM_CONFIRMATION_PREFIX} {self._instance} {digest[7:19]}",
         )
 
     def _rendered_config(self) -> bytes:
         image = _PACKVM_IMAGES[self._machine]
+        gibibyte = 1024**3
+        if (
+            PACKVM_DISK_SIZE_BYTES < PACKVM_MIN_DISK_SIZE_BYTES
+            or PACKVM_DISK_SIZE_BYTES % gibibyte != 0
+        ):
+            raise ValueError("PackVM disk policy is below the bounded runtime minimum")
         template = _PACKVM_CONFIG.read_text(encoding="utf-8")
         rendered = (
             template.replace("{{ARCH}}", str(image["lima_arch"]))
             .replace("{{IMAGE_URL}}", str(image["url"]))
             .replace("{{IMAGE_DIGEST}}", str(image["digest"]))
+            .replace("{{DISK_SIZE_GIB}}", str(PACKVM_DISK_SIZE_BYTES // gibibyte))
         )
         return rendered.encode()
+
+    def _required_host_space(self, image_download_required: bool) -> int:
+        """Return the fail-closed host capacity needed for sparse VM growth."""
+
+        image_bytes = int(str(_PACKVM_IMAGES[self._machine]["size_bytes"]))
+        return (
+            PACKVM_DISK_SIZE_BYTES
+            + PACKVM_HOST_STORAGE_RESERVE_BYTES
+            + PACKVM_PINNED_IMAGE_VIRTUAL_SIZE_BYTES
+            + (image_bytes if image_download_required else 0)
+        )
+
+    def _host_storage_path(self) -> Path:
+        """Return the volume on which Lima stores its managed instance."""
+
+        home = str(os.environ.get("HOME") or "").strip()
+        if not home:
+            raise ValueError("PackVM host storage preflight cannot resolve the user home")
+        path = Path(home).expanduser()
+        while not path.exists() and path != path.parent:
+            path = path.parent
+        if not path.exists():
+            raise ValueError("PackVM host storage preflight path is unavailable")
+        return path
+
+    def _pinned_image_cache_status(self) -> tuple[str, str | None]:
+        """Classify the exact Lima cache entry without trusting converted metadata."""
+
+        image = _PACKVM_IMAGES[self._machine]
+        source = str(image["url"])
+        expected_size = int(str(image["size_bytes"]))
+        expected_digest = str(image["digest"])
+        home = str(os.environ.get("HOME") or "").strip()
+        if not home:
+            return "absent", None
+        cache_root = Path(home).expanduser() / "Library" / "Caches" / "lima"
+        entry = (
+            cache_root / "download" / "by-url-sha256" / hashlib.sha256(source.encode()).hexdigest()
+        )
+        try:
+            entry_metadata = entry.lstat()
+        except FileNotFoundError:
+            return "absent", None
+        except OSError as exc:
+            return "unsafe", f"PackVM pinned image cache cannot be inspected: {exc}"
+        if entry.is_symlink() or not stat.S_ISDIR(entry_metadata.st_mode):
+            return "unsafe", "PackVM pinned image cache entry is not a regular directory"
+        try:
+            for directory in (
+                cache_root,
+                cache_root / "download",
+                cache_root / "download" / "by-url-sha256",
+                entry,
+            ):
+                metadata = directory.lstat()
+                if directory.is_symlink() or not stat.S_ISDIR(metadata.st_mode):
+                    return "unsafe", "PackVM pinned image cache path is unsafe"
+                if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
+                    return "unsafe", "PackVM pinned image cache owner changed"
+            url_path = entry / "url"
+            data_path = entry / "data"
+            for path, maximum in ((url_path, 4096), (data_path, expected_size)):
+                metadata = path.lstat()
+                if (
+                    path.is_symlink()
+                    or not stat.S_ISREG(metadata.st_mode)
+                    or metadata.st_size > maximum
+                    or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+                ):
+                    return "unsafe", "PackVM pinned image cache file is unsafe"
+            if data_path.stat().st_size != expected_size:
+                return "unsafe", "PackVM pinned image cache size does not match"
+            if url_path.read_text(encoding="utf-8") != source:
+                return "unsafe", "PackVM pinned image cache source does not match"
+            if not hmac.compare_digest(
+                _stable_regular_file_digest(data_path, expected_size), expected_digest
+            ):
+                return "unsafe", "PackVM pinned image cache digest does not match"
+            converted = entry / "imgconv" / "raw"
+            converted_digest = entry / "imgconv" / "raw.digest"
+            if (
+                converted.exists()
+                or converted.is_symlink()
+                or converted_digest.exists()
+                or converted_digest.is_symlink()
+            ):
+                return "unsafe", (
+                    "PackVM pinned image cache contains a Lima-converted raw image "
+                    "that is not independently bound to the pinned qcow2 digest"
+                )
+            return "verified_source", None
+        except (OSError, UnicodeError, ValueError) as exc:
+            return "unsafe", f"PackVM pinned image cache verification failed: {exc}"
+
+    def _host_free_space(self, required_space: int) -> tuple[int, str | None]:
+        """Measure host capacity and format a stable insufficiency diagnostic."""
+
+        try:
+            available = int(self._disk_usage(self._host_storage_path()).free)
+        except (AttributeError, OSError, TypeError, ValueError) as exc:
+            return 0, f"PackVM host storage preflight failed: {exc}"
+        if available < required_space:
+            return available, (
+                "PackVM provisioning requires at least "
+                f"{_format_gib(required_space)} free on the Lima host volume; "
+                f"only {_format_gib(available)} is available"
+            )
+        return available, None
+
+    def _require_host_capacity(self, image_download_required: bool) -> None:
+        """Fail before Lima mutation when bounded host capacity is unavailable."""
+
+        required = self._required_host_space(image_download_required)
+        _available, reason = self._host_free_space(required)
+        if reason is not None:
+            raise ValueError(reason)
 
     def _resolve_command(self) -> str | None:
         if self._command_path is None and platform.system() != "Darwin":
@@ -1051,6 +1233,10 @@ def _sha256(value: bytes) -> str:
     return f"sha256:{hashlib.sha256(value).hexdigest()}"
 
 
+def _format_gib(value: int) -> str:
+    return f"{value / (1024**3):.2f} GiB"
+
+
 def _file_digest(path: Path) -> str:
     metadata = path.lstat()
     if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
@@ -1060,6 +1246,42 @@ def _file_digest(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return f"sha256:{digest.hexdigest()}"
+
+
+def _stable_regular_file_digest(path: Path, expected_size: int) -> str:
+    """Hash one unlinked regular file descriptor and reject concurrent changes."""
+
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_size != expected_size
+            or (hasattr(os, "getuid") and before.st_uid != os.getuid())
+        ):
+            raise ValueError("PackVM pinned image cache file is unsafe")
+        digest = hashlib.sha256()
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        after = os.fstat(descriptor)
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ):
+            raise ValueError("PackVM pinned image cache changed during verification")
+        return f"sha256:{digest.hexdigest()}"
+    finally:
+        os.close(descriptor)
 
 
 def _canonical_json(value: object) -> bytes:

@@ -3,7 +3,9 @@ vmType: vz
 arch: {{ARCH}}
 cpus: 2
 memory: "4GiB"
-disk: "20GiB"
+# Sparse upper bound. Host provisioning reserves the full growth ceiling plus
+# the pinned image and 512 MiB before Lima mutates instance state.
+disk: "{{DISK_SIZE_GIB}}GiB"
 images:
 - location: {{IMAGE_URL}}
   arch: {{ARCH}}

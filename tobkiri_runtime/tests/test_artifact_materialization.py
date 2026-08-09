@@ -26,6 +26,15 @@ FIXTURE = RUNTIME_ROOT / "tests" / "fixtures" / "conformance_minimal_echo_pack"
 PACK_ID = "conformance.minimal.echo"
 
 
+@pytest.fixture(autouse=True)
+def _ample_guest_storage(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        packvm_guest_runner.shutil,
+        "disk_usage",
+        lambda _path: type("Usage", (), {"free": 8 * 1024**3})(),
+    )
+
+
 def _copied_binding(tmp_path: Path):
     root = tmp_path / PACK_ID
     shutil.copytree(FIXTURE, root)
@@ -167,6 +176,40 @@ def test_guest_stage_is_read_only_replay_safe_and_reverified(
     target.chmod(0o500)
     with pytest.raises(ValueError, match="inventory changed"):
         packvm_guest_runner._verify_invocation_artifact(invoke)
+
+
+def test_guest_materialization_rejects_storage_quota_overflow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, binding = _copied_binding(tmp_path)
+    captured = capture_materialized_artifact(root, binding)
+    guest_root = tmp_path / "guest-artifacts"
+    monkeypatch.setattr(packvm_guest_runner, "ARTIFACT_ROOT", guest_root)
+    monkeypatch.setattr(packvm_guest_runner.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(packvm_guest_runner, "MAX_ARTIFACT_STORAGE_BYTES", 1)
+
+    with pytest.raises(ValueError, match="storage quota exceeded"):
+        packvm_guest_runner._materialize(captured.request_payload(nonce="a" * 64))
+
+
+def test_guest_materialization_preserves_free_space_reserve(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, binding = _copied_binding(tmp_path)
+    captured = capture_materialized_artifact(root, binding)
+    guest_root = tmp_path / "guest-artifacts"
+    monkeypatch.setattr(packvm_guest_runner, "ARTIFACT_ROOT", guest_root)
+    monkeypatch.setattr(packvm_guest_runner.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        packvm_guest_runner.shutil,
+        "disk_usage",
+        lambda _path: type("Usage", (), {"free": 0})(),
+    )
+
+    with pytest.raises(ValueError, match="guest free space is insufficient"):
+        packvm_guest_runner._materialize(captured.request_payload(nonce="a" * 64))
 
 
 def test_guest_supervisor_materializes_and_invokes_the_exact_python_abi(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import subprocess
 import sys
 import time
@@ -12,10 +13,18 @@ import pytest
 import yaml
 
 from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
+    PACKVM_ARTIFACT_STORAGE_BUDGET_BYTES,
     PACKVM_BACKEND_ID,
+    PACKVM_DISK_SIZE_BYTES,
+    PACKVM_GUEST_FREE_RESERVE_BYTES,
+    PACKVM_HOST_STORAGE_RESERVE_BYTES,
     PACKVM_LIMA_INSTANCE,
+    PACKVM_PINNED_IMAGE_VIRTUAL_SIZE_BYTES,
     PackVMLimaProvisioner,
     PackVMProvisioningRequest,
+)
+from ecosystem.defaultspack.backend.sandbox.isolation.resources import (
+    packvm_guest_runner,
 )
 from core_runtime.packvm_lifecycle_v4 import PackVMLifecycleV4
 
@@ -135,6 +144,7 @@ def provisioner(tmp_path: Path):
         runner=fake,
         state_dir=tmp_path / "state",
         machine="arm64",
+        disk_usage=lambda _path: SimpleNamespace(free=64 * 1024**3),
     )
     return manager, fake, command
 
@@ -157,6 +167,17 @@ def test_fresh_provision_requires_download_approval_and_consumes_ceremony(
     assert plan.image_download_required is True
     assert plan.image_source.startswith("https://cloud-images.ubuntu.com/jammy/20260807/")
     assert plan.image_size_bytes > 600_000_000
+    assert plan.disk_size_bytes == 4 * 1024**3
+    assert plan.host_free_space_required_bytes == (
+        PACKVM_DISK_SIZE_BYTES
+        + PACKVM_HOST_STORAGE_RESERVE_BYTES
+        + PACKVM_PINNED_IMAGE_VIRTUAL_SIZE_BYTES
+        + plan.image_size_bytes
+    )
+    assert plan.host_free_space_available_bytes == 64 * 1024**3
+    assert plan.host_free_space_reason is None
+    assert plan.image_cache_status == "absent"
+    assert plan.image_cache_reason is None
     assert plan.architecture == "arm64"
     assert plan.config_digest.startswith("sha256:")
     assert plan.guest_runner_digest.startswith("sha256:")
@@ -175,12 +196,181 @@ def test_checked_in_policy_has_no_network_mount_or_guest_download(provisioner) -
 
     assert config["cpus"] == 2
     assert config["memory"] == "4GiB"
-    assert config["disk"] == "20GiB"
+    assert config["disk"] == "4GiB"
     assert config["mounts"] == []
     assert config["networks"] == []
     assert config["propagateProxyEnv"] is False
     assert config["images"][0]["digest"].startswith("sha256:")
     assert "provision" not in config
+    assert PACKVM_ARTIFACT_STORAGE_BUDGET_BYTES == packvm_guest_runner.MAX_ARTIFACT_STORAGE_BYTES
+    assert PACKVM_GUEST_FREE_RESERVE_BYTES == packvm_guest_runner.MIN_GUEST_FREE_RESERVE_BYTES
+
+
+def test_provision_fails_before_lima_mutation_when_host_space_is_insufficient(
+    tmp_path: Path,
+) -> None:
+    command = tmp_path / "limactl"
+    command.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    command.chmod(0o755)
+    instance_dir = tmp_path / PACKVM_LIMA_INSTANCE
+    instance_dir.mkdir()
+    fake = FakeLima(command, instance_dir)
+    available = 2 * 1024**3
+    manager = PackVMLimaProvisioner(
+        command_path=str(command),
+        runner=fake,
+        state_dir=tmp_path / "state",
+        machine="arm64",
+        disk_usage=lambda _path: SimpleNamespace(free=available),
+    )
+
+    plan = manager.prepare()
+    assert plan.host_free_space_available_bytes == available
+    assert "requires at least" in str(plan.host_free_space_reason)
+    assert "only 2.00 GiB" in str(plan.host_free_space_reason)
+    with pytest.raises(ValueError, match="only 2.00 GiB"):
+        manager.provision(_request(plan))
+    assert fake.exists is False
+    assert all(command[1] == "list" for command in fake.commands)
+
+
+def test_exact_lima_cache_hit_is_digest_verified_and_reduces_preflight(
+    provisioner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ecosystem.defaultspack.backend.sandbox.isolation import lima_runtime
+
+    manager, fake, _command = provisioner
+    content = b"pinned-test-image"
+    source = "https://example.invalid/pinned-packvm.img"
+    image = dict(lima_runtime._PACKVM_IMAGES["arm64"])
+    image.update(
+        {
+            "url": source,
+            "digest": "sha256:" + hashlib.sha256(content).hexdigest(),
+            "size_bytes": len(content),
+        }
+    )
+    monkeypatch.setitem(lima_runtime._PACKVM_IMAGES, "arm64", image)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    entry = (
+        tmp_path
+        / "Library"
+        / "Caches"
+        / "lima"
+        / "download"
+        / "by-url-sha256"
+        / hashlib.sha256(source.encode()).hexdigest()
+    )
+    entry.mkdir(parents=True)
+    (entry / "url").write_text(source, encoding="utf-8")
+    (entry / "data").write_bytes(content)
+
+    plan = manager.prepare()
+    assert plan.image_download_required is False
+    assert plan.image_cache_status == "verified_source"
+    assert plan.host_free_space_required_bytes == (
+        PACKVM_DISK_SIZE_BYTES
+        + PACKVM_HOST_STORAGE_RESERVE_BYTES
+        + PACKVM_PINNED_IMAGE_VIRTUAL_SIZE_BYTES
+    )
+    (entry / "data").write_bytes(b"tampered-test-image")
+    with pytest.raises(ValueError, match="plan changed"):
+        manager.provision(_request(plan, approve=False))
+    assert fake.exists is False
+
+
+def test_lima_cache_source_match_without_digest_match_fails_closed(
+    provisioner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ecosystem.defaultspack.backend.sandbox.isolation import lima_runtime
+
+    manager, _fake, _command = provisioner
+    content = b"expected"
+    source = "https://example.invalid/pinned-packvm.img"
+    image = dict(lima_runtime._PACKVM_IMAGES["arm64"])
+    image.update(
+        {
+            "url": source,
+            "digest": "sha256:" + hashlib.sha256(content).hexdigest(),
+            "size_bytes": len(content),
+        }
+    )
+    monkeypatch.setitem(lima_runtime._PACKVM_IMAGES, "arm64", image)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    entry = (
+        tmp_path
+        / "Library"
+        / "Caches"
+        / "lima"
+        / "download"
+        / "by-url-sha256"
+        / hashlib.sha256(source.encode()).hexdigest()
+    )
+    entry.mkdir(parents=True)
+    (entry / "url").write_text(source, encoding="utf-8")
+    (entry / "data").write_bytes(b"tampered")
+
+    plan = manager.prepare()
+    assert plan.image_download_required is False
+    assert plan.image_cache_status == "unsafe"
+    assert "digest does not match" in str(plan.image_cache_reason)
+    assert plan.host_free_space_required_bytes == (
+        PACKVM_DISK_SIZE_BYTES
+        + PACKVM_HOST_STORAGE_RESERVE_BYTES
+        + PACKVM_PINNED_IMAGE_VIRTUAL_SIZE_BYTES
+    )
+    with pytest.raises(ValueError, match="digest does not match"):
+        manager.provision(_request(plan, approve=False))
+
+
+def test_lima_converted_raw_cache_is_not_trusted_as_pinned_source(
+    provisioner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ecosystem.defaultspack.backend.sandbox.isolation import lima_runtime
+
+    manager, fake, _command = provisioner
+    content = b"expected"
+    source = "https://example.invalid/pinned-packvm.img"
+    image = dict(lima_runtime._PACKVM_IMAGES["arm64"])
+    image.update(
+        {
+            "url": source,
+            "digest": "sha256:" + hashlib.sha256(content).hexdigest(),
+            "size_bytes": len(content),
+        }
+    )
+    monkeypatch.setitem(lima_runtime._PACKVM_IMAGES, "arm64", image)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    entry = (
+        tmp_path
+        / "Library"
+        / "Caches"
+        / "lima"
+        / "download"
+        / "by-url-sha256"
+        / hashlib.sha256(source.encode()).hexdigest()
+    )
+    (entry / "imgconv").mkdir(parents=True)
+    (entry / "url").write_text(source, encoding="utf-8")
+    (entry / "data").write_bytes(content)
+    (entry / "imgconv" / "raw").write_bytes(content)
+    (entry / "imgconv" / "raw.digest").write_text(
+        "sha256:" + hashlib.sha256(content).hexdigest(),
+        encoding="utf-8",
+    )
+
+    plan = manager.prepare()
+    assert plan.image_cache_status == "unsafe"
+    assert "not independently bound" in str(plan.image_cache_reason)
+    with pytest.raises(ValueError, match="not independently bound"):
+        manager.provision(_request(plan, approve=False))
+    assert fake.exists is False
 
 
 def test_provision_doctor_stop_and_cleanup_are_authenticated(provisioner) -> None:
