@@ -499,6 +499,7 @@ def test_profile_ceremony_is_ordered_digest_bound_and_one_shot(
         session_id="session-a",
     )
     Draft202012Validator(_control_output_schema()).validate(approved)
+    assert approved["approval_id"] == approved["authority_approval"]["approval_id"]
     with AuthorityStore(runtime_user_data_root() / "authority" / "v4.sqlite3") as authority:
         authority_approval = authority.get_approval(approved["authority_approval"]["approval_id"])
     assert authority_approval is not None
@@ -524,6 +525,107 @@ def test_profile_ceremony_is_ordered_digest_bound_and_one_shot(
             session_id="session-a",
         )
     assert replay.value.code is RuntimeSurfaceErrorCode.UNAPPROVED
+
+
+def test_profile_activation_rejects_wrong_credentials_without_consuming_approval(
+    active_runtime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "core_runtime.pack_control_v4.resolve_profile_pack_set",
+        lambda _pack_ids: active_runtime.resolved,
+    )
+    monkeypatch.setattr(
+        "core_runtime.pack_control_v4.activate_resolved_profile_pack_set",
+        lambda _resolved, **_bindings: active_runtime.activation,
+    )
+    ceremony = RuntimeProfileChangeService(surface_service=_service(active_runtime))
+    resolved = ceremony.resolve(
+        {
+            "profile_id": "defaults",
+            "expected_profile_revision": active_runtime.resolved.plan["profile_revision"],
+            "expected_plan_digest": active_runtime.resolved.plan["plan_digest"],
+            "desired_pack_ids": ["defaultspack"],
+        },
+        session_id="session-a",
+    )
+    reviewed = ceremony.review(
+        {
+            "candidate_id": resolved["candidate_id"],
+            "candidate_digest": resolved["candidate_digest"],
+        },
+        session_id="session-a",
+    )
+    approved = ceremony.approve(
+        {
+            "candidate_id": reviewed["candidate_id"],
+            "candidate_digest": reviewed["candidate_digest"],
+        },
+        session_id="session-a",
+    )
+    request = {
+        "approval_id": approved["approval_id"],
+        "approval_digest": approved["approval_digest"],
+    }
+
+    invalid_requests = (
+        ({**request, "approval_id": "approval.profile-change.wrong"}, "session-a"),
+        ({**request, "approval_digest": "sha256:" + "0" * 64}, "session-a"),
+        (request, "session-b"),
+    )
+    for invalid_request, session_id in invalid_requests:
+        with pytest.raises(RuntimeSurfaceError) as rejected:
+            ceremony.activate(invalid_request, session_id=session_id)
+        assert rejected.value.code is RuntimeSurfaceErrorCode.UNAPPROVED
+
+    assert ceremony.activate(request, session_id="session-a")["state"] == "active"
+
+
+def test_profile_activation_reauthenticates_immutable_authority_record(
+    active_runtime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "core_runtime.pack_control_v4.resolve_profile_pack_set",
+        lambda _pack_ids: active_runtime.resolved,
+    )
+    ceremony = RuntimeProfileChangeService(surface_service=_service(active_runtime))
+    resolved = ceremony.resolve(
+        {
+            "profile_id": "defaults",
+            "expected_profile_revision": active_runtime.resolved.plan["profile_revision"],
+            "expected_plan_digest": active_runtime.resolved.plan["plan_digest"],
+            "desired_pack_ids": ["defaultspack"],
+        },
+        session_id="session-a",
+    )
+    reviewed = ceremony.review(
+        {
+            "candidate_id": resolved["candidate_id"],
+            "candidate_digest": resolved["candidate_digest"],
+        },
+        session_id="session-a",
+    )
+    approved = ceremony.approve(
+        {
+            "candidate_id": reviewed["candidate_id"],
+            "candidate_digest": reviewed["candidate_digest"],
+        },
+        session_id="session-a",
+    )
+    approval_id = str(approved["approval_id"])
+    with AuthorityStore(runtime_user_data_root() / "authority" / "v4.sqlite3") as authority:
+        record = authority.get_approval(approval_id)
+        assert record is not None
+        authority.put_record(replace(record, decision="denied"), replace=True)
+
+    with pytest.raises(RuntimeSurfaceError) as rejected:
+        ceremony.activate(
+            {
+                "approval_id": approval_id,
+                "approval_digest": approved["approval_digest"],
+            },
+            session_id="session-a",
+        )
+    assert rejected.value.code is RuntimeSurfaceErrorCode.UNAPPROVED
 
 
 def test_profile_ceremony_rejects_cross_session_and_expired_review(

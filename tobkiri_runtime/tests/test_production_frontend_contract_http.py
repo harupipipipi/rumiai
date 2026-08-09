@@ -487,7 +487,20 @@ def test_profile_ceremony_uses_four_canonical_broker_operations(
     )
     assert status == 200, approved
     receipt = approved["data"]["authority_approval"]
+    assert approved["data"]["approval_id"] == receipt["approval_id"]
     assert authority.get_approval(receipt["approval_id"]) is not None
+    approval_audit = next(
+        event
+        for event in reversed(authority.audit_events())
+        if event["event_type"] == "authority_records_committed"
+    )
+    assert approval_audit["payload"]["records"] == [
+        {
+            "record_type": "approval",
+            "record_id": approved["data"]["approval_id"],
+            "record_digest": approved["data"]["approval_digest"],
+        }
+    ]
     status, activated, _ = post(
         "/api/runtime-surface/profile-change/activate",
         {

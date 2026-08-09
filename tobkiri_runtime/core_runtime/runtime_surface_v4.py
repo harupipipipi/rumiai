@@ -246,7 +246,7 @@ class RuntimeProfileChangeService:
                 candidate,
                 session_id=session_id,
             )
-            approval_id = secrets.token_urlsafe(32)
+            approval_id = str(authority_record.approval_id)
             approval_digest = str(authority_record.digest)
             approval = _ProfileApproval(
                 approval_id=approval_id,
