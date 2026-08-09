@@ -56,6 +56,8 @@ PACKVM_MIN_DISK_SIZE_BYTES = (
 )
 PACKVM_DISK_SIZE_BYTES = 4 * 1024 * 1024 * 1024
 PACKVM_HOST_STORAGE_RESERVE_BYTES = 512 * 1024 * 1024
+LIMA_PROCESS_PATH = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
+LIMA_PROCESS_ENVIRONMENT_KEYS = frozenset({"PATH", "HOME", "LIMA_HOME"})
 _PACKVM_RESOURCE_ROOT = Path(__file__).with_name("resources")
 _PACKVM_CONFIG = _PACKVM_RESOURCE_ROOT / "packvm-lima.v1.yaml"
 _PACKVM_RUNNER = _PACKVM_RESOURCE_ROOT / "packvm_guest_runner.py"
@@ -227,6 +229,88 @@ def resolve_limactl_path() -> str | None:
     return None
 
 
+def _lima_process_environment() -> dict[str, str]:
+    """Build the minimal validated environment permitted for a Lima process."""
+
+    environment = {"PATH": LIMA_PROCESS_PATH}
+    for key in ("HOME", "LIMA_HOME"):
+        if key in os.environ:
+            environment[key] = _validate_lima_directory(os.environ[key], key)
+    return environment
+
+
+def _validate_lima_directory(value: str, variable: str) -> str:
+    """Validate one host directory supplied to Lima through its environment.
+
+    Lima may create a missing leaf directory, so the nearest existing parent is
+    accepted when it is a user-owned, non-writable-safe directory.  Every
+    existing component is inspected with ``lstat`` and paths that resolve
+    differently are rejected to keep symlink and traversal escapes fail-closed.
+    """
+
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or "\x00" in value
+    ):
+        raise ValueError(f"{variable} must be a non-empty absolute directory path")
+    path = Path(value)
+    if not path.is_absolute():
+        raise ValueError(f"{variable} must be an absolute directory path")
+    if any(part in {".", ".."} for part in value.split("/")):
+        raise ValueError(f"{variable} path traversal is not allowed")
+    try:
+        resolved = path.resolve(strict=False)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError(f"{variable} path is unsafe") from exc
+    if resolved != path:
+        raise ValueError(f"{variable} path must not contain symlinks or traversal")
+
+    current = Path(path.anchor)
+    components = path.parts[1:]
+    for component in components:
+        current /= component
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError:
+            break
+        except OSError as exc:
+            raise ValueError(f"{variable} path cannot be inspected") from exc
+        is_target = current == path
+        if current.is_symlink() or not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError(f"{variable} path must contain only regular directories")
+        _validate_lima_directory_metadata(metadata, variable, is_target=is_target)
+    else:
+        try:
+            metadata = current.lstat()
+        except OSError as exc:
+            raise ValueError(f"{variable} path cannot be inspected") from exc
+        _validate_lima_directory_metadata(metadata, variable, is_target=True)
+    return value
+
+
+def _validate_lima_directory_metadata(
+    metadata: os.stat_result,
+    variable: str,
+    *,
+    is_target: bool,
+) -> None:
+    """Reject ownership and permission states unsafe for a Lima directory."""
+
+    if metadata.st_mode & 0o022:
+        is_sticky_parent = not is_target and bool(metadata.st_mode & stat.S_ISVTX)
+        if not is_sticky_parent:
+            raise ValueError(f"{variable} path has unsafe permissions")
+    if hasattr(os, "getuid"):
+        user_id = os.getuid()
+        if is_target:
+            if metadata.st_uid != user_id:
+                raise ValueError(f"{variable} path must be owned by the current user")
+        elif metadata.st_uid not in {0, user_id}:
+            raise ValueError(f"{variable} path has an unsafe owner")
+
+
 def lima_instance_payload(
     limactl: str,
     instance: str,
@@ -241,16 +325,7 @@ def lima_instance_payload(
             raise ValueError("limactl is unavailable")
         argv = (executable, "list", instance, "--format", "json")
         cwd = Path.cwd().resolve()
-        environment = {
-            str(key): str(value)
-            for key, value in os.environ.items()
-            if isinstance(key, str)
-            and isinstance(value, str)
-            and key
-            and "=" not in key
-            and "\x00" not in key
-            and "\x00" not in value
-        }
+        environment = _lima_process_environment()
         result = HostBoundedProcessRunner().run_local(
             argv=argv,
             cwd=cwd,
@@ -261,7 +336,7 @@ def lima_instance_payload(
                 allowed_executables=frozenset({argv[0]}),
                 allowed_argv=(argv,),
                 allowed_cwds=(cwd,),
-                allowed_environment=frozenset(environment),
+                allowed_environment=LIMA_PROCESS_ENVIRONMENT_KEYS,
                 max_stdin_bytes=1,
                 max_stdout_bytes=MAX_LIMA_STATE_BYTES,
                 max_stderr_bytes=MAX_LIMA_STATE_BYTES,
@@ -1154,9 +1229,7 @@ class PackVMLimaProvisioner:
     ) -> Any:
         if self._runner is not None:
             return self._runner(command, input_text, timeout)
-        environment = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"}
-        if "HOME" in os.environ:
-            environment["HOME"] = os.environ["HOME"]
+        environment = _lima_process_environment()
         argv = tuple(str(item) for item in command)
         cwd = Path.cwd().resolve()
         bounded_timeout = min(max(float(timeout), 1.0), 900.0)
@@ -1170,7 +1243,7 @@ class PackVMLimaProvisioner:
                 allowed_executables=frozenset({argv[0]}),
                 allowed_argv=(argv,),
                 allowed_cwds=(cwd,),
-                allowed_environment=frozenset(environment),
+                allowed_environment=LIMA_PROCESS_ENVIRONMENT_KEYS,
                 max_stdin_bytes=max_stdin_bytes,
                 max_stdout_bytes=MAX_LIMA_STATE_BYTES,
                 max_stderr_bytes=MAX_LIMA_STATE_BYTES,

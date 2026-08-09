@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
+import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -132,7 +135,13 @@ class FakeLima:
 
 
 @pytest.fixture
-def provisioner(tmp_path: Path):
+def provisioner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    test_home = tmp_path / "home"
+    test_lima_home = tmp_path / "lima-home"
+    test_home.mkdir()
+    test_lima_home.mkdir()
+    monkeypatch.setenv("HOME", str(test_home))
+    monkeypatch.setenv("LIMA_HOME", str(test_lima_home))
     command = tmp_path / "limactl"
     command.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     command.chmod(0o755)
@@ -156,6 +165,162 @@ def _request(plan, *, approve: bool = True) -> PackVMProvisioningRequest:
         confirmation=plan.confirmation,
         approve_image_download=approve,
     )
+
+
+def _write_environment_probe(path: Path) -> None:
+    path.write_text(
+        "#!/bin/sh\n"
+        "printf 'HOME=%s\\n' \"${HOME-}\"\n"
+        "printf 'LIMA_HOME=%s\\n' \"${LIMA_HOME-}\"\n"
+        "printf 'PATH=%s\\n' \"${PATH-}\"\n"
+        "printf 'UNTRUSTED=%s\\n' \"${PACKVM_UNTRUSTED-}\"\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o700)
+
+
+def test_call_passes_only_validated_lima_environment_to_real_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    lima_home = tmp_path / "lima-home"
+    home.mkdir()
+    lima_home.mkdir()
+    probe = tmp_path / "environment-probe"
+    _write_environment_probe(probe)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("LIMA_HOME", str(lima_home))
+    monkeypatch.setenv("PACKVM_UNTRUSTED", "must-not-cross-process-boundary")
+
+    manager = PackVMLimaProvisioner(
+        command_path=str(probe),
+        state_dir=tmp_path / "state",
+        machine="arm64",
+    )
+    result = manager._call((str(probe),), timeout=10)
+
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == [
+        f"HOME={home}",
+        f"LIMA_HOME={lima_home}",
+        "PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin",
+        "UNTRUSTED=",
+    ]
+
+
+@pytest.mark.parametrize("variable", ["HOME", "LIMA_HOME"])
+@pytest.mark.parametrize(
+    "invalid_kind",
+    ["empty", "relative", "parent", "symlink", "file", "unsafe_permissions"],
+)
+def test_lima_environment_rejects_unsafe_directory_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    variable: str,
+    invalid_kind: str,
+) -> None:
+    safe_home = tmp_path / "safe-home"
+    safe_lima_home = tmp_path / "safe-lima-home"
+    safe_home.mkdir()
+    safe_lima_home.mkdir()
+    invalid_root = tmp_path / "invalid"
+    invalid_root.mkdir()
+    if invalid_kind == "empty":
+        invalid = ""
+    elif invalid_kind == "relative":
+        invalid = "relative-lima-home"
+    elif invalid_kind == "parent":
+        parent_target = tmp_path / "parent-target"
+        parent_target.mkdir()
+        invalid = str(tmp_path / "invalid" / ".." / "parent-target")
+    elif invalid_kind == "symlink":
+        target = invalid_root / "target"
+        target.mkdir()
+        link = invalid_root / "link"
+        link.symlink_to(target)
+        invalid = str(link)
+    elif invalid_kind == "file":
+        file_path = invalid_root / "not-a-directory"
+        file_path.write_text("not a directory", encoding="utf-8")
+        invalid = str(file_path)
+    else:
+        unsafe = invalid_root / "world-writable"
+        unsafe.mkdir()
+        os.chmod(unsafe, 0o777)
+        invalid = str(unsafe)
+
+    monkeypatch.setenv("HOME", str(safe_home))
+    monkeypatch.setenv("LIMA_HOME", str(safe_lima_home))
+    monkeypatch.setenv(variable, invalid)
+    probe = tmp_path / "environment-probe"
+    _write_environment_probe(probe)
+    manager = PackVMLimaProvisioner(
+        command_path=str(probe),
+        state_dir=tmp_path / "state",
+        machine="arm64",
+    )
+
+    with pytest.raises(ValueError, match=variable):
+        manager._call((str(probe),), timeout=10)
+
+
+def test_lifecycle_rejects_environment_injection_payload(provisioner) -> None:
+    manager, _fake, _command = provisioner
+    lifecycle = PackVMLifecycleV4(manager)
+    plan = lifecycle.prepare()
+    consent_payload = {
+        "plan_digest": plan["plan_digest"],
+        "ceremony_nonce": plan["ceremony_nonce"],
+        "confirmation": plan["confirmation"],
+        "approve_image_download": True,
+        "env": {"LIMA_HOME": "/tmp/attacker-controlled-lima-home"},
+    }
+
+    with pytest.raises(ValueError, match="typed contract"):
+        lifecycle.consent(consent_payload)
+
+    consent_payload.pop("env")
+    consent = lifecycle.consent(consent_payload)
+    with pytest.raises(ValueError, match="typed contract"):
+        lifecycle.provision(
+            {
+                "consent_id": consent["consent_id"],
+                "operation_id": str(uuid.uuid4()),
+                "env": {"LIMA_HOME": "/tmp/attacker-controlled-lima-home"},
+            }
+        )
+
+
+@pytest.mark.skipif(
+    platform.system() != "Darwin" or shutil.which("limactl") is None,
+    reason="requires the installed macOS limactl for a non-mutating isolation check",
+)
+def test_real_limactl_list_isolated_from_user_lima_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    isolated_home = tmp_path / "isolated-home"
+    isolated_lima_home = tmp_path / "isolated-lima-home"
+    isolated_home.mkdir()
+    isolated_lima_home.mkdir()
+    monkeypatch.setenv("HOME", str(isolated_home))
+    monkeypatch.setenv("LIMA_HOME", str(isolated_lima_home))
+    monkeypatch.delenv("PACKVM_UNTRUSTED", raising=False)
+
+    command = shutil.which("limactl")
+    assert command is not None
+    manager = PackVMLimaProvisioner(
+        command_path=command,
+        state_dir=tmp_path / "state",
+        machine="arm64",
+    )
+    result = manager._call(
+        (manager._require_command(), "list", "--format", "{{.Name}}"),
+        timeout=10,
+    )
+
+    assert result.returncode == 0
+    assert PACKVM_LIMA_INSTANCE not in result.stdout
+    assert not (isolated_lima_home / PACKVM_LIMA_INSTANCE).exists()
 
 
 def test_fresh_provision_requires_download_approval_and_consumes_ceremony(
