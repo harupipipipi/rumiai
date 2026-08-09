@@ -1,0 +1,112 @@
+import {useEffect, useState} from 'react';
+import {BrainCircuit, ShieldAlert} from 'lucide-react';
+
+import {AdvancedSurfaceFrame, EmptySurfacePanel} from '@/src/components/advanced/AdvancedSurfaceFrame';
+import {OperationInputForm} from '@/src/components/advanced/OperationInputForm';
+import {RuntimeEvidenceCard} from '@/src/components/advanced/RuntimeEvidenceCard';
+import {Badge} from '@/src/components/ui/Badge';
+import {Card, CardContent, CardDescription, CardHeader, CardTitle} from '@/src/components/ui/Card';
+import {useRuntimeSurface} from '@/src/hooks/useRuntimeSurface';
+import {LAUNCHER_ADVANCED_VIEWS} from '@/src/lib/advancedSurfaces';
+import {
+  classifyRuntimeSurfaceError,
+  extractExactOperationDescriptors,
+  invokeRuntimeOperation,
+  runtimeSurfaceErrorMessage,
+  type RuntimeSurfaceErrorCode,
+} from '@/src/lib/runtimeSurface';
+
+export function AiInput() {
+  const surface = useRuntimeSurface<unknown>('operations');
+  const descriptor = LAUNCHER_ADVANCED_VIEWS.aiInput;
+  const operations = surface.data ? extractExactOperationDescriptors(surface.data.data) : [];
+  const invokableOperations = operations.filter((operation) => operation.invokable);
+  const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null);
+  const [invocationState, setInvocationState] = useState<'idle' | 'running' | 'succeeded' | 'failed'>('idle');
+  const [invocationError, setInvocationError] = useState<{code: RuntimeSurfaceErrorCode; message: string} | null>(null);
+
+  useEffect(() => {
+    if (!selectedOperationId || !invokableOperations.some((operation) => operation.operation_id === selectedOperationId)) {
+      setSelectedOperationId(invokableOperations[0]?.operation_id ?? null);
+    }
+  }, [selectedOperationId, invokableOperations.map((operation) => operation.operation_id).join('\u0000')]);
+
+  const selectedOperation = invokableOperations.find((operation) => operation.operation_id === selectedOperationId) ?? null;
+
+  const handleInvoke = async (payload: Record<string, unknown>) => {
+    if (!surface.data || !selectedOperation) return;
+    setInvocationState('running');
+    setInvocationError(null);
+    try {
+      await invokeRuntimeOperation({envelope: surface.data, operation: selectedOperation, payload});
+      setInvocationState('succeeded');
+    } catch (error) {
+      const code = classifyRuntimeSurfaceError(error);
+      setInvocationState('failed');
+      setInvocationError({code, message: runtimeSurfaceErrorMessage(code)});
+    }
+  };
+
+  return (
+    <AdvancedSurfaceFrame
+      descriptor={descriptor}
+      state={{status: surface.status, stale: surface.stale, error: surface.error}}
+      onRetry={() => void surface.refresh()}
+    >
+      {surface.data ? <RuntimeEvidenceCard envelope={surface.data} title="Operation catalog provenance" /> : null}
+      {surface.status === 'ready' && invokableOperations.length > 0 && selectedOperation ? (
+        <div className="grid gap-5 lg:grid-cols-[minmax(15rem,0.8fr)_minmax(0,1.2fr)]">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><BrainCircuit className="h-4 w-4" aria-hidden="true" />Invokable operations</CardTitle>
+              <CardDescription>Only operations marked invokable in the accepted snapshot can be selected.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-2">
+              {invokableOperations.map((operation) => (
+                <button
+                  key={operation.operation_id}
+                  type="button"
+                  className="flex min-h-11 flex-col items-start gap-1 rounded-lg border border-border px-3 py-2 text-left transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
+                  aria-pressed={operation.operation_id === selectedOperation.operation_id}
+                  onClick={() => {
+                    setSelectedOperationId(operation.operation_id);
+                    setInvocationState('idle');
+                    setInvocationError(null);
+                  }}
+                >
+                  <span className="text-sm font-medium text-text-main">{operation.label || operation.operation_id}</span>
+                  <span className="break-all font-mono text-[11px] text-text-muted">{operation.contract_id}</span>
+                </button>
+              ))}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle>{selectedOperation.label || selectedOperation.operation_id}</CardTitle>
+                <Badge variant="success">invokable</Badge>
+              </div>
+              <CardDescription>Input controls are generated from the declared operation schema. Invocation remains bound to the accepted Profile / Plan / catalog digests.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {invocationError ? (
+                <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-300/70 bg-amber-50/70 px-4 py-3 text-sm dark:border-amber-800/60 dark:bg-amber-950/20" role="alert">
+                  <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
+                  <span>{invocationError.code}: {invocationError.message}</span>
+                </div>
+              ) : null}
+              {invocationState === 'succeeded' ? <p className="mb-4 text-sm text-emerald-700 dark:text-emerald-300" role="status">Operation accepted by the canonical Broker path.</p> : null}
+              <OperationInputForm operation={selectedOperation} busy={invocationState === 'running'} onInvoke={handleInvoke} />
+            </CardContent>
+          </Card>
+        </div>
+      ) : (
+        <EmptySurfacePanel
+          icon={<BrainCircuit className="h-6 w-6" />}
+          title="No invokable operation schema is available"
+          message="AI Input does not infer prompts from Pack labels. A Pack must publish exact operation metadata, an input schema, a valid catalog digest, and an invokable binding before this form becomes active."
+        />
+      )}
+    </AdvancedSurfaceFrame>
+  );
+}

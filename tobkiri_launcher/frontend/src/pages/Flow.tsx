@@ -1,0 +1,146 @@
+import {useEffect, useMemo, useState} from 'react';
+import {ListTree, PlayCircle, ShieldAlert} from 'lucide-react';
+
+import {AdvancedSurfaceFrame, EmptySurfacePanel} from '@/src/components/advanced/AdvancedSurfaceFrame';
+import {OperationInputForm} from '@/src/components/advanced/OperationInputForm';
+import {RuntimeEvidenceCard} from '@/src/components/advanced/RuntimeEvidenceCard';
+import {Badge} from '@/src/components/ui/Badge';
+import {Card, CardContent, CardHeader, CardTitle} from '@/src/components/ui/Card';
+import {useRuntimeSurface} from '@/src/hooks/useRuntimeSurface';
+import {LAUNCHER_ADVANCED_VIEWS} from '@/src/lib/advancedSurfaces';
+import {
+  classifyRuntimeSurfaceError,
+  extractExactFlowDescriptors,
+  extractExactOperationDescriptors,
+  invokeRuntimeOperation,
+  runtimeSurfaceErrorMessage,
+  type RuntimeSurfaceErrorCode,
+} from '@/src/lib/runtimeSurface';
+
+export function Flow() {
+  const surface = useRuntimeSurface<unknown>('operations');
+  const descriptor = LAUNCHER_ADVANCED_VIEWS.flow;
+  const flows = surface.data ? extractExactFlowDescriptors(surface.data.data) : null;
+  const operations = surface.data ? extractExactOperationDescriptors(surface.data.data) : [];
+  const operationIds = new Set(operations.map((operation) => operation.operation_id));
+  const declaredOperationIds = useMemo(
+    () => new Set((flows ?? []).flatMap((flow) => flow.operation_ids)),
+    [flows],
+  );
+  const invokableOperations = operations.filter((operation) => (
+    operation.invokable && (flows === null || flows.length === 0 || declaredOperationIds.has(operation.operation_id))
+  ));
+  const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null);
+  const [invocationState, setInvocationState] = useState<'idle' | 'running' | 'succeeded' | 'failed'>('idle');
+  const [invocationError, setInvocationError] = useState<{code: RuntimeSurfaceErrorCode; message: string} | null>(null);
+
+  useEffect(() => {
+    if (!selectedOperationId || !invokableOperations.some((operation) => operation.operation_id === selectedOperationId)) {
+      setSelectedOperationId(invokableOperations[0]?.operation_id ?? null);
+    }
+  }, [selectedOperationId, invokableOperations.map((operation) => operation.operation_id).join('\u0000')]);
+
+  const selectedOperation = invokableOperations.find((operation) => operation.operation_id === selectedOperationId) ?? null;
+
+  const handleInvoke = async (payload: Record<string, unknown>) => {
+    if (!surface.data || !selectedOperation) return;
+    setInvocationState('running');
+    setInvocationError(null);
+    try {
+      await invokeRuntimeOperation({envelope: surface.data, operation: selectedOperation, payload});
+      setInvocationState('succeeded');
+    } catch (error) {
+      const code = classifyRuntimeSurfaceError(error);
+      setInvocationState('failed');
+      setInvocationError({code, message: runtimeSurfaceErrorMessage(code)});
+    }
+  };
+
+  return (
+    <AdvancedSurfaceFrame
+      descriptor={descriptor}
+      state={{status: surface.status, stale: surface.stale, error: surface.error}}
+      onRetry={() => void surface.refresh()}
+    >
+      {surface.data ? <RuntimeEvidenceCard envelope={surface.data} title="Flow catalog provenance" /> : null}
+      {surface.status === 'ready' && operations.length > 0 ? (
+        <div className="grid gap-5">
+          {flows && flows.length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><ListTree className="h-4 w-4" aria-hidden="true" />Pack-declared compositions</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-3">
+                {flows.map((flow) => (
+                  <article key={flow.flow_id} className="rounded-lg border border-border bg-bg-main p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="text-sm font-semibold text-text-main">{flow.label || flow.flow_id}</h2>
+                      <Badge variant={flow.state === 'ready' ? 'success' : 'warning'}>{flow.state}</Badge>
+                    </div>
+                    <p className="mt-2 text-xs text-text-muted">Declared operations: {flow.operation_ids.length}</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {flow.operation_ids.map((operationId) => (
+                        <Badge key={operationId} variant={operationIds.has(operationId) ? 'outline' : 'destructive'}>
+                          {operationId}
+                        </Badge>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="rounded-xl border border-dashed border-border bg-bg-card px-4 py-4 text-sm leading-6 text-text-muted">No Flow sequence record is published in the current v4 operations surface. The controls below expose exact operation bindings only; no sequence is synthesized.</div>
+          )}
+          {selectedOperation ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>{selectedOperation.label || selectedOperation.operation_id}</CardTitle>
+                <p className="text-sm leading-6 text-text-muted">Invoke a currently invokable operation from the declared Flow composition. Inputs come only from its exact schema.</p>
+              </CardHeader>
+              <CardContent>
+                <div className="mb-4 flex flex-wrap gap-2">
+                  {invokableOperations.map((operation) => (
+                    <button
+                      key={operation.operation_id}
+                      type="button"
+                      className="min-h-11 rounded-lg border border-border px-3 py-2 text-left text-xs text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
+                      aria-pressed={operation.operation_id === selectedOperation.operation_id}
+                      onClick={() => {
+                        setSelectedOperationId(operation.operation_id);
+                        setInvocationState('idle');
+                        setInvocationError(null);
+                      }}
+                    >
+                      {operation.operation_id}
+                    </button>
+                  ))}
+                </div>
+                {invocationError ? (
+                  <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-300/70 bg-amber-50/70 px-3 py-3 text-sm dark:border-amber-800/60 dark:bg-amber-950/20" role="alert">
+                    <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
+                    {invocationError.code}: {invocationError.message}
+                  </div>
+                ) : null}
+                {invocationState === 'succeeded' ? <p className="mb-4 text-sm text-emerald-700 dark:text-emerald-300" role="status">Flow operation accepted by the canonical Broker path.</p> : null}
+                <OperationInputForm operation={selectedOperation} busy={invocationState === 'running'} onInvoke={handleInvoke} />
+              </CardContent>
+            </Card>
+          ) : (
+            <EmptySurfacePanel
+              icon={<PlayCircle className="h-6 w-6" />}
+              title="No invokable operation binding is available"
+              message="The operations surface has no fresh lifecycle/grant and catalog-bound invokable state for this Flow workspace."
+            />
+          )}
+        </div>
+      ) : (
+        <EmptySurfacePanel
+          icon={<PlayCircle className="h-6 w-6" />}
+          title="No exact Flow operation binding is available"
+          message="Flow sequence and run parity require a Pack-declared composition. Until then, this surface does not reclassify Pack labels or inventory rows into a Flow."
+        />
+      )}
+    </AdvancedSurfaceFrame>
+  );
+}

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  isPanelRouteActive,
   panelRouteMeta,
   panelRoutes,
   panelRouteTitleKey,
@@ -30,7 +31,19 @@ test('registered panel routes expose stable header title metadata', () => {
 test('viewer navigation groups use route metadata and i18n keys', () => {
   const navRoutes = new Set<string>(viewerNavGroups.flatMap((group) => group.routes));
   assert.ok(navRoutes.has('packs'));
-  assert.ok(!navRoutes.has('settings'));
+  for (const route of [
+    'profile',
+    'settings',
+    'profileWiring',
+    'profileFiles',
+    'flow',
+    'graph',
+    'aiInput',
+    'apiMap',
+    'nodeManager',
+  ]) {
+    assert.ok(navRoutes.has(route));
+  }
   assert.ok(!navRoutes.has('startup'));
 
   for (const group of viewerNavGroups) {
@@ -41,7 +54,7 @@ test('viewer navigation groups use route metadata and i18n keys', () => {
   }
 });
 
-test('retired advanced panel paths are not registered', () => {
+test('stable advanced panel paths map to rebuilt v4 surfaces', () => {
   for (const path of [
     '/nodes',
     '/graphs',
@@ -52,8 +65,29 @@ test('retired advanced panel paths are not registered', () => {
     '/flows',
     '/settings',
   ]) {
-    assert.equal(panelRouteTitleKey(path), 'nav.unknown');
+    assert.match(panelRouteTitleKey(path), /^nav\./);
   }
 
-  assert.deepEqual(Object.keys(panelRouteMeta), ['home', 'setup', 'packs']);
+  assert.deepEqual(Object.keys(panelRouteMeta), [
+    'home',
+    'setup',
+    'packs',
+    'profile',
+    'settings',
+    'profileWiring',
+    'profileFiles',
+    'flow',
+    'graph',
+    'aiInput',
+    'apiMap',
+    'nodeManager',
+  ]);
+  assert.equal(panelRouteTitleKey('/profile-unknown'), 'nav.unknown');
+});
+
+test('stable route activity does not confuse Profile with Profile Wiring or Profile Files', () => {
+  assert.equal(isPanelRouteActive('/profile', panelRoutes.profile), true);
+  assert.equal(isPanelRouteActive('/profile-graph', panelRoutes.profile), false);
+  assert.equal(isPanelRouteActive('/profile-workspace', panelRoutes.profile), false);
+  assert.equal(isPanelRouteActive('/packs/provider-pack', panelRoutes.packs), true);
 });

@@ -3,25 +3,89 @@
     "file": "assets/tobkiri-launcher-icon-A0Q09elZ.png",
     "src": "../assets/app-icon/tobkiri-launcher-icon.png"
   },
-  "_Input-suPHc_2s.js": {
-    "file": "assets/Input-suPHc_2s.js",
+  "_Card-DivfNU5d.js": {
+    "file": "assets/Card-DivfNU5d.js",
+    "name": "Card",
+    "dynamicImports": [
+      "node_modules/@tauri-apps/api/core.js"
+    ]
+  },
+  "_InlineLoadError-ybkoC_ax.js": {
+    "file": "assets/InlineLoadError-ybkoC_ax.js",
+    "name": "InlineLoadError",
+    "imports": [
+      "_Card-DivfNU5d.js",
+      "_triangle-alert-C7c-HS7j.js"
+    ]
+  },
+  "_Input-C21u2j-w.js": {
+    "file": "assets/Input-C21u2j-w.js",
     "name": "Input",
     "imports": [
-      "index.html"
+      "_Card-DivfNU5d.js"
+    ]
+  },
+  "_OperationInputForm-ayUSYSfX.js": {
+    "file": "assets/OperationInputForm-ayUSYSfX.js",
+    "name": "OperationInputForm",
+    "imports": [
+      "_Card-DivfNU5d.js",
+      "_Input-C21u2j-w.js"
+    ]
+  },
+  "_advancedSurfaces-CICPx4ge.js": {
+    "file": "assets/advancedSurfaces-CICPx4ge.js",
+    "name": "advancedSurfaces",
+    "imports": [
+      "_Card-DivfNU5d.js",
+      "index.html",
+      "_triangle-alert-C7c-HS7j.js"
+    ]
+  },
+  "_arrow-right-C7F3JJbR.js": {
+    "file": "assets/arrow-right-C7F3JJbR.js",
+    "name": "arrow-right",
+    "imports": [
+      "_Card-DivfNU5d.js"
+    ]
+  },
+  "_check-C6Y4tlMt.js": {
+    "file": "assets/check-C6Y4tlMt.js",
+    "name": "check",
+    "imports": [
+      "_Card-DivfNU5d.js"
+    ]
+  },
+  "_triangle-alert-C7c-HS7j.js": {
+    "file": "assets/triangle-alert-C7c-HS7j.js",
+    "name": "triangle-alert",
+    "imports": [
+      "_Card-DivfNU5d.js"
     ]
   },
   "index.html": {
-    "file": "assets/index-B2KL_glL.js",
+    "file": "assets/index-Ck1UNie9.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
+    "imports": [
+      "_Card-DivfNU5d.js"
+    ],
     "dynamicImports": [
-      "node_modules/@tauri-apps/api/core.js",
       "src/pages/Packs.tsx",
-      "src/pages/PackDetail.tsx"
+      "src/pages/PackDetail.tsx",
+      "src/pages/Profile.tsx",
+      "src/pages/Settings.tsx",
+      "src/pages/ProfileWiring.tsx",
+      "src/pages/ProfileFiles.tsx",
+      "src/pages/Flow.tsx",
+      "src/pages/Graph.tsx",
+      "src/pages/AiInput.tsx",
+      "src/pages/ApiMap.tsx",
+      "src/pages/NodeManager.tsx"
     ],
     "css": [
-      "assets/index-kZE3Hf9H.css"
+      "assets/index-Hah7K3P-.css"
     ],
     "assets": [
       "assets/tobkiri-launcher-icon-A0Q09elZ.png"
@@ -33,24 +97,133 @@
     "src": "node_modules/@tauri-apps/api/core.js",
     "isDynamicEntry": true
   },
+  "src/pages/AiInput.tsx": {
+    "file": "assets/AiInput-0FIbcBxa.js",
+    "name": "AiInput",
+    "src": "src/pages/AiInput.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_Card-DivfNU5d.js",
+      "index.html",
+      "_advancedSurfaces-CICPx4ge.js",
+      "_OperationInputForm-ayUSYSfX.js"
+    ]
+  },
+  "src/pages/ApiMap.tsx": {
+    "file": "assets/ApiMap-iZ5PdQAt.js",
+    "name": "ApiMap",
+    "src": "src/pages/ApiMap.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_Card-DivfNU5d.js",
+      "index.html",
+      "_advancedSurfaces-CICPx4ge.js"
+    ]
+  },
+  "src/pages/Flow.tsx": {
+    "file": "assets/Flow-bC4XrNlV.js",
+    "name": "Flow",
+    "src": "src/pages/Flow.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_Card-DivfNU5d.js",
+      "index.html",
+      "_advancedSurfaces-CICPx4ge.js",
+      "_OperationInputForm-ayUSYSfX.js"
+    ]
+  },
+  "src/pages/Graph.tsx": {
+    "file": "assets/Graph-D1mNfU3s.js",
+    "name": "Graph",
+    "src": "src/pages/Graph.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_Card-DivfNU5d.js",
+      "index.html",
+      "_arrow-right-C7F3JJbR.js",
+      "_advancedSurfaces-CICPx4ge.js"
+    ]
+  },
+  "src/pages/NodeManager.tsx": {
+    "file": "assets/NodeManager-BmdsKQII.js",
+    "name": "NodeManager",
+    "src": "src/pages/NodeManager.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_Card-DivfNU5d.js",
+      "index.html",
+      "_advancedSurfaces-CICPx4ge.js"
+    ]
+  },
   "src/pages/PackDetail.tsx": {
-    "file": "assets/PackDetail-BqYRhPgi.js",
+    "file": "assets/PackDetail-Cxn3XDuo.js",
     "name": "PackDetail",
     "src": "src/pages/PackDetail.tsx",
     "isDynamicEntry": true,
     "imports": [
+      "_Card-DivfNU5d.js",
       "index.html",
-      "_Input-suPHc_2s.js"
+      "_InlineLoadError-ybkoC_ax.js",
+      "_Input-C21u2j-w.js"
     ]
   },
   "src/pages/Packs.tsx": {
-    "file": "assets/Packs-D4wbh0X3.js",
+    "file": "assets/Packs-K-9Wpdrz.js",
     "name": "Packs",
     "src": "src/pages/Packs.tsx",
     "isDynamicEntry": true,
     "imports": [
+      "_Card-DivfNU5d.js",
       "index.html",
-      "_Input-suPHc_2s.js"
+      "_triangle-alert-C7c-HS7j.js",
+      "_InlineLoadError-ybkoC_ax.js",
+      "_Input-C21u2j-w.js"
+    ]
+  },
+  "src/pages/Profile.tsx": {
+    "file": "assets/Profile-Tmgtrvmc.js",
+    "name": "Profile",
+    "src": "src/pages/Profile.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_Card-DivfNU5d.js",
+      "index.html",
+      "_arrow-right-C7F3JJbR.js",
+      "_check-C6Y4tlMt.js",
+      "_advancedSurfaces-CICPx4ge.js",
+      "_Input-C21u2j-w.js"
+    ]
+  },
+  "src/pages/ProfileFiles.tsx": {
+    "file": "assets/ProfileFiles-DGJieU6R.js",
+    "name": "ProfileFiles",
+    "src": "src/pages/ProfileFiles.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_Card-DivfNU5d.js",
+      "_advancedSurfaces-CICPx4ge.js"
+    ]
+  },
+  "src/pages/ProfileWiring.tsx": {
+    "file": "assets/ProfileWiring-CT-kDCjB.js",
+    "name": "ProfileWiring",
+    "src": "src/pages/ProfileWiring.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_Card-DivfNU5d.js",
+      "index.html",
+      "_advancedSurfaces-CICPx4ge.js"
+    ]
+  },
+  "src/pages/Settings.tsx": {
+    "file": "assets/Settings-DQhaSN7u.js",
+    "name": "Settings",
+    "src": "src/pages/Settings.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_Card-DivfNU5d.js",
+      "_check-C6Y4tlMt.js",
+      "_advancedSurfaces-CICPx4ge.js"
     ]
   }
 }

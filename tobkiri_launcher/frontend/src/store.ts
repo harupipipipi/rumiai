@@ -132,6 +132,7 @@ const SIDEBAR_STORAGE_KEY = 'tobkiri-launcher-sidebar-open';
 const LEGACY_SIDEBAR_STORAGE_KEY = 'rumi-viewer-sidebar-open';
 const SETUP_STORAGE_KEY = 'tobkiri-launcher-setup';
 const LEGACY_SETUP_STORAGE_KEY = 'rumi-setup';
+const PROFILE_STORAGE_KEY = 'tobkiri-launcher-local-profile';
 
 interface AppState {
   theme: Theme;
@@ -190,6 +191,7 @@ interface AppState {
   revokePackApproval: (id: string) => Promise<void>;
   togglePack: (id: string) => Promise<boolean>;
   profile: Profile;
+  updateLocalProfile: (profile: Partial<Pick<Profile, 'avatar' | 'username' | 'language' | 'job'>>) => void;
 }
 
 const defaultProfile: Profile = {
@@ -199,6 +201,27 @@ const defaultProfile: Profile = {
   job: '',
   connected: false,
 };
+
+function readLocalProfile(): Profile {
+  const raw = readLocalStorage(PROFILE_STORAGE_KEY);
+  if (!raw) return defaultProfile;
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    const username = typeof value.username === 'string' && value.username.trim()
+      ? value.username.trim().slice(0, 80)
+      : defaultProfile.username;
+    const avatar = typeof value.avatar === 'string' && AVATAR_OPTIONS.includes(value.avatar)
+      ? value.avatar
+      : defaultProfile.avatar;
+    const language = typeof value.language === 'string' && ['en', 'ja'].includes(value.language)
+      ? value.language
+      : defaultProfile.language;
+    const job = typeof value.job === 'string' ? value.job.slice(0, 120) : defaultProfile.job;
+    return {...defaultProfile, avatar, username, language, job};
+  } catch {
+    return defaultProfile;
+  }
+}
 
 let packsLoadPromise: Promise<void> | null = null;
 let frontendCatalogLoadPromise: Promise<void> | null = null;
@@ -665,5 +688,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  profile: defaultProfile,
+  profile: readLocalProfile(),
+  updateLocalProfile: (profileUpdate) => {
+    set((state) => {
+      const profile = {...state.profile, ...profileUpdate, connected: state.profile.connected};
+      writeLocalStorage(PROFILE_STORAGE_KEY, JSON.stringify({
+        avatar: profile.avatar,
+        username: profile.username,
+        language: profile.language,
+        job: profile.job,
+      }));
+      return {profile};
+    });
+  },
 }));

@@ -34,6 +34,10 @@ import {
   normalizePackVMOperation,
   normalizePackVMPlan,
 } from './packvmLifecycle';
+import {
+  generatedRouteFor,
+  VERIFIED_GENERATED_FRONTEND_CONTRACT_MAP,
+} from './generatedFrontendContractMap';
 
 const API_BASE_URL =
   (import.meta as ImportMeta & {env?: Record<string, string>}).env?.VITE_API_BASE_URL ?? '';
@@ -50,6 +54,16 @@ export class ApiRequestTimeoutError extends Error {
   constructor(method: string, path: string, timeoutMs: number) {
     super(`${method} request timed out after ${timeoutMs}ms: ${path}`);
     this.name = 'ApiRequestTimeoutError';
+  }
+}
+
+export class ApiContractError extends Error {
+  readonly data: unknown;
+
+  constructor(message: string, data: unknown) {
+    super(message);
+    this.name = 'ApiContractError';
+    this.data = data;
   }
 }
 
@@ -80,24 +94,166 @@ function isUnsafeMethod(method: string): boolean {
 }
 
 function isSetupApiPath(path: string): boolean {
-  return path === '/api/setup' || path.startsWith('/api/setup/');
+  return path === '/api/setup/packs' || path === '/api/setup/packs/install';
 }
 
 function isFrontendContractPath(path: string): boolean {
-  return path.startsWith('/api/contracts/defaultspack/');
+  const match = /^\/api\/contracts\/defaultspack\/([^/?#]+)(?:\?([^#]*))?$/.exec(path);
+  if (!match) return false;
+  let operation: string;
+  try {
+    operation = decodeURIComponent(match[1]);
+  } catch {
+    return false;
+  }
+  const separator = operation.indexOf(' ');
+  if (separator <= 0) return false;
+  const method = operation.slice(0, separator);
+  const target = operation.slice(separator + 1);
+  if (method !== 'GET' && method !== 'POST') return false;
+  let route;
+  try {
+    route = generatedRouteFor(
+      VERIFIED_GENERATED_FRONTEND_CONTRACT_MAP,
+      method,
+      target,
+    );
+  } catch {
+    return false;
+  }
+  if (!match[2]) return true;
+  if (method !== 'GET' || route.targets.length !== 1) return false;
+  const allowedKeys = new Set(route.targets[0].allowed_payload_keys);
+  const params = new URLSearchParams(match[2]);
+  const seen = new Set<string>();
+  for (const [key, value] of params.entries()) {
+    if (!allowedKeys.has(key) || seen.has(key) || !value) return false;
+    seen.add(key);
+  }
+  return true;
+}
+
+function frontendContractMethodForPath(path: string): FrontendContractMethod | null {
+  if (!isFrontendContractPath(path)) return null;
+  const match = /^\/api\/contracts\/defaultspack\/([^/?#]+)(?:\?[^#]*)?$/.exec(path);
+  if (!match) return null;
+  let operation: string;
+  try {
+    operation = decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+  const separator = operation.indexOf(' ');
+  if (separator <= 0) return null;
+  const method = operation.slice(0, separator);
+  return method === 'GET' || method === 'POST' ? method : null;
 }
 
 function isPackVMLifecyclePath(path: string): boolean {
-  return path === '/api/v4/packvm' || path.startsWith('/api/v4/packvm/');
+  if (path === '/api/v4/packvm/prepare'
+    || path === '/api/v4/packvm/consent'
+    || path === '/api/v4/packvm/provision'
+    || path === '/api/v4/packvm/cancel'
+    || path === '/api/v4/packvm/doctor'
+    || path === '/api/v4/packvm/stop'
+    || path === '/api/v4/packvm/cleanup') {
+    return true;
+  }
+  return /^\/api\/v4\/packvm\/progress\?operation_id=[^&#]+$/.test(path);
 }
 
 function isPanelSessionApiPath(path: string): boolean {
   return isSetupApiPath(path) || isFrontendContractPath(path) || isPackVMLifecyclePath(path);
 }
 
-function frontendContractPath(method: string, target: string): string {
+function isExactAllowedApiRequest(path: string, method: string): boolean {
+  const contractMethod = frontendContractMethodForPath(path);
+  if (contractMethod) return method === contractMethod;
+  if (path === '/health') return method === 'GET';
+  if (path === '/api/setup/packs') return method === 'GET';
+  if (path === '/api/setup/packs/install') return method === 'POST';
+  if (path === '/api/v4/packvm/doctor' || path.startsWith('/api/v4/packvm/progress?')) {
+    return method === 'GET' && isPackVMLifecyclePath(path);
+  }
+  if (isPackVMLifecyclePath(path)) return method === 'POST';
+  return !path.startsWith('/api/');
+}
+
+function frontendContractPath(method: FrontendContractMethod, target: string): string {
+  if (method !== 'GET' && method !== 'POST') {
+    throw new Error('The generated v4 contract method is unsupported.');
+  }
+  try {
+    generatedRouteFor(
+      VERIFIED_GENERATED_FRONTEND_CONTRACT_MAP,
+      method,
+      target,
+    );
+  } catch {
+    throw new Error(`The logical target is not declared by the verified frontend Contract Map: ${method} ${target}`);
+  }
   const operation = `${method.toUpperCase()} ${target}`;
   return `/api/contracts/defaultspack/${encodeURIComponent(operation)}`;
+}
+
+export type FrontendContractMethod = 'GET' | 'POST';
+
+function assertLogicalContractTarget(method: FrontendContractMethod, target: string): void {
+  if (
+    !target.startsWith('/api/')
+    || target.startsWith('/api/contracts/')
+    || target.includes('..')
+    || target.includes('//')
+    || target.includes('\\')
+    || target.includes('?')
+    || target.includes('#')
+  ) {
+    throw new Error('The generated v4 contract target is invalid.');
+  }
+  if (method !== 'GET' && method !== 'POST') {
+    throw new Error('The generated v4 contract method is unsupported.');
+  }
+}
+
+/**
+ * Call one target supplied by the digest-pinned v4 frontend contract map.
+ *
+ * The target is intentionally injected by the generated map; this helper
+ * does not discover routes, synthesize function paths, or provide a legacy
+ * HTTP fallback.
+ */
+export function fetchFrontendContractOperation<T>(
+  method: FrontendContractMethod,
+  target: string,
+  payload?: Record<string, unknown>,
+): Promise<T> {
+  assertLogicalContractTarget(method, target);
+  const route = generatedRouteFor(
+    VERIFIED_GENERATED_FRONTEND_CONTRACT_MAP,
+    method,
+    target,
+  );
+  if (route.targets.length !== 1) {
+    throw new Error('The generated v4 target has multiple operations; select an exact operation binding first.');
+  }
+  const allowedKeys = new Set(route.targets[0].allowed_payload_keys);
+  if (payload && Object.keys(payload).some((key) => !allowedKeys.has(key))) {
+    throw new Error('The generated v4 contract payload contains an unknown key.');
+  }
+  if (method === 'GET' && payload) {
+    if (Object.keys(payload).some((key) => !allowedKeys.has(key))) {
+      throw new Error('The generated v4 GET contract payload contains an unknown key.');
+    }
+  }
+  const query = method === 'GET' && payload && Object.keys(payload).length > 0
+    ? `?${new URLSearchParams(
+      Object.entries(payload).map(([key, value]) => [key, String(value)]),
+    ).toString()}`
+    : '';
+  const path = frontendContractPath(method, target);
+  return apiFetch<T>(query ? `${path}${query}` : path, method === 'POST'
+    ? {method, body: JSON.stringify(payload ?? {})}
+    : {});
 }
 
 export function hasPendingPanelBootstrapCode(href = window.location.href): boolean {
@@ -315,6 +471,9 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const url = `${API_BASE_URL}${path}`;
   const method = (options.method || 'GET').toUpperCase();
+  if (!isExactAllowedApiRequest(path, method)) {
+    throw new Error(`The frontend request is not in the exact method/path allowlist: ${method} ${path}`);
+  }
 
   const fetchRequest = async (
     allowPanelRecovery = true,
@@ -346,9 +505,11 @@ export async function apiFetch<T>(
       let errorMessage = response.status === 429
         ? 'Too many requests reached the local panel. Please wait a moment and try again.'
         : `API Error: ${response.status} ${response.statusText}`;
+      let errorData: unknown = null;
       try {
         const errorBody: ApiResponse<unknown> = await response.json();
         if (errorBody.error) errorMessage = errorBody.error;
+        errorData = errorBody.data;
       } catch {
         // Use the default HTTP error.
       }
@@ -360,7 +521,7 @@ export async function apiFetch<T>(
       ) {
         return fetchRequest(false, signal);
       }
-      throw new Error(errorMessage);
+      throw new ApiContractError(errorMessage, errorData);
     }
 
     const envelope: ApiResponse<T> = await response.json();
@@ -374,7 +535,7 @@ export async function apiFetch<T>(
       ) {
         return fetchRequest(false, signal);
       }
-      throw new Error(errorMessage);
+      throw new ApiContractError(errorMessage, envelope.data);
     }
     return envelope.data as T;
   };

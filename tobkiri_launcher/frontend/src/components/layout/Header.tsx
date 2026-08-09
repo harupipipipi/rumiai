@@ -5,7 +5,8 @@ import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
 import { describeRuntimeBadge } from '@/src/lib/runtimeHealth';
-import { panelRouteMeta, panelRouteTitleKey, panelRoutes, viewerNavGroups } from '@/src/lib/routes';
+import { isPanelRouteActive, panelRouteMeta, panelRouteTitleKey, viewerNavGroups } from '@/src/lib/routes';
+import { preloadPanelRoute } from '@/src/lib/routeModules';
 import { Avatar } from '@/src/components/ui/Avatar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/src/components/ui/Popover';
 
@@ -71,7 +72,7 @@ export function Header() {
                     <div className="flex flex-col gap-1">
                       {group.routes.map((route) => {
                         const meta = panelRouteMeta[route];
-                        const isActive = location.pathname === meta.path || (meta.path !== panelRoutes.home && location.pathname.startsWith(meta.path));
+                        const isActive = isPanelRouteActive(location.pathname, meta.path);
                         return (
                           <Link
                             key={route}
@@ -129,13 +130,48 @@ export function Header() {
           )}
           <span>{runtimePill.label}</span>
         </div>
-        <span className="text-xs text-text-muted hidden sm:block">{profile.username}</span>
-        <Avatar
-          src={profile.avatar}
-          username={profile.username}
-          alt={`${profile.username} avatar`}
-          className="h-7 w-7 text-xs"
-        />
+        <Popover>
+          <PopoverTrigger
+            className="flex min-h-11 items-center gap-2 rounded-lg px-2 text-left transition hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
+            aria-label={`${profile.username} profile and settings`}
+            aria-haspopup="dialog"
+          >
+            <span className="text-xs text-text-muted hidden sm:block">{profile.username}</span>
+            <Avatar
+              src={profile.avatar}
+              username={profile.username}
+              alt={`${profile.username} avatar`}
+              className="h-7 w-7 text-xs"
+            />
+          </PopoverTrigger>
+          <PopoverContent align="right" className="w-64" role="dialog" aria-label="Profile menu">
+            <div className="border-b border-border px-3 py-2">
+              <p className="truncate text-sm font-semibold text-text-main">{profile.username}</p>
+              <p className="text-xs text-text-muted">Launcher-local profile</p>
+            </div>
+            <nav className="flex flex-col gap-1 p-1" aria-label="Profile and settings">
+              {(['profile', 'settings'] as const).map((route) => {
+                const meta = panelRouteMeta[route];
+                const isActive = location.pathname === meta.path;
+                return (
+                  <Link
+                    key={route}
+                    to={meta.path}
+                    aria-current={isActive ? 'page' : undefined}
+                    onFocus={() => { void preloadPanelRoute(route); }}
+                    onPointerEnter={() => { void preloadPanelRoute(route); }}
+                    className={cn(
+                      "flex min-h-11 items-center rounded-md px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]",
+                      isActive ? "bg-accent/8 text-accent" : "text-text-muted hover:bg-bg-hover hover:text-text-main",
+                    )}
+                  >
+                    {t(meta.navKey || meta.titleKey)}
+                  </Link>
+                );
+              })}
+            </nav>
+          </PopoverContent>
+        </Popover>
       </div>
     </header>
   );

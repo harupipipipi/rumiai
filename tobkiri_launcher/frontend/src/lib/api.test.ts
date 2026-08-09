@@ -10,6 +10,7 @@ import {
   disablePack,
   enablePack,
   fetchDashboard,
+  fetchFrontendContractOperation,
   fetchFrontendCatalog,
   fetchPacks,
   fetchPresentationState,
@@ -20,6 +21,7 @@ import {
   restartKernel,
   selectPresentation,
 } from './api.ts';
+import {invokeRuntimeOperation, RUNTIME_SURFACE_API_VERSION} from './runtimeSurface.ts';
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
@@ -254,6 +256,61 @@ test('dynamic catalog and capability invocation use the exact canonical v4 route
   assert.doesNotMatch(lastFetchUrl, /api\/v4\/dispatch/);
 });
 
+test('runtime operation invocation uses only its exact invocation contribution and catalog hash', async () => {
+  let body: Record<string, unknown> | undefined;
+  fetchHandler = async (input, init) => {
+    lastFetchUrl = String(input);
+    lastFetchInit = init;
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({success: true, data: {accepted: true}}), {
+      headers: {'Content-Type': 'application/json'},
+    });
+  };
+  const digest = (character: string): string => `sha256:${character.repeat(64)}`;
+  const envelope = {
+    runtime_surface_api_version: RUNTIME_SURFACE_API_VERSION,
+    surface: 'operations' as const,
+    state: 'ready' as const,
+    profile_id: 'defaults',
+    profile_revision: digest('a'),
+    plan_digest: digest('b'),
+    catalog_revision: digest('c'),
+    records: {
+      profile_lock: {digest: digest('d'), source_ref: 'profile-lock-v4://defaults/lock'},
+      resolved_plan: {digest: digest('b'), source_ref: 'resolved-plan-v1://defaults/plan'},
+      activation_record: {digest: digest('1'), source_ref: 'activation-record-v1://defaults/activation'},
+      authority_snapshot: {digest: digest('e'), source_ref: 'authority-snapshot-v4://defaults/snapshot'},
+    },
+    data: {},
+  };
+  const operation = {
+    operation_id: 'operation.one',
+    contract_id: 'contract.one.v1',
+    owner_pack_id: 'provider-pack',
+    contribution_id: 'catalog-only-contribution',
+    target_provider_id: 'provider.one',
+    artifact_digest: digest('1'),
+    invocation_contribution_id: 'invocation-contribution',
+    invocation_owner_pack_id: 'provider-pack',
+    invocation_catalog_hash: digest('c'),
+    invocation_reason: null,
+    invokable: true,
+    catalog_digest: digest('c'),
+    function_id: 'function.one',
+    schema: {},
+  };
+
+  const result = await invokeRuntimeOperation({envelope, operation, payload: {prompt: 'hello'}});
+  assert.deepEqual(result, {accepted: true});
+  assert.equal(decodeURIComponent(lastFetchUrl.replace('/api/contracts/defaultspack/', '')), 'POST /api/ui/capability/invoke');
+  assert.equal(body?.contribution_id, 'invocation-contribution');
+  assert.equal(body?.catalog_hash, digest('c'));
+  assert.equal(body?.plan_hash, digest('b'));
+  assert.equal(Object.prototype.hasOwnProperty.call(body ?? {}, 'catalog_revision'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(body ?? {}, 'operation_digest'), false);
+  assert.deepEqual(body?.payload, {prompt: 'hello'});
+});
+
 test('approval revocation uses the exact typed v4 contract route and payload', async () => {
   fetchHandler = async (input, init) => {
     lastFetchUrl = String(input);
@@ -319,8 +376,8 @@ test('unsafe frontend requests time out and reject instead of leaving lifecycle 
   fetchHandler = async () => new Promise<Response>(() => {});
 
   await assert.rejects(
-    apiFetch('/api/pack-control/disable', {method: 'POST'}, {timeoutMs: 1}),
-    /POST request timed out after 1ms: \/api\/pack-control\/disable/,
+    apiFetch('/api/v4/packvm/prepare', {method: 'POST'}, {timeoutMs: 1}),
+    /POST request timed out after 1ms: \/api\/v4\/packvm\/prepare/,
   );
 });
 
@@ -366,4 +423,72 @@ test('setup and health requests remain separate from Pack contract dispatch', as
   assert.equal(lastFetchUrl, '/api/setup/packs');
   await checkHealth();
   assert.equal(lastFetchUrl, '/health');
+  await assert.rejects(
+    apiFetch('/api/setup/packs/install'),
+    /exact method\/path allowlist/,
+  );
+  await assert.rejects(
+    apiFetch('/api/pack-control/disable', {method: 'POST'}),
+    /exact method\/path allowlist/,
+  );
+});
+
+test('runtime surface GET guards stay outside the encoded contract operation key', async () => {
+  await fetchFrontendContractOperation('GET', '/api/runtime-surface/profile', {
+    expected_profile_revision: 'revision-one',
+    expected_plan_digest: 'sha256:plan-one',
+  });
+
+  assert.equal(
+    lastFetchUrl,
+    '/api/contracts/defaultspack/GET%20%2Fapi%2Fruntime-surface%2Fprofile?expected_profile_revision=revision-one&expected_plan_digest=sha256%3Aplan-one',
+  );
+  assert.equal(
+    decodeURIComponent(lastFetchUrl.slice('/api/contracts/defaultspack/'.length).split('?')[0]),
+    'GET /api/runtime-surface/profile',
+  );
+  assert.doesNotMatch(lastFetchUrl.split('?')[0], /expected_profile/);
+});
+
+test('runtime surface settings target has no guard query and unknown GET keys fail before dispatch', async () => {
+  await fetchFrontendContractOperation('GET', '/api/runtime-surface/settings');
+  assert.equal(lastFetchUrl, '/api/contracts/defaultspack/GET%20%2Fapi%2Fruntime-surface%2Fsettings');
+
+  assert.throws(
+    () => fetchFrontendContractOperation('GET', '/api/runtime-surface/profile', {surface: 'profile'}),
+    /unknown key/,
+  );
+  assert.throws(
+    () => fetchFrontendContractOperation('GET', '/api/runtime-surface/profile?surface=profile'),
+    /target is invalid/,
+  );
+  assert.equal(lastFetchUrl, '/api/contracts/defaultspack/GET%20%2Fapi%2Fruntime-surface%2Fsettings');
+});
+
+test('frontend contract transport rejects map-external targets, method mismatches, and retired recovery paths', async () => {
+  const before = lastFetchUrl;
+  assert.throws(
+    () => fetchFrontendContractOperation('GET', '/api/not-in-the-map'),
+    /not declared by the verified frontend Contract Map|no exact route/i,
+  );
+  assert.throws(
+    () => fetchFrontendContractOperation('POST', '/api/runtime-surface/profile'),
+    /not declared by the verified frontend Contract Map|no exact route/i,
+  );
+  assert.throws(
+    () => fetchFrontendContractOperation('GET', '/api/runtime-recovery/v4/profile'),
+    /not declared by the verified frontend Contract Map|no exact route/i,
+  );
+  assert.equal(lastFetchUrl, before);
+});
+
+test('all generated map bindings use the exact method/path and reject ambiguous capability dispatch', () => {
+  assert.throws(
+    () => fetchFrontendContractOperation('POST', '/api/ui/capability/invoke'),
+    /multiple operations/i,
+  );
+  assert.throws(
+    () => fetchFrontendContractOperation('PUT' as never, '/api/pack-control/catalog'),
+    /unsupported|not declared/i,
+  );
 });
