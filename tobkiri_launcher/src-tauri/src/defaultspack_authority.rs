@@ -18,6 +18,21 @@ const DEFAULT_SHELL_ID: &str = "shell.tauri.default";
 const DEFAULT_RUNTIME_ID: &str = "runtime.tauri.application.default";
 const DEFAULT_PROFILE_SOURCE: &str =
     "tobkiri_runtime/ecosystem/defaultspack/v4/defaults.profile.v4.json";
+const DEFAULT_PROVIDER_PACK_IDS: [&str; 13] = [
+    "defaultspack",
+    "rumi_ai_gateway_pack",
+    "rumi_ai_pipeline_pack",
+    "rumi_ai_routing_pack",
+    "rumi_ai_stream_pack",
+    "rumi_ai_tool_bridge_pack",
+    "rumi_ai_usage_pack",
+    "rumi_file_inspect_pack",
+    "rumi_model_catalog_pack",
+    "rumi_model_registry_pack",
+    "rumi_provider_adapters_pack",
+    "rumi_provider_registry_pack",
+    "tobkiri_host_pack_control",
+];
 const BUNDLE_SCHEMA: &str = "io.tobkiri.defaultspack-bundle-lock.v1";
 const PROFILE_PATH: &str = "defaults.profile.v4.json";
 const DEFAULTSPACK_PACK_PATH: &str = "packs/defaultspack.pack.v4.json";
@@ -437,6 +452,10 @@ fn validate_profile(
     {
         bail!("Defaults Profile does not bind the exact Base and Tauri Shell");
     }
+    validate_effective_pack_set(profile)
+}
+
+fn validate_effective_pack_set(profile: &Value) -> Result<()> {
     let packs = profile
         .get("packs")
         .and_then(Value::as_array)
@@ -450,12 +469,11 @@ fn validate_profile(
             ))
         })
         .collect::<Result<BTreeSet<_>>>()?;
-    let expected = BTreeSet::from([
-        ("defaultspack", "provider"),
-        ("rumi_file_inspect_pack", "provider"),
-        ("tobkiri_host_pack_control", "provider"),
-        (DEFAULT_RUNTIME_ID, "application"),
-    ]);
+    let mut expected = DEFAULT_PROVIDER_PACK_IDS
+        .iter()
+        .map(|pack_id| (*pack_id, "provider"))
+        .collect::<BTreeSet<_>>();
+    expected.insert((DEFAULT_RUNTIME_ID, "application"));
     if packs.len() != expected.len()
         || effective != expected
         || effective
@@ -649,6 +667,55 @@ mod tests {
             dev_workspace_root: None,
         };
         (root, config)
+    }
+
+    #[test]
+    fn finite_production_pack_set_tracks_canonical_defaults_profile() {
+        const AI_PACK_IDS: [&str; 10] = [
+            "rumi_ai_gateway_pack",
+            "rumi_ai_pipeline_pack",
+            "rumi_ai_routing_pack",
+            "rumi_ai_stream_pack",
+            "rumi_ai_tool_bridge_pack",
+            "rumi_ai_usage_pack",
+            "rumi_model_catalog_pack",
+            "rumi_model_registry_pack",
+            "rumi_provider_adapters_pack",
+            "rumi_provider_registry_pack",
+        ];
+
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let profile_path = repository.join(DEFAULT_PROFILE_SOURCE);
+        let profile: Value = serde_json::from_slice(&fs::read(profile_path).unwrap()).unwrap();
+
+        assert_eq!(value_str(&profile, "/base/pack_id"), Some(DEFAULT_BASE_ID));
+        assert_eq!(
+            value_str(&profile, "/shell/pack_id"),
+            Some(DEFAULT_SHELL_ID)
+        );
+        validate_effective_pack_set(&profile).unwrap();
+
+        for pack_id in AI_PACK_IDS {
+            let mut missing = profile.clone();
+            missing["packs"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|pack| value_str(pack, "/pack_id") != Some(pack_id));
+            assert!(
+                validate_effective_pack_set(&missing).is_err(),
+                "missing required AI Pack was accepted: {pack_id}"
+            );
+        }
+
+        let mut extra = profile;
+        extra["packs"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "pack_id": "unreviewed.extra.pack",
+                "role": "provider"
+            }));
+        assert!(validate_effective_pack_set(&extra).is_err());
     }
 
     #[test]
