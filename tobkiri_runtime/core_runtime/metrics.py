@@ -20,8 +20,17 @@ from __future__ import annotations
 
 import threading
 import time
+import sys
 from contextlib import contextmanager
 from typing import Any, Dict, Generator, List, Optional, Tuple
+
+
+_this_module = sys.modules.get(__name__)
+if _this_module is not None:
+    if __name__.startswith("tobkiri_runtime."):
+        sys.modules.setdefault(__name__.removeprefix("tobkiri_runtime."), _this_module)
+    else:
+        sys.modules.setdefault(f"tobkiri_runtime.{__name__}", _this_module)
 
 
 # ============================================================
