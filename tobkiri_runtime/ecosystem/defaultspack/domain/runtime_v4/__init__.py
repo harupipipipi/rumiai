@@ -8,6 +8,7 @@ from .service import (
     DefaultProfileV4Error,
     ProfileResolutionDenied,
     ResolvedDefaultProfile,
+    dynamic_profile_edges,
     resolve_default_profile,
 )
 
@@ -19,5 +20,6 @@ __all__ = [
     "DefaultProfileV4Error",
     "ProfileResolutionDenied",
     "ResolvedDefaultProfile",
+    "dynamic_profile_edges",
     "resolve_default_profile",
 ]

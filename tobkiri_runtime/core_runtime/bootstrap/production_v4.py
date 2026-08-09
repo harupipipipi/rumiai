@@ -249,6 +249,7 @@ def _commit_pack_control_authority(
     target: FunctionPrincipal,
     target_domain: ExecutionDomain,
     scope: AuthorityScope,
+    authority_label: str = "pack-control",
 ) -> None:
     activation = active.activation
     profile = active.resolved.profile
@@ -257,8 +258,12 @@ def _commit_pack_control_authority(
     ).timestamp()
     identity_suffix = str(activation["activation_id"]).replace(":", ".")
     operation_suffix = target.operation_id.replace(".", "-")
+    authority_label = authority_label.replace("/", "-").replace(".", "-")
     approval = ApprovalRecord(
-        approval_id=(f"approval.defaults.pack-control.{operation_suffix}.{identity_suffix}"),
+        approval_id=(
+            f"approval.defaults.{authority_label}.{operation_suffix}."
+            f"{identity_suffix}"
+        ),
         snapshot_digest=canonical_digest(
             {
                 "ceremony": "defaults.activate",
@@ -281,7 +286,10 @@ def _commit_pack_control_authority(
         security_epoch=int(activation["security_epoch"]),
     )
     provider = ProviderAuthorityRecord(
-        record_id=(f"provider.defaults.pack-control.{operation_suffix}.{identity_suffix}"),
+        record_id=(
+            f"provider.defaults.{authority_label}.{operation_suffix}."
+            f"{identity_suffix}"
+        ),
         provider=target,
         execution_domain_id=target_domain.domain_id,
         execution_domain_identity_digest=target_domain.identity_digest,
@@ -301,7 +309,10 @@ def _commit_pack_control_authority(
         host_broker_binding="tobkiri.request-broker.v4",
     )
     grant = GrantRecord(
-        grant_id=f"grant.defaults.pack-control.{operation_suffix}.{identity_suffix}",
+        grant_id=(
+            f"grant.defaults.{authority_label}.{operation_suffix}."
+            f"{identity_suffix}"
+        ),
         caller=caller,
         target=target,
         profile_id=str(profile["profile_id"]),
@@ -392,7 +403,9 @@ def capture_production_dispatch(
         principal = FunctionPrincipal.from_dict(binding["function_principal"])
         principals[principal.function_id] = principal
 
-    edges = catalog.profiles["defaults"]["requested_edges"]
+    # Dispatch must follow the persisted immutable Profile, including exact
+    # operation edges contributed by an enabled/approved optional Pack.
+    edges = profile["requested_edges"]
     binding_by_key = {
         (item["contract_id"], item["operation_id"]): item for item in plan["bindings"]
     }
@@ -497,16 +510,70 @@ def capture_production_dispatch(
             **dict(target_backend_digests or {}),
             **{target[0]: backend_digest for target in control_targets.values()},
         }
+    static_edge_keys = {
+        (str(edge["contract_id"]), str(edge["operation_id"]))
+        for edge in catalog.profiles["defaults"]["requested_edges"]
+    }
+    dynamic_bindings = {
+        key: binding
+        for key, binding in binding_by_key.items()
+        if key not in static_edge_keys and key[0] != PACK_CONTROL_CONTRACT
+    }
+    for key, dynamic_binding in sorted(dynamic_bindings.items()):
+        contract_id, operation_id = key
+        target = FunctionPrincipal.from_dict(dynamic_binding["function_principal"])
+        target_suffix = target.principal_id.removeprefix("sha256:")[:24]
+        target_domain = _execution_domain(
+            domain_id=f"domain.provider.{target_suffix}.{activation_suffix}",
+            principal=target,
+            active=active,
+            boundary=DomainBoundary.DEDICATED_PROCESS,
+            channel_seed=f"dynamic-provider:{contract_id}:{operation_id}",
+        )
+        _register_exact_domain(
+            authority_store,
+            authority_control,
+            target_domain,
+            session_id=f"session.provider.dynamic.{target_suffix}.{activation_suffix}",
+            principal=target,
+        )
+        caller = caller_by_operation[key]
+        _commit_pack_control_authority(
+            authority_store,
+            authority_control,
+            active=active,
+            caller=caller,
+            target=target,
+            target_domain=target_domain,
+            scope=_operation_scope(contract_id, operation_id, target),
+            authority_label="dynamic-pack",
+        )
     registered_backends = tuple((backends or BackendRegistry(())).registered)
     if control_backend is not None:
         if any(item.status.backend_id == PACK_CATALOG_BACKEND_ID for item in registered_backends):
             raise AuthorityDenied("Pack control backend identity is duplicated")
         registered_backends += (control_backend,)
+    backend_registry = BackendRegistry(registered_backends)
+    target_backend_digests = dict(target_backend_digests or {})
+    for binding in plan["bindings"]:
+        target = FunctionPrincipal.from_dict(binding["function_principal"])
+        if target.principal_id in target_backend_digests:
+            continue
+        try:
+            resolved_binding = runtime.composition.catalog.resolve(
+                binding["contract_id"],
+                binding["operation_id"],
+                ">=1,<2",
+            )
+            selected_backend = backend_registry.select(resolved_binding)
+        except Exception:
+            continue
+        target_backend_digests[target.principal_id] = selected_backend.status.backend_digest
     broker = runtime.broker(
         authority_store=authority_store,
         adapters=AdapterPlanner(()),
         adapter_executor=_NoAdapterExecution(),
-        backends=BackendRegistry(registered_backends),
+        backends=backend_registry,
         materialization=MaterializationCoordinator(),
         admission=_FiniteAdmission(),
         reconciliation=InMemoryReconciliationStore(),
@@ -528,7 +595,15 @@ def capture_production_dispatch(
         caller = caller_by_operation[key]
         target = target_by_operation[key]
         target_suffix = target.principal_id.removeprefix("sha256:")[:24]
-        authority_session_id = f"{session_id}.{activation_suffix}"
+        # One authenticated panel session may invoke operations whose
+        # resolved Shell caller principals differ.  Authority session
+        # bindings are principal-specific, so include that exact caller in
+        # the Host-derived session identity instead of reusing a session
+        # already bound to another caller.
+        caller_identity_suffix = caller.principal_id.removeprefix("sha256:")[:24]
+        authority_session_id = (
+            f"{session_id}.{caller_identity_suffix}.{activation_suffix}"
+        )
         caller_suffix = canonical_digest(
             {"session_id": authority_session_id, "caller": caller.principal_id}
         ).removeprefix("sha256:")[:24]
@@ -546,7 +621,7 @@ def capture_production_dispatch(
             caller_boot_epoch=1,
             target_domain_id=f"domain.provider.{target_suffix}.{activation_suffix}",
             target_boot_epoch=1,
-            target_backend_digest=(target_backend_digests or {}).get(
+            target_backend_digest=target_backend_digests.get(
                 target.principal_id,
                 canonical_digest(
                     {
@@ -559,24 +634,23 @@ def capture_production_dispatch(
             fencing_token=int(active.activation["fencing_token"]),
             handle_namespace=f"activation.{target_suffix}",
         )
-        if contract_id == PACK_CONTROL_CONTRACT:
-            with caller_sessions_lock:
-                if authority_session_id not in caller_sessions:
-                    caller_domain = _execution_domain(
-                        domain_id=context.caller_domain_id,
-                        principal=caller,
-                        active=active,
-                        boundary=DomainBoundary.UNPRIVILEGED_WORKER,
-                        channel_seed=f"panel:{session_id}",
-                    )
-                    _register_exact_domain(
-                        authority_store,
-                        authority_control,
-                        caller_domain,
-                        session_id=authority_session_id,
-                        principal=caller,
-                    )
-                    caller_sessions.add(authority_session_id)
+        with caller_sessions_lock:
+            if authority_session_id not in caller_sessions:
+                caller_domain = _execution_domain(
+                    domain_id=context.caller_domain_id,
+                    principal=caller,
+                    active=active,
+                    boundary=DomainBoundary.UNPRIVILEGED_WORKER,
+                    channel_seed=f"panel:{session_id}",
+                )
+                _register_exact_domain(
+                    authority_store,
+                    authority_control,
+                    caller_domain,
+                    session_id=authority_session_id,
+                    principal=caller,
+                )
+                caller_sessions.add(authority_session_id)
         return context
 
     providers: dict[str, tuple[Mapping[str, Any], ...]] = {}
@@ -586,11 +660,13 @@ def capture_production_dispatch(
             binding["operation_id"],
             ">=1,<2",
         )
-        selected_backend = (
-            broker._backends.select(resolved_binding)
-            if binding["contract_id"] == PACK_CONTROL_CONTRACT
-            else None
-        )
+        try:
+            selected_backend = broker._backends.select(resolved_binding)
+        except Exception:
+            # A non-selected optional binding may not have an installed
+            # substrate yet; its contribution is omitted by the API projection
+            # until the exact production backend is available.
+            selected_backend = None
         function_principal = binding["function_principal"]
         providers.setdefault(binding["contract_id"], ())
         providers[binding["contract_id"]] += (

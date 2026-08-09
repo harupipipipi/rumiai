@@ -246,6 +246,91 @@ def _provider_candidates(
     return candidates
 
 
+def dynamic_profile_edges(
+    catalog: BundledCatalog,
+    profile_id: str,
+    additional_pack_ids: tuple[str, ...],
+) -> tuple[dict[str, Any], ...]:
+    """Derive exact operation edges for newly enabled Pack dependencies.
+
+    The bundled Profile owns its static edges.  An approved optional Pack may
+    contribute only its own operation graph and the recursively required Pack
+    dependencies; every edge remains bound to the selected Shell caller and is
+    persisted into the immutable resolved Profile before dispatch.
+    """
+
+    source = catalog.profiles.get(profile_id)
+    if source is None or not additional_pack_ids:
+        return ()
+    source_keys = {
+        (str(edge["contract_id"]), str(edge["operation_id"]))
+        for edge in source["requested_edges"]
+    }
+    pending = [str(pack_id) for pack_id in additional_pack_ids]
+    closure: set[str] = set()
+    while pending:
+        pack_id = pending.pop(0)
+        if pack_id in closure:
+            continue
+        manifest = catalog.packs.get(pack_id)
+        if manifest is None:
+            raise ProfileResolutionDenied(
+                f"dynamic Pack is not in the exact inventory: {pack_id}"
+            )
+        closure.add(pack_id)
+        pending.extend(
+            str(dependency)
+            for dependency in manifest["requirements"]["pack_dependencies"]
+        )
+    shell_request = source.get("shell")
+    if not isinstance(shell_request, Mapping):
+        raise ProfileResolutionDenied("dynamic Pack edges require the selected Shell")
+    shell_definition = catalog.shells.get(str(shell_request["provider_id"]))
+    if shell_definition is None:
+        raise ProfileResolutionDenied("dynamic Pack Shell Provider is unavailable")
+    shell_manifest = catalog.packs.get(str(shell_definition["pack_id"]))
+    if shell_manifest is None or not shell_manifest["functions"]:
+        raise ProfileResolutionDenied("dynamic Pack Shell Function is unavailable")
+    caller_function_id = sorted(
+        str(function["id"]) for function in shell_manifest["functions"]
+    )[0]
+    result: list[dict[str, Any]] = []
+    for pack_id in sorted(closure):
+        manifest = catalog.packs[pack_id]
+        contracts = {
+            str(contract["contract_id"]): contract
+            for contract in manifest["contracts"]
+        }
+        for function in sorted(manifest["functions"], key=lambda item: str(item["id"])):
+            for operation_id in sorted(str(item) for item in function["operations"]):
+                contract_id = next(
+                    (
+                        candidate_id
+                        for candidate_id, contract in contracts.items()
+                        if operation_id in contract["operations"]
+                    ),
+                    None,
+                )
+                if contract_id is None or (contract_id, operation_id) in source_keys:
+                    continue
+                result.append(
+                    {
+                        "caller_function_id": caller_function_id,
+                        "target_provider_id": str(function["id"]),
+                        "contract_id": contract_id,
+                        "operation_id": operation_id,
+                        "requested_scope_template": {
+                            "capability": "operation.invoke",
+                            "dimensions": {
+                                "contract": [contract_id],
+                                "operation": [operation_id],
+                            },
+                        },
+                    }
+                )
+    return tuple(result)
+
+
 def resolve_default_profile(
     catalog: BundledCatalog,
     profile_id: str,
@@ -375,7 +460,12 @@ def resolve_default_profile(
         for manifest in selected
         for function in manifest["functions"]
     }
-    for edge in source["requested_edges"]:
+    available_function_ids.update(
+        function["id"] for function in shell_manifest["functions"]
+    )
+    dynamic_edges = dynamic_profile_edges(catalog, profile_id, additional_pack_ids)
+    all_source_edges = (*source["requested_edges"], *dynamic_edges)
+    for edge in all_source_edges:
         caller_function_id = edge["caller_function_id"]
         if caller_function_id not in available_function_ids:
             raise ProfileResolutionDenied(
@@ -386,7 +476,7 @@ def resolve_default_profile(
     bindings: list[dict[str, Any]] = []
     resolved_edges: list[dict[str, Any]] = []
     references: list[str] = []
-    for source_edge in source["requested_edges"]:
+    for source_edge in all_source_edges:
         edge = dict(source_edge)
         candidates = _provider_candidates(
             selected, edge["contract_id"], edge["operation_id"]

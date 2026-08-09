@@ -400,14 +400,40 @@ def _binding_payload(binding: _Binding) -> dict[str, str]:
 
 def _catalog_payload(binding: _Binding) -> dict[str, Any]:
     installed = _read_control_state(binding.profile_id)
-    active = set(_active_profile()[1].get("packs") or [])
+    state, active_profile = _active_profile()
+    active = set(active_profile.get("packs") or [])
+    active_grant_bindings = _active_grant_bindings(state)
+    plan_bindings = {
+        (str(item.get("contract_id") or ""), str(item.get("operation_id") or ""))
+        for item in state["resolved_plan"].get("bindings") or []
+        if isinstance(item, Mapping)
+    }
     packs = []
     for pack_id, record in sorted(load_pack_catalog().items()):
         is_installed = pack_id in installed or pack_id in active
         if pack_id in installed:
             _require_install_binding(pack_id, record, installed[pack_id], binding)
-        approved, reason = _approval_status(pack_id, record, binding)
+        approved, reason = _approval_status(
+            pack_id,
+            record,
+            binding,
+        )
         status = "approved" if approved else "installed"
+        declared_operations = _declared_operations(record)
+        invokable_operations = [
+            operation
+            for operation in declared_operations
+            if (
+                pack_id in active
+                and approved
+                and (
+                    operation["contract_id"], operation["operation_id"]
+                ) in plan_bindings
+                and (
+                    operation["contract_id"], operation["operation_id"]
+                ) in active_grant_bindings
+            )
+        ]
         packs.append(
             {
                 "pack_id": pack_id,
@@ -424,10 +450,151 @@ def _catalog_payload(binding: _Binding) -> dict[str, Any]:
                 "critical_changed": reason == "hash_mismatch",
                 "approval_issues": [] if approved else [reason or "approval_required"],
                 "artifact_digest": _record_digest(record),
+                "capabilities": _capability_projection(record),
+                "flows": [
+                    str(operation["operation_id"])
+                    for operation in declared_operations
+                ],
+                "dependencies": sorted(
+                    str(dependency)
+                    for dependency in (record.get("dependencies") or {})
+                ),
+                "declared_operations": declared_operations,
+                "invokable_operations": invokable_operations,
                 **_binding_payload(binding),
             }
         )
     return {"packs": packs, "count": len(packs), **_binding_payload(binding)}
+
+
+def _active_grant_bindings(state: Mapping[str, Any]) -> set[tuple[str, str]]:
+    """Return current plan operations with a live, non-revoked Grant.
+
+    A valid Pack approval file is necessary but not sufficient for an
+    invokable projection.  The captured production Authority store must also
+    contain the exact current activation Grant for that operation.
+    """
+
+    activation = state.get("activation")
+    profile = state.get("resolved_profile")
+    if not isinstance(activation, Mapping) or not isinstance(profile, Mapping):
+        return set()
+    expected_activation = str(activation.get("activation_id") or "")
+    expected_profile = str(profile.get("profile_id") or "")
+    expected_epoch = activation.get("security_epoch")
+    from .authority.v4 import FunctionPrincipal
+
+    plan_bindings: set[tuple[str, str, str]] = set()
+    for item in state.get("resolved_plan", {}).get("bindings") or []:
+        if not isinstance(item, Mapping) or not isinstance(
+            item.get("function_principal"), Mapping
+        ):
+            continue
+        try:
+            principal = FunctionPrincipal.from_dict(item["function_principal"])
+        except Exception:
+            continue
+        plan_bindings.add(
+            (
+                str(item.get("contract_id") or ""),
+                str(item.get("operation_id") or ""),
+                principal.principal_id,
+            )
+        )
+    if not expected_activation or not expected_profile or not isinstance(
+        expected_epoch, int
+    ):
+        return set()
+    from .authority.v4 import AuthorityStore
+
+    try:
+        with AuthorityStore(_user_data_root() / "authority" / "v4.sqlite3") as authority:
+            result: set[tuple[str, str]] = set()
+            for grant in authority.list_grants():
+                if (
+                    grant.revoked
+                    or grant.profile_id != expected_profile
+                    or grant.activation_id != expected_activation
+                    or grant.security_epoch != expected_epoch
+                    or authority.is_revoked("grant", grant.grant_id)
+                ):
+                    continue
+                dimensions = grant.scope.dimensions
+                contracts = tuple(dimensions.get("contract", ()))
+                operations = tuple(dimensions.get("operation", ()))
+                if len(contracts) != 1 or len(operations) != 1:
+                    continue
+                candidate = (contracts[0], operations[0], grant.target.principal_id)
+                if candidate in plan_bindings:
+                    result.add((contracts[0], operations[0]))
+            return result
+    except Exception:
+        return set()
+
+
+def _capability_projection(record: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Project only capability names declared by the generated v4 catalog."""
+
+    capabilities = record.get("capabilities")
+    if not isinstance(capabilities, list):
+        return []
+    return [
+        {
+            "name": capability,
+            "description": f"Pack-declared capability: {capability}.",
+        }
+        for capability in sorted(
+            {
+                str(item).strip()
+                for item in capabilities
+                if str(item).strip()
+            }
+        )
+    ]
+
+
+def _declared_operations(record: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Return deterministic operation metadata from the v4 catalog record."""
+
+    result: list[dict[str, Any]] = []
+    contracts = record.get("provided_contracts")
+    if not isinstance(contracts, list):
+        return result
+    for contract in contracts:
+        if not isinstance(contract, Mapping):
+            continue
+        contract_id = str(contract.get("contract_id") or "").strip()
+        provider_id = str(contract.get("provider_id") or "").strip()
+        required = contract.get("required_capabilities")
+        required_capabilities = sorted(
+            {
+                str(item).strip()
+                for item in required
+                if str(item).strip()
+            }
+        ) if isinstance(required, list) else []
+        operations = contract.get("operations")
+        if not isinstance(operations, list):
+            continue
+        for operation in operations:
+            if not isinstance(operation, Mapping):
+                continue
+            operation_id = str(operation.get("id") or "").strip()
+            if not contract_id or not provider_id or not operation_id:
+                continue
+            result.append(
+                {
+                    "contract_id": contract_id,
+                    "operation_id": operation_id,
+                    "provider_id": provider_id,
+                    "function_id": provider_id,
+                    "required_capabilities": required_capabilities,
+                }
+            )
+    return sorted(
+        result,
+        key=lambda item: (item["contract_id"], item["operation_id"]),
+    )
 
 
 def _capture_binding() -> _Binding:
@@ -491,6 +658,7 @@ def _activate_pack_set(state: Mapping[str, Any], pack_ids: list[str]) -> None:
     from ecosystem.defaultspack.domain.runtime_v4 import (
         ActivationStore,
         BundledCatalog,
+        dynamic_profile_edges,
         resolve_default_profile,
     )
 
@@ -590,6 +758,16 @@ def _activate_pack_set(state: Mapping[str, Any], pack_ids: list[str]) -> None:
         additional_pack_ids = tuple(
             pack_id for pack_id in requested if pack_id not in mandatory
         )
+        # Optional Pack operations are part of the immutable resolved Profile,
+        # so mint the exact authority references before resolving the plan.
+        # The resolver derives only the selected Pack/dependency closure and
+        # binds every operation to the selected Shell caller.
+        for edge in dynamic_profile_edges(
+            catalog, "defaults", additional_pack_ids
+        ):
+            bindings[_edge_key(edge)] = _authority_reference(
+                edge, snapshot_digest
+            )
         approved_digests = {
             str(item["artifact_digest"])
             for item in baseline.lock["effective_set"]
@@ -817,17 +995,16 @@ def _persist_revoked_approval(
 
 
 def _approval_status(
-    pack_id: str, record: Mapping[str, Any], binding: _Binding
+    pack_id: str,
+    record: Mapping[str, Any],
+    binding: _Binding,
 ) -> tuple[bool, str | None]:
-    active_packs = set(_active_profile()[1].get("packs") or [])
     path = _approval_path(binding.profile_id, pack_id)
     if path.is_symlink():
         return False, "approval_symlinked"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        if pack_id in active_packs:
-            return True, None
         return False, "approval_required"
     except (OSError, json.JSONDecodeError):
         return False, "approval_unreadable"

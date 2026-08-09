@@ -51,6 +51,8 @@ class FrontendContractTarget:
     provider_id: str
     function_id: str
     allowed_payload_keys: frozenset[str] = frozenset()
+    owner_pack_id: str = DEFAULT_CONTRACT_PACK_ID
+    artifact_digest: str = ""
 
 
 @dataclass(frozen=True)

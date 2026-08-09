@@ -12,7 +12,8 @@ import uuid
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Callable, Mapping, Protocol
+from pathlib import PurePosixPath
+from typing import Any, Callable, Mapping, Protocol
 from urllib.parse import urlparse
 
 from .api.api_response import APIResponse
@@ -70,6 +71,24 @@ _RETIRED_API_ROOTS = frozenset(
         "webhooks",
     }
 )
+
+
+def _dynamic_payload_keys(pack_id: str, operation_id: str) -> frozenset[str]:
+    """Return the narrow request schema for a dynamic Pack contribution."""
+
+    if pack_id == "rumi_media_inspect_service_pack":
+        return frozenset(
+            {
+                "name",
+                "path",
+                "encoding",
+                "max_bytes",
+                "start_line",
+                "end_line",
+            }
+        )
+    del operation_id
+    return frozenset()
 
 
 class DispatchSession(Protocol):
@@ -434,6 +453,21 @@ class PackAPIHandler(
                 503,
             )
             return True
+        try:
+            payload = self._normalize_dynamic_payload(target, payload, session)
+        except (OSError, ValueError) as error:
+            self._send_response(
+                APIResponse(
+                    False,
+                    data={
+                        "state": "contract_dispatch_denied",
+                        "code": "invalid_contract_payload",
+                    },
+                    error=str(error),
+                ),
+                400,
+            )
+            return True
         payload["_session_id"] = session_id
         try:
             session.assert_current()
@@ -443,7 +477,13 @@ class PackAPIHandler(
                 payload,
             )
             self._refresh_after_operation(target.operation_id)
-        except (HostCoreError, KeyError, RuntimeError, ValueError) as error:
+        except (
+            HostCoreError,
+            KeyError,
+            OSError,
+            RuntimeError,
+            ValueError,
+        ) as error:
             self._send_response(
                 APIResponse(
                     False,
@@ -515,7 +555,6 @@ class PackAPIHandler(
         if session is None or (
             body.get("profile_id") != session.profile_id
             or body.get("plan_hash") != session.plan_digest
-            or body.get("owner_pack_id") != "defaultspack"
             or body.get("catalog_hash") != self._frontend_catalog_hash(binding)
         ):
             return None
@@ -524,14 +563,17 @@ class PackAPIHandler(
         return next(
             (
                 target
-                for target in binding.targets
-                if target.contribution_id == contribution_id and target.contract_id == contract_id
+                for target in self._capability_targets(binding)
+                if target.contribution_id == contribution_id
+                and target.contract_id == contract_id
+                and target.owner_pack_id == body.get("owner_pack_id")
             ),
             None,
         )
 
     def _frontend_catalog_hash(self, binding: FrontendContractBinding) -> str:
         session = self._dispatch_session
+        targets = self._capability_targets(binding)
         return canonical_digest(
             {
                 "profile_id": session.profile_id if session is not None else "",
@@ -543,10 +585,103 @@ class PackAPIHandler(
                         "operation_id": target.operation_id,
                         "provider_id": target.provider_id,
                         "function_id": target.function_id,
+                        "artifact_digest": target.artifact_digest,
                     }
-                    for target in binding.targets
+                    for target in targets
                 ],
             }
+        )
+
+    def _capability_targets(
+        self,
+        binding: FrontendContractBinding,
+        catalog: Mapping[str, object] | None = None,
+    ) -> tuple[FrontendContractTarget, ...]:
+        """Return static map targets plus exact enabled Pack contributions."""
+
+        if binding.path != "/api/ui/capability/invoke":
+            return binding.targets
+        session = self._dispatch_session
+        if session is None:
+            return binding.targets
+        if catalog is None:
+            catalog = getattr(self, "_capability_catalog_cache", None)
+            if catalog is None:
+                try:
+                    from .pack_control_v4 import capture_pack_catalog_reader
+
+                    catalog = capture_pack_catalog_reader().read()
+                    # A handler serves one request, so this cache cannot span a
+                    # lifecycle mutation while avoiding duplicate authority
+                    # database scans for hash and target selection.
+                    self._capability_catalog_cache = catalog
+                except Exception:
+                    return binding.targets
+        packs = catalog.get("packs") if isinstance(catalog, Mapping) else None
+        if not isinstance(packs, list):
+            return binding.targets
+        dynamic: list[FrontendContractTarget] = []
+        for pack in packs:
+            if not isinstance(pack, Mapping):
+                continue
+            pack_id = str(pack.get("pack_id") or "").strip()
+            if (
+                not pack_id
+                or pack.get("enabled") is not True
+                or pack.get("approved") is not True
+            ):
+                continue
+            operations = pack.get("invokable_operations")
+            if not isinstance(operations, list):
+                continue
+            for operation in operations:
+                if not isinstance(operation, Mapping):
+                    continue
+                contract_id = str(operation.get("contract_id") or "").strip()
+                operation_id = str(operation.get("operation_id") or "").strip()
+                provider_id = str(operation.get("provider_id") or "").strip()
+                function_id = str(operation.get("function_id") or provider_id).strip()
+                artifact_digest = str(pack.get("artifact_digest") or "").strip()
+                if not contract_id or not operation_id or not provider_id:
+                    continue
+                providers = tuple(
+                    item
+                    for item in session.provider_metadata(contract_id)
+                    if item.get("provider_id") == provider_id
+                    and item.get("function_id") == function_id
+                    and item.get("operation_id") == operation_id
+                    and item.get("profile_id") == session.profile_id
+                    and item.get("plan_digest") == session.plan_digest
+                )
+                if len(providers) != 1:
+                    continue
+                try:
+                    session.assert_operation_ready(contract_id, operation_id)
+                except Exception:
+                    continue
+                dynamic.append(
+                    FrontendContractTarget(
+                        contribution_id=f"pack.{pack_id}.{operation_id}",
+                        contract_id=contract_id,
+                        operation_id=operation_id,
+                        provider_id=provider_id,
+                        function_id=function_id,
+                        allowed_payload_keys=_dynamic_payload_keys(
+                            pack_id, operation_id
+                        ),
+                        owner_pack_id=pack_id,
+                        artifact_digest=artifact_digest,
+                    )
+                )
+        return tuple(binding.targets) + tuple(
+            sorted(
+                dynamic,
+                key=lambda target: (
+                    target.owner_pack_id,
+                    target.contract_id,
+                    target.operation_id,
+                ),
+            )
         )
 
     def _present_contract_result(
@@ -559,7 +694,11 @@ class PackAPIHandler(
         if binding.presentation != "dynamic_pack_catalog":
             return dict(result)
         capability_binding = self._contract_routes.get(("POST", "/api/ui/capability/invoke"))
-        contributions = capability_binding.targets if capability_binding else ()
+        contributions = (
+            self._capability_targets(capability_binding, result)
+            if capability_binding
+            else ()
+        )
         session = self._dispatch_session
         catalog_hash = (
             self._frontend_catalog_hash(capability_binding)
@@ -580,8 +719,9 @@ class PackAPIHandler(
                         "mode": "same_origin_builtin",
                         "label": target.operation_id,
                         "priority": index,
-                        "owner_pack_id": "defaultspack",
-                        "owner_pack_hash": session.plan_digest if session is not None else "",
+                        "owner_pack_id": target.owner_pack_id,
+                        "owner_pack_hash": target.artifact_digest
+                        or (session.plan_digest if session is not None else ""),
                         "build_identity": target.function_id,
                         "resolved_profile_revision": session.plan_digest
                         if session is not None
@@ -595,6 +735,10 @@ class PackAPIHandler(
                         ),
                         "route": "/packs",
                         "action_contract": target.contract_id,
+                        "operation_id": target.operation_id,
+                        "provider_id": target.provider_id,
+                        "function_id": target.function_id,
+                        "pack_id": target.owner_pack_id,
                         "localization": {},
                         "accessibility": {
                             "name": target.operation_id,
@@ -608,6 +752,39 @@ class PackAPIHandler(
                 "catalog_hash": catalog_hash,
             },
         }
+
+    @staticmethod
+    def _normalize_dynamic_payload(
+        target: FrontendContractTarget,
+        payload: Mapping[str, object],
+        session: DispatchSession,
+    ) -> dict[str, object]:
+        """Bind dynamic Pack requests to Host identity and safe path semantics."""
+
+        if target.owner_pack_id == "defaultspack":
+            return dict(payload)
+        if target.contract_id != "tobkiri.service.media.inspect.v1":
+            raise ValueError("dynamic Pack operation is not an approved media contract")
+        if payload.get("name") not in {
+            "document.parse",
+            "image.inspect",
+            "audio.inspect",
+            "recording.inspect",
+        }:
+            raise ValueError("media inspection operation is not selected")
+        path = payload.get("path")
+        if not isinstance(path, str) or not path.strip() or "\x00" in path:
+            raise ValueError("a workspace-relative path is required")
+        if "\\" in path:
+            raise PermissionError("backslash paths are not accepted")
+        relative = PurePosixPath(path.strip())
+        if relative.is_absolute() or ".." in relative.parts or "." in relative.parts:
+            raise PermissionError("a workspace-relative path is required")
+        normalized = dict(payload)
+        normalized["path"] = relative.as_posix()
+        normalized["profile_id"] = session.profile_id
+        normalized["workspace_id"] = session.profile_id
+        return normalized
 
     def _parse_object_body(self) -> dict[str, object] | None:
         """Parse one JSON object and reject every other JSON root type."""
