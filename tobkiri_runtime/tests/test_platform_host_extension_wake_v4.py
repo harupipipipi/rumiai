@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from core_runtime.bootstrap.production_v4 import _authenticated_packvm_backend
 from core_runtime.authority.v4 import (
     AuthorityMode,
     AuthorityScope,
@@ -116,9 +117,7 @@ def binding():
         materialization_mode="on_demand",
         target_principal_ref=OpaqueAuthorityRef("authority:files"),
     )
-    return OperationCatalog((artifact,), (route,)).resolve(
-        "host.files.v1", "read", ">=1,<2"
-    )
+    return OperationCatalog((artifact,), (route,)).resolve("host.files.v1", "read", ">=1,<2")
 
 
 def materialized_artifact() -> MaterializedPackArtifact:
@@ -236,9 +235,7 @@ def test_platform_supervisor_accepts_only_explicit_portable_variant_alias() -> N
 
 def test_platform_selection_and_attestation_fail_closed() -> None:
     selected = binding()
-    unavailable = production_backend_registry(
-        platform_system="Darwin", machine="arm64"
-    )
+    unavailable = production_backend_registry(platform_system="Darwin", machine="arm64")
     with pytest.raises(BackendUnavailableError, match="supervisor"):
         unavailable.select(selected)
     driver = Driver()
@@ -344,6 +341,33 @@ def test_managed_lima_driver_invokes_only_authenticated_guest_and_rejects_replay
     assert driver.capability() == (False, "managed Lima PackVM attestation changed")
 
 
+def test_production_composition_registers_only_a_healthy_managed_lima_attestation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core_runtime.bootstrap import production_v4
+
+    monkeypatch.setattr(production_v4.platform, "system", lambda: "Darwin")
+    provisioner = Provisioner()
+    backend = _authenticated_packvm_backend(provisioner)
+    assert backend is not None
+    assert backend.status.backend_id == "tobkiri.python-pack-v4"
+    assert backend.status.ready_for_production is True
+    assert backend.status.backend_digest == provisioner.attestation
+
+    provisioner.attestation = digest("tampered-after-capture")
+    assert backend._driver.capability() == (
+        False,
+        "managed Lima PackVM attestation changed",
+    )
+    provisioner.doctor = lambda: SimpleNamespace(
+        ready=False,
+        reason="explicit provisioning required",
+        platform="macos-arm64",
+        attestation_digest=None,
+    )
+    assert _authenticated_packvm_backend(provisioner) is None
+
+
 class RegistrationStore:
     security_epoch = 1
 
@@ -438,10 +462,7 @@ def test_host_extension_sdk_exact_registration_revoke_and_normal_pack_denial() -
         ("provider_authority", ids[0]),
         ("host_extension", "trust.extension.files.v1"),
     ]
-    assert [
-        event["event_type"]
-        for event in restarted.audit_events("registration.files.v1")
-    ] == [
+    assert [event["event_type"] for event in restarted.audit_events("registration.files.v1")] == [
         "registered",
         "revoked",
     ]
@@ -526,13 +547,9 @@ def test_generated_tauri_roles_are_separate_and_production_selects_runtime_only(
         )
     )
     toolchain = json.loads(
-        (bundle / "packs" / "dev.tauri.toolchain.default.pack.v4.json").read_text(
-            encoding="utf-8"
-        )
+        (bundle / "packs" / "dev.tauri.toolchain.default.pack.v4.json").read_text(encoding="utf-8")
     )
-    profile = json.loads(
-        (bundle / "defaults.profile.v4.json").read_text(encoding="utf-8")
-    )
+    profile = json.loads((bundle / "defaults.profile.v4.json").read_text(encoding="utf-8"))
     assert runtime["pack"]["kind"] == "application"
     assert runtime["contracts"][0]["contract_id"] == "runtime.tauri.application.v1"
     assert toolchain["pack"]["kind"] == "host_extension"

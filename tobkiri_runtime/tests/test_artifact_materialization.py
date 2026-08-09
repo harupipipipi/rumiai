@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 from pathlib import Path
 import shutil
 
@@ -16,6 +18,7 @@ from tobkiri_host.artifact_materialization import capture_materialized_artifact
 from tobkiri_host.contracts import OperationCatalog, OperationRoute
 from tobkiri_host.errors import InvalidArtifactError
 from tobkiri_host.models import OpaqueAuthorityRef
+from tobkiri_protocol.canonical import canonical_digest
 
 
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
@@ -125,9 +128,7 @@ def test_guest_stage_is_read_only_replay_safe_and_reverified(
     identity = str(response["guest_artifact_identity"])
     with pytest.raises(ValueError, match="replay"):
         packvm_guest_runner._materialize(request)
-    retry = packvm_guest_runner._materialize(
-        captured.request_payload(nonce="b" * 64)
-    )
+    retry = packvm_guest_runner._materialize(captured.request_payload(nonce="b" * 64))
     assert retry["guest_artifact_identity"] == identity
 
     invoke = {
@@ -166,3 +167,77 @@ def test_guest_stage_is_read_only_replay_safe_and_reverified(
     target.chmod(0o500)
     with pytest.raises(ValueError, match="inventory changed"):
         packvm_guest_runner._verify_invocation_artifact(invoke)
+
+
+def test_guest_supervisor_materializes_and_invokes_the_exact_python_abi(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = (
+        b"def tobkiri_packvm_invoke(operation_id, payload):\n"
+        b"    return {'operation': operation_id, 'message': payload['message']}\n"
+    )
+    file_digest = "sha256:" + hashlib.sha256(source).hexdigest()
+    artifact_digest = "sha256:" + "1" * 64
+    inventory = [
+        {
+            "path": "runtime/operation.py",
+            "digest": file_digest,
+            "executable": False,
+            "size": len(source),
+        }
+    ]
+    materialization_digest = canonical_digest(
+        {
+            "pack_id": "example-pack",
+            "artifact_digest": artifact_digest,
+            "function_id": "example-pack.operation",
+            "implementation_digest": file_digest,
+            "implementation_path": "runtime/operation.py",
+            "files": inventory,
+        }
+    )
+    guest_root = tmp_path / "guest-artifacts"
+    monkeypatch.setattr(packvm_guest_runner, "ARTIFACT_ROOT", guest_root)
+    monkeypatch.setattr(packvm_guest_runner.os, "geteuid", lambda: 0)
+    staged = packvm_guest_runner._materialize(
+        {
+            "operation": "materialize",
+            "pack_id": "example-pack",
+            "artifact_digest": artifact_digest,
+            "function_id": "example-pack.operation",
+            "implementation_digest": file_digest,
+            "implementation_path": "runtime/operation.py",
+            "materialization_digest": materialization_digest,
+            "materialization_nonce": "a" * 64,
+            "files": [
+                {
+                    "path": "runtime/operation.py",
+                    "digest": file_digest,
+                    "executable": False,
+                    "content": base64.b64encode(source).decode("ascii"),
+                }
+            ],
+        }
+    )
+    result = packvm_guest_runner._invoke(
+        {
+            "operation": "invoke",
+            "request_id": "request.test",
+            "target_domain": "packvm:test",
+            "artifact_digest": artifact_digest,
+            "materialization_digest": materialization_digest,
+            "guest_artifact_identity": staged["guest_artifact_identity"],
+            "contract_id": "example.contract.v1",
+            "contract_version": "1.0.0",
+            "operation_id": "example-pack.inspect",
+            "payload": {"message": "inside guest"},
+            "request_digest": "sha256:" + "2" * 64,
+            "deadline_monotonic": 100.0,
+        }
+    )
+    assert result["ok"] is True
+    assert result["payload"] == {
+        "operation": "example-pack.inspect",
+        "message": "inside guest",
+    }

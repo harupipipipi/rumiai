@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Callable, Mapping, Protocol
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .api.api_response import APIResponse
 from .api.auth_gate import AuthGateMixin
@@ -139,6 +139,26 @@ class LifecyclePort(Protocol):
         """Return current process health."""
 
 
+class PackVMLifecyclePort(Protocol):
+    """Typed Host-owned lifecycle for the dedicated v4 PackVM."""
+
+    def prepare(self) -> Mapping[str, object]: ...
+
+    def consent(self, payload: Mapping[str, object]) -> Mapping[str, object]: ...
+
+    def provision(self, payload: Mapping[str, object]) -> Mapping[str, object]: ...
+
+    def doctor(self) -> Mapping[str, object]: ...
+
+    def progress(self, operation_id: str) -> Mapping[str, object]: ...
+
+    def cancel(self, payload: Mapping[str, object]) -> Mapping[str, object]: ...
+
+    def stop(self, payload: Mapping[str, object]) -> Mapping[str, object]: ...
+
+    def cleanup(self, payload: Mapping[str, object]) -> Mapping[str, object]: ...
+
+
 @dataclass(frozen=True)
 class RuntimeHTTPConfig:
     """Verified local-only server coordinates."""
@@ -211,6 +231,7 @@ class PackAPIHandler(
     _contract_routes: Mapping[tuple[str, str], FrontendContractBinding] = {}
     _contract_replay_guard: _RequestReplayGuard | None = None
     _runtime_refresh: Callable[[DispatchSession | None], None] | None = None
+    _packvm_lifecycle: PackVMLifecyclePort | None = None
     _workspace_binding_resolver: WorkspaceBindingResolver | None = None
     _instance_web_mounts: tuple[WebMountEntry, ...] | None = None
     app_lifecycle_manager: LifecyclePort | None = None
@@ -231,6 +252,7 @@ class PackAPIHandler(
         web_mounts: tuple[WebMountEntry, ...] | None = None,
         runtime_refresh: Callable[[DispatchSession | None], None] | None = None,
         workspace_binding_resolver: WorkspaceBindingResolver | None = None,
+        packvm_lifecycle: PackVMLifecyclePort | None = None,
     ) -> type["PackAPIHandler"]:
         """Create an isolated handler bound to one captured runtime session."""
 
@@ -242,6 +264,7 @@ class PackAPIHandler(
         bound_web_mounts = web_mounts
         bound_runtime_refresh = runtime_refresh
         bound_workspace_binding_resolver = workspace_binding_resolver
+        bound_packvm_lifecycle = packvm_lifecycle
 
         class BoundPackAPIHandler(PackAPIHandler):
             _panel_auth_manager = bound_panel_auth
@@ -249,6 +272,7 @@ class PackAPIHandler(
             app_lifecycle_manager = bound_lifecycle
             _contract_routes = bound_contract_routes
             _contract_replay_guard = bound_replay_guard
+            _packvm_lifecycle = bound_packvm_lifecycle
             _instance_web_mounts = bound_web_mounts
             _runtime_refresh = (
                 staticmethod(bound_runtime_refresh) if bound_runtime_refresh is not None else None
@@ -510,6 +534,96 @@ class PackAPIHandler(
         self._send_response(APIResponse(True, data=presented))
         return True
 
+    def _handle_packvm_lifecycle(self, method: str, path: str) -> bool:
+        """Serve the finite authenticated v4 PackVM lifecycle contract."""
+
+        prefix = "/api/v4/packvm/"
+        if not path.startswith(prefix):
+            return False
+        operation = path.removeprefix(prefix)
+        allowed = {
+            ("POST", "prepare"),
+            ("POST", "consent"),
+            ("POST", "provision"),
+            ("GET", "doctor"),
+            ("GET", "progress"),
+            ("POST", "cancel"),
+            ("POST", "stop"),
+            ("POST", "cleanup"),
+        }
+        if (method, operation) not in allowed:
+            self._discard_request_body()
+            self._send_not_found()
+            return True
+        if not self._check_auth(method, path):
+            self._discard_request_body()
+            self._send_response(APIResponse(False, error="Unauthorized"), 401)
+            return True
+        if method == "POST":
+            panel_session = self._panel_session
+            session_id = panel_session.get("session_id") if panel_session else None
+            request_id = self.headers.get("X-Tobkiri-Request-ID", "").strip().lower()
+            guard = self._contract_replay_guard
+            if (
+                not isinstance(session_id, str)
+                or guard is None
+                or not guard.consume(session_id, request_id)
+            ):
+                self._discard_request_body()
+                self._send_response(
+                    APIResponse(False, error="Canonical request identity is missing or replayed"),
+                    409,
+                )
+                return True
+            payload = self._parse_object_body()
+            if payload is None:
+                return True
+        else:
+            self._discard_request_body()
+            payload = {}
+        lifecycle = self._packvm_lifecycle
+        if lifecycle is None:
+            self._send_response(APIResponse(False, error="PackVM lifecycle is unavailable"), 503)
+            return True
+        try:
+            if operation == "prepare":
+                if payload:
+                    raise ValueError("PackVM prepare payload must be empty")
+                result = lifecycle.prepare()
+            elif operation == "consent":
+                result = lifecycle.consent(payload)
+            elif operation == "provision":
+                result = lifecycle.provision(payload)
+            elif operation == "doctor":
+                result = lifecycle.doctor()
+            elif operation == "progress":
+                operation_values = parse_qs(urlparse(self.path).query).get("operation_id", [])
+                if len(operation_values) != 1:
+                    raise ValueError("PackVM progress requires one operation_id")
+                result = lifecycle.progress(operation_values[0])
+            elif operation == "cancel":
+                result = lifecycle.cancel(payload)
+            elif operation == "stop":
+                result = lifecycle.stop(payload)
+            else:
+                result = lifecycle.cleanup(payload)
+            if operation == "doctor" and result.get("ready") is True and self._runtime_refresh:
+                self._runtime_refresh(None)
+            elif operation in {"stop", "cleanup"} and self._runtime_refresh:
+                self._runtime_refresh(None)
+        except (OSError, RuntimeError, ValueError) as error:
+            self._send_response(
+                APIResponse(
+                    False,
+                    data={"state": "packvm_lifecycle_denied", "operation": operation},
+                    error=str(error),
+                ),
+                409,
+            )
+            return True
+        self._send_response(APIResponse(True, data=dict(result)))
+        return True
+
     def _refresh_after_operation(self, operation_id: str) -> None:
         """Publish a fresh runtime capture after an activation boundary."""
 
@@ -637,11 +751,13 @@ class PackAPIHandler(
             pack_id = str(pack.get("pack_id") or "").strip()
             if not pack_id or pack.get("enabled") is not True or pack.get("approved") is not True:
                 continue
-            operations = pack.get("invokable_operations")
+            operations = pack.get("operations")
             if not isinstance(operations, list):
                 continue
             for operation in operations:
                 if not isinstance(operation, Mapping):
+                    continue
+                if operation.get("invokable") is not True:
                     continue
                 contract_id = str(operation.get("contract_id") or "").strip()
                 operation_id = str(operation.get("operation_id") or "").strip()
@@ -703,11 +819,13 @@ class PackAPIHandler(
             if not isinstance(pack, Mapping) or pack.get("enabled") is not True:
                 continue
             pack_id = str(pack.get("pack_id") or "")
-            operations = pack.get("invokable_operations")
+            operations = pack.get("operations")
             if not isinstance(operations, list):
                 continue
             for operation in operations:
                 if not isinstance(operation, Mapping):
+                    continue
+                if operation.get("invokable") is not True:
                     continue
                 contract_id = str(operation.get("contract_id") or "")
                 operation_id = str(operation.get("operation_id") or "")
@@ -721,8 +839,9 @@ class PackAPIHandler(
                         diagnostics.append(
                             {
                                 "code": "production_backend_unavailable",
-                                "pack_id": pack_id,
-                                "operation_id": operation_id,
+                                "severity": "error",
+                                "owner_pack_id": pack_id,
+                                "contribution_id": f"pack.{pack_id}.{operation_id}",
                                 "message": str(provider["backend_unavailable_reason"]),
                             }
                         )
@@ -781,7 +900,6 @@ class PackAPIHandler(
                         "operation_id": target.operation_id,
                         "provider_id": target.provider_id,
                         "function_id": target.function_id,
-                        "pack_id": target.owner_pack_id,
                         "localization": {},
                         "accessibility": {
                             "name": target.operation_id,
@@ -1066,6 +1184,8 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
 
         self._reset_request_state()
         path = urlparse(self.path).path
+        if self._handle_packvm_lifecycle("GET", path):
+            return
         if self._handle_contract_request("GET"):
             return
         if self._is_retired_setup_complete_path():
@@ -1118,6 +1238,8 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
 
         self._reset_request_state()
         path = urlparse(self.path).path
+        if self._handle_packvm_lifecycle("POST", path):
+            return
         if self._handle_contract_request("POST"):
             return
         if self._is_retired_setup_complete_path():
@@ -1205,6 +1327,7 @@ class PackAPIServer:
         contract_bindings: tuple[FrontendContractBinding, ...] = (),
         web_mounts: tuple[WebMountEntry, ...] | None = None,
         workspace_binding_resolver: WorkspaceBindingResolver | None = None,
+        packvm_lifecycle: PackVMLifecyclePort | None = None,
     ) -> None:
         self.config = RuntimeHTTPConfig.verify(host, port)
         self.host = self.config.host
@@ -1215,6 +1338,11 @@ class PackAPIServer:
         self._contract_routes = contract_binding_map(contract_bindings)
         self._web_mounts = web_mounts
         self._workspace_binding_resolver = workspace_binding_resolver
+        if packvm_lifecycle is None:
+            from .packvm_lifecycle_v4 import PackVMLifecycleV4
+
+            packvm_lifecycle = PackVMLifecycleV4()
+        self._packvm_lifecycle = packvm_lifecycle
         self._replay_guard = _RequestReplayGuard()
         self.server: _PackThreadingHTTPServer | None = None
         self.thread: threading.Thread | None = None
@@ -1237,6 +1365,7 @@ class PackAPIServer:
                 web_mounts=self._web_mounts,
                 runtime_refresh=self._refresh_runtime_capture,
                 workspace_binding_resolver=self._workspace_binding_resolver,
+                packvm_lifecycle=self._packvm_lifecycle,
             )
             server = _PackThreadingHTTPServer((self.host, self.port), handler)
             actual_port = int(server.server_address[1])
@@ -1353,6 +1482,7 @@ class PackAPIServer:
                 web_mounts=self._web_mounts,
                 runtime_refresh=self._refresh_runtime_capture,
                 workspace_binding_resolver=self._workspace_binding_resolver,
+                packvm_lifecycle=self._packvm_lifecycle,
             )
             handler._runtime_port = self.port
             self._dispatch_session = session
@@ -1407,6 +1537,7 @@ def initialize_pack_api_server(
     contract_bindings: tuple[FrontendContractBinding, ...] = (),
     web_mounts: tuple[WebMountEntry, ...] | None = None,
     workspace_binding_resolver: WorkspaceBindingResolver | None = None,
+    packvm_lifecycle: PackVMLifecyclePort | None = None,
 ) -> PackAPIServer:
     """Replace the process-local server with one verified v4 instance."""
 
@@ -1422,6 +1553,7 @@ def initialize_pack_api_server(
         contract_bindings=contract_bindings,
         web_mounts=web_mounts,
         workspace_binding_resolver=workspace_binding_resolver,
+        packvm_lifecycle=packvm_lifecycle,
     )
     server.start()
     _api_server = server

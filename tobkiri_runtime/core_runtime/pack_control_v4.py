@@ -437,8 +437,8 @@ def _catalog_payload(binding: _Binding) -> dict[str, Any]:
         )
         status = "approved" if approved else "installed"
         declared_operations = _declared_operations(record)
-        invokable_operations = [
-            operation
+        invokable_operation_keys = {
+            (operation["contract_id"], operation["operation_id"])
             for operation in declared_operations
             if (
                 pack_id in active
@@ -446,6 +446,14 @@ def _catalog_payload(binding: _Binding) -> dict[str, Any]:
                 and (operation["contract_id"], operation["operation_id"]) in plan_bindings
                 and (operation["contract_id"], operation["operation_id"]) in active_grant_bindings
             )
+        }
+        operations = [
+            {
+                **operation,
+                "invokable": (operation["contract_id"], operation["operation_id"])
+                in invokable_operation_keys,
+            }
+            for operation in declared_operations
         ]
         packs.append(
             {
@@ -468,8 +476,8 @@ def _catalog_payload(binding: _Binding) -> dict[str, Any]:
                 "dependencies": sorted(
                     str(dependency) for dependency in (record.get("dependencies") or {})
                 ),
-                "declared_operations": declared_operations,
-                "invokable_operations": invokable_operations,
+                "operations_api_version": "io.tobkiri.pack-operations.v1",
+                "operations": operations,
                 **_binding_payload(binding),
             }
         )
@@ -586,6 +594,8 @@ def _declared_operations(record: Mapping[str, Any]) -> list[dict[str, Any]]:
                     "provider_id": provider_id,
                     "function_id": provider_id,
                     "required_capabilities": required_capabilities,
+                    "capabilities": required_capabilities,
+                    "input_schema": dict(operation.get("input_schema") or {}),
                 }
             )
     return sorted(
@@ -689,18 +699,12 @@ def _activate_pack_set(state: Mapping[str, Any], pack_ids: list[str]) -> None:
             manifest = validate_document(manifest_path.read_bytes(), "pack")
         except Exception as error:
             raise PackControlDenied("Pack v4 manifest is invalid") from error
-        external_normal = (
-            record.get("authority") == "host-signed-external-normal-v4"
-        )
-        if (
-            manifest["pack"]["id"] != pack_id
-            or (
-                external_normal
-                and (
-                    manifest["pack"]["kind"] != "normal_sandbox"
-                    or manifest["pack"]["artifact_digest"]
-                    != record.get("artifact_digest")
-                )
+        external_normal = record.get("authority") == "host-signed-external-normal-v4"
+        if manifest["pack"]["id"] != pack_id or (
+            external_normal
+            and (
+                manifest["pack"]["kind"] != "normal_sandbox"
+                or manifest["pack"]["artifact_digest"] != record.get("artifact_digest")
             )
         ):
             raise PackControlDenied("Pack v4 manifest identity is inconsistent")

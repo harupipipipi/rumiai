@@ -6,12 +6,14 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
 import stat
+import subprocess
 import sys
 
 
@@ -22,6 +24,7 @@ MAX_REQUEST_BYTES = 700 * 1024 * 1024
 MAX_FILES = 10_000
 MAX_FILE_BYTES = 128 * 1024 * 1024
 MAX_TOTAL_BYTES = 512 * 1024 * 1024
+MAX_RESULT_BYTES = 16 * 1024 * 1024
 _DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
 _IDENTIFIER = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 
@@ -30,6 +33,10 @@ def main() -> int:
     """Serve one bounded request from stdin and emit one JSON response."""
 
     try:
+        if sys.argv[1:]:
+            if len(sys.argv) != 3 or sys.argv[1] != "--execute":
+                raise ValueError("PackVM runner arguments are invalid")
+            return _execute_staged_module(Path(sys.argv[2]))
         raw = sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1)
         if len(raw) > MAX_REQUEST_BYTES:
             raise ValueError("request exceeds size limit")
@@ -62,13 +69,7 @@ def main() -> int:
                 },
             }
         elif operation == "invoke":
-            identity = _verify_invocation_artifact(request)
-            response = {
-                "ok": False,
-                "error": "packvm_execution_abi_unavailable",
-                "protocol": PROTOCOL,
-                "guest_artifact_identity": identity,
-            }
+            response = _invoke(request)
         else:
             raise ValueError("unsupported operation")
     except (binascii.Error, OSError, ValueError, json.JSONDecodeError) as exc:
@@ -81,6 +82,124 @@ def main() -> int:
     sys.stdout.write(json.dumps(response, sort_keys=True, separators=(",", ":")))
     sys.stdout.write("\n")
     return 0
+
+
+def _invoke(request: dict[str, object]) -> dict[str, object]:
+    """Execute one digest-pinned implementation through the finite PackVM ABI."""
+
+    required = {
+        "operation",
+        "request_id",
+        "target_domain",
+        "artifact_digest",
+        "materialization_digest",
+        "guest_artifact_identity",
+        "contract_id",
+        "contract_version",
+        "operation_id",
+        "payload",
+        "request_digest",
+        "deadline_monotonic",
+    }
+    if set(request) != required:
+        raise ValueError("PackVM invocation fields are invalid")
+    for field in ("request_id", "target_domain", "contract_version"):
+        if not isinstance(request[field], str) or not request[field]:
+            raise ValueError(f"PackVM invocation {field} is invalid")
+    if not isinstance(request["payload"], dict):
+        raise ValueError("PackVM invocation payload must be an object")
+    _digest(request["request_digest"], "request_digest")
+    if not isinstance(request["deadline_monotonic"], (int, float)):
+        raise ValueError("PackVM invocation deadline is invalid")
+    identity = _verify_invocation_artifact(request)
+    artifact_digest = _digest(request["artifact_digest"], "artifact_digest")
+    materialization_digest = _digest(request["materialization_digest"], "materialization_digest")
+    target = (
+        ARTIFACT_ROOT
+        / artifact_digest.removeprefix("sha256:")
+        / materialization_digest.removeprefix("sha256:")
+    )
+    manifest = _load_manifest(target)
+    implementation_path = _relative_path(manifest.get("implementation_path"))
+    implementation = target.joinpath(*PurePosixPath(implementation_path).parts)
+    encoded = json.dumps(
+        {
+            "contract_id": _identifier(request["contract_id"], "contract_id"),
+            "operation_id": _identifier(request["operation_id"], "operation_id"),
+            "payload": request["payload"],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    if len(encoded) > MAX_REQUEST_BYTES:
+        raise ValueError("PackVM invocation payload exceeds size limit")
+    process = subprocess.Popen(
+        (
+            sys.executable,
+            "-I",
+            "-S",
+            str(Path(__file__).resolve()),
+            "--execute",
+            str(implementation),
+        ),
+        cwd=target,
+        env={"PATH": "/usr/bin:/bin"},
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = process.communicate(encoded, timeout=60)
+    except subprocess.TimeoutExpired as exc:
+        process.kill()
+        process.communicate()
+        raise ValueError("PackVM invocation timed out") from exc
+    if process.returncode != 0:
+        message = stderr.decode("utf-8", errors="replace")[:1000]
+        raise ValueError(message or "PackVM implementation failed")
+    if len(stdout) > MAX_RESULT_BYTES:
+        raise ValueError("PackVM invocation result exceeds size limit")
+    result = json.loads(stdout)
+    if not isinstance(result, dict):
+        raise ValueError("PackVM implementation result must be an object")
+    return {
+        "ok": True,
+        "protocol": PROTOCOL,
+        "guest_artifact_identity": identity,
+        "payload": result,
+    }
+
+
+def _execute_staged_module(path: Path) -> int:
+    """Private child mode for the explicit staged Python Pack ABI."""
+
+    try:
+        request = json.loads(sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1))
+        if not isinstance(request, dict) or set(request) != {
+            "contract_id",
+            "operation_id",
+            "payload",
+        }:
+            raise ValueError("PackVM child request is invalid")
+        specification = importlib.util.spec_from_file_location("_tobkiri_packvm_entry", path)
+        if specification is None or specification.loader is None:
+            raise ValueError("PackVM implementation cannot be loaded")
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        operation = getattr(module, "tobkiri_packvm_invoke", None)
+        if not callable(operation):
+            raise ValueError("PackVM implementation does not export tobkiri_packvm_invoke")
+        result = operation(request["operation_id"], request["payload"])
+        if not isinstance(result, dict):
+            raise ValueError("PackVM implementation result must be an object")
+        encoded = json.dumps(result, sort_keys=True, separators=(",", ":")).encode()
+        if len(encoded) > MAX_RESULT_BYTES:
+            raise ValueError("PackVM implementation result exceeds size limit")
+        sys.stdout.buffer.write(encoded)
+        return 0
+    except Exception as error:
+        sys.stderr.write(f"{type(error).__name__}: {error}\n")
+        return 1
 
 
 def _materialize(request: dict[str, object]) -> dict[str, object]:
@@ -102,12 +221,8 @@ def _materialize(request: dict[str, object]) -> dict[str, object]:
     pack_id = _identifier(request["pack_id"], "pack_id")
     function_id = _identifier(request["function_id"], "function_id")
     artifact_digest = _digest(request["artifact_digest"], "artifact_digest")
-    implementation_digest = _digest(
-        request["implementation_digest"], "implementation_digest"
-    )
-    materialization_digest = _digest(
-        request["materialization_digest"], "materialization_digest"
-    )
+    implementation_digest = _digest(request["implementation_digest"], "implementation_digest")
+    materialization_digest = _digest(request["materialization_digest"], "materialization_digest")
     implementation_path = _relative_path(request["implementation_path"])
     nonce = str(request["materialization_nonce"])
     if len(nonce) != 64 or any(character not in "0123456789abcdef" for character in nonce):
@@ -272,9 +387,7 @@ def _verify_invocation_artifact(request: dict[str, object]) -> str:
     materialization_digest = _digest(
         request.get("materialization_digest"), "materialization_digest"
     )
-    expected_identity = _digest(
-        request.get("guest_artifact_identity"), "guest_artifact_identity"
-    )
+    expected_identity = _digest(request.get("guest_artifact_identity"), "guest_artifact_identity")
     target = (
         ARTIFACT_ROOT
         / artifact_digest.removeprefix("sha256:")
@@ -306,7 +419,11 @@ def _verify_staged_artifact(
     materialization_digest: str,
 ) -> str:
     metadata = target.lstat()
-    if target.is_symlink() or not stat.S_ISDIR(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o500:
+    if (
+        target.is_symlink()
+        or not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o500
+    ):
         raise ValueError("staged artifact root is unsafe")
     manifest = _load_manifest(target)
     if (
@@ -317,11 +434,7 @@ def _verify_staged_artifact(
     files = manifest.get("files")
     if not isinstance(files, list):
         raise ValueError("staged artifact manifest is invalid")
-    expected_files = {
-        _relative_path(item.get("path"))
-        for item in files
-        if isinstance(item, dict)
-    }
+    expected_files = {_relative_path(item.get("path")) for item in files if isinstance(item, dict)}
     if len(expected_files) != len(files):
         raise ValueError("staged artifact manifest is invalid")
     expected_directories = {
@@ -351,11 +464,11 @@ def _verify_staged_artifact(
             raise ValueError("staged artifact manifest is invalid")
         relative = _relative_path(item.get("path"))
         candidate = target.joinpath(*PurePosixPath(relative).parts)
-        current = candidate.lstat()
-        if candidate.is_symlink() or not stat.S_ISREG(current.st_mode):
+        candidate_metadata = candidate.lstat()
+        if candidate.is_symlink() or not stat.S_ISREG(candidate_metadata.st_mode):
             raise ValueError("staged artifact contains an unsafe file")
         expected_mode = 0o500 if item.get("executable") is True else 0o400
-        if stat.S_IMODE(current.st_mode) != expected_mode:
+        if stat.S_IMODE(candidate_metadata.st_mode) != expected_mode:
             raise ValueError("staged artifact file is not read-only")
         content = candidate.read_bytes()
         if len(content) != item.get("size") or _sha256(content) != item.get("digest"):
@@ -388,11 +501,12 @@ def _load_manifest(target: Path) -> dict[str, object]:
         after = os.fstat(descriptor)
     finally:
         os.close(descriptor)
-    if (
-        len(content) > MAX_REQUEST_BYTES
-        or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
-        != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
-    ):
+    if len(content) > MAX_REQUEST_BYTES or (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+    ) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
         raise ValueError("staged artifact manifest changed while reading")
     value = json.loads(content)
     if not isinstance(value, dict):

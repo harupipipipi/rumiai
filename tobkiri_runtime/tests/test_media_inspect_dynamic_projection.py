@@ -388,16 +388,23 @@ def test_media_catalog_reports_missing_authenticated_supervisor(media_server) ->
     )
     assert row["enabled"] is True
     assert row["approved"] is True
+    assert row["operations_api_version"] == "io.tobkiri.pack-operations.v1"
+    assert "declared_operations" not in row
+    assert "invokable_operations" not in row
     assert {item["name"] for item in row["capabilities"]} == {
         "file.inspect",
         "media.inspect",
     }
     media_operations = [
-        item for item in row["invokable_operations"] if item["contract_id"] == MEDIA_CONTRACT
+        item
+        for item in row["operations"]
+        if item["contract_id"] == MEDIA_CONTRACT and item["invokable"] is True
     ]
     assert len(media_operations) == 1, row
     operation = media_operations[0]
     assert operation["operation_id"] == MEDIA_OPERATION
+    assert operation["capabilities"] == operation["required_capabilities"]
+    assert isinstance(operation["input_schema"], dict)
 
     headers = _authenticated(server)
     status, catalog, _ = _request(
@@ -409,8 +416,10 @@ def test_media_catalog_reports_missing_authenticated_supervisor(media_server) ->
     assert status == 200, catalog
     host = catalog["data"]["dynamic_host"]
     assert all(item["owner_pack_id"] != MEDIA_PACK for item in host["contributions"])
-    diagnostic = next(item for item in host["diagnostics"] if item["pack_id"] == MEDIA_PACK)
+    diagnostic = next(item for item in host["diagnostics"] if item["owner_pack_id"] == MEDIA_PACK)
     assert diagnostic["code"] == "production_backend_unavailable"
+    assert diagnostic["severity"] == "error"
+    assert diagnostic["contribution_id"] == f"pack.{MEDIA_PACK}.{MEDIA_OPERATION}"
     assert "authenticated PackVM supervisor" in diagnostic["message"]
 
 

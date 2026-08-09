@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import uuid
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 
@@ -45,6 +46,51 @@ class _Lifecycle:
 
     def get_health(self) -> dict[str, object]:
         return {"status": "ok", "runtime_ready": True}
+
+
+class _PackVMLifecycle:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def prepare(self) -> Mapping[str, object]:
+        self.calls.append(("prepare", {}))
+        return {
+            "instance": "tobkiri-packvm-v4",
+            "image_source": "https://images.invalid/pinned.img",
+            "image_digest": "sha256:" + "a" * 64,
+            "image_size_bytes": 700_000_000,
+            "plan_digest": "sha256:" + "b" * 64,
+            "ceremony_nonce": "c" * 32,
+            "confirmation": "PROVISION tobkiri-packvm-v4 bbbbbbbbbbbb",
+        }
+
+    def consent(self, payload: Mapping[str, object]) -> Mapping[str, object]:
+        self.calls.append(("consent", dict(payload)))
+        return {"consent_id": "packvm-consent.test"}
+
+    def provision(self, payload: Mapping[str, object]) -> Mapping[str, object]:
+        self.calls.append(("provision", dict(payload)))
+        return {"operation_id": payload["operation_id"], "state": "queued"}
+
+    def doctor(self) -> Mapping[str, object]:
+        self.calls.append(("doctor", {}))
+        return {"ready": True, "attestation_digest": "sha256:" + "d" * 64}
+
+    def progress(self, operation_id: str) -> Mapping[str, object]:
+        self.calls.append(("progress", {"operation_id": operation_id}))
+        return {"operation_id": operation_id, "state": "succeeded"}
+
+    def cancel(self, payload: Mapping[str, object]) -> Mapping[str, object]:
+        self.calls.append(("cancel", dict(payload)))
+        return {"operation_id": payload["operation_id"], "state": "cancelled"}
+
+    def stop(self, payload: Mapping[str, object]) -> Mapping[str, object]:
+        self.calls.append(("stop", dict(payload)))
+        return {"ready": False}
+
+    def cleanup(self, payload: Mapping[str, object]) -> Mapping[str, object]:
+        self.calls.append(("cleanup", dict(payload)))
+        return {"ready": False, "instance": "tobkiri-packvm-v4"}
 
 
 @pytest.fixture
@@ -123,9 +169,122 @@ def _assert_retired_generic_dispatch(
         "retired_route": "/api/v4/dispatch",
         "write_set": [],
     }
-    assert payload["error"] == (
-        "Legacy API route is retired; use an exact Pack v4 operation"
+    assert payload["error"] == ("Legacy API route is retired; use an exact Pack v4 operation")
+
+
+def test_packvm_lifecycle_routes_require_auth_csrf_and_fresh_request_id() -> None:
+    lifecycle = _PackVMLifecycle()
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified-desktop"),
+        packvm_lifecycle=lifecycle,
     )
+    refreshed: list[object] = []
+    server._refresh_runtime_capture = lambda session=None: refreshed.append(session)  # type: ignore[method-assign]
+    server.start()
+    try:
+        status, _payload, _headers = _request(
+            server,
+            "POST",
+            "/api/v4/packvm/prepare",
+            body={},
+        )
+        assert status == 401
+        cookie, csrf, origin = _panel_session(server)
+        authenticated = {
+            "Cookie": cookie,
+            "Origin": origin,
+            "X-Rumi-CSRF": csrf,
+        }
+        request_id = str(uuid.uuid4())
+        status, prepared, _headers = _request(
+            server,
+            "POST",
+            "/api/v4/packvm/prepare",
+            body={},
+            headers={**authenticated, "X-Tobkiri-Request-ID": request_id},
+        )
+        assert status == 200
+        assert prepared["data"]["image_size_bytes"] == 700_000_000
+        assert prepared["data"]["image_digest"] == "sha256:" + "a" * 64
+
+        replay_status, _replay, _headers = _request(
+            server,
+            "POST",
+            "/api/v4/packvm/prepare",
+            body={},
+            headers={**authenticated, "X-Tobkiri-Request-ID": request_id},
+        )
+        assert replay_status == 409
+        assert [call[0] for call in lifecycle.calls].count("prepare") == 1
+
+        consent_body = {
+            "plan_digest": prepared["data"]["plan_digest"],
+            "ceremony_nonce": prepared["data"]["ceremony_nonce"],
+            "confirmation": prepared["data"]["confirmation"],
+            "approve_image_download": True,
+        }
+        status, consent, _headers = _request(
+            server,
+            "POST",
+            "/api/v4/packvm/consent",
+            body=consent_body,
+            headers={
+                **authenticated,
+                "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+            },
+        )
+        assert status == 200
+        status, provisioned, _headers = _request(
+            server,
+            "POST",
+            "/api/v4/packvm/provision",
+            body={
+                "consent_id": consent["data"]["consent_id"],
+                "operation_id": "11111111-1111-4111-8111-111111111111",
+            },
+            headers={
+                **authenticated,
+                "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+            },
+        )
+        assert status == 200
+        assert provisioned["data"]["state"] == "queued"
+        assert refreshed == []
+
+        status, progress, _headers = _request(
+            server,
+            "GET",
+            "/api/v4/packvm/progress?operation_id=11111111-1111-4111-8111-111111111111",
+            headers={"Cookie": cookie, "Origin": origin},
+        )
+        assert status == 200
+        assert progress["data"]["state"] == "succeeded"
+
+        status, cancelled, _headers = _request(
+            server,
+            "POST",
+            "/api/v4/packvm/cancel",
+            body={"operation_id": "11111111-1111-4111-8111-111111111111"},
+            headers={
+                **authenticated,
+                "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+            },
+        )
+        assert status == 200
+        assert cancelled["data"]["state"] == "cancelled"
+
+        status, doctor, _headers = _request(
+            server,
+            "GET",
+            "/api/v4/packvm/doctor",
+            headers={"Cookie": cookie, "Origin": origin},
+        )
+        assert status == 200
+        assert doctor["data"]["ready"] is True
+        assert refreshed == [None]
+    finally:
+        server.stop()
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1"])

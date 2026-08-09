@@ -28,6 +28,7 @@ LimaRunner = Callable[[Sequence[str], str | None, float | None], Any]
 
 
 DEFAULT_LIMA_INSTANCE = "rumi-managed-runtime"
+PACKVM_LIMA_INSTANCE = "tobkiri-packvm-v4"
 LIMA_STATE_VERSION = 1
 LIMA_CONFIG_POLICY_VERSION = 4
 LIMA_STATE_ENV = "RUMI_SANDBOX_LIMA_STATE"
@@ -37,7 +38,7 @@ LIMA_GUEST_PACK_DATA_ROOT = "/var/lib/rumi/pack-data"
 PACKVM_BACKEND_ID = "tobkiri.python-pack-v4"
 PACKVM_GUEST_RUNNER = "/usr/local/libexec/tobkiri-packvm-supervisor"
 PACKVM_PROTOCOL = "io.tobkiri.packvm-supervisor.v1"
-PACKVM_ATTESTATION_VERSION = 1
+PACKVM_ATTESTATION_VERSION = 2
 PACKVM_CONFIRMATION_PREFIX = "PROVISION"
 PACKVM_CLEANUP_PREFIX = "DELETE"
 MAX_PACKVM_ARTIFACT_REQUEST_BYTES = 700 * 1024 * 1024
@@ -75,6 +76,7 @@ class PackVMProvisioningPlan:
     image_download_required: bool
     config_digest: str
     guest_runner_digest: str
+    host_build_digest: str
     ceremony_nonce: str
     plan_digest: str
     confirmation: str
@@ -211,9 +213,7 @@ def lima_instance_payload(
 ) -> dict[str, Any]:
     if runner is None:
         executable = (
-            str(Path(limactl).resolve())
-            if Path(limactl).is_absolute()
-            else shutil.which(limactl)
+            str(Path(limactl).resolve()) if Path(limactl).is_absolute() else shutil.which(limactl)
         )
         if executable is None:
             raise ValueError("limactl is unavailable")
@@ -293,13 +293,14 @@ def validate_lima_instance_config(payload: Mapping[str, Any]) -> str | None:
     ssh = config.get("ssh")
     if not isinstance(ssh, Mapping) or ssh.get("forwardAgent") is not False:
         return "Lima sandbox SSH agent forwarding must be disabled"
-    if (
-        ssh.get("forwardX11") is not False
-        or ssh.get("forwardX11Trusted") is not False
-    ):
+    if ssh.get("forwardX11") is not False or ssh.get("forwardX11Trusted") is not False:
         return "Lima sandbox X11 forwarding must be disabled"
     containerd = config.get("containerd")
-    if not isinstance(containerd, Mapping) or containerd.get("system") is not False or containerd.get("user") is not False:
+    if (
+        not isinstance(containerd, Mapping)
+        or containerd.get("system") is not False
+        or containerd.get("user") is not False
+    ):
         return "Lima sandbox containerd services must be disabled"
     if config.get("propagateProxyEnv") is not False:
         return "Lima sandbox host proxy propagation must be disabled"
@@ -320,7 +321,9 @@ def stable_lima_config_hash(instance: str, payload: Mapping[str, Any]) -> str:
         "vmType": payload.get("vmType"),
         "config": config if isinstance(config, Mapping) else {},
     }
-    encoded = json.dumps(relevant, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    encoded = json.dumps(
+        relevant, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+    )
     return hashlib.sha256(encoded.encode("utf-8", errors="replace")).hexdigest()
 
 
@@ -342,10 +345,7 @@ def build_guest_bwrap_argv(
         or workspace_path.parent != workspace_root
         or workspace_path.name in {"", ".", ".."}
         or not cwd_path.is_absolute()
-        or (
-            cwd_path != visible_workspace
-            and visible_workspace not in cwd_path.parents
-        )
+        or (cwd_path != visible_workspace and visible_workspace not in cwd_path.parents)
         or ".." in cwd_path.parts
     ):
         raise ValueError("guest sandbox paths must be absolute")
@@ -418,11 +418,7 @@ def _with_resolved_mounts(
     if not missing_fields:
         return dict(payload)
     instance_dir = Path(str(payload.get("dir") or ""))
-    if (
-        not instance_dir.is_absolute()
-        or instance_dir.name != instance
-        or instance_dir.is_symlink()
-    ):
+    if not instance_dir.is_absolute() or instance_dir.name != instance or instance_dir.is_symlink():
         raise ValueError("Lima sandbox config attestation source is unavailable")
     config_path = instance_dir / "lima.yaml"
     try:
@@ -490,7 +486,7 @@ class PackVMLimaProvisioner:
         runner: LimaRunner | None = None,
         state_dir: Path | None = None,
         machine: str | None = None,
-        instance: str = DEFAULT_LIMA_INSTANCE,
+        instance: str = PACKVM_LIMA_INSTANCE,
     ) -> None:
         self._command_path = command_path
         self._runner = runner
@@ -524,10 +520,12 @@ class PackVMLimaProvisioner:
             "image_download_required": not self._instance_exists(limactl),
             "config_digest": _sha256(config),
             "guest_runner_digest": _file_digest(_PACKVM_RUNNER),
+            "host_build_digest": _file_digest(Path(__file__)),
             "ceremony_nonce": nonce,
         }
         plan_digest = _canonical_digest(facts)
         confirmation = f"{PACKVM_CONFIRMATION_PREFIX} {self._instance} {plan_digest[7:19]}"
+        self._pending.clear()
         self._pending[nonce] = plan_digest
         return PackVMProvisioningPlan(
             backend_id=PACKVM_BACKEND_ID,
@@ -541,6 +539,7 @@ class PackVMLimaProvisioner:
             image_download_required=bool(facts["image_download_required"]),
             config_digest=str(facts["config_digest"]),
             guest_runner_digest=str(facts["guest_runner_digest"]),
+            host_build_digest=str(facts["host_build_digest"]),
             ceremony_nonce=nonce,
             plan_digest=plan_digest,
             confirmation=confirmation,
@@ -613,6 +612,7 @@ class PackVMLimaProvisioner:
                 "image_digest": plan.image_digest,
                 "limactl_digest": _file_digest(Path(plan.limactl)),
                 "guest_runner_digest": runner_digest,
+                "host_build_digest": plan.host_build_digest,
                 "ceremony_nonce_digest": _sha256(request.ceremony_nonce.encode()),
                 "created_unix": int(time.time()),
             }
@@ -642,6 +642,8 @@ class PackVMLimaProvisioner:
                 raise ValueError("managed PackVM pinned image changed")
             if state.get("guest_runner_digest") != _file_digest(_PACKVM_RUNNER):
                 raise ValueError("packaged PackVM guest supervisor changed")
+            if state.get("host_build_digest") != _file_digest(Path(__file__)):
+                raise ValueError("PackVM Host build changed after provisioning")
             payload = lima_instance_payload(limactl, self._instance, runner=self._runner)
             violation = validate_lima_instance_config(payload)
             if violation:
@@ -702,6 +704,7 @@ class PackVMLimaProvisioner:
                 "shell",
                 self._instance,
                 "--",
+                "sudo",
                 "timeout",
                 "--signal=TERM",
                 "--kill-after=1s",
@@ -762,6 +765,7 @@ class PackVMLimaProvisioner:
             "image_download_required": not self._instance_exists(limactl),
             "config_digest": _sha256(config),
             "guest_runner_digest": _file_digest(_PACKVM_RUNNER),
+            "host_build_digest": _file_digest(Path(__file__)),
             "ceremony_nonce": nonce,
         }
         digest = _canonical_digest(facts)
@@ -777,6 +781,7 @@ class PackVMLimaProvisioner:
             bool(facts["image_download_required"]),
             str(facts["config_digest"]),
             str(facts["guest_runner_digest"]),
+            str(facts["host_build_digest"]),
             nonce,
             digest,
             f"{PACKVM_CONFIRMATION_PREFIX} {self._instance} {digest[7:19]}",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 import os
+import platform
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +35,10 @@ from tobkiri_host.models import (
 )
 from tobkiri_host.errors import BackendUnavailableError
 from tobkiri_host.runtime import ProductionRuntimeV4, V4DispatchSession
+from tobkiri_host.platform_backends import (
+    ManagedLimaPackVMDriver,
+    build_platform_backend,
+)
 from tobkiri_protocol.canonical import canonical_digest
 
 from ..authority.v4 import (
@@ -100,6 +105,33 @@ class _UnavailablePythonPackBackend:
 
     def terminate(self, domain_id: str) -> None:
         del domain_id
+
+
+def _authenticated_packvm_backend(provisioner: Any | None = None) -> ExecutionBackend | None:
+    """Return a production backend only for the current healthy v4 attestation."""
+
+    if platform.system() != "Darwin":
+        return None
+    if provisioner is None:
+        from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
+            PackVMLimaProvisioner,
+        )
+
+        provisioner = PackVMLimaProvisioner()
+    doctor = provisioner.doctor()
+    if not doctor.ready or not doctor.attestation_digest:
+        return None
+    driver = ManagedLimaPackVMDriver(provisioner)
+    backend = build_platform_backend(
+        platform_system="Darwin",
+        machine=str(doctor.platform).removeprefix("macos-"),
+        drivers=(driver,),
+    )
+    if not backend.status.ready_for_production:
+        raise AuthorityDenied(
+            "authenticated PackVM attestation did not produce a production backend"
+        )
+    return backend
 
 
 class _NoAdapterExecution:
@@ -417,6 +449,7 @@ def capture_production_dispatch(
     authority_store: AuthorityStore,
     backends: BackendRegistry | None = None,
     target_backend_digests: Mapping[str, str] | None = None,
+    packvm_provisioner: Any | None = None,
 ) -> V4DispatchSession:
     """Capture ProductionRuntimeV4 and its RequestBroker from verified records."""
 
@@ -517,6 +550,7 @@ def capture_production_dispatch(
         if root.is_symlink() or (int(after.st_dev), int(after.st_ino)) != expected_identity:
             raise AuthorityDenied("resolved Pack artifact root changed during materialization")
         return artifact
+
     effective = {
         str(item["identity"]): str(item["artifact_digest"]) for item in lock["effective_set"]
     }
@@ -669,14 +703,16 @@ def capture_production_dispatch(
             pack_approval_revision=pack_approval_revision,
         )
     registered_backends = tuple((backends or BackendRegistry(())).registered)
+    if backends is None:
+        authenticated_backend = _authenticated_packvm_backend(packvm_provisioner)
+        if authenticated_backend is not None:
+            registered_backends += (authenticated_backend,)
     for registered_backend in registered_backends:
         if registered_backend.status.backend_id != _PYTHON_PACK_BACKEND_ID:
             continue
         binder = getattr(registered_backend, "bind_artifact_resolver", None)
         if binder is None:
-            raise AuthorityDenied(
-                "production PackVM backend cannot bind authenticated artifacts"
-            )
+            raise AuthorityDenied("production PackVM backend cannot bind authenticated artifacts")
         binder(artifact_resolver)
     if not any(item.status.backend_id == _PYTHON_PACK_BACKEND_ID for item in registered_backends):
         # The descriptor remains unavailable unless the composition root
