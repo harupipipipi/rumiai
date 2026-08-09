@@ -54,6 +54,23 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Resolve checked-out source revision
+        id: checked_out_source
+        shell: python
+        run: |
+          import os
+          import subprocess
+
+          source_revision = subprocess.check_output(
+              ["git", "rev-parse", "--verify", "HEAD"], text=True
+          ).strip()
+          if len(source_revision) != 40 or any(
+              character not in "0123456789abcdef" for character in source_revision
+          ):
+              raise SystemExit("checked-out source revision is not a full lowercase SHA")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"source_revision={source_revision}\n")
+
       - name: Install Shell release signing dependency
         run: python -m pip install -r tobkiri_runtime/requirements.txt
 
@@ -144,7 +161,7 @@ jobs:
           python tobkiri_launcher/scripts/write_shell_build_output.py \
             --artifact-id '${{ matrix.presentation_variant }}' --artifact "$artifact" \
             --platform '${{ matrix.presentation_platform }}' --architecture '${{ matrix.presentation_architecture }}' \
-            --source-identity 'github:${{ github.repository }}' --source-revision '${{ github.sha }}' \
+            --source-identity 'github:${{ github.repository }}' --source-revision '${{ steps.checked_out_source.outputs.source_revision }}' \
             --output "$RUNNER_TEMP/shell-build-output.v4.json"
           python tobkiri_launcher/scripts/package_presentation_artifact.py \
             --catalog tobkiri_launcher/src-tauri/bundled/presentation_catalog.json \
@@ -166,7 +183,7 @@ jobs:
           python tobkiri_launcher/scripts/write_shell_build_output.py \
             --artifact-id '${{ matrix.presentation_variant }}' --artifact "$artifact" \
             --platform '${{ matrix.presentation_platform }}' --architecture '${{ matrix.presentation_architecture }}' \
-            --source-identity 'github:${{ github.repository }}' --source-revision '${{ github.sha }}' \
+            --source-identity 'github:${{ github.repository }}' --source-revision '${{ steps.checked_out_source.outputs.source_revision }}' \
             --output "$RUNNER_TEMP/shell-build-output.v4.json"
           python tobkiri_launcher/scripts/package_presentation_artifact.py \
             --catalog tobkiri_launcher/src-tauri/bundled/presentation_catalog.json \
@@ -190,7 +207,7 @@ jobs:
           python tobkiri_launcher/scripts/write_shell_build_output.py `
             --artifact-id '${{ matrix.presentation_variant }}' --artifact $artifact `
             --platform '${{ matrix.presentation_platform }}' --architecture '${{ matrix.presentation_architecture }}' `
-            --source-identity 'github:${{ github.repository }}' --source-revision '${{ github.sha }}' --output $manifest
+            --source-identity 'github:${{ github.repository }}' --source-revision '${{ steps.checked_out_source.outputs.source_revision }}' --output $manifest
           python tobkiri_launcher/scripts/package_presentation_artifact.py `
             --catalog tobkiri_launcher/src-tauri/bundled/presentation_catalog.json `
             --build-output-manifest $manifest --signing-key $key `
@@ -254,7 +271,7 @@ jobs:
         if: failure() && runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: tobkiri-release-${{ matrix.target }}-installer-diagnostics-${{ github.sha }}
+          name: tobkiri-release-${{ matrix.target }}-installer-diagnostics-${{ steps.checked_out_source.outputs.source_revision }}
           path: |
             ${{ runner.temp }}/tobkiri-macos-dmg-${{ matrix.target }}.log
             ${{ runner.temp }}/tobkiri-macos-dmg-${{ matrix.target }}-diagnostic.txt

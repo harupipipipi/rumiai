@@ -3,6 +3,9 @@ use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
+#[path = "src/artifact_integrity.rs"]
+mod artifact_integrity;
+
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 #[cfg(test)]
 use ed25519_dalek::Signer;
@@ -468,61 +471,8 @@ fn require_release_path(root: &Path, relative: &str, label: &str) -> io::Result<
     Ok(candidate)
 }
 
-fn hash_release_artifact(
-    path: &Path,
-    relative: &Path,
-    digest: &mut Sha256,
-    size: &mut u64,
-) -> io::Result<()> {
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() {
-        return Err(invalid_release(format!(
-            "release artifact contains a symlink: {}",
-            path.display()
-        )));
-    }
-    if metadata.is_file() {
-        digest.update(portable_relative_path(relative).as_bytes());
-        digest.update([0]);
-        let mut file = fs::File::open(path)?;
-        let mut buffer = [0_u8; 64 * 1024];
-        loop {
-            let count = file.read(&mut buffer)?;
-            if count == 0 {
-                break;
-            }
-            digest.update(&buffer[..count]);
-            *size = size
-                .checked_add(count as u64)
-                .ok_or_else(|| invalid_release("release artifact size overflow"))?;
-        }
-        return Ok(());
-    }
-    if !metadata.is_dir() {
-        return Err(invalid_release(format!(
-            "release artifact entry is not a file or directory: {}",
-            path.display()
-        )));
-    }
-    let mut children =
-        fs::read_dir(path).and_then(|entries| entries.collect::<Result<Vec<_>, io::Error>>())?;
-    children.sort_by_key(|entry| entry.file_name());
-    for child in children {
-        hash_release_artifact(
-            &child.path(),
-            &relative.join(child.file_name()),
-            digest,
-            size,
-        )?;
-    }
-    Ok(())
-}
-
 fn release_artifact_digest(path: &Path) -> io::Result<(String, u64)> {
-    let mut digest = Sha256::new();
-    let mut size = 0_u64;
-    hash_release_artifact(path, Path::new(""), &mut digest, &mut size)?;
-    Ok((format!("sha256:{:x}", digest.finalize()), size))
+    artifact_integrity::digest_and_size(path)
 }
 
 fn git_value(repo_root: &Path, args: &[&str], label: &str) -> io::Result<String> {
@@ -844,10 +794,10 @@ fn verify_presentation_release(release_root: &Path) -> io::Result<VerifiedPresen
             "bundle_identifier",
             "selected artifact variant",
         )?;
-        if !artifact_path
+        if artifact_path
             .extension()
             .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| extension == "app")
+            .is_none_or(|extension| extension != "app")
         {
             return Err(invalid_release(
                 "macOS Shell artifact is not an .app bundle",

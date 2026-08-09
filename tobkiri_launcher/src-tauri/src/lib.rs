@@ -3,6 +3,7 @@
 //! V2: Full implementation with setup hook, commands, tray menu, and navigation guard.
 
 mod app_data_migration;
+mod artifact_integrity;
 mod config;
 mod debug_approval;
 mod defaultspack_authority;

@@ -25,6 +25,21 @@ from typing import Any, Mapping, Sequence
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+try:
+    from tobkiri_launcher.scripts.artifact_integrity import artifact_digest_and_size
+except ModuleNotFoundError:
+    from artifact_integrity import artifact_digest_and_size  # type: ignore[no-redef]
+
+
+def artifact_digest(path: Path) -> str:
+    """Return the canonical artifact digest for compatibility with callers."""
+    return artifact_digest_and_size(path)[0]
+
+
+def artifact_size(path: Path) -> int:
+    """Return the canonical artifact payload size for compatibility with callers."""
+    return artifact_digest_and_size(path)[1]
+
 CATALOG_SCHEMA = "io.tobkiri.launcher.presentation-catalog.v1"
 BUILD_OUTPUT_SCHEMA = "io.tobkiri.shell.build-output.v4"
 ARTIFACT_INDEX_SCHEMA = "io.tobkiri.shell.artifact-index.v4"
@@ -239,40 +254,6 @@ def _reject_symlink_components(path: Path) -> None:
         current /= part
         if current.is_symlink() and current not in {Path("/var"), Path("/tmp")}:
             raise RuntimeError(f"release artifact is missing or symlinked: {current}")
-
-
-def _hash_path_into(path: Path, relative: Path, digest: Any) -> None:
-    if path.is_symlink():
-        raise RuntimeError(f"release artifact may not contain a symlink: {path}")
-    if path.is_file():
-        digest.update(relative.as_posix().encode("utf-8"))
-        digest.update(b"\0")
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(64 * 1024), b""):
-                digest.update(chunk)
-        return
-    if not path.is_dir():
-        raise RuntimeError(f"release artifact is not a file or directory: {path}")
-    for child in sorted(path.iterdir(), key=lambda item: item.name):
-        _hash_path_into(child, relative / child.name, digest)
-
-
-def artifact_digest(path: Path) -> str:
-    """Return the digest format consumed by the Rust Launcher resolver."""
-    digest = hashlib.sha256()
-    _hash_path_into(path, Path(""), digest)
-    return "sha256:" + digest.hexdigest()
-
-
-def artifact_size(path: Path) -> int:
-    """Return deterministic payload bytes, excluding filesystem allocation."""
-    if path.is_symlink():
-        raise RuntimeError(f"release artifact may not contain a symlink: {path}")
-    if path.is_file():
-        return path.stat().st_size
-    if not path.is_dir():
-        raise RuntimeError(f"release artifact is not a file or directory: {path}")
-    return sum(artifact_size(child) for child in path.iterdir())
 
 
 def _find_variant(
@@ -500,8 +481,7 @@ def package_artifact(
         raise RuntimeError(f"release artifact output already exists: {output}")
     output.mkdir(parents=True)
     staged = _copy_artifact(source, output / ARTIFACT_ROOT / artifact_id, entrypoint)
-    digest = artifact_digest(staged)
-    size = artifact_size(staged)
+    digest, size = artifact_digest_and_size(staged)
     relative = staged.relative_to(output).as_posix()
     variant.update(
         path=relative,

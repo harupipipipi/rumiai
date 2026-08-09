@@ -155,6 +155,16 @@ def test_release_scanner_rejects_null_metadata_wrong_size_and_path_escape() -> N
         with pytest.raises(RuntimeError, match="symlink"):
             VERIFY.verify_catalog(catalog, resource_root)
 
+    with TemporaryDirectory(prefix="tobkiri-presentation-relative-escape-negative-") as temp:
+        resource_root, _ = _release(Path(temp))
+        catalog_path = resource_root / "bundled/presentation_catalog.json"
+        catalog = VERIFY.load_catalog(catalog_path)
+        catalog["shell_providers"][0]["artifact_variants"][0][
+            "path"
+        ] = "bundled/presentation-artifacts/../outside-shell"
+        with pytest.raises(RuntimeError, match="unsafe"):
+            VERIFY.verify_catalog(catalog, resource_root)
+
 
 def test_release_scanner_rejects_cross_document_identity_and_target_mismatch() -> None:
     with TemporaryDirectory(prefix="tobkiri-presentation-binding-cross-negative-") as temp:

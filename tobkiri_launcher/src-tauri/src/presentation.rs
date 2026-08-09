@@ -8,8 +8,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -20,6 +20,8 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use log::error;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+use crate::artifact_integrity;
 use tauri::{AppHandle, State};
 
 use crate::config::AppConfig;
@@ -1172,10 +1174,10 @@ fn resolve_artifact(
         artifact.status_detail = "The verified production artifact is not installed.".to_string();
         return Ok(artifact);
     }
-    let actual_digest = match sha256_path(&path) {
-        Ok(digest) => digest,
+    let (actual_digest, actual_size) = match artifact_integrity::digest_and_size(&path) {
+        Ok((digest, size)) => (normalize_digest(&digest), size),
         Err(error) => {
-            artifact.status_detail = format!("Artifact could not be hashed: {error}");
+            artifact.status_detail = format!("Artifact could not be hashed or measured: {error}");
             return Ok(artifact);
         }
     };
@@ -1184,13 +1186,6 @@ fn resolve_artifact(
         artifact.status_detail = "Artifact digest does not match the pinned variant.".to_string();
         return Ok(artifact);
     }
-    let actual_size = match payload_size(&path) {
-        Ok(size) => size,
-        Err(error) => {
-            artifact.status_detail = format!("Artifact size could not be measured: {error}");
-            return Ok(artifact);
-        }
-    };
     if artifact.size != Some(actual_size) {
         artifact.status = "size_mismatch".to_string();
         artifact.status_detail = "Artifact size does not match the signed index.".to_string();
@@ -1492,69 +1487,8 @@ pub(crate) fn catalog_revision(catalog: &PresentationCatalog) -> AnyResult<Strin
 }
 
 fn sha256_path(path: &Path) -> AnyResult<String> {
-    let mut hasher = Sha256::new();
-    hash_path_contents(path, Path::new(""), &mut hasher)?;
-    Ok(hex::encode(hasher.finalize()))
-}
-
-fn payload_size(path: &Path) -> AnyResult<u64> {
-    let metadata = fs::symlink_metadata(path)
-        .with_context(|| format!("failed to inspect artifact path {}", path.display()))?;
-    if metadata.file_type().is_symlink() {
-        bail!("symlinked artifact content is not accepted");
-    }
-    if metadata.is_file() {
-        return Ok(metadata.len());
-    }
-    if !metadata.is_dir() {
-        bail!("artifact path is neither a file nor a directory");
-    }
-    fs::read_dir(path)
-        .with_context(|| format!("failed to read artifact directory {}", path.display()))?
-        .try_fold(0_u64, |total, entry| {
-            let entry = entry?;
-            total
-                .checked_add(payload_size(&entry.path())?)
-                .context("artifact payload size overflow")
-        })
-}
-
-fn hash_path_contents(path: &Path, relative: &Path, hasher: &mut Sha256) -> AnyResult<()> {
-    let metadata = fs::symlink_metadata(path)
-        .with_context(|| format!("failed to inspect artifact path {}", path.display()))?;
-    if metadata.file_type().is_symlink() {
-        bail!("symlinked artifact content is not accepted");
-    }
-    if metadata.is_file() {
-        let normalized_relative = relative.to_string_lossy().replace('\\', "/");
-        hasher.update(normalized_relative.as_bytes());
-        hasher.update([0]);
-        let mut file = File::open(path)
-            .with_context(|| format!("failed to open artifact file {}", path.display()))?;
-        let mut buffer = [0_u8; 64 * 1024];
-        loop {
-            let read = file
-                .read(&mut buffer)
-                .context("failed to read artifact file")?;
-            if read == 0 {
-                break;
-            }
-            hasher.update(&buffer[..read]);
-        }
-        return Ok(());
-    }
-    if !metadata.is_dir() {
-        bail!("artifact path is neither a file nor a directory");
-    }
-    let mut entries = fs::read_dir(path)
-        .with_context(|| format!("failed to read artifact directory {}", path.display()))?
-        .collect::<Result<Vec<_>, io::Error>>()?;
-    entries.sort_by_key(|entry| entry.file_name());
-    for entry in entries {
-        let child_relative = relative.join(entry.file_name());
-        hash_path_contents(&entry.path(), &child_relative, hasher)?;
-    }
-    Ok(())
+    let (digest, _) = artifact_integrity::digest_and_size(path)?;
+    Ok(normalize_digest(&digest))
 }
 
 fn normalize_digest(value: &str) -> String {

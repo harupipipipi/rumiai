@@ -29,6 +29,10 @@ payload size, platform, architecture, source identity, and source revision are
 bound together. The detached Ed25519 signature binds the exact catalog, index,
 and lock bytes.
 
+The cross-platform artifact-tree/file digest and byte-size contract is defined
+in `ARTIFACT_INTEGRITY_V1.md` and exercised by shared Linux-file, Windows
+`.exe`, and macOS `.app` vectors.
+
 `build.rs` stages those fixed files and embeds that build's signer public key
 and key id in the Launcher binary. The environment variable above is strictly
 a build input; the running Launcher never reads it. Each CI target may describe

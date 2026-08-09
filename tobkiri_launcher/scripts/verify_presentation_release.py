@@ -21,6 +21,11 @@ from typing import Any, Sequence
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.exceptions import InvalidSignature
 
+try:
+    from tobkiri_launcher.scripts.artifact_integrity import artifact_digest_and_size
+except ModuleNotFoundError:
+    from artifact_integrity import artifact_digest_and_size  # type: ignore[no-redef]
+
 CATALOG_SCHEMA = "io.tobkiri.launcher.presentation-catalog.v1"
 SHELL_CONTRACT = "app.shell.v1"
 PRESENTATION_COMMANDS = (
@@ -85,31 +90,6 @@ def load_catalog(path: Path) -> dict[str, Any]:
     return catalog
 
 
-def _artifact_digest(path: Path) -> str:
-    """Return the same relative-name SHA-256 used by the Launcher."""
-    digest = hashlib.sha256()
-
-    def visit(current: Path, relative: Path) -> None:
-        if current.is_symlink():
-            raise RuntimeError(f"packaged artifact contains a symlink: {current}")
-        if current.is_file():
-            digest.update(relative.as_posix().encode("utf-8"))
-            digest.update(b"\0")
-            with current.open("rb") as handle:
-                for chunk in iter(lambda: handle.read(64 * 1024), b""):
-                    digest.update(chunk)
-            return
-        if not current.is_dir():
-            raise RuntimeError(
-                f"packaged artifact is not a file or directory: {current}"
-            )
-        for child in sorted(current.iterdir(), key=lambda item: item.name):
-            visit(child, relative / child.name)
-
-    visit(path, Path(""))
-    return "sha256:" + digest.hexdigest()
-
-
 def _byte_digest(contents: bytes) -> str:
     return "sha256:" + hashlib.sha256(contents).hexdigest()
 
@@ -152,17 +132,6 @@ def _safe_resource_path(root: Path, relative: str, label: str) -> Path:
     if not resolved.is_relative_to(root.resolve()):
         raise RuntimeError(f"{label} escapes Resources/app: {relative}")
     return resolved
-
-
-def _artifact_size(path: Path) -> int:
-    """Return the deterministic payload size while rejecting links."""
-    if path.is_symlink():
-        raise RuntimeError(f"packaged artifact contains a symlink: {path}")
-    if path.is_file():
-        return path.stat().st_size
-    if not path.is_dir():
-        raise RuntimeError(f"packaged artifact is not a file or directory: {path}")
-    return sum(_artifact_size(child) for child in path.iterdir())
 
 
 def _validate_bundle_identity(artifact: Path, expected: object) -> None:
@@ -382,12 +351,11 @@ def verify_catalog(
             )
             if not artifact.exists():
                 raise RuntimeError(f"packaged artifact is missing: {artifact}")
-            actual_digest = _artifact_digest(artifact)
+            actual_digest, actual_size = artifact_digest_and_size(artifact)
             if actual_digest.lower() != str(digest_value).lower():
                 raise RuntimeError(
                     f"packaged artifact digest mismatch for {variant['artifact_id']}"
                 )
-            actual_size = _artifact_size(artifact)
             if variant.get("size") != actual_size:
                 raise RuntimeError(
                     f"packaged artifact size mismatch for {variant['artifact_id']}"
