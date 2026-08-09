@@ -18383,7 +18383,7 @@
     ]
   },
   "repository": {
-    "commit": "b8855900f69c999a15e7557b5f4cace01e7bdc5b",
+    "commit": "65aa1de884141319ef892b1d61f386cff7617d34",
     "tree_digest": "23a9a6922defc23d98baabb8015dfe6cad58a5960597505514eccb6efb307880"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
