@@ -5962,14 +5962,14 @@
       },
       {
         "evidence": "permissive",
-        "line": 468,
+        "line": 607,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/hmac_key_manager.py",
         "rule_id": "legacy_permissive_mode"
       },
       {
         "evidence": "permissive",
-        "line": 543,
+        "line": 682,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/hmac_key_manager.py",
         "rule_id": "legacy_permissive_mode"
@@ -15048,14 +15048,14 @@
         "rule_id": "legacy_permissive_mode"
       },
       {
-        "evidence_digest": "sha256:f562e4da98942dfcee6aed5d851a651e088b7958d0467e48dbbbefbe7706489a",
-        "line": 468,
+        "evidence_digest": "sha256:d139bb7c683f0c3eaab2cc07932eb53b64959f3f7fb5b053e0246b8263940d0d",
+        "line": 607,
         "path": "tobkiri_runtime/core_runtime/hmac_key_manager.py",
         "rule_id": "legacy_permissive_mode"
       },
       {
-        "evidence_digest": "sha256:f562e4da98942dfcee6aed5d851a651e088b7958d0467e48dbbbefbe7706489a",
-        "line": 543,
+        "evidence_digest": "sha256:d139bb7c683f0c3eaab2cc07932eb53b64959f3f7fb5b053e0246b8263940d0d",
+        "line": 682,
         "path": "tobkiri_runtime/core_runtime/hmac_key_manager.py",
         "rule_id": "legacy_permissive_mode"
       },
@@ -18379,7 +18379,7 @@
     ]
   },
   "repository": {
-    "commit": "66e5070ddc0f812238c633abeee0e530563559e8",
+    "commit": "4bb7a3ef20cd8dc7ebe61ddfe3342fee5a1d7d16",
     "tree_digest": "560c872e45bd7fa15df037c0a4ef2a619fcf3d2afbb87d5828d1796a538d0ab7"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",

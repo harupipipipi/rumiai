@@ -9,6 +9,7 @@ HMACKeyManager のユニットテスト (Wave4-B 改善推奨2)
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -67,11 +68,20 @@ from tobkiri_runtime.core_runtime.hmac_key_manager import (  # noqa: E402
     verify_data_hmac,
     DEFAULT_GRACE_PERIOD_SECONDS,
 )
+from tobkiri_runtime.core_runtime import hmac_key_manager as hmac_key_manager_module
 
 
-def _write_owner_key(path: Path, value: str, mode: int = 0o600) -> None:
+def _write_owner_key(
+    path: Path,
+    value: str,
+    mode: int = 0o600,
+    *,
+    secure_windows: bool = True,
+) -> None:
     path.write_text(value, encoding="utf-8")
     path.chmod(mode)
+    if os.name == "nt" and secure_windows:
+        hmac_key_manager_module._secure_windows_signing_key(path)
 
 
 # ======================================================================
@@ -164,8 +174,14 @@ class TestGenerateOrLoadSigningKey:
 
     def test_world_readable_key_rejected(self, tmp_path):
         key_path = tmp_path / "signing.key"
-        _write_owner_key(key_path, "w" * 64, mode=0o644)
-        with pytest.raises(SigningKeyError, match="0600"):
+        _write_owner_key(
+            key_path,
+            "w" * 64,
+            mode=0o644,
+            secure_windows=False,
+        )
+        expected = "Windows ACL" if os.name == "nt" else "0600"
+        with pytest.raises(SigningKeyError, match=expected):
             generate_or_load_signing_key(key_path)
 
     def test_restart_loads_same_owner_key(self, tmp_path):
@@ -173,6 +189,111 @@ class TestGenerateOrLoadSigningKey:
         first = generate_or_load_signing_key(key_path)
         second = generate_or_load_signing_key(key_path)
         assert second == first
+
+    def test_windows_generation_hardens_acl_without_fchmod(
+        self, tmp_path, monkeypatch
+    ):
+        """Windows key creation must use an ACL, not a Unix-only descriptor call."""
+        key_path = tmp_path / "signing.key"
+        secured: list[Path] = []
+        verified: list[Path] = []
+
+        monkeypatch.setattr(hmac_key_manager_module.os, "name", "nt")
+        monkeypatch.delattr(hmac_key_manager_module.os, "fchmod", raising=False)
+        monkeypatch.setattr(
+            hmac_key_manager_module,
+            "_secure_windows_signing_key",
+            secured.append,
+        )
+        monkeypatch.setattr(
+            hmac_key_manager_module,
+            "_verify_windows_signing_key_acl",
+            verified.append,
+        )
+
+        first = generate_or_load_signing_key(key_path)
+        second = generate_or_load_signing_key(key_path)
+
+        assert second == first
+        assert len(secured) == 2
+        assert secured[-1] == key_path
+        assert verified == [key_path]
+
+    def test_windows_acl_script_removes_inheritance_and_verifies_one_sid(
+        self, tmp_path, monkeypatch
+    ):
+        """Windows ACL hardening must be explicit and checked after mutation."""
+        calls: list[tuple[list[str], dict[str, object]]] = []
+
+        def _run(argv: list[str], **kwargs: object) -> None:
+            calls.append((argv, kwargs))
+
+        key_path = tmp_path / "signing.key"
+        monkeypatch.setattr(hmac_key_manager_module.os, "name", "nt")
+        monkeypatch.setattr(hmac_key_manager_module.subprocess, "run", _run)
+        hmac_key_manager_module._secure_windows_signing_key(key_path)
+
+        assert len(calls) == 1
+        argv, kwargs = calls[0]
+        assert argv[:5] == [
+            "powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+        ]
+        assert str(tmp_path) not in argv[-1]
+        assert "FileSecurity]::new()" in argv[-1]
+        assert "SetAccessRuleProtection($true, $false)" in argv[-1]
+        assert "$rules.Count -ne 1" in argv[-1]
+        assert "$rule.IsInherited" in argv[-1]
+        assert kwargs == {
+            "check": True,
+            "capture_output": True,
+            "text": False,
+            "timeout": 15,
+            "input": base64.b64encode(str(key_path).encode("utf-8")),
+        }
+
+    @pytest.mark.parametrize(
+        "filename",
+        (
+            "署名鍵_日本語_e\u0301_é_🙂.key",
+            " leading-whitespace.key",
+            "trailing-whitespace.key ",
+            "\tleading-control.key",
+            "trailing-control.key\r\n",
+        ),
+    )
+    def test_windows_acl_path_transport_preserves_exact_code_points(
+        self, tmp_path, monkeypatch, filename
+    ):
+        """Harden and verify must receive the same unnormalized Unicode path."""
+        calls: list[tuple[list[str], dict[str, object]]] = []
+
+        def _run(argv: list[str], **kwargs: object) -> None:
+            calls.append((argv, kwargs))
+
+        key_path = tmp_path / filename
+        expected_path = str(key_path)
+        expected_code_points = tuple(map(ord, expected_path))
+        monkeypatch.setattr(hmac_key_manager_module.subprocess, "run", _run)
+
+        hmac_key_manager_module._secure_windows_signing_key(key_path)
+        hmac_key_manager_module._verify_windows_signing_key_acl(key_path)
+
+        assert len(calls) == 2
+        assert calls[0][1]["input"] == calls[1][1]["input"]
+        for argv, kwargs in calls:
+            command = argv[-1]
+            assert expected_path not in command
+            assert ".Trim()" not in command
+            assert "[Convert]::FromBase64String($encodedTarget)" in command
+            assert "[System.Text.UTF8Encoding]::new($false, $true)" in command
+            payload = kwargs["input"]
+            assert isinstance(payload, bytes)
+            decoded_path = base64.b64decode(payload, validate=True).decode("utf-8")
+            assert tuple(map(ord, decoded_path)) == expected_code_points
 
 
 # ======================================================================

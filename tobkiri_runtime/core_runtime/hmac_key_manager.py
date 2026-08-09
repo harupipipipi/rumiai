@@ -16,6 +16,7 @@ hmac_key_manager.py - HMAC鍵のローテーション管理 + 署名ユーティ
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -24,6 +25,7 @@ import os
 import secrets
 import shutil
 import stat
+import subprocess
 import tempfile
 import threading
 from dataclasses import dataclass
@@ -105,6 +107,126 @@ def _reject_symlink_key(key_path: Path) -> None:
         raise SigningKeyError(f"signing-key path is symlinked: {key_path}")
 
 
+_WINDOWS_SIGNING_KEY_ACL_VALIDATION = r"""
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$sid = $identity.User
+$allow = [System.Security.AccessControl.AccessControlType]::Allow
+$fullControl = [System.Security.AccessControl.FileSystemRights]::FullControl
+$noInheritance = [System.Security.AccessControl.InheritanceFlags]::None
+$noPropagation = [System.Security.AccessControl.PropagationFlags]::None
+$file = [System.IO.FileInfo]::new($target)
+$sections = [System.Security.AccessControl.AccessControlSections]::Access -bor
+  [System.Security.AccessControl.AccessControlSections]::Owner
+$verified = $file.GetAccessControl($sections)
+if (-not $verified.AreAccessRulesProtected) {
+  throw 'signing-key ACL inherits'
+}
+$rules = @($verified.GetAccessRules(
+  $true, $false, [System.Security.Principal.SecurityIdentifier]
+))
+if ($rules.Count -ne 1) {
+  throw 'signing-key ACL has extra principals'
+}
+$ownerSid = $verified.GetOwner(
+  [System.Security.Principal.SecurityIdentifier]
+).Value
+if ($ownerSid -ne $sid.Value) {
+  throw 'signing-key ACL owner changed'
+}
+$rule = $rules[0]
+if ($rule.IdentityReference.Value -ne $sid.Value) {
+  throw 'signing-key ACL owner grant changed'
+}
+if ($rule.AccessControlType -ne $allow) {
+  throw 'signing-key ACL is not an allow grant'
+}
+if ($rule.FileSystemRights -ne $fullControl) {
+  throw 'signing-key ACL does not grant full control'
+}
+if ($rule.InheritanceFlags -ne $noInheritance -or
+    $rule.PropagationFlags -ne $noPropagation -or
+    $rule.IsInherited) {
+  throw 'signing-key ACL inheritance changed'
+}
+"""
+
+_WINDOWS_SIGNING_KEY_ACL_HARDEN = (
+    r"""
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$sid = $identity.User
+$allow = [System.Security.AccessControl.AccessControlType]::Allow
+$fullControl = [System.Security.AccessControl.FileSystemRights]::FullControl
+$noInheritance = [System.Security.AccessControl.InheritanceFlags]::None
+$noPropagation = [System.Security.AccessControl.PropagationFlags]::None
+$file = [System.IO.FileInfo]::new($target)
+$acl = [System.Security.AccessControl.FileSecurity]::new()
+$acl.SetOwner($sid)
+$acl.SetAccessRuleProtection($true, $false)
+$rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+  $sid, $fullControl, $noInheritance, $noPropagation, $allow
+)
+[void]$acl.AddAccessRule($rule)
+$file.SetAccessControl($acl)
+"""
+    + _WINDOWS_SIGNING_KEY_ACL_VALIDATION
+)
+
+
+def _run_windows_signing_key_acl(key_path: Path, *, harden: bool) -> None:
+    """Harden or validate one Windows signing-key ACL without leaking its path."""
+    encoded_path = base64.b64encode(str(key_path).encode("utf-8"))
+    script = (
+        _WINDOWS_SIGNING_KEY_ACL_HARDEN
+        if harden
+        else _WINDOWS_SIGNING_KEY_ACL_VALIDATION
+    )
+    script = (
+        "$ErrorActionPreference = 'Stop'\n"
+        "$encodedTarget = [Console]::In.ReadToEnd()\n"
+        "if ([string]::IsNullOrEmpty($encodedTarget)) { "
+        "throw 'signing-key ACL target missing' }\n"
+        "$strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)\n"
+        "$targetBytes = [Convert]::FromBase64String($encodedTarget)\n"
+        "$target = $strictUtf8.GetString($targetBytes)\n"
+        "if ([string]::IsNullOrEmpty($target)) { "
+        "throw 'signing-key ACL target missing' }\n"
+        + script
+    )
+    try:
+        subprocess.run(
+            [
+                "powershell.exe",
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                script,
+            ],
+            check=True,
+            capture_output=True,
+            text=False,
+            timeout=15,
+            input=encoded_path,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        message = (
+            "signing-key Windows ACL could not be secured"
+            if harden
+            else "signing-key Windows ACL is unsafe"
+        )
+        raise SigningKeyError(message) from error
+
+
+def _secure_windows_signing_key(key_path: Path) -> None:
+    """Replace inherited key ACLs with one verified current-user SID grant."""
+    _run_windows_signing_key_acl(key_path, harden=True)
+
+
+def _verify_windows_signing_key_acl(key_path: Path) -> None:
+    """Require an existing key to have only the current user's Windows ACL."""
+    _run_windows_signing_key_acl(key_path, harden=False)
+
+
 def _load_secure_signing_key(key_path: Path) -> bytes:
     """Load one owner-only regular key file without silent recovery."""
     _reject_symlink_key(key_path)
@@ -119,7 +241,9 @@ def _load_secure_signing_key(key_path: Path) -> bytes:
             raise SigningKeyError("signing-key path is not a regular file")
         if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
             raise SigningKeyError("signing-key file is not owned by the Host user")
-        if stat.S_IMODE(metadata.st_mode) & 0o077:
+        if os.name == "nt":
+            _verify_windows_signing_key_acl(key_path)
+        elif stat.S_IMODE(metadata.st_mode) & 0o077:
             raise SigningKeyError("signing-key file must have mode 0600")
         chunks = []
         while chunk := os.read(descriptor, 4096):
@@ -166,12 +290,27 @@ def generate_or_load_signing_key(
         dir=str(key_path.parent), prefix=".signing_key_tmp_"
     )
     try:
-        os.write(fd, key_str.encode("utf-8"))
-        os.fchmod(fd, 0o600)
-        os.close(fd)
-        fd = -1
+        if os.name == "nt":
+            os.close(fd)
+            fd = -1
+            _secure_windows_signing_key(Path(tmp_path))
+            fd = os.open(
+                tmp_path,
+                os.O_WRONLY | os.O_TRUNC | getattr(os, "O_BINARY", 0),
+            )
+            os.write(fd, key_str.encode("utf-8"))
+            os.close(fd)
+            fd = -1
+        else:
+            os.write(fd, key_str.encode("utf-8"))
+            os.fchmod(fd, 0o600)
+            os.close(fd)
+            fd = -1
         os.replace(tmp_path, str(key_path))
-        safe_chmod(str(key_path), 0o600)
+        if os.name == "nt":
+            _secure_windows_signing_key(key_path)
+        else:
+            safe_chmod(str(key_path), 0o600)
     except Exception:
         if fd >= 0:
             try:
