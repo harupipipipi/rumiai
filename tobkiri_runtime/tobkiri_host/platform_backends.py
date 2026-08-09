@@ -7,15 +7,18 @@ import hashlib
 import json
 from pathlib import Path
 import platform as host_platform
+import secrets
 import time
-from typing import Callable, Iterable, Mapping, Protocol
+from typing import Any, Callable, Iterable, Mapping, Protocol
 
 from .backends import BackendStatus, REQUIRED_PRODUCTION_GATES
 from .contracts import ResolvedOperationBinding
 from .errors import BackendUnavailableError
+from .effects import ProviderOutcome
 from .models import ExecutionKind, OpaqueAuthorityRef, RuntimeEvidence, require_digest
 
 
+PYTHON_PACKVM_BACKEND = "tobkiri.python-pack-v4"
 SUPPORTED_BACKENDS: Mapping[str, tuple[str, str]] = {
     "Darwin": ("macos-vz", "/System/Library/Frameworks/Virtualization.framework"),
     "Windows": ("windows-whpx", "C:/Windows/System32/WinHvPlatform.dll"),
@@ -77,6 +80,7 @@ class PlatformIsolationDriver(Protocol):
     """Privileged supervisor boundary implemented by VZ, WHPX, or Firecracker."""
 
     backend_id: str
+    substrate_id: str
     backend_digest: str
     platform: str
 
@@ -99,8 +103,16 @@ class PlatformIsolationDriver(Protocol):
 class UnavailablePlatformDriver:
     """Deterministic fail-closed driver used when Host dependencies are absent."""
 
-    def __init__(self, backend_id: str, platform: str, reason: str) -> None:
+    def __init__(
+        self,
+        backend_id: str,
+        platform: str,
+        reason: str,
+        *,
+        substrate_id: str = "unavailable",
+    ) -> None:
         self.backend_id = backend_id
+        self.substrate_id = substrate_id
         self.platform = platform
         self.backend_digest = _digest(
             {"backend_id": backend_id, "platform": platform, "state": "unavailable"}
@@ -256,7 +268,11 @@ class MacOSVZBackend(ProductionIsolationBackend):
     """macOS Virtualization.framework PackVM backend."""
 
     def __init__(self, driver: PlatformIsolationDriver) -> None:
-        if driver.backend_id != "macos-vz" or not driver.platform.startswith("macos-"):
+        if (
+            driver.backend_id != PYTHON_PACKVM_BACKEND
+            or driver.substrate_id != "macos-vz"
+            or not driver.platform.startswith("macos-")
+        ):
             raise BackendUnavailableError("macOS VZ driver identity mismatch")
         super().__init__(driver)
 
@@ -265,7 +281,11 @@ class WindowsWHPXBackend(ProductionIsolationBackend):
     """Windows Hypervisor Platform PackVM backend."""
 
     def __init__(self, driver: PlatformIsolationDriver) -> None:
-        if driver.backend_id != "windows-whpx" or not driver.platform.startswith("windows-"):
+        if (
+            driver.backend_id != PYTHON_PACKVM_BACKEND
+            or driver.substrate_id != "windows-whpx"
+            or not driver.platform.startswith("windows-")
+        ):
             raise BackendUnavailableError("Windows WHPX driver identity mismatch")
         super().__init__(driver)
 
@@ -274,7 +294,11 @@ class LinuxFirecrackerBackend(ProductionIsolationBackend):
     """Linux Firecracker/KVM PackVM backend."""
 
     def __init__(self, driver: PlatformIsolationDriver) -> None:
-        if driver.backend_id != "linux-firecracker" or not driver.platform.startswith("linux-"):
+        if (
+            driver.backend_id != PYTHON_PACKVM_BACKEND
+            or driver.substrate_id != "linux-firecracker"
+            or not driver.platform.startswith("linux-")
+        ):
             raise BackendUnavailableError("Linux Firecracker driver identity mismatch")
         super().__init__(driver)
 
@@ -294,12 +318,13 @@ def build_platform_backend(
             "unsupported-packvm", f"{system.lower()}-{architecture}", "unsupported Host platform"
         )
         return ProductionIsolationBackend(driver)
-    backend_id, dependency = spec
+    substrate_id, dependency = spec
     platform_id = f"{system.lower().replace('darwin', 'macos')}-{architecture}"
     candidates = [
         item
         for item in drivers
-        if getattr(item, "backend_id", None) == backend_id
+        if getattr(item, "backend_id", None) == PYTHON_PACKVM_BACKEND
+        and getattr(item, "substrate_id", None) == substrate_id
         and getattr(item, "platform", None) == platform_id
     ]
     if len(candidates) > 1:
@@ -309,16 +334,138 @@ def build_platform_backend(
             "macos-vz": MacOSVZBackend,
             "windows-whpx": WindowsWHPXBackend,
             "linux-firecracker": LinuxFirecrackerBackend,
-        }[backend_id]
+        }[substrate_id]
         return backend_class(candidates[0])
     reason = (
         f"required substrate dependency is unavailable: {dependency}"
         if not Path(dependency).exists()
-        else f"authenticated {backend_id} supervisor is not registered"
+        else f"authenticated {substrate_id} supervisor is not registered"
     )
     return ProductionIsolationBackend(
-        UnavailablePlatformDriver(backend_id, platform_id, reason)
+        UnavailablePlatformDriver(
+            PYTHON_PACKVM_BACKEND,
+            platform_id,
+            reason,
+            substrate_id=substrate_id,
+        )
     )
+
+
+class ManagedLimaPackVMDriver:
+    """Adapter from the explicit Lima provisioner to the v4 platform driver."""
+
+    backend_id = PYTHON_PACKVM_BACKEND
+    substrate_id = "macos-vz"
+
+    def __init__(self, provisioner: Any) -> None:
+        self._provisioner = provisioner
+        self._domains: set[str] = set()
+        self._seen_launches: set[str] = set()
+        doctor = provisioner.doctor()
+        self.platform = str(doctor.platform)
+        self.backend_digest = (
+            str(doctor.attestation_digest)
+            if doctor.ready and doctor.attestation_digest
+            else _digest(
+                {
+                    "backend_id": self.backend_id,
+                    "substrate_id": self.substrate_id,
+                    "platform": self.platform,
+                    "state": "unavailable",
+                }
+            )
+        )
+
+    def capability(self) -> tuple[bool, str | None]:
+        doctor = self._provisioner.doctor()
+        if not doctor.ready or doctor.attestation_digest != self.backend_digest:
+            return False, doctor.reason or "managed Lima PackVM attestation changed"
+        return True, None
+
+    def launch(self, request: IsolationLaunch) -> PlatformAttestation:
+        ready, reason = self.capability()
+        if not ready:
+            raise BackendUnavailableError(reason or "managed Lima PackVM is unavailable")
+        if request.backend_id != self.backend_id or request.platform != self.platform:
+            raise BackendUnavailableError("managed Lima PackVM launch identity mismatch")
+        launch_key = _digest(
+            {
+                "reservation_id": request.reservation_id,
+                "lease_id": request.lease.lease_id,
+                "executable_digest": request.executable_digest,
+                "backend_digest": self.backend_digest,
+            }
+        )
+        if launch_key in self._seen_launches:
+            raise BackendUnavailableError("managed Lima PackVM launch replay")
+        self._seen_launches.add(launch_key)
+        attestation_nonce = secrets.token_hex(32)
+        domain_id = (
+            "packvm:"
+            + _digest(
+                {
+                    "launch_key": launch_key,
+                    "attestation_nonce": attestation_nonce,
+                }
+            )[7:]
+        )
+        self._domains.add(domain_id)
+        attestation_digest = _digest(
+            {
+                "domain_id": domain_id,
+                "backend_digest": self.backend_digest,
+                "executable_digest": request.executable_digest,
+                "lease_id": request.lease.lease_id,
+                "reservation_id": request.reservation_id,
+                "attestation_nonce": attestation_nonce,
+            }
+        )
+        return PlatformAttestation(
+            domain_id=domain_id,
+            backend_id=self.backend_id,
+            backend_digest=self.backend_digest,
+            platform=self.platform,
+            executable_digest=request.executable_digest,
+            isolation_profile=request.isolation_profile,
+            attestation_digest=attestation_digest,
+            lease_id=request.lease.lease_id,
+            reservation_id=request.reservation_id,
+            authenticated_channel=True,
+            nonce_fresh=True,
+        )
+
+    def invoke(self, request: object) -> object:
+        domain = getattr(getattr(request, "target_domain", None), "value", None)
+        if domain not in self._domains:
+            raise BackendUnavailableError("managed Lima PackVM domain is unavailable")
+        context = getattr(request, "context", None)
+        payload = {
+            "operation": "invoke",
+            "request_id": getattr(context, "request_id", None),
+            "target_domain": domain,
+            "contract_id": getattr(request, "contract_id", None),
+            "contract_version": getattr(request, "contract_version", None),
+            "operation_id": getattr(request, "operation_id", None),
+            "payload": getattr(request, "payload", None),
+            "request_digest": getattr(request, "request_digest", None),
+            "deadline_monotonic": getattr(request, "deadline_monotonic", None),
+        }
+        response = self._provisioner.invoke_guest(payload)
+        if response.get("ok") is not True:
+            raise BackendUnavailableError(
+                f"managed PackVM supervisor rejected invocation: {response.get('error', 'unknown')}"
+            )
+        result = response.get("payload")
+        if not isinstance(result, Mapping):
+            raise BackendUnavailableError("managed PackVM supervisor returned invalid payload")
+        return ProviderOutcome(result)
+
+    def cancel(self, request_id: str) -> None:
+        if request_id:
+            self._provisioner.invoke_guest({"operation": "cancel", "request_id": request_id})
+
+    def terminate(self, domain_id: str) -> None:
+        self._domains.discard(domain_id)
 
 
 def _normalize_machine(value: str) -> str:
@@ -337,6 +484,8 @@ __all__ = [
     "IsolationLease",
     "LinuxFirecrackerBackend",
     "MacOSVZBackend",
+    "ManagedLimaPackVMDriver",
+    "PYTHON_PACKVM_BACKEND",
     "PlatformAttestation",
     "PlatformIsolationDriver",
     "ProductionIsolationBackend",

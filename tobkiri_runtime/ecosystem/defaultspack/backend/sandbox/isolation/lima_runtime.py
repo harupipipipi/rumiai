@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
+import platform
+import secrets
 import shutil
 import stat
 import subprocess
 import tempfile
+import time
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 
@@ -16,6 +21,7 @@ from core_runtime.bounded_process_runner import (
     HostBoundedProcessRunner,
     ProcessExecutionPolicy,
 )
+from core_runtime.hmac_key_manager import generate_or_load_signing_key
 
 
 LimaRunner = Callable[[Sequence[str], str | None, float | None], Any]
@@ -28,6 +34,71 @@ LIMA_STATE_ENV = "RUMI_SANDBOX_LIMA_STATE"
 MAX_LIMA_STATE_BYTES = 64 * 1024
 LIMA_GUEST_WORKSPACE_ROOT = "/var/lib/rumi/workspaces"
 LIMA_GUEST_PACK_DATA_ROOT = "/var/lib/rumi/pack-data"
+PACKVM_BACKEND_ID = "tobkiri.python-pack-v4"
+PACKVM_GUEST_RUNNER = "/usr/local/libexec/tobkiri-packvm-supervisor"
+PACKVM_PROTOCOL = "io.tobkiri.packvm-supervisor.v1"
+PACKVM_ATTESTATION_VERSION = 1
+PACKVM_CONFIRMATION_PREFIX = "PROVISION"
+PACKVM_CLEANUP_PREFIX = "DELETE"
+_PACKVM_RESOURCE_ROOT = Path(__file__).with_name("resources")
+_PACKVM_CONFIG = _PACKVM_RESOURCE_ROOT / "packvm-lima.v1.yaml"
+_PACKVM_RUNNER = _PACKVM_RESOURCE_ROOT / "packvm_guest_runner.py"
+_PACKVM_IMAGES = {
+    "arm64": {
+        "lima_arch": "aarch64",
+        "url": "https://cloud-images.ubuntu.com/jammy/20260807/jammy-server-cloudimg-arm64.img",
+        "digest": "sha256:b17d9ac9b6249ab30f8c95630acdab3b7a51d76050229ab0ce6c013e303f5ccd",
+        "size_bytes": 703_594_496,
+    },
+    "amd64": {
+        "lima_arch": "x86_64",
+        "url": "https://cloud-images.ubuntu.com/jammy/20260807/jammy-server-cloudimg-amd64.img",
+        "digest": "sha256:ff271290a23279ce764561dbe2e9c3ec29da899535b571a987c37b47970c2ad9",
+        "size_bytes": 734_327_808,
+    },
+}
+
+
+@dataclass(frozen=True)
+class PackVMProvisioningPlan:
+    """User-visible, immutable facts for one explicit provisioning ceremony."""
+
+    backend_id: str
+    instance: str
+    limactl: str | None
+    launcher_reason: str | None
+    architecture: str
+    image_source: str
+    image_digest: str
+    image_size_bytes: int
+    image_download_required: bool
+    config_digest: str
+    guest_runner_digest: str
+    ceremony_nonce: str
+    plan_digest: str
+    confirmation: str
+
+
+@dataclass(frozen=True)
+class PackVMProvisioningRequest:
+    """Typed user/setup authorization for one exact provisioning plan."""
+
+    plan_digest: str
+    ceremony_nonce: str
+    confirmation: str
+    approve_image_download: bool = False
+
+
+@dataclass(frozen=True)
+class PackVMDoctor:
+    """Fail-closed health status for the managed PackVM supervisor."""
+
+    ready: bool
+    backend_id: str
+    platform: str
+    instance: str
+    reason: str | None = None
+    attestation_digest: str | None = None
 
 
 def lima_state_path() -> Path:
@@ -406,3 +477,579 @@ def _decode(value: bytes | str | None) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return str(value or "")
+
+
+class PackVMLimaProvisioner:
+    """Explicit, authenticated lifecycle for Tobkiri's dedicated Lima PackVM."""
+
+    def __init__(
+        self,
+        *,
+        command_path: str | None = None,
+        runner: LimaRunner | None = None,
+        state_dir: Path | None = None,
+        machine: str | None = None,
+        instance: str = DEFAULT_LIMA_INSTANCE,
+    ) -> None:
+        self._command_path = command_path
+        self._runner = runner
+        self._state_dir = (state_dir or lima_state_path().parent).resolve()
+        self._machine = _normalize_packvm_machine(machine or platform.machine())
+        self._instance = instance
+        self._pending: dict[str, str] = {}
+
+    @property
+    def state_path(self) -> Path:
+        return self._state_dir / "packvm-lima-attestation.json"
+
+    @property
+    def audit_path(self) -> Path:
+        return self._state_dir / "packvm-lima-audit.jsonl"
+
+    def prepare(self) -> PackVMProvisioningPlan:
+        """Return download and identity facts without creating or starting a VM."""
+        image = _PACKVM_IMAGES[self._machine]
+        limactl = self._resolve_command()
+        config = self._rendered_config()
+        nonce = secrets.token_hex(16)
+        facts = {
+            "backend_id": PACKVM_BACKEND_ID,
+            "instance": self._instance,
+            "limactl_digest": _file_digest(Path(limactl)) if limactl else None,
+            "architecture": self._machine,
+            "image_source": image["url"],
+            "image_digest": image["digest"],
+            "image_size_bytes": image["size_bytes"],
+            "image_download_required": not self._instance_exists(limactl),
+            "config_digest": _sha256(config),
+            "guest_runner_digest": _file_digest(_PACKVM_RUNNER),
+            "ceremony_nonce": nonce,
+        }
+        plan_digest = _canonical_digest(facts)
+        confirmation = f"{PACKVM_CONFIRMATION_PREFIX} {self._instance} {plan_digest[7:19]}"
+        self._pending[nonce] = plan_digest
+        return PackVMProvisioningPlan(
+            backend_id=PACKVM_BACKEND_ID,
+            instance=self._instance,
+            limactl=limactl,
+            launcher_reason=self._launcher_reason(limactl),
+            architecture=self._machine,
+            image_source=str(image["url"]),
+            image_digest=str(image["digest"]),
+            image_size_bytes=int(image["size_bytes"]),
+            image_download_required=bool(facts["image_download_required"]),
+            config_digest=str(facts["config_digest"]),
+            guest_runner_digest=str(facts["guest_runner_digest"]),
+            ceremony_nonce=nonce,
+            plan_digest=plan_digest,
+            confirmation=confirmation,
+        )
+
+    def provision(self, request: PackVMProvisioningRequest) -> PackVMDoctor:
+        """Create and attest the guest after consuming an exact ceremony once."""
+        expected = self._pending.pop(request.ceremony_nonce, None)
+        if expected is None or not hmac.compare_digest(expected, request.plan_digest):
+            raise ValueError("PackVM provisioning ceremony is invalid or already consumed")
+        plan = self._plan_for_consumed_nonce(request.ceremony_nonce)
+        if plan.plan_digest != request.plan_digest:
+            raise ValueError("PackVM provisioning plan changed; review it again")
+        if not hmac.compare_digest(plan.confirmation, request.confirmation):
+            raise ValueError("PackVM provisioning confirmation does not match")
+        if plan.limactl is None:
+            raise ValueError("limactl is unavailable; install approved Lima first")
+        if plan.image_download_required and not request.approve_image_download:
+            raise ValueError(
+                "PackVM image download requires explicit approval for the displayed source, size, and digest"
+            )
+        if self.state_path.exists():
+            raise ValueError("PackVM is already provisioned; use doctor or explicit cleanup")
+        if self._instance_exists(plan.limactl):
+            raise ValueError(
+                "unattested managed Lima instance already exists; explicit cleanup is required"
+            )
+
+        self._state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        created = False
+        try:
+            with tempfile.NamedTemporaryFile(
+                prefix=".packvm-lima-",
+                suffix=".yaml",
+                dir=self._state_dir,
+                delete=False,
+            ) as handle:
+                config_path = Path(handle.name)
+                handle.write(self._rendered_config())
+            os.chmod(config_path, 0o600)
+            try:
+                self._checked_call(
+                    (plan.limactl, "start", "--name", self._instance, str(config_path)),
+                    timeout=900,
+                )
+                created = True
+            finally:
+                config_path.unlink(missing_ok=True)
+            self._install_guest_runner(plan.limactl)
+            machine_id = self._guest_machine_id(plan.limactl)
+            runner_digest = self._guest_runner_digest(plan.limactl)
+            if runner_digest != plan.guest_runner_digest:
+                raise ValueError("guest supervisor binary verification failed")
+            self._verify_guest_doctor(plan.limactl)
+            payload = lima_instance_payload(
+                plan.limactl,
+                self._instance,
+                runner=self._runner,
+            )
+            violation = validate_lima_instance_config(payload)
+            if violation:
+                raise ValueError(violation)
+            state = {
+                "version": PACKVM_ATTESTATION_VERSION,
+                "backend_id": PACKVM_BACKEND_ID,
+                "instance": self._instance,
+                "instance_machine_id": machine_id,
+                "instance_config_hash": stable_lima_config_hash(self._instance, payload),
+                "config_digest": plan.config_digest,
+                "image_digest": plan.image_digest,
+                "limactl_digest": _file_digest(Path(plan.limactl)),
+                "guest_runner_digest": runner_digest,
+                "ceremony_nonce_digest": _sha256(request.ceremony_nonce.encode()),
+                "created_unix": int(time.time()),
+            }
+            state["attestation_digest"] = _canonical_digest(state)
+            state["authentication"] = self._sign_state(state)
+            _atomic_private_json(self.state_path, state)
+            self._audit("provisioned", state["attestation_digest"])
+            return self.doctor()
+        except Exception:
+            if created and plan.limactl:
+                self._call((plan.limactl, "stop", "--force", self._instance), timeout=60)
+                self._call((plan.limactl, "delete", "--force", self._instance), timeout=120)
+            self._audit("provision_failed", None)
+            raise
+
+    def doctor(self) -> PackVMDoctor:
+        """Authenticate Host state, VM identity, config, and guest runner health."""
+        platform_id = f"macos-{self._machine}"
+        try:
+            limactl = self._require_command()
+            state = self._load_authenticated_state()
+            if state.get("limactl_digest") != _file_digest(Path(limactl)):
+                raise ValueError("limactl binary changed after provisioning")
+            if state.get("config_digest") != _sha256(self._rendered_config()):
+                raise ValueError("managed PackVM pinned config changed")
+            if state.get("image_digest") != _PACKVM_IMAGES[self._machine]["digest"]:
+                raise ValueError("managed PackVM pinned image changed")
+            if state.get("guest_runner_digest") != _file_digest(_PACKVM_RUNNER):
+                raise ValueError("packaged PackVM guest supervisor changed")
+            payload = lima_instance_payload(limactl, self._instance, runner=self._runner)
+            violation = validate_lima_instance_config(payload)
+            if violation:
+                raise ValueError(violation)
+            if str(payload.get("status") or "").casefold() != "running":
+                raise ValueError("managed PackVM instance is not running")
+            if state.get("instance_config_hash") != stable_lima_config_hash(
+                self._instance, payload
+            ):
+                raise ValueError("managed PackVM config changed")
+            if state.get("instance_machine_id") != self._guest_machine_id(limactl):
+                raise ValueError("managed PackVM instance identity changed")
+            if state.get("guest_runner_digest") != self._guest_runner_digest(limactl):
+                raise ValueError("managed PackVM guest supervisor changed")
+            self._verify_guest_doctor(limactl)
+            return PackVMDoctor(
+                True,
+                PACKVM_BACKEND_ID,
+                platform_id,
+                self._instance,
+                attestation_digest=str(state["attestation_digest"]),
+            )
+        except (OSError, ValueError) as exc:
+            return PackVMDoctor(
+                False, PACKVM_BACKEND_ID, platform_id, self._instance, reason=str(exc)
+            )
+
+    def stop(self) -> None:
+        """Stop only the authenticated Tobkiri-owned instance."""
+        self._load_authenticated_state()
+        limactl = self._require_command()
+        self._checked_call((limactl, "stop", "--force", self._instance), timeout=60)
+        self._audit("stopped", None)
+
+    def cleanup(self, confirmation: str) -> None:
+        """Delete only the authenticated instance after an exact typed ceremony."""
+        state = self._load_authenticated_state()
+        expected = f"{PACKVM_CLEANUP_PREFIX} {self._instance}"
+        if not hmac.compare_digest(confirmation, expected):
+            raise ValueError(f"PackVM cleanup requires exact confirmation: {expected}")
+        limactl = self._require_command()
+        self._checked_call((limactl, "delete", "--force", self._instance), timeout=120)
+        self._audit("deleted", str(state["attestation_digest"]))
+        self.state_path.unlink(missing_ok=True)
+        (self._state_dir / "packvm-lima-attestation.key").unlink(missing_ok=True)
+
+    def invoke_guest(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Invoke only through the authenticated guest supervisor channel."""
+        health = self.doctor()
+        if not health.ready:
+            raise ValueError(health.reason or "managed PackVM is unavailable")
+        encoded = json.dumps(request, sort_keys=True, separators=(",", ":"))
+        if len(encoded.encode()) > 1024 * 1024:
+            raise ValueError("PackVM supervisor request is too large")
+        result = self._checked_call(
+            (
+                self._require_command(),
+                "shell",
+                self._instance,
+                "--",
+                "timeout",
+                "--signal=TERM",
+                "--kill-after=1s",
+                "60s",
+                PACKVM_GUEST_RUNNER,
+            ),
+            input_text=encoded,
+            timeout=65,
+        )
+        response = json.loads(_decode(result.stdout))
+        if not isinstance(response, dict) or response.get("protocol") != PACKVM_PROTOCOL:
+            raise ValueError("PackVM supervisor returned an unauthenticated response")
+        return response
+
+    def _plan_for_consumed_nonce(self, nonce: str) -> PackVMProvisioningPlan:
+        # Rebuild immutable facts while preserving the already reviewed nonce.
+        image = _PACKVM_IMAGES[self._machine]
+        limactl = self._resolve_command()
+        config = self._rendered_config()
+        facts = {
+            "backend_id": PACKVM_BACKEND_ID,
+            "instance": self._instance,
+            "limactl_digest": _file_digest(Path(limactl)) if limactl else None,
+            "architecture": self._machine,
+            "image_source": image["url"],
+            "image_digest": image["digest"],
+            "image_size_bytes": image["size_bytes"],
+            "image_download_required": not self._instance_exists(limactl),
+            "config_digest": _sha256(config),
+            "guest_runner_digest": _file_digest(_PACKVM_RUNNER),
+            "ceremony_nonce": nonce,
+        }
+        digest = _canonical_digest(facts)
+        return PackVMProvisioningPlan(
+            PACKVM_BACKEND_ID,
+            self._instance,
+            limactl,
+            self._launcher_reason(limactl),
+            self._machine,
+            str(image["url"]),
+            str(image["digest"]),
+            int(image["size_bytes"]),
+            bool(facts["image_download_required"]),
+            str(facts["config_digest"]),
+            str(facts["guest_runner_digest"]),
+            nonce,
+            digest,
+            f"{PACKVM_CONFIRMATION_PREFIX} {self._instance} {digest[7:19]}",
+        )
+
+    def _rendered_config(self) -> bytes:
+        image = _PACKVM_IMAGES[self._machine]
+        template = _PACKVM_CONFIG.read_text(encoding="utf-8")
+        rendered = (
+            template.replace("{{ARCH}}", str(image["lima_arch"]))
+            .replace("{{IMAGE_URL}}", str(image["url"]))
+            .replace("{{IMAGE_DIGEST}}", str(image["digest"]))
+        )
+        return rendered.encode()
+
+    def _resolve_command(self) -> str | None:
+        if self._command_path is None and platform.system() != "Darwin":
+            return None
+        candidate = self._command_path or resolve_limactl_path()
+        if candidate is None:
+            return None
+        path = Path(candidate)
+        try:
+            metadata = path.lstat()
+        except OSError:
+            return None
+        if path.is_symlink():
+            try:
+                resolved = path.resolve(strict=True)
+            except OSError:
+                return None
+            trusted_roots = (
+                Path("/opt/homebrew/Cellar/lima"),
+                Path("/usr/local/Cellar/lima"),
+            )
+            if path not in {
+                Path("/opt/homebrew/bin/limactl"),
+                Path("/usr/local/bin/limactl"),
+            } or not any(resolved.is_relative_to(root) for root in trusted_roots):
+                return None
+            path = resolved
+            try:
+                metadata = path.lstat()
+            except OSError:
+                return None
+        if not stat.S_ISREG(metadata.st_mode) or not os.access(path, os.X_OK):
+            return None
+        return str(path.resolve())
+
+    def _launcher_reason(self, resolved: str | None) -> str | None:
+        if resolved is not None:
+            return None
+        if self._command_path is None and platform.system() != "Darwin":
+            return "Lima PackVM provisioning is available only on macOS"
+        candidate = self._command_path or resolve_limactl_path()
+        if candidate is None:
+            return "limactl was not detected; install an approved pinned Lima launcher"
+        return "limactl must be a regular executable or a trusted versioned Homebrew link"
+
+    def _require_command(self) -> str:
+        command = self._resolve_command()
+        if command is None:
+            raise ValueError("limactl is unavailable or is not a regular executable")
+        return command
+
+    def _instance_exists(self, limactl: str | None) -> bool:
+        if limactl is None:
+            return False
+        result = self._call((limactl, "list", "--format", "{{.Name}}"), timeout=10)
+        return result.returncode == 0 and self._instance in {
+            line.strip() for line in _decode(result.stdout).splitlines()
+        }
+
+    def _install_guest_runner(self, limactl: str) -> None:
+        script = _PACKVM_RUNNER.read_text(encoding="utf-8")
+        self._checked_call(
+            (
+                limactl,
+                "shell",
+                self._instance,
+                "--",
+                "sudo",
+                "install",
+                "-o",
+                "root",
+                "-g",
+                "root",
+                "-m",
+                "0755",
+                "/dev/stdin",
+                PACKVM_GUEST_RUNNER,
+            ),
+            input_text=script,
+            timeout=30,
+        )
+
+    def _guest_machine_id(self, limactl: str) -> str:
+        result = self._checked_call(
+            (limactl, "shell", self._instance, "--", "cat", "/etc/machine-id"),
+            timeout=10,
+        )
+        machine_id = _decode(result.stdout).strip()
+        if len(machine_id) != 32 or any(char not in "0123456789abcdef" for char in machine_id):
+            raise ValueError("managed PackVM machine identity is invalid")
+        return machine_id
+
+    def _guest_runner_digest(self, limactl: str) -> str:
+        result = self._checked_call(
+            (limactl, "shell", self._instance, "--", "sha256sum", PACKVM_GUEST_RUNNER),
+            timeout=10,
+        )
+        value = _decode(result.stdout).split(maxsplit=1)[0].lower()
+        if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+            raise ValueError("managed PackVM guest supervisor digest is invalid")
+        return f"sha256:{value}"
+
+    def _verify_guest_doctor(self, limactl: str) -> None:
+        result = self._checked_call(
+            (limactl, "shell", self._instance, "--", PACKVM_GUEST_RUNNER),
+            input_text='{"operation":"doctor"}',
+            timeout=10,
+        )
+        response = json.loads(_decode(result.stdout))
+        if (
+            not isinstance(response, dict)
+            or response.get("ok") is not True
+            or response.get("protocol") != PACKVM_PROTOCOL
+        ):
+            raise ValueError("managed PackVM guest supervisor doctor failed")
+        challenge = secrets.token_hex(32)
+        invoked = self._checked_call(
+            (limactl, "shell", self._instance, "--", PACKVM_GUEST_RUNNER),
+            input_text=json.dumps(
+                {
+                    "operation": "invoke",
+                    "contract_id": "io.tobkiri.packvm.attestation.v1",
+                    "operation_id": "challenge",
+                    "payload": {"challenge": challenge},
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            timeout=10,
+        )
+        invoke_response = json.loads(_decode(invoked.stdout))
+        expected_digest = _sha256(challenge.encode())
+        if (
+            not isinstance(invoke_response, dict)
+            or invoke_response.get("ok") is not True
+            or invoke_response.get("protocol") != PACKVM_PROTOCOL
+            or not isinstance(invoke_response.get("payload"), dict)
+            or invoke_response["payload"].get("challenge_digest") != expected_digest
+        ):
+            raise ValueError("managed PackVM guest supervisor invoke challenge failed")
+
+    def _call(
+        self,
+        command: Sequence[str],
+        *,
+        input_text: str | None = None,
+        timeout: float,
+    ) -> Any:
+        if self._runner is not None:
+            return self._runner(command, input_text, timeout)
+        environment = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"}
+        if "HOME" in os.environ:
+            environment["HOME"] = os.environ["HOME"]
+        argv = tuple(str(item) for item in command)
+        cwd = Path.cwd().resolve()
+        bounded_timeout = min(max(float(timeout), 1.0), 900.0)
+        result = HostBoundedProcessRunner().run_local(
+            argv=argv,
+            cwd=cwd,
+            stdin=input_text,
+            timeout_seconds=bounded_timeout,
+            environment=environment,
+            policy=ProcessExecutionPolicy(
+                allowed_executables=frozenset({argv[0]}),
+                allowed_argv=(argv,),
+                allowed_cwds=(cwd,),
+                allowed_environment=frozenset(environment),
+                max_stdin_bytes=1024 * 1024,
+                max_stdout_bytes=MAX_LIMA_STATE_BYTES,
+                max_stderr_bytes=MAX_LIMA_STATE_BYTES,
+                max_timeout_seconds=bounded_timeout,
+            ),
+        )
+        return subprocess.CompletedProcess(
+            argv,
+            result.exit_code if result.exit_code is not None else 1,
+            result.stdout,
+            result.stderr or result.transport_error or "",
+        )
+
+    def _checked_call(
+        self, command: Sequence[str], *, timeout: float, input_text: str | None = None
+    ) -> Any:
+        result = self._call(command, input_text=input_text, timeout=timeout)
+        if result.returncode != 0:
+            raise ValueError(_decode(result.stderr)[:1000] or f"command failed: {command[1]}")
+        return result
+
+    def _sign_state(self, state: Mapping[str, Any]) -> str:
+        key_path = self._state_dir / "packvm-lima-attestation.key"
+        key = generate_or_load_signing_key(key_path)
+        unsigned = {key: value for key, value in state.items() if key != "authentication"}
+        return hmac.new(key, _canonical_json(unsigned), hashlib.sha256).hexdigest()
+
+    def _load_authenticated_state(self) -> dict[str, Any]:
+        try:
+            raw = _read_private_file(self.state_path, MAX_LIMA_STATE_BYTES)
+        except FileNotFoundError as exc:
+            raise ValueError("managed PackVM has not completed explicit provisioning") from exc
+        try:
+            state = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("PackVM attestation state is invalid") from exc
+        if not isinstance(state, dict) or state.get("version") != PACKVM_ATTESTATION_VERSION:
+            raise ValueError("PackVM attestation state is unsupported")
+        if state.get("backend_id") != PACKVM_BACKEND_ID or state.get("instance") != self._instance:
+            raise ValueError("PackVM attestation is bound to another runtime")
+        authentication = str(state.get("authentication") or "")
+        key = _read_private_file(self._state_dir / "packvm-lima-attestation.key", 64)
+        unsigned = {key: value for key, value in state.items() if key != "authentication"}
+        expected = hmac.new(key, _canonical_json(unsigned), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(authentication, expected):
+            raise ValueError("PackVM attestation authentication failed")
+        attested = dict(unsigned)
+        attestation_digest = str(attested.pop("attestation_digest", ""))
+        if attestation_digest != _canonical_digest(attested):
+            raise ValueError("PackVM attestation digest failed")
+        return state
+
+    def _audit(self, event: str, attestation_digest: str | None) -> None:
+        self._state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        record = {
+            "event": event,
+            "backend_id": PACKVM_BACKEND_ID,
+            "instance": self._instance,
+            "attestation_digest": attestation_digest,
+            "timestamp_unix": int(time.time()),
+        }
+        with self.audit_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
+        os.chmod(self.audit_path, 0o600)
+
+
+def _normalize_packvm_machine(value: str) -> str:
+    machine = {"aarch64": "arm64", "x86_64": "amd64", "AMD64": "amd64"}.get(value, value.lower())
+    if machine not in _PACKVM_IMAGES:
+        raise ValueError(f"unsupported PackVM architecture: {machine}")
+    return machine
+
+
+def _sha256(value: bytes) -> str:
+    return f"sha256:{hashlib.sha256(value).hexdigest()}"
+
+
+def _file_digest(path: Path) -> str:
+    metadata = path.lstat()
+    if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+        raise ValueError(f"attested file is not a regular file: {path.name}")
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _canonical_json(value: object) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+
+
+def _canonical_digest(value: object) -> str:
+    return _sha256(_canonical_json(value))
+
+
+def _read_private_file(path: Path, maximum: int) -> bytes:
+    metadata = path.lstat()
+    if path.is_symlink() or not stat.S_ISREG(metadata.st_mode) or metadata.st_size > maximum:
+        raise ValueError(f"unsafe PackVM state file: {path.name}")
+    if metadata.st_mode & 0o077:
+        raise ValueError(f"PackVM state permissions are too broad: {path.name}")
+    if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
+        raise ValueError(f"PackVM state owner changed: {path.name}")
+    return path.read_bytes()
+
+
+def _atomic_private_bytes(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+
+
+def _atomic_private_json(path: Path, payload: Mapping[str, Any]) -> None:
+    _atomic_private_bytes(path, _canonical_json(payload) + b"\n")

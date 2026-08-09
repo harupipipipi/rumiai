@@ -7,6 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
@@ -41,6 +42,8 @@ from tobkiri_host.models import (
 )
 from tobkiri_host.platform_backends import (
     IsolationLaunch,
+    IsolationLease,
+    ManagedLimaPackVMDriver,
     PlatformAttestation,
     ProductionIsolationBackend,
 )
@@ -83,7 +86,7 @@ def pack_artifact(kind: PackageKind = PackageKind.HOST_EXTENSION) -> PackArtifac
         os="macos",
         architecture="arm64",
         runtime_abi="packvm-v1",
-        backend="macos-vz",
+        backend="tobkiri.python-pack-v4",
     )
     return PackArtifact(
         pack_id="extension.files",
@@ -114,7 +117,8 @@ def binding():
 
 
 class Driver:
-    backend_id = "macos-vz"
+    backend_id = "tobkiri.python-pack-v4"
+    substrate_id = "macos-vz"
     backend_digest = digest("backend")
     platform = "macos-arm64"
 
@@ -163,15 +167,28 @@ def test_all_documented_platforms_register_exact_provider_with_controlled_driver
     )
     for system, machine, backend_id, platform_id in matrix:
         driver = Driver()
-        driver.backend_id = backend_id
+        driver.substrate_id = backend_id
         driver.platform = platform_id
         registry = production_backend_registry(
             platform_system=system,
             machine=machine,
             drivers=(driver,),
         )
-        assert registry.statuses[0].backend_id == backend_id
+        assert registry.statuses[0].backend_id == "tobkiri.python-pack-v4"
         assert registry.statuses[0].ready_for_production
+
+
+def test_platform_supervisor_accepts_only_explicit_portable_variant_alias() -> None:
+    driver = Driver()
+    registry = production_backend_registry(
+        platform_system="Darwin", machine="arm64", drivers=(driver,)
+    )
+    selected = binding()
+    portable = replace(
+        selected,
+        variant=replace(selected.variant, os="any", architecture="any"),
+    )
+    assert registry.select(portable).status.backend_id == "tobkiri.python-pack-v4"
 
 
 def test_platform_selection_and_attestation_fail_closed() -> None:
@@ -190,9 +207,83 @@ def test_platform_selection_and_attestation_fail_closed() -> None:
     driver.attestation_platform = "linux-arm64"
     with pytest.raises(BackendUnavailableError, match="attestation"):
         backend.materialize(selected, "reservation-2")
-    wrong = replace(selected.variant, backend="linux-firecracker")
+    wrong = replace(selected.variant, backend="other-packvm")
     with pytest.raises(BackendUnavailableError, match="wrong platform"):
         backend.materialize(replace(selected, variant=wrong), "reservation-3")
+
+
+@pytest.mark.parametrize(
+    ("system", "machine", "dependency", "substrate"),
+    [
+        ("Windows", "AMD64", "WinHvPlatform.dll", "windows-whpx"),
+        ("Linux", "x86_64", "/dev/kvm", "linux-firecracker"),
+    ],
+)
+def test_unregistered_cross_platform_python_packvm_fails_closed(
+    system: str, machine: str, dependency: str, substrate: str
+) -> None:
+    registry = production_backend_registry(platform_system=system, machine=machine)
+    assert registry.statuses[0].backend_id == "tobkiri.python-pack-v4"
+    assert registry.statuses[0].ready_for_production is False
+    reason = str(registry.statuses[0].unavailable_reason)
+    assert dependency in reason or f"authenticated {substrate}" in reason
+
+
+class Provisioner:
+    def __init__(self) -> None:
+        self.attestation = digest("lima-attestation")
+        self.requests: list[object] = []
+
+    def doctor(self):
+        return SimpleNamespace(
+            ready=True,
+            reason=None,
+            platform="macos-arm64",
+            attestation_digest=self.attestation,
+        )
+
+    def invoke_guest(self, request):
+        self.requests.append(request)
+        return {
+            "ok": True,
+            "protocol": "io.tobkiri.packvm-supervisor.v1",
+            "payload": {"inside_guest": True},
+        }
+
+
+def test_managed_lima_driver_invokes_only_authenticated_guest_and_rejects_replay() -> None:
+    provisioner = Provisioner()
+    driver = ManagedLimaPackVMDriver(provisioner)
+    lease = IsolationLease("lease-1", "reservation-1", 100.0)
+    launch = IsolationLaunch(
+        backend_id="tobkiri.python-pack-v4",
+        platform="macos-arm64",
+        artifact_digest=digest("artifact"),
+        executable_digest=digest("executable"),
+        isolation_profile="packvm.default.v1",
+        reservation_id="reservation-1",
+        lease=lease,
+    )
+    attestation = driver.launch(launch)
+    request = SimpleNamespace(
+        target_domain=SimpleNamespace(value=attestation.domain_id),
+        context=SimpleNamespace(request_id="request-1"),
+        contract_id="sample.v1",
+        contract_version="1.0.0",
+        operation_id="run",
+        payload={"value": 1},
+        request_digest=digest("request"),
+        deadline_monotonic=50.0,
+    )
+
+    outcome = driver.invoke(request)
+    assert outcome.payload == {"inside_guest": True}
+    assert provisioner.requests[0]["operation"] == "invoke"
+    driver.terminate(attestation.domain_id)
+    with pytest.raises(BackendUnavailableError, match="replay"):
+        driver.launch(launch)
+    provisioner.attestation = digest("tampered")
+    assert driver.capability() == (False, "managed Lima PackVM attestation changed")
 
 
 class RegistrationStore:

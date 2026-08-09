@@ -94,10 +94,14 @@ class BackendRegistry:
         if backend is None:
             raise BackendUnavailableError("pinned backend is not installed")
         status = backend.status
-        if status.enforces_platform and status.platform != (
-            f"{binding.variant.os}-{binding.variant.architecture}"
-        ):
-            raise BackendUnavailableError("backend platform does not match pinned variant")
+        if status.enforces_platform:
+            requested_platform = (
+                None
+                if binding.variant.os == "any" and binding.variant.architecture == "any"
+                else f"{binding.variant.os}-{binding.variant.architecture}"
+            )
+            if requested_platform is not None and status.platform != requested_platform:
+                raise BackendUnavailableError("backend platform does not match pinned variant")
         if status.execution_kind is not binding.variant.execution_kind:
             raise BackendUnavailableError("backend execution kind mismatch")
         if production and not status.ready_for_production:
