@@ -2,58 +2,25 @@ import {lazy, type ComponentType, type LazyExoticComponent} from 'react';
 
 import type {PanelRouteKey} from './routes';
 
-export type AdvancedRouteModuleKey =
+export type RouteModuleKey =
   | 'packs'
-  | 'packDetail'
-  | 'nodes'
-  | 'graphEditor'
-  | 'profileGraph'
-  | 'aiInput'
-  | 'apiMap'
-  | 'profileWorkspace'
-  | 'flows'
-  | 'settings';
+  | 'packDetail';
 
 type RouteModuleLoader = () => Promise<unknown>;
 
-const rawRouteModuleLoaders: Record<AdvancedRouteModuleKey, RouteModuleLoader> = {
+const rawRouteModuleLoaders: Record<RouteModuleKey, RouteModuleLoader> = {
   packs: () => import('../pages/Packs'),
   packDetail: () => import('../pages/PackDetail'),
-  nodes: () => import('../pages/NodeManager'),
-  graphEditor: () => Promise.all([
-    import('@xyflow/react/dist/style.css'),
-    import('../pages/GraphEditor'),
-  ]).then(([, routeModule]) => routeModule),
-  profileGraph: () => Promise.all([
-    import('@xyflow/react/dist/style.css'),
-    import('../pages/ProfileGraphEditor'),
-  ]).then(([, routeModule]) => routeModule),
-  aiInput: () => import('../pages/AiInputInspector'),
-  apiMap: () => import('../pages/ApiMap'),
-  profileWorkspace: () => import('../pages/ProfileWorkspace'),
-  flows: () => Promise.all([
-    import('@xyflow/react/dist/style.css'),
-    import('../pages/Flows'),
-  ]).then(([, routeModule]) => routeModule),
-  settings: () => import('../pages/Settings'),
 };
 
-export const advancedRouteModuleSources: Record<AdvancedRouteModuleKey, string> = {
+export const routeModuleSources: Record<RouteModuleKey, string> = {
   packs: 'src/pages/Packs.tsx',
   packDetail: 'src/pages/PackDetail.tsx',
-  nodes: 'src/pages/NodeManager.tsx',
-  graphEditor: 'src/pages/GraphEditor.tsx',
-  profileGraph: 'src/pages/ProfileGraphEditor.tsx',
-  aiInput: 'src/pages/AiInputInspector.tsx',
-  apiMap: 'src/pages/ApiMap.tsx',
-  profileWorkspace: 'src/pages/ProfileWorkspace.tsx',
-  flows: 'src/pages/Flows.tsx',
-  settings: 'src/pages/Settings.tsx',
 };
 
-const routeModulePromises = new Map<AdvancedRouteModuleKey, Promise<unknown>>();
+const routeModulePromises = new Map<RouteModuleKey, Promise<unknown>>();
 
-export function preloadRouteModule(key: AdvancedRouteModuleKey): Promise<unknown> {
+export function preloadRouteModule(key: RouteModuleKey): Promise<unknown> {
   const existing = routeModulePromises.get(key);
   if (existing) return existing;
 
@@ -65,16 +32,8 @@ export function preloadRouteModule(key: AdvancedRouteModuleKey): Promise<unknown
   return promise;
 }
 
-const panelRouteToModule: Partial<Record<PanelRouteKey, AdvancedRouteModuleKey>> = {
+const panelRouteToModule: Partial<Record<PanelRouteKey, RouteModuleKey>> = {
   packs: 'packs',
-  nodes: 'nodes',
-  graphEditor: 'graphEditor',
-  profileGraph: 'profileGraph',
-  aiInput: 'aiInput',
-  apiMap: 'apiMap',
-  profileWorkspace: 'profileWorkspace',
-  flows: 'flows',
-  settings: 'settings',
 };
 
 export function preloadPanelRoute(route: PanelRouteKey): Promise<unknown> | null {
@@ -83,7 +42,7 @@ export function preloadPanelRoute(route: PanelRouteKey): Promise<unknown> | null
 }
 
 function lazyNamedRoute(
-  key: AdvancedRouteModuleKey,
+  key: RouteModuleKey,
   exportName: string,
 ): LazyExoticComponent<ComponentType> {
   return lazy(async () => {
@@ -98,11 +57,3 @@ function lazyNamedRoute(
 
 export const LazyPacks = lazyNamedRoute('packs', 'Packs');
 export const LazyPackDetail = lazyNamedRoute('packDetail', 'PackDetail');
-export const LazyNodeManager = lazyNamedRoute('nodes', 'NodeManager');
-export const LazyGraphEditor = lazyNamedRoute('graphEditor', 'GraphEditor');
-export const LazyProfileGraphEditor = lazyNamedRoute('profileGraph', 'ProfileGraphEditor');
-export const LazyAiInputInspector = lazyNamedRoute('aiInput', 'AiInputInspector');
-export const LazyApiMap = lazyNamedRoute('apiMap', 'ApiMap');
-export const LazyProfileWorkspace = lazyNamedRoute('profileWorkspace', 'ProfileWorkspace');
-export const LazyFlows = lazyNamedRoute('flows', 'Flows');
-export const LazySettings = lazyNamedRoute('settings', 'Settings');

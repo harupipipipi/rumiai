@@ -6,10 +6,10 @@ import { panelRouteMeta, panelRoutes, viewerNavGroups, type PanelRouteKey } from
 import { Avatar } from '@/src/components/ui/Avatar';
 import { LAUNCHER_DISPLAY_NAME } from '@/src/lib/launcherBrand';
 import { preloadPanelRoute } from '@/src/lib/routeModules';
-import { BrainCircuit, Folder, FolderCog, LayoutGrid, Network, Settings, PanelLeft, Home, GitBranch, Share2, Route } from 'lucide-react';
+import { Folder, PanelLeft, Home } from 'lucide-react';
 
 type NavGroup = {
-  id: 'workspace' | 'advanced';
+  id: 'workspace';
   label: string;
   items: { to: string; icon: typeof Home; label: string; route: PanelRouteKey }[];
 };
@@ -20,14 +20,6 @@ const routeIcons: Record<PanelRouteKey, typeof Home> = {
   home: Home,
   setup: Home,
   packs: Folder,
-  nodes: Network,
-  graphEditor: GitBranch,
-  profileGraph: Share2,
-  aiInput: BrainCircuit,
-  apiMap: Route,
-  profileWorkspace: FolderCog,
-  flows: LayoutGrid,
-  settings: Settings,
 };
 
 export function Sidebar() {
@@ -199,12 +191,9 @@ export function Sidebar() {
             isSidebarOpen ? "p-3" : "flex justify-center p-1.5",
           )}
         >
-          <Link
-            to={panelRoutes.settings}
+          <div
             title={!isSidebarOpen ? profile.username : undefined}
             aria-label={profile.username}
-            onFocus={() => { void preloadPanelRoute('settings'); }}
-            onPointerEnter={() => { void preloadPanelRoute('settings'); }}
             className={cn(
               "flex items-center rounded-lg transition-[gap,padding,background-color] hover:bg-bg-hover",
               sidebarAnimation,
@@ -222,7 +211,7 @@ export function Sidebar() {
             >
               <div className="truncate text-sm font-medium text-text-main">{profile.username}</div>
             </div>
-          </Link>
+          </div>
         </div>
       </div>
     </aside>

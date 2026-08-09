@@ -1,51 +1,19 @@
 import type {
-  ApiResponse,
-  PacksResponseData,
-  PackInstallResponseData,
-  PackApprovalResponseData,
-  PackToggleResponseData,
-  StartupProfilesResponseData,
-  ApiStartupProfile,
-  StartupProfileGraphResponseData,
-  StartupProfileGraphCompilePreviewResponseData,
-  StartupProfileAiInputResponseData,
-  StartupProfileAiInputTracesResponseData,
-  ApiAiInputConfig,
-  StartupProfileCompilePreviewResponseData,
-  StartupProfileMutationResponseData,
-  StartupProfileDeleteResponseData,
-  FlowsResponseData,
-  ApiFlowDetail,
-  FlowCreateResponseData,
-  FlowUpdateResponseData,
-  FlowDeleteResponseData,
   ApiDashboard,
-  ProfileResponseData,
-  ApiVersion,
-  ApiUpdateTarget,
-  ApiUpdateSettings,
-  UpdatesResponseData,
-  UpdateApplyResponseData,
-  KernelRestartResponseData,
-  OAuthStartResponseData,
-  SetupStatusResponseData,
-  ApiPresentationState,
   ApiPresentationSelection,
-  PresentationLaunchResponse,
-  HealthResponseData,
+  ApiResponse,
+  ApiPresentationState,
   BackgroundControlStatus,
-  DesktopSystemInfo,
   DebugApprovalDuration,
   DebugApprovalStatus,
-  CapabilityGraphsResponseData,
-  CapabilityGraphResponseData,
-  CapabilityGraphCompileResponseData,
-  CapabilityGraphSaveResponseData,
-  CapabilityNodesResponseData,
-  CapabilityProfileCloneResponseData,
-  CapabilityProfileNodesResponseData,
-  CapabilityProfilesResponseData,
-  ApiMapResponseData,
+  DesktopSystemInfo,
+  HealthResponseData,
+  KernelRestartResponseData,
+  PackApprovalResponseData,
+  PackInstallResponseData,
+  PackToggleResponseData,
+  PacksResponseData,
+  PresentationLaunchResponse,
 } from './apiTypes';
 import {
   GetRequestCoordinator,
@@ -53,10 +21,10 @@ import {
   type GetRequestSnapshot,
 } from './getRequestCoordinator';
 
-// Base URL: empty string means relative path (works with Vite proxy)
 const API_BASE_URL =
   (import.meta as ImportMeta & {env?: Record<string, string>}).env?.VITE_API_BASE_URL ?? '';
 const PANEL_CSRF_STORAGE_KEY = 'rumi-panel-csrf';
+const PANEL_AUTH_EXCHANGE_PATH = '/api/panel/auth/exchange';
 let panelBootstrapPromise: Promise<void> | null = null;
 let panelBootstrapCodeInFlight: string | null = null;
 let panelSessionRecoveryPromise: Promise<boolean> | null = null;
@@ -89,16 +57,8 @@ function isUnsafeMethod(method: string): boolean {
   return method === 'POST' || method === 'PUT' || method === 'DELETE' || method === 'PATCH';
 }
 
-function isPanelApiPath(path: string): boolean {
-  return path === '/api/panel' || path.startsWith('/api/panel/');
-}
-
 function isSetupApiPath(path: string): boolean {
   return path === '/api/setup' || path.startsWith('/api/setup/');
-}
-
-function isV4DispatchApiPath(path: string): boolean {
-  return path === '/api/v4/dispatch';
 }
 
 function isFrontendContractPath(path: string): boolean {
@@ -106,8 +66,7 @@ function isFrontendContractPath(path: string): boolean {
 }
 
 function isPanelSessionApiPath(path: string): boolean {
-  return isPanelApiPath(path) || isSetupApiPath(path) || isV4DispatchApiPath(path)
-    || isFrontendContractPath(path);
+  return isSetupApiPath(path) || isFrontendContractPath(path);
 }
 
 function frontendContractPath(method: string, target: string): string {
@@ -124,40 +83,32 @@ async function exchangePanelBootstrapCode(
   currentRequestSignal?: AbortSignal,
 ): Promise<void> {
   const url = new URL(window.location.href);
-  if (!code) {
-    return;
-  }
+  if (!code) return;
 
-  const response = await fetch(`${API_BASE_URL}/api/panel/auth/exchange`, {
+  const response = await fetch(`${API_BASE_URL}${PANEL_AUTH_EXCHANGE_PATH}`, {
     method: 'POST',
     credentials: 'same-origin',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ code }),
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({code}),
   });
 
   if (!response.ok) {
     let errorMessage = `Panel bootstrap failed: ${response.status} ${response.statusText}`;
     try {
       const errorBody: ApiResponse<unknown> = await response.json();
-      if (errorBody.error) {
-        errorMessage = errorBody.error;
-      }
+      if (errorBody.error) errorMessage = errorBody.error;
     } catch {
-      // fall back to default message
+      // Use the HTTP status when the server did not return an error envelope.
     }
     throw new Error(errorMessage);
   }
 
-  const envelope: ApiResponse<{ csrf_token: string }> = await response.json();
+  const envelope: ApiResponse<{csrf_token: string}> = await response.json();
   if (!envelope.success || !envelope.data?.csrf_token) {
     throw new Error(envelope.error || 'Panel bootstrap failed');
   }
 
   setStoredPanelCsrfToken(envelope.data.csrf_token);
-  // The current request will refetch only after this exchange completes. Keep
-  // that exact request while invalidating all other stale foreground reads.
   getRequestCoordinator.invalidate({preserveSignal: currentRequestSignal});
   url.searchParams.delete('code');
   window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
@@ -176,18 +127,22 @@ function isLikelyTauriShell(): boolean {
 
 async function loadTauriInvoke(): Promise<TauriInvoke | null> {
   const globalInvoke = getTauriInvoke();
-  if (globalInvoke) {
-    return globalInvoke;
-  }
-  if (!isLikelyTauriShell()) {
-    return null;
-  }
+  if (globalInvoke) return globalInvoke;
+  if (!isLikelyTauriShell()) return null;
   try {
     const mod = await import('@tauri-apps/api/core');
     return mod.invoke as TauriInvoke;
   } catch {
     return null;
   }
+}
+
+async function requireTauriInvoke(operation: string): Promise<TauriInvoke> {
+  const invoke = await loadTauriInvoke();
+  if (!invoke) {
+    throw new Error(`${operation} is only available in Tobkiri Launcher.`);
+  }
+  return invoke;
 }
 
 export function isDesktopShellAvailable(): boolean {
@@ -200,124 +155,69 @@ export async function openExternalUrl(url: string): Promise<void> {
     await invoke('open_external_url', {url});
     return;
   }
-
   window.location.href = url;
 }
 
 export async function sendToBackground(): Promise<void> {
-  const invoke = await loadTauriInvoke();
-  if (!invoke) {
-    throw new Error('Background control is only available in Tobkiri Launcher.');
-  }
-
+  const invoke = await requireTauriInvoke('Background control');
   await invoke<void>('send_to_background');
 }
 
 export async function showAppWindow(): Promise<void> {
-  const invoke = await loadTauriInvoke();
-  if (!invoke) {
-    throw new Error('Window restore is only available in Tobkiri Launcher.');
-  }
-
+  const invoke = await requireTauriInvoke('Window restore');
   await invoke<void>('show_app_window');
 }
 
 export async function fetchBackgroundControlStatus(): Promise<BackgroundControlStatus | null> {
   const invoke = await loadTauriInvoke();
-  if (!invoke) {
-    return null;
-  }
-
-  return invoke<BackgroundControlStatus>('get_background_control_status');
+  return invoke ? invoke<BackgroundControlStatus>('get_background_control_status') : null;
 }
 
 export async function fetchDesktopSystemInfo(): Promise<DesktopSystemInfo | null> {
   const invoke = await loadTauriInvoke();
-  if (!invoke) {
-    return null;
-  }
-
-  return invoke<DesktopSystemInfo>('get_desktop_system_info');
+  return invoke ? invoke<DesktopSystemInfo>('get_desktop_system_info') : null;
 }
 
 export async function fetchDebugApprovalStatus(): Promise<DebugApprovalStatus | null> {
   const invoke = await loadTauriInvoke();
-  if (!invoke) {
-    return null;
-  }
-  return invoke<DebugApprovalStatus>('debug_approval_status');
+  return invoke ? invoke<DebugApprovalStatus>('debug_approval_status') : null;
 }
 
 export async function armDebugApproval(duration: DebugApprovalDuration): Promise<DebugApprovalStatus> {
-  const invoke = await loadTauriInvoke();
-  if (!invoke) {
-    throw new Error('Developer Debug Approval is only available in Tobkiri Launcher.');
-  }
+  const invoke = await requireTauriInvoke('Developer Debug Approval');
   return invoke<DebugApprovalStatus>('arm_debug_approval', {duration});
 }
 
 export async function revokeDebugApproval(): Promise<DebugApprovalStatus> {
-  const invoke = await loadTauriInvoke();
-  if (!invoke) {
-    throw new Error('Developer Debug Approval is only available in Tobkiri Launcher.');
-  }
+  const invoke = await requireTauriInvoke('Developer Debug Approval');
   return invoke<DebugApprovalStatus>('revoke_debug_approval');
 }
 
 export async function launchDefaultspackDesktop(): Promise<string> {
-  const invoke = await loadTauriInvoke();
-  if (!invoke) {
-    throw new Error('Defaultspack desktop launch is only available in Tobkiri Launcher.');
-  }
-
-  try {
-    return await invoke<string>('launch_defaultspack_desktop');
-  } catch (error) {
-    if (error instanceof Error) {
-      throw error;
-    }
-    throw new Error(String(error || 'Failed to launch Defaultspack'));
-  }
+  const invoke = await requireTauriInvoke('Defaultspack desktop launch');
+  return invoke<string>('launch_defaultspack_desktop');
 }
 
 export async function fetchPresentationState(): Promise<ApiPresentationState> {
-  const invoke = await loadTauriInvoke();
-  if (invoke) {
-    return invoke<ApiPresentationState>('get_presentation_catalog');
-  }
-  return apiFetch<ApiPresentationState>('/api/panel/presentation/catalog');
+  const invoke = await requireTauriInvoke('Presentation selection');
+  return invoke<ApiPresentationState>('get_presentation_catalog');
 }
 
 export async function selectPresentation(
   selection: ApiPresentationSelection,
 ): Promise<ApiPresentationState> {
-  const invoke = await loadTauriInvoke();
-  if (invoke) {
-    return invoke<ApiPresentationState>('select_presentation', {selection});
-  }
-  return apiFetch<ApiPresentationState>('/api/panel/presentation/selection', {
-    method: 'POST',
-    body: JSON.stringify(selection),
-  });
+  const invoke = await requireTauriInvoke('Presentation selection');
+  return invoke<ApiPresentationState>('select_presentation', {selection});
 }
 
 export async function launchSelectedPresentation(): Promise<PresentationLaunchResponse> {
-  const invoke = await loadTauriInvoke();
-  if (invoke) {
-    return invoke<PresentationLaunchResponse>('launch_selected_presentation');
-  }
-  return apiFetch<PresentationLaunchResponse>('/api/panel/presentation/launch', {
-    method: 'POST',
-  });
+  const invoke = await requireTauriInvoke('Presentation launch');
+  return invoke<PresentationLaunchResponse>('launch_selected_presentation');
 }
 
 async function requestDesktopPanelBootstrapCode(): Promise<string | null> {
   const invoke = await loadTauriInvoke();
-  if (!invoke) {
-    return null;
-  }
-
-  return invoke<string>('reauthorize_panel_session');
+  return invoke ? invoke<string>('reauthorize_panel_session') : null;
 }
 
 function isRecoverablePanelAuthError(status: number, errorMessage: string): boolean {
@@ -325,9 +225,7 @@ function isRecoverablePanelAuthError(status: number, errorMessage: string): bool
 }
 
 async function recoverExpiredPanelSession(currentRequestSignal?: AbortSignal): Promise<boolean> {
-  if (panelSessionRecoveryPromise) {
-    return panelSessionRecoveryPromise;
-  }
+  if (panelSessionRecoveryPromise) return panelSessionRecoveryPromise;
 
   panelSessionRecoveryPromise = (async () => {
     if (hasPendingPanelBootstrapCode()) {
@@ -336,10 +234,7 @@ async function recoverExpiredPanelSession(currentRequestSignal?: AbortSignal): P
     }
 
     const code = await requestDesktopPanelBootstrapCode();
-    if (!code) {
-      return false;
-    }
-
+    if (!code) return false;
     await exchangePanelBootstrapCode(code, currentRequestSignal);
     return true;
   })();
@@ -354,9 +249,7 @@ async function recoverExpiredPanelSession(currentRequestSignal?: AbortSignal): P
 export async function bootstrapPanelSession(currentRequestSignal?: AbortSignal): Promise<void> {
   const url = new URL(window.location.href);
   const code = url.searchParams.get('code');
-  if (!code) {
-    return;
-  }
+  if (!code) return;
 
   if (panelBootstrapPromise && panelBootstrapCodeInFlight === code) {
     return panelBootstrapPromise;
@@ -364,7 +257,6 @@ export async function bootstrapPanelSession(currentRequestSignal?: AbortSignal):
 
   panelBootstrapCodeInFlight = code;
   panelBootstrapPromise = exchangePanelBootstrapCode(code, currentRequestSignal);
-
   try {
     await panelBootstrapPromise;
   } finally {
@@ -378,27 +270,13 @@ async function ensurePanelSessionForRequest(
   method: string,
   currentRequestSignal?: AbortSignal,
 ): Promise<void> {
-  if (!isPanelSessionApiPath(path)) {
-    return;
-  }
-
-  if (!isUnsafeMethod(method) && !hasPendingPanelBootstrapCode() && !panelBootstrapPromise) {
-    return;
-  }
-
+  if (!isPanelSessionApiPath(path)) return;
+  if (!isUnsafeMethod(method) && !hasPendingPanelBootstrapCode() && !panelBootstrapPromise) return;
   if (panelBootstrapPromise || hasPendingPanelBootstrapCode()) {
     await bootstrapPanelSession(currentRequestSignal);
   }
 }
 
-/**
- * Common fetch wrapper for API calls.
- * - Prepends API_BASE_URL
- * - Sets JSON headers
- * - Parses {success, data, error} envelope
- * - Throws on success===false or non-ok HTTP status
- * - Returns unwrapped `data`
- */
 export interface ApiRequestPolicy {
   mode?: 'foreground' | 'prefetch';
   timeoutMs?: number;
@@ -422,16 +300,12 @@ export async function apiFetch<T>(
       'Content-Type': 'application/json',
       ...(options.headers as Record<string, string> | undefined),
     };
-
     if (isFrontendContractPath(path)) {
       headers['X-Tobkiri-Request-ID'] = crypto.randomUUID();
     }
-
     if (isUnsafeMethod(method)) {
       const csrfToken = getStoredPanelCsrfToken();
-      if (csrfToken) {
-        headers['X-Rumi-CSRF'] = csrfToken;
-      }
+      if (csrfToken) headers['X-Rumi-CSRF'] = csrfToken;
     }
 
     const response = await fetch(url, {
@@ -443,19 +317,15 @@ export async function apiFetch<T>(
     });
 
     if (!response.ok) {
-      // Try to parse error envelope even on non-ok status
       let errorMessage = response.status === 429
         ? 'Too many requests reached the local panel. Please wait a moment and try again.'
         : `API Error: ${response.status} ${response.statusText}`;
       try {
         const errorBody: ApiResponse<unknown> = await response.json();
-        if (errorBody.error) {
-          errorMessage = errorBody.error;
-        }
+        if (errorBody.error) errorMessage = errorBody.error;
       } catch {
-        // If JSON parsing fails, use the default error message
+        // Use the default HTTP error.
       }
-
       if (
         allowPanelRecovery &&
         isPanelSessionApiPath(path) &&
@@ -464,12 +334,10 @@ export async function apiFetch<T>(
       ) {
         return fetchRequest(false, signal);
       }
-
       throw new Error(errorMessage);
     }
 
     const envelope: ApiResponse<T> = await response.json();
-
     if (!envelope.success) {
       const errorMessage = envelope.error || 'Unknown API error';
       if (
@@ -482,7 +350,6 @@ export async function apiFetch<T>(
       }
       throw new Error(errorMessage);
     }
-
     return envelope.data as T;
   };
 
@@ -518,7 +385,7 @@ export async function apiFetch<T>(
 
 export function prefetchApiGet<T>(
   path: string,
-  options: { timeoutMs?: number } = {},
+  options: {timeoutMs?: number} = {},
 ): Promise<T> {
   return apiFetch<T>(path, {}, {
     mode: 'prefetch',
@@ -538,19 +405,14 @@ export function getApiRequestCacheSnapshot(): GetRequestSnapshot {
   return getRequestCoordinator.snapshot();
 }
 
-// ============================================================
-// Dashboard
-// ============================================================
-
 export function fetchDashboard(): Promise<ApiDashboard> {
   return apiFetch<ApiDashboard>(frontendContractPath('GET', '/api/home/dashboard'));
 }
 
-// ============================================================
-// Packs
-// ============================================================
-
-function dispatchPackControl<T>(operationId: string, payload: Record<string, unknown> = {}): Promise<T> {
+function dispatchPackControl<T>(
+  operationId: string,
+  payload: Record<string, unknown> = {},
+): Promise<T> {
   const targets: Record<string, string> = {
     'approval.approve': '/api/pack-control/approval-approve',
     'approval.candidate': '/api/pack-control/approval-candidate',
@@ -563,9 +425,7 @@ function dispatchPackControl<T>(operationId: string, payload: Record<string, unk
     return apiFetch<T>(frontendContractPath('GET', '/api/pack-control/catalog'));
   }
   const target = targets[operationId];
-  if (!target) {
-    throw new Error(`Unselected Pack control operation: ${operationId}`);
-  }
+  if (!target) throw new Error(`Unselected Pack control operation: ${operationId}`);
   return apiFetch<T>(frontendContractPath('POST', target), {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -596,467 +456,10 @@ export function disablePack(id: string): Promise<PackToggleResponseData> {
   return dispatchPackControl<PackToggleResponseData>('pack.disable', {pack_id: id});
 }
 
-// ============================================================
-// Startup Profiles
-// ============================================================
-
-export function fetchStartupProfiles(): Promise<StartupProfilesResponseData> {
-  return apiFetch<StartupProfilesResponseData>('/api/panel/startup/profiles');
-}
-
-export function createStartupProfile(
-  data: {
-    name?: string;
-    base_pack: string;
-    graph_id?: string;
-    packs?: string[];
-    node_overrides?: Record<string, string>;
-    icon?: string | null;
-  },
-): Promise<StartupProfileMutationResponseData> {
-  return apiFetch<StartupProfileMutationResponseData>('/api/panel/startup/profiles', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-}
-
-export type StartupProfileUpdatePayload = Partial<Pick<
-  ApiStartupProfile,
-  | 'name'
-  | 'base_pack'
-  | 'graph_id'
-  | 'packs'
-  | 'node_overrides'
-  | 'icon'
-  | 'default_flow'
-  | 'default_graph'
-  | 'system_prompt_id'
-  | 'default_prompt_id'
-  | 'capability_profile_id'
-  | 'launch_capability_graph'
-  | 'surfaces'
-  | 'policy'
-  | 'permissions'
-  | 'enabled_nodes'
-  | 'disabled_nodes'
-  | 'node_settings'
-  | 'metadata'
->>;
-
-export function updateStartupProfile(
-  id: string,
-  data: StartupProfileUpdatePayload,
-): Promise<StartupProfileMutationResponseData> {
-  return apiFetch<StartupProfileMutationResponseData>(
-    `/api/panel/startup/profiles/${encodeURIComponent(id)}`,
-    {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    },
-  );
-}
-
-export function deleteStartupProfile(id: string): Promise<StartupProfileDeleteResponseData> {
-  return apiFetch<StartupProfileDeleteResponseData>(
-    `/api/panel/startup/profiles/${encodeURIComponent(id)}`,
-    { method: 'DELETE' },
-  );
-}
-
-export function duplicateStartupProfile(id: string): Promise<StartupProfileMutationResponseData> {
-  return apiFetch<StartupProfileMutationResponseData>(
-    `/api/panel/startup/profiles/${encodeURIComponent(id)}/duplicate`,
-    { method: 'POST' },
-  );
-}
-
-export function activateStartupProfile(id: string): Promise<StartupProfileMutationResponseData> {
-  return apiFetch<StartupProfileMutationResponseData>(
-    `/api/panel/startup/profiles/${encodeURIComponent(id)}/activate`,
-    { method: 'POST' },
-  );
-}
-
-export function launchStartupProfile(id: string): Promise<StartupProfileMutationResponseData> {
-  return apiFetch<StartupProfileMutationResponseData>(
-    `/api/panel/startup/profiles/${encodeURIComponent(id)}/launch`,
-    { method: 'POST' },
-  );
-}
-
-export function compileStartupProfilePreview(
-  id: string,
-  profile?: ApiStartupProfile,
-): Promise<StartupProfileCompilePreviewResponseData> {
-  return apiFetch<StartupProfileCompilePreviewResponseData>(
-    `/api/panel/startup/profiles/${encodeURIComponent(id)}/compile-preview`,
-    {
-      method: 'POST',
-      body: JSON.stringify(profile ? { profile } : {}),
-    },
-  );
-}
-
-export function fetchStartupProfileGraph(id: string): Promise<StartupProfileGraphResponseData> {
-  return apiFetch<StartupProfileGraphResponseData>(
-    `/api/panel/startup/profiles/${encodeURIComponent(id)}/graph`,
-  );
-}
-
-export function updateStartupProfileGraph(
-  id: string,
-  payload: {
-    graph?: Record<string, unknown>;
-    selected?: Record<string, unknown>;
-  },
-): Promise<StartupProfileGraphResponseData> {
-  return apiFetch<StartupProfileGraphResponseData>(
-    `/api/panel/startup/profiles/${encodeURIComponent(id)}/graph`,
-    {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    },
-  );
-}
-
-export function compileStartupProfileGraphPreview(
-  id: string,
-  payload: {
-    graph?: Record<string, unknown>;
-    selected?: Record<string, unknown>;
-  },
-): Promise<StartupProfileGraphCompilePreviewResponseData> {
-  return apiFetch<StartupProfileGraphCompilePreviewResponseData>(
-    `/api/panel/startup/profiles/${encodeURIComponent(id)}/graph/compile-preview`,
-    {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    },
-  );
-}
-
-export function fetchApiMap(params?: { profile_id?: string; focus?: string }): Promise<ApiMapResponseData> {
-  const search = new URLSearchParams();
-  if (params?.profile_id) {
-    search.set('profile_id', params.profile_id);
-  }
-  if (params?.focus) {
-    search.set('focus', params.focus);
-  }
-  const query = search.toString();
-  return apiFetch<ApiMapResponseData>(`/api/panel/api-map${query ? `?${query}` : ''}`);
-}
-
-export function fetchStartupProfileAiInput(
-  id: string,
-  options?: {include_text?: boolean},
-): Promise<StartupProfileAiInputResponseData> {
-  const search = new URLSearchParams();
-  if (options?.include_text === false) {
-    search.set('include_text', 'false');
-  }
-  const query = search.toString();
-  return apiFetch<StartupProfileAiInputResponseData>(
-    `/api/panel/startup/profiles/${encodeURIComponent(id)}/ai-input${query ? `?${query}` : ''}`,
-  );
-}
-
-export function updateStartupProfileAiInput(
-  id: string,
-  aiInput: Partial<ApiAiInputConfig>,
-): Promise<StartupProfileAiInputResponseData> {
-  return apiFetch<StartupProfileAiInputResponseData>(
-    `/api/panel/startup/profiles/${encodeURIComponent(id)}/ai-input`,
-    {
-      method: 'PUT',
-      body: JSON.stringify({ai_input: aiInput}),
-    },
-  );
-}
-
-export function compileStartupProfileAiInputPreview(
-  id: string,
-  payload: {ai_input?: Partial<ApiAiInputConfig>; message?: string},
-): Promise<StartupProfileAiInputResponseData> {
-  return apiFetch<StartupProfileAiInputResponseData>(
-    `/api/panel/startup/profiles/${encodeURIComponent(id)}/ai-input/compile-preview`,
-    {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    },
-  );
-}
-
-export function fetchStartupProfileAiInputTraces(
-  id: string,
-): Promise<StartupProfileAiInputTracesResponseData> {
-  return apiFetch<StartupProfileAiInputTracesResponseData>(
-    `/api/panel/startup/profiles/${encodeURIComponent(id)}/ai-input/traces`,
-  );
-}
-
-export function addPackToStartupProfile(id: string, packId: string): Promise<StartupProfileMutationResponseData> {
-  return apiFetch<StartupProfileMutationResponseData>(
-    `/api/panel/startup/profiles/${encodeURIComponent(id)}/packs`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ pack_id: packId }),
-    },
-  );
-}
-
-export function removePackFromStartupProfile(id: string, packId: string): Promise<StartupProfileMutationResponseData> {
-  return apiFetch<StartupProfileMutationResponseData>(
-    `/api/panel/startup/profiles/${encodeURIComponent(id)}/packs/${encodeURIComponent(packId)}`,
-    { method: 'DELETE' },
-  );
-}
-
-export function setStartupProfileNodeOverride(
-  id: string,
-  portKey: string,
-  nodeId: string,
-): Promise<StartupProfileMutationResponseData> {
-  return apiFetch<StartupProfileMutationResponseData>(
-    `/api/panel/startup/profiles/${encodeURIComponent(id)}/overrides`,
-    {
-      method: 'PUT',
-      body: JSON.stringify({ port_key: portKey, node_id: nodeId }),
-    },
-  );
-}
-
-export function clearStartupProfileNodeOverride(id: string, portKey: string): Promise<StartupProfileMutationResponseData> {
-  return apiFetch<StartupProfileMutationResponseData>(
-    `/api/panel/startup/profiles/${encodeURIComponent(id)}/overrides/${encodeURIComponent(portKey)}`,
-    { method: 'DELETE' },
-  );
-}
-
-// ============================================================
-// Flows
-// ============================================================
-
-export function fetchFlows(): Promise<FlowsResponseData> {
-  return apiFetch<FlowsResponseData>('/api/panel/flows');
-}
-
-export function fetchFlowDetail(id: string): Promise<ApiFlowDetail> {
-  return apiFetch<ApiFlowDetail>(
-    `/api/panel/flows/${encodeURIComponent(id)}`,
-  );
-}
-
-export function createFlow(
-  data: { flow_id: string; yaml_content: string; filename?: string },
-): Promise<FlowCreateResponseData> {
-  return apiFetch<FlowCreateResponseData>('/api/panel/flows', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-}
-
-export function updateFlow(
-  id: string,
-  data: { yaml_content: string },
-): Promise<FlowUpdateResponseData> {
-  return apiFetch<FlowUpdateResponseData>(
-    `/api/panel/flows/${encodeURIComponent(id)}`,
-    {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    },
-  );
-}
-
-export function deleteFlow(id: string): Promise<FlowDeleteResponseData> {
-  return apiFetch<FlowDeleteResponseData>(
-    `/api/panel/flows/${encodeURIComponent(id)}`,
-    { method: 'DELETE' },
-  );
-}
-
-// ============================================================
-// Settings
-// ============================================================
-
-export function fetchProfile(): Promise<ProfileResponseData> {
-  return apiFetch<ProfileResponseData>('/api/panel/settings/profile');
-}
-
-export function updateProfile(
-  data: Record<string, unknown>,
-): Promise<ProfileResponseData> {
-  return apiFetch<ProfileResponseData>('/api/panel/settings/profile', {
-    method: 'PUT',
-    body: JSON.stringify(data),
-  });
-}
-
-// ============================================================
-// System
-// ============================================================
-
-export function fetchVersion(): Promise<ApiVersion> {
-  return apiFetch<ApiVersion>('/api/panel/version');
-}
-
-export function fetchUpdates(): Promise<UpdatesResponseData> {
-  return apiFetch<UpdatesResponseData>('/api/panel/updates');
-}
-
-export function fetchUpdateSettings(): Promise<ApiUpdateSettings> {
-  return apiFetch<ApiUpdateSettings>('/api/panel/updates/settings');
-}
-
-export function updateUpdateSettings(
-  autoUpdate: Partial<Record<ApiUpdateTarget, boolean>>,
-): Promise<ApiUpdateSettings> {
-  return apiFetch<ApiUpdateSettings>('/api/panel/updates/settings', {
-    method: 'PUT',
-    body: JSON.stringify({auto_update: autoUpdate}),
-  });
-}
-
-export function applyUpdate(target: ApiUpdateTarget): Promise<UpdateApplyResponseData> {
-  return apiFetch<UpdateApplyResponseData>(
-    `/api/panel/updates/${encodeURIComponent(target)}/apply`,
-    {
-      method: 'POST',
-      body: JSON.stringify({}),
-    },
-  );
-}
-
 export function restartKernel(): Promise<KernelRestartResponseData> {
   return dispatchPackControl<KernelRestartResponseData>('runtime.restart');
 }
 
-// ============================================================
-// Setup
-// ============================================================
-
-export function fetchSetupStatus(): Promise<SetupStatusResponseData> {
-  return apiFetch<SetupStatusResponseData>('/api/setup/status');
-}
-
-export function startOAuth(): Promise<OAuthStartResponseData> {
-  return apiFetch<OAuthStartResponseData>('/api/setup/oauth/start');
-}
-
-// ============================================================
-// Health
-// ============================================================
-
 export function checkHealth(): Promise<HealthResponseData> {
   return apiFetch<HealthResponseData>('/health');
-}
-
-// ============================================================
-// Capability Graph
-// ============================================================
-
-export function fetchCapabilityNodes(): Promise<CapabilityNodesResponseData> {
-  return apiFetch<CapabilityNodesResponseData>('/api/panel/nodes');
-}
-
-export function fetchCapabilityProfiles(): Promise<CapabilityProfilesResponseData> {
-  return apiFetch<CapabilityProfilesResponseData>('/api/panel/profiles');
-}
-
-export function fetchCapabilityProfileNodes(
-  profileId: string,
-): Promise<CapabilityProfileNodesResponseData> {
-  return apiFetch<CapabilityProfileNodesResponseData>(
-    `/api/panel/profiles/${encodeURIComponent(profileId)}/nodes`,
-  );
-}
-
-export function enableCapabilityProfileNode(
-  profileId: string,
-  nodeId: string,
-): Promise<{ profile_id: string; node_id: string; enabled: boolean }> {
-  return apiFetch(`/api/panel/profiles/${encodeURIComponent(profileId)}/nodes/${encodeURIComponent(nodeId)}/enable`, {
-    method: 'POST',
-  });
-}
-
-export function disableCapabilityProfileNode(
-  profileId: string,
-  nodeId: string,
-): Promise<{ profile_id: string; node_id: string; enabled: boolean }> {
-  return apiFetch(`/api/panel/profiles/${encodeURIComponent(profileId)}/nodes/${encodeURIComponent(nodeId)}/disable`, {
-    method: 'POST',
-  });
-}
-
-export function fetchCapabilityGraphs(): Promise<CapabilityGraphsResponseData> {
-  return apiFetch<CapabilityGraphsResponseData>('/api/panel/graphs');
-}
-
-export function fetchCapabilityGraph(graphId: string): Promise<CapabilityGraphResponseData> {
-  return apiFetch<CapabilityGraphResponseData>(
-    `/api/panel/graphs/${encodeURIComponent(graphId)}`,
-  );
-}
-
-export function validateCapabilityGraph(
-  graphId: string,
-  profileId: string,
-  graph?: Record<string, unknown>,
-): Promise<CapabilityGraphCompileResponseData> {
-  return apiFetch<CapabilityGraphCompileResponseData>(
-    `/api/panel/graphs/${encodeURIComponent(graphId)}/validate`,
-    {
-      method: 'POST',
-      body: JSON.stringify({profile_id: profileId, graph}),
-    },
-  );
-}
-
-export function compileCapabilityGraph(
-  graphId: string,
-  profileId: string,
-  graph?: Record<string, unknown>,
-): Promise<CapabilityGraphCompileResponseData> {
-  return apiFetch<CapabilityGraphCompileResponseData>(
-    `/api/panel/graphs/${encodeURIComponent(graphId)}/compile`,
-    {
-      method: 'POST',
-      body: JSON.stringify({profile_id: profileId, register: false, graph}),
-    },
-  );
-}
-
-export function saveCapabilityGraph(
-  graph: Record<string, unknown>,
-  create = false,
-): Promise<CapabilityGraphSaveResponseData> {
-  const graphId = String(graph.graph_id ?? '');
-  if (create) {
-    return apiFetch<CapabilityGraphSaveResponseData>('/api/panel/graphs', {
-      method: 'POST',
-      body: JSON.stringify({graph}),
-    });
-  }
-  return apiFetch<CapabilityGraphSaveResponseData>(
-    `/api/panel/graphs/${encodeURIComponent(graphId)}`,
-    {
-      method: 'PUT',
-      body: JSON.stringify({graph}),
-    },
-  );
-}
-
-export function cloneCapabilityProfile(
-  profileId: string,
-  data: {profile_id: string; display_name?: string},
-): Promise<CapabilityProfileCloneResponseData> {
-  return apiFetch<CapabilityProfileCloneResponseData>(
-    `/api/panel/profiles/${encodeURIComponent(profileId)}/clone`,
-    {
-      method: 'POST',
-      body: JSON.stringify(data),
-    },
-  );
 }

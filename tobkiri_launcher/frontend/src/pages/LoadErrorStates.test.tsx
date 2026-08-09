@@ -9,7 +9,6 @@ import type {Pack} from '@/src/store';
 import {useAppStore} from '@/src/store';
 import {PackDetail} from './PackDetail';
 import {Packs} from './Packs';
-import {ProfileWorkspace} from './ProfileWorkspace';
 
 const cachedPack: Pack = {
   id: 'cached', name: 'Cached Pack', version: '1.0.0', type: 'community', enabled: true,
@@ -63,16 +62,6 @@ test('PackDetail does not mislabel a failed catalog request as an unknown id', a
   );
   assert.match(document.body.textContent ?? '', /Pack details could not be loaded/);
   assert.doesNotMatch(document.body.textContent ?? '', /Pack not found/);
-  await act(async () => root.unmount());
-  dom.window.close();
-});
-
-test('ProfileWorkspace renders runtime-not-ready instead of a permanent loader', async () => {
-  useAppStore.setState({runtimeReady: false, runtimeStatus: 'error', runtimeError: 'Kernel exited'});
-  const {dom, root} = await renderPage(<ProfileWorkspace />);
-  assert.match(document.body.textContent ?? '', /Runtime failed to start/);
-  assert.match(document.body.textContent ?? '', /Kernel exited/);
-  assert.doesNotMatch(document.body.textContent ?? '', /Loading workspace/);
   await act(async () => root.unmount());
   dom.window.close();
 });

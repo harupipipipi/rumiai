@@ -7,16 +7,10 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const FRONTEND_ROOT = resolve(SCRIPT_DIR, '..');
 const DEFAULT_DIST_DIR = resolve(FRONTEND_ROOT, 'dist');
 const ROUTE_SOURCES = [
+  'src/pages/Setup.tsx',
+  'src/pages/Dashboard.tsx',
   'src/pages/Packs.tsx',
   'src/pages/PackDetail.tsx',
-  'src/pages/NodeManager.tsx',
-  'src/pages/GraphEditor.tsx',
-  'src/pages/ProfileGraphEditor.tsx',
-  'src/pages/AiInputInspector.tsx',
-  'src/pages/ApiMap.tsx',
-  'src/pages/ProfileWorkspace.tsx',
-  'src/pages/Flows.tsx',
-  'src/pages/Settings.tsx',
 ];
 
 async function fileMetric(distDir, relativePath) {

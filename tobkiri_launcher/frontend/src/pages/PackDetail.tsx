@@ -7,7 +7,7 @@ import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
 import { Card, CardHeader, CardTitle, CardContent } from '@/src/components/ui/Card';
 import { panelRoutes } from '@/src/lib/routes';
-import { ArrowLeft, Play } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { InlineLoadError } from '@/src/components/ui/InlineLoadError';
 
 export function PackDetail() {
@@ -199,12 +199,8 @@ export function PackDetail() {
               ) : (
                 <ul className="space-y-2">
                   {pack.flows.map((flow, i) => (
-                    <li key={i} className="flex items-center justify-between rounded-lg border border-border p-3">
+                    <li key={i} className="rounded-lg border border-border p-3">
                       <span className="text-sm font-medium text-text-main">{flow}</span>
-                      <Button size="sm" variant="outline" onClick={() => navigate(panelRoutes.flows)}>
-                        <Play className="h-3 w-3" />
-                        {t('pack.run')}
-                      </Button>
                     </li>
                   ))}
                 </ul>

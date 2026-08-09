@@ -18,7 +18,6 @@ export function Header() {
   const runtimeDisconnected = useAppStore(state => state.runtimeDisconnected);
   const lastRuntimeHealthyAt = useAppStore(state => state.lastRuntimeHealthyAt);
   const location = useLocation();
-  const isFlows = location.pathname === panelRoutes.flows;
   const runtimeBadge = describeRuntimeBadge({
     runtimeReady,
     runtimeStatus,
@@ -54,7 +53,7 @@ export function Header() {
   return (
     <header
       data-tauri-drag-region
-      className={`z-40 flex shrink-0 items-center justify-between border-b border-border bg-bg-header transition-colors duration-[var(--transition-base)] ${isFlows ? 'h-12 px-4' : 'h-14 px-6'}`}
+      className="z-40 flex h-14 shrink-0 items-center justify-between border-b border-border bg-bg-header px-6 transition-colors duration-[var(--transition-base)]"
     >
       <div className="flex min-w-0 items-center gap-3">
         <div className="md:hidden">

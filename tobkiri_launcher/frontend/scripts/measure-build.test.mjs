@@ -12,19 +12,19 @@ test('measureBuild separates initial JavaScript, CSS, and lazy route chunks', as
     await mkdir(join(root, 'assets'), {recursive: true});
     await writeFile(join(root, 'assets/main.js'), 'console.log("main")');
     await writeFile(join(root, 'assets/shared.js'), 'export const shared = true');
-    await writeFile(join(root, 'assets/Flows.js'), 'console.log("flows")');
+    await writeFile(join(root, 'assets/Packs.js'), 'console.log("packs")');
     await writeFile(join(root, 'assets/main.css'), 'body{}');
     await writeFile(join(root, 'manifest.json'), JSON.stringify({
       'src/main.tsx': {file: 'assets/main.js', css: ['assets/main.css'], imports: ['shared'], isEntry: true},
       shared: {file: 'assets/shared.js'},
-      'src/pages/Flows.tsx': {file: 'assets/Flows.js', imports: ['shared']},
+      'src/pages/Packs.tsx': {file: 'assets/Packs.js', imports: ['shared']},
     }));
 
     const {report, outputPath} = await measureBuild({distDir: root});
-    assert.equal(report.initial_javascript.files.some((item) => item.file === 'assets/Flows.js'), false);
+    assert.equal(report.initial_javascript.files.some((item) => item.file === 'assets/Packs.js'), false);
     assert.equal(report.initial_javascript.files.some((item) => item.file === 'assets/main.js'), true);
     assert.deepEqual(report.initial_css.files.map((item) => item.file), ['assets/main.css']);
-    assert.equal(report.routes['src/pages/Flows.tsx'].present, true);
+    assert.equal(report.routes['src/pages/Packs.tsx'].present, true);
     const firstReport = await readFile(outputPath, 'utf8');
     assert.equal(JSON.parse(firstReport).entry, 'src/main.tsx');
     assert.equal('generated_at' in report, false);

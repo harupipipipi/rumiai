@@ -12,16 +12,8 @@ import { runtimeMonitorDelay } from '@/src/lib/runtimeHealth';
 import { panelRoutes } from '@/src/lib/routes';
 import {fetchDefaultsSetupState} from '@/src/lib/defaultsSetup';
 import {
-  LazyAiInputInspector,
-  LazyApiMap,
-  LazyFlows,
-  LazyGraphEditor,
-  LazyNodeManager,
   LazyPackDetail,
   LazyPacks,
-  LazyProfileGraphEditor,
-  LazyProfileWorkspace,
-  LazySettings,
 } from '@/src/lib/routeModules';
 
 export default function App() {
@@ -157,14 +149,6 @@ function DeferredRouteTree({ isSetupDone }: { isSetupDone: boolean }) {
           <Route index element={<Dashboard />} />
           <Route path={panelRoutes.packs.slice(1)} element={<LazyPacks />} />
           <Route path={`${panelRoutes.packs.slice(1)}/:id`} element={<LazyPackDetail />} />
-          <Route path={panelRoutes.nodes.slice(1)} element={<LazyNodeManager />} />
-          <Route path={panelRoutes.graphEditor.slice(1)} element={<LazyGraphEditor />} />
-          <Route path={panelRoutes.profileGraph.slice(1)} element={<LazyProfileGraphEditor />} />
-          <Route path={panelRoutes.aiInput.slice(1)} element={<LazyAiInputInspector />} />
-          <Route path={panelRoutes.apiMap.slice(1)} element={<LazyApiMap />} />
-          <Route path={panelRoutes.profileWorkspace.slice(1)} element={<LazyProfileWorkspace />} />
-          <Route path={panelRoutes.flows.slice(1)} element={<LazyFlows />} />
-          <Route path={panelRoutes.settings.slice(1)} element={<LazySettings />} />
         </Route>
       </Routes>
       {routePending && (

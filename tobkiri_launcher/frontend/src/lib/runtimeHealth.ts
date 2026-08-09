@@ -64,7 +64,7 @@ export function describeRuntimeBadge(
   return {
     tone: "warning",
     label: "Preparing",
-    detail: "Rumi を開くための足場を整えています。",
+    detail: "Tobkiri を開くための足場を整えています。",
     showOfflineBadge: false,
   };
 }
@@ -81,14 +81,14 @@ export function describeRuntimeBanner(
     return {
       tone: "danger",
       title: "接続がほどけても、いまの画面はここに残します。",
-      detail: `${formatElapsedLabel(state.lastRuntimeHealthyAt, now)} までは安定していました。Viewer は再接続を続けています。必要なら Settings から再起動できます。`,
+      detail: `${formatElapsedLabel(state.lastRuntimeHealthyAt, now)} までは安定していました。Tobkiri Launcher は再接続を続けています。必要なら Launcher を再起動できます。`,
     };
   }
   if (state.runtimeStatus === "error") {
     return {
       tone: "danger",
       title: "起動は止まりましたが、復帰の道筋は残しています。",
-      detail: state.runtimeError || "Settings から原因確認や再起動を行えます。",
+      detail: state.runtimeError || "Tobkiri Launcher を再起動して原因を確認できます。",
     };
   }
   return {
