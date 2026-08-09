@@ -5,6 +5,7 @@
     "__init__.py",
     "admission.py",
     "artifact_compiler.py",
+    "artifact_materialization.py",
     "authority_v4.py",
     "backends.py",
     "broker.py",
