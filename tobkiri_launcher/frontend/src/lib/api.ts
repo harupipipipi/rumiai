@@ -43,6 +43,33 @@ const API_BASE_URL =
   (import.meta as ImportMeta & {env?: Record<string, string>}).env?.VITE_API_BASE_URL ?? '';
 const PANEL_CSRF_STORAGE_KEY = 'rumi-panel-csrf';
 const PANEL_AUTH_EXCHANGE_PATH = '/api/panel/auth/exchange';
+export type FrontendContractMethod = 'GET' | 'POST';
+
+const EXACT_NON_MAP_API_ROUTES = [
+  {method: 'POST', path: PANEL_AUTH_EXCHANGE_PATH},
+  {method: 'GET', path: '/api/setup/packs'},
+  {method: 'POST', path: '/api/setup/packs/install'},
+  {method: 'POST', path: '/api/v4/packvm/prepare'},
+  {method: 'POST', path: '/api/v4/packvm/consent'},
+  {method: 'POST', path: '/api/v4/packvm/provision'},
+  {method: 'POST', path: '/api/v4/packvm/cancel'},
+  {method: 'GET', path: '/api/v4/packvm/doctor'},
+  {method: 'POST', path: '/api/v4/packvm/stop'},
+  {method: 'POST', path: '/api/v4/packvm/cleanup'},
+  {method: 'GET', path: '/health'},
+] as const satisfies ReadonlyArray<{
+  method: FrontendContractMethod;
+  path: string;
+}>;
+const EXACT_PACKVM_LIFECYCLE_PATHS = new Set([
+  '/api/v4/packvm/prepare',
+  '/api/v4/packvm/consent',
+  '/api/v4/packvm/provision',
+  '/api/v4/packvm/cancel',
+  '/api/v4/packvm/doctor',
+  '/api/v4/packvm/stop',
+  '/api/v4/packvm/cleanup',
+]);
 let panelBootstrapPromise: Promise<void> | null = null;
 let panelBootstrapCodeInFlight: string | null = null;
 let panelSessionRecoveryPromise: Promise<boolean> | null = null;
@@ -97,45 +124,13 @@ function isSetupApiPath(path: string): boolean {
   return path === '/api/setup/packs' || path === '/api/setup/packs/install';
 }
 
-function isFrontendContractPath(path: string): boolean {
-  const match = /^\/api\/contracts\/defaultspack\/([^/?#]+)(?:\?([^#]*))?$/.exec(path);
-  if (!match) return false;
-  let operation: string;
-  try {
-    operation = decodeURIComponent(match[1]);
-  } catch {
-    return false;
-  }
-  const separator = operation.indexOf(' ');
-  if (separator <= 0) return false;
-  const method = operation.slice(0, separator);
-  const target = operation.slice(separator + 1);
-  if (method !== 'GET' && method !== 'POST') return false;
-  let route;
-  try {
-    route = generatedRouteFor(
-      VERIFIED_GENERATED_FRONTEND_CONTRACT_MAP,
-      method,
-      target,
-    );
-  } catch {
-    return false;
-  }
-  if (!match[2]) return true;
-  if (method !== 'GET' || route.targets.length !== 1) return false;
-  const allowedKeys = new Set(route.targets[0].allowed_payload_keys);
-  const params = new URLSearchParams(match[2]);
-  const seen = new Set<string>();
-  for (const [key, value] of params.entries()) {
-    if (!allowedKeys.has(key) || seen.has(key) || !value) return false;
-    seen.add(key);
-  }
-  return true;
+interface ParsedFrontendContractPath {
+  method: FrontendContractMethod;
+  route: ReturnType<typeof generatedRouteFor>;
 }
 
-function frontendContractMethodForPath(path: string): FrontendContractMethod | null {
-  if (!isFrontendContractPath(path)) return null;
-  const match = /^\/api\/contracts\/defaultspack\/([^/?#]+)(?:\?[^#]*)?$/.exec(path);
+function parseFrontendContractPath(path: string): ParsedFrontendContractPath | null {
+  const match = /^\/api\/contracts\/defaultspack\/([^/?#]+)(?:\?([^#]*))?$/.exec(path);
   if (!match) return null;
   let operation: string;
   try {
@@ -146,20 +141,61 @@ function frontendContractMethodForPath(path: string): FrontendContractMethod | n
   const separator = operation.indexOf(' ');
   if (separator <= 0) return null;
   const method = operation.slice(0, separator);
-  return method === 'GET' || method === 'POST' ? method : null;
+  const target = operation.slice(separator + 1);
+  if (method !== 'GET' && method !== 'POST') return null;
+  let route;
+  try {
+    route = generatedRouteFor(
+      VERIFIED_GENERATED_FRONTEND_CONTRACT_MAP,
+      method,
+      target,
+    );
+  } catch {
+    return null;
+  }
+  const query = match[2];
+  if (query !== undefined) {
+    if (!query || method !== 'GET' || route.targets.length !== 1) return null;
+    const allowedKeys = new Set(route.targets[0].allowed_payload_keys);
+    const params = new URLSearchParams(query);
+    const seen = new Set<string>();
+    for (const [key, value] of params.entries()) {
+      if (!allowedKeys.has(key) || seen.has(key) || !value) return null;
+      seen.add(key);
+    }
+    if (seen.size === 0) return null;
+  }
+  return {method, route};
+}
+
+function isFrontendContractPath(path: string): boolean {
+  return parseFrontendContractPath(path) !== null;
+}
+
+function exactNonMapMethodForPath(path: string): FrontendContractMethod | null {
+  const route = EXACT_NON_MAP_API_ROUTES.find((candidate) => candidate.path === path);
+  return route?.method ?? null;
+}
+
+function isPackVMProgressPath(path: string): boolean {
+  const separator = path.indexOf('?');
+  if (separator <= 0 || path.slice(0, separator) !== '/api/v4/packvm/progress') {
+    return false;
+  }
+  const query = path.slice(separator + 1);
+  const match = /^operation_id=([^&#=]+)$/.exec(query);
+  if (!match) return false;
+  let operationId: string;
+  try {
+    operationId = decodeURIComponent(match[1]);
+  } catch {
+    return false;
+  }
+  return operationId.length > 0 && encodeURIComponent(operationId) === match[1];
 }
 
 function isPackVMLifecyclePath(path: string): boolean {
-  if (path === '/api/v4/packvm/prepare'
-    || path === '/api/v4/packvm/consent'
-    || path === '/api/v4/packvm/provision'
-    || path === '/api/v4/packvm/cancel'
-    || path === '/api/v4/packvm/doctor'
-    || path === '/api/v4/packvm/stop'
-    || path === '/api/v4/packvm/cleanup') {
-    return true;
-  }
-  return /^\/api\/v4\/packvm\/progress\?operation_id=[^&#]+$/.test(path);
+  return EXACT_PACKVM_LIFECYCLE_PATHS.has(path) || isPackVMProgressPath(path);
 }
 
 function isPanelSessionApiPath(path: string): boolean {
@@ -167,16 +203,12 @@ function isPanelSessionApiPath(path: string): boolean {
 }
 
 function isExactAllowedApiRequest(path: string, method: string): boolean {
-  const contractMethod = frontendContractMethodForPath(path);
-  if (contractMethod) return method === contractMethod;
-  if (path === '/health') return method === 'GET';
-  if (path === '/api/setup/packs') return method === 'GET';
-  if (path === '/api/setup/packs/install') return method === 'POST';
-  if (path === '/api/v4/packvm/doctor' || path.startsWith('/api/v4/packvm/progress?')) {
-    return method === 'GET' && isPackVMLifecyclePath(path);
-  }
-  if (isPackVMLifecyclePath(path)) return method === 'POST';
-  return !path.startsWith('/api/');
+  const contract = parseFrontendContractPath(path);
+  if (contract) return method === contract.method;
+  const nonMapMethod = exactNonMapMethodForPath(path);
+  if (nonMapMethod) return method === nonMapMethod;
+  if (isPackVMProgressPath(path)) return method === 'GET';
+  return false;
 }
 
 function frontendContractPath(method: FrontendContractMethod, target: string): string {
@@ -195,8 +227,6 @@ function frontendContractPath(method: FrontendContractMethod, target: string): s
   const operation = `${method.toUpperCase()} ${target}`;
   return `/api/contracts/defaultspack/${encodeURIComponent(operation)}`;
 }
-
-export type FrontendContractMethod = 'GET' | 'POST';
 
 function assertLogicalContractTarget(method: FrontendContractMethod, target: string): void {
   if (
@@ -239,11 +269,6 @@ export function fetchFrontendContractOperation<T>(
   const allowedKeys = new Set(route.targets[0].allowed_payload_keys);
   if (payload && Object.keys(payload).some((key) => !allowedKeys.has(key))) {
     throw new Error('The generated v4 contract payload contains an unknown key.');
-  }
-  if (method === 'GET' && payload) {
-    if (Object.keys(payload).some((key) => !allowedKeys.has(key))) {
-      throw new Error('The generated v4 GET contract payload contains an unknown key.');
-    }
   }
   const query = method === 'GET' && payload && Object.keys(payload).length > 0
     ? `?${new URLSearchParams(

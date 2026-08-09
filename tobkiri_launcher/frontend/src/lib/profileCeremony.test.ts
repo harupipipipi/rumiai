@@ -37,7 +37,19 @@ function profileSnapshot(): RuntimeSurfaceEnvelope<unknown> {
       },
       profile_lock: {lock_digest: digest('d')},
       resolved_plan: {plan_digest: digest('b')},
-      activation_record: {activation_id: 'activation-one'},
+      activation_record: {
+        activation_api_version: 'io.tobkiri.activation-record.v1',
+        profile_id: 'defaults',
+        activation_id: 'activation:defaults-one',
+        state: 'active',
+        state_generation: 1,
+        plan_digest: digest('b'),
+        profile_authority_snapshot_digest: digest('e'),
+        security_epoch: 4,
+        fencing_token: 7,
+        created_at: '2026-08-10T00:00:00Z',
+        committed_at: '2026-08-10T00:00:01Z',
+      },
       authority_snapshot: {profile_authority_snapshot_digest: digest('e')},
       profile_document: {packs: [{pack_id: 'provider-pack', role: 'provider', artifact_digest: digest('1')}]},
       resolved_wiring: {requested_edges: [], bindings: []},
@@ -227,6 +239,8 @@ test('Profile approval and activate snapshots remain digest-bound to the Kernel 
   mismatchedSnapshot.records.resolved_plan = {digest: digest('f'), source_ref: 'resolved-plan-v1://defaults/plan-two'};
   const mismatchedData = mismatchedSnapshot.data as Record<string, unknown>;
   mismatchedData.resolved_plan = {plan_digest: digest('f')};
+  const mismatchedActivation = mismatchedData.activation_record as Record<string, unknown>;
+  mismatchedActivation.plan_digest = digest('f');
   const mismatchedSnapshotClient = createProfileCeremonyClient(undefined, queuedTransport([{
     runtime_surface_api_version: RUNTIME_SURFACE_API_VERSION,
     state: 'active',

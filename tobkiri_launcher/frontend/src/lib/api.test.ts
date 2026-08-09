@@ -21,7 +21,12 @@ import {
   restartKernel,
   selectPresentation,
 } from './api.ts';
-import {invokeRuntimeOperation, RUNTIME_SURFACE_API_VERSION} from './runtimeSurface.ts';
+import {
+  extractExactOperationDescriptors,
+  invokeRuntimeOperation,
+  RUNTIME_SURFACE_API_VERSION,
+} from './runtimeSurface.ts';
+import {GENERATED_FRONTEND_CONTRACT_MAP} from './generatedFrontendContractMap.ts';
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
@@ -297,10 +302,48 @@ test('runtime operation invocation uses only its exact invocation contribution a
     invokable: true,
     catalog_digest: digest('c'),
     function_id: 'function.one',
-    schema: {},
+    function_principal_id: 'principal.function.one',
+    caller_function_id: 'caller.function.one',
+    authority_reference: 'authority://one',
+    route: {
+      contract_id: 'contract.one.v1',
+      operation_id: 'operation.one',
+      function_id: 'function.one',
+      provider_pack_id: 'provider-pack',
+    },
+    schema: {
+      input_schema: {
+        type: 'object',
+        properties: {prompt: {type: 'string'}},
+      },
+    },
+    input_schema: {
+      type: 'object',
+      properties: {prompt: {type: 'string'}},
+    },
   };
+  envelope.data = {operations: [operation]};
+  const [acceptedOperation] = extractExactOperationDescriptors(envelope.data);
+  assert.ok(acceptedOperation);
+  assert.equal(acceptedOperation.invocation_catalog_hash, digest('c'));
+  assert.equal(acceptedOperation.invocation_contribution_id, 'invocation-contribution');
+  assert.equal(acceptedOperation.function_principal_id, 'principal.function.one');
+  assert.equal(acceptedOperation.caller_function_id, 'caller.function.one');
+  assert.equal(acceptedOperation.authority_reference, 'authority://one');
+  assert.equal(acceptedOperation.target_provider_id, 'provider.one');
+  assert.deepEqual(acceptedOperation.route, {
+    contract_id: 'contract.one.v1',
+    operation_id: 'operation.one',
+    function_id: 'function.one',
+    provider_pack_id: 'provider-pack',
+  });
+  assert.deepEqual(Object.keys(acceptedOperation.input_schema?.properties ?? {}), ['prompt']);
 
-  const result = await invokeRuntimeOperation({envelope, operation, payload: {prompt: 'hello'}});
+  const result = await invokeRuntimeOperation({
+    envelope,
+    operation: acceptedOperation,
+    payload: {prompt: 'hello'},
+  });
   assert.deepEqual(result, {accepted: true});
   assert.equal(decodeURIComponent(lastFetchUrl.replace('/api/contracts/defaultspack/', '')), 'POST /api/ui/capability/invoke');
   assert.equal(body?.contribution_id, 'invocation-contribution');
@@ -309,6 +352,14 @@ test('runtime operation invocation uses only its exact invocation contribution a
   assert.equal(Object.prototype.hasOwnProperty.call(body ?? {}, 'catalog_revision'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(body ?? {}, 'operation_digest'), false);
   assert.deepEqual(body?.payload, {prompt: 'hello'});
+  await assert.rejects(
+    invokeRuntimeOperation({
+      envelope,
+      operation: acceptedOperation,
+      payload: {prompt: 'hello', unexpected: true},
+    }),
+    (error: unknown) => error instanceof Error && /not declared by the accepted operation schema/.test(error.message),
+  );
 });
 
 test('approval revocation uses the exact typed v4 contract route and payload', async () => {
@@ -423,6 +474,8 @@ test('setup and health requests remain separate from Pack contract dispatch', as
   assert.equal(lastFetchUrl, '/api/setup/packs');
   await checkHealth();
   assert.equal(lastFetchUrl, '/health');
+  await apiFetch('/api/setup/packs/install', {method: 'POST'});
+  assert.equal(lastFetchUrl, '/api/setup/packs/install');
   await assert.rejects(
     apiFetch('/api/setup/packs/install'),
     /exact method\/path allowlist/,
@@ -431,6 +484,41 @@ test('setup and health requests remain separate from Pack contract dispatch', as
     apiFetch('/api/pack-control/disable', {method: 'POST'}),
     /exact method\/path allowlist/,
   );
+});
+
+test('exact route allowlist rejects legacy, map-external, wildcard, and malformed host paths', async () => {
+  await apiFetch('/api/contracts/defaultspack/GET%20%2Fapi%2Fhome%2Fdashboard');
+  assert.equal(lastFetchUrl, '/api/contracts/defaultspack/GET%20%2Fapi%2Fhome%2Fdashboard');
+  await apiFetch('/api/v4/packvm/progress?operation_id=one%20two');
+  const lastAllowedRequest = lastFetchUrl;
+
+  const invalidRequests: Array<[string, RequestInit?]> = [
+    ['/api/contracts/defaultspack/POST%20%2Fapi%2Fhome%2Fdashboard', {method: 'POST'}],
+    ['/api/contracts/defaultspack/GET%20%2Fapi%2Fpanel%2Fdashboard'],
+    ['/api/contracts/defaultspack/GET%20%2Fapi%2Fruntime-recovery%2Fv4%2Fprofile'],
+    ['/api/panel/dashboard'],
+    ['/api/panel/startup/profiles'],
+    ['/api/panel/auth/exchange'],
+    ['/api/runtime-recovery/v4/profile'],
+    ['/api/registry/default'],
+    ['/api/setup/packs?unexpected=1'],
+    ['/api/setup/packs', {method: 'POST'}],
+    ['/api/v4/packvm/prepare?unexpected=1', {method: 'POST'}],
+    ['/api/v4/packvm/doctor', {method: 'POST'}],
+    ['/api/v4/packvm/progress?operation_id=one&unexpected=two'],
+    ['/api/v4/packvm/progress?operation_id=one=two'],
+    ['/api/v4/packvm/progress?operation_id=one', {method: 'POST'}],
+    ['/health', {method: 'POST'}],
+  ];
+  for (const [path, options] of invalidRequests) {
+    await assert.rejects(
+      apiFetch(path, options),
+      /exact method\/path allowlist/,
+      path,
+    );
+  }
+  assert.equal(lastAllowedRequest, '/api/v4/packvm/progress?operation_id=one%20two');
+  assert.equal(lastFetchUrl, lastAllowedRequest);
 });
 
 test('runtime surface GET guards stay outside the encoded contract operation key', async () => {
@@ -480,6 +568,21 @@ test('frontend contract transport rejects map-external targets, method mismatche
     /not declared by the verified frontend Contract Map|no exact route/i,
   );
   assert.equal(lastFetchUrl, before);
+});
+
+test('every single-target product route is dispatched through the generated map', async () => {
+  const singleTargetRoutes = GENERATED_FRONTEND_CONTRACT_MAP.routes.filter(
+    (route) => route.targets.length === 1,
+  );
+  assert.ok(singleTargetRoutes.length > 10);
+  for (const route of singleTargetRoutes) {
+    await fetchFrontendContractOperation(route.method, route.path);
+    assert.equal(
+      decodeURIComponent(lastFetchUrl.replace('/api/contracts/defaultspack/', '')).split('?')[0],
+      `${route.method} ${route.path}`,
+      route.path,
+    );
+  }
 });
 
 test('all generated map bindings use the exact method/path and reject ambiguous capability dispatch', () => {

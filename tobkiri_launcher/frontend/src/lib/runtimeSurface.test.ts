@@ -11,6 +11,7 @@ import {
   RUNTIME_SURFACE_API_VERSION,
   RUNTIME_SURFACE_TARGETS,
   RuntimeSurfaceError,
+  assertVerifiedRuntimeTarget,
   createRuntimeSurfaceClient,
   extractExactFlowDescriptors,
   extractExactOperationDescriptors,
@@ -46,7 +47,19 @@ function profileData() {
     pack_closure: [{pack_id: 'provider-pack'}],
     profile_lock: {lock_digest: digest('d')},
     resolved_plan: {plan_digest: digest('b')},
-    activation_record: {activation_id: 'activation-one'},
+    activation_record: {
+      activation_api_version: 'io.tobkiri.activation-record.v1',
+      profile_id: 'defaults',
+      activation_id: 'activation:defaults-one',
+      state: 'active',
+      state_generation: 1,
+      plan_digest: digest('b'),
+      profile_authority_snapshot_digest: digest('e'),
+      security_epoch: 4,
+      fencing_token: 7,
+      created_at: '2026-08-10T00:00:00Z',
+      committed_at: '2026-08-10T00:00:01Z',
+    },
     authority_snapshot: {
       profile_authority_snapshot_digest: digest('e'),
       authority_references: ['authority://one'],
@@ -122,6 +135,67 @@ test('frozen runtime surface targets cover only the six canonical projections', 
   assert.equal(RUNTIME_SURFACE_TARGETS.settings?.read_guards, false);
   assert.equal(RUNTIME_SURFACE_TARGETS.operations?.logical_target, '/api/runtime-surface/topology/operations');
   assert.equal(RUNTIME_SURFACE_TARGETS.principals?.logical_target, '/api/runtime-surface/topology/principals');
+});
+
+test('runtime target and operation revisions fail closed on map or digest mismatches', async () => {
+  const target = RUNTIME_SURFACE_TARGETS.operations;
+  assert.ok(target);
+  assert.throws(
+    () => assertVerifiedRuntimeTarget({...target, map_artifact_digest: digest('f')}),
+    (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'DIGEST_MISMATCH',
+  );
+
+  const operation = {
+    operation_id: 'operation.one',
+    contract_id: 'contract.one.v1',
+    owner_pack_id: 'provider-pack',
+    contribution_id: 'contribution-one',
+    target_provider_id: 'provider.one',
+    artifact_digest: digest('1'),
+    invocation_contribution_id: 'invocation-contribution-one',
+    invocation_owner_pack_id: 'provider-pack',
+    invocation_catalog_hash: digest('c'),
+    invocation_reason: null,
+    invokable: true,
+    catalog_digest: digest('c'),
+    function_id: 'function-one',
+    function_principal_id: 'principal.function-one',
+    caller_function_id: 'caller.function-one',
+    authority_reference: 'authority://one',
+    route: {
+      contract_id: 'contract.one.v1',
+      operation_id: 'operation.one',
+      function_id: 'function-one',
+      provider_pack_id: 'provider-pack',
+    },
+    schema: {
+      input_schema: {
+        type: 'object',
+        properties: {prompt: {type: 'string'}},
+      },
+    },
+    input_schema: {
+      type: 'object',
+      properties: {prompt: {type: 'string'}},
+    },
+  };
+  const envelopeValue = envelope('operations', {operations: [operation]});
+  await assert.rejects(
+    invokeRuntimeOperation({
+      envelope: {...envelopeValue, catalog_revision: digest('d')},
+      operation,
+      payload: {prompt: 'hello'},
+    }),
+    (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'DIGEST_MISMATCH',
+  );
+  await assert.rejects(
+    invokeRuntimeOperation({
+      envelope: envelopeValue,
+      operation: {...operation, artifact_digest: digest('f')},
+      payload: {prompt: 'hello'},
+    }),
+    (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'DIGEST_MISMATCH',
+  );
 });
 
 test('generated Contract Map is pinned to the canonical raw artifact and includes every map binding plus ten runtime targets', () => {
@@ -281,7 +355,25 @@ test('stale or mismatched profile/plan/catalog blocks every surface action', asy
     invokable: true,
     catalog_digest: digest('c'),
     function_id: 'function.one',
-    schema: {},
+    function_principal_id: 'principal.function.one',
+    caller_function_id: 'caller.function.one',
+    authority_reference: 'authority://one',
+    route: {
+      contract_id: 'contract.one.v1',
+      operation_id: 'operation.one',
+      function_id: 'function.one',
+      provider_pack_id: 'provider-pack',
+    },
+    schema: {
+      input_schema: {
+        type: 'object',
+        properties: {prompt: {type: 'string'}},
+      },
+    },
+    input_schema: {
+      type: 'object',
+      properties: {prompt: {type: 'string'}},
+    },
   };
   await assert.rejects(
     invokeRuntimeOperation({
@@ -336,7 +428,6 @@ test('route projection consumes exact frontend map metadata without synthesizing
 });
 
 test('operation invocation fails before Broker dispatch on stale catalog, denial, or authority payload', async () => {
-  const validEnvelope = envelope('operations', {operations: []});
   const operation = {
     operation_id: 'operation.one',
     contract_id: 'contract.one.v1',
@@ -351,18 +442,49 @@ test('operation invocation fails before Broker dispatch on stale catalog, denial
     invokable: true,
     catalog_digest: digest('4'),
     function_id: 'function-one',
-    schema: {},
+    function_principal_id: 'principal.function-one',
+    caller_function_id: 'caller.function-one',
+    authority_reference: 'authority://one',
+    route: {
+      contract_id: 'contract.one.v1',
+      operation_id: 'operation.one',
+      function_id: 'function-one',
+      provider_pack_id: 'provider-pack',
+    },
+    schema: {
+      input_schema: {
+        type: 'object',
+        properties: {prompt: {type: 'string'}},
+      },
+    },
+    input_schema: {
+      type: 'object',
+      properties: {prompt: {type: 'string'}},
+    },
   };
+  const validEnvelope = envelope('operations', {operations: [operation]});
   await assert.rejects(
     invokeRuntimeOperation({envelope: validEnvelope, operation, payload: {prompt: 'hello'}}),
     (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'DIGEST_MISMATCH',
   );
   await assert.rejects(
-    invokeRuntimeOperation({envelope: validEnvelope, operation: {...operation, catalog_digest: digest('c'), invokable: false}, payload: {}}),
+    invokeRuntimeOperation({
+      envelope: envelope('operations', {
+        operations: [{...operation, catalog_digest: digest('c'), invokable: false}],
+      }),
+      operation: {...operation, catalog_digest: digest('c'), invokable: false},
+      payload: {},
+    }),
     (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'APPROVAL_DENIED',
   );
   await assert.rejects(
-    invokeRuntimeOperation({envelope: validEnvelope, operation: {...operation, catalog_digest: digest('c')}, payload: {approved: true}}),
+    invokeRuntimeOperation({
+      envelope: envelope('operations', {
+        operations: [{...operation, catalog_digest: digest('c')}],
+      }),
+      operation: {...operation, catalog_digest: digest('c')},
+      payload: {approved: true},
+    }),
     (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'INVALID',
   );
 });

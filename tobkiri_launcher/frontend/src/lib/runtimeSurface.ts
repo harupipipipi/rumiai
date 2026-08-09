@@ -32,6 +32,20 @@ export interface RuntimeSurfaceRecordRef {
   source_ref: string;
 }
 
+export interface RuntimeActivationRecord {
+  activation_api_version: 'io.tobkiri.activation-record.v1';
+  profile_id: string;
+  activation_id: string;
+  state: 'active';
+  state_generation: number;
+  plan_digest: string;
+  profile_authority_snapshot_digest: string;
+  security_epoch: number;
+  fencing_token: number;
+  created_at: string;
+  committed_at?: string;
+}
+
 /** Digest/source evidence refs for the captured canonical records. */
 export interface RuntimeSurfaceRecords {
   profile_lock: RuntimeSurfaceRecordRef;
@@ -123,12 +137,22 @@ export interface RuntimeOperationDescriptor {
   invokable: boolean;
   catalog_digest: string;
   function_id: string;
+  function_principal_id: string;
+  caller_function_id: string;
+  authority_reference: string;
   schema: Record<string, unknown>;
   label?: string;
   provider_id?: string;
   input_schema?: RuntimeJsonSchema;
   provider_semantics?: Record<string, unknown> | null;
-  route?: Record<string, unknown>;
+  route: RuntimeOperationRoute;
+}
+
+export interface RuntimeOperationRoute {
+  contract_id: string;
+  operation_id: string;
+  function_id: string;
+  provider_pack_id: string;
 }
 
 export interface RuntimePackDescriptor {
@@ -287,6 +311,165 @@ function isSha256Digest(value: unknown): value is string {
   return typeof value === 'string' && /^sha256:[0-9a-f]{64}$/.test(value);
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => validString(item));
+}
+
+function isDateTime(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && Number.isFinite(Date.parse(value));
+}
+
+function parseRuntimeSurfaceRecordRef(value: unknown): RuntimeSurfaceRecordRef | null {
+  if (!isRecord(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length !== 2 || !keys.includes('digest') || !keys.includes('source_ref')) {
+    return null;
+  }
+  const digest = value.digest;
+  const sourceRef = value.source_ref;
+  if (!isSha256Digest(digest) || !validString(sourceRef)) return null;
+  if (
+    /^(?:file|https?):/i.test(sourceRef)
+    || sourceRef.startsWith('/')
+    || /^[A-Za-z]:[\\/]/.test(sourceRef)
+    || sourceRef.includes('\\')
+    || sourceRef.includes('\0')
+    || !/^[a-z][a-z0-9+.-]*:\/\//i.test(sourceRef)
+  ) {
+    return null;
+  }
+  return {digest, source_ref: sourceRef};
+}
+
+function parseRuntimeSurfaceRecords(value: unknown): RuntimeSurfaceRecords | null {
+  if (!isRecord(value)) return null;
+  const recordKeys = [
+    'profile_lock',
+    'resolved_plan',
+    'activation_record',
+    'authority_snapshot',
+  ];
+  if (
+    Object.keys(value).length !== recordKeys.length
+    || recordKeys.some((key) => !Object.prototype.hasOwnProperty.call(value, key))
+  ) {
+    return null;
+  }
+  const profileLock = parseRuntimeSurfaceRecordRef(value.profile_lock);
+  const resolvedPlan = parseRuntimeSurfaceRecordRef(value.resolved_plan);
+  const activationRecord = parseRuntimeSurfaceRecordRef(value.activation_record);
+  const authoritySnapshot = parseRuntimeSurfaceRecordRef(value.authority_snapshot);
+  if (!profileLock || !resolvedPlan || !activationRecord || !authoritySnapshot) return null;
+  return {
+    profile_lock: profileLock,
+    resolved_plan: resolvedPlan,
+    activation_record: activationRecord,
+    authority_snapshot: authoritySnapshot,
+  };
+}
+
+function parseRuntimeActivationRecord(
+  value: unknown,
+  profileId: string,
+  planDigest: string,
+  authoritySnapshotDigest: string,
+): RuntimeActivationRecord | null {
+  if (!isRecord(value)) return null;
+  const activationApiVersion = value.activation_api_version;
+  const recordProfileId = value.profile_id;
+  const activationId = value.activation_id;
+  const state = value.state;
+  const stateGeneration = value.state_generation;
+  const recordPlanDigest = value.plan_digest;
+  const recordAuthoritySnapshotDigest = value.profile_authority_snapshot_digest;
+  const securityEpoch = value.security_epoch;
+  const fencingToken = value.fencing_token;
+  const createdAt = value.created_at;
+  const committedAt = value.committed_at;
+  const requiredKeys = [
+    'activation_api_version',
+    'profile_id',
+    'activation_id',
+    'state',
+    'state_generation',
+    'plan_digest',
+    'profile_authority_snapshot_digest',
+    'security_epoch',
+    'fencing_token',
+    'created_at',
+  ];
+  const hasCommittedAt = Object.prototype.hasOwnProperty.call(value, 'committed_at');
+  if (
+    Object.keys(value).length !== requiredKeys.length + (hasCommittedAt ? 1 : 0)
+    || requiredKeys.some((key) => !Object.prototype.hasOwnProperty.call(value, key))
+    || activationApiVersion !== 'io.tobkiri.activation-record.v1'
+    || recordProfileId !== profileId
+    || !validString(activationId)
+    || !/^activation:[a-z0-9][a-z0-9._-]{7,127}$/.test(activationId)
+    || state !== 'active'
+    || typeof stateGeneration !== 'number'
+    || !Number.isInteger(stateGeneration)
+    || stateGeneration < 0
+    || recordPlanDigest !== planDigest
+    || recordAuthoritySnapshotDigest !== authoritySnapshotDigest
+    || typeof securityEpoch !== 'number'
+    || !Number.isInteger(securityEpoch)
+    || securityEpoch < 0
+    || typeof fencingToken !== 'number'
+    || !Number.isInteger(fencingToken)
+    || fencingToken < 0
+    || !isDateTime(createdAt)
+  ) {
+    return null;
+  }
+  let committedAtValue: string | undefined;
+  if (hasCommittedAt) {
+    if (!isDateTime(committedAt)) return null;
+    committedAtValue = committedAt;
+  }
+  return {
+    activation_api_version: activationApiVersion,
+    profile_id: recordProfileId,
+    activation_id: activationId,
+    state: 'active',
+    state_generation: stateGeneration,
+    plan_digest: recordPlanDigest,
+    profile_authority_snapshot_digest: recordAuthoritySnapshotDigest,
+    security_epoch: securityEpoch,
+    fencing_token: fencingToken,
+    created_at: createdAt,
+    ...(committedAtValue === undefined ? {} : {committed_at: committedAtValue}),
+  };
+}
+
+function parseRuntimeOperationRoute(
+  value: unknown,
+  operation: Pick<RuntimeOperationDescriptor, 'contract_id' | 'operation_id' | 'function_id' | 'owner_pack_id'>,
+): RuntimeOperationRoute | null {
+  if (!isRecord(value)) return null;
+  const keys = ['contract_id', 'operation_id', 'function_id', 'provider_pack_id'];
+  if (
+    Object.keys(value).length !== keys.length
+    || keys.some((key) => !Object.prototype.hasOwnProperty.call(value, key))
+    || !validString(value.contract_id)
+    || !validString(value.operation_id)
+    || !validString(value.function_id)
+    || !validString(value.provider_pack_id)
+    || value.contract_id !== operation.contract_id
+    || value.operation_id !== operation.operation_id
+    || value.function_id !== operation.function_id
+    || value.provider_pack_id !== operation.owner_pack_id
+  ) {
+    return null;
+  }
+  return {
+    contract_id: value.contract_id,
+    operation_id: value.operation_id,
+    function_id: value.function_id,
+    provider_pack_id: value.provider_pack_id,
+  };
+}
+
 export function assertVerifiedRuntimeTarget(target: RuntimeSurfaceTarget): void {
   let expected: VerifiedGeneratedTarget;
   try {
@@ -390,35 +573,7 @@ export function validateRuntimeSurfaceEnvelope<T>(
   const profileRevision = value.profile_revision;
   const catalogRevision = value.catalog_revision;
   const planDigest = value.plan_digest;
-  const recordKeys = [
-    'profile_lock',
-    'resolved_plan',
-    'activation_record',
-    'authority_snapshot',
-  ];
-  const records = value.records;
-  const recordRefsValid = isRecord(records)
-    && Object.keys(records).length === recordKeys.length
-    && recordKeys.every((key) => Object.prototype.hasOwnProperty.call(records, key))
-    && recordKeys.every((key) => {
-      const record = records[key];
-      if (!isRecord(record)) return false;
-      const keys = Object.keys(record);
-      if (keys.length !== 2 || !keys.includes('digest') || !keys.includes('source_ref')) {
-        return false;
-      }
-      if (!isSha256Digest(record.digest)) return false;
-      if (!validString(record.source_ref)) return false;
-      if (/^(?:file|https?):/i.test(record.source_ref)
-        || record.source_ref.startsWith('/')
-        || /^[A-Za-z]:[\\/]/.test(record.source_ref)
-        || record.source_ref.includes('\\')
-        || record.source_ref.includes('\0')
-        || !/^[a-z][a-z0-9+.-]*:\/\//i.test(record.source_ref)) {
-        return false;
-      }
-      return true;
-    });
+  const acceptedRecords = parseRuntimeSurfaceRecords(value.records);
   if (
     typeof profileId !== 'string'
     || !profileId
@@ -428,14 +583,13 @@ export function validateRuntimeSurfaceEnvelope<T>(
     || !catalogRevision
     || typeof planDigest !== 'string'
     || !planDigest
-    || !recordRefsValid
     || !isSha256Digest(profileRevision)
     || !isSha256Digest(planDigest)
     || !isSha256Digest(catalogRevision)
+    || !acceptedRecords
   ) {
     throw new RuntimeSurfaceError('INVALID', runtimeSurfaceErrorMessage('INVALID'));
   }
-  const acceptedRecords = records as unknown as RuntimeSurfaceRecords;
   if (expectedSurface === 'profile') {
     const profileData = isRecord(value.data) ? value.data : null;
     const profileSummary = profileData && isRecord(profileData.profile)
@@ -450,6 +604,14 @@ export function validateRuntimeSurfaceEnvelope<T>(
     const authoritySnapshot = profileData && isRecord(profileData.authority_snapshot)
       ? profileData.authority_snapshot
       : null;
+    const activationRecord = profileData
+      ? parseRuntimeActivationRecord(
+        profileData.activation_record,
+        profileId,
+        planDigest,
+        acceptedRecords.authority_snapshot.digest,
+      )
+      : null;
     if (
       !profileSummary
       || profileSummary.profile_id !== profileId
@@ -461,7 +623,7 @@ export function validateRuntimeSurfaceEnvelope<T>(
       || profileLock.lock_digest !== acceptedRecords.profile_lock.digest
       || !authoritySnapshot
       || authoritySnapshot.profile_authority_snapshot_digest !== acceptedRecords.authority_snapshot.digest
-      || !isRecord(profileData.activation_record)
+      || !activationRecord
     ) {
       throw new RuntimeSurfaceError('INVALID', runtimeSurfaceErrorMessage('INVALID'));
     }
@@ -493,13 +655,17 @@ export function validateRuntimeSurfaceEnvelope<T>(
     profile_revision: profileRevision,
     catalog_revision: catalogRevision,
     plan_digest: planDigest,
-    records: value.records as RuntimeSurfaceRecords,
+    records: acceptedRecords,
     data: value.data as T,
   };
 }
 
 function validString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
+}
+
+function isOptionalString(value: unknown): value is string | null | undefined {
+  return value === undefined || value === null || validString(value);
 }
 
 /** Read only the runtime scope; Launcher user preferences are intentionally ignored. */
@@ -589,6 +755,7 @@ export function extractExactRequestedEdges(value: unknown): RuntimeRequestedEdge
   if (!Array.isArray(edgeValue)) return null;
   const edges: RuntimeRequestedEdge[] = [];
   for (const candidate of edgeValue) {
+    const authorityReference = isRecord(candidate) ? candidate.authority_reference : undefined;
     if (
       !isRecord(candidate)
       || !validString(candidate.caller_function_id)
@@ -596,9 +763,7 @@ export function extractExactRequestedEdges(value: unknown): RuntimeRequestedEdge
       || !validString(candidate.contract_id)
       || !validString(candidate.operation_id)
       || !isRecord(candidate.requested_scope_template)
-      || (candidate.authority_reference !== undefined
-        && candidate.authority_reference !== null
-        && !validString(candidate.authority_reference))
+      || !isOptionalString(authorityReference)
     ) {
       return null;
     }
@@ -608,7 +773,7 @@ export function extractExactRequestedEdges(value: unknown): RuntimeRequestedEdge
       contract_id: candidate.contract_id,
       operation_id: candidate.operation_id,
       requested_scope_template: candidate.requested_scope_template,
-      authority_reference: candidate.authority_reference as string | null | undefined,
+      authority_reference: authorityReference,
     });
   }
   return edges;
@@ -643,6 +808,8 @@ function extractExactArray(value: unknown, key: string): Record<string, unknown>
 /** Normalize complete Pack lifecycle rows from the exact Packs projection. */
 export function extractExactPackDescriptors(value: unknown): RuntimePackDescriptor[] {
   return extractExactArray(value, 'packs').flatMap((candidate) => {
+    const invokableOperations = candidate.invokable_operations;
+    const reason = candidate.reason;
     if (
       !validString(candidate.pack_id)
       || !validString(candidate.role)
@@ -655,9 +822,19 @@ export function extractExactPackDescriptors(value: unknown): RuntimePackDescript
       || typeof candidate.enabled !== 'boolean'
       || typeof candidate.approved !== 'boolean'
       || typeof candidate.required !== 'boolean'
-      || !Array.isArray(candidate.invokable_operations)
-      || candidate.invokable_operations.some((item) => !validString(item))
+      || !isStringArray(invokableOperations)
+      || (reason !== undefined && reason !== null && !validString(reason))
     ) {
+      return [];
+    }
+    let normalizedReason: string | null | undefined;
+    if (reason === undefined) {
+      normalizedReason = undefined;
+    } else if (reason === null) {
+      normalizedReason = null;
+    } else if (validString(reason)) {
+      normalizedReason = reason;
+    } else {
       return [];
     }
     return [{
@@ -672,8 +849,8 @@ export function extractExactPackDescriptors(value: unknown): RuntimePackDescript
       enabled: candidate.enabled,
       approved: candidate.approved,
       required: candidate.required,
-      invokable_operations: candidate.invokable_operations as string[],
-      ...(candidate.reason === null || validString(candidate.reason) ? {reason: candidate.reason as string | null | undefined} : {}),
+      invokable_operations: invokableOperations,
+      ...(normalizedReason === undefined ? {} : {reason: normalizedReason}),
     }];
   });
 }
@@ -692,19 +869,69 @@ export function extractExactOperationDescriptors(
       || !validString(candidate.contribution_id)
       || !validString(candidate.target_provider_id)
       || !isSha256Digest(candidate.artifact_digest)
-      || (candidate.invocation_contribution_id !== null && !validString(candidate.invocation_contribution_id))
-      || (candidate.invocation_owner_pack_id !== null && !validString(candidate.invocation_owner_pack_id))
-      || (candidate.invocation_catalog_hash !== null && !isSha256Digest(candidate.invocation_catalog_hash))
-      || (candidate.invocation_reason !== null && !validString(candidate.invocation_reason))
       || !validString(candidate.operation_id)
       || !validString(candidate.contract_id)
       || !validString(candidate.function_id)
+      || !validString(candidate.function_principal_id)
+      || !validString(candidate.caller_function_id)
+      || !validString(candidate.authority_reference)
       || !isRecord(schema)
       || !isSha256Digest(candidate.catalog_digest)
       || typeof candidate.invokable !== 'boolean'
     ) {
       return [];
     }
+    const invocationContributionValue = candidate.invocation_contribution_id;
+    const invocationOwnerPackValue = candidate.invocation_owner_pack_id;
+    const invocationCatalogHashValue = candidate.invocation_catalog_hash;
+    const invocationReasonValue = candidate.invocation_reason;
+    const invocationContributionId = invocationContributionValue === null
+      ? null
+      : validString(invocationContributionValue)
+        ? invocationContributionValue
+        : null;
+    const invocationOwnerPackId = invocationOwnerPackValue === null
+      ? null
+      : validString(invocationOwnerPackValue)
+        ? invocationOwnerPackValue
+        : null;
+    const invocationCatalogHash = invocationCatalogHashValue === null
+      ? null
+      : isSha256Digest(invocationCatalogHashValue)
+        ? invocationCatalogHashValue
+        : null;
+    const invocationReason = invocationReasonValue === null
+      ? null
+      : validString(invocationReasonValue)
+        ? invocationReasonValue
+        : null;
+    if (
+      invocationContributionValue === undefined
+      || invocationOwnerPackValue === undefined
+      || invocationCatalogHashValue === undefined
+      || invocationReasonValue === undefined
+      || (invocationContributionValue !== null && !validString(invocationContributionValue))
+      || (invocationOwnerPackValue !== null && !validString(invocationOwnerPackValue))
+      || (invocationCatalogHashValue !== null && !isSha256Digest(invocationCatalogHashValue))
+      || (invocationReasonValue !== null && !validString(invocationReasonValue))
+    ) {
+      return [];
+    }
+    const operationIdentity: Pick<
+      RuntimeOperationDescriptor,
+      'contract_id' | 'operation_id' | 'function_id' | 'owner_pack_id'
+    > = {
+      contract_id: candidate.contract_id,
+      operation_id: candidate.operation_id,
+      function_id: candidate.function_id,
+      owner_pack_id: candidate.owner_pack_id,
+    };
+    const route = parseRuntimeOperationRoute(candidate.route, operationIdentity);
+    if (!route) return [];
+    const inputSchema = isRuntimeJsonSchema(schema.input_schema) ? schema.input_schema : undefined;
+    const providerSemantics = candidate.provider_semantics;
+    const providerId = candidate.provider_id;
+    const label = candidate.label;
     return [{
       operation_id: candidate.operation_id,
       contract_id: candidate.contract_id,
@@ -712,23 +939,22 @@ export function extractExactOperationDescriptors(
       contribution_id: candidate.contribution_id,
       target_provider_id: candidate.target_provider_id,
       artifact_digest: candidate.artifact_digest,
-      invocation_contribution_id: candidate.invocation_contribution_id as string | null,
-      invocation_owner_pack_id: candidate.invocation_owner_pack_id as string | null,
-      invocation_catalog_hash: candidate.invocation_catalog_hash as string | null,
-      invocation_reason: candidate.invocation_reason as string | null,
+      invocation_contribution_id: invocationContributionId,
+      invocation_owner_pack_id: invocationOwnerPackId,
+      invocation_catalog_hash: invocationCatalogHash,
+      invocation_reason: invocationReason,
       invokable: candidate.invokable,
       catalog_digest: candidate.catalog_digest,
       function_id: candidate.function_id,
+      function_principal_id: candidate.function_principal_id,
+      caller_function_id: candidate.caller_function_id,
+      authority_reference: candidate.authority_reference,
       schema,
-      ...(validString(candidate.label) ? {label: candidate.label} : {}),
-      ...(validString(candidate.provider_id) ? {provider_id: candidate.provider_id} : {}),
-      ...(isRecord(schema.input_schema) && isRuntimeJsonSchema(schema.input_schema)
-        ? {input_schema: schema.input_schema}
-        : {}),
-      ...(isRecord(candidate.provider_semantics)
-        ? {provider_semantics: candidate.provider_semantics}
-        : {}),
-      ...(isRecord(candidate.route) ? {route: candidate.route} : {}),
+      ...(validString(label) ? {label} : {}),
+      ...(validString(providerId) ? {provider_id: providerId} : {}),
+      ...(inputSchema ? {input_schema: inputSchema} : {}),
+      ...(isRecord(providerSemantics) ? {provider_semantics: providerSemantics} : {}),
+      route,
     }];
   });
 }
@@ -769,6 +995,7 @@ function isRuntimeJsonSchema(value: unknown): value is RuntimeJsonSchema {
 export function extractExactRouteDescriptors(value: unknown): RuntimeRouteDescriptor[] {
   return extractExactArray(value, 'routes').flatMap((candidate) => {
     const security = candidate.security;
+    const allowedPayloadKeys = candidate.allowed_payload_keys;
     const expectedRouteKeys = [
       'route_id',
       'method',
@@ -810,8 +1037,7 @@ export function extractExactRouteDescriptors(value: unknown): RuntimeRouteDescri
       || !validString(candidate.owner_pack_id)
       || !isSha256Digest(candidate.manifest_digest)
       || !validString(candidate.function_principal_id)
-      || !Array.isArray(candidate.allowed_payload_keys)
-      || candidate.allowed_payload_keys.some((item) => !validString(item))
+      || !isStringArray(allowedPayloadKeys)
       || !isRecord(security)
       || security.transport !== 'canonical_contract'
       || typeof security.panel_authentication_required !== 'boolean'
@@ -843,7 +1069,7 @@ export function extractExactRouteDescriptors(value: unknown): RuntimeRouteDescri
       owner_pack_id: candidate.owner_pack_id,
       manifest_digest: candidate.manifest_digest,
       function_principal_id: candidate.function_principal_id,
-      allowed_payload_keys: candidate.allowed_payload_keys as string[],
+      allowed_payload_keys: allowedPayloadKeys,
       security: {
         transport: security.transport,
         panel_authentication_required: security.panel_authentication_required,
@@ -859,18 +1085,18 @@ export function extractExactRouteDescriptors(value: unknown): RuntimeRouteDescri
 /** Flow rows must be declared composition records, never Pack-name matches. */
 export function extractExactFlowDescriptors(value: unknown): RuntimeFlowDescriptor[] {
   return extractExactArray(value, 'flows').flatMap((candidate) => {
+    const operationIds = candidate.operation_ids;
     if (
       !validString(candidate.flow_id)
       || !validString(candidate.state)
-      || !Array.isArray(candidate.operation_ids)
-      || candidate.operation_ids.some((item) => !validString(item))
+      || !isStringArray(operationIds)
     ) {
       return [];
     }
     return [{
       flow_id: candidate.flow_id,
       state: candidate.state,
-      operation_ids: candidate.operation_ids as string[],
+      operation_ids: operationIds,
       ...(validString(candidate.label) ? {label: candidate.label} : {}),
     }];
   });
@@ -916,6 +1142,41 @@ export function extractFiniteArtifactEntries(value: unknown): RuntimeArtifactEnt
   return entries;
 }
 
+function runtimeOperationMatchesSnapshot(
+  envelope: RuntimeSurfaceEnvelope<unknown>,
+  operation: RuntimeOperationDescriptor,
+): boolean {
+  const acceptedOperations = extractExactOperationDescriptors(envelope.data);
+  const operationInputSchema = operation.input_schema
+    ?? (isRecord(operation.schema) && isRuntimeJsonSchema(operation.schema.input_schema)
+      ? operation.schema.input_schema
+      : undefined);
+  return acceptedOperations.some((candidate) => (
+    candidate.operation_id === operation.operation_id
+    && candidate.contract_id === operation.contract_id
+    && candidate.owner_pack_id === operation.owner_pack_id
+    && candidate.contribution_id === operation.contribution_id
+    && candidate.target_provider_id === operation.target_provider_id
+    && candidate.artifact_digest === operation.artifact_digest
+    && candidate.invocation_contribution_id === operation.invocation_contribution_id
+    && candidate.invocation_owner_pack_id === operation.invocation_owner_pack_id
+    && candidate.invocation_catalog_hash === operation.invocation_catalog_hash
+    && candidate.invocation_reason === operation.invocation_reason
+    && candidate.invokable === operation.invokable
+    && candidate.catalog_digest === operation.catalog_digest
+    && candidate.function_id === operation.function_id
+    && candidate.function_principal_id === operation.function_principal_id
+    && candidate.caller_function_id === operation.caller_function_id
+    && candidate.authority_reference === operation.authority_reference
+    && candidate.route.contract_id === operation.route.contract_id
+    && candidate.route.operation_id === operation.route.operation_id
+    && candidate.route.function_id === operation.route.function_id
+    && candidate.route.provider_pack_id === operation.route.provider_pack_id
+    && JSON.stringify(candidate.schema) === JSON.stringify(operation.schema)
+    && JSON.stringify(candidate.input_schema) === JSON.stringify(operationInputSchema)
+  ));
+}
+
 export interface RuntimeOperationInvocation {
   envelope: RuntimeSurfaceEnvelope<unknown>;
   operation: RuntimeOperationDescriptor;
@@ -932,6 +1193,47 @@ export function invokeRuntimeOperation({
   operation,
   payload,
 }: RuntimeOperationInvocation): Promise<unknown> {
+  if (!isRecord(payload)) {
+    return Promise.reject(new RuntimeSurfaceError(
+      'INVALID',
+      'Operation input must be a JSON object declared by the accepted operation schema.',
+    ));
+  }
+  const route = parseRuntimeOperationRoute(operation.route, operation);
+  const operationInputSchema = operation.input_schema
+    ?? (isRecord(operation.schema) && isRuntimeJsonSchema(operation.schema.input_schema)
+      ? operation.schema.input_schema
+      : undefined);
+  if (
+    !validString(operation.operation_id)
+    || !validString(operation.contract_id)
+    || !validString(operation.owner_pack_id)
+    || !validString(operation.contribution_id)
+    || !validString(operation.target_provider_id)
+    || !isSha256Digest(operation.artifact_digest)
+    || !validString(operation.function_id)
+    || !validString(operation.function_principal_id)
+    || !validString(operation.caller_function_id)
+    || !validString(operation.authority_reference)
+    || !isRecord(operation.schema)
+    || !isSha256Digest(operation.catalog_digest)
+    || (operation.invocation_contribution_id !== null
+      && !validString(operation.invocation_contribution_id))
+    || (operation.invocation_owner_pack_id !== null
+      && !validString(operation.invocation_owner_pack_id))
+    || (operation.invocation_catalog_hash !== null
+      && !isSha256Digest(operation.invocation_catalog_hash))
+    || (operation.invocation_reason !== null && !validString(operation.invocation_reason))
+    || !route
+    || !isSha256Digest(envelope.plan_digest)
+    || !isSha256Digest(envelope.catalog_revision)
+    || !runtimeOperationMatchesSnapshot(envelope, operation)
+  ) {
+    return Promise.reject(new RuntimeSurfaceError(
+      'DIGEST_MISMATCH',
+      'The operation binding is not owned by the accepted operations snapshot.',
+    ));
+  }
   const forbiddenPayloadKeys = new Set([
     'approved',
     'approval_token',
@@ -951,6 +1253,16 @@ export function invokeRuntimeOperation({
     return Promise.reject(new RuntimeSurfaceError(
       'INVALID',
       'Operation input cannot provide authority, caller, target, provider, or approval fields.',
+    ));
+  }
+  const allowedInputProperties = operationInputSchema?.properties;
+  if (Object.keys(payload).some((key) => (
+    !allowedInputProperties
+    || !Object.prototype.hasOwnProperty.call(allowedInputProperties, key)
+  ))) {
+    return Promise.reject(new RuntimeSurfaceError(
+      'INVALID',
+      'Operation input contains a key not declared by the accepted operation schema.',
     ));
   }
   if (

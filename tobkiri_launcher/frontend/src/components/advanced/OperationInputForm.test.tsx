@@ -24,6 +24,15 @@ function operation(invokable = true): RuntimeOperationDescriptor {
     invokable,
     catalog_digest: digest('c'),
     function_id: 'conversation.turn',
+    function_principal_id: 'principal.conversation.turn',
+    caller_function_id: 'caller.conversation.turn',
+    authority_reference: 'authority://conversation/turn',
+    route: {
+      contract_id: 'conversation.v1',
+      operation_id: 'conversation.turn',
+      function_id: 'conversation.turn',
+      provider_pack_id: 'conversation-pack',
+    },
     schema: {
       input_schema: {
         type: 'object',
