@@ -17,6 +17,7 @@ import {
   invokeFrontendCapability,
   launchSelectedPresentation,
   revokePackApproval,
+  restartKernel,
   selectPresentation,
 } from './api.ts';
 
@@ -283,6 +284,27 @@ test('approval revocation uses the exact typed v4 contract route and payload', a
   });
 });
 
+test('kernel restart uses the exact typed v4 contract route', async () => {
+  fetchHandler = async (input, init) => {
+    lastFetchUrl = String(input);
+    lastFetchInit = init;
+    return new Response(JSON.stringify({
+      data: {restarting: true, message: 'Kernel restart requested.'},
+      success: true,
+    }), {headers: {'Content-Type': 'application/json'}});
+  };
+
+  const response = await restartKernel();
+
+  assert.equal(
+    decodeURIComponent(lastFetchUrl.replace('/api/contracts/defaultspack/', '')),
+    'POST /api/pack-control/restart',
+  );
+  assert.equal(lastFetchInit?.method, 'POST');
+  assert.deepEqual(JSON.parse(String(lastFetchInit?.body)), {});
+  assert.deepEqual(response, {restarting: true, message: 'Kernel restart requested.'});
+});
+
 test('v4 contract failure is surfaced and never treated as a successful fallback', async () => {
   fetchHandler = async (input) => {
     lastFetchUrl = String(input);
@@ -291,6 +313,15 @@ test('v4 contract failure is surfaced and never treated as a successful fallback
 
   await assert.rejects(fetchPacks(), /retired/);
   assert.match(lastFetchUrl, /^\/api\/contracts\/defaultspack\//);
+});
+
+test('unsafe frontend requests time out and reject instead of leaving lifecycle controls pending', async () => {
+  fetchHandler = async () => new Promise<Response>(() => {});
+
+  await assert.rejects(
+    apiFetch('/api/pack-control/disable', {method: 'POST'}, {timeoutMs: 1}),
+    /POST request timed out after 1ms: \/api\/pack-control\/disable/,
+  );
 });
 
 test('presentation wrappers use Launcher-owned Tauri commands', async () => {

@@ -68,6 +68,7 @@ export function Packs() {
   const installPack = useAppStore(state => state.installPack);
   const approvePack = useAppStore(state => state.approvePack);
   const revokePackApproval = useAppStore(state => state.revokePackApproval);
+  const addToast = useAppStore(state => state.addToast);
   const showDialog = useAppStore(state => state.showDialog);
   const togglePack = useAppStore(state => state.togglePack);
   const [search, setSearch] = useState('');
@@ -108,6 +109,12 @@ export function Packs() {
       cancelText: 'Keep approval',
       onConfirm: () => revokePackApproval(pack.id),
     });
+  };
+
+  const handleToggle = async (pack: Pack) => {
+    if (await togglePack(pack.id)) {
+      addToast(t(pack.enabled ? 'packs.toggle_off' : 'packs.toggle_on', {name: pack.name}), 'success');
+    }
   };
 
   return (
@@ -240,7 +247,8 @@ export function Packs() {
                             || Boolean(packTogglePending[pack.id])
                             || Boolean(packApprovalPending[pack.id])
                           }
-                          onCheckedChange={() => { void togglePack(pack.id); }}
+                          aria-busy={Boolean(packTogglePending[pack.id])}
+                          onCheckedChange={() => { void handleToggle(pack); }}
                           aria-label={`Toggle ${pack.name}`}
                           title={pack.type === 'core' ? 'Core Packs cannot be disabled.' : undefined}
                           className="relative after:absolute after:-inset-2.5"

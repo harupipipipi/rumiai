@@ -13,14 +13,17 @@ export function DialogContainer() {
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const isConfirmingRef = useRef(false);
   const [isConfirming, setIsConfirming] = useState(false);
+  const [confirmationError, setConfirmationError] = useState<string | null>(null);
   isConfirmingRef.current = isConfirming;
 
   useEffect(() => {
     if (!dialog) {
       setIsConfirming(false);
+      setConfirmationError(null);
       return;
     }
 
+    setConfirmationError(null);
     previousFocusRef.current = document.activeElement as HTMLElement | null;
 
     const timer = setTimeout(() => {
@@ -78,11 +81,14 @@ export function DialogContainer() {
     if (!dialog || isConfirmingRef.current) return;
     isConfirmingRef.current = true;
     setIsConfirming(true);
+    setConfirmationError(null);
     try {
       await dialog.onConfirm();
       closeDialog();
     } catch (error) {
-      console.error('Dialog confirmation failed:', error);
+      setConfirmationError(
+        error instanceof Error ? error.message : 'The confirmation could not be completed.',
+      );
     } finally {
       isConfirmingRef.current = false;
       setIsConfirming(false);
@@ -102,13 +108,23 @@ export function DialogContainer() {
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="dialog-title"
-        aria-describedby="dialog-description"
+        aria-describedby={confirmationError ? 'dialog-description dialog-error' : 'dialog-description'}
         tabIndex={-1}
         className="w-full max-w-md rounded-xl border border-border bg-bg-card p-6 shadow-xl animate-in zoom-in-95 outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="dialog-title" className="text-lg font-semibold text-text-main">{dialog.title}</h2>
         <p id="dialog-description" className="mt-2 text-sm text-text-muted">{dialog.message}</p>
+        {confirmationError ? (
+          <p
+            id="dialog-error"
+            role="alert"
+            aria-live="assertive"
+            className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200"
+          >
+            {confirmationError}
+          </p>
+        ) : null}
         <div className="mt-6 flex justify-end gap-3">
           <Button variant="outline" onClick={handleClose} disabled={isConfirming}>
             {dialog.cancelText || t('dialog.cancel')}

@@ -89,12 +89,12 @@ async function renderDetail(root: Root): Promise<void> {
   });
 }
 
-function configureStore(currentPack: Pack): void {
+function configureStore(currentPack: Pack, currentCatalog = catalog): void {
   useAppStore.setState({
     packs: [currentPack],
     packsLoading: false,
     packsError: null,
-    frontendCatalog: catalog,
+    frontendCatalog: currentCatalog,
     frontendCatalogLoading: false,
     frontendCatalogError: null,
     packOperationPending: {},
@@ -143,6 +143,35 @@ test('PackDetail keeps the file operation unavailable after approval revocation'
     await renderDetail(root);
     assert.match(container.textContent ?? '', /Approval revoked/);
     assert.match(container.textContent ?? '', /approval is revoked/i);
+    assert.equal(container.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled, true);
+  } finally {
+    act(() => root.unmount());
+    useAppStore.setState(previousState, true);
+    dom.window.close();
+  }
+});
+
+test('PackDetail renders typed backend-unavailable diagnostics without exposing invocation', async () => {
+  const previousState = useAppStore.getState();
+  const {dom, container, root} = createSurface();
+  configureStore(pack, {
+    ...catalog,
+    diagnostics: [{
+      code: 'production_backend_unavailable',
+      pack_id: pack.id,
+      operation_id: operation.operationId,
+      message: 'Authenticated production backend is unavailable.',
+    }],
+  });
+
+  try {
+    await renderDetail(root);
+    assert.match(container.textContent ?? '', /Capability diagnostics/);
+    assert.match(container.textContent ?? '', /Authenticated production backend is unavailable/);
+    assert.match(container.textContent ?? '', /Invocation remains unavailable/);
+    assert.equal(container.querySelector('[role="alert"]')?.textContent?.includes(
+      'production_backend_unavailable',
+    ), true);
     assert.equal(container.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled, true);
   } finally {
     act(() => root.unmount());

@@ -296,9 +296,27 @@ export const useAppStore = create<AppState>((set, get) => ({
         const packs = transformPacks(data.packs).map((pack) => {
           const before = versionsAtStart.get(pack.id) ?? 0;
           const after = packMutationVersions.get(pack.id) ?? 0;
-          if (before === after && !latestState.packTogglePending[pack.id]) return pack;
+          if (
+            before === after
+            && !latestState.packTogglePending[pack.id]
+            && !latestState.packApprovalPending[pack.id]
+          ) return pack;
           const current = currentById.get(pack.id);
-          return current ? {...pack, enabled: current.enabled} : pack;
+          if (!current) return pack;
+          if (
+            latestState.packApprovalPending[pack.id]
+            || (current.approvalStatus === 'revoked' && !current.approved)
+          ) {
+            return {
+              ...pack,
+              enabled: current.enabled,
+              approved: current.approved,
+              approvalStatus: current.approvalStatus,
+              approvalReason: current.approvalReason,
+              approvalIssues: current.approvalIssues,
+            };
+          }
+          return {...pack, enabled: current.enabled};
         });
         set({packs, packsError: null});
       } catch (error) {
@@ -450,6 +468,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       || state.packApprovalPending[id]
     ) return;
 
+    const version = (packMutationVersions.get(id) ?? 0) + 1;
+    packMutationVersions.set(id, version);
     set((current) => ({
       packApprovalPending: {...current.packApprovalPending, [id]: true},
     }));
@@ -459,14 +479,32 @@ export const useAppStore = create<AppState>((set, get) => ({
         response.pack_id !== id
         || response.approved
         || response.approval_status !== 'revoked'
+        || response.enabled !== false
       ) {
         throw new Error('Tobkiri did not confirm Pack approval revocation.');
       }
-      await get().loadPacks();
-      const refreshedPack = get().packs.find((candidate) => candidate.id === id);
-      if (!refreshedPack || refreshedPack.approved || refreshedPack.enabled) {
-        throw new Error('Tobkiri catalog did not confirm Pack approval revocation.');
+      if (packMutationVersions.get(id) === version) {
+        set((current) => ({
+          packs: current.packs.map((candidate) => (
+            candidate.id === id
+              ? {
+                ...candidate,
+                enabled: false,
+                approved: false,
+                approvalStatus: 'revoked',
+                approvalReason: 'approval_revoked',
+                approvalIssues: ['approval_revoked'],
+                profileId: response.profile_id,
+                workspaceId: response.workspace_id,
+                profileRevision: response.profile_revision,
+                planDigest: response.plan_digest,
+                catalogRevision: response.catalog_revision,
+              }
+              : candidate
+          )),
+        }));
       }
+      await Promise.all([get().loadPacks(), get().loadFrontendCatalog()]);
       get().addToast('Pack approval revoked.', 'success');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to revoke Pack approval';
@@ -489,23 +527,35 @@ export const useAppStore = create<AppState>((set, get) => ({
     const version = (packMutationVersions.get(id) ?? 0) + 1;
     packMutationVersions.set(id, version);
     set((current) => ({
-      packs: current.packs.map((candidate) => (
-        candidate.id === id ? {...candidate, enabled: !pack.enabled} : candidate
-      )),
       packTogglePending: {...current.packTogglePending, [id]: true},
     }));
 
     try {
+      const expectedEnabled = !pack.enabled;
       const response = pack.enabled
         ? await apiDisablePack(id)
         : await apiEnablePack(id);
+      if (response.pack_id !== id || response.enabled !== expectedEnabled) {
+        throw new Error('Tobkiri did not confirm the requested Pack state.');
+      }
       if (packMutationVersions.get(id) === version) {
         set((current) => ({
           packs: current.packs.map((candidate) => (
-            candidate.id === id ? {...candidate, enabled: response.enabled} : candidate
+            candidate.id === id
+              ? {
+                ...candidate,
+                enabled: response.enabled,
+                profileId: response.profile_id,
+                workspaceId: response.workspace_id,
+                profileRevision: response.profile_revision,
+                planDigest: response.plan_digest,
+                catalogRevision: response.catalog_revision,
+              }
+              : candidate
           )),
         }));
       }
+      await Promise.all([get().loadPacks(), get().loadFrontendCatalog()]);
       return true;
     } catch (error) {
       if (packMutationVersions.get(id) === version) {

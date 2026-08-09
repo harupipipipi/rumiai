@@ -98,6 +98,19 @@ function binding() {
   };
 }
 
+function dynamicCatalog() {
+  return {
+    version: 'rumi.ui.contribution.v1',
+    profile_id: samplePack.profileId,
+    profile_revision: samplePack.profileRevision,
+    plan_hash: samplePack.planDigest,
+    contributions: [],
+    diagnostics: [],
+    quarantined_pack_ids: [],
+    catalog_hash: 'sha256:frontend-catalog',
+  };
+}
+
 test('store revoke action calls the typed route, refreshes catalog, and confirms state', async () => {
   const routes = installFetch(async (route, init) => {
     if (route === 'POST /api/pack-control/approval-revoke') {
@@ -107,11 +120,16 @@ test('store revoke action calls the typed route, refreshes catalog, and confirms
         data: {...binding(), pack_id: samplePack.id, approved: false, enabled: false, approval_status: 'revoked'},
       }), {headers: {'Content-Type': 'application/json'}});
     }
-    assert.equal(route, 'GET /api/pack-control/catalog');
-    return new Response(JSON.stringify({
-      success: true,
-      data: {...binding(), packs: [revokedCatalogPack], count: 1},
-    }), {headers: {'Content-Type': 'application/json'}});
+    if (route === 'GET /api/pack-control/catalog') {
+      return new Response(JSON.stringify({
+        success: true,
+        data: {...binding(), packs: [revokedCatalogPack], count: 1},
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
+    assert.equal(route, 'GET /api/ui/catalog');
+    return new Response(JSON.stringify({success: true, data: {dynamic_host: dynamicCatalog()}}), {
+      headers: {'Content-Type': 'application/json'},
+    });
   });
   const successes: string[] = [];
   useAppStore.setState({
@@ -127,6 +145,7 @@ test('store revoke action calls the typed route, refreshes catalog, and confirms
   assert.deepEqual(routes, [
     'POST /api/pack-control/approval-revoke',
     'GET /api/pack-control/catalog',
+    'GET /api/ui/catalog',
   ]);
   const pack = useAppStore.getState().packs[0];
   assert.equal(pack.approved, false);
@@ -163,4 +182,31 @@ test('store revoke action fails closed without optimistic state or refresh on ty
   assert.deepEqual(useAppStore.getState().packs, [samplePack]);
   assert.deepEqual(useAppStore.getState().packApprovalPending, {});
   assert.deepEqual(errors, ['HTTP 409 approval_revocation_denied']);
+});
+
+test('store revoke action clears pending and surfaces a timeout without changing approval state', async () => {
+  const routes = installFetch(async (route) => {
+    assert.equal(route, 'POST /api/pack-control/approval-revoke');
+    throw new Error('POST request timed out after 10000ms: /api/pack-control/approval-revoke');
+  });
+  const errors: string[] = [];
+  useAppStore.setState({
+    packs: [samplePack],
+    packApprovalPending: {},
+    addToast: (message, type) => {
+      if (type === 'error') errors.push(message);
+    },
+  });
+
+  await assert.rejects(
+    useAppStore.getState().revokePackApproval(samplePack.id),
+    /POST request timed out after 10000ms/,
+  );
+
+  assert.deepEqual(routes, ['POST /api/pack-control/approval-revoke']);
+  assert.deepEqual(useAppStore.getState().packs, [samplePack]);
+  assert.deepEqual(useAppStore.getState().packApprovalPending, {});
+  assert.deepEqual(errors, [
+    'POST request timed out after 10000ms: /api/pack-control/approval-revoke',
+  ]);
 });

@@ -2,13 +2,20 @@ import type {ApiDashboard, ApiPack} from './apiTypes';
 import type {DashboardData, Pack, PackOperation} from '../store';
 
 export function transformPack(api: ApiPack): Pack {
-  const operations: PackOperation[] = (api.operations ?? []).map((operation) => ({
+  const declaredOperations = api.declared_operations ?? api.operations ?? api.invokable_operations ?? [];
+  const invokableOperationKeys = new Set(
+    (api.invokable_operations ?? []).map((operation) => (
+      `${operation.contract_id}:${operation.operation_id}`
+    )),
+  );
+  const operations: PackOperation[] = declaredOperations.map((operation) => ({
     operationId: operation.operation_id,
     contractId: operation.contract_id,
     providerId: operation.provider_id,
-    capabilities: operation.capabilities ?? [],
+    capabilities: operation.capabilities ?? operation.required_capabilities ?? [],
     inputSchema: operation.input_schema ?? {},
-    invokable: operation.invokable === true,
+    invokable: operation.invokable === true
+      || invokableOperationKeys.has(`${operation.contract_id}:${operation.operation_id}`),
   }));
   return {
     id: api.pack_id,

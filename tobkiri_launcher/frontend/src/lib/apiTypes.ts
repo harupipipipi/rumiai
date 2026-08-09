@@ -30,8 +30,10 @@ export interface ApiPackOperation {
   operation_id: string;
   contract_id: string;
   provider_id: string;
-  capabilities: string[];
-  input_schema: Record<string, unknown>;
+  function_id?: string;
+  capabilities?: string[];
+  required_capabilities?: string[];
+  input_schema?: Record<string, unknown>;
   invokable?: boolean;
 }
 
@@ -52,6 +54,8 @@ export interface ApiPack extends PackControlBinding {
   approval_issues?: string[];
   capabilities?: ApiPackCapability[];
   operations?: ApiPackOperation[];
+  declared_operations?: ApiPackOperation[];
+  invokable_operations?: ApiPackOperation[];
   flows?: string[];
   dependencies?: string[];
 }
@@ -68,10 +72,12 @@ export interface ApiFrontendContribution {
 
 export interface ApiFrontendDiagnostic {
   code: string;
-  severity: string;
+  severity?: string;
   message: string;
   owner_pack_id?: string | null;
   contribution_id?: string | null;
+  pack_id?: string | null;
+  operation_id?: string | null;
 }
 
 export interface ApiDynamicFrontendCatalog {

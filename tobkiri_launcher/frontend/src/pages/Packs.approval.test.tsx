@@ -105,6 +105,8 @@ test('Pack approval revocation opens an accessible confirmation and can be cance
     await act(async () => revokeButton.click());
     const dialog = container.querySelector<HTMLElement>('[role="alertdialog"]');
     assert.ok(dialog);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    assert.equal(document.activeElement, dialog);
     assert.match(dialog.textContent ?? '', /revoke Tobkiri approval and access/);
     assert.equal(dialog.getAttribute('aria-modal'), 'true');
     assert.equal(buttonWithText(dialog, 'Keep approval').disabled, false);
@@ -112,6 +114,7 @@ test('Pack approval revocation opens an accessible confirmation and can be cance
     await act(async () => buttonWithText(dialog, 'Keep approval').click());
     assert.equal(revokeCount, 0);
     assert.equal(container.querySelector('[role="alertdialog"]'), null);
+    assert.equal(document.activeElement, revokeButton);
     assert.ok(container.querySelector('[role="switch"]'));
   } finally {
     await act(async () => root.unmount());
@@ -200,6 +203,7 @@ test('failed Pack approval revocation stays approved and surfaces the typed fail
     assert.ok(container.querySelector('[role="alertdialog"]'));
     assert.ok(container.querySelector('[role="switch"]'));
     assert.match(container.textContent ?? '', /Approved/);
+    assert.match(container.textContent ?? '', /HTTP 409 approval_revocation_denied/);
     assert.doesNotMatch(container.textContent ?? '', /Approval revoked/);
   } finally {
     console.error = previousConsoleError;

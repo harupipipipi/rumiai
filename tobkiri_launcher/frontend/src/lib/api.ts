@@ -32,6 +32,14 @@ let panelBootstrapCodeInFlight: string | null = null;
 let panelSessionRecoveryPromise: Promise<boolean> | null = null;
 const getRequestCoordinator = new GetRequestCoordinator();
 const FOREGROUND_GET_TIMEOUT_MS = 10_000;
+const MUTATION_TIMEOUT_MS = 10_000;
+
+export class ApiRequestTimeoutError extends Error {
+  constructor(method: string, path: string, timeoutMs: number) {
+    super(`${method} request timed out after ${timeoutMs}ms: ${path}`);
+    this.name = 'ApiRequestTimeoutError';
+  }
+}
 
 type TauriInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 type TauriWindow = Window & {
@@ -379,7 +387,39 @@ export async function apiFetch<T>(
   }
 
   try {
-    return await fetchRequest();
+    const timeoutMs = requestPolicy.timeoutMs ?? MUTATION_TIMEOUT_MS;
+    const controller = new AbortController();
+    let timeout: ReturnType<typeof globalThis.setTimeout> | undefined;
+    const externalSignal = options.signal;
+    const abortFromExternalSignal = () => {
+      controller.abort(externalSignal?.reason);
+    };
+
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        abortFromExternalSignal();
+      } else {
+        externalSignal.addEventListener('abort', abortFromExternalSignal, {once: true});
+      }
+    }
+
+    const request = fetchRequest(true, controller.signal);
+    const timeoutPromise = Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? new Promise<never>((_resolve, reject) => {
+        timeout = globalThis.setTimeout(() => {
+          const error = new ApiRequestTimeoutError(method, path, timeoutMs);
+          controller.abort(error);
+          reject(error);
+        }, timeoutMs);
+      })
+      : null;
+
+    try {
+      return await (timeoutPromise ? Promise.race([request, timeoutPromise]) : request);
+    } finally {
+      if (timeout) globalThis.clearTimeout(timeout);
+      externalSignal?.removeEventListener('abort', abortFromExternalSignal);
+    }
   } finally {
     getRequestCoordinator.invalidate();
   }

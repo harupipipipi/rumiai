@@ -119,16 +119,25 @@ export function PackDetail() {
     || pack.approvalIssues.includes('approval_revoked');
 
   const operations = pack.operations ?? [];
+  const diagnostics = (frontendCatalog?.diagnostics ?? []).filter((diagnostic) => (
+    diagnostic.owner_pack_id === pack.id || diagnostic.pack_id === pack.id
+  ));
+  const backendUnavailableForOperation = (operationId: string) => diagnostics.some((diagnostic) => (
+    diagnostic.code === 'production_backend_unavailable'
+    && diagnostic.operation_id === operationId
+  ));
   const contributionForOperation = (operationId: string, contractId: string) => (
-    frontendCatalog?.contributions.find((contribution) => (
-      contribution.owner_pack_id === pack.id
-      && contribution.action_contract === contractId
-      && (
-        contribution.operation_id === operationId
-        || contribution.contribution_id === operationId
-        || contribution.label === operationId
-      )
-    )) ?? null
+    backendUnavailableForOperation(operationId)
+      ? null
+      : frontendCatalog?.contributions.find((contribution) => (
+        contribution.owner_pack_id === pack.id
+        && contribution.action_contract === contractId
+        && (
+          contribution.operation_id === operationId
+          || contribution.contribution_id === operationId
+          || contribution.label === operationId
+        )
+      )) ?? null
   );
 
   const handleRevoke = () => {
@@ -212,6 +221,7 @@ export function PackDetail() {
                   }
                   onCheckedChange={() => { void handleToggle(); }}
                   aria-label={`Toggle ${pack.name}`}
+                  aria-busy={Boolean(packTogglePending[pack.id])}
                   title={pack.type === 'core' ? 'Core Packs cannot be disabled.' : undefined}
                 />
               </>
@@ -304,6 +314,36 @@ export function PackDetail() {
           </Card>
         </div>
 
+        {diagnostics.length > 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Capability diagnostics</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ul className="space-y-3">
+                {diagnostics.map((diagnostic) => (
+                  <li
+                    key={`${diagnostic.code}:${diagnostic.operation_id ?? diagnostic.contribution_id ?? 'pack'}`}
+                    role={diagnostic.severity === 'error'
+                      || diagnostic.code === 'production_backend_unavailable'
+                      ? 'alert'
+                      : 'status'}
+                    className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200"
+                  >
+                    <p className="font-medium">{diagnostic.code}</p>
+                    <p className="mt-1">{diagnostic.message}</p>
+                    {diagnostic.code === 'production_backend_unavailable' ? (
+                      <p className="mt-2 text-xs">
+                        Invocation remains unavailable until Tobkiri reports a healthy verified backend.
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        ) : null}
+
         <Card>
           <CardHeader>
             <CardTitle>Declared operations</CardTitle>
@@ -322,7 +362,10 @@ export function PackDetail() {
               <ul className="space-y-3">
                 {operations.map((operation) => {
                   const contribution = contributionForOperation(operation.operationId, operation.contractId);
-                  const callable = operation.invokable && Boolean(contribution) && !approvalRevoked;
+                  const callable = operation.invokable
+                    && Boolean(contribution)
+                    && !approvalRevoked
+                    && !backendUnavailableForOperation(operation.operationId);
                   return (
                     <li className="rounded-lg border border-border p-3" key={operation.operationId}>
                       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -365,6 +408,7 @@ export function PackDetail() {
             operation={operation}
             pack={pack}
             contributionVerified={Boolean(contributionForOperation(operation.operationId, operation.contractId))
+              && !backendUnavailableForOperation(operation.operationId)
               && !frontendCatalog?.quarantined_pack_ids.includes(pack.id)}
             pending={Boolean(packOperationPending[`${pack.id}:${operation.operationId}`])}
             onInvoke={(payload) => invokePackOperation(pack.id, operation.operationId, payload)}

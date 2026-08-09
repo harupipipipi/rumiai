@@ -66,3 +66,40 @@ test('transformPack preserves approval state from panel packs API', () => {
   assert.deepEqual(pack.flows, ['rumi_file_inspect_pack.file-inspect']);
   assert.deepEqual(pack.dependencies, ['workspace.base']);
 });
+
+test('transformPack normalizes the v4 declared and invokable operation projections', () => {
+  const declaredOperation = {
+    operation_id: 'pack.status',
+    contract_id: 'tobkiri.pack.status.v1',
+    provider_id: 'pack.status.provider',
+    function_id: 'pack.status.provider',
+    required_capabilities: ['pack.status'],
+  };
+  const pack = transformPack({
+    pack_id: 'pack_v4',
+    name: 'Pack v4',
+    version: '1.0.0',
+    description: 'v4 projection',
+    is_core: false,
+    installed: true,
+    enabled: true,
+    artifact_digest: 'sha256:artifact-v4',
+    profile_id: 'profile-v4',
+    workspace_id: 'workspace-v4',
+    profile_revision: 'sha256:profile-v4',
+    plan_digest: 'sha256:plan-v4',
+    catalog_revision: 'catalog-v4',
+    declared_operations: [declaredOperation],
+    invokable_operations: [declaredOperation],
+  });
+
+  assert.deepEqual(pack.operations, [{
+    operationId: 'pack.status',
+    contractId: 'tobkiri.pack.status.v1',
+    providerId: 'pack.status.provider',
+    capabilities: ['pack.status'],
+    inputSchema: {},
+    invokable: true,
+  }]);
+  assert.deepEqual(pack.flows, ['pack.status']);
+});
