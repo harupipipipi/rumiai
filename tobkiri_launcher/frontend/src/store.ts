@@ -4,11 +4,13 @@ import {
   checkHealth,
   disablePack as apiDisablePack,
   enablePack as apiEnablePack,
+  fetchFrontendCatalog,
   fetchPacks,
   installPack as apiInstallPack,
+  invokeFrontendCapability,
   revokePackApproval as apiRevokePackApproval,
 } from './lib/api';
-import type {ApiSupervisorDashboard} from './lib/apiTypes';
+import type {ApiDynamicFrontendCatalog, ApiSupervisorDashboard} from './lib/apiTypes';
 import {transformPacks} from './lib/transforms';
 import {
   COLOR_MODE_STORAGE_KEY,
@@ -59,6 +61,15 @@ export interface DialogConfig {
   cancelText?: string;
 }
 
+export interface PackOperation {
+  operationId: string;
+  contractId: string;
+  providerId: string;
+  capabilities: string[];
+  inputSchema: Record<string, unknown>;
+  invokable: boolean;
+}
+
 export interface Pack {
   id: string;
   name: string;
@@ -80,6 +91,7 @@ export interface Pack {
   criticalChanged: boolean | null;
   approvalIssues: string[];
   capabilities: {name: string; description: string}[];
+  operations?: PackOperation[];
   flows: string[];
   dependencies: string[];
 }
@@ -151,7 +163,17 @@ interface AppState {
   packInstallPending: Record<string, boolean>;
   packTogglePending: Record<string, boolean>;
   packApprovalPending: Record<string, boolean>;
+  frontendCatalog: ApiDynamicFrontendCatalog | null;
+  frontendCatalogLoading: boolean;
+  frontendCatalogError: string | null;
+  packOperationPending: Record<string, boolean>;
   loadPacks: () => Promise<void>;
+  loadFrontendCatalog: () => Promise<void>;
+  invokePackOperation: (
+    packId: string,
+    operationId: string,
+    payload: Record<string, unknown>,
+  ) => Promise<unknown>;
   installPack: (id: string) => Promise<void>;
   approvePack: (id: string) => Promise<void>;
   revokePackApproval: (id: string) => Promise<void>;
@@ -168,6 +190,7 @@ const defaultProfile: Profile = {
 };
 
 let packsLoadPromise: Promise<void> | null = null;
+let frontendCatalogLoadPromise: Promise<void> | null = null;
 const packMutationVersions = new Map<string, number>();
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -256,6 +279,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   packInstallPending: {},
   packTogglePending: {},
   packApprovalPending: {},
+  frontendCatalog: null,
+  frontendCatalogLoading: false,
+  frontendCatalogError: null,
+  packOperationPending: {},
 
   loadPacks: () => {
     if (packsLoadPromise) return packsLoadPromise;
@@ -284,6 +311,99 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({packsLoading: false});
     });
     return packsLoadPromise;
+  },
+
+  loadFrontendCatalog: () => {
+    if (frontendCatalogLoadPromise) return frontendCatalogLoadPromise;
+    set({
+      frontendCatalogLoading: true,
+      frontendCatalogError: null,
+      frontendCatalog: null,
+    });
+    frontendCatalogLoadPromise = (async () => {
+      try {
+        const catalog = await fetchFrontendCatalog();
+        if (
+          !catalog.profile_id
+          || !catalog.plan_hash
+          || !catalog.catalog_hash
+          || !Array.isArray(catalog.contributions)
+        ) {
+          throw new Error('Tobkiri returned an invalid dynamic frontend catalog.');
+        }
+        set({frontendCatalog: catalog, frontendCatalogError: null});
+      } catch (error) {
+        const message = error instanceof Error
+          ? error.message
+          : 'Tobkiri dynamic frontend catalog is unavailable.';
+        set({frontendCatalog: null, frontendCatalogError: message});
+      }
+    })().finally(() => {
+      frontendCatalogLoadPromise = null;
+      set({frontendCatalogLoading: false});
+    });
+    return frontendCatalogLoadPromise;
+  },
+
+  invokePackOperation: async (packId, operationId, payload) => {
+    const operationKey = `${packId}:${operationId}`;
+    const state = get();
+    const pack = state.packs.find((candidate) => candidate.id === packId);
+    if (!pack || !pack.installed || !pack.enabled || !pack.approved) {
+      throw new Error(
+        'Tobkiri requires an installed, approved, enabled Pack before invoking its operation.',
+      );
+    }
+    if (state.packOperationPending[operationKey]) {
+      throw new Error('Tobkiri operation is already in progress.');
+    }
+    const operation = (pack.operations ?? []).find(
+      (candidate) => candidate.operationId === operationId,
+    );
+    const catalog = state.frontendCatalog;
+    const contribution = catalog?.contributions.find((candidate) => (
+      candidate.owner_pack_id === packId
+      && candidate.action_contract
+      && (
+        candidate.operation_id === operationId
+        || candidate.contribution_id === operationId
+        || candidate.label === operationId
+      )
+    ));
+    if (!operation || !catalog || catalog.quarantined_pack_ids.includes(packId) || !contribution) {
+      throw new Error(
+        'Tobkiri has not exposed this Pack operation in the current v4 capability catalog.',
+      );
+    }
+    if (
+      !operation.invokable
+      || contribution.action_contract !== operation.contractId
+    ) {
+      throw new Error('Tobkiri has not verified this Pack operation for invocation.');
+    }
+
+    set((current) => ({
+      packOperationPending: {...current.packOperationPending, [operationKey]: true},
+    }));
+    try {
+      const result = await invokeFrontendCapability({
+        profileId: catalog.profile_id,
+        planHash: catalog.plan_hash,
+        catalogHash: catalog.catalog_hash,
+        contributionId: contribution.contribution_id,
+        ownerPackId: contribution.owner_pack_id,
+        contractId: contribution.action_contract,
+        payload,
+      });
+      await Promise.all([get().loadPacks(), get().loadFrontendCatalog()]);
+      return result;
+    } finally {
+      set((current) => {
+        const pending = {...current.packOperationPending};
+        delete pending[operationKey];
+        return {packOperationPending: pending};
+      });
+    }
   },
 
   installPack: async (id) => {

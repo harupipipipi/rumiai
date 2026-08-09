@@ -10,9 +10,11 @@ import {
   disablePack,
   enablePack,
   fetchDashboard,
+  fetchFrontendCatalog,
   fetchPacks,
   fetchPresentationState,
   installPack,
+  invokeFrontendCapability,
   launchSelectedPresentation,
   revokePackApproval,
   selectPresentation,
@@ -180,6 +182,75 @@ test('Home and Packs use only exact v4 frontend contract routes', async () => {
     'POST /api/pack-control/disable',
   ]);
   assert.equal(lastFetchInit?.method, 'POST');
+});
+
+test('dynamic catalog and capability invocation use the exact canonical v4 routes', async () => {
+  const operations: string[] = [];
+  let invocationBody: Record<string, unknown> | undefined;
+  fetchHandler = async (input, init) => {
+    lastFetchUrl = String(input);
+    lastFetchInit = init;
+    const route = decodeURIComponent(lastFetchUrl.replace('/api/contracts/defaultspack/', ''));
+    operations.push(route);
+    if (route === 'POST /api/ui/capability/invoke') {
+      invocationBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({success: true, data: {kind: 'stat', size: 12}}), {
+        headers: {'Content-Type': 'application/json'},
+      });
+    }
+    return new Response(JSON.stringify({
+      success: true,
+      data: {
+        dynamic_host: {
+          version: 'rumi.ui.contribution.v1',
+          profile_id: 'profile-a',
+          profile_revision: 'sha256:profile-a',
+          plan_hash: 'sha256:plan-a',
+          contributions: [{
+            contribution_id: 'file-inspect',
+            owner_pack_id: 'rumi_file_inspect_pack',
+            label: 'rumi_file_inspect_pack.file-inspect',
+            action_contract: 'tobkiri.service.file.inspect.v1',
+            operation_id: 'rumi_file_inspect_pack.file-inspect',
+          }],
+          diagnostics: [],
+          quarantined_pack_ids: [],
+          catalog_hash: 'sha256:catalog-a',
+        },
+      },
+    }), {headers: {'Content-Type': 'application/json'}});
+  };
+
+  const catalog = await fetchFrontendCatalog();
+  const result = await invokeFrontendCapability({
+    profileId: catalog.profile_id,
+    planHash: catalog.plan_hash,
+    catalogHash: catalog.catalog_hash,
+    contributionId: 'file-inspect',
+    ownerPackId: 'rumi_file_inspect_pack',
+    contractId: 'tobkiri.service.file.inspect.v1',
+    payload: {name: 'stat', path: 'docs/example.txt'},
+  });
+
+  assert.deepEqual(operations, [
+    'GET /api/ui/catalog',
+    'POST /api/ui/capability/invoke',
+  ]);
+  assert.equal(typeof invocationBody?.request_id, 'string');
+  assert.equal(typeof invocationBody?.expires_at, 'number');
+  assert.deepEqual(invocationBody, {
+    request_id: invocationBody?.request_id,
+    expires_at: invocationBody?.expires_at,
+    profile_id: 'profile-a',
+    plan_hash: 'sha256:plan-a',
+    catalog_hash: 'sha256:catalog-a',
+    contribution_id: 'file-inspect',
+    owner_pack_id: 'rumi_file_inspect_pack',
+    contract_id: 'tobkiri.service.file.inspect.v1',
+    payload: {name: 'stat', path: 'docs/example.txt'},
+  });
+  assert.deepEqual(result, {kind: 'stat', size: 12});
+  assert.doesNotMatch(lastFetchUrl, /api\/v4\/dispatch/);
 });
 
 test('approval revocation uses the exact typed v4 contract route and payload', async () => {

@@ -1,7 +1,15 @@
 import type {ApiDashboard, ApiPack} from './apiTypes';
-import type {DashboardData, Pack} from '../store';
+import type {DashboardData, Pack, PackOperation} from '../store';
 
 export function transformPack(api: ApiPack): Pack {
+  const operations: PackOperation[] = (api.operations ?? []).map((operation) => ({
+    operationId: operation.operation_id,
+    contractId: operation.contract_id,
+    providerId: operation.provider_id,
+    capabilities: operation.capabilities ?? [],
+    inputSchema: operation.input_schema ?? {},
+    invokable: operation.invokable === true,
+  }));
   return {
     id: api.pack_id,
     name: api.name,
@@ -22,9 +30,13 @@ export function transformPack(api: ApiPack): Pack {
     hashValid: api.hash_valid ?? (api.is_core ? true : null),
     criticalChanged: api.critical_changed ?? (api.is_core ? false : null),
     approvalIssues: api.approval_issues || [],
-    capabilities: [],
-    flows: [],
-    dependencies: [],
+    capabilities: (api.capabilities ?? []).map((capability) => ({
+      name: capability.name,
+      description: capability.description ?? '',
+    })),
+    operations,
+    flows: api.flows ?? operations.map((operation) => operation.operationId),
+    dependencies: api.dependencies ?? [],
   };
 }
 

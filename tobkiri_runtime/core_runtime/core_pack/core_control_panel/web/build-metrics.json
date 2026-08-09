@@ -3,71 +3,71 @@
   "initial_javascript": {
     "files": [
       {
-        "file": "assets/index-ZKgj2Rt_.js",
-        "raw_bytes": 370794,
-        "gzip_bytes": 113818
+        "file": "assets/index-xyLMbL7J.js",
+        "raw_bytes": 376565,
+        "gzip_bytes": 115275
       }
     ],
-    "raw_bytes": 370794,
-    "gzip_bytes": 113818
+    "raw_bytes": 376565,
+    "gzip_bytes": 115275
   },
   "initial_css": {
     "files": [
       {
-        "file": "assets/index-fK11Se4O.css",
-        "raw_bytes": 59700,
-        "gzip_bytes": 11378
+        "file": "assets/index-BP7XWm-b.css",
+        "raw_bytes": 60107,
+        "gzip_bytes": 11420
       }
     ],
-    "raw_bytes": 59700,
-    "gzip_bytes": 11378
+    "raw_bytes": 60107,
+    "gzip_bytes": 11420
   },
   "initial_assets": {
     "files": [
       {
-        "file": "assets/index-ZKgj2Rt_.js",
-        "raw_bytes": 370794,
-        "gzip_bytes": 113818
+        "file": "assets/index-xyLMbL7J.js",
+        "raw_bytes": 376565,
+        "gzip_bytes": 115275
       },
       {
-        "file": "assets/index-fK11Se4O.css",
-        "raw_bytes": 59700,
-        "gzip_bytes": 11378
+        "file": "assets/index-BP7XWm-b.css",
+        "raw_bytes": 60107,
+        "gzip_bytes": 11420
       }
     ],
-    "raw_bytes": 430494,
-    "gzip_bytes": 125196
+    "raw_bytes": 436672,
+    "gzip_bytes": 126695
   },
   "all_javascript": {
     "files": [
+      {
+        "file": "assets/InlineLoadError-D3k_l8Id.js",
+        "raw_bytes": 2246,
+        "gzip_bytes": 1066
+      },
+      {
+        "file": "assets/index-xyLMbL7J.js",
+        "raw_bytes": 376565,
+        "gzip_bytes": 115275
+      },
       {
         "file": "assets/core-SwWLTXZB.js",
         "raw_bytes": 2706,
         "gzip_bytes": 1054
       },
       {
-        "file": "assets/InlineLoadError-CMump5U5.js",
-        "raw_bytes": 2246,
-        "gzip_bytes": 1067
+        "file": "assets/PackDetail-DZF5qtpP.js",
+        "raw_bytes": 15196,
+        "gzip_bytes": 4337
       },
       {
-        "file": "assets/index-ZKgj2Rt_.js",
-        "raw_bytes": 370794,
-        "gzip_bytes": 113818
-      },
-      {
-        "file": "assets/PackDetail-DcfZnxU8.js",
-        "raw_bytes": 7297,
-        "gzip_bytes": 2171
-      },
-      {
-        "file": "assets/Packs-DuQBtbKp.js",
+        "file": "assets/Packs-XTguGcfF.js",
         "raw_bytes": 7626,
         "gzip_bytes": 2762
       }
     ],
-    "raw_bytes": 390669,
-    "gzip_bytes": 120872
+    "raw_bytes": 404339,
+    "gzip_bytes": 124494
   },
   "routes": {
     "src/pages/Setup.tsx": {
@@ -80,45 +80,45 @@
       "present": true,
       "files": [
         {
-          "file": "assets/Packs-DuQBtbKp.js",
+          "file": "assets/Packs-XTguGcfF.js",
           "raw_bytes": 7626,
           "gzip_bytes": 2762
         },
         {
-          "file": "assets/index-ZKgj2Rt_.js",
-          "raw_bytes": 370794,
-          "gzip_bytes": 113818
+          "file": "assets/index-xyLMbL7J.js",
+          "raw_bytes": 376565,
+          "gzip_bytes": 115275
         },
         {
-          "file": "assets/InlineLoadError-CMump5U5.js",
+          "file": "assets/InlineLoadError-D3k_l8Id.js",
           "raw_bytes": 2246,
-          "gzip_bytes": 1067
+          "gzip_bytes": 1066
         }
       ],
-      "raw_bytes": 380666,
-      "gzip_bytes": 117647
+      "raw_bytes": 386437,
+      "gzip_bytes": 119103
     },
     "src/pages/PackDetail.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/PackDetail-DcfZnxU8.js",
-          "raw_bytes": 7297,
-          "gzip_bytes": 2171
+          "file": "assets/PackDetail-DZF5qtpP.js",
+          "raw_bytes": 15196,
+          "gzip_bytes": 4337
         },
         {
-          "file": "assets/index-ZKgj2Rt_.js",
-          "raw_bytes": 370794,
-          "gzip_bytes": 113818
+          "file": "assets/index-xyLMbL7J.js",
+          "raw_bytes": 376565,
+          "gzip_bytes": 115275
         },
         {
-          "file": "assets/InlineLoadError-CMump5U5.js",
+          "file": "assets/InlineLoadError-D3k_l8Id.js",
           "raw_bytes": 2246,
-          "gzip_bytes": 1067
+          "gzip_bytes": 1066
         }
       ],
-      "raw_bytes": 380337,
-      "gzip_bytes": 117056
+      "raw_bytes": 394007,
+      "gzip_bytes": 120678
     }
   }
 }

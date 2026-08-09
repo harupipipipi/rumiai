@@ -1,56 +1,56 @@
 {
-  "../../../../feff/tobkiri_update/tobkiri_launcher/frontend/node_modules/@tauri-apps/api/core.js": {
-    "file": "assets/core-SwWLTXZB.js",
-    "name": "core",
-    "src": "../../../../feff/tobkiri_update/tobkiri_launcher/frontend/node_modules/@tauri-apps/api/core.js",
-    "isDynamicEntry": true
-  },
   "../assets/app-icon/tobkiri-launcher-icon.png": {
     "file": "assets/tobkiri-launcher-icon-A0Q09elZ.png",
     "src": "../assets/app-icon/tobkiri-launcher-icon.png"
   },
-  "_InlineLoadError-CMump5U5.js": {
-    "file": "assets/InlineLoadError-CMump5U5.js",
+  "_InlineLoadError-D3k_l8Id.js": {
+    "file": "assets/InlineLoadError-D3k_l8Id.js",
     "name": "InlineLoadError",
     "imports": [
       "index.html"
     ]
   },
   "index.html": {
-    "file": "assets/index-ZKgj2Rt_.js",
+    "file": "assets/index-xyLMbL7J.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "dynamicImports": [
-      "../../../../feff/tobkiri_update/tobkiri_launcher/frontend/node_modules/@tauri-apps/api/core.js",
+      "node_modules/@tauri-apps/api/core.js",
       "src/pages/Packs.tsx",
       "src/pages/PackDetail.tsx"
     ],
     "css": [
-      "assets/index-fK11Se4O.css"
+      "assets/index-BP7XWm-b.css"
     ],
     "assets": [
       "assets/tobkiri-launcher-icon-A0Q09elZ.png"
     ]
   },
+  "node_modules/@tauri-apps/api/core.js": {
+    "file": "assets/core-SwWLTXZB.js",
+    "name": "core",
+    "src": "node_modules/@tauri-apps/api/core.js",
+    "isDynamicEntry": true
+  },
   "src/pages/PackDetail.tsx": {
-    "file": "assets/PackDetail-DcfZnxU8.js",
+    "file": "assets/PackDetail-DZF5qtpP.js",
     "name": "PackDetail",
     "src": "src/pages/PackDetail.tsx",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
-      "_InlineLoadError-CMump5U5.js"
+      "_InlineLoadError-D3k_l8Id.js"
     ]
   },
   "src/pages/Packs.tsx": {
-    "file": "assets/Packs-DuQBtbKp.js",
+    "file": "assets/Packs-XTguGcfF.js",
     "name": "Packs",
     "src": "src/pages/Packs.tsx",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
-      "_InlineLoadError-CMump5U5.js"
+      "_InlineLoadError-D3k_l8Id.js"
     ]
   }
 }

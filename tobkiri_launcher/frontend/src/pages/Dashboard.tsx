@@ -21,6 +21,7 @@ import { Badge } from '@/src/components/ui/Badge';
 import { transformDashboard } from '@/src/lib/transforms';
 import type { DashboardData } from '@/src/store';
 import { panelRoutes } from '@/src/lib/routes';
+import { ShellLaunchCard } from '@/src/components/presentation/ShellLaunchCard';
 
 const defaultDashboard: DashboardData = {
   kernelStatus: 'stopped',
@@ -178,6 +179,8 @@ export function Dashboard() {
             <span className="flex-1">Runtime is still preparing. Packs are available now, and launch surfaces will open after readiness.</span>
           </div>
         )}
+
+        <ShellLaunchCard runtimeReady={runtimeReady} />
 
         {/* Summary tiles */}
         <section className="grid gap-4 sm:grid-cols-3">

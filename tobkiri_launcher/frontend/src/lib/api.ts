@@ -1,5 +1,6 @@
 import type {
   ApiDashboard,
+  ApiDynamicFrontendCatalog,
   ApiPresentationSelection,
   ApiResponse,
   ApiPresentationState,
@@ -9,6 +10,7 @@ import type {
   DesktopSystemInfo,
   HealthResponseData,
   KernelRestartResponseData,
+  FrontendCapabilityInvocation,
   PackApprovalResponseData,
   PackInstallResponseData,
   PackToggleResponseData,
@@ -407,6 +409,35 @@ export function getApiRequestCacheSnapshot(): GetRequestSnapshot {
 
 export function fetchDashboard(): Promise<ApiDashboard> {
   return apiFetch<ApiDashboard>(frontendContractPath('GET', '/api/home/dashboard'));
+}
+
+export async function fetchFrontendCatalog(): Promise<ApiDynamicFrontendCatalog> {
+  const data = await apiFetch<{dynamic_host?: ApiDynamicFrontendCatalog | null}>(
+    frontendContractPath('GET', '/api/ui/catalog'),
+  );
+  if (!data.dynamic_host) {
+    throw new Error('Tobkiri dynamic frontend catalog is unavailable.');
+  }
+  return data.dynamic_host;
+}
+
+export function invokeFrontendCapability(
+  request: FrontendCapabilityInvocation,
+): Promise<unknown> {
+  return apiFetch<unknown>(frontendContractPath('POST', '/api/ui/capability/invoke'), {
+    method: 'POST',
+    body: JSON.stringify({
+      request_id: crypto.randomUUID(),
+      expires_at: Date.now() / 1000 + 30,
+      profile_id: request.profileId,
+      plan_hash: request.planHash,
+      catalog_hash: request.catalogHash,
+      contribution_id: request.contributionId,
+      owner_pack_id: request.ownerPackId,
+      contract_id: request.contractId,
+      payload: request.payload,
+    }),
+  });
 }
 
 function dispatchPackControl<T>(

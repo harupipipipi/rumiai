@@ -9,6 +9,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/src/components/ui/Ca
 import { panelRoutes } from '@/src/lib/routes';
 import { ArrowLeft } from 'lucide-react';
 import { InlineLoadError } from '@/src/components/ui/InlineLoadError';
+import { FileInspectOperation } from '@/src/components/packs/FileInspectOperation';
 
 export function PackDetail() {
   const t = useT();
@@ -20,7 +21,13 @@ export function PackDetail() {
   const packTogglePending = useAppStore(state => state.packTogglePending);
   const packInstallPending = useAppStore(state => state.packInstallPending);
   const packApprovalPending = useAppStore(state => state.packApprovalPending);
+  const frontendCatalog = useAppStore(state => state.frontendCatalog);
+  const frontendCatalogLoading = useAppStore(state => state.frontendCatalogLoading);
+  const frontendCatalogError = useAppStore(state => state.frontendCatalogError);
+  const packOperationPending = useAppStore(state => state.packOperationPending);
   const loadPacks = useAppStore(state => state.loadPacks);
+  const loadFrontendCatalog = useAppStore(state => state.loadFrontendCatalog);
+  const invokePackOperation = useAppStore(state => state.invokePackOperation);
   const installPack = useAppStore(state => state.installPack);
   const approvePack = useAppStore(state => state.approvePack);
   const revokePackApproval = useAppStore(state => state.revokePackApproval);
@@ -35,6 +42,17 @@ export function PackDetail() {
   useEffect(() => {
     if (packs.length === 0) void loadPacks();
   }, [packs.length, loadPacks]);
+
+  useEffect(() => {
+    void loadFrontendCatalog();
+  }, [
+    loadFrontendCatalog,
+    pack?.id,
+    pack?.installed,
+    pack?.approved,
+    pack?.enabled,
+    pack?.approvalStatus,
+  ]);
 
   if (packsLoading && packs.length === 0) {
     return (
@@ -99,6 +117,19 @@ export function PackDetail() {
   const approvalRevoked = pack.approvalStatus === 'revoked'
     || pack.approvalReason === 'approval_revoked'
     || pack.approvalIssues.includes('approval_revoked');
+
+  const operations = pack.operations ?? [];
+  const contributionForOperation = (operationId: string, contractId: string) => (
+    frontendCatalog?.contributions.find((contribution) => (
+      contribution.owner_pack_id === pack.id
+      && contribution.action_contract === contractId
+      && (
+        contribution.operation_id === operationId
+        || contribution.contribution_id === operationId
+        || contribution.label === operationId
+      )
+    )) ?? null
+  );
 
   const handleRevoke = () => {
     if (!pack.installed || !pack.approved || pack.type === 'core') return;
@@ -272,6 +303,73 @@ export function PackDetail() {
             </CardContent>
           </Card>
         </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Declared operations</CardTitle>
+            <p className="text-sm leading-relaxed text-text-muted">
+              Operations are callable only when Tobkiri exposes the Pack contribution in the current verified v4 catalog.
+            </p>
+          </CardHeader>
+          <CardContent>
+            {frontendCatalogLoading ? (
+              <p className="text-sm text-text-muted" role="status">Loading the verified capability catalog…</p>
+            ) : frontendCatalogError ? (
+              <p className="text-sm text-destructive" role="alert">{frontendCatalogError}</p>
+            ) : operations.length === 0 ? (
+              <p className="text-sm text-text-muted">No operations declared by this Pack.</p>
+            ) : (
+              <ul className="space-y-3">
+                {operations.map((operation) => {
+                  const contribution = contributionForOperation(operation.operationId, operation.contractId);
+                  const callable = operation.invokable && Boolean(contribution) && !approvalRevoked;
+                  return (
+                    <li className="rounded-lg border border-border p-3" key={operation.operationId}>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="break-all text-sm font-medium text-text-main">{operation.operationId}</p>
+                          <p className="mt-1 break-all text-xs text-text-muted">Contract: {operation.contractId}</p>
+                          <p className="mt-1 break-all text-xs text-text-muted">Provider: {operation.providerId}</p>
+                        </div>
+                        <Badge variant={callable ? 'success' : 'secondary'}>
+                          {callable ? 'Callable' : 'Not callable'}
+                        </Badge>
+                      </div>
+                      {operation.capabilities.length > 0 ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {operation.capabilities.map((capability) => (
+                            <Badge key={capability} variant="outline">{capability}</Badge>
+                          ))}
+                        </div>
+                      ) : null}
+                      {!callable ? (
+                        <p className="mt-3 text-xs text-text-muted">
+                          {approvalRevoked
+                            ? 'Approval is revoked; invocation is unavailable.'
+                            : operation.invokable
+                              ? 'Waiting for a verified Pack contribution from Tobkiri.'
+                              : 'Tobkiri has not exposed a verified capability route.'}
+                        </p>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+
+        {operations.map((operation) => operation.operationId === 'rumi_file_inspect_pack.file-inspect' ? (
+          <FileInspectOperation
+            key={`${operation.operationId}-surface`}
+            operation={operation}
+            pack={pack}
+            contributionVerified={Boolean(contributionForOperation(operation.operationId, operation.contractId))
+              && !frontendCatalog?.quarantined_pack_ids.includes(pack.id)}
+            pending={Boolean(packOperationPending[`${pack.id}:${operation.operationId}`])}
+            onInvoke={(payload) => invokePackOperation(pack.id, operation.operationId, payload)}
+          />
+        ) : null)}
       </div>
     </div>
   );

@@ -21,6 +21,20 @@ export interface PackControlBinding {
   catalog_revision: string;
 }
 
+export interface ApiPackCapability {
+  name: string;
+  description: string;
+}
+
+export interface ApiPackOperation {
+  operation_id: string;
+  contract_id: string;
+  provider_id: string;
+  capabilities: string[];
+  input_schema: Record<string, unknown>;
+  invokable?: boolean;
+}
+
 export interface ApiPack extends PackControlBinding {
   pack_id: string;
   name: string;
@@ -36,6 +50,55 @@ export interface ApiPack extends PackControlBinding {
   hash_valid?: boolean | null;
   critical_changed?: boolean | null;
   approval_issues?: string[];
+  capabilities?: ApiPackCapability[];
+  operations?: ApiPackOperation[];
+  flows?: string[];
+  dependencies?: string[];
+}
+
+export interface ApiFrontendContribution {
+  contribution_id: string;
+  owner_pack_id: string;
+  label: string;
+  action_contract?: string | null;
+  operation_id?: string | null;
+  provider_id?: string | null;
+  kind?: string;
+}
+
+export interface ApiFrontendDiagnostic {
+  code: string;
+  severity: string;
+  message: string;
+  owner_pack_id?: string | null;
+  contribution_id?: string | null;
+}
+
+export interface ApiDynamicFrontendCatalog {
+  version: string;
+  profile_id: string;
+  profile_revision: string;
+  plan_hash: string;
+  contributions: ApiFrontendContribution[];
+  diagnostics: ApiFrontendDiagnostic[];
+  quarantined_pack_ids: string[];
+  catalog_hash: string;
+}
+
+export interface ApiUiCatalogData {
+  dynamic_host?: ApiDynamicFrontendCatalog | null;
+  packs?: ApiPack[];
+  count?: number;
+}
+
+export interface FrontendCapabilityInvocation {
+  profileId: string;
+  planHash: string;
+  catalogHash: string;
+  contributionId: string;
+  ownerPackId: string;
+  contractId: string;
+  payload: Record<string, unknown>;
 }
 
 export interface ApiDashboard {
