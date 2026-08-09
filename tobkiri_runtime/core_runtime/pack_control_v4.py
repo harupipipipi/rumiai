@@ -388,6 +388,16 @@ def capture_pack_catalog_reader() -> CapturedPackCatalogReader:
     return CapturedPackCatalogReader.capture()
 
 
+def capture_valid_pack_approval(pack_id: str) -> Mapping[str, Any]:
+    """Load one exact current signed optional-Pack approval for Authority capture."""
+
+    binding = _capture_binding()
+    record = load_pack_catalog().get(pack_id)
+    if record is None:
+        raise PackControlDenied("Pack is absent from the canonical v4 catalog")
+    return _load_valid_approval(pack_id, record, binding)
+
+
 def _binding_payload(binding: _Binding) -> dict[str, str]:
     return {
         "profile_id": binding.profile_id,
@@ -426,12 +436,8 @@ def _catalog_payload(binding: _Binding) -> dict[str, Any]:
             if (
                 pack_id in active
                 and approved
-                and (
-                    operation["contract_id"], operation["operation_id"]
-                ) in plan_bindings
-                and (
-                    operation["contract_id"], operation["operation_id"]
-                ) in active_grant_bindings
+                and (operation["contract_id"], operation["operation_id"]) in plan_bindings
+                and (operation["contract_id"], operation["operation_id"]) in active_grant_bindings
             )
         ]
         packs.append(
@@ -451,13 +457,9 @@ def _catalog_payload(binding: _Binding) -> dict[str, Any]:
                 "approval_issues": [] if approved else [reason or "approval_required"],
                 "artifact_digest": _record_digest(record),
                 "capabilities": _capability_projection(record),
-                "flows": [
-                    str(operation["operation_id"])
-                    for operation in declared_operations
-                ],
+                "flows": [str(operation["operation_id"]) for operation in declared_operations],
                 "dependencies": sorted(
-                    str(dependency)
-                    for dependency in (record.get("dependencies") or {})
+                    str(dependency) for dependency in (record.get("dependencies") or {})
                 ),
                 "declared_operations": declared_operations,
                 "invokable_operations": invokable_operations,
@@ -486,9 +488,7 @@ def _active_grant_bindings(state: Mapping[str, Any]) -> set[tuple[str, str]]:
 
     plan_bindings: set[tuple[str, str, str]] = set()
     for item in state.get("resolved_plan", {}).get("bindings") or []:
-        if not isinstance(item, Mapping) or not isinstance(
-            item.get("function_principal"), Mapping
-        ):
+        if not isinstance(item, Mapping) or not isinstance(item.get("function_principal"), Mapping):
             continue
         try:
             principal = FunctionPrincipal.from_dict(item["function_principal"])
@@ -501,9 +501,7 @@ def _active_grant_bindings(state: Mapping[str, Any]) -> set[tuple[str, str]]:
                 principal.principal_id,
             )
         )
-    if not expected_activation or not expected_profile or not isinstance(
-        expected_epoch, int
-    ):
+    if not expected_activation or not expected_profile or not isinstance(expected_epoch, int):
         return set()
     from .authority.v4 import AuthorityStore
 
@@ -543,13 +541,7 @@ def _capability_projection(record: Mapping[str, Any]) -> list[dict[str, str]]:
             "name": capability,
             "description": f"Pack-declared capability: {capability}.",
         }
-        for capability in sorted(
-            {
-                str(item).strip()
-                for item in capabilities
-                if str(item).strip()
-            }
-        )
+        for capability in sorted({str(item).strip() for item in capabilities if str(item).strip()})
     ]
 
 
@@ -566,13 +558,11 @@ def _declared_operations(record: Mapping[str, Any]) -> list[dict[str, Any]]:
         contract_id = str(contract.get("contract_id") or "").strip()
         provider_id = str(contract.get("provider_id") or "").strip()
         required = contract.get("required_capabilities")
-        required_capabilities = sorted(
-            {
-                str(item).strip()
-                for item in required
-                if str(item).strip()
-            }
-        ) if isinstance(required, list) else []
+        required_capabilities = (
+            sorted({str(item).strip() for item in required if str(item).strip()})
+            if isinstance(required, list)
+            else []
+        )
         operations = contract.get("operations")
         if not isinstance(operations, list):
             continue
@@ -694,17 +684,14 @@ def _activate_pack_set(state: Mapping[str, Any], pack_ids: list[str]) -> None:
             raise PackControlDenied("Pack v4 manifest is invalid") from error
         if (
             manifest["pack"]["id"] != pack_id
-            or manifest["integrity"]["artifact_set_digest"]
-            != manifest["pack"]["artifact_digest"]
+            or manifest["integrity"]["artifact_set_digest"] != manifest["pack"]["artifact_digest"]
         ):
             raise PackControlDenied("Pack v4 manifest identity is inconsistent")
         external_packs[pack_id] = manifest
         dependencies = set(manifest["requirements"]["pack_dependencies"])
         requested_closure.update(dependencies)
         pending.extend(
-            dependency
-            for dependency in dependencies
-            if dependency not in external_packs
+            dependency for dependency in dependencies if dependency not in external_packs
         )
     catalog = BundledCatalog(
         root=catalog.root,
@@ -726,17 +713,16 @@ def _activate_pack_set(state: Mapping[str, Any], pack_ids: list[str]) -> None:
     authority_path = user_data / "authority" / "v4.sqlite3"
     workspace = user_data / "workspaces" / "defaults"
     with AuthorityStore(authority_path) as authority:
-        bundle_lock_digest = "sha256:" + hashlib.sha256(
-            (bundle_root / "bundle.lock.json").read_bytes()
-        ).hexdigest()
+        bundle_lock_digest = (
+            "sha256:" + hashlib.sha256((bundle_root / "bundle.lock.json").read_bytes()).hexdigest()
+        )
         snapshot_digest = _authority_snapshot_digest(authority, bundle_lock_digest)
         bindings = {
             _edge_key(edge): _authority_reference(edge, snapshot_digest)
             for edge in source["requested_edges"]
         }
         verified_digests = {
-            str(manifest["pack"]["artifact_digest"])
-            for manifest in catalog.packs.values()
+            str(manifest["pack"]["artifact_digest"]) for manifest in catalog.packs.values()
         }
         baseline = resolve_default_profile(
             catalog,
@@ -752,26 +738,15 @@ def _activate_pack_set(state: Mapping[str, Any], pack_ids: list[str]) -> None:
             if item.get("role") != "application"
         }
         if not mandatory.issubset(requested):
-            raise PackControlDenied(
-                "the bundled Defaults Profile Pack set is immutable"
-            )
-        additional_pack_ids = tuple(
-            pack_id for pack_id in requested if pack_id not in mandatory
-        )
+            raise PackControlDenied("the bundled Defaults Profile Pack set is immutable")
+        additional_pack_ids = tuple(pack_id for pack_id in requested if pack_id not in mandatory)
         # Optional Pack operations are part of the immutable resolved Profile,
         # so mint the exact authority references before resolving the plan.
         # The resolver derives only the selected Pack/dependency closure and
         # binds every operation to the selected Shell caller.
-        for edge in dynamic_profile_edges(
-            catalog, "defaults", additional_pack_ids
-        ):
-            bindings[_edge_key(edge)] = _authority_reference(
-                edge, snapshot_digest
-            )
-        approved_digests = {
-            str(item["artifact_digest"])
-            for item in baseline.lock["effective_set"]
-        }
+        for edge in dynamic_profile_edges(catalog, "defaults", additional_pack_ids):
+            bindings[_edge_key(edge)] = _authority_reference(edge, snapshot_digest)
+        approved_digests = {str(item["artifact_digest"]) for item in baseline.lock["effective_set"]}
         installed = _read_control_state("defaults")
         binding = _capture_binding()
         external_selected = {
@@ -900,9 +875,7 @@ def _require_install_binding(
     binding: _Binding,
 ) -> None:
     del binding
-    if not isinstance(entry, Mapping) or (
-        entry.get("artifact_digest") != _record_digest(record)
-    ):
+    if not isinstance(entry, Mapping) or (entry.get("artifact_digest") != _record_digest(record)):
         raise PackControlDenied(f"installed Pack binding is stale or tampered: {pack_id}")
 
 
@@ -976,9 +949,7 @@ def _persist_revoked_approval(
     *,
     revocation_id: str,
 ) -> None:
-    payload = {
-        key: value for key, value in approval.items() if key != "signature"
-    }
+    payload = {key: value for key, value in approval.items() if key != "signature"}
     payload.update(
         {
             "revoked": True,
@@ -1036,9 +1007,7 @@ def _approval_status(
     from .authority.v4 import AuthorityStore
 
     try:
-        with AuthorityStore(
-            _user_data_root() / "authority" / "v4.sqlite3"
-        ) as authority:
+        with AuthorityStore(_user_data_root() / "authority" / "v4.sqlite3") as authority:
             if authority.is_revoked("approval", revision):
                 return False, "approval_revoked"
     except Exception:
@@ -1187,4 +1156,5 @@ __all__ = [
     "PackControlDenied",
     "capture_pack_catalog_reader",
     "capture_pack_control_session",
+    "capture_valid_pack_approval",
 ]

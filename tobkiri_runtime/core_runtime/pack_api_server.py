@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from pathlib import PurePosixPath
-from typing import Any, Callable, Mapping, Protocol
+from typing import Callable, Mapping, Protocol
 from urllib.parse import urlparse
 
 from .api.api_response import APIResponse
@@ -73,10 +73,10 @@ _RETIRED_API_ROOTS = frozenset(
 )
 
 
-def _dynamic_payload_keys(pack_id: str, operation_id: str) -> frozenset[str]:
+def _dynamic_payload_keys(contract_id: str, operation_id: str) -> frozenset[str]:
     """Return the narrow request schema for a dynamic Pack contribution."""
 
-    if pack_id == "rumi_media_inspect_service_pack":
+    if contract_id == "tobkiri.service.media.inspect.v1":
         return frozenset(
             {
                 "name",
@@ -120,6 +120,13 @@ class DispatchSession(Protocol):
     @property
     def plan_digest(self) -> str:
         """Return the exact captured ResolvedPlan digest."""
+
+
+class WorkspaceBindingResolver(Protocol):
+    """Host-injected port for an immutable selected-workspace capture."""
+
+    def __call__(self, profile_id: str) -> Mapping[str, object]:
+        """Return canonical root and filesystem identity for the Profile."""
 
 
 class LifecyclePort(Protocol):
@@ -204,6 +211,7 @@ class PackAPIHandler(
     _contract_routes: Mapping[tuple[str, str], FrontendContractBinding] = {}
     _contract_replay_guard: _RequestReplayGuard | None = None
     _runtime_refresh: Callable[[DispatchSession | None], None] | None = None
+    _workspace_binding_resolver: WorkspaceBindingResolver | None = None
     _instance_web_mounts: tuple[WebMountEntry, ...] | None = None
     app_lifecycle_manager: LifecyclePort | None = None
     _runtime_port = 8765
@@ -222,6 +230,7 @@ class PackAPIHandler(
         replay_guard: _RequestReplayGuard | None = None,
         web_mounts: tuple[WebMountEntry, ...] | None = None,
         runtime_refresh: Callable[[DispatchSession | None], None] | None = None,
+        workspace_binding_resolver: WorkspaceBindingResolver | None = None,
     ) -> type["PackAPIHandler"]:
         """Create an isolated handler bound to one captured runtime session."""
 
@@ -232,6 +241,7 @@ class PackAPIHandler(
         bound_replay_guard = replay_guard
         bound_web_mounts = web_mounts
         bound_runtime_refresh = runtime_refresh
+        bound_workspace_binding_resolver = workspace_binding_resolver
 
         class BoundPackAPIHandler(PackAPIHandler):
             _panel_auth_manager = bound_panel_auth
@@ -241,17 +251,17 @@ class PackAPIHandler(
             _contract_replay_guard = bound_replay_guard
             _instance_web_mounts = bound_web_mounts
             _runtime_refresh = (
-                staticmethod(bound_runtime_refresh)
-                if bound_runtime_refresh is not None
+                staticmethod(bound_runtime_refresh) if bound_runtime_refresh is not None else None
+            )
+            _workspace_binding_resolver = (
+                staticmethod(bound_workspace_binding_resolver)
+                if bound_workspace_binding_resolver is not None
                 else None
             )
 
             def _setup_install_pack(self, body: dict[str, object]) -> dict[str, object]:
                 result = super()._setup_install_pack(body)
-                if (
-                    result.get("state") == "active"
-                    and bound_runtime_refresh is not None
-                ):
+                if result.get("state") == "active" and bound_runtime_refresh is not None:
                     try:
                         bound_runtime_refresh(self.__class__._dispatch_session)
                     except Exception:
@@ -625,11 +635,7 @@ class PackAPIHandler(
             if not isinstance(pack, Mapping):
                 continue
             pack_id = str(pack.get("pack_id") or "").strip()
-            if (
-                not pack_id
-                or pack.get("enabled") is not True
-                or pack.get("approved") is not True
-            ):
+            if not pack_id or pack.get("enabled") is not True or pack.get("approved") is not True:
                 continue
             operations = pack.get("invokable_operations")
             if not isinstance(operations, list):
@@ -666,9 +672,7 @@ class PackAPIHandler(
                         operation_id=operation_id,
                         provider_id=provider_id,
                         function_id=function_id,
-                        allowed_payload_keys=_dynamic_payload_keys(
-                            pack_id, operation_id
-                        ),
+                        allowed_payload_keys=_dynamic_payload_keys(contract_id, operation_id),
                         owner_pack_id=pack_id,
                         artifact_digest=artifact_digest,
                     )
@@ -684,6 +688,46 @@ class PackAPIHandler(
             )
         )
 
+    def _capability_diagnostics(
+        self,
+        catalog: Mapping[str, object],
+    ) -> list[dict[str, str]]:
+        """Expose stable fail-closed reasons for selected unavailable operations."""
+
+        session = self._dispatch_session
+        packs = catalog.get("packs")
+        if session is None or not isinstance(packs, list):
+            return []
+        diagnostics: list[dict[str, str]] = []
+        for pack in packs:
+            if not isinstance(pack, Mapping) or pack.get("enabled") is not True:
+                continue
+            pack_id = str(pack.get("pack_id") or "")
+            operations = pack.get("invokable_operations")
+            if not isinstance(operations, list):
+                continue
+            for operation in operations:
+                if not isinstance(operation, Mapping):
+                    continue
+                contract_id = str(operation.get("contract_id") or "")
+                operation_id = str(operation.get("operation_id") or "")
+                provider_id = str(operation.get("provider_id") or "")
+                for provider in session.provider_metadata(contract_id):
+                    if (
+                        provider.get("provider_id") == provider_id
+                        and provider.get("operation_id") == operation_id
+                        and provider.get("backend_unavailable_reason")
+                    ):
+                        diagnostics.append(
+                            {
+                                "code": "production_backend_unavailable",
+                                "pack_id": pack_id,
+                                "operation_id": operation_id,
+                                "message": str(provider["backend_unavailable_reason"]),
+                            }
+                        )
+        return diagnostics
+
     def _present_contract_result(
         self,
         binding: FrontendContractBinding,
@@ -695,10 +739,9 @@ class PackAPIHandler(
             return dict(result)
         capability_binding = self._contract_routes.get(("POST", "/api/ui/capability/invoke"))
         contributions = (
-            self._capability_targets(capability_binding, result)
-            if capability_binding
-            else ()
+            self._capability_targets(capability_binding, result) if capability_binding else ()
         )
+        diagnostics = self._capability_diagnostics(result)
         session = self._dispatch_session
         catalog_hash = (
             self._frontend_catalog_hash(capability_binding)
@@ -747,21 +790,22 @@ class PackAPIHandler(
                     }
                     for index, target in enumerate(contributions)
                 ],
-                "diagnostics": [],
+                "diagnostics": diagnostics,
                 "quarantined_pack_ids": [],
                 "catalog_hash": catalog_hash,
             },
         }
 
-    @staticmethod
+    @classmethod
     def _normalize_dynamic_payload(
+        cls,
         target: FrontendContractTarget,
         payload: Mapping[str, object],
         session: DispatchSession,
     ) -> dict[str, object]:
         """Bind dynamic Pack requests to Host identity and safe path semantics."""
 
-        if target.owner_pack_id == "defaultspack":
+        if not target.contribution_id.startswith("pack."):
             return dict(payload)
         if target.contract_id != "tobkiri.service.media.inspect.v1":
             raise ValueError("dynamic Pack operation is not an approved media contract")
@@ -780,10 +824,16 @@ class PackAPIHandler(
         relative = PurePosixPath(path.strip())
         if relative.is_absolute() or ".." in relative.parts or "." in relative.parts:
             raise PermissionError("a workspace-relative path is required")
+        resolver = cls._workspace_binding_resolver
+        if resolver is None:
+            raise RuntimeError("Host workspace binding resolver is unavailable")
+        binding = dict(resolver(session.profile_id))
         normalized = dict(payload)
         normalized["path"] = relative.as_posix()
         normalized["profile_id"] = session.profile_id
-        normalized["workspace_id"] = session.profile_id
+        normalized["workspace_id"] = binding["workspace_id"]
+        normalized["require_selected"] = True
+        normalized["_workspace_binding"] = binding
         return normalized
 
     def _parse_object_body(self) -> dict[str, object] | None:
@@ -1154,6 +1204,7 @@ class PackAPIServer:
         app_lifecycle_manager: LifecyclePort | None = None,
         contract_bindings: tuple[FrontendContractBinding, ...] = (),
         web_mounts: tuple[WebMountEntry, ...] | None = None,
+        workspace_binding_resolver: WorkspaceBindingResolver | None = None,
     ) -> None:
         self.config = RuntimeHTTPConfig.verify(host, port)
         self.host = self.config.host
@@ -1163,6 +1214,7 @@ class PackAPIServer:
         self.app_lifecycle_manager = app_lifecycle_manager
         self._contract_routes = contract_binding_map(contract_bindings)
         self._web_mounts = web_mounts
+        self._workspace_binding_resolver = workspace_binding_resolver
         self._replay_guard = _RequestReplayGuard()
         self.server: _PackThreadingHTTPServer | None = None
         self.thread: threading.Thread | None = None
@@ -1184,6 +1236,7 @@ class PackAPIServer:
                 replay_guard=self._replay_guard,
                 web_mounts=self._web_mounts,
                 runtime_refresh=self._refresh_runtime_capture,
+                workspace_binding_resolver=self._workspace_binding_resolver,
             )
             server = _PackThreadingHTTPServer((self.host, self.port), handler)
             actual_port = int(server.server_address[1])
@@ -1238,9 +1291,7 @@ class PackAPIServer:
                 if not root.is_dir() or not (root / mount["index_file"]).is_file():
                     raise RuntimeError("frontend contract web mount is unavailable")
 
-    def _refresh_runtime_capture(
-        self, activated_session: DispatchSession | None = None
-    ) -> None:
+    def _refresh_runtime_capture(self, activated_session: DispatchSession | None = None) -> None:
         """Atomically publish a current Broker session and canonical route map."""
 
         from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
@@ -1260,9 +1311,7 @@ class PackAPIServer:
         created_session = False
         if session is None:
             active = capture_default_profile()
-            authority = AuthorityStore(
-                runtime_user_data_root() / "authority" / "v4.sqlite3"
-            )
+            authority = AuthorityStore(runtime_user_data_root() / "authority" / "v4.sqlite3")
             try:
                 session = capture_production_dispatch(
                     active,
@@ -1275,9 +1324,7 @@ class PackAPIServer:
                 authority.close()
                 raise
         try:
-            catalog = BundledCatalog.load(
-                runtime_root / "ecosystem" / "defaultspack" / "v4"
-            )
+            catalog = BundledCatalog.load(runtime_root / "ecosystem" / "defaultspack" / "v4")
             bindings = load_frontend_contract_bindings(
                 runtime_root
                 / "ecosystem"
@@ -1305,6 +1352,7 @@ class PackAPIServer:
                 replay_guard=self._replay_guard,
                 web_mounts=self._web_mounts,
                 runtime_refresh=self._refresh_runtime_capture,
+                workspace_binding_resolver=self._workspace_binding_resolver,
             )
             handler._runtime_port = self.port
             self._dispatch_session = session
@@ -1358,6 +1406,7 @@ def initialize_pack_api_server(
     app_lifecycle_manager: LifecyclePort | None = None,
     contract_bindings: tuple[FrontendContractBinding, ...] = (),
     web_mounts: tuple[WebMountEntry, ...] | None = None,
+    workspace_binding_resolver: WorkspaceBindingResolver | None = None,
 ) -> PackAPIServer:
     """Replace the process-local server with one verified v4 instance."""
 
@@ -1372,6 +1421,7 @@ def initialize_pack_api_server(
         app_lifecycle_manager=app_lifecycle_manager,
         contract_bindings=contract_bindings,
         web_mounts=web_mounts,
+        workspace_binding_resolver=workspace_binding_resolver,
     )
     server.start()
     _api_server = server

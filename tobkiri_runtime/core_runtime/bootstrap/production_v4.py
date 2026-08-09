@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+import os
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -14,7 +15,7 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
     BundledCatalog,
 )
 from tobkiri_host.admission import AdmissionEstimate, QueueScope, ResourceReservation
-from tobkiri_host.backends import BackendRegistry
+from tobkiri_host.backends import BackendRegistry, BackendStatus
 from tobkiri_host.broker import AdmissionTicket, RequestAdmissionPort
 from tobkiri_host.composition import AuthorityCeilings
 from tobkiri_host.contracts import AdapterPlanner, ResolvedOperationBinding, StructuralAdapter
@@ -30,6 +31,7 @@ from tobkiri_host.models import (
     PackageKind,
     RequestContext,
 )
+from tobkiri_host.errors import BackendUnavailableError
 from tobkiri_host.runtime import ProductionRuntimeV4, V4DispatchSession
 from tobkiri_protocol.canonical import canonical_digest
 
@@ -54,10 +56,49 @@ from ..pack_catalog_backend_v4 import (
 from ..pack_control_v4 import (
     PACK_CONTROL_CONTRACT,
     capture_pack_control_session,
+    capture_valid_pack_approval,
 )
+from ..pack_boundary import resolve_selected_pack_roots
 
 
 _PACK_CATALOG_KEY = (PACK_CONTROL_CONTRACT, "catalog.read")
+_PYTHON_PACK_BACKEND_ID = "tobkiri.python-pack-v4"
+
+
+class _UnavailablePythonPackBackend:
+    """Exact fail-closed registration when no authenticated PackVM exists."""
+
+    def __init__(self) -> None:
+        self.status = BackendStatus(
+            backend_id=_PYTHON_PACK_BACKEND_ID,
+            execution_kind=ExecutionKind.PACK_VM,
+            platform="any",
+            backend_digest=canonical_digest(
+                {
+                    "backend": _PYTHON_PACK_BACKEND_ID,
+                    "state": "authenticated-supervisor-unavailable",
+                }
+            ),
+            production_enabled=False,
+            conformance_only=True,
+            unavailable_reason=(
+                "authenticated PackVM supervisor is not registered for tobkiri.python-pack-v4"
+            ),
+        )
+
+    def materialize(self, binding: Any, reservation_id: str) -> Any:
+        del binding, reservation_id
+        raise BackendUnavailableError(self.status.unavailable_reason or "backend unavailable")
+
+    def invoke(self, request: object) -> object:
+        del request
+        raise BackendUnavailableError(self.status.unavailable_reason or "backend unavailable")
+
+    def cancel(self, request_id: str) -> None:
+        del request_id
+
+    def terminate(self, domain_id: str) -> None:
+        del domain_id
 
 
 class _NoAdapterExecution:
@@ -101,6 +142,24 @@ class _FiniteAdmission(RequestAdmissionPort):
 
     def release(self, ticket: AdmissionTicket) -> None:
         del ticket
+
+
+def _pack_root_identities(pack_roots: Mapping[str, Path]) -> dict[str, tuple[int, int]]:
+    """Reject symlinks and capture exact Pack-root filesystem identities."""
+
+    identities: dict[str, tuple[int, int]] = {}
+    for pack_id, root in sorted(pack_roots.items()):
+        if root.is_symlink() or not root.is_dir():
+            raise AuthorityDenied(f"selected Pack root is unavailable: {pack_id}")
+        for current, directories, names in os.walk(root, followlinks=False):
+            current_path = Path(current)
+            if current_path.is_symlink() or any(
+                (current_path / name).is_symlink() for name in (*directories, *names)
+            ):
+                raise AuthorityDenied(f"selected Pack contains a symlink: {pack_id}")
+        stat_result = root.stat()
+        identities[pack_id] = (int(stat_result.st_dev), int(stat_result.st_ino))
+    return identities
 
 
 def _shell_artifact(catalog: BundledCatalog, shell_id: str) -> PackArtifact:
@@ -250,6 +309,7 @@ def _commit_pack_control_authority(
     target_domain: ExecutionDomain,
     scope: AuthorityScope,
     authority_label: str = "pack-control",
+    pack_approval_revision: str | None = None,
 ) -> None:
     activation = active.activation
     profile = active.resolved.profile
@@ -259,11 +319,18 @@ def _commit_pack_control_authority(
     identity_suffix = str(activation["activation_id"]).replace(":", ".")
     operation_suffix = target.operation_id.replace(".", "-")
     authority_label = authority_label.replace("/", "-").replace(".", "-")
+    approval_identity = (
+        pack_approval_revision.removeprefix("sha256:")[:24]
+        if pack_approval_revision is not None
+        else identity_suffix
+    )
+    record_identity = (
+        f"{identity_suffix}.{approval_identity}"
+        if pack_approval_revision is not None
+        else identity_suffix
+    )
     approval = ApprovalRecord(
-        approval_id=(
-            f"approval.defaults.{authority_label}.{operation_suffix}."
-            f"{identity_suffix}"
-        ),
+        approval_id=(f"approval.defaults.{authority_label}.{operation_suffix}.{approval_identity}"),
         snapshot_digest=canonical_digest(
             {
                 "ceremony": "defaults.activate",
@@ -274,9 +341,14 @@ def _commit_pack_control_authority(
                 ],
                 "security_epoch": activation["security_epoch"],
                 "scope": scope.to_dict(),
+                "pack_approval_revision": pack_approval_revision,
             }
         ),
-        actor_id="user.defaults-confirmation",
+        actor_id=(
+            "user.pack-approval"
+            if pack_approval_revision is not None
+            else "user.defaults-confirmation"
+        ),
         decision="approved",
         decided_at=decided_at,
         caller=caller,
@@ -286,10 +358,7 @@ def _commit_pack_control_authority(
         security_epoch=int(activation["security_epoch"]),
     )
     provider = ProviderAuthorityRecord(
-        record_id=(
-            f"provider.defaults.{authority_label}.{operation_suffix}."
-            f"{identity_suffix}"
-        ),
+        record_id=(f"provider.defaults.{authority_label}.{operation_suffix}.{record_identity}"),
         provider=target,
         execution_domain_id=target_domain.domain_id,
         execution_domain_identity_digest=target_domain.identity_digest,
@@ -309,10 +378,7 @@ def _commit_pack_control_authority(
         host_broker_binding="tobkiri.request-broker.v4",
     )
     grant = GrantRecord(
-        grant_id=(
-            f"grant.defaults.{authority_label}.{operation_suffix}."
-            f"{identity_suffix}"
-        ),
+        grant_id=(f"grant.defaults.{authority_label}.{operation_suffix}.{record_identity}"),
         caller=caller,
         target=target,
         profile_id=str(profile["profile_id"]),
@@ -376,9 +442,7 @@ def capture_production_dispatch(
         or dict(persisted_active.resolved.lock) != dict(active.resolved.lock)
         or dict(persisted_active.resolved.plan) != dict(active.resolved.plan)
     ):
-        raise AuthorityDenied(
-            "Authority store is not bound to the captured Defaults activation"
-        )
+        raise AuthorityDenied("Authority store is not bound to the captured Defaults activation")
     active = persisted_active
     activation_suffix = str(active.activation["fencing_token"])
 
@@ -432,6 +496,11 @@ def capture_production_dispatch(
         caller_by_operation[key] = caller
 
     binding_pack_ids = {str(item["pack_id"]) for item in plan["bindings"]}
+    pack_roots = resolve_selected_pack_roots(
+        tuple(sorted(binding_pack_ids)),
+        ecosystem_root,
+    )
+    captured_pack_root_identities = _pack_root_identities(pack_roots)
     effective = {
         str(item["identity"]): str(item["artifact_digest"]) for item in lock["effective_set"]
     }
@@ -440,7 +509,7 @@ def capture_production_dispatch(
         lock=lock,
         plan=plan,
         activation=active.activation,
-        pack_roots={pack_id: ecosystem_root / pack_id for pack_id in binding_pack_ids},
+        pack_roots=pack_roots,
         supporting_artifacts=(shell,),
         verified_effective_artifacts=effective,
         authority_ceilings=ceilings,
@@ -468,10 +537,7 @@ def capture_production_dispatch(
                 authority_store,
                 authority_control,
                 target_domain,
-                session_id=(
-                    f"session.provider.pack-control.{operation_id}."
-                    f"{activation_suffix}"
-                ),
+                session_id=(f"session.provider.pack-control.{operation_id}.{activation_suffix}"),
                 principal=target,
             )
             scope = _operation_scope(PACK_CONTROL_CONTRACT, operation_id, target)
@@ -519,8 +585,45 @@ def capture_production_dispatch(
         for key, binding in binding_by_key.items()
         if key not in static_edge_keys and key[0] != PACK_CONTROL_CONTRACT
     }
+    optional_pack_ids = {
+        str(item["pack_id"])
+        for item in profile.get("packs", ())
+        if str(item["pack_id"]) not in catalog.packs
+    }
+    pack_by_function = {
+        str(binding["function_principal"]["function_id"]): str(binding["pack_id"])
+        for binding in plan["bindings"]
+    }
+    edge_by_key = {
+        (str(edge["contract_id"]), str(edge["operation_id"])): edge
+        for edge in profile["requested_edges"]
+    }
+    captured_dynamic_approvals: dict[str, str] = {}
     for key, dynamic_binding in sorted(dynamic_bindings.items()):
         contract_id, operation_id = key
+        target_pack_id = str(dynamic_binding["pack_id"])
+        caller_pack_id = pack_by_function.get(
+            str(edge_by_key[key]["caller_function_id"]),
+            "",
+        )
+        approval_pack_ids = {
+            pack_id for pack_id in (target_pack_id, caller_pack_id) if pack_id in optional_pack_ids
+        }
+        if len(approval_pack_ids) != 1:
+            # Dynamic authority must trace to exactly one approved optional
+            # Pack, either as the operation owner or as the signed direct
+            # dependency caller.  Never mint authority from dependency
+            # presence alone.
+            continue
+        approval_pack_id = next(iter(approval_pack_ids))
+        try:
+            pack_approval = capture_valid_pack_approval(approval_pack_id)
+            pack_approval_revision = str(pack_approval["approval_revision"])
+            captured_dynamic_approvals[approval_pack_id] = pack_approval_revision
+        except Exception:
+            # The immutable plan may still contain a previously selected Pack,
+            # but missing/corrupt/stale approval must never recreate authority.
+            continue
         target = FunctionPrincipal.from_dict(dynamic_binding["function_principal"])
         target_suffix = target.principal_id.removeprefix("sha256:")[:24]
         target_domain = _execution_domain(
@@ -547,8 +650,15 @@ def capture_production_dispatch(
             target_domain=target_domain,
             scope=_operation_scope(contract_id, operation_id, target),
             authority_label="dynamic-pack",
+            pack_approval_revision=pack_approval_revision,
         )
     registered_backends = tuple((backends or BackendRegistry(())).registered)
+    if not any(item.status.backend_id == _PYTHON_PACK_BACKEND_ID for item in registered_backends):
+        # The descriptor remains unavailable unless the composition root
+        # supplies a real authenticated supervisor.  Registering the exact
+        # disabled identity preserves a stable user-facing diagnostic without
+        # substituting in-process Python execution.
+        registered_backends += (_UnavailablePythonPackBackend(),)
     if control_backend is not None:
         if any(item.status.backend_id == PACK_CATALOG_BACKEND_ID for item in registered_backends):
             raise AuthorityDenied("Pack control backend identity is duplicated")
@@ -601,9 +711,7 @@ def capture_production_dispatch(
         # the Host-derived session identity instead of reusing a session
         # already bound to another caller.
         caller_identity_suffix = caller.principal_id.removeprefix("sha256:")[:24]
-        authority_session_id = (
-            f"{session_id}.{caller_identity_suffix}.{activation_suffix}"
-        )
+        authority_session_id = f"{session_id}.{caller_identity_suffix}.{activation_suffix}"
         caller_suffix = canonical_digest(
             {"session_id": authority_session_id, "caller": caller.principal_id}
         ).removeprefix("sha256:")[:24]
@@ -660,13 +768,12 @@ def capture_production_dispatch(
             binding["operation_id"],
             ">=1,<2",
         )
+        backend_error: str | None = None
         try:
             selected_backend = broker._backends.select(resolved_binding)
-        except Exception:
-            # A non-selected optional binding may not have an installed
-            # substrate yet; its contribution is omitted by the API projection
-            # until the exact production backend is available.
+        except Exception as error:
             selected_backend = None
+            backend_error = str(error) or "production backend is unavailable"
         function_principal = binding["function_principal"]
         providers.setdefault(binding["contract_id"], ())
         providers[binding["contract_id"]] += (
@@ -684,6 +791,11 @@ def capture_production_dispatch(
                         "backend_digest": selected_backend.status.backend_digest,
                     }
                     if selected_backend is not None
+                    else {}
+                ),
+                **(
+                    {"backend_unavailable_reason": backend_error}
+                    if backend_error is not None
                     else {}
                 ),
                 "profile_id": profile["profile_id"],
@@ -706,6 +818,15 @@ def capture_production_dispatch(
             or authority_store.security_epoch != int(captured_activation["security_epoch"])
         ):
             raise AuthorityDenied("captured Defaults activation is stale")
+        if _pack_root_identities(pack_roots) != captured_pack_root_identities:
+            raise AuthorityDenied("captured Pack filesystem identity changed")
+        for pack_id, approval_revision in captured_dynamic_approvals.items():
+            try:
+                current_approval = capture_valid_pack_approval(pack_id)
+            except Exception as error:
+                raise AuthorityDenied("captured optional Pack approval is unavailable") from error
+            if current_approval.get("approval_revision") != approval_revision:
+                raise AuthorityDenied("captured optional Pack approval changed")
 
     return runtime.dispatch_session(
         broker=broker,

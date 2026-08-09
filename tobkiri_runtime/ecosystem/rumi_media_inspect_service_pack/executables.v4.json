@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:a52eac1f008b3885994e24bf23d1769258ca6ab3b1557eb44b3b7d6039a850a0",
+  "catalog_digest": "sha256:d8f516bca2371c78f9b3632e8899a3eeac99fa73082d2be7e729dcef6157e1d9",
   "pack_id": "rumi_media_inspect_service_pack",
-  "source_identity": "sha256:d47f7c73e9d309a44ff90ac4f5990611e032b90cff35eaf743afd5f974be1257",
+  "source_identity": "sha256:d62965b30ed62a68329fb611d1a2889700f81dd36852d31b7342dd64833e8d91",
   "variants": [
     {
       "architecture": "any",
@@ -10,7 +10,7 @@
       "execution_domain_profile": "sandbox.default.v1",
       "execution_kind": "pack_vm",
       "function_id": "rumi_media_inspect_service_pack.media-inspect.service",
-      "implementation_digest": "sha256:5650e0863ed7b5d1e24d11f80c1a706f02d2e096a2a8cba998ce0538cd30ff7a",
+      "implementation_digest": "sha256:73d0c3316b34ace2b00abf868dbbc6ac47c67be1a694b472485637f63b22553e",
       "implementation_path": "runtime/inspect.py",
       "materialization_mode": "on_demand",
       "operations": [

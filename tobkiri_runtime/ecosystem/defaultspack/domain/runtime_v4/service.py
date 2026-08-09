@@ -67,17 +67,13 @@ class ActivationAuthority(Protocol):
         new_state: str,
     ) -> Mapping[str, Any]: ...
 
-    def activation_reservation(
-        self, reservation_id: str
-    ) -> Mapping[str, Any] | None: ...
+    def activation_reservation(self, reservation_id: str) -> Mapping[str, Any] | None: ...
 
     def incomplete_activation_reservations(
         self, profile_id: str
     ) -> tuple[Mapping[str, Any], ...]: ...
 
-    def active_activation_reservation(
-        self, activation_id: str
-    ) -> Mapping[str, Any] | None: ...
+    def active_activation_reservation(self, activation_id: str) -> Mapping[str, Any] | None: ...
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -150,7 +146,10 @@ class BundledCatalog:
                 raise BundleIntegrityError(f"bundle entry {index} has an invalid path")
             if kind not in collections:
                 raise BundleIntegrityError(f"bundle entry {relative} has an invalid kind")
-            if not isinstance(expected_digest, str) or _DIGEST_RE.fullmatch(expected_digest) is None:
+            if (
+                not isinstance(expected_digest, str)
+                or _DIGEST_RE.fullmatch(expected_digest) is None
+            ):
                 raise BundleIntegrityError(f"bundle entry {relative} has an invalid digest")
             candidate = (root / relative).resolve(strict=True)
             if candidate == root or root not in candidate.parents:
@@ -160,9 +159,7 @@ class BundledCatalog:
             for part in relative_path.parts:
                 current /= part
                 if current.is_symlink():
-                    raise BundleIntegrityError(
-                        f"bundle entry contains a symlink: {relative}"
-                    )
+                    raise BundleIntegrityError(f"bundle entry contains a symlink: {relative}")
             raw = candidate.read_bytes()
             actual_digest = _sha256_bytes(raw)
             if actual_digest != expected_digest:
@@ -176,7 +173,9 @@ class BundledCatalog:
                 raise BundleIntegrityError(f"invalid {kind} document {relative}: {exc}") from exc
             parent_field, identity_field = identity_fields[kind]
             identity_source = document.get(parent_field) if parent_field else document
-            identity = identity_source.get(identity_field) if isinstance(identity_source, dict) else None
+            identity = (
+                identity_source.get(identity_field) if isinstance(identity_source, dict) else None
+            )
             if not isinstance(identity, str) or identity in collections[kind]:
                 raise BundleIntegrityError(f"duplicate or missing {kind} identity: {identity!r}")
             collections[kind][identity] = document
@@ -227,8 +226,7 @@ def _provider_candidates(
         contracts = [
             contract
             for contract in manifest["contracts"]
-            if contract["contract_id"] == contract_id
-            and operation_id in contract["operations"]
+            if contract["contract_id"] == contract_id and operation_id in contract["operations"]
         ]
         if len(contracts) > 1:
             raise ProfileResolutionDenied(
@@ -254,34 +252,19 @@ def dynamic_profile_edges(
     """Derive exact operation edges for newly enabled Pack dependencies.
 
     The bundled Profile owns its static edges.  An approved optional Pack may
-    contribute only its own operation graph and the recursively required Pack
-    dependencies; every edge remains bound to the selected Shell caller and is
-    persisted into the immutable resolved Profile before dispatch.
+    contribute its own operations to the selected Shell and exact operations
+    from a direct signed Pack dependency to the contributing Pack Function.
+    Transitive dependencies remain selected and verified, but they do not gain
+    new caller edges merely by appearing in the dependency closure.  Every edge
+    is persisted into the immutable resolved Profile before dispatch.
     """
 
     source = catalog.profiles.get(profile_id)
     if source is None or not additional_pack_ids:
         return ()
     source_keys = {
-        (str(edge["contract_id"]), str(edge["operation_id"]))
-        for edge in source["requested_edges"]
+        (str(edge["contract_id"]), str(edge["operation_id"])) for edge in source["requested_edges"]
     }
-    pending = [str(pack_id) for pack_id in additional_pack_ids]
-    closure: set[str] = set()
-    while pending:
-        pack_id = pending.pop(0)
-        if pack_id in closure:
-            continue
-        manifest = catalog.packs.get(pack_id)
-        if manifest is None:
-            raise ProfileResolutionDenied(
-                f"dynamic Pack is not in the exact inventory: {pack_id}"
-            )
-        closure.add(pack_id)
-        pending.extend(
-            str(dependency)
-            for dependency in manifest["requirements"]["pack_dependencies"]
-        )
     shell_request = source.get("shell")
     if not isinstance(shell_request, Mapping):
         raise ProfileResolutionDenied("dynamic Pack edges require the selected Shell")
@@ -291,16 +274,85 @@ def dynamic_profile_edges(
     shell_manifest = catalog.packs.get(str(shell_definition["pack_id"]))
     if shell_manifest is None or not shell_manifest["functions"]:
         raise ProfileResolutionDenied("dynamic Pack Shell Function is unavailable")
-    caller_function_id = sorted(
-        str(function["id"]) for function in shell_manifest["functions"]
-    )[0]
+    # The signed Profile's selected Shell provider is the only caller role
+    # allowed to project optional Pack operations.  Never infer authority from
+    # lexical Function ordering: a newly added Shell Function must not silently
+    # inherit every dynamic Pack capability.
+    selected_caller_id = str(shell_request.get("provider_id") or "")
+    caller_functions = [
+        function
+        for function in shell_manifest["functions"]
+        if str(function.get("id") or "") == selected_caller_id
+        and str(function.get("role") or "") == "brokered"
+    ]
+    if len(caller_functions) != 1:
+        raise ProfileResolutionDenied("dynamic Pack Shell caller role is absent or ambiguous")
+    caller_function_id = selected_caller_id
+    pending = [(str(pack_id), caller_function_id, 0, None) for pack_id in additional_pack_ids]
+    caller_for_pack: dict[str, str] = {}
+    depth_for_pack: dict[str, int] = {}
+    contracts_for_pack: dict[str, tuple[str, ...] | None] = {}
+    closure: set[str] = set()
+    while pending:
+        pack_id, caller_id, depth, allowed_contracts = pending.pop(0)
+        prior_caller = caller_for_pack.setdefault(pack_id, caller_id)
+        prior_depth = depth_for_pack.setdefault(pack_id, depth)
+        prior_contracts = contracts_for_pack.setdefault(pack_id, allowed_contracts)
+        if (
+            prior_caller != caller_id
+            or prior_depth != depth
+            or prior_contracts != allowed_contracts
+        ):
+            raise ProfileResolutionDenied(f"dynamic Pack dependency caller is ambiguous: {pack_id}")
+        if pack_id in closure:
+            continue
+        manifest = catalog.packs.get(pack_id)
+        if manifest is None:
+            raise ProfileResolutionDenied(f"dynamic Pack is not in the exact inventory: {pack_id}")
+        closure.add(pack_id)
+        dependencies = tuple(
+            str(dependency) for dependency in manifest["requirements"]["pack_dependencies"]
+        )
+        if dependencies:
+            functions = tuple(manifest["functions"])
+            dependency_caller = str(functions[0]["id"]) if len(functions) == 1 else ""
+            required_contracts = {
+                str(item["contract_id"])
+                for item in manifest["requirements"]["contract_dependencies"]
+                if not item["optional"]
+            }
+            for dependency in dependencies:
+                dependency_manifest = catalog.packs.get(dependency)
+                if dependency_manifest is None:
+                    raise ProfileResolutionDenied(
+                        f"dynamic Pack is not in the exact inventory: {dependency}"
+                    )
+                provided_contracts = {
+                    str(item["contract_id"]) for item in dependency_manifest["contracts"]
+                }
+                dependency_contracts = tuple(sorted(required_contracts & provided_contracts))
+                if depth == 0 and not dependency_contracts:
+                    raise ProfileResolutionDenied(
+                        "dynamic Pack dependency does not provide a signed required "
+                        f"Contract: {pack_id} -> {dependency}"
+                    )
+                pending.append(
+                    (
+                        dependency,
+                        dependency_caller,
+                        depth + 1,
+                        dependency_contracts,
+                    )
+                )
     result: list[dict[str, Any]] = []
     for pack_id in sorted(closure):
+        # Only the optional Pack and its direct signed dependencies contribute
+        # dynamic Authority edges.  Deeper dependencies are implementation
+        # closure and cannot inherit the ancestor caller.
+        if depth_for_pack[pack_id] > 1:
+            continue
         manifest = catalog.packs[pack_id]
-        contracts = {
-            str(contract["contract_id"]): contract
-            for contract in manifest["contracts"]
-        }
+        contracts = {str(contract["contract_id"]): contract for contract in manifest["contracts"]}
         for function in sorted(manifest["functions"], key=lambda item: str(item["id"])):
             for operation_id in sorted(str(item) for item in function["operations"]):
                 contract_id = next(
@@ -313,9 +365,17 @@ def dynamic_profile_edges(
                 )
                 if contract_id is None or (contract_id, operation_id) in source_keys:
                     continue
+                allowed_contracts = contracts_for_pack[pack_id]
+                if allowed_contracts is not None and contract_id not in allowed_contracts:
+                    continue
+                operation_caller = caller_for_pack[pack_id]
+                if not operation_caller:
+                    raise ProfileResolutionDenied(
+                        f"dynamic Pack dependency caller is ambiguous: {pack_id}"
+                    )
                 result.append(
                     {
-                        "caller_function_id": caller_function_id,
+                        "caller_function_id": operation_caller,
                         "target_provider_id": str(function["id"]),
                         "contract_id": contract_id,
                         "operation_id": operation_id,
@@ -347,10 +407,12 @@ def resolve_default_profile(
     inputs. This function never interprets client approval flags and never mints
     authority.
     """
-    snapshot_digest = _require_digest(
-        authority_snapshot_digest, "authority_snapshot_digest"
-    )
-    if not isinstance(security_epoch, int) or isinstance(security_epoch, bool) or security_epoch < 0:
+    snapshot_digest = _require_digest(authority_snapshot_digest, "authority_snapshot_digest")
+    if (
+        not isinstance(security_epoch, int)
+        or isinstance(security_epoch, bool)
+        or security_epoch < 0
+    ):
         raise ProfileResolutionDenied("security_epoch must be a non-negative integer")
     source = catalog.profiles.get(profile_id)
     if source is None:
@@ -388,8 +450,7 @@ def resolve_default_profile(
 
     requested_pack_ids = [item["pack_id"] for item in source["packs"]]
     requested_pack_roles = {
-        item["pack_id"]: item.get("role", "provider")
-        for item in source["packs"]
+        item["pack_id"]: item.get("role", "provider") for item in source["packs"]
     }
     selected_ids = [base_id, shell_pack_id, *requested_pack_ids, *additional_pack_ids]
     pending = list(selected_ids)
@@ -397,12 +458,8 @@ def resolve_default_profile(
         current_id = pending.pop(0)
         current = catalog.packs.get(current_id)
         if current is None:
-            raise ProfileResolutionDenied(
-                f"Pack is not in the exact inventory: {current_id}"
-            )
-        for dependency_id, version_range in current["requirements"][
-            "pack_dependencies"
-        ].items():
+            raise ProfileResolutionDenied(f"Pack is not in the exact inventory: {current_id}")
+        for dependency_id, version_range in current["requirements"]["pack_dependencies"].items():
             dependency = catalog.packs.get(dependency_id)
             if dependency is None:
                 raise ProfileResolutionDenied(
@@ -436,16 +493,13 @@ def resolve_default_profile(
         selected.append(manifest)
 
     provided_contracts = {
-        contract["contract_id"]
-        for manifest in selected
-        for contract in manifest["contracts"]
+        contract["contract_id"] for manifest in selected for contract in manifest["contracts"]
     }
     for manifest in selected:
         for dependency in manifest["requirements"]["contract_dependencies"]:
             if not dependency["optional"] and dependency["contract_id"] not in provided_contracts:
                 raise ProfileResolutionDenied(
-                    "required Contract dependency is unavailable: "
-                    f"{dependency['contract_id']}"
+                    f"required Contract dependency is unavailable: {dependency['contract_id']}"
                 )
 
     foundational = _provider_candidates(selected, _FOUNDATIONAL_CONTRACT, "complete")
@@ -456,13 +510,9 @@ def resolve_default_profile(
         )
 
     available_function_ids = {
-        function["id"]
-        for manifest in selected
-        for function in manifest["functions"]
+        function["id"] for manifest in selected for function in manifest["functions"]
     }
-    available_function_ids.update(
-        function["id"] for function in shell_manifest["functions"]
-    )
+    available_function_ids.update(function["id"] for function in shell_manifest["functions"])
     dynamic_edges = dynamic_profile_edges(catalog, profile_id, additional_pack_ids)
     all_source_edges = (*source["requested_edges"], *dynamic_edges)
     for edge in all_source_edges:
@@ -478,9 +528,7 @@ def resolve_default_profile(
     references: list[str] = []
     for source_edge in all_source_edges:
         edge = dict(source_edge)
-        candidates = _provider_candidates(
-            selected, edge["contract_id"], edge["operation_id"]
-        )
+        candidates = _provider_candidates(selected, edge["contract_id"], edge["operation_id"])
         candidates = [item for item in candidates if item[1]["id"] == edge["target_provider_id"]]
         if len(candidates) != 1:
             raise ProfileResolutionDenied(
@@ -536,9 +584,7 @@ def resolve_default_profile(
         {
             "pack_id": manifest["pack"]["id"],
             "artifact_digest": manifest["pack"]["artifact_digest"],
-            "role": requested_pack_roles.get(
-                manifest["pack"]["id"], "provider"
-            ),
+            "role": requested_pack_roles.get(manifest["pack"]["id"], "provider"),
         }
         for manifest in selected
         if manifest["pack"]["id"] not in {base_id, shell_pack_id}
@@ -547,10 +593,7 @@ def resolve_default_profile(
     profile["authority_references"] = references
     profile["profile_authority_snapshot_digest"] = snapshot_digest
     profile["catalog_revision"] = canonical_digest(
-        {
-            manifest["pack"]["id"]: manifest["integrity"]["source_identity"]
-            for manifest in selected
-        }
+        {manifest["pack"]["id"]: manifest["integrity"]["source_identity"] for manifest in selected}
     )
     profile = validate_document(profile, "profile")
     profile_revision = canonical_digest(profile)
@@ -575,7 +618,9 @@ def resolve_default_profile(
         "bindings": bindings,
         "plan_digest": "sha256:" + "0" * 64,
     }
-    plan["plan_digest"] = canonical_digest({key: value for key, value in plan.items() if key != "plan_digest"})
+    plan["plan_digest"] = canonical_digest(
+        {key: value for key, value in plan.items() if key != "plan_digest"}
+    )
     plan = validate_document(plan, "resolved_plan")
 
     lock: dict[str, Any] = {
@@ -608,7 +653,9 @@ def resolve_default_profile(
         "profile_authority_snapshot_digest": snapshot_digest,
         "lock_digest": "sha256:" + "0" * 64,
     }
-    lock["lock_digest"] = canonical_digest({key: value for key, value in lock.items() if key != "lock_digest"})
+    lock["lock_digest"] = canonical_digest(
+        {key: value for key, value in lock.items() if key != "lock_digest"}
+    )
     lock = validate_document(lock, "profile_lock")
     return ResolvedDefaultProfile(profile=profile, lock=lock, plan=plan)
 
@@ -638,9 +685,7 @@ class ActivationStore:
         self._fault = fault or (lambda _stage: None)
         if not self.workspace_root.is_dir():
             raise ProfileResolutionDenied("workspace_root must be a directory")
-        self._workspace_digest = canonical_digest(
-            {"workspace_root": str(self.workspace_root)}
-        )
+        self._workspace_digest = canonical_digest({"workspace_root": str(self.workspace_root)})
 
     def resolve_workspace_path(self, relative_path: str) -> Path:
         """Resolve a relative resource and reject traversal or workspace escape."""
@@ -673,9 +718,7 @@ class ActivationStore:
             activation_id=activation_id,
             profile_id=self.profile_id,
             plan_digest=plan["plan_digest"],
-            profile_authority_digest=profile[
-                "profile_authority_snapshot_digest"
-            ],
+            profile_authority_digest=profile["profile_authority_snapshot_digest"],
             security_epoch=plan["security_epoch"],
         )
         envelope_path = self.state_root / "activations" / f"{activation_id[11:]}.json"
@@ -789,18 +832,14 @@ class ActivationStore:
             self._fault("after_authority_commit")
             _write_atomic(
                 self.state_root / "active.json",
-                self._active_pointer(
-                    activation_id, envelope_path, envelope_digest
-                ),
+                self._active_pointer(activation_id, envelope_path, envelope_digest),
             )
             pending_path.unlink(missing_ok=True)
             return activation
         except Exception:
             if state != "active":
                 try:
-                    reservation = self._authority.activation_reservation(
-                        reservation_id
-                    )
+                    reservation = self._authority.activation_reservation(reservation_id)
                     if reservation is not None and reservation.get("state") == state:
                         self._authority.transition_activation(
                             reservation_id,
@@ -818,9 +857,7 @@ class ActivationStore:
         pending_path = self.state_root / "pending.json"
         self._reject_symlink(pending_path, "pending activation journal")
         if not pending_path.exists():
-            for reservation in self._authority.incomplete_activation_reservations(
-                self.profile_id
-            ):
+            for reservation in self._authority.incomplete_activation_reservations(self.profile_id):
                 self._authority.transition_activation(
                     str(reservation["reservation_id"]),
                     expected_state=str(reservation["state"]),
@@ -830,9 +867,7 @@ class ActivationStore:
         try:
             pending = strict_loads(pending_path.read_bytes())
         except (OSError, ProtocolError) as exc:
-            raise ProfileResolutionDenied(
-                f"pending activation journal is invalid: {exc}"
-            ) from exc
+            raise ProfileResolutionDenied(f"pending activation journal is invalid: {exc}") from exc
         expected_keys = {
             "schema",
             "reservation_id",
@@ -927,9 +962,7 @@ class ActivationStore:
             "state": state,
             "state_generation": generation,
             "plan_digest": plan["plan_digest"],
-            "profile_authority_snapshot_digest": profile[
-                "profile_authority_snapshot_digest"
-            ],
+            "profile_authority_snapshot_digest": profile["profile_authority_snapshot_digest"],
             "security_epoch": plan["security_epoch"],
             "fencing_token": fencing_token,
             "created_at": created_at,
@@ -1016,7 +1049,10 @@ class ActivationStore:
             envelope = strict_loads(envelope_path.read_bytes())
         except (OSError, ProtocolError) as exc:
             raise ProfileResolutionDenied(f"activation envelope is unavailable: {exc}") from exc
-        if not isinstance(envelope, dict) or canonical_digest(envelope) != pointer["envelope_digest"]:
+        if (
+            not isinstance(envelope, dict)
+            or canonical_digest(envelope) != pointer["envelope_digest"]
+        ):
             raise ProfileResolutionDenied("activation envelope digest changed")
         if envelope.get("schema") != _ENVELOPE_SCHEMA:
             raise ProfileResolutionDenied("activation envelope schema is unsupported")
@@ -1043,9 +1079,7 @@ class ActivationStore:
             raise ProfileResolutionDenied("active pointer selects another activation")
         if activation["state"] != "active" or activation["plan_digest"] != plan["plan_digest"]:
             raise ProfileResolutionDenied("activation is stale or not active")
-        authority = self._authority.active_activation_reservation(
-            str(activation["activation_id"])
-        )
+        authority = self._authority.active_activation_reservation(str(activation["activation_id"]))
         expected_authority = (
             activation["profile_id"],
             activation["plan_digest"],
@@ -1054,12 +1088,16 @@ class ActivationStore:
             activation["fencing_token"],
         )
         actual_authority = (
-            authority.get("profile_id"),
-            authority.get("plan_digest"),
-            authority.get("profile_authority_digest"),
-            authority.get("security_epoch"),
-            authority.get("fencing_token"),
-        ) if authority is not None else ()
+            (
+                authority.get("profile_id"),
+                authority.get("plan_digest"),
+                authority.get("profile_authority_digest"),
+                authority.get("security_epoch"),
+                authority.get("fencing_token"),
+            )
+            if authority is not None
+            else ()
+        )
         if (
             actual_authority != expected_authority
             or activation["security_epoch"] != self._authority.security_epoch
@@ -1096,9 +1134,15 @@ class ActivationStore:
         expected_lock_digest = canonical_digest(
             {key: value for key, value in lock.items() if key != "lock_digest"}
         )
-        if lock["profile_revision"] != profile_revision or plan["profile_revision"] != profile_revision:
+        if (
+            lock["profile_revision"] != profile_revision
+            or plan["profile_revision"] != profile_revision
+        ):
             raise ProfileResolutionDenied("ProfileLock or ResolvedPlan is stale")
-        if plan["plan_digest"] != expected_plan_digest or lock["plan_digest"] != expected_plan_digest:
+        if (
+            plan["plan_digest"] != expected_plan_digest
+            or lock["plan_digest"] != expected_plan_digest
+        ):
             raise ProfileResolutionDenied("ResolvedPlan digest is stale")
         if lock["lock_digest"] != expected_lock_digest:
             raise ProfileResolutionDenied("ProfileLock digest is stale")

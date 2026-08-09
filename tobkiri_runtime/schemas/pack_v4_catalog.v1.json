@@ -6087,6 +6087,11 @@
               "entrypoint_id": "file-inspect",
               "id": "rumi_file_inspect_pack.file-inspect",
               "implementation_digest": "sha256:9267d5985023bcbdd20c318d07d01dcb8239d7628a2621005a37e89eed7a75bd"
+            },
+            {
+              "entrypoint_id": "file-inspect-for-media",
+              "id": "rumi_file_inspect_pack.file-inspect.for-media",
+              "implementation_digest": "sha256:9267d5985023bcbdd20c318d07d01dcb8239d7628a2621005a37e89eed7a75bd"
             }
           ],
           "owner": "rumi_file_inspect_pack",
@@ -8851,7 +8856,7 @@
             {
               "entrypoint_id": "media-inspect",
               "id": "rumi_media_inspect_service_pack.media-inspect",
-              "implementation_digest": "sha256:5650e0863ed7b5d1e24d11f80c1a706f02d2e096a2a8cba998ce0538cd30ff7a"
+              "implementation_digest": "sha256:73d0c3316b34ace2b00abf868dbbc6ac47c67be1a694b472485637f63b22553e"
             }
           ],
           "owner": "rumi_media_inspect_service_pack",
@@ -8881,7 +8886,7 @@
       ],
       "runtime_artifacts": [
         {
-          "digest": "sha256:5650e0863ed7b5d1e24d11f80c1a706f02d2e096a2a8cba998ce0538cd30ff7a",
+          "digest": "sha256:73d0c3316b34ace2b00abf868dbbc6ac47c67be1a694b472485637f63b22553e",
           "kind": "executable",
           "path": "runtime/inspect.py"
         }
@@ -14963,7 +14968,7 @@
             {
               "entrypoint_id": "workspace-mount",
               "id": "rumi_workspace_mount_pack.workspace-mount",
-              "implementation_digest": "sha256:746432a4b642fc74701ece23f9b38fbf2c57f32d85517e0ddd431bd69c302eb6"
+              "implementation_digest": "sha256:7c339e5cd1716f30f264e3b0239344ed4f7a13415a544ff88f627d7202bb545b"
             }
           ],
           "owner": "rumi_workspace_mount_pack",
@@ -14996,7 +15001,7 @@
             {
               "entrypoint_id": "workspace-resource",
               "id": "rumi_workspace_mount_pack.workspace-resource",
-              "implementation_digest": "sha256:746432a4b642fc74701ece23f9b38fbf2c57f32d85517e0ddd431bd69c302eb6"
+              "implementation_digest": "sha256:7c339e5cd1716f30f264e3b0239344ed4f7a13415a544ff88f627d7202bb545b"
             }
           ],
           "owner": "rumi_workspace_mount_pack",
@@ -15026,7 +15031,7 @@
       ],
       "runtime_artifacts": [
         {
-          "digest": "sha256:746432a4b642fc74701ece23f9b38fbf2c57f32d85517e0ddd431bd69c302eb6",
+          "digest": "sha256:7c339e5cd1716f30f264e3b0239344ed4f7a13415a544ff88f627d7202bb545b",
           "kind": "executable",
           "path": "runtime/mounts.py"
         }

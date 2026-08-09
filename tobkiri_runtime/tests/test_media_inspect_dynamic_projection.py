@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import http.client
 import json
-import os
 import time
 import uuid
 from pathlib import Path
@@ -14,8 +13,11 @@ from urllib.parse import quote
 
 import pytest
 
-from core_runtime.authority.v4 import AuthorityStore
-from core_runtime.bootstrap.production_v4 import capture_production_dispatch
+from core_runtime.authority.v4 import AuthorityDenied, AuthorityStore
+from core_runtime.bootstrap.production_v4 import (
+    _pack_root_identities,
+    capture_production_dispatch,
+)
 from core_runtime.bootstrap.profile_capture import (
     capture_default_profile,
     prepare_default_profile_confirmation,
@@ -28,43 +30,52 @@ from core_runtime.pack_control_v4 import (
     capture_pack_control_session,
 )
 from core_runtime.panel_auth import PanelAuthManager
-from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+from ecosystem.defaultspack.domain.runtime_v4 import (
+    BundledCatalog,
+    ProfileResolutionDenied,
+    dynamic_profile_edges,
+)
 from ecosystem.rumi_file_inspect_pack.runtime.inspect import FileInspectService
 from ecosystem.rumi_media_inspect_service_pack.runtime.inspect import (
     MediaInspectService,
 )
-from ecosystem.rumi_workspace_mount_pack.runtime.mounts import WorkspaceMountStore
+from ecosystem.rumi_workspace_mount_pack.runtime.mounts import (
+    WorkspaceMountStore,
+    capture_selected_workspace_binding,
+)
 from tobkiri_host.backends import (
     REQUIRED_PRODUCTION_GATES,
-    BackendRegistry,
     BackendStatus,
 )
 from tobkiri_host.effects import ProviderOutcome
-from tobkiri_host.models import ExecutionKind, OpaqueAuthorityRef, RuntimeEvidence
+from tobkiri_host.errors import AuthorizationError
+from tobkiri_host.models import (
+    ExecutionKind,
+    InvocationFrame,
+    OpaqueAuthorityRef,
+    RuntimeEvidence,
+)
 from tobkiri_protocol.canonical import canonical_digest
 
 
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 BUNDLE_ROOT = RUNTIME_ROOT / "ecosystem" / "defaultspack" / "v4"
 MAP_PATH = (
-    RUNTIME_ROOT
-    / "ecosystem"
-    / "defaultspack"
-    / "defaultspack"
-    / "frontend_contract_map.v4.json"
+    RUNTIME_ROOT / "ecosystem" / "defaultspack" / "defaultspack" / "frontend_contract_map.v4.json"
 )
 MEDIA_PACK = "rumi_media_inspect_service_pack"
 MEDIA_CONTRACT = "tobkiri.service.media.inspect.v1"
 MEDIA_OPERATION = "rumi_media_inspect_service_pack.media-inspect"
 FILE_CONTRACT = "tobkiri.service.file.inspect.v1"
-FILE_OPERATION = "rumi_file_inspect_pack.file-inspect"
+FILE_OPERATION = "rumi_file_inspect_pack.file-inspect.for-media"
+GENERAL_FILE_OPERATION = "rumi_file_inspect_pack.file-inspect"
+CONVERSATION_CALLER = "defaultspack.conversation"
+MEDIA_CALLER = "rumi_media_inspect_service_pack.media-inspect.service"
 WORKSPACE_CONTRACT = "tobkiri.resource.workspace.v1"
 
 
 def _contract(method: str, path: str) -> str:
-    return "/api/contracts/defaultspack/" + quote(
-        f"{method.upper()} {path}", safe=""
-    )
+    return "/api/contracts/defaultspack/" + quote(f"{method.upper()} {path}", safe="")
 
 
 class _WorkspaceClient:
@@ -97,10 +108,7 @@ def _workspace_binding(store: WorkspaceMountStore) -> dict[str, Any]:
         "workspace_id": "defaults",
         "access": "read_only",
         "mount_revision": str(
-            mount.get("revision")
-            or mount.get("updated_at_ms")
-            or mount.get("updated_at")
-            or ""
+            mount.get("revision") or mount.get("updated_at_ms") or mount.get("updated_at") or ""
         ),
         "canonical_root": str(root),
         "root_st_dev": int(root_stat.st_dev),
@@ -141,7 +149,6 @@ class _BrokerMediaClient:
             FILE_OPERATION,
             {
                 **dict(payload),
-                "_file_operation": operation_id,
                 "_workspace_binding": self.binding,
                 "_session_id": self.session_id,
             },
@@ -174,9 +181,7 @@ class _MediaBackend:
     def materialize(self, binding: Any, reservation_id: str) -> RuntimeEvidence:
         del reservation_id
         return RuntimeEvidence(
-            domain_ref=OpaqueAuthorityRef(
-                self.target_domains[binding.principal_ref.value]
-            ),
+            domain_ref=OpaqueAuthorityRef(self.target_domains[binding.principal_ref.value]),
             executable_digest=binding.function.implementation_digest,
             backend_digest=self.status.backend_digest,
             authenticated_channel=True,
@@ -186,10 +191,13 @@ class _MediaBackend:
     def invoke(self, request: Any) -> ProviderOutcome:
         self.calls.append((request.contract_id, request.operation_id))
         if request.contract_id == MEDIA_CONTRACT:
+            workspace_binding = request.payload.get("_workspace_binding")
+            if not isinstance(workspace_binding, Mapping):
+                raise PermissionError("Host workspace binding is missing")
             client = _BrokerMediaClient(
                 self,
                 request.context.caller_session_id,
-                self.binding,
+                workspace_binding,
             )
             result = MediaInspectService(client).invoke(
                 str(request.payload.get("name") or ""),
@@ -198,7 +206,7 @@ class _MediaBackend:
             return ProviderOutcome(result)
         if request.contract_id == FILE_CONTRACT:
             payload = dict(request.payload)
-            operation = str(payload.pop("_file_operation", ""))
+            operation = str(payload.pop("name", ""))
             result = FileInspectService(_WorkspaceClient(self.store)).invoke(
                 operation,
                 payload,
@@ -230,8 +238,6 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     store = WorkspaceMountStore("defaults", user_data_root=user_data)
     mounted = store.mount("defaults", str(workspace), expected_revision=0)
     store.select("defaults", expected_revision=int(mounted["revision"]))
-    binding = _workspace_binding(store)
-
     active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
     control = capture_pack_control_session()
     control.invoke(
@@ -260,27 +266,13 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     active = capture_default_profile()
 
-    backend = _MediaBackend(store, binding)
     authority = AuthorityStore(user_data / "authority" / "v4.sqlite3")
     session = capture_production_dispatch(
         active,
         bundle_root=BUNDLE_ROOT,
         ecosystem_root=RUNTIME_ROOT / "ecosystem",
         authority_store=authority,
-        backends=BackendRegistry((backend,)),
     )
-    for contract_id, operation_id in (
-        (MEDIA_CONTRACT, MEDIA_OPERATION),
-        (FILE_CONTRACT, FILE_OPERATION),
-    ):
-        context = session.context_for(contract_id, operation_id, "preflight")
-        resolved = session.broker._catalog.resolve(
-            contract_id,
-            operation_id,
-            ">=1,<2",
-        )
-        backend.target_domains[resolved.principal_ref.value] = context.target_domain_id
-    backend.session = session
 
     catalog = BundledCatalog.load(BUNDLE_ROOT)
     bindings = load_frontend_contract_bindings(
@@ -292,10 +284,14 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         panel_auth_manager=PanelAuthManager(bootstrap_secret="media-test-secret"),
         dispatch_session=session,
         contract_bindings=bindings,
+        workspace_binding_resolver=lambda profile_id: capture_selected_workspace_binding(
+            profile_id,
+            user_data_root=user_data,
+        ),
     )
     server.start()
     try:
-        yield server, session, control, backend, authority
+        yield server, session, control, authority, user_data
     finally:
         server.stop()
         session.close()
@@ -340,9 +336,9 @@ def _authenticated(server: PackAPIServer) -> dict[str, str]:
         headers={"Origin": origin},
     )
     assert status == 200, exchange
-    cookie = next(
-        value for key, value in response_headers if key.lower() == "set-cookie"
-    ).split(";", 1)[0]
+    cookie = next(value for key, value in response_headers if key.lower() == "set-cookie").split(
+        ";", 1
+    )[0]
     return {
         "Cookie": cookie,
         "Origin": origin,
@@ -381,10 +377,10 @@ def _dynamic_request(
     return status, result
 
 
-def test_media_catalog_and_real_loopback_broker_invoke(media_server) -> None:
-    """The selected Pack projects exact metadata and invokes file.inspect via Broker."""
+def test_media_catalog_reports_missing_authenticated_supervisor(media_server) -> None:
+    """The selected Pack stays non-invokable without a real PackVM supervisor."""
 
-    server, session, _control, backend, authority = media_server
+    server, _session, _control, _authority, _user_data = media_server
     row = next(
         item
         for item in capture_pack_catalog_reader().read()["packs"]
@@ -396,9 +392,11 @@ def test_media_catalog_and_real_loopback_broker_invoke(media_server) -> None:
         "file.inspect",
         "media.inspect",
     }
-    operation = next(
+    media_operations = [
         item for item in row["invokable_operations"] if item["contract_id"] == MEDIA_CONTRACT
-    )
+    ]
+    assert len(media_operations) == 1, row
+    operation = media_operations[0]
     assert operation["operation_id"] == MEDIA_OPERATION
 
     headers = _authenticated(server)
@@ -410,34 +408,16 @@ def test_media_catalog_and_real_loopback_broker_invoke(media_server) -> None:
     )
     assert status == 200, catalog
     host = catalog["data"]["dynamic_host"]
-    target = next(
-        item
-        for item in host["contributions"]
-        if item["owner_pack_id"] == MEDIA_PACK
-    )
-    assert target["action_contract"] == MEDIA_CONTRACT
-    assert target["operation_id"] == MEDIA_OPERATION
-    assert target["owner_pack_hash"] == row["artifact_digest"]
-
-    status, result = _dynamic_request(
-        server,
-        headers,
-        host,
-        target,
-        {"name": "image.inspect", "path": "sample.png"},
-    )
-    assert status == 200, result
-    assert result["data"]["success"] is True
-    assert result["data"]["path"] == "sample.png"
-    assert (MEDIA_CONTRACT, MEDIA_OPERATION) in backend.calls
-    assert (FILE_CONTRACT, FILE_OPERATION) in backend.calls
-    assert authority.audit_events()[-1]["event_state"] == "committed"
+    assert all(item["owner_pack_id"] != MEDIA_PACK for item in host["contributions"])
+    diagnostic = next(item for item in host["diagnostics"] if item["pack_id"] == MEDIA_PACK)
+    assert diagnostic["code"] == "production_backend_unavailable"
+    assert "authenticated PackVM supervisor" in diagnostic["message"]
 
 
-def test_media_invoke_rejects_path_contribution_and_replay_boundaries(media_server) -> None:
-    """Traversal, symlink escape, wrong selection, stale capture, and replay fail closed."""
+def test_deleted_approval_removes_descriptor_and_fences_capture(media_server) -> None:
+    """Approval deletion immediately removes projection and denies the old session."""
 
-    server, _session, control, backend, _authority = media_server
+    server, session, control, _authority, user_data = media_server
     headers = _authenticated(server)
     status, catalog, _ = _request(
         server,
@@ -447,77 +427,157 @@ def test_media_invoke_rejects_path_contribution_and_replay_boundaries(media_serv
     )
     assert status == 200
     host = catalog["data"]["dynamic_host"]
-    target = next(
-        item
-        for item in host["contributions"]
-        if item["owner_pack_id"] == MEDIA_PACK
-    )
-
-    for path in ("../outside.png", "/outside.png", "sub\\outside.png"):
-        status, result = _dynamic_request(
-            server,
-            headers,
-            host,
-            target,
-            {"name": "image.inspect", "path": path},
-        )
-        assert status == 400, result
-        assert result["data"]["code"] == "invalid_contract_payload"
-
-    status, result = _dynamic_request(
-        server,
-        headers,
-        host,
-        target,
-        {"name": "image.inspect", "path": "outside-link.png"},
-    )
-    assert status == 409, result
-
-    wrong = {
-        **target,
-        "owner_pack_id": "defaultspack",
-    }
-    status, _ = _dynamic_request(
-        server,
-        headers,
-        host,
-        wrong,
-        {"name": "image.inspect", "path": "sample.png"},
-    )
-    assert status == 404
-
-    replay_id = str(uuid.uuid4())
-    status, result = _dynamic_request(
-        server,
-        headers,
-        host,
-        target,
-        {"name": "image.inspect", "path": "sample.png"},
-        request_id=replay_id,
-    )
-    assert status == 200, result
-    calls_after_first = len(backend.calls)
-    status, replay = _dynamic_request(
-        server,
-        headers,
-        host,
-        target,
-        {"name": "image.inspect", "path": "sample.png"},
-        request_id=replay_id,
-    )
-    assert status == 409, replay
-    assert len(backend.calls) == calls_after_first
-
-    control.invoke(
+    assert all(item["owner_pack_id"] != MEDIA_PACK for item in host["contributions"])
+    approval = user_data / "pack_control" / "approvals" / "defaults" / f"{MEDIA_PACK}.json"
+    approval.unlink()
+    row = control.invoke(
         PACK_CONTROL_CONTRACT,
-        "pack.disable",
+        "pack.status",
         {"pack_id": MEDIA_PACK, "_session_id": "lifecycle"},
     )
-    status, stale = _dynamic_request(
-        server,
-        headers,
-        host,
-        target,
-        {"name": "image.inspect", "path": "sample.png"},
+    assert row["approved"] is False
+    assert row["enabled"] is False
+    with pytest.raises(Exception, match="approval"):
+        session.assert_current()
+
+
+def test_corrupt_approval_fences_captured_dependency_authority(media_server) -> None:
+    """Corrupt approval bytes revoke the Media edge and its File dependency edge."""
+
+    _server, session, control, _authority, user_data = media_server
+    approval = user_data / "pack_control" / "approvals" / "defaults" / f"{MEDIA_PACK}.json"
+    approval.write_text("{", encoding="utf-8")
+    row = control.invoke(
+        PACK_CONTROL_CONTRACT,
+        "pack.status",
+        {"pack_id": MEDIA_PACK, "_session_id": "lifecycle"},
     )
-    assert status == 404, stale
+    assert row["approved"] is False
+    assert row["enabled"] is False
+    with pytest.raises(Exception, match="approval"):
+        session.assert_current()
+
+
+def test_file_operations_have_exact_distinct_callers(media_server) -> None:
+    """Conversation and Media cannot cross the two signed File edges."""
+
+    _server, session, _control, _authority, _user_data = media_server
+    conversation_context = session.context_for(
+        FILE_CONTRACT,
+        GENERAL_FILE_OPERATION,
+        "conversation-negative",
+    )
+    media_context = session.context_for(
+        FILE_CONTRACT,
+        FILE_OPERATION,
+        "media-negative",
+    )
+    general_binding = session.broker._catalog.resolve(
+        FILE_CONTRACT,
+        GENERAL_FILE_OPERATION,
+        ">=1,<2",
+    )
+    media_binding = session.broker._catalog.resolve(
+        FILE_CONTRACT,
+        FILE_OPERATION,
+        ">=1,<2",
+    )
+    resolver = session.broker._authority._principals
+
+    assert (
+        resolver.resolve_principal(conversation_context.caller_principal).function_id
+        == CONVERSATION_CALLER
+    )
+    assert resolver.resolve_principal(media_context.caller_principal).function_id == (MEDIA_CALLER)
+    assert general_binding.operation.operation_id == GENERAL_FILE_OPERATION
+    assert media_binding.operation.operation_id == FILE_OPERATION
+
+    payload = {
+        "name": "stat",
+        "path": "sample.png",
+        "profile_id": "defaults",
+        "workspace_id": "defaults",
+        "_workspace_binding": {},
+    }
+    with pytest.raises(AuthorizationError, match="static authorization failed"):
+        session.broker.invoke(
+            InvocationFrame(
+                contract_id=FILE_CONTRACT,
+                version_range=">=1,<2",
+                operation_id=FILE_OPERATION,
+                payload=payload,
+            ),
+            conversation_context,
+            effect_scope=session.effect_scope_for(
+                FILE_CONTRACT,
+                FILE_OPERATION,
+                payload,
+            ),
+        )
+    with pytest.raises(AuthorizationError, match="static authorization failed"):
+        session.broker.invoke(
+            InvocationFrame(
+                contract_id=FILE_CONTRACT,
+                version_range=">=1,<2",
+                operation_id=GENERAL_FILE_OPERATION,
+                payload=payload,
+            ),
+            media_context,
+            effect_scope=session.effect_scope_for(
+                FILE_CONTRACT,
+                GENERAL_FILE_OPERATION,
+                payload,
+            ),
+        )
+
+
+def test_pack_root_identity_rejects_symlink_and_detects_swap(tmp_path: Path) -> None:
+    """Captured Pack roots reject nested symlinks and same-path replacement."""
+
+    pack_root = tmp_path / "pack"
+    pack_root.mkdir()
+    (pack_root / "runtime.py").write_text("pass\n", encoding="utf-8")
+    captured = _pack_root_identities({MEDIA_PACK: pack_root})
+
+    moved_root = tmp_path / "pack-old"
+    pack_root.rename(moved_root)
+    pack_root.mkdir()
+    (pack_root / "runtime.py").write_text("pass\n", encoding="utf-8")
+    assert _pack_root_identities({MEDIA_PACK: pack_root}) != captured
+
+    (pack_root / "runtime.py").unlink()
+    (pack_root / "runtime.py").symlink_to(moved_root / "runtime.py")
+    with pytest.raises(AuthorityDenied, match="contains a symlink"):
+        _pack_root_identities({MEDIA_PACK: pack_root})
+
+
+@pytest.mark.parametrize(
+    ("dependency_id", "message"),
+    (
+        ("missing.file.pack", "not in the exact inventory"),
+        (
+            "rumi_host_authority_bridge_pack",
+            "does not provide a signed required Contract",
+        ),
+    ),
+)
+def test_media_dependency_graph_rejects_missing_or_forged_pack(
+    dependency_id: str,
+    message: str,
+) -> None:
+    """A Pack ID alone cannot forge the signed Media-to-File dependency edge."""
+
+    bundled = BundledCatalog.load(BUNDLE_ROOT)
+    media_manifest = json.loads(
+        (RUNTIME_ROOT / "ecosystem" / MEDIA_PACK / "pack.v4.json").read_text(encoding="utf-8")
+    )
+    media_manifest["requirements"]["pack_dependencies"] = {dependency_id: ">=1.0.0,<2.0.0"}
+    catalog = BundledCatalog(
+        root=bundled.root,
+        packs={**bundled.packs, MEDIA_PACK: media_manifest},
+        bases=bundled.bases,
+        shells=bundled.shells,
+        profiles=bundled.profiles,
+    )
+    with pytest.raises(ProfileResolutionDenied, match=message):
+        dynamic_profile_edges(catalog, "defaults", (MEDIA_PACK,))
