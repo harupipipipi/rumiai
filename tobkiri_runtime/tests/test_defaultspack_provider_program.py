@@ -50,6 +50,7 @@ def _v4_provider_fixture(
     from ecosystem.defaultspack.domain.runtime_v4 import (
         ActivationStore,
         BundledCatalog,
+        dynamic_profile_edges,
         resolve_default_profile,
     )
     from ecosystem.rumi_credential_broker_pack.runtime.service import (
@@ -130,6 +131,22 @@ def _v4_provider_fixture(
         authority_bindings.setdefault(
             requested_edge_key,
             f"authority-ref:provider-fixture.{index}",
+        )
+    for index, requested_edge in enumerate(
+        dynamic_profile_edges(catalog, "defaults", additional_pack_ids)
+    ):
+        requested_edge_key = "|".join(
+            requested_edge[field]
+            for field in (
+                "caller_function_id",
+                "target_provider_id",
+                "contract_id",
+                "operation_id",
+            )
+        )
+        authority_bindings.setdefault(
+            requested_edge_key,
+            f"authority-ref:provider-fixture.dynamic.{index}",
         )
     resolved = resolve_default_profile(
         catalog,
@@ -254,6 +271,20 @@ def test_required_provider_program_has_one_canonical_registry_owner():
     assert len(manifests) == 79
     assert validate_provider_program_coverage() == []
     assert all(manifest["models"] == [] for manifest in manifests.values())
+
+
+def test_v4_provider_fixture_binds_dynamic_credential_authority_edge(tmp_path):
+    fixture, _broker = _v4_provider_fixture(tmp_path, "openai")
+
+    credential_edge = next(
+        edge
+        for edge in fixture.profile["requested_edges"]
+        if edge["contract_id"] == "tobkiri.action.credential.manage.v1"
+        and edge["operation_id"] == "rumi_credential_broker_pack.credential-manage"
+    )
+    authority_reference = credential_edge["authority_reference"]
+    assert authority_reference.startswith("authority-ref:")
+    assert authority_reference in fixture.profile["authority_references"]
 
 
 def test_local_openai_runtimes_discover_served_models_without_credentials(monkeypatch):
