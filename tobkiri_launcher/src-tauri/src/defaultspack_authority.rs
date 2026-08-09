@@ -568,6 +568,24 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    const RELOCATION_LAYOUTS: &[(&str, &[&str])] = &[
+        (
+            "macos-bundle",
+            &[
+                "Relocated",
+                "Tobkiri Launcher.app",
+                "Contents",
+                "Resources",
+                "app",
+            ],
+        ),
+        ("linux-prefix", &["opt", "tobkiri", "resources", "app"]),
+        (
+            "windows-install",
+            &["Program Files", "Tobkiri Launcher", "resources", "app"],
+        ),
+    ];
+
     fn rewrite_locked_document(
         config: &AppConfig,
         relative: &str,
@@ -619,7 +637,7 @@ mod tests {
         }
     }
 
-    fn fixture(name: &str) -> (PathBuf, AppConfig) {
+    fn fixture_at_layout(name: &str, layout: &[&str]) -> (PathBuf, AppConfig) {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -628,10 +646,9 @@ mod tests {
             "tobkiri-defaultspack-authority-{name}-{}-{unique}",
             std::process::id()
         ));
-        let app_dir = root
-            .join("Relocated")
-            .join("Tobkiri Launcher.app")
-            .join("Contents/Resources/app");
+        let app_dir = layout
+            .iter()
+            .fold(root.clone(), |path, component| path.join(component));
         let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let source_pack = repository.join("tobkiri_runtime/ecosystem/defaultspack");
         let destination_pack = app_dir.join("ecosystem/defaultspack");
@@ -667,6 +684,10 @@ mod tests {
             dev_workspace_root: None,
         };
         (root, config)
+    }
+
+    fn fixture(name: &str) -> (PathBuf, AppConfig) {
+        fixture_at_layout(name, RELOCATION_LAYOUTS[0].1)
     }
 
     #[test]
@@ -720,47 +741,76 @@ mod tests {
 
     #[test]
     fn relocated_packaged_first_start_and_restart_use_identical_v4_authority() {
-        let (root, config) = fixture("relocated-restart");
-        let retired = config.app_dir.join("ecosystem/defaultspack/ecosystem.json");
-        assert!(
-            !retired.exists(),
-            "retired ecosystem.json must remain absent"
-        );
+        for (layout_name, layout) in RELOCATION_LAYOUTS {
+            let (root, config) =
+                fixture_at_layout(&format!("relocated-restart-{layout_name}"), layout);
+            let retired = config.app_dir.join("ecosystem/defaultspack/ecosystem.json");
+            assert!(
+                !retired.exists(),
+                "retired ecosystem.json must remain absent for {layout_name}"
+            );
 
-        let first = resolve(&config).unwrap();
-        let restarted = resolve(&config).unwrap();
+            let first = resolve(&config).unwrap();
+            let restarted = resolve(&config).unwrap();
 
-        assert_eq!(first, restarted);
-        assert_eq!(first.profile_id, DEFAULT_PROFILE_ID);
-        assert!(first.launch.argv.is_empty());
-        assert_eq!(first.launch.function_id, DEFAULT_RUNTIME_ID);
-        assert_eq!(first.launch.provider_id, DEFAULT_RUNTIME_ID);
-        assert_eq!(first.launch.entrypoint, restarted.launch.entrypoint);
-        assert_eq!(
-            first.launch.entrypoint,
-            first
-                .pack_root
-                .join("defaultspack/desktop_app.py")
-                .canonicalize()
-                .unwrap()
-        );
-        assert_eq!(
-            first.launch.artifact_digest,
-            sha256(&fs::read(&first.launch.entrypoint).unwrap())
-        );
-        assert_eq!(
-            first.pack_root,
-            config
-                .app_dir
-                .join("ecosystem/defaultspack")
-                .canonicalize()
-                .unwrap()
-        );
-        assert!(
-            !retired.exists(),
-            "guardian preparation must not synthesize legacy state"
-        );
-        fs::remove_dir_all(root).unwrap();
+            assert_eq!(first, restarted);
+            assert_eq!(first.profile_id, DEFAULT_PROFILE_ID);
+            assert!(first.launch.argv.is_empty());
+            assert_eq!(first.launch.function_id, DEFAULT_RUNTIME_ID);
+            assert_eq!(first.launch.provider_id, DEFAULT_RUNTIME_ID);
+            assert_eq!(first.launch.entrypoint, restarted.launch.entrypoint);
+            assert_eq!(
+                first.launch.entrypoint,
+                first
+                    .pack_root
+                    .join("defaultspack/desktop_app.py")
+                    .canonicalize()
+                    .unwrap()
+            );
+            assert_eq!(
+                first.launch.artifact_digest,
+                sha256(&fs::read(&first.launch.entrypoint).unwrap())
+            );
+            assert_eq!(
+                first.pack_root,
+                config
+                    .app_dir
+                    .join("ecosystem/defaultspack")
+                    .canonicalize()
+                    .unwrap()
+            );
+            assert!(
+                !retired.exists(),
+                "guardian preparation must not synthesize legacy state for {layout_name}"
+            );
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn relocated_entrypoint_tamper_fails_closed_across_packaged_layouts() {
+        for (layout_name, layout) in RELOCATION_LAYOUTS {
+            let (root, config) =
+                fixture_at_layout(&format!("relocated-tamper-{layout_name}"), layout);
+            resolve(&config).unwrap();
+
+            fs::write(
+                config
+                    .app_dir
+                    .join("ecosystem/defaultspack/defaultspack/desktop_app.py"),
+                b"raise SystemExit(0)\n",
+            )
+            .unwrap();
+
+            let error = resolve(&config).unwrap_err().to_string();
+            assert!(
+                error.contains(
+                    "application Pack entrypoint escaped or failed artifact verification"
+                ),
+                "unexpected tamper error for {layout_name}: {error}"
+            );
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]
