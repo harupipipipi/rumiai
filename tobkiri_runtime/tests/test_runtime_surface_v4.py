@@ -1,0 +1,518 @@
+"""Typed Launcher runtime-surface tests over canonical Protocol v4 records."""
+
+from __future__ import annotations
+
+from dataclasses import replace
+import json
+from pathlib import Path
+import time
+
+import pytest
+from jsonschema import Draft202012Validator
+
+from core_runtime.bootstrap.profile_capture import (
+    capture_default_profile,
+    prepare_default_profile_confirmation,
+    runtime_user_data_root,
+)
+from core_runtime.authority.v4 import AuthorityStore
+from core_runtime.runtime_surface_v4 import (
+    RUNTIME_SURFACE_API_VERSION,
+    RuntimeSurfaceErrorCode,
+    RuntimeProfileChangeService,
+    RuntimeSurfaceError,
+    RuntimeSurfaceService,
+)
+import core_runtime.runtime_surface_v4 as runtime_surface
+from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+from tobkiri_protocol.canonical import canonical_digest
+
+
+RUNTIME_ROOT = Path(__file__).resolve().parents[1]
+BUNDLE_ROOT = RUNTIME_ROOT / "ecosystem" / "defaultspack" / "v4"
+
+
+@pytest.fixture
+def active_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(tmp_path / "user-data"))
+    return capture_default_profile(confirmation=prepare_default_profile_confirmation())
+
+
+def _service(active_runtime, **kwargs) -> RuntimeSurfaceService:
+    return RuntimeSurfaceService(
+        snapshot_loader=lambda: active_runtime,
+        catalog_loader=lambda: BundledCatalog.load(BUNDLE_ROOT),
+        **kwargs,
+    )
+
+
+def _control_output_schema() -> dict[str, object]:
+    catalog = json.loads(
+        (RUNTIME_ROOT / "ecosystem" / "tobkiri_host_pack_control" / "contracts.v4.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    contract = next(
+        item
+        for item in catalog["contracts"]
+        if item["contract_id"] == "tobkiri.host.control-presentation.v4"
+    )
+    digest = contract["operations"][0]["output_schema_digest"]
+    return contract["schema_catalog"][digest]
+
+
+def test_profile_read_model_is_derived_from_verified_v4_graph(active_runtime) -> None:
+    result = _service(active_runtime).read_profile()
+    Draft202012Validator(_control_output_schema()).validate(result)
+
+    assert result["runtime_surface_api_version"] == RUNTIME_SURFACE_API_VERSION
+    assert result["surface"] == "profile"
+    assert result["state"] == "ready"
+    assert set(result) == {
+        "runtime_surface_api_version",
+        "surface",
+        "state",
+        "profile_id",
+        "profile_revision",
+        "plan_digest",
+        "catalog_revision",
+        "records",
+        "data",
+    }
+    data = result["data"]
+    records = result["records"]
+    assert data["profile"]["profile_id"] == "defaults"
+    assert data["base"] == active_runtime.resolved.plan["base"]
+    assert data["shell"] == active_runtime.resolved.plan["shell"]
+    assert data["application"]["role"] == "application"
+    assert records["profile_lock"]["digest"] == active_runtime.resolved.lock["lock_digest"]
+    assert records["resolved_plan"]["digest"] == active_runtime.resolved.plan["plan_digest"]
+    assert records["activation_record"]["digest"] == canonical_digest(active_runtime.activation)
+    assert records["authority_snapshot"] == {
+        "digest": active_runtime.resolved.profile["profile_authority_snapshot_digest"],
+        "source_ref": (
+            "authority-snapshot-v4://defaults/"
+            + active_runtime.resolved.profile["profile_authority_snapshot_digest"]
+        ),
+    }
+    assert all(
+        set(record) == {"digest", "source_ref"}
+        and "://" in record["source_ref"]
+        and not record["source_ref"].startswith("file:")
+        for record in records.values()
+    )
+    assert {item["pack_id"] for item in data["pack_closure"]} == {
+        item["identity"] for item in active_runtime.resolved.lock["effective_set"]
+    }
+    assert all(
+        set(binding)
+        >= {
+            "binding_id",
+            "source_principal_id",
+            "target_contract_id",
+            "edge_digest",
+        }
+        for binding in data["resolved_wiring"]["bindings"]
+    )
+
+
+@pytest.mark.parametrize("view", ["packs", "contracts", "operations", "principals"])
+def test_advanced_views_have_exact_named_payload(active_runtime, view: str) -> None:
+    result = _service(active_runtime).read_advanced(view)
+
+    assert result["surface"] == view
+    assert result["state"] == "ready"
+    assert isinstance(result["data"][view], list)
+    assert set(result) == {
+        "runtime_surface_api_version",
+        "surface",
+        "state",
+        "profile_id",
+        "profile_revision",
+        "plan_digest",
+        "catalog_revision",
+        "records",
+        "data",
+    }
+
+
+def test_operation_and_principal_views_are_resolved_plan_derived(active_runtime) -> None:
+    service = _service(active_runtime)
+    operations = service.read_advanced("operations")["data"]["operations"]
+    principals = service.read_advanced("principals")["data"]["principals"]
+
+    assert len(operations) == len(active_runtime.resolved.plan["bindings"])
+    assert len(principals) == len(active_runtime.resolved.plan["bindings"])
+    assert all(item["contract_revision_digest"].startswith("sha256:") for item in operations)
+    assert all(item["parent_artifact_digest"].startswith("sha256:") for item in principals)
+    assert all(
+        set(item)
+        >= {
+            "owner_pack_id",
+            "contribution_id",
+            "invokable",
+            "catalog_digest",
+        }
+        for item in operations
+    )
+    assert all(
+        item["invokable"] is False for item in operations if item["domain_kind"] == "pack_vm"
+    )
+    verified = [item for item in operations if item["schema"].get("input_schema")]
+    assert verified
+    assert all(
+        item["schema"]["input_schema_digest"].startswith("sha256:")
+        and item["schema"]["output_schema_digest"].startswith("sha256:")
+        and item["schema"]["error_schema_digest"].startswith("sha256:")
+        and isinstance(item["schema"]["effect_ceiling"], list)
+        and isinstance(item["schema"]["idempotency"], dict)
+        for item in verified
+    )
+
+
+def test_contract_routes_are_exact_digest_pinned_broker_bindings(active_runtime) -> None:
+    result = _service(active_runtime).read_advanced("contracts")
+    routes = result["data"]["routes"]
+    catalog = BundledCatalog.load(BUNDLE_ROOT)
+    application = catalog.packs["runtime.tauri.application.default"]
+    map_digest = next(
+        item["digest"]
+        for item in application["artifacts"]
+        if item["path"] == "defaultspack/frontend_contract_map.v4.json"
+    )
+
+    # The map has 21 logical routes and 29 exact route-to-target bindings.
+    assert len(routes) == 29
+    assert all(
+        set(route)
+        >= {
+            "route_id",
+            "method",
+            "logical_target",
+            "contract_id",
+            "operation_id",
+            "security",
+            "provider_id",
+            "function_id",
+            "function_principal_id",
+            "manifest_digest",
+            "frontend_map_digest",
+        }
+        for route in routes
+    )
+    assert all(route["frontend_map_digest"] == map_digest for route in routes)
+    assert all(route["security"]["broker_authority_required"] is True for route in routes)
+    assert all(route["security"]["csrf_required"] is (route["method"] != "GET") for route in routes)
+    serialized = json.dumps(routes)
+    assert str(RUNTIME_ROOT) not in serialized
+    assert "session_secret" not in serialized
+    assert "cookie" not in serialized
+
+
+def test_contract_route_principal_mismatch_fails_closed(active_runtime) -> None:
+    from core_runtime.frontend_contract_routes import load_frontend_contract_bindings
+
+    catalog = BundledCatalog.load(BUNDLE_ROOT)
+    bindings = load_frontend_contract_bindings(
+        RUNTIME_ROOT
+        / "ecosystem"
+        / "defaultspack"
+        / "defaultspack"
+        / "frontend_contract_map.v4.json",
+        catalog.packs["runtime.tauri.application.default"],
+    )
+    first = bindings[0]
+    forged_target = replace(first.targets[0], provider_id="forged.provider")
+    forged = (replace(first, targets=(forged_target,)), *bindings[1:])
+
+    with pytest.raises(RuntimeSurfaceError) as denied:
+        _service(
+            active_runtime,
+            frontend_contract_bindings=forged,
+        ).read_advanced("contracts")
+
+    assert denied.value.code == RuntimeSurfaceErrorCode.DIGEST_MISMATCH
+
+
+def test_packvm_invocation_requires_fresh_matching_host_attestation(
+    active_runtime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unattested = _service(active_runtime).read_advanced("operations")["data"]["operations"]
+    packvm_rows = [item for item in unattested if item["domain_kind"] == "pack_vm"]
+    assert packvm_rows
+    assert all(item["invokable"] is False for item in packvm_rows)
+
+    lifecycle = runtime_surface._captured_lifecycle_projection()
+    for pack in lifecycle["packs"]:
+        for operation in pack["operations"]:
+            operation["invokable"] = True
+    monkeypatch.setattr(
+        runtime_surface,
+        "_captured_lifecycle_projection",
+        lambda: lifecycle,
+    )
+
+    attested = {
+        "version": 2,
+        "backend_id": "tobkiri.python-pack-v4",
+        "instance": "tobkiri-packvm-v4",
+        "instance_machine_id": "machine.test",
+        "instance_config_hash": "sha256:" + "1" * 64,
+        "config_digest": "sha256:" + "2" * 64,
+        "image_digest": "sha256:" + "3" * 64,
+        "limactl_digest": "sha256:" + "4" * 64,
+        "guest_runner_digest": "sha256:" + "5" * 64,
+        "host_build_digest": "sha256:" + "6" * 64,
+        "ceremony_nonce_digest": "sha256:" + "7" * 64,
+        "created_unix": int(time.time()) - 1,
+    }
+    snapshot = {
+        **attested,
+        "ready": True,
+        "observed_unix": int(time.time()),
+        "attestation_digest": canonical_digest(attested),
+    }
+    ready = _service(
+        active_runtime,
+        packvm_readiness_reader=lambda: snapshot,
+    ).read_advanced("operations")["data"]["operations"]
+    ready_packvm = [item for item in ready if item["domain_kind"] == "pack_vm"]
+    assert any(item["invokable"] is True for item in ready_packvm)
+
+    stale = {**snapshot, "observed_unix": int(time.time()) - 31}
+    stale_rows = _service(
+        active_runtime,
+        packvm_readiness_reader=lambda: stale,
+    ).read_advanced("operations")["data"]["operations"]
+    assert all(
+        item["invokable"] is False for item in stale_rows if item["domain_kind"] == "pack_vm"
+    )
+
+    wrong = {**snapshot, "image_digest": "sha256:" + "8" * 64}
+    wrong_rows = _service(
+        active_runtime,
+        packvm_readiness_reader=lambda: wrong,
+    ).read_advanced("operations")["data"]["operations"]
+    assert all(
+        item["invokable"] is False for item in wrong_rows if item["domain_kind"] == "pack_vm"
+    )
+
+
+def test_pack_files_are_exact_manifest_artifacts(active_runtime) -> None:
+    packs = _service(active_runtime).read_advanced("packs")["data"]["packs"]
+    pack = next(item for item in packs if item["pack_id"] == "tobkiri_host_pack_control")
+
+    assert len(pack["artifacts"]) == 1
+    artifact = pack["artifacts"][0]
+    assert artifact["entry_id"].startswith("sha256:")
+    assert artifact == {
+        "entry_id": artifact["entry_id"],
+        "owner_pack_id": "tobkiri_host_pack_control",
+        "path": "runtime/catalog.py",
+        "kind": "executable",
+        "artifact_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7",
+    }
+    payload = json.dumps(_service(active_runtime).read_profile())
+    assert "/Users/" not in payload
+    assert "authentication" not in payload
+    assert all(
+        not item["path"].startswith(("/", ".."))
+        for selected in packs
+        for item in selected["artifacts"]
+    )
+
+
+def test_settings_keep_user_and_runtime_profile_scopes_separate(active_runtime) -> None:
+    result = _service(
+        active_runtime,
+        user_settings_reader=lambda: {"locale": "ja"},
+    ).read_settings()
+
+    assert result["surface"] == "settings"
+    assert result["data"]["user_settings"] == {
+        "scope": "user",
+        "source": "launcher_local",
+        "state": "available_from_explicit_adapter",
+        "mutable_via_profile_activation": False,
+        "values": {"locale": "ja"},
+    }
+    runtime = result["data"]["runtime_profile_settings"]
+    assert runtime["scope"] == "runtime_profile"
+    assert runtime["mutable_via_profile_activation"] is True
+    assert runtime["plan_digest"] == active_runtime.resolved.plan["plan_digest"]
+
+    unavailable = _service(active_runtime).read_settings()["data"]["user_settings"]
+    assert unavailable == {
+        "scope": "user",
+        "source": "launcher_local",
+        "state": "unavailable_from_runtime",
+        "mutable_via_profile_activation": False,
+    }
+
+
+def test_expected_revision_and_digest_fail_closed(active_runtime) -> None:
+    service = _service(active_runtime)
+
+    with pytest.raises(RuntimeSurfaceError) as stale:
+        service.read_profile(expected_profile_revision="sha256:" + "0" * 64)
+    assert stale.value.code is RuntimeSurfaceErrorCode.STALE_REVISION
+
+    with pytest.raises(RuntimeSurfaceError) as mismatch:
+        service.read_profile(expected_plan_digest="sha256:" + "0" * 64)
+    assert mismatch.value.code is RuntimeSurfaceErrorCode.DIGEST_MISMATCH
+
+
+def test_catalog_artifact_mismatch_fails_closed(active_runtime) -> None:
+    catalog = BundledCatalog.load(BUNDLE_ROOT)
+    pack_id = str(active_runtime.resolved.lock["effective_set"][0]["identity"])
+    manifest = dict(catalog.packs[pack_id])
+    manifest["pack"] = {
+        **manifest["pack"],
+        "artifact_digest": "sha256:" + "0" * 64,
+    }
+    mismatched = replace(catalog, packs={**catalog.packs, pack_id: manifest})
+    service = RuntimeSurfaceService(
+        snapshot_loader=lambda: active_runtime,
+        catalog_loader=lambda: mismatched,
+    )
+
+    with pytest.raises(RuntimeSurfaceError) as error:
+        service.read_profile()
+    assert error.value.code is RuntimeSurfaceErrorCode.DIGEST_MISMATCH
+
+
+def test_read_timeout_is_a_typed_fail_closed_error(active_runtime) -> None:
+    ticks = iter((0.0, 6.0))
+    service = _service(active_runtime, clock=lambda: next(ticks))
+
+    with pytest.raises(RuntimeSurfaceError) as error:
+        service.read_profile()
+    assert error.value.code is RuntimeSurfaceErrorCode.TIMEOUT
+    assert error.value.as_dict()["write_set"] == []
+
+
+def test_profile_ceremony_is_ordered_digest_bound_and_one_shot(
+    active_runtime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    read_service = _service(active_runtime)
+    monkeypatch.setattr(
+        "core_runtime.pack_control_v4.resolve_profile_pack_set",
+        lambda _pack_ids: active_runtime.resolved,
+    )
+    activated: list[object] = []
+
+    def activate(resolved, **_bindings):
+        activated.append(resolved)
+        return active_runtime.activation
+
+    monkeypatch.setattr(
+        "core_runtime.pack_control_v4.activate_resolved_profile_pack_set",
+        activate,
+    )
+    ceremony = RuntimeProfileChangeService(surface_service=read_service)
+    revision = str(active_runtime.resolved.plan["profile_revision"])
+    plan_digest = str(active_runtime.resolved.plan["plan_digest"])
+    resolved = ceremony.resolve(
+        {
+            "profile_id": "defaults",
+            "expected_profile_revision": revision,
+            "expected_plan_digest": plan_digest,
+            "desired_pack_ids": ["defaultspack"],
+        },
+        session_id="session-a",
+    )
+    reviewed = ceremony.review(
+        {
+            "candidate_id": resolved["candidate_id"],
+            "candidate_digest": resolved["candidate_digest"],
+        },
+        session_id="session-a",
+    )
+    approved = ceremony.approve(
+        {
+            "candidate_id": reviewed["candidate_id"],
+            "candidate_digest": reviewed["candidate_digest"],
+        },
+        session_id="session-a",
+    )
+    Draft202012Validator(_control_output_schema()).validate(approved)
+    with AuthorityStore(runtime_user_data_root() / "authority" / "v4.sqlite3") as authority:
+        authority_approval = authority.get_approval(approved["authority_approval"]["approval_id"])
+    assert authority_approval is not None
+    assert authority_approval.decision == "approved"
+    assert authority_approval.target.function_id == ("tobkiri.host.control-presentation")
+    assert authority_approval.target.operation_id == "profile.change.approve"
+    result = ceremony.activate(
+        {
+            "approval_id": approved["approval_id"],
+            "approval_digest": approved["approval_digest"],
+        },
+        session_id="session-a",
+    )
+
+    assert result["state"] == "active"
+    assert activated == [active_runtime.resolved]
+    with pytest.raises(RuntimeSurfaceError) as replay:
+        ceremony.activate(
+            {
+                "approval_id": approved["approval_id"],
+                "approval_digest": approved["approval_digest"],
+            },
+            session_id="session-a",
+        )
+    assert replay.value.code is RuntimeSurfaceErrorCode.UNAPPROVED
+
+
+def test_profile_ceremony_rejects_cross_session_and_expired_review(
+    active_runtime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = [0.0]
+    read_service = _service(active_runtime)
+    monkeypatch.setattr(
+        "core_runtime.pack_control_v4.resolve_profile_pack_set",
+        lambda _pack_ids: active_runtime.resolved,
+    )
+    ceremony = RuntimeProfileChangeService(
+        ttl_seconds=1,
+        clock=lambda: now[0],
+        surface_service=read_service,
+    )
+    resolved = ceremony.resolve(
+        {
+            "profile_id": "defaults",
+            "expected_profile_revision": active_runtime.resolved.plan["profile_revision"],
+            "expected_plan_digest": active_runtime.resolved.plan["plan_digest"],
+            "desired_pack_ids": ["defaultspack"],
+        },
+        session_id="session-a",
+    )
+    with pytest.raises(RuntimeSurfaceError) as wrong_session:
+        ceremony.review(
+            {
+                "candidate_id": resolved["candidate_id"],
+                "candidate_digest": resolved["candidate_digest"],
+            },
+            session_id="session-b",
+        )
+    assert wrong_session.value.code is RuntimeSurfaceErrorCode.DIGEST_MISMATCH
+
+    second = ceremony.resolve(
+        {
+            "profile_id": "defaults",
+            "expected_profile_revision": active_runtime.resolved.plan["profile_revision"],
+            "expected_plan_digest": active_runtime.resolved.plan["plan_digest"],
+            "desired_pack_ids": ["defaultspack"],
+        },
+        session_id="session-a",
+    )
+    now[0] = 2.0
+    with pytest.raises(RuntimeSurfaceError) as expired:
+        ceremony.review(
+            {
+                "candidate_id": second["candidate_id"],
+                "candidate_digest": second["candidate_digest"],
+            },
+            session_id="session-a",
+        )
+    assert expired.value.code is RuntimeSurfaceErrorCode.TIMEOUT

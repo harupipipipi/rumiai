@@ -12,6 +12,7 @@ from tobkiri_host.effects import ProviderOutcome
 from tobkiri_host.models import ExecutionKind, OpaqueAuthorityRef, RuntimeEvidence
 
 from .pack_control_v4 import (
+    CONTROL_PRESENTATION_CONTRACT,
     PACK_CONTROL_CONTRACT,
     CapturedPackCatalogReader,
     CapturedPackControlSession,
@@ -103,7 +104,7 @@ class PackControlBackendV4:
         self,
         *,
         session: CapturedPackControlSession,
-        targets: dict[str, tuple[str, str, str]],
+        targets: dict[tuple[str, str], tuple[str, str, str]],
         backend_digest: str,
     ) -> None:
         self._session = session
@@ -125,10 +126,12 @@ class PackControlBackendV4:
     ) -> RuntimeEvidence:
         """Return evidence only for an exact selected Function principal."""
 
-        expected = self._targets.get(binding.operation.operation_id)
+        key = (binding.operation.contract_id, binding.operation.operation_id)
+        expected = self._targets.get(key)
         if (
             not reservation_id
-            or binding.operation.contract_id != PACK_CONTROL_CONTRACT
+            or binding.operation.contract_id
+            not in {PACK_CONTROL_CONTRACT, CONTROL_PRESENTATION_CONTRACT}
             or expected is None
             or expected[0] != binding.principal_ref.value
             or expected[1] != binding.function.implementation_digest
@@ -147,9 +150,9 @@ class PackControlBackendV4:
 
         if not isinstance(request, RequestEnvelope):
             raise PackControlDenied("Pack control Provider envelope is invalid")
-        expected = self._targets.get(request.operation_id)
+        expected = self._targets.get((request.contract_id, request.operation_id))
         if (
-            request.contract_id != PACK_CONTROL_CONTRACT
+            request.contract_id not in {PACK_CONTROL_CONTRACT, CONTROL_PRESENTATION_CONTRACT}
             or expected is None
             or request.target_principal.value != expected[0]
             or request.target_domain.value != expected[2]

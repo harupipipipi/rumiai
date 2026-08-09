@@ -1,9 +1,1324 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:3e934ab1c8467c5b18a94678912dffb698cae68c93823fcb53f8340bad04b0dc",
+  "catalog_digest": "sha256:52ccc24f1800e71fd15457bddd6af636007951ead19b68d9c5d56b478e6f7c06",
   "pack_id": "tobkiri_host_pack_control",
-  "source_identity": "sha256:e9d36e6cff56a6b3e8c0d0f68227c486d419744716209b78d4ecdb7803215147",
+  "source_identity": "sha256:c871789bd8ce828b476b23fdc309948569a23cf0208d79e78f58917bc249b18c",
   "variants": [
+    {
+      "architecture": "any",
+      "backend": "tobkiri.python-host-v4",
+      "execution_domain_profile": "host.extension.default.v1",
+      "execution_kind": "host_extension",
+      "function_id": "tobkiri.host.control-presentation",
+      "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7",
+      "implementation_path": "runtime/catalog.py",
+      "materialization_mode": "on_demand",
+      "operations": [
+        {
+          "contract_id": "tobkiri.host.control-presentation.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "type": "object"
+          },
+          "operation_id": "profile.change.activate",
+          "output_schema": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "catalog_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "data": {
+                    "type": "object"
+                  },
+                  "plan_digest": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  },
+                  "profile_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "records": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "digest": {
+                          "pattern": "^sha256:[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "source_ref": {
+                          "pattern": "^[a-z][a-z0-9-]*://",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "source_ref"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "object"
+                  },
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "ready",
+                      "stale",
+                      "blocked"
+                    ]
+                  },
+                  "surface": {
+                    "enum": [
+                      "profile",
+                      "settings",
+                      "packs",
+                      "contracts",
+                      "operations",
+                      "principals"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "surface",
+                  "state",
+                  "profile_id",
+                  "profile_revision",
+                  "plan_digest",
+                  "catalog_revision",
+                  "records",
+                  "data"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "resolved",
+                      "reviewed",
+                      "approved",
+                      "active",
+                      "error"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "state"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "revision_digest": "sha256:35ec548795000230c44058bebdc468d89a9bb04a6157e41ecd156935648fb527",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.control-presentation.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "type": "object"
+          },
+          "operation_id": "profile.change.approve",
+          "output_schema": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "catalog_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "data": {
+                    "type": "object"
+                  },
+                  "plan_digest": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  },
+                  "profile_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "records": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "digest": {
+                          "pattern": "^sha256:[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "source_ref": {
+                          "pattern": "^[a-z][a-z0-9-]*://",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "source_ref"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "object"
+                  },
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "ready",
+                      "stale",
+                      "blocked"
+                    ]
+                  },
+                  "surface": {
+                    "enum": [
+                      "profile",
+                      "settings",
+                      "packs",
+                      "contracts",
+                      "operations",
+                      "principals"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "surface",
+                  "state",
+                  "profile_id",
+                  "profile_revision",
+                  "plan_digest",
+                  "catalog_revision",
+                  "records",
+                  "data"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "resolved",
+                      "reviewed",
+                      "approved",
+                      "active",
+                      "error"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "state"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "revision_digest": "sha256:35ec548795000230c44058bebdc468d89a9bb04a6157e41ecd156935648fb527",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.control-presentation.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "type": "object"
+          },
+          "operation_id": "profile.change.resolve",
+          "output_schema": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "catalog_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "data": {
+                    "type": "object"
+                  },
+                  "plan_digest": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  },
+                  "profile_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "records": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "digest": {
+                          "pattern": "^sha256:[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "source_ref": {
+                          "pattern": "^[a-z][a-z0-9-]*://",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "source_ref"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "object"
+                  },
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "ready",
+                      "stale",
+                      "blocked"
+                    ]
+                  },
+                  "surface": {
+                    "enum": [
+                      "profile",
+                      "settings",
+                      "packs",
+                      "contracts",
+                      "operations",
+                      "principals"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "surface",
+                  "state",
+                  "profile_id",
+                  "profile_revision",
+                  "plan_digest",
+                  "catalog_revision",
+                  "records",
+                  "data"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "resolved",
+                      "reviewed",
+                      "approved",
+                      "active",
+                      "error"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "state"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "revision_digest": "sha256:35ec548795000230c44058bebdc468d89a9bb04a6157e41ecd156935648fb527",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.control-presentation.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "type": "object"
+          },
+          "operation_id": "profile.change.review",
+          "output_schema": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "catalog_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "data": {
+                    "type": "object"
+                  },
+                  "plan_digest": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  },
+                  "profile_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "records": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "digest": {
+                          "pattern": "^sha256:[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "source_ref": {
+                          "pattern": "^[a-z][a-z0-9-]*://",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "source_ref"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "object"
+                  },
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "ready",
+                      "stale",
+                      "blocked"
+                    ]
+                  },
+                  "surface": {
+                    "enum": [
+                      "profile",
+                      "settings",
+                      "packs",
+                      "contracts",
+                      "operations",
+                      "principals"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "surface",
+                  "state",
+                  "profile_id",
+                  "profile_revision",
+                  "plan_digest",
+                  "catalog_revision",
+                  "records",
+                  "data"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "resolved",
+                      "reviewed",
+                      "approved",
+                      "active",
+                      "error"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "state"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "revision_digest": "sha256:35ec548795000230c44058bebdc468d89a9bb04a6157e41ecd156935648fb527",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.control-presentation.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "type": "object"
+          },
+          "operation_id": "profile.read",
+          "output_schema": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "catalog_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "data": {
+                    "type": "object"
+                  },
+                  "plan_digest": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  },
+                  "profile_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "records": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "digest": {
+                          "pattern": "^sha256:[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "source_ref": {
+                          "pattern": "^[a-z][a-z0-9-]*://",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "source_ref"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "object"
+                  },
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "ready",
+                      "stale",
+                      "blocked"
+                    ]
+                  },
+                  "surface": {
+                    "enum": [
+                      "profile",
+                      "settings",
+                      "packs",
+                      "contracts",
+                      "operations",
+                      "principals"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "surface",
+                  "state",
+                  "profile_id",
+                  "profile_revision",
+                  "plan_digest",
+                  "catalog_revision",
+                  "records",
+                  "data"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "resolved",
+                      "reviewed",
+                      "approved",
+                      "active",
+                      "error"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "state"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "revision_digest": "sha256:35ec548795000230c44058bebdc468d89a9bb04a6157e41ecd156935648fb527",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.control-presentation.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "type": "object"
+          },
+          "operation_id": "settings.read",
+          "output_schema": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "catalog_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "data": {
+                    "type": "object"
+                  },
+                  "plan_digest": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  },
+                  "profile_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "records": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "digest": {
+                          "pattern": "^sha256:[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "source_ref": {
+                          "pattern": "^[a-z][a-z0-9-]*://",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "source_ref"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "object"
+                  },
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "ready",
+                      "stale",
+                      "blocked"
+                    ]
+                  },
+                  "surface": {
+                    "enum": [
+                      "profile",
+                      "settings",
+                      "packs",
+                      "contracts",
+                      "operations",
+                      "principals"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "surface",
+                  "state",
+                  "profile_id",
+                  "profile_revision",
+                  "plan_digest",
+                  "catalog_revision",
+                  "records",
+                  "data"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "resolved",
+                      "reviewed",
+                      "approved",
+                      "active",
+                      "error"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "state"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "revision_digest": "sha256:35ec548795000230c44058bebdc468d89a9bb04a6157e41ecd156935648fb527",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.control-presentation.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "type": "object"
+          },
+          "operation_id": "topology.contracts.read",
+          "output_schema": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "catalog_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "data": {
+                    "type": "object"
+                  },
+                  "plan_digest": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  },
+                  "profile_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "records": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "digest": {
+                          "pattern": "^sha256:[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "source_ref": {
+                          "pattern": "^[a-z][a-z0-9-]*://",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "source_ref"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "object"
+                  },
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "ready",
+                      "stale",
+                      "blocked"
+                    ]
+                  },
+                  "surface": {
+                    "enum": [
+                      "profile",
+                      "settings",
+                      "packs",
+                      "contracts",
+                      "operations",
+                      "principals"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "surface",
+                  "state",
+                  "profile_id",
+                  "profile_revision",
+                  "plan_digest",
+                  "catalog_revision",
+                  "records",
+                  "data"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "resolved",
+                      "reviewed",
+                      "approved",
+                      "active",
+                      "error"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "state"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "revision_digest": "sha256:35ec548795000230c44058bebdc468d89a9bb04a6157e41ecd156935648fb527",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.control-presentation.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "type": "object"
+          },
+          "operation_id": "topology.operations.read",
+          "output_schema": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "catalog_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "data": {
+                    "type": "object"
+                  },
+                  "plan_digest": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  },
+                  "profile_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "records": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "digest": {
+                          "pattern": "^sha256:[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "source_ref": {
+                          "pattern": "^[a-z][a-z0-9-]*://",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "source_ref"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "object"
+                  },
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "ready",
+                      "stale",
+                      "blocked"
+                    ]
+                  },
+                  "surface": {
+                    "enum": [
+                      "profile",
+                      "settings",
+                      "packs",
+                      "contracts",
+                      "operations",
+                      "principals"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "surface",
+                  "state",
+                  "profile_id",
+                  "profile_revision",
+                  "plan_digest",
+                  "catalog_revision",
+                  "records",
+                  "data"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "resolved",
+                      "reviewed",
+                      "approved",
+                      "active",
+                      "error"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "state"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "revision_digest": "sha256:35ec548795000230c44058bebdc468d89a9bb04a6157e41ecd156935648fb527",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.control-presentation.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "type": "object"
+          },
+          "operation_id": "topology.packs.read",
+          "output_schema": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "catalog_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "data": {
+                    "type": "object"
+                  },
+                  "plan_digest": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  },
+                  "profile_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "records": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "digest": {
+                          "pattern": "^sha256:[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "source_ref": {
+                          "pattern": "^[a-z][a-z0-9-]*://",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "source_ref"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "object"
+                  },
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "ready",
+                      "stale",
+                      "blocked"
+                    ]
+                  },
+                  "surface": {
+                    "enum": [
+                      "profile",
+                      "settings",
+                      "packs",
+                      "contracts",
+                      "operations",
+                      "principals"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "surface",
+                  "state",
+                  "profile_id",
+                  "profile_revision",
+                  "plan_digest",
+                  "catalog_revision",
+                  "records",
+                  "data"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "resolved",
+                      "reviewed",
+                      "approved",
+                      "active",
+                      "error"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "state"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "revision_digest": "sha256:35ec548795000230c44058bebdc468d89a9bb04a6157e41ecd156935648fb527",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.host.control-presentation.v4",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "type": "object"
+          },
+          "operation_id": "topology.principals.read",
+          "output_schema": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "catalog_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "data": {
+                    "type": "object"
+                  },
+                  "plan_digest": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "type": "string"
+                  },
+                  "profile_revision": {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "records": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "digest": {
+                          "pattern": "^sha256:[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "source_ref": {
+                          "pattern": "^[a-z][a-z0-9-]*://",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "source_ref"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "object"
+                  },
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "ready",
+                      "stale",
+                      "blocked"
+                    ]
+                  },
+                  "surface": {
+                    "enum": [
+                      "profile",
+                      "settings",
+                      "packs",
+                      "contracts",
+                      "operations",
+                      "principals"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "surface",
+                  "state",
+                  "profile_id",
+                  "profile_revision",
+                  "plan_digest",
+                  "catalog_revision",
+                  "records",
+                  "data"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "runtime_surface_api_version": {
+                    "const": "io.tobkiri.launcher.runtime-surface.v4"
+                  },
+                  "state": {
+                    "enum": [
+                      "resolved",
+                      "reviewed",
+                      "approved",
+                      "active",
+                      "error"
+                    ]
+                  }
+                },
+                "required": [
+                  "runtime_surface_api_version",
+                  "state"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "revision_digest": "sha256:35ec548795000230c44058bebdc468d89a9bb04a6157e41ecd156935648fb527",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        }
+      ],
+      "platform": "any",
+      "runtime_abi": "python3.13",
+      "variant_id": "tobkiri.host.control-presentation.python"
+    },
     {
       "architecture": "any",
       "backend": "tobkiri.python-host-v4",

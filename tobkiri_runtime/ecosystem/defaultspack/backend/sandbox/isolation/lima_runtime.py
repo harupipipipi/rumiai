@@ -716,6 +716,27 @@ class PackVMLimaProvisioner:
                 False, PACKVM_BACKEND_ID, platform_id, self._instance, reason=str(exc)
             )
 
+    def readiness_snapshot(self) -> dict[str, Any]:
+        """Return a fresh Host-authenticated PackVM attestation projection."""
+
+        doctor = self.doctor()
+        result = {
+            "ready": doctor.ready,
+            "backend_id": doctor.backend_id,
+            "platform": doctor.platform,
+            "instance": doctor.instance,
+            "reason": doctor.reason,
+            "attestation_digest": doctor.attestation_digest,
+            "observed_unix": int(time.time()),
+        }
+        if not doctor.ready:
+            return result
+        state = self._load_authenticated_state()
+        return {
+            **result,
+            **{key: value for key, value in state.items() if key != "authentication"},
+        }
+
     def stop(self, confirmation: str) -> None:
         """Stop only the authenticated instance after exact confirmation."""
         self._load_authenticated_state()

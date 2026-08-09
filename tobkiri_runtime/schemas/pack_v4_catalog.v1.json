@@ -15188,6 +15188,7 @@
         "pack.enable",
         "pack.install",
         "pack.status.read",
+        "control.presentation",
         "profile.reload",
         "runtime.restart"
       ],
@@ -15321,6 +15322,73 @@
             },
             "output": {
               "type": "object"
+            }
+          },
+          "security": "sensitive",
+          "version": "1.0.0"
+        },
+        {
+          "cardinality": "one",
+          "contract_id": "tobkiri.host.control-presentation.v4",
+          "failure": "fail_closed",
+          "isolation": "in_process",
+          "lifecycle": {"deprecated": false, "introduced": "1.0.0"},
+          "operations": [
+            {"entrypoint_id": "profile.change.activate", "id": "profile.change.activate", "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"},
+            {"entrypoint_id": "profile.change.approve", "id": "profile.change.approve", "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"},
+            {"entrypoint_id": "profile.change.resolve", "id": "profile.change.resolve", "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"},
+            {"entrypoint_id": "profile.change.review", "id": "profile.change.review", "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"},
+            {"entrypoint_id": "profile.read", "id": "profile.read", "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"},
+            {"entrypoint_id": "settings.read", "id": "settings.read", "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"},
+            {"entrypoint_id": "topology.contracts.read", "id": "topology.contracts.read", "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"},
+            {"entrypoint_id": "topology.operations.read", "id": "topology.operations.read", "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"},
+            {"entrypoint_id": "topology.packs.read", "id": "topology.packs.read", "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"},
+            {"entrypoint_id": "topology.principals.read", "id": "topology.principals.read", "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"}
+          ],
+          "owner": "tobkiri_host_pack_control",
+          "provider_id": "tobkiri.host.control-presentation",
+          "required_capabilities": ["control.presentation"],
+          "schemas": {
+            "error": {"additionalProperties": false, "properties": {"code": {"type": "string"}, "message": {"type": "string"}}, "required": ["code", "message"], "type": "object"},
+            "input": {"type": "object"},
+            "output": {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalog_revision": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
+                    "data": {"type": "object"},
+                    "plan_digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
+                    "profile_id": {"type": "string"},
+                    "profile_revision": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
+                    "records": {
+                      "additionalProperties": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
+                          "source_ref": {"pattern": "^[a-z][a-z0-9-]*://", "type": "string"}
+                        },
+                        "required": ["digest", "source_ref"],
+                        "type": "object"
+                      },
+                      "type": "object"
+                    },
+                    "runtime_surface_api_version": {"const": "io.tobkiri.launcher.runtime-surface.v4"},
+                    "state": {"enum": ["ready", "stale", "blocked"]},
+                    "surface": {"enum": ["profile", "settings", "packs", "contracts", "operations", "principals"]}
+                  },
+                  "required": ["runtime_surface_api_version", "surface", "state", "profile_id", "profile_revision", "plan_digest", "catalog_revision", "records", "data"],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "runtime_surface_api_version": {"const": "io.tobkiri.launcher.runtime-surface.v4"},
+                    "state": {"enum": ["resolved", "reviewed", "approved", "active", "error"]}
+                  },
+                  "required": ["runtime_surface_api_version", "state"],
+                  "type": "object"
+                }
+              ]
             }
           },
           "security": "sensitive",

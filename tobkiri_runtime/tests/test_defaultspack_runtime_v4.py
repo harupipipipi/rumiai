@@ -78,8 +78,7 @@ def _resolve(catalog: BundledCatalog | None = None):
     for edge in selected_catalog.profiles["defaults"]["requested_edges"]:
         authority_bindings.setdefault(
             _edge_key(edge),
-            "authority-ref:test."
-            + canonical_digest(_edge_key(edge)).removeprefix("sha256:"),
+            "authority-ref:test." + canonical_digest(_edge_key(edge)).removeprefix("sha256:"),
         )
     return resolve_default_profile(
         selected_catalog,
@@ -186,6 +185,16 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
         "tobkiri.host.pack-control",
         "tobkiri.host.pack-control",
         "tobkiri.host.pack-control",
+        "tobkiri.host.control-presentation",
+        "tobkiri.host.control-presentation",
+        "tobkiri.host.control-presentation",
+        "tobkiri.host.control-presentation",
+        "tobkiri.host.control-presentation",
+        "tobkiri.host.control-presentation",
+        "tobkiri.host.control-presentation",
+        "tobkiri.host.control-presentation",
+        "tobkiri.host.control-presentation",
+        "tobkiri.host.control-presentation",
         "tobkiri.host.pack-control",
         "tobkiri.host.pack-control",
         "rumi_file_inspect_pack.file-inspect.service",
@@ -199,8 +208,7 @@ def test_unreferenced_caller_cannot_piggyback_on_shared_provider_operation() -> 
     shared_edge = next(
         edge
         for edge in profile["requested_edges"]
-        if edge["operation_id"]
-        == "rumi_model_catalog_pack.bundled-model-catalog.generate"
+        if edge["operation_id"] == "rumi_model_catalog_pack.bundled-model-catalog.generate"
     )
     unreferenced_edge = {
         **shared_edge,
@@ -214,12 +222,9 @@ def test_unreferenced_caller_cannot_piggyback_on_shared_provider_operation() -> 
     for edge in catalog.profiles["defaults"]["requested_edges"]:
         authority_bindings.setdefault(
             _edge_key(edge),
-            "authority-ref:test."
-            + canonical_digest(_edge_key(edge)).removeprefix("sha256:"),
+            "authority-ref:test." + canonical_digest(_edge_key(edge)).removeprefix("sha256:"),
         )
-    authority_bindings[_edge_key(unreferenced_edge)] = (
-        "authority-ref:test.unreferenced-caller"
-    )
+    authority_bindings[_edge_key(unreferenced_edge)] = "authority-ref:test.unreferenced-caller"
 
     with pytest.raises(
         ProfileResolutionDenied,

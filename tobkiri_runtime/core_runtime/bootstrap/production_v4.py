@@ -8,7 +8,7 @@ import platform
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from ecosystem.defaultspack.domain.runtime_v4 import (
     ActivationStore,
@@ -60,6 +60,7 @@ from ..pack_catalog_backend_v4 import (
     PackControlBackendV4,
 )
 from ..pack_control_v4 import (
+    CONTROL_PRESENTATION_CONTRACT,
     PACK_CONTROL_CONTRACT,
     capture_pack_control_session,
     capture_valid_pack_approval,
@@ -68,6 +69,7 @@ from ..external_pack_catalog_v4 import resolve_admitted_pack_roots
 
 
 _PACK_CATALOG_KEY = (PACK_CONTROL_CONTRACT, "catalog.read")
+_CONTROL_CONTRACTS = {PACK_CONTROL_CONTRACT, CONTROL_PRESENTATION_CONTRACT}
 _PYTHON_PACK_BACKEND_ID = "tobkiri.python-pack-v4"
 
 
@@ -450,6 +452,7 @@ def capture_production_dispatch(
     backends: BackendRegistry | None = None,
     target_backend_digests: Mapping[str, str] | None = None,
     packvm_provisioner: Any | None = None,
+    packvm_readiness_reader: Callable[[], Mapping[str, Any]] | None = None,
 ) -> V4DispatchSession:
     """Capture ProductionRuntimeV4 and its RequestBroker from verified records."""
 
@@ -565,13 +568,15 @@ def capture_production_dispatch(
         authority_ceilings=ceilings,
     )
     authority_control = runtime.composition.authority_adapter(authority_store)
-    control_targets: dict[str, tuple[str, str, str]] = {}
+    control_targets: dict[tuple[str, str], tuple[str, str, str]] = {}
     control_backend: PackControlBackendV4 | None = None
     control_bindings = {
-        key: binding for key, binding in binding_by_key.items() if key[0] == PACK_CONTROL_CONTRACT
+        key: binding for key, binding in binding_by_key.items() if key[0] in _CONTROL_CONTRACTS
     }
     if control_bindings:
-        control_session = capture_pack_control_session()
+        control_session = capture_pack_control_session(
+            packvm_readiness_reader=packvm_readiness_reader
+        )
         for key, control_binding in sorted(control_bindings.items()):
             operation_id = key[1]
             target = FunctionPrincipal.from_dict(control_binding["function_principal"])
@@ -590,7 +595,7 @@ def capture_production_dispatch(
                 session_id=(f"session.provider.pack-control.{operation_id}.{activation_suffix}"),
                 principal=target,
             )
-            scope = _operation_scope(PACK_CONTROL_CONTRACT, operation_id, target)
+            scope = _operation_scope(key[0], operation_id, target)
             caller = caller_by_operation[key]
             _commit_pack_control_authority(
                 authority_store,
@@ -601,7 +606,7 @@ def capture_production_dispatch(
                 target_domain=target_domain,
                 scope=scope,
             )
-            control_targets[operation_id] = (
+            control_targets[key] = (
                 target.principal_id,
                 target.function_implementation_digest,
                 target_domain.domain_id,
@@ -610,7 +615,7 @@ def capture_production_dispatch(
             {
                 "backend": "tobkiri.host-pack-control.v4",
                 "targets": {
-                    operation_id: list(target) for operation_id, target in control_targets.items()
+                    f"{key[0]}::{key[1]}": list(target) for key, target in control_targets.items()
                 },
                 "profile_id": profile["profile_id"],
                 "plan_digest": plan["plan_digest"],
@@ -633,7 +638,7 @@ def capture_production_dispatch(
     dynamic_bindings = {
         key: binding
         for key, binding in binding_by_key.items()
-        if key not in static_edge_keys and key[0] != PACK_CONTROL_CONTRACT
+        if key not in static_edge_keys and key[0] not in _CONTROL_CONTRACTS
     }
     optional_pack_ids = {
         str(item["pack_id"])

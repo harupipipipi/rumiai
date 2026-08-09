@@ -34,13 +34,21 @@ def test_all_canonical_executable_catalogs_compile_without_exclusion() -> None:
             "tobkiri.service.file.inspect.v1",
             "rumi_file_inspect_pack.file-inspect",
         ),
+        (
+            "tobkiri.service.file.inspect.v1",
+            "rumi_file_inspect_pack.file-inspect.for-media",
+        ),
     }
     assert set(conversation.routes) == {("conversation.turn.v1", "complete")}
     assert set(inspect.routes) == {
         (
             "tobkiri.service.file.inspect.v1",
             "rumi_file_inspect_pack.file-inspect",
-        )
+        ),
+        (
+            "tobkiri.service.file.inspect.v1",
+            "rumi_file_inspect_pack.file-inspect.for-media",
+        ),
     }
 
 

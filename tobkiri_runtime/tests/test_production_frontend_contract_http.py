@@ -250,9 +250,7 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
     assert status == 200, refreshed_catalog
     refreshed_host = refreshed_catalog["data"]["dynamic_host"]
     refreshed_status = next(
-        item
-        for item in refreshed_host["contributions"]
-        if item["label"] == "pack.status"
+        item for item in refreshed_host["contributions"] if item["label"] == "pack.status"
     )
     status, persisted = post(
         "/api/ui/capability/invoke",
@@ -271,9 +269,7 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
     assert status == 200, persisted
     assert persisted["data"]["enabled"] is True
     assert post("/api/pack-control/disable", {"pack_id": target_pack})[0] == 200
-    revoke_status, revoked = post(
-        "/api/pack-control/approval-revoke", {"pack_id": target_pack}
-    )
+    revoke_status, revoked = post("/api/pack-control/approval-revoke", {"pack_id": target_pack})
     assert revoke_status == 200, revoked
     assert revoked["data"]["approved"] is False
     assert revoked["data"]["approval_status"] == "revoked"
@@ -289,23 +285,18 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
     )
     assert catalog_status == 200, after_revoke
     revoked_pack = next(
-        item
-        for item in after_revoke["data"]["packs"]
-        if item["pack_id"] == target_pack
+        item for item in after_revoke["data"]["packs"] if item["pack_id"] == target_pack
     )
     assert revoked_pack["approved"] is False
     assert revoked_pack["enabled"] is False
     assert revoked_pack["approval_reason"] == "approval_revoked"
-    enable_status, denied = post(
-        "/api/pack-control/enable", {"pack_id": target_pack}
-    )
+    enable_status, denied = post("/api/pack-control/enable", {"pack_id": target_pack})
     assert enable_status == 409
     assert denied["data"]["code"] == "provider_failed"
 
     with AuthorityStore(authority_path) as current_authority:
         assert any(
-            event["event_type"] == "pack_approval_revoked"
-            and event["event_state"] == "committed"
+            event["event_type"] == "pack_approval_revoked" and event["event_state"] == "committed"
             for event in current_authority.audit_events()
         )
 
@@ -321,6 +312,138 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
     assert retired["data"]["state"] == "legacy_api_retired"
     with AuthorityStore(authority_path) as current_authority:
         assert len(current_authority.audit_events()) == audit_before_legacy
+
+
+def test_runtime_surface_reads_use_the_canonical_broker_contract(
+    production_server,
+) -> None:
+    server, _session, authority = production_server
+    cookie, _csrf, _origin = _authenticate(server)
+    headers = {
+        "Cookie": cookie,
+        "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+    }
+
+    targets = {
+        "profile": "/api/runtime-surface/profile",
+        "settings": "/api/runtime-surface/settings",
+        "packs": "/api/runtime-surface/topology/packs",
+        "contracts": "/api/runtime-surface/topology/contracts",
+        "operations": "/api/runtime-surface/topology/operations",
+        "principals": "/api/runtime-surface/topology/principals",
+    }
+    responses = {}
+    for surface, target in targets.items():
+        status, payload, _ = _request(
+            server,
+            "GET",
+            _contract("GET", target),
+            headers={**headers, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+        )
+        assert status == 200, payload
+        envelope = payload["data"]
+        assert envelope["runtime_surface_api_version"] == ("io.tobkiri.launcher.runtime-surface.v4")
+        assert envelope["surface"] == surface
+        assert envelope["state"] == "ready"
+        assert envelope["catalog_revision"].startswith("sha256:")
+        assert all(
+            set(record) == {"digest", "source_ref"} for record in envelope["records"].values()
+        )
+        responses[surface] = envelope
+
+    assert responses["profile"]["data"]["profile"]["profile_id"] == "defaults"
+    verified = [
+        item
+        for item in responses["operations"]["data"]["operations"]
+        if item["schema"].get("input_schema")
+    ]
+    assert verified
+    assert all(item["route"]["function_id"] for item in verified)
+    assert any(event["event_state"] == "committed" for event in authority.audit_events())
+
+
+def test_profile_ceremony_uses_four_canonical_broker_operations(
+    production_server,
+) -> None:
+    server, _session, authority = production_server
+    cookie, csrf, origin = _authenticate(server)
+    headers = {
+        "Cookie": cookie,
+        "Origin": origin,
+        "X-Rumi-CSRF": csrf,
+    }
+
+    status, profile, _ = _request(
+        server,
+        "GET",
+        _contract("GET", "/api/runtime-surface/profile"),
+        headers={"Cookie": cookie, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+    )
+    assert status == 200, profile
+    envelope = profile["data"]
+    desired = [
+        item["pack_id"]
+        for item in envelope["data"]["profile_document"]["packs"]
+        if item.get("role") != "application"
+    ]
+
+    def post(target: str, body: Mapping[str, object]):
+        return _request(
+            server,
+            "POST",
+            _contract("POST", target),
+            body=body,
+            headers={**headers, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+        )
+
+    status, resolved, _ = post(
+        "/api/runtime-surface/profile-change/resolve",
+        {
+            "profile_id": "defaults",
+            "expected_profile_revision": envelope["profile_revision"],
+            "expected_plan_digest": envelope["plan_digest"],
+            "desired_pack_ids": desired,
+        },
+    )
+    assert status == 200, resolved
+    status, reviewed, _ = post(
+        "/api/runtime-surface/profile-change/review",
+        {
+            "candidate_id": resolved["data"]["candidate_id"],
+            "candidate_digest": resolved["data"]["candidate_digest"],
+        },
+    )
+    assert status == 200, reviewed
+    status, approved, _ = post(
+        "/api/runtime-surface/profile-change/approve",
+        {
+            "candidate_id": reviewed["data"]["candidate_id"],
+            "candidate_digest": reviewed["data"]["candidate_digest"],
+        },
+    )
+    assert status == 200, approved
+    receipt = approved["data"]["authority_approval"]
+    assert authority.get_approval(receipt["approval_id"]) is not None
+    status, activated, _ = post(
+        "/api/runtime-surface/profile-change/activate",
+        {
+            "approval_id": approved["data"]["approval_id"],
+            "approval_digest": approved["data"]["approval_digest"],
+        },
+    )
+    assert status == 200, activated
+    assert activated["data"]["state"] == "active"
+    assert activated["data"]["authoritative_snapshot"]["state"] == "ready"
+    status, replayed, _ = post(
+        "/api/runtime-surface/profile-change/activate",
+        {
+            "approval_id": approved["data"]["approval_id"],
+            "approval_digest": approved["data"]["approval_digest"],
+        },
+    )
+    assert status == 200, replayed
+    assert replayed["data"]["state"] == "error"
+    assert replayed["data"]["code"] == "UNAPPROVED"
 
 
 def test_contract_replay_unknown_and_stale_capture_fail_closed(

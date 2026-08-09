@@ -76,6 +76,10 @@ class _PackVMLifecycle:
         self.calls.append(("doctor", {}))
         return {"ready": True, "attestation_digest": "sha256:" + "d" * 64}
 
+    def readiness_snapshot(self) -> Mapping[str, object]:
+        self.calls.append(("readiness_snapshot", {}))
+        return {"ready": False}
+
     def progress(self, operation_id: str) -> Mapping[str, object]:
         self.calls.append(("progress", {"operation_id": operation_id}))
         return {"operation_id": operation_id, "state": "succeeded"}
@@ -91,6 +95,24 @@ class _PackVMLifecycle:
     def cleanup(self, payload: Mapping[str, object]) -> Mapping[str, object]:
         self.calls.append(("cleanup", dict(payload)))
         return {"ready": False, "instance": "tobkiri-packvm-v4"}
+
+
+def test_profile_activation_refresh_requires_durable_success_result() -> None:
+    handler = object.__new__(PackAPIHandler)
+    refreshes: list[object] = []
+    handler._runtime_refresh = refreshes.append
+
+    handler._refresh_after_operation(
+        "profile.change.activate",
+        {"state": "error", "code": "UNAPPROVED"},
+    )
+    assert refreshes == []
+
+    handler._refresh_after_operation(
+        "profile.change.activate",
+        {"state": "active", "activation_id": "activation.test"},
+    )
+    assert refreshes == [None]
 
 
 @pytest.fixture

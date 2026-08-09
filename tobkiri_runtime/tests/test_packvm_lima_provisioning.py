@@ -394,6 +394,28 @@ def test_provision_doctor_stop_and_cleanup_are_authenticated(provisioner) -> Non
     assert fake.exists is False
 
 
+def test_runtime_surface_recomputes_exact_packvm_attestation_digest(
+    provisioner,
+) -> None:
+    from core_runtime.runtime_surface_v4 import _packvm_attested
+
+    manager, _fake, _command = provisioner
+    plan = manager.prepare()
+    manager.provision(_request(plan))
+    snapshot = manager.readiness_snapshot()
+
+    assert _packvm_attested(snapshot) is True
+    assert snapshot["config_digest"] == plan.config_digest
+    assert snapshot["image_digest"] == plan.image_digest
+    assert snapshot["guest_runner_digest"] == plan.guest_runner_digest
+    assert snapshot["host_build_digest"] == plan.host_build_digest
+
+    tampered = {**snapshot, "guest_runner_digest": "sha256:" + "0" * 64}
+    assert _packvm_attested(tampered) is False
+    expired = {**snapshot, "observed_unix": int(time.time()) - 31}
+    assert _packvm_attested(expired) is False
+
+
 @pytest.mark.parametrize(
     "mutation, expected",
     [

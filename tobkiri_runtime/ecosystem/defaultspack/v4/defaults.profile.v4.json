@@ -357,6 +357,106 @@
     },
     {
       "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.control-presentation.v4",
+      "operation_id": "profile.change.activate",
+      "requested_scope_template": {
+        "ceremony": "activation",
+        "resource_namespace": "profile.activation"
+      },
+      "target_provider_id": "tobkiri.host.control-presentation"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.control-presentation.v4",
+      "operation_id": "profile.change.approve",
+      "requested_scope_template": {
+        "ceremony": "authority_approval",
+        "resource_namespace": "profile.activation"
+      },
+      "target_provider_id": "tobkiri.host.control-presentation"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.control-presentation.v4",
+      "operation_id": "profile.change.resolve",
+      "requested_scope_template": {
+        "access": "read_only",
+        "resource_namespace": "profile.candidate"
+      },
+      "target_provider_id": "tobkiri.host.control-presentation"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.control-presentation.v4",
+      "operation_id": "profile.change.review",
+      "requested_scope_template": {
+        "access": "read_only",
+        "resource_namespace": "profile.candidate"
+      },
+      "target_provider_id": "tobkiri.host.control-presentation"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.control-presentation.v4",
+      "operation_id": "profile.read",
+      "requested_scope_template": {
+        "access": "read_only",
+        "resource_namespace": "profile.runtime-surface"
+      },
+      "target_provider_id": "tobkiri.host.control-presentation"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.control-presentation.v4",
+      "operation_id": "settings.read",
+      "requested_scope_template": {
+        "access": "read_only",
+        "resource_namespace": "profile.runtime-settings"
+      },
+      "target_provider_id": "tobkiri.host.control-presentation"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.control-presentation.v4",
+      "operation_id": "topology.contracts.read",
+      "requested_scope_template": {
+        "access": "read_only",
+        "resource_namespace": "profile.topology"
+      },
+      "target_provider_id": "tobkiri.host.control-presentation"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.control-presentation.v4",
+      "operation_id": "topology.operations.read",
+      "requested_scope_template": {
+        "access": "read_only",
+        "resource_namespace": "profile.topology"
+      },
+      "target_provider_id": "tobkiri.host.control-presentation"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.control-presentation.v4",
+      "operation_id": "topology.packs.read",
+      "requested_scope_template": {
+        "access": "read_only",
+        "resource_namespace": "profile.topology"
+      },
+      "target_provider_id": "tobkiri.host.control-presentation"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.control-presentation.v4",
+      "operation_id": "topology.principals.read",
+      "requested_scope_template": {
+        "access": "read_only",
+        "resource_namespace": "profile.topology"
+      },
+      "target_provider_id": "tobkiri.host.control-presentation"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
       "contract_id": "tobkiri.host.pack-control.v4",
       "operation_id": "profile.reload",
       "requested_scope_template": {

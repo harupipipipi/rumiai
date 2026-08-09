@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from pathlib import PurePosixPath
-from typing import Callable, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 from urllib.parse import parse_qs, urlparse
 
 from .api.api_response import APIResponse
@@ -149,6 +149,8 @@ class PackVMLifecyclePort(Protocol):
     def provision(self, payload: Mapping[str, object]) -> Mapping[str, object]: ...
 
     def doctor(self) -> Mapping[str, object]: ...
+
+    def readiness_snapshot(self) -> Mapping[str, object]: ...
 
     def progress(self, operation_id: str) -> Mapping[str, object]: ...
 
@@ -510,7 +512,7 @@ class PackAPIHandler(
                 target.operation_id,
                 payload,
             )
-            self._refresh_after_operation(target.operation_id)
+            self._refresh_after_operation(target.operation_id, result)
         except (
             HostCoreError,
             KeyError,
@@ -624,14 +626,23 @@ class PackAPIHandler(
         self._send_response(APIResponse(True, data=dict(result)))
         return True
 
-    def _refresh_after_operation(self, operation_id: str) -> None:
+    def _refresh_after_operation(
+        self,
+        operation_id: str,
+        result: Mapping[str, Any],
+    ) -> None:
         """Publish a fresh runtime capture after an activation boundary."""
 
         refresh = self._runtime_refresh
+        if operation_id == "profile.change.activate" and (
+            result.get("state") != "active" or not result.get("activation_id")
+        ):
+            return
         if refresh is not None and operation_id in {
             "pack.enable",
             "pack.disable",
             "approval.revoke",
+            "profile.change.activate",
             "runtime.restart",
         }:
             refresh(None)
@@ -1447,6 +1458,7 @@ class PackAPIServer:
                     bundle_root=runtime_root / "ecosystem" / "defaultspack" / "v4",
                     ecosystem_root=runtime_root / "ecosystem",
                     authority_store=authority,
+                    packvm_readiness_reader=self._packvm_lifecycle.readiness_snapshot,
                 )
                 created_session = True
             except Exception:

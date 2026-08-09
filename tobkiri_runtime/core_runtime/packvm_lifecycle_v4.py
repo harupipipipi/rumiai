@@ -172,6 +172,12 @@ class PackVMLifecycleV4:
         with self._lock:
             return asdict(self._provisioner.doctor())
 
+    def readiness_snapshot(self) -> Mapping[str, Any]:
+        """Return the Host-authenticated readiness evidence for runtime capture."""
+
+        with self._lock:
+            return self._provisioner.readiness_snapshot()
+
     def stop(self, payload: Mapping[str, object]) -> Mapping[str, Any]:
         """Stop only the authenticated v4 instance after exact confirmation."""
 

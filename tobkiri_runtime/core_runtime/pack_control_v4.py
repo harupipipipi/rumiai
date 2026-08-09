@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from tobkiri_host.errors import HostCoreError
 from tobkiri_protocol.validation import validate_document
@@ -27,6 +27,21 @@ from .external_pack_catalog_v4 import (
 
 
 PACK_CONTROL_CONTRACT = "tobkiri.host.pack-control.v4"
+CONTROL_PRESENTATION_CONTRACT = "tobkiri.host.control-presentation.v4"
+CONTROL_PRESENTATION_OPERATIONS = frozenset(
+    {
+        "profile.change.activate",
+        "profile.change.approve",
+        "profile.change.resolve",
+        "profile.change.review",
+        "profile.read",
+        "settings.read",
+        "topology.contracts.read",
+        "topology.operations.read",
+        "topology.packs.read",
+        "topology.principals.read",
+    }
+)
 PACK_CONTROL_OPERATIONS = frozenset(
     {
         "catalog.read",
@@ -74,15 +89,36 @@ class _ApprovalCandidate:
 class CapturedPackControlSession:
     """One immutable-v4-profile control session with explicit recapture points."""
 
-    def __init__(self, binding: _Binding) -> None:
+    def __init__(
+        self,
+        binding: _Binding,
+        *,
+        packvm_readiness_reader: Callable[[], Mapping[str, Any]] | None = None,
+    ) -> None:
         self._binding = binding
         self._lock = threading.RLock()
         self._candidates: dict[str, _ApprovalCandidate] = {}
+        from .runtime_surface_v4 import (
+            RuntimeProfileChangeService,
+            RuntimeSurfaceService,
+        )
+
+        self._runtime_surface = RuntimeSurfaceService(
+            packvm_readiness_reader=packvm_readiness_reader
+        )
+        self._profile_changes = RuntimeProfileChangeService(surface_service=self._runtime_surface)
 
     @classmethod
-    def capture(cls) -> "CapturedPackControlSession":
+    def capture(
+        cls,
+        *,
+        packvm_readiness_reader: Callable[[], Mapping[str, Any]] | None = None,
+    ) -> "CapturedPackControlSession":
         """Capture the active Profile and canonical catalog revisions."""
-        return cls(_capture_binding())
+        return cls(
+            _capture_binding(),
+            packvm_readiness_reader=packvm_readiness_reader,
+        )
 
     @property
     def profile_id(self) -> str:
@@ -94,6 +130,16 @@ class CapturedPackControlSession:
 
     def provider_metadata(self, contract_id: str) -> tuple[Mapping[str, Any], ...]:
         """Expose only this Host-owned qualified control provider."""
+        if contract_id == CONTROL_PRESENTATION_CONTRACT:
+            return (
+                {
+                    "provider_id": "tobkiri.host.control-presentation",
+                    "contract_id": CONTROL_PRESENTATION_CONTRACT,
+                    "operations": sorted(CONTROL_PRESENTATION_OPERATIONS),
+                    "profile_id": self.profile_id,
+                    "plan_digest": self.plan_digest,
+                },
+            )
         if contract_id != PACK_CONTROL_CONTRACT:
             return ()
         return (
@@ -116,6 +162,8 @@ class CapturedPackControlSession:
     ) -> Mapping[str, Any]:
         """Invoke one qualified operation after exact session/profile checks."""
         del version_range
+        if contract_id == CONTROL_PRESENTATION_CONTRACT:
+            return self._invoke_control_presentation(operation_id, payload)
         if contract_id != PACK_CONTROL_CONTRACT:
             raise PackControlDenied("contract is absent from the captured Host session")
         if operation_id not in PACK_CONTROL_OPERATIONS:
@@ -154,6 +202,60 @@ class CapturedPackControlSession:
                 request_kernel_restart()
                 return {"restart_requested": True, **self._binding_payload()}
         raise PackControlDenied("qualified operation is unavailable")
+
+    def _invoke_control_presentation(
+        self,
+        operation_id: str,
+        payload: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        """Serve declared Launcher surfaces only through the captured Broker."""
+
+        if operation_id not in CONTROL_PRESENTATION_OPERATIONS:
+            raise PackControlDenied("control presentation operation is not declared")
+        arguments = dict(payload)
+        session_id = _required(arguments.pop("_session_id", None), "session binding")
+        self._reject_identity_override(arguments)
+        if "approved" in arguments or "approval_token" in arguments:
+            raise PackControlDenied("client approval assertions are not trusted")
+        try:
+            if operation_id == "profile.read":
+                return self._runtime_surface.read_profile(
+                    expected_profile_revision=_optional_string(
+                        arguments.pop("expected_profile_revision", None)
+                    ),
+                    expected_plan_digest=_optional_string(
+                        arguments.pop("expected_plan_digest", None)
+                    ),
+                ) | _require_empty(arguments)
+            if operation_id == "settings.read":
+                _require_empty(arguments)
+                return self._runtime_surface.read_settings()
+            if operation_id.startswith("topology."):
+                view = operation_id.removeprefix("topology.").removesuffix(".read")
+                revision = _optional_string(arguments.pop("expected_profile_revision", None))
+                plan_digest = _optional_string(arguments.pop("expected_plan_digest", None))
+                _require_empty(arguments)
+                return self._runtime_surface.read_advanced(
+                    view,
+                    expected_profile_revision=revision,
+                    expected_plan_digest=plan_digest,
+                )
+            action = operation_id.removeprefix("profile.change.")
+            handler = getattr(self._profile_changes, action)
+            result = handler(arguments, session_id=session_id)
+            if action == "activate":
+                self._recapture()
+                result = {
+                    **result,
+                    "authoritative_snapshot": self._runtime_surface.read_profile(),
+                }
+            return result
+        except Exception as error:
+            from .runtime_surface_v4 import RuntimeSurfaceError
+
+            if isinstance(error, RuntimeSurfaceError):
+                return error.as_dict()
+            raise
 
     def _reject_identity_override(self, arguments: Mapping[str, Any]) -> None:
         expected = {
@@ -362,9 +464,19 @@ class CapturedPackControlSession:
         }
 
 
-def capture_pack_control_session() -> CapturedPackControlSession:
+def capture_pack_control_session(
+    *,
+    packvm_readiness_reader: Callable[[], Mapping[str, Any]] | None = None,
+) -> CapturedPackControlSession:
     """Capture the Pack control session used by the production HTTP surface."""
-    return CapturedPackControlSession.capture()
+    return CapturedPackControlSession.capture(packvm_readiness_reader=packvm_readiness_reader)
+
+
+def capture_pack_control_catalog() -> Mapping[str, Any]:
+    """Capture the authoritative lifecycle projection for the active Profile."""
+
+    binding = _capture_binding()
+    return _catalog_payload(binding)
 
 
 class CapturedPackCatalogReader:
@@ -689,13 +801,15 @@ def _active_profile() -> tuple[dict[str, Any], dict[str, Any]]:
     }, profile
 
 
-def _activate_pack_set(state: Mapping[str, Any], pack_ids: list[str]) -> None:
-    """Resolve and atomically activate a new immutable Profile Pack set."""
+def resolve_profile_pack_set(pack_ids: list[str]) -> Any:
+    """Resolve a candidate Pack closure without activating or persisting it.
 
-    del state
+    This is the resolve step used by the Launcher recovery ceremony.  Pack
+    installation and Pack approval remain prerequisites, but neither a client
+    assertion nor resolving the candidate changes runtime state.
+    """
 
     from ecosystem.defaultspack.domain.runtime_v4 import (
-        ActivationStore,
         BundledCatalog,
         dynamic_profile_edges,
         resolve_default_profile,
@@ -764,7 +878,6 @@ def _activate_pack_set(state: Mapping[str, Any], pack_ids: list[str]) -> None:
         raise PackControlDenied("requested Profile Pack set is invalid")
 
     authority_path = user_data / "authority" / "v4.sqlite3"
-    workspace = user_data / "workspaces" / "defaults"
     with AuthorityStore(authority_path) as authority:
         bundle_lock_digest = (
             "sha256:" + hashlib.sha256((bundle_root / "bundle.lock.json").read_bytes()).hexdigest()
@@ -828,6 +941,29 @@ def _activate_pack_set(state: Mapping[str, Any], pack_ids: list[str]) -> None:
             security_epoch=authority.security_epoch,
             additional_pack_ids=additional_pack_ids,
         )
+    return resolved
+
+
+def activate_resolved_profile_pack_set(
+    resolved: Any,
+    *,
+    expected_profile_revision: str,
+    expected_plan_digest: str,
+) -> Mapping[str, Any]:
+    """Activate one reviewed candidate if its captured predecessor is current."""
+
+    from ecosystem.defaultspack.domain.runtime_v4 import ActivationStore
+
+    from .authority.v4 import AuthorityStore
+
+    binding = _capture_binding()
+    if not hmac.compare_digest(
+        binding.profile_revision, expected_profile_revision
+    ) or not hmac.compare_digest(binding.plan_digest, expected_plan_digest):
+        raise PackControlDenied("reviewed Profile predecessor is stale")
+    user_data = _user_data_root()
+    workspace = user_data / "workspaces" / "defaults"
+    with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
         store = ActivationStore(
             workspace / "activation",
             workspace,
@@ -841,7 +977,27 @@ def _activate_pack_set(state: Mapping[str, Any], pack_ids: list[str]) -> None:
             + secrets.token_hex(8)
         )
         created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        store.activate(resolved, activation_id=activation_id, created_at=created_at)
+        activation = store.activate(
+            resolved,
+            activation_id=activation_id,
+            created_at=created_at,
+        )
+    return activation
+
+
+def _activate_pack_set(state: Mapping[str, Any], pack_ids: list[str]) -> None:
+    """Compatibility wrapper for the existing Pack lifecycle transaction."""
+
+    resolved = resolve_profile_pack_set(pack_ids)
+    profile = state.get("resolved_profile")
+    plan = state.get("resolved_plan")
+    if not isinstance(profile, Mapping) or not isinstance(plan, Mapping):
+        raise PackControlDenied("active v4 Profile binding is unavailable")
+    activate_resolved_profile_pack_set(
+        resolved,
+        expected_profile_revision="sha256:" + _digest(profile),
+        expected_plan_digest=str(plan.get("plan_digest") or ""),
+    )
 
 
 def _control_state_path(profile_id: str) -> Path:
@@ -1190,6 +1346,21 @@ def _required(value: object, label: str) -> str:
     return normalized
 
 
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip() if isinstance(value, str) else ""
+    if not normalized:
+        raise PackControlDenied("optional binding must be a non-empty string")
+    return normalized
+
+
+def _require_empty(value: Mapping[str, Any]) -> dict[str, Any]:
+    if value:
+        raise PackControlDenied("control presentation payload has unknown fields")
+    return {}
+
+
 def _safe_identity(value: object, label: str) -> str:
     normalized = _required(value, label)
     allowed = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
@@ -1223,8 +1394,11 @@ __all__ = [
     "CapturedPackControlSession",
     "PACK_CONTROL_CONTRACT",
     "PACK_CONTROL_OPERATIONS",
+    "CONTROL_PRESENTATION_CONTRACT",
+    "CONTROL_PRESENTATION_OPERATIONS",
     "PackControlDenied",
     "capture_pack_catalog_reader",
     "capture_pack_control_session",
+    "capture_pack_control_catalog",
     "capture_valid_pack_approval",
 ]
