@@ -64,6 +64,7 @@ PYTHON_ENTRY_ROOTS = (
     RUNTIME / "tobkiri" / "__main__.py",
     RUNTIME / "tobkiri" / "cli_shell.py",
     RUNTIME / "tobkiri_host" / "runtime.py",
+    RUNTIME / "ecosystem" / "defaultspack" / "defaultspack" / "desktop_app.py",
     RUNTIME / "ecosystem" / "defaultspack" / "run_http.py",
     RUNTIME / "ecosystem" / "defaultspack" / "domain" / "runtime_v4" / "__init__.py",
 )
@@ -144,6 +145,31 @@ LEGACY_LIVE_ROUTES = frozenset(
         "/api/runtime/available",
         "/api/packs/scan",
         "/api/routes/reload",
+    }
+)
+
+RETIRED_PROFILE_AND_EXECUTION_MODULES = frozenset(
+    {
+        RUNTIME / "core_runtime" / "global_contracts" / "manifest.py",
+        RUNTIME / "core_runtime" / "resolved_profile.py",
+        RUNTIME / "core_runtime" / "runtime_profile_resolver.py",
+        RUNTIME / "core_runtime" / "setup_pack.py",
+        RUNTIME / "core_runtime" / "core_pack" / "core_setup" / "check_profile.py",
+        RUNTIME / "core_runtime" / "core_pack" / "core_setup" / "save_profile.py",
+        RUNTIME / "core_runtime" / "api" / "oauth_handlers.py",
+        RUNTIME / "core_runtime" / "api" / "flow_handlers.py",
+        RUNTIME / "core_runtime" / "flow_loader.py",
+        RUNTIME / "core_runtime" / "kernel_flow_execution.py",
+        RUNTIME / "core_runtime" / "kernel_handlers_runtime.py",
+        RUNTIME / "core_runtime" / "python_file_executor.py",
+        RUNTIME / "core_runtime" / "secure_executor.py",
+        RUNTIME / "core_runtime" / "lib_executor.py",
+        RUNTIME / "core_runtime" / "unit_executor.py",
+        ECOSYSTEM / "defaultspack" / "transport" / "http.py",
+        ECOSYSTEM / "defaultspack" / "transport" / "stdio.py",
+        ECOSYSTEM / "defaultspack" / "transport" / "cli.py",
+        ECOSYSTEM / "defaultspack" / "domain" / "flow" / "engine.py",
+        ECOSYSTEM / "setup_pack" / "pack_selector.py",
     }
 )
 
@@ -1612,6 +1638,15 @@ from ecosystem.setup_pack.pack_selector import PackSelector
     )
 
 
+def test_retired_profile_setup_and_direct_execution_modules_are_unreachable() -> None:
+    """Canonical production entries cannot import legacy state or executors."""
+
+    reachable = set(_reachable_python_trees())
+    assert reachable.isdisjoint(RETIRED_PROFILE_AND_EXECUTION_MODULES), sorted(
+        _relative(path) for path in reachable & RETIRED_PROFILE_AND_EXECUTION_MODULES
+    )
+
+
 def test_pack_api_has_no_hardcoded_legacy_handler_reachability() -> None:
     """The production HTTP adapter contains no legacy route implementation."""
 
@@ -1650,6 +1685,11 @@ for cycle in (1, 2):
             ("POST", "/api/packs/scan"),
             ("POST", "/api/routes/reload"),
             ("POST", "/api/v4/dispatch"),
+            ("GET", "/api/flows"),
+            ("POST", "/api/flows/legacy/run"),
+            ("POST", "/api/executors/python-file-call"),
+            ("POST", "/api/blocks/python-file-call"),
+            ("POST", "/api/functions/direct-invoke"),
             ("GET", "/api/setup/complete"),
             ("POST", "/api/setup/complete"),
             ("PUT", "/api/setup/complete"),
@@ -1696,6 +1736,12 @@ blocked_modules = sorted(
         "core_runtime.api.control_panel_handlers",
         "core_runtime.api.router_table",
         "core_runtime.global_contracts.manifest",
+        "core_runtime.api.flow_handlers",
+        "core_runtime.kernel_flow_execution",
+        "core_runtime.kernel_handlers_runtime",
+        "core_runtime.python_file_executor",
+        "core_runtime.resolved_profile",
+        "core_runtime.runtime_profile_resolver",
         "core_runtime.setup_pack",
         "ecosystem.setup_pack.pack_selector",
     }
@@ -1728,6 +1774,11 @@ print(
         [1, "POST", "/api/packs/scan", 410, "legacy_api_retired", []],
         [1, "POST", "/api/routes/reload", 410, "legacy_api_retired", []],
         [1, "POST", "/api/v4/dispatch", 410, "legacy_api_retired", []],
+        [1, "GET", "/api/flows", 410, "legacy_api_retired", []],
+        [1, "POST", "/api/flows/legacy/run", 410, "legacy_api_retired", []],
+        [1, "POST", "/api/executors/python-file-call", 410, "legacy_api_retired", []],
+        [1, "POST", "/api/blocks/python-file-call", 410, "legacy_api_retired", []],
+        [1, "POST", "/api/functions/direct-invoke", 410, "legacy_api_retired", []],
         [1, "GET", "/api/setup/complete", 410, "legacy_setup_retired", []],
         [1, "POST", "/api/setup/complete", 410, "legacy_setup_retired", []],
         [1, "PUT", "/api/setup/complete", 410, "legacy_setup_retired", []],

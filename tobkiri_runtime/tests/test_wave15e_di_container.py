@@ -237,11 +237,25 @@ class TestExistingServicesNotBroken:
         assert "metrics_collector" in names
         assert "profiler" in names
 
-    def test_total_service_count_at_least_28(self):
-        """Wave 1-8 で 25 + Wave 15 で 3 = 少なくとも 28 サービス"""
+    def test_canonical_container_excludes_direct_executors(self):
+        """Only Broker-installed execution may enter the canonical container."""
         c = get_container()
-        names = c.registered_names()
-        assert len(names) >= 28
+        names = set(c.registered_names())
+        assert names.isdisjoint(
+            {
+                "container_orchestrator",
+                "docker_capability_handler",
+                "egress_proxy_manager",
+                "flow_composer",
+                "host_privilege_manager",
+                "lib_executor",
+                "modifier_applier",
+                "modifier_loader",
+                "python_file_executor",
+                "secure_executor",
+                "unit_executor",
+            }
+        )
 
 
 # ======================================================================

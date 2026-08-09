@@ -1,4 +1,4 @@
-"""Fail-closed, data-only ``rumi.pack.v3`` manifest loading."""
+"""Offline-only, data-only ``rumi.pack.v3`` manifest loading."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ except ImportError:  # Desktop runtime keeps third-party bootstrap minimal.
     Draft202012Validator = None  # type: ignore[assignment,misc]
     FormatChecker = None  # type: ignore[assignment,misc]
 
-from .canonical import content_identity
-from .models import ContractResult, ContractStatus
+from core_runtime.global_contracts.canonical import content_identity
+from core_runtime.global_contracts.models import ContractResult, ContractStatus
 
 SCHEMA_PATH = Path(__file__).parents[2] / "schemas" / "pack_manifest_v3.schema.json"
 

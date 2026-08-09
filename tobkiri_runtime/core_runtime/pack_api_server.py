@@ -44,10 +44,13 @@ _RETIRED_API_ROOTS = frozenset(
     {
         "auth",
         "authority",
+        "blocks",
         "capabilities",
         "containers",
         "desktop",
         "flows",
+        "executors",
+        "functions",
         "graphs",
         "integrations",
         "mobile",

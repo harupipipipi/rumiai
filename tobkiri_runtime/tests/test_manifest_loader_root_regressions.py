@@ -18,7 +18,7 @@ from backend_core.ecosystem.spec.schema.validator import (
     SchemaValidationError,
     validate_ecosystem,
 )
-from core_runtime.global_contracts.manifest import load_manifest
+from scripts.quality.legacy_manifest_v3 import load_manifest
 from scripts.offline_legacy_projection import (
     generate_legacy_ecosystem_projection,
     source_manifest_identity,
@@ -188,17 +188,9 @@ def test_repository_v3_projections_are_current_and_source_integrity_bound() -> N
 
 
 def test_invalid_v3_manifest_is_not_available_or_effective(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """A v3 error must never remain in the resolved effective Pack set."""
-    import core_runtime.resolved_profile as profile_module
-
-    monkeypatch.setattr(
-        profile_module,
-        "verify_declared_artifacts",
-        lambda *_args, **_kwargs: (True, ()),
-    )
     pack_id = "invalid_v3_profile_pack"
     ecosystem_dir = tmp_path / "ecosystem"
     pack_dir = _write_legacy_pack(ecosystem_dir, pack_id)

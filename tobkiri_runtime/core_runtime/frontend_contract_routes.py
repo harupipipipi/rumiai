@@ -263,24 +263,9 @@ def _registered_target(
         if str(route_method).upper() == method and pattern.match(path) is not None:
             return True
 
-    # DefaultsHttpServer owns the component/flow route registry.  Matching it
-    # here is side-effect free and keeps route admission aligned with the
-    # actual defaultspack dispatcher.
-    try:
-        from ecosystem.defaultspack.transport.http import DefaultsHttpServer
-
-        facade = None
-        kernel = getattr(server.__class__, "kernel", None)
-        if kernel is not None:
-            from .kernel_facade import KernelFacade
-
-            facade = KernelFacade(kernel)
-        adapter = DefaultsHttpServer(facade)
-        handler, _params, _source, _inject, _pattern = adapter._match_route(method, path)
-        if handler is not None:
-            return True
-    except Exception:
-        return False
+    # Canonical frontend admission is map-only.  The historical Defaultspack
+    # route registry included direct Flow/executor handlers and must never be
+    # consulted as a production fallback.
     return False
 
 

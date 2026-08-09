@@ -6,19 +6,7 @@ PackAPIHandler のセットアップ API エンドポイントをテストする
 """
 
 import json
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock
-
-# core_setup のパスを追加
-_CORE_SETUP_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "core_runtime"
-    / "core_pack"
-    / "core_setup"
-)
-if str(_CORE_SETUP_DIR) not in sys.path:
-    sys.path.insert(0, str(_CORE_SETUP_DIR))
 
 
 class TestCheckSetupStatus:

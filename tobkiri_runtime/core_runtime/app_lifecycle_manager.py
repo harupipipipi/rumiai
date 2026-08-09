@@ -1,10 +1,7 @@
 """
 app_lifecycle_manager.py - アプリケーションライフサイクル管理
 
-セットアップ状態の確認・完了を一箇所に集約する薄いマネージャ。
-core_setup の check_profile / save_profile を遅延 import で呼び出す。
-
-Phase A で新規作成。
+セットアップ状態の確認・完了を v4 activation に集約する薄いマネージャ。
 """
 
 from __future__ import annotations
@@ -85,8 +82,8 @@ class AppLifecycleManager:
     アプリケーションライフサイクル管理マネージャ。
 
     セットアップ状態の確認・完了を提供する。
-    core_pack/core_setup の check_profile / save_profile を遅延 import し、
-    Phase B の core_setup が存在しない環境でも ImportError にならない。
+    legacy ``profile.json`` には触れず、Authority-owned v4 activation のみを
+    setup completion として扱う。
     """
 
     base_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parent.parent)
@@ -173,7 +170,8 @@ class AppLifecycleManager:
         """
         セットアップを完了する。
 
-        save_profile() を呼び、成功後に check_profile() で検証する。
+        既存の v4 activation を検証する。ユーザー属性の旧 Profile writer
+        は production setup の一部ではない。
 
         Args:
             data: {"username": str, "language": str, "icon": optional, "occupation": optional}

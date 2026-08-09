@@ -12,7 +12,7 @@ import pytest
 
 from backend_core.ecosystem.registry import LegacyRegistryUnavailable, Registry
 from backend_core.ecosystem.spec.schema.validator import validate_ecosystem
-from core_runtime.global_contracts.manifest import load_manifest
+from scripts.quality.legacy_manifest_v3 import load_manifest
 from core_runtime.manifest_authority import (
     ManifestAuthorityError,
     load_manifest_authority_catalog,

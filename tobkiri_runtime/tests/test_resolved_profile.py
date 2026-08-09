@@ -13,14 +13,16 @@ import pytest
 
 from core_runtime.resolved_profile import (
     _pack_content_hash,
-    apply_legacy_selection_migration,
-    plan_legacy_selection_migration,
     resolution_input_from_startup_profile,
-    rollback_legacy_selection_migration,
 )
 from core_runtime.resolved_profile_scope import (
     invalidate_persisted_resolved_profile,
     persisted_resolved_profile,
+)
+from scripts.quality.legacy_selection_migration import (
+    apply_legacy_selection_migration,
+    plan_legacy_selection_migration,
+    rollback_legacy_selection_migration,
 )
 
 
@@ -81,12 +83,6 @@ def _isolate_profile_resolution_from_pack_install_policy(
         # recovery actually exercises the isolated temporary state.
         scope_module._ACTIVE_PROFILE.set(None)
         request.addfinalizer(lambda module=scope_module: module._ACTIVE_PROFILE.set(None))
-
-    monkeypatch.setattr(
-        "core_runtime.resolved_profile.verify_declared_artifacts",
-        lambda *_args, **_kwargs: (True, ()),
-    )
-
 
 @pytest.fixture
 def captured_v4_profile(request: pytest.FixtureRequest):
@@ -490,6 +486,11 @@ def test_lockfile_detects_pack_content_and_profile_revision_changes(
 def test_legacy_selection_migration_has_dry_run_backup_and_rollback(
     tmp_path: Path,
 ) -> None:
+    import core_runtime.resolved_profile as runtime_resolver
+
+    assert not hasattr(runtime_resolver, "apply_legacy_selection_migration")
+    assert not hasattr(runtime_resolver, "plan_legacy_selection_migration")
+    assert not hasattr(runtime_resolver, "rollback_legacy_selection_migration")
     profile_path = tmp_path / "profile.json"
     selection_path = tmp_path / "setup_pack_selection.json"
     original = {"profile_id": "fixture", "packs": ["pack-a"], "user_edit": 7}

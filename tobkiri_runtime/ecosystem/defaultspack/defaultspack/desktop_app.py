@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -33,18 +32,16 @@ def _pack_root() -> Path:
 
 
 def _configure_persistent_user_state() -> None:
-    """Use launcher-owned storage and migrate bundle-local state once.
+    """Bind Defaultspack state to launcher-owned storage without migration.
 
-    A managed Defaultspack bundle is replaceable. API keys and model settings
-    must therefore live below ``RUMI_USER_DATA`` rather than the bundle. The
-    migration copies encrypted files directly and never reads or logs secrets.
+    Production startup never reads a replaceable bundle's historical state.
+    Legacy state import is an explicit offline maintenance operation.
     """
     user_data = os.environ.get("RUMI_USER_DATA", "").strip()
     if not user_data:
         return
 
     persistent_root = Path(user_data).expanduser()
-    legacy_root = _pack_root() / "user_data"
     agent_runtime_dir = persistent_root / "defaultspack" / "shared" / "agent_runtime"
     os.environ.setdefault("RUMI_DEFAULTSPACK_AGENT_RUNTIME_DIR", str(agent_runtime_dir))
     os.environ.setdefault(
@@ -52,32 +49,12 @@ def _configure_persistent_user_state() -> None:
         str(agent_runtime_dir / "transcripts"),
     )
 
-    secrets_dir = persistent_root / "secrets"
-    legacy_secrets_dir = legacy_root / "secrets"
-    if legacy_secrets_dir.exists() and not secrets_dir.exists():
-        secrets_dir.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(legacy_secrets_dir, secrets_dir)
-        legacy_key = legacy_root / ".secrets_key"
-        persistent_key = secrets_dir.parent / ".secrets_key"
-        if legacy_key.exists() and not persistent_key.exists():
-            shutil.copy2(legacy_key, persistent_key)
-
     configured_settings = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH", "").strip()
     settings_path = (
         Path(configured_settings).expanduser()
         if configured_settings
         else persistent_root / "defaultspack" / "shared" / "frontend_settings.json"
     )
-    legacy_settings_path = legacy_root / "shared" / "frontend_settings.json"
-    if legacy_settings_path.exists() and not settings_path.exists():
-        settings_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(legacy_settings_path, settings_path)
-        legacy_backup = legacy_settings_path.with_suffix(f"{legacy_settings_path.suffix}.bak")
-        if legacy_backup.exists():
-            shutil.copy2(
-                legacy_backup,
-                settings_path.with_suffix(f"{settings_path.suffix}.bak"),
-            )
     if not configured_settings:
         os.environ["RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH"] = str(settings_path)
 

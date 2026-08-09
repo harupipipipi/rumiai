@@ -138,7 +138,7 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
         self.assertNotIn("local token", url)
         self.assertNotIn("#", url)
 
-    def test_desktop_state_migration_moves_bundle_local_settings_and_secrets(self):
+    def test_desktop_startup_never_imports_bundle_local_legacy_state(self):
         from defaultspack import desktop_app
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -157,16 +157,28 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
             with patch.dict(os.environ, {"RUMI_USER_DATA": str(user_data)}, clear=True):
                 with patch.object(desktop_app, "_pack_root", return_value=bundle_root):
                     desktop_app._configure_persistent_user_state()
+                configured_settings = os.environ[
+                    "RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH"
+                ]
 
-            self.assertTrue((user_data / "secrets" / secret_file.name).exists())
-            self.assertTrue((user_data / ".secrets_key").exists())
+            self.assertFalse((user_data / "secrets" / secret_file.name).exists())
+            self.assertFalse((user_data / ".secrets_key").exists())
+            self.assertFalse(
+                (
+                    user_data
+                    / "defaultspack"
+                    / "shared"
+                    / "frontend_settings.json"
+                ).exists()
+            )
             self.assertEqual(
-                json.loads(
-                    (user_data / "defaultspack" / "shared" / "frontend_settings.json").read_text(
-                        encoding="utf-8"
-                    )
-                )["models"]["preferred_model"],
-                "openrouter/demo",
+                configured_settings,
+                str(
+                    user_data
+                    / "defaultspack"
+                    / "shared"
+                    / "frontend_settings.json"
+                ),
             )
 
     def test_surface_can_be_disabled_for_smoke_tests(self):

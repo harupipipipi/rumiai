@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
 from backend_core.ecosystem.spec.schema.validator import (  # noqa: E402
     validate_ecosystem,
 )
-from core_runtime.global_contracts.manifest import load_manifest  # noqa: E402
+from scripts.quality.legacy_manifest_v3 import load_manifest  # noqa: E402
 from scripts.offline_legacy_projection import (  # noqa: E402
     render_legacy_ecosystem,
 )
@@ -458,7 +458,7 @@ def migrate(*, check: bool) -> None:
             else:
                 v3_path.write_text(v3_text, encoding="utf-8")
             loaded = load_manifest(v3_path)
-            if not loaded.ok:
+            if not loaded.ok or loaded.value is None:
                 raise SystemExit(f"invalid canonical v3 manifest {v3_path}: {loaded.diagnostics}")
             projected = json.loads(render_legacy_ecosystem(loaded.value))
             _pin_v4_projection(projected, v4)

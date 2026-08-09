@@ -22,29 +22,19 @@ if TYPE_CHECKING:
     from .audit_logger import AuditLogger
     from .capability_grant_manager import CapabilityGrantManager
     from .capability_trust_store import CapabilityTrustStore
-    from .container_orchestrator import ContainerOrchestrator
     from .desktop_capability import DesktopCapabilityHandler
     from .diagnostics import Diagnostics
-    from .docker_capability import DockerCapabilityHandler
-    from .egress_proxy import UDSEgressProxyManager
     from .event_bus import EventBus
-    from .flow_composer import FlowComposer
-    from .flow_modifier import FlowModifierApplier, FlowModifierLoader
     from .function_alias import FunctionAliasRegistry
     from .health import HealthChecker
     from .hmac_key_manager import HMACKeyManager
-    from .host_privilege_manager import HostPrivilegeManager
     from .install_journal import InstallJournal
-    from .lib_executor import LibExecutor
     from .metrics import MetricsCollector
     from .network_grant_manager import NetworkGrantManager
     from .profiling import Profiler
-    from .python_file_executor import PythonFileExecutor
-    from .secure_executor import SecureExecutor
     from .secrets_grant_manager import SecretsGrantManager
     from .secrets_store import SecretsStore
     from .store_registry import StoreRegistry
-    from .unit_executor import UnitExecutor
     from .vocab_registry import VocabRegistry
 
 _this_module = sys.modules.get(__name__)
@@ -207,7 +197,8 @@ def get_container() -> DIContainer:
     """
     Get the global DIContainer, lazily initialized.
 
-    The first call registers all default factories.
+    The first call registers Host support services only. Pack execution is
+    installed explicitly as a captured v4 Broker session.
 
     Returns:
         DIContainer instance.
@@ -242,14 +233,8 @@ def _register_defaults(container: DIContainer) -> None:
     Register all default service factories on a container.
 
     Wave 1-4: AuditLogger, HMACKeyManager, VocabRegistry,
-              NetworkGrantManager, StoreRegistry,
-              ApprovalManager, PermissionManager,
-              ContainerOrchestrator, HostPrivilegeManager,
-              FlowComposer, FunctionAliasRegistry,
-              SecretsStore, FlowModifierLoader, FlowModifierApplier
-    Wave 5:   PackAPIServer, EgressProxyManager,
-              PythonFileExecutor, SecureExecutor,
-              LibExecutor, UnitExecutor, CapabilityExecutor
+              NetworkGrantManager, StoreRegistry, ApprovalManager,
+              FunctionAliasRegistry, SecretsStore
     Wave 8:   Diagnostics, InstallJournal, InterfaceRegistry,
               EventBus, ComponentLifecycleExecutor
     Wave 15:  HealthChecker, MetricsCollector, Profiler
@@ -305,18 +290,6 @@ def _register_defaults(container: DIContainer) -> None:
         return instance
 
     # --- Wave 4: orchestration / composition ---
-    def _container_orchestrator_factory() -> "ContainerOrchestrator":
-        from .container_orchestrator import ContainerOrchestrator
-        return ContainerOrchestrator()
-
-    def _host_privilege_manager_factory() -> "HostPrivilegeManager":
-        from .host_privilege_manager import HostPrivilegeManager
-        return HostPrivilegeManager()
-
-    def _flow_composer_factory() -> "FlowComposer":
-        from .flow_composer import FlowComposer
-        return FlowComposer()
-
     def _function_alias_registry_factory() -> "FunctionAliasRegistry":
         from .function_alias import FunctionAliasRegistry
         return FunctionAliasRegistry()
@@ -328,38 +301,6 @@ def _register_defaults(container: DIContainer) -> None:
     def _secrets_grant_manager_factory() -> "SecretsGrantManager":
         from .secrets_grant_manager import SecretsGrantManager
         return SecretsGrantManager()
-
-    def _modifier_loader_factory() -> "FlowModifierLoader":
-        from .flow_modifier import FlowModifierLoader
-        return FlowModifierLoader()
-
-    def _modifier_applier_factory() -> "FlowModifierApplier":
-        from .flow_modifier import FlowModifierApplier
-        return FlowModifierApplier()
-
-    def _egress_proxy_manager_factory() -> "UDSEgressProxyManager":
-        from .egress_proxy import UDSEgressProxyManager
-        c = get_container()
-        return UDSEgressProxyManager(
-            network_grant_manager=c.get("network_grant_manager"),
-            audit_logger=c.get_or_none("audit_logger"),
-        )
-
-    def _python_file_executor_factory() -> "PythonFileExecutor":
-        from .python_file_executor import PythonFileExecutor
-        return PythonFileExecutor()
-
-    def _secure_executor_factory() -> "SecureExecutor":
-        from .secure_executor import SecureExecutor
-        return SecureExecutor()
-
-    def _lib_executor_factory() -> "LibExecutor":
-        from .lib_executor import LibExecutor
-        return LibExecutor()
-
-    def _unit_executor_factory() -> "UnitExecutor":
-        from .unit_executor import UnitExecutor
-        return UnitExecutor()
 
     # --- Wave 8: Kernel core services ---
     def _diagnostics_factory() -> "Diagnostics":
@@ -387,13 +328,6 @@ def _register_defaults(container: DIContainer) -> None:
         from .profiling import Profiler
         return Profiler()
 
-    # --- Wave 22: Docker capability ---
-    def _docker_capability_handler_factory() -> "DockerCapabilityHandler":
-        from .docker_capability import DockerCapabilityHandler
-        return DockerCapabilityHandler()
-
-
-
     # --- Wave V-4: Desktop app capability ---
     def _desktop_capability_handler_factory() -> "DesktopCapabilityHandler":
         from .desktop_capability import DesktopCapabilityHandler
@@ -414,25 +348,14 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("approval_manager", _approval_manager_factory)
     container.register("capability_trust_store", _capability_trust_store_factory)
     container.register("capability_grant_manager", _capability_grant_manager_factory)
-    container.register("container_orchestrator", _container_orchestrator_factory)
-    container.register("host_privilege_manager", _host_privilege_manager_factory)
-    container.register("flow_composer", _flow_composer_factory)
     container.register("function_alias_registry", _function_alias_registry_factory)
     container.register("secrets_store", _secrets_store_factory)
     container.register("secrets_grant_manager", _secrets_grant_manager_factory)
-    container.register("modifier_loader", _modifier_loader_factory)
-    container.register("modifier_applier", _modifier_applier_factory)
-    container.register("egress_proxy_manager", _egress_proxy_manager_factory)
-    container.register("python_file_executor", _python_file_executor_factory)
-    container.register("secure_executor", _secure_executor_factory)
-    container.register("lib_executor", _lib_executor_factory)
-    container.register("unit_executor", _unit_executor_factory)
     container.register("diagnostics", _diagnostics_factory)
     container.register("install_journal", _install_journal_factory)
     container.register("event_bus", _event_bus_factory)
     container.register("health_checker", _health_checker_factory)
     container.register("metrics_collector", _metrics_collector_factory)
     container.register("profiler", _profiler_factory)
-    container.register("docker_capability_handler", _docker_capability_handler_factory)
     container.register("desktop_capability_handler", _desktop_capability_handler_factory)
     container.register("managed_sandbox_supervisor", _managed_sandbox_supervisor_factory)
