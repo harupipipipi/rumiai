@@ -19,9 +19,12 @@ export function PackDetail() {
   const packsError = useAppStore(state => state.packsError);
   const packTogglePending = useAppStore(state => state.packTogglePending);
   const packInstallPending = useAppStore(state => state.packInstallPending);
+  const packApprovalPending = useAppStore(state => state.packApprovalPending);
   const loadPacks = useAppStore(state => state.loadPacks);
   const installPack = useAppStore(state => state.installPack);
   const approvePack = useAppStore(state => state.approvePack);
+  const revokePackApproval = useAppStore(state => state.revokePackApproval);
+  const showDialog = useAppStore(state => state.showDialog);
   const togglePack = useAppStore(state => state.togglePack);
   const addToast = useAppStore(state => state.addToast);
   const [installing, setInstalling] = useState(false);
@@ -93,6 +96,22 @@ export function PackDetail() {
     }
   };
 
+  const approvalRevoked = pack.approvalStatus === 'revoked'
+    || pack.approvalReason === 'approval_revoked'
+    || pack.approvalIssues.includes('approval_revoked');
+
+  const handleRevoke = () => {
+    if (!pack.installed || !pack.approved || pack.type === 'core') return;
+    showDialog({
+      title: `Revoke ${pack.name} approval?`,
+      message: `This will revoke Tobkiri approval and access for ${pack.name}. The Pack will be disabled, and its capabilities will be unavailable until a new approval succeeds.`,
+      confirmText: 'Revoke approval',
+      confirmPendingText: 'Revoking approval…',
+      cancelText: 'Keep approval',
+      onConfirm: () => revokePackApproval(pack.id),
+    });
+  };
+
   return (
     <div className="flex-1 overflow-y-auto page-enter">
       <div className="mx-auto max-w-4xl px-6 py-8 flex flex-col gap-6">
@@ -110,6 +129,9 @@ export function PackDetail() {
                 <Badge variant={pack.installed ? 'success' : 'outline'}>
                   {pack.installed ? 'Installed' : 'Available'}
                 </Badge>
+                <Badge variant={pack.approved ? 'success' : approvalRevoked ? 'destructive' : 'warning'}>
+                  {pack.approved ? 'Approved' : approvalRevoked ? 'Approval revoked' : 'Needs approval'}
+                </Badge>
               </div>
               <p className="mt-0.5 text-sm text-text-muted">{pack.description}</p>
             </div>
@@ -124,17 +146,42 @@ export function PackDetail() {
                 Install
               </Button>
             ) : !pack.approved ? (
-              <Button size="sm" onClick={() => void handleApprove()} loading={approving}>
-                Approve
-              </Button>
+              <div className="flex items-center gap-3">
+                {approvalRevoked ? (
+                  <span className="max-w-56 text-right text-xs text-text-muted" role="status">
+                    Tobkiri approval revoked. Approve again before enabling this Pack.
+                  </span>
+                ) : null}
+                <Button size="sm" onClick={() => void handleApprove()} loading={approving}>
+                  Approve
+                </Button>
+              </div>
             ) : (
               <>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="min-h-11"
+                  onClick={handleRevoke}
+                  loading={Boolean(packApprovalPending[pack.id])}
+                  aria-busy={Boolean(packApprovalPending[pack.id])}
+                  disabled={pack.type === 'core' || Boolean(packApprovalPending[pack.id])}
+                  aria-label={`Revoke approval for ${pack.name}`}
+                  title={pack.type === 'core' ? 'Core Packs cannot have approval revoked.' : undefined}
+                >
+                  {packApprovalPending[pack.id] ? 'Revoking approval…' : 'Revoke approval'}
+                </Button>
                 <span className="text-sm text-text-muted">{pack.enabled ? t('packs.enabled') : t('packs.disabled')}</span>
                 <Switch
                   checked={pack.enabled}
-                  disabled={Boolean(packTogglePending[pack.id])}
+                  disabled={
+                    pack.type === 'core'
+                    || Boolean(packTogglePending[pack.id])
+                    || Boolean(packApprovalPending[pack.id])
+                  }
                   onCheckedChange={() => { void handleToggle(); }}
                   aria-label={`Toggle ${pack.name}`}
+                  title={pack.type === 'core' ? 'Core Packs cannot be disabled.' : undefined}
                 />
               </>
             )}

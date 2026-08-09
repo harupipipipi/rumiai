@@ -14,6 +14,7 @@ import {
   fetchPresentationState,
   installPack,
   launchSelectedPresentation,
+  revokePackApproval,
   selectPresentation,
 } from './api.ts';
 
@@ -179,6 +180,36 @@ test('Home and Packs use only exact v4 frontend contract routes', async () => {
     'POST /api/pack-control/disable',
   ]);
   assert.equal(lastFetchInit?.method, 'POST');
+});
+
+test('approval revocation uses the exact typed v4 contract route and payload', async () => {
+  fetchHandler = async (input, init) => {
+    lastFetchUrl = String(input);
+    lastFetchInit = init;
+    return new Response(JSON.stringify({
+      data: {
+        pack_id: 'pack-a',
+        approved: false,
+        enabled: false,
+        approval_status: 'revoked',
+      },
+      success: true,
+    }), {headers: {'Content-Type': 'application/json'}});
+  };
+
+  const response = await revokePackApproval('pack-a');
+
+  assert.equal(
+    decodeURIComponent(lastFetchUrl.replace('/api/contracts/defaultspack/', '')),
+    'POST /api/pack-control/approval-revoke',
+  );
+  assert.deepEqual(JSON.parse(String(lastFetchInit?.body)), {pack_id: 'pack-a'});
+  assert.deepEqual(response, {
+    pack_id: 'pack-a',
+    approved: false,
+    enabled: false,
+    approval_status: 'revoked',
+  });
 });
 
 test('v4 contract failure is surfaced and never treated as a successful fallback', async () => {

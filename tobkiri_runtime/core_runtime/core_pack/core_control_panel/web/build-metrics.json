@@ -3,40 +3,40 @@
   "initial_javascript": {
     "files": [
       {
-        "file": "assets/index-CMfMtRIR.js",
-        "raw_bytes": 369834,
-        "gzip_bytes": 113635
+        "file": "assets/index-ZKgj2Rt_.js",
+        "raw_bytes": 370794,
+        "gzip_bytes": 113818
       }
     ],
-    "raw_bytes": 369834,
-    "gzip_bytes": 113635
+    "raw_bytes": 370794,
+    "gzip_bytes": 113818
   },
   "initial_css": {
     "files": [
       {
-        "file": "assets/index-_ft2ilWJ.css",
-        "raw_bytes": 59654,
-        "gzip_bytes": 11371
+        "file": "assets/index-fK11Se4O.css",
+        "raw_bytes": 59700,
+        "gzip_bytes": 11378
       }
     ],
-    "raw_bytes": 59654,
-    "gzip_bytes": 11371
+    "raw_bytes": 59700,
+    "gzip_bytes": 11378
   },
   "initial_assets": {
     "files": [
       {
-        "file": "assets/index-CMfMtRIR.js",
-        "raw_bytes": 369834,
-        "gzip_bytes": 113635
+        "file": "assets/index-ZKgj2Rt_.js",
+        "raw_bytes": 370794,
+        "gzip_bytes": 113818
       },
       {
-        "file": "assets/index-_ft2ilWJ.css",
-        "raw_bytes": 59654,
-        "gzip_bytes": 11371
+        "file": "assets/index-fK11Se4O.css",
+        "raw_bytes": 59700,
+        "gzip_bytes": 11378
       }
     ],
-    "raw_bytes": 429488,
-    "gzip_bytes": 125006
+    "raw_bytes": 430494,
+    "gzip_bytes": 125196
   },
   "all_javascript": {
     "files": [
@@ -46,28 +46,28 @@
         "gzip_bytes": 1054
       },
       {
-        "file": "assets/InlineLoadError-7BiSRjyA.js",
+        "file": "assets/InlineLoadError-CMump5U5.js",
         "raw_bytes": 2246,
-        "gzip_bytes": 1066
+        "gzip_bytes": 1067
       },
       {
-        "file": "assets/index-CMfMtRIR.js",
-        "raw_bytes": 369834,
-        "gzip_bytes": 113635
+        "file": "assets/index-ZKgj2Rt_.js",
+        "raw_bytes": 370794,
+        "gzip_bytes": 113818
       },
       {
-        "file": "assets/PackDetail-CoO0hUNW.js",
-        "raw_bytes": 5922,
-        "gzip_bytes": 1731
+        "file": "assets/PackDetail-DcfZnxU8.js",
+        "raw_bytes": 7297,
+        "gzip_bytes": 2171
       },
       {
-        "file": "assets/Packs-DOqgYKfm.js",
-        "raw_bytes": 6441,
-        "gzip_bytes": 2396
+        "file": "assets/Packs-DuQBtbKp.js",
+        "raw_bytes": 7626,
+        "gzip_bytes": 2762
       }
     ],
-    "raw_bytes": 387149,
-    "gzip_bytes": 119882
+    "raw_bytes": 390669,
+    "gzip_bytes": 120872
   },
   "routes": {
     "src/pages/Setup.tsx": {
@@ -80,45 +80,45 @@
       "present": true,
       "files": [
         {
-          "file": "assets/Packs-DOqgYKfm.js",
-          "raw_bytes": 6441,
-          "gzip_bytes": 2396
+          "file": "assets/Packs-DuQBtbKp.js",
+          "raw_bytes": 7626,
+          "gzip_bytes": 2762
         },
         {
-          "file": "assets/index-CMfMtRIR.js",
-          "raw_bytes": 369834,
-          "gzip_bytes": 113635
+          "file": "assets/index-ZKgj2Rt_.js",
+          "raw_bytes": 370794,
+          "gzip_bytes": 113818
         },
         {
-          "file": "assets/InlineLoadError-7BiSRjyA.js",
+          "file": "assets/InlineLoadError-CMump5U5.js",
           "raw_bytes": 2246,
-          "gzip_bytes": 1066
+          "gzip_bytes": 1067
         }
       ],
-      "raw_bytes": 378521,
-      "gzip_bytes": 117097
+      "raw_bytes": 380666,
+      "gzip_bytes": 117647
     },
     "src/pages/PackDetail.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/PackDetail-CoO0hUNW.js",
-          "raw_bytes": 5922,
-          "gzip_bytes": 1731
+          "file": "assets/PackDetail-DcfZnxU8.js",
+          "raw_bytes": 7297,
+          "gzip_bytes": 2171
         },
         {
-          "file": "assets/index-CMfMtRIR.js",
-          "raw_bytes": 369834,
-          "gzip_bytes": 113635
+          "file": "assets/index-ZKgj2Rt_.js",
+          "raw_bytes": 370794,
+          "gzip_bytes": 113818
         },
         {
-          "file": "assets/InlineLoadError-7BiSRjyA.js",
+          "file": "assets/InlineLoadError-CMump5U5.js",
           "raw_bytes": 2246,
-          "gzip_bytes": 1066
+          "gzip_bytes": 1067
         }
       ],
-      "raw_bytes": 378002,
-      "gzip_bytes": 116432
+      "raw_bytes": 380337,
+      "gzip_bytes": 117056
     }
   }
 }

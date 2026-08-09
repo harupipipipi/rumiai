@@ -6,6 +6,7 @@ import {
   enablePack as apiEnablePack,
   fetchPacks,
   installPack as apiInstallPack,
+  revokePackApproval as apiRevokePackApproval,
 } from './lib/api';
 import type {ApiSupervisorDashboard} from './lib/apiTypes';
 import {transformPacks} from './lib/transforms';
@@ -149,9 +150,11 @@ interface AppState {
   packsError: string | null;
   packInstallPending: Record<string, boolean>;
   packTogglePending: Record<string, boolean>;
+  packApprovalPending: Record<string, boolean>;
   loadPacks: () => Promise<void>;
   installPack: (id: string) => Promise<void>;
   approvePack: (id: string) => Promise<void>;
+  revokePackApproval: (id: string) => Promise<void>;
   togglePack: (id: string) => Promise<boolean>;
   profile: Profile;
 }
@@ -252,6 +255,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   packsError: null,
   packInstallPending: {},
   packTogglePending: {},
+  packApprovalPending: {},
 
   loadPacks: () => {
     if (packsLoadPromise) return packsLoadPromise;
@@ -312,6 +316,48 @@ export const useAppStore = create<AppState>((set, get) => ({
       const message = error instanceof Error ? error.message : 'Failed to approve pack';
       get().addToast(message, 'error');
       throw error;
+    }
+  },
+
+  revokePackApproval: async (id) => {
+    const state = get();
+    const pack = state.packs.find((candidate) => candidate.id === id);
+    if (
+      !pack
+      || !pack.installed
+      || !pack.approved
+      || pack.type === 'core'
+      || state.packApprovalPending[id]
+    ) return;
+
+    set((current) => ({
+      packApprovalPending: {...current.packApprovalPending, [id]: true},
+    }));
+    try {
+      const response = await apiRevokePackApproval(id);
+      if (
+        response.pack_id !== id
+        || response.approved
+        || response.approval_status !== 'revoked'
+      ) {
+        throw new Error('Tobkiri did not confirm Pack approval revocation.');
+      }
+      await get().loadPacks();
+      const refreshedPack = get().packs.find((candidate) => candidate.id === id);
+      if (!refreshedPack || refreshedPack.approved || refreshedPack.enabled) {
+        throw new Error('Tobkiri catalog did not confirm Pack approval revocation.');
+      }
+      get().addToast('Pack approval revoked.', 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to revoke Pack approval';
+      get().addToast(message, 'error');
+      throw error;
+    } finally {
+      set((current) => {
+        const pending = {...current.packApprovalPending};
+        delete pending[id];
+        return {packApprovalPending: pending};
+      });
     }
   },
 

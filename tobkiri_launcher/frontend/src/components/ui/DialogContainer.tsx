@@ -75,7 +75,8 @@ export function DialogContainer() {
   }, [closeDialog, isConfirming]);
 
   const handleConfirm = useCallback(async () => {
-    if (!dialog || isConfirming) return;
+    if (!dialog || isConfirmingRef.current) return;
+    isConfirmingRef.current = true;
     setIsConfirming(true);
     try {
       await dialog.onConfirm();
@@ -83,9 +84,10 @@ export function DialogContainer() {
     } catch (error) {
       console.error('Dialog confirmation failed:', error);
     } finally {
+      isConfirmingRef.current = false;
       setIsConfirming(false);
     }
-  }, [dialog, closeDialog, isConfirming]);
+  }, [dialog, closeDialog]);
 
   if (!dialog) return null;
 

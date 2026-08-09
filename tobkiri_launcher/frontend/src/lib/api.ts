@@ -416,6 +416,7 @@ function dispatchPackControl<T>(
   const targets: Record<string, string> = {
     'approval.approve': '/api/pack-control/approval-approve',
     'approval.candidate': '/api/pack-control/approval-candidate',
+    'approval.revoke': '/api/pack-control/approval-revoke',
     'pack.disable': '/api/pack-control/disable',
     'pack.enable': '/api/pack-control/enable',
     'pack.install': '/api/pack-control/install',
@@ -454,6 +455,10 @@ export function enablePack(id: string): Promise<PackToggleResponseData> {
 
 export function disablePack(id: string): Promise<PackToggleResponseData> {
   return dispatchPackControl<PackToggleResponseData>('pack.disable', {pack_id: id});
+}
+
+export function revokePackApproval(id: string): Promise<PackApprovalResponseData> {
+  return dispatchPackControl<PackApprovalResponseData>('approval.revoke', {pack_id: id});
 }
 
 export function restartKernel(): Promise<KernelRestartResponseData> {

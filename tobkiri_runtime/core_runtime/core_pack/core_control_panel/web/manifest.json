@@ -9,15 +9,15 @@
     "file": "assets/tobkiri-launcher-icon-A0Q09elZ.png",
     "src": "../assets/app-icon/tobkiri-launcher-icon.png"
   },
-  "_InlineLoadError-7BiSRjyA.js": {
-    "file": "assets/InlineLoadError-7BiSRjyA.js",
+  "_InlineLoadError-CMump5U5.js": {
+    "file": "assets/InlineLoadError-CMump5U5.js",
     "name": "InlineLoadError",
     "imports": [
       "index.html"
     ]
   },
   "index.html": {
-    "file": "assets/index-CMfMtRIR.js",
+    "file": "assets/index-ZKgj2Rt_.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -27,30 +27,30 @@
       "src/pages/PackDetail.tsx"
     ],
     "css": [
-      "assets/index-_ft2ilWJ.css"
+      "assets/index-fK11Se4O.css"
     ],
     "assets": [
       "assets/tobkiri-launcher-icon-A0Q09elZ.png"
     ]
   },
   "src/pages/PackDetail.tsx": {
-    "file": "assets/PackDetail-CoO0hUNW.js",
+    "file": "assets/PackDetail-DcfZnxU8.js",
     "name": "PackDetail",
     "src": "src/pages/PackDetail.tsx",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
-      "_InlineLoadError-7BiSRjyA.js"
+      "_InlineLoadError-CMump5U5.js"
     ]
   },
   "src/pages/Packs.tsx": {
-    "file": "assets/Packs-DOqgYKfm.js",
+    "file": "assets/Packs-DuQBtbKp.js",
     "name": "Packs",
     "src": "src/pages/Packs.tsx",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
-      "_InlineLoadError-7BiSRjyA.js"
+      "_InlineLoadError-CMump5U5.js"
     ]
   }
 }

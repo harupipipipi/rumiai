@@ -15,6 +15,7 @@ type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'succe
 
 function approvalBadgeVariant(pack: Pack): BadgeVariant {
   if (!pack.installed) return 'outline';
+  if (isApprovalRevoked(pack)) return 'destructive';
   if (pack.approved) return 'success';
   if (pack.approvalStatus === 'pending' || pack.approvalStatus === 'installed') return 'warning';
   if (pack.criticalChanged || ['blocked', 'error', 'modified'].includes(pack.approvalStatus)) return 'destructive';
@@ -23,6 +24,7 @@ function approvalBadgeVariant(pack: Pack): BadgeVariant {
 
 function approvalBadgeLabel(pack: Pack): string {
   if (!pack.installed) return 'Install required';
+  if (isApprovalRevoked(pack)) return 'Approval revoked';
   if (pack.approved) return 'Approved';
   if (pack.approvalStatus === 'pending' || pack.approvalStatus === 'installed') return 'Needs approval';
   if (pack.approvalStatus === 'blocked') return 'Blocked';
@@ -32,7 +34,16 @@ function approvalBadgeLabel(pack: Pack): string {
 
 function approvalIssueText(pack: Pack): string {
   if (!pack.installed) return 'Install this Pack before requesting approval.';
+  if (isApprovalRevoked(pack)) {
+    return 'Tobkiri approval has been revoked. Approve again before enabling this Pack.';
+  }
   return pack.approvalReason || pack.approvalIssues[0] || 'Pack approval needs attention.';
+}
+
+function isApprovalRevoked(pack: Pack): boolean {
+  return pack.approvalStatus === 'revoked'
+    || pack.approvalReason === 'approval_revoked'
+    || pack.approvalIssues.includes('approval_revoked');
 }
 
 function PackListSkeleton() {
@@ -52,9 +63,12 @@ export function Packs() {
   const packsError = useAppStore(state => state.packsError);
   const packInstallPending = useAppStore(state => state.packInstallPending);
   const packTogglePending = useAppStore(state => state.packTogglePending);
+  const packApprovalPending = useAppStore(state => state.packApprovalPending);
   const loadPacks = useAppStore(state => state.loadPacks);
   const installPack = useAppStore(state => state.installPack);
   const approvePack = useAppStore(state => state.approvePack);
+  const revokePackApproval = useAppStore(state => state.revokePackApproval);
+  const showDialog = useAppStore(state => state.showDialog);
   const togglePack = useAppStore(state => state.togglePack);
   const [search, setSearch] = useState('');
   const [installingPackId, setInstallingPackId] = useState<string | null>(null);
@@ -82,6 +96,18 @@ export function Packs() {
     } finally {
       setInstallingPackId(null);
     }
+  };
+
+  const handleRevoke = (pack: Pack) => {
+    if (!pack.installed || !pack.approved || pack.type === 'core') return;
+    showDialog({
+      title: `Revoke ${pack.name} approval?`,
+      message: `This will revoke Tobkiri approval and access for ${pack.name}. The Pack will be disabled, and its capabilities will be unavailable until a new approval succeeds.`,
+      confirmText: 'Revoke approval',
+      confirmPendingText: 'Revoking approval…',
+      cancelText: 'Keep approval',
+      onConfirm: () => revokePackApproval(pack.id),
+    });
   };
 
   return (
@@ -193,13 +219,33 @@ export function Packs() {
                       </Button>
                     ) : null}
                     {pack.installed && pack.approved ? (
-                      <Switch
-                        checked={pack.enabled}
-                        disabled={Boolean(packTogglePending[pack.id])}
-                        onCheckedChange={() => { void togglePack(pack.id); }}
-                        aria-label={`Toggle ${pack.name}`}
-                        className="relative after:absolute after:-inset-2.5"
-                      />
+                      <>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="min-h-11"
+                          onClick={() => handleRevoke(pack)}
+                          loading={Boolean(packApprovalPending[pack.id])}
+                          aria-busy={Boolean(packApprovalPending[pack.id])}
+                          disabled={pack.type === 'core' || Boolean(packApprovalPending[pack.id])}
+                          aria-label={`Revoke approval for ${pack.name}`}
+                          title={pack.type === 'core' ? 'Core Packs cannot have approval revoked.' : undefined}
+                        >
+                          {packApprovalPending[pack.id] ? 'Revoking approval…' : 'Revoke approval'}
+                        </Button>
+                        <Switch
+                          checked={pack.enabled}
+                          disabled={
+                            pack.type === 'core'
+                            || Boolean(packTogglePending[pack.id])
+                            || Boolean(packApprovalPending[pack.id])
+                          }
+                          onCheckedChange={() => { void togglePack(pack.id); }}
+                          aria-label={`Toggle ${pack.name}`}
+                          title={pack.type === 'core' ? 'Core Packs cannot be disabled.' : undefined}
+                          className="relative after:absolute after:-inset-2.5"
+                        />
+                      </>
                     ) : null}
                   </div>
                 </div>

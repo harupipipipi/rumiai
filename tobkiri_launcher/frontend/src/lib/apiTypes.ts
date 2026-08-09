@@ -221,6 +221,7 @@ export interface PackApprovalResponseData extends PackControlBinding {
   pack_id: string;
   approved: boolean;
   approval_status: string;
+  enabled?: boolean;
 }
 
 export interface KernelRestartResponseData {
