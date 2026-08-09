@@ -240,11 +240,11 @@ def test_profile_identity_traversal_fails_before_control_state_access(
         _invoke(session, "catalog.read", {"profile_id": "../escaped"})
 
 
-def test_real_http_local_auth_dispatch_lifecycle_has_zero_legacy_calls(
+def test_generic_dispatch_is_retired_without_client_selected_execution(
     captured_session,
 ) -> None:
-    """Production-shaped HTTP auth/CSRF transport never calls a legacy route."""
-    session, _state_path, _user_data = captured_session
+    """The generic endpoint never trusts client-selected Broker identities."""
+    session, state_path, _user_data = captured_session
     auth = PanelAuthManager(bootstrap_secret="desktop-bootstrap")
     server = PackAPIServer(
         host="127.0.0.1",
@@ -259,10 +259,7 @@ def test_real_http_local_auth_dispatch_lifecycle_has_zero_legacy_calls(
     opener = urllib.request.build_opener(
         urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
     )
-    paths: list[str] = []
-
     def post(path: str, body: dict, headers: dict | None = None) -> dict:
-        paths.append(path)
         request = urllib.request.Request(
             origin + path,
             data=json.dumps(body).encode("utf-8"),
@@ -285,6 +282,13 @@ def test_real_http_local_auth_dispatch_lifecycle_has_zero_legacy_calls(
         with pytest.raises(urllib.error.HTTPError) as denied:
             post(path, body, headers)
         assert denied.value.code == expected_status
+        payload = json.loads(denied.value.read().decode("utf-8"))
+        assert payload["data"] == {
+            "api_version": "io.tobkiri.pack-api.v4",
+            "retired_route": "/api/v4/dispatch",
+            "state": "legacy_api_retired",
+            "write_set": [],
+        }
 
     try:
         dispatch_body = {
@@ -292,11 +296,12 @@ def test_real_http_local_auth_dispatch_lifecycle_has_zero_legacy_calls(
             "operation_id": "catalog.read",
             "payload": {},
         }
-        assert_post_denied("/api/v4/dispatch", dispatch_body, 401)
+        before = state_path.read_bytes()
+        assert_post_denied("/api/v4/dispatch", dispatch_body, 410)
         assert_post_denied(
             "/api/v4/dispatch",
             dispatch_body,
-            401,
+            410,
             {"Authorization": "Bearer formerly-valid-internal-token"},
         )
         bootstrap = post(
@@ -309,53 +314,16 @@ def test_real_http_local_auth_dispatch_lifecycle_has_zero_legacy_calls(
             {"code": bootstrap["data"]["code"]},
         )
         csrf = exchange["data"]["csrf_token"]
-        assert_post_denied("/api/v4/dispatch", dispatch_body, 401)
-
-        def dispatch(operation_id: str, payload: dict | None = None) -> dict:
-            try:
-                envelope = post(
-                    "/api/v4/dispatch",
-                    {
-                        "contract_id": PACK_CONTROL_CONTRACT,
-                        "operation_id": operation_id,
-                        "payload": payload or {},
-                    },
-                    {"X-Rumi-CSRF": csrf},
-                )
-            except urllib.error.HTTPError as error:
-                pytest.fail(error.read().decode("utf-8"))
-            assert envelope["success"] is True
-            return envelope["data"]
-
-        assert dispatch("catalog.read")["count"] == 142
-        dispatch("pack.install", {"pack_id": TARGET_PACK})
-        candidate = dispatch("approval.candidate", {"pack_id": TARGET_PACK})
-        dispatch(
-            "approval.approve",
+        assert_post_denied(
+            "/api/v4/dispatch",
             {
-                "pack_id": TARGET_PACK,
-                "candidate_id": candidate["candidate_id"],
+                "contract_id": "attacker.selected.contract",
+                "operation_id": "attacker.selected.operation",
+                "payload": {"pack_id": TARGET_PACK},
             },
+            410,
+            {"X-Rumi-CSRF": csrf},
         )
-        assert dispatch("pack.enable", {"pack_id": TARGET_PACK})["enabled"] is True
-        assert dispatch("runtime.restart")["restart_requested"] is True
-        restarted_status = dispatch(
-            "pack.status",
-            {"pack_id": TARGET_PACK},
-        )
-        assert restarted_status["enabled"] is True
-        assert restarted_status["approved"] is True
-        assert dispatch("pack.disable", {"pack_id": TARGET_PACK})["enabled"] is False
-        assert dispatch("runtime.restart")["restart_requested"] is True
-        disabled_status = dispatch("pack.status", {"pack_id": TARGET_PACK})
-        assert disabled_status["enabled"] is False
-        assert disabled_status["approved"] is True
-        assert all(path != "/api/panel/packs" for path in paths)
-        assert not any(path.startswith("/api/panel/packs/") for path in paths)
+        assert state_path.read_bytes() == before
     finally:
-        from core_runtime.restart_control import (
-            clear_kernel_restart_request,
-        )
-
-        clear_kernel_restart_request()
         server.stop()

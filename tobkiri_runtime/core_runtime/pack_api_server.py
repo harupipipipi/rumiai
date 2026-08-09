@@ -760,65 +760,6 @@ class PackAPIHandler(
         )
         self._send_response(APIResponse(True, data=state))
 
-    def _handle_v4_dispatch(self, body: Mapping[str, object]) -> None:
-        session = self._dispatch_session
-        panel_session = self._panel_session
-        if session is None:
-            self._send_response(
-                APIResponse(False, error="Captured v4 dispatch session is unavailable"),
-                503,
-            )
-            return
-        session_id_value = panel_session.get("session_id") if panel_session else None
-        contract_value = body.get("contract_id")
-        operation_value = body.get("operation_id")
-        payload_value = body.get("payload")
-        if (
-            not isinstance(session_id_value, str)
-            or not session_id_value
-            or not isinstance(contract_value, str)
-            or not contract_value.strip()
-            or not isinstance(operation_value, str)
-            or not operation_value.strip()
-            or not isinstance(payload_value, dict)
-            or any(not isinstance(key, str) for key in payload_value)
-        ):
-            self._send_response(
-                APIResponse(
-                    False,
-                    data={"state": "broker_dispatch_denied", "code": "invalid_dispatch"},
-                    error="Dispatch requires exact contract, operation, and object payload",
-                ),
-                400,
-            )
-            return
-        payload: dict[str, object] = {
-            key: value for key, value in payload_value.items() if isinstance(key, str)
-        }
-        payload["_session_id"] = session_id_value
-        try:
-            result = session.invoke(
-                contract_value.strip(),
-                operation_value.strip(),
-                payload,
-            )
-            self._refresh_after_operation(operation_value.strip())
-        except (HostCoreError, KeyError, RuntimeError, ValueError) as error:
-            code = getattr(error, "code", "invalid_dispatch")
-            self._send_response(
-                APIResponse(
-                    False,
-                    data={
-                        "state": "broker_dispatch_denied",
-                        "code": str(code),
-                    },
-                    error=str(error),
-                ),
-                409,
-            )
-            return
-        self._send_response(APIResponse(True, data=dict(result)))
-
     def _serve_panel_bootstrap_page(self) -> None:
         document = b"""<!doctype html><meta charset=\"utf-8\"><title>Tobkiri</title>
 <script>
@@ -969,13 +910,8 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
                 self._send_mapping_result(self._setup_install_pack(body))
             return
         if path == "/api/v4/dispatch":
-            if not self._check_auth("POST", path):
-                self._discard_request_body()
-                self._send_response(APIResponse(False, error="Unauthorized"), 401)
-                return
-            body = self._parse_object_body()
-            if body is not None:
-                self._handle_v4_dispatch(body)
+            self._discard_request_body()
+            self._send_retired_api(path)
             return
         if self._retired_api_path(path):
             self._discard_request_body()

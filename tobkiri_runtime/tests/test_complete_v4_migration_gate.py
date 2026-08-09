@@ -84,6 +84,14 @@ LEGACY_AUTHORITY_MODULES = frozenset(
         "backend_core.ecosystem.registry",
     }
 )
+LEGACY_ENTRY_MODULES = frozenset(
+    {
+        "core_runtime.global_contracts.manifest",
+        "core_runtime.manifest_projection",
+        "core_runtime.setup_pack",
+        "ecosystem.setup_pack",
+    }
+)
 INSTALLED_LOOKUP_NAMES = frozenset(
     {
         "all_installed",
@@ -709,6 +717,15 @@ def _legacy_aliases(tree: ast.AST) -> set[str]:
     return aliases
 
 
+def _is_legacy_entry_module(module: str) -> bool:
+    """Match retired entry roots and every importable child module."""
+
+    return any(
+        module == root or module.startswith(root + ".")
+        for root in LEGACY_ENTRY_MODULES
+    )
+
+
 def _ast_legacy_runtime_findings_for_tree(path: Path, tree: ast.AST) -> list[dict[str, Any]]:
     """Find executable legacy imports and calls in one reachable module."""
     findings: list[dict[str, Any]] = []
@@ -720,6 +737,7 @@ def _ast_legacy_runtime_findings_for_tree(path: Path, tree: ast.AST) -> list[dic
                 module = alias.name
                 if (
                     module in LEGACY_AUTHORITY_MODULES
+                    or _is_legacy_entry_module(module)
                     or module.rsplit(".", 1)[-1] in LEGACY_SYMBOLS
                 ):
                     findings.append(
@@ -733,7 +751,11 @@ def _ast_legacy_runtime_findings_for_tree(path: Path, tree: ast.AST) -> list[dic
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
             imported = {alias.name for alias in node.names}
-            if module in LEGACY_AUTHORITY_MODULES or imported & LEGACY_SYMBOLS:
+            if (
+                module in LEGACY_AUTHORITY_MODULES
+                or _is_legacy_entry_module(module)
+                or imported & LEGACY_SYMBOLS
+            ):
                 findings.append(
                     _finding(
                         path,
@@ -1564,6 +1586,22 @@ def dispatch(registry):
         Path("legacy_fixture.py"), legacy_fixture
     )
     assert any(item["rule"] == "runtime_installed_lookup" for item in fixture_findings)
+    retired_entry_fixture = ast.parse(
+        """
+from core_runtime.setup_pack import SetupPackManager
+from core_runtime.global_contracts.manifest import load_manifest
+from ecosystem.setup_pack.pack_selector import PackSelector
+""",
+        filename="retired_entry_fixture.py",
+    )
+    retired_findings = _ast_legacy_runtime_findings_for_tree(
+        Path("retired_entry_fixture.py"), retired_entry_fixture
+    )
+    assert {item["module"] for item in retired_findings} == {
+        "core_runtime.global_contracts.manifest",
+        "core_runtime.setup_pack",
+        "ecosystem.setup_pack.pack_selector",
+    }
     _assert_zero(
         "legacy Registry/all-installed runtime lookup",
         _ast_legacy_runtime_findings()
@@ -1611,6 +1649,7 @@ for cycle in (1, 2):
             ("GET", "/api/runtime/available"),
             ("POST", "/api/packs/scan"),
             ("POST", "/api/routes/reload"),
+            ("POST", "/api/v4/dispatch"),
             ("GET", "/api/setup/complete"),
             ("POST", "/api/setup/complete"),
             ("PUT", "/api/setup/complete"),
@@ -1656,6 +1695,9 @@ blocked_modules = sorted(
         "core_runtime.manifest_loader",
         "core_runtime.api.control_panel_handlers",
         "core_runtime.api.router_table",
+        "core_runtime.global_contracts.manifest",
+        "core_runtime.setup_pack",
+        "ecosystem.setup_pack.pack_selector",
     }
 )
 print(
@@ -1685,6 +1727,7 @@ print(
         [1, "GET", "/api/runtime/available", 410, "legacy_api_retired", []],
         [1, "POST", "/api/packs/scan", 410, "legacy_api_retired", []],
         [1, "POST", "/api/routes/reload", 410, "legacy_api_retired", []],
+        [1, "POST", "/api/v4/dispatch", 410, "legacy_api_retired", []],
         [1, "GET", "/api/setup/complete", 410, "legacy_setup_retired", []],
         [1, "POST", "/api/setup/complete", 410, "legacy_setup_retired", []],
         [1, "PUT", "/api/setup/complete", 410, "legacy_setup_retired", []],

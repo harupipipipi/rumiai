@@ -311,11 +311,41 @@ jobs:
       - name: Verify generated Tobkiri Launcher presentation catalog
         run: python scripts/quality/generate_presentation_catalog.py --check
 
+      - name: Verify complete v4 migration evidence is fresh
+        run: >-
+          python tobkiri_runtime/scripts/quality/scan_complete_v4_migration.py
+          --output "${RUNNER_TEMP}/complete-v4-migration.json"
+          --check-against
+          tobkiri_runtime/scripts/quality/evidence/complete_v4_migration_red_64b2240e.json
+
+      - name: Set up Node for Launcher panel gate
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tobkiri_launcher/frontend/package-lock.json
+
+      - name: Test, typecheck, build, and copy Launcher panel
+        working-directory: tobkiri_launcher/frontend
+        run: |
+          npm ci
+          npm test
+          npm run lint
+          npm run build
+
+      - name: Scan copied Launcher panel routes
+        run: python scripts/quality/scan_launcher_frontend_routes.py
+
       - name: Exercise Base Pack/Shell and structured CLI integration
         run: |
           python -m pip install pytest
           PYTHONPATH=tobkiri_runtime python -m pytest -q \
             tobkiri_runtime/tests/test_complete_v4_migration_gate.py \
+            tobkiri_runtime/tests/test_complete_v4_migration_evidence.py \
+            tobkiri_runtime/tests/test_production_frontend_contract_http.py \
+            tobkiri_runtime/tests/test_packaged_runtime_bootstrap.py \
+            tobkiri_runtime/tests/test_phase_a_setup_api.py::TestCompleteSetup::test_setup_complete_is_typed_retired_route_without_writes \
+            scripts/quality/test_launcher_frontend_routes.py \
             scripts/quality/test_presentation_catalog_v4.py \
             tobkiri_runtime/tests/test_defaultspack_integrity_scan.py \
             tobkiri_runtime/tests/test_tobkiri_host_v4_composition.py \

@@ -12,6 +12,7 @@ import argparse
 import ast
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -104,6 +105,46 @@ def build_evidence() -> dict[str, Any]:
     }
 
 
+def _semantic_document(evidence: dict[str, Any]) -> dict[str, Any]:
+    """Return evidence content without the self-referential commit field."""
+
+    normalized = json.loads(json.dumps(evidence))
+    source = normalized.get("source")
+    if isinstance(source, dict):
+        source.pop("observed_head_sha", None)
+    return normalized
+
+
+def evidence_drift(
+    tracked: dict[str, Any],
+    observed: dict[str, Any],
+) -> list[str]:
+    """Return fail-closed freshness errors for checked-in migration evidence."""
+
+    errors: list[str] = []
+    if _semantic_document(tracked) != _semantic_document(observed):
+        errors.append("tracked evidence differs from the current semantic scan")
+
+    source = tracked.get("source")
+    tracked_sha = source.get("observed_head_sha") if isinstance(source, dict) else None
+    current_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+    ).strip()
+    parent_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD^"], cwd=ROOT, text=True
+    ).strip()
+    # Evidence generated in the same commit necessarily records that commit's
+    # parent: embedding the final commit SHA would be self-referential.  No
+    # older provenance is accepted, so the next repository change must refresh
+    # and semantically compare the evidence again.
+    if tracked_sha not in {current_sha, parent_sha}:
+        errors.append(
+            "tracked observed_head_sha is stale: "
+            f"expected {current_sha} or {parent_sha}, got {tracked_sha!r}"
+        )
+    return errors
+
+
 def main() -> int:
     """Write evidence and return non-zero while any migration gate is RED."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -113,6 +154,11 @@ def main() -> int:
         default=DEFAULT_OUTPUT,
         help="evidence JSON destination (default: the checked-in quality evidence path)",
     )
+    parser.add_argument(
+        "--check-against",
+        type=Path,
+        help="compare the temporary scan against checked-in evidence",
+    )
     args = parser.parse_args()
     output = args.output if args.output.is_absolute() else ROOT / args.output
     evidence = build_evidence()
@@ -121,6 +167,22 @@ def main() -> int:
         json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    drift: list[str] = []
+    if args.check_against is not None:
+        tracked_path = (
+            args.check_against
+            if args.check_against.is_absolute()
+            else ROOT / args.check_against
+        )
+        try:
+            tracked = json.loads(tracked_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            drift = [f"tracked evidence is unreadable: {error}"]
+        else:
+            if not isinstance(tracked, dict):
+                drift = ["tracked evidence is not a JSON object"]
+            else:
+                drift = evidence_drift(tracked, evidence)
     counts = evidence["counts"]
     try:
         output_name = output.relative_to(ROOT).as_posix()
@@ -133,12 +195,13 @@ def main() -> int:
                 "status": evidence["gate"]["status"],
                 "nodeids": len(evidence["nodeids"]),
                 "counts": counts,
+                "drift": drift,
             },
             ensure_ascii=False,
             sort_keys=True,
         )
     )
-    return 0 if evidence["gate"]["status"] == "GREEN" else 1
+    return 0 if evidence["gate"]["status"] == "GREEN" and not drift else 1
 
 
 if __name__ == "__main__":
