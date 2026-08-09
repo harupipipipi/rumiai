@@ -145,6 +145,30 @@ def test_operation_catalog_routes_exact_inventoried_operation() -> None:
     catalog.validate_output(binding, {"result": 4})
 
 
+def test_operation_catalog_host_owned_resolution_uses_exact_pinned_version() -> None:
+    """Host internal projection uses the plan pin, not a global major default."""
+
+    catalog = OperationCatalog((artifact(),), (route(),))
+    assert catalog.pinned_version_range("io.tobkiri.math.v1", "increment") == "==1.2.0"
+    assert (
+        catalog.resolve_pinned("io.tobkiri.math.v1", "increment").operation.contract_version
+        == "1.2.0"
+    )
+    with pytest.raises(ResolutionError, match="incompatible"):
+        catalog.resolve("io.tobkiri.math.v1", "increment", ">=2,<3")
+
+
+def test_operation_catalog_invalid_pinned_version_fails_closed() -> None:
+    """An invalid executable Contract pin is never treated as unconstrained."""
+
+    item = artifact()
+    operation = replace(item.functions[0].operations[0], contract_version="not-a-version")
+    function = replace(item.functions[0], operations=(operation,))
+    catalog = OperationCatalog((replace(item, functions=(function,)),), (route(),))
+    with pytest.raises(ResolutionError, match="invalid pinned Contract version"):
+        catalog.resolve_pinned("io.tobkiri.math.v1", "increment")
+
+
 def test_operation_catalog_never_discovers_unpinned_provider() -> None:
     catalog = OperationCatalog((artifact(),), ())
     with pytest.raises(ResolutionError, match="not pinned"):

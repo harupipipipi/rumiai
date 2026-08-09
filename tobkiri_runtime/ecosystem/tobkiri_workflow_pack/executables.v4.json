@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:9941ec3360e23ed254621defd89b9d06bf2873d304f352ec3fac0b41a91d5a3b",
+  "catalog_digest": "sha256:c205ae628991eacdb2e2127b6b4be4205bc5a8b3858b86729de5f620bb289dce",
   "pack_id": "tobkiri_workflow_pack",
-  "source_identity": "sha256:236ee907129de64ce5d48606cf29a971cb3a84d9293ebc871e3886b55b1f5b1a",
+  "source_identity": "sha256:db703d0a99038a5b1f9dccd0258f444a6c6f9516f6f802c25baacd9e56a515e0",
   "variants": [
     {
       "architecture": "any",
@@ -10,7 +10,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "tobkiri.workflow.provider",
-      "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669",
+      "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3",
       "implementation_path": "runtime/provider.py",
       "materialization_mode": "on_demand",
       "operations": [

@@ -56,7 +56,6 @@ from ..authority.v4 import (
     authority_digest,
 )
 from ..pack_catalog_backend_v4 import (
-    PACK_CATALOG_BACKEND_ID,
     PackControlBackendV4,
 )
 from ..pack_control_v4 import (
@@ -66,6 +65,11 @@ from ..pack_control_v4 import (
     capture_valid_pack_approval,
 )
 from ..external_pack_catalog_v4 import resolve_admitted_pack_roots
+from ..host_provider_backend_v4 import (
+    ExactHostProviderBackendV4,
+    HostProviderCaptureContextV4,
+)
+from ..host_provider_hooks_v4 import load_host_provider_factory
 
 
 _PACK_CATALOG_KEY = (PACK_CONTROL_CONTRACT, "catalog.read")
@@ -655,6 +659,8 @@ def capture_production_dispatch(
         for edge in profile["requested_edges"]
     }
     captured_dynamic_approvals: dict[str, str] = {}
+    approved_host_binding_keys: set[tuple[str, str]] = set()
+    dynamic_domain_ids: dict[tuple[str, str, str], str] = {}
     for key, dynamic_binding in sorted(dynamic_bindings.items()):
         contract_id, operation_id = key
         target_pack_id = str(dynamic_binding["pack_id"])
@@ -708,6 +714,10 @@ def capture_production_dispatch(
             authority_label="dynamic-pack",
             pack_approval_revision=pack_approval_revision,
         )
+        approved_host_binding_keys.add(key)
+        dynamic_domain_ids[(contract_id, operation_id, target.principal_id)] = (
+            target_domain.domain_id
+        )
     registered_backends = tuple((backends or BackendRegistry(())).registered)
     if backends is None:
         authenticated_backend = _authenticated_packvm_backend(packvm_provisioner)
@@ -727,9 +737,80 @@ def capture_production_dispatch(
         # substituting in-process Python execution.
         registered_backends += (_UnavailablePythonPackBackend(),)
     if control_backend is not None:
-        if any(item.status.backend_id == PACK_CATALOG_BACKEND_ID for item in registered_backends):
-            raise AuthorityDenied("Pack control backend identity is duplicated")
         registered_backends += (control_backend,)
+    catalog_bindings = tuple(
+        runtime.composition.catalog.resolve_pinned(
+            str(binding["contract_id"]),
+            str(binding["operation_id"]),
+        )
+        for binding in plan["bindings"]
+    )
+    binding_by_function: dict[str, list[ResolvedOperationBinding]] = {}
+    for resolved_binding in catalog_bindings:
+        key = (
+            resolved_binding.operation.contract_id,
+            resolved_binding.operation.operation_id,
+        )
+        if key in approved_host_binding_keys:
+            binding_by_function.setdefault(
+                resolved_binding.function.function_id,
+                [],
+            ).append(resolved_binding)
+    host_contributions_by_backend: dict[str, list[Any]] = {}
+    close_callbacks: list[Callable[[], None]] = []
+    for function_id, provider_bindings in sorted(binding_by_function.items()):
+        factory = load_host_provider_factory(
+            pack_roots[provider_bindings[0].artifact.pack_id],
+            provider_bindings[0],
+        )
+        if factory is None:
+            continue
+        if factory.function_id != function_id:
+            raise AuthorityDenied("Host Provider hook Function identity changed")
+        backend_ids = {binding.variant.backend for binding in provider_bindings}
+        if len(backend_ids) != 1 or any(
+            binding.variant.execution_kind is not ExecutionKind.HOST_EXTENSION
+            for binding in provider_bindings
+        ):
+            raise AuthorityDenied("Host Provider hook executable boundary is invalid")
+        captured_provider = factory.capture(
+            HostProviderCaptureContextV4(
+                profile_id=str(profile["profile_id"]),
+                plan_digest=str(plan["plan_digest"]),
+                security_epoch=int(active.activation["security_epoch"]),
+                activation=active.activation,
+                state_root=authority_user_data / "host_provider_state",
+                provider_bindings=tuple(provider_bindings),
+                catalog_bindings=catalog_bindings,
+                domain_ids=dynamic_domain_ids,
+            )
+        )
+        expected_keys = {
+            (
+                binding.operation.contract_id,
+                binding.operation.operation_id,
+                binding.principal_ref.value,
+            )
+            for binding in provider_bindings
+        }
+        if {item.key for item in captured_provider.contributions} != expected_keys:
+            captured_provider.close()
+            raise AuthorityDenied("Host Provider hook contribution set is incomplete")
+        backend_id = next(iter(backend_ids))
+        host_contributions_by_backend.setdefault(backend_id, []).extend(
+            captured_provider.contributions
+        )
+        close_callbacks.append(captured_provider.close)
+    for backend_id, contributions in sorted(host_contributions_by_backend.items()):
+        registered_backends += (
+            ExactHostProviderBackendV4(
+                tuple(contributions),
+                backend_id=backend_id,
+                profile_id=str(profile["profile_id"]),
+                plan_digest=str(plan["plan_digest"]),
+                security_epoch=int(active.activation["security_epoch"]),
+            ),
+        )
     backend_registry = BackendRegistry(registered_backends)
     target_backend_digests = dict(target_backend_digests or {})
     for binding in plan["bindings"]:
@@ -737,10 +818,9 @@ def capture_production_dispatch(
         if target.principal_id in target_backend_digests:
             continue
         try:
-            resolved_binding = runtime.composition.catalog.resolve(
+            resolved_binding = runtime.composition.catalog.resolve_pinned(
                 binding["contract_id"],
                 binding["operation_id"],
-                ">=1,<2",
             )
             selected_backend = backend_registry.select(resolved_binding)
         except Exception:
@@ -830,10 +910,9 @@ def capture_production_dispatch(
 
     providers: dict[str, tuple[Mapping[str, Any], ...]] = {}
     for binding in plan["bindings"]:
-        resolved_binding = broker._catalog.resolve(
+        resolved_binding = broker._catalog.resolve_pinned(
             binding["contract_id"],
             binding["operation_id"],
-            ">=1,<2",
         )
         backend_error: str | None = None
         projected_backend: ExecutionBackend | None
@@ -913,6 +992,7 @@ def capture_production_dispatch(
         authority_control=authority_control,
         current_capture_check=assert_current_capture,
         owned_authority_store=authority_store,
+        close_callbacks=tuple(close_callbacks),
     )
     if control_session is not None and frontend_contract_bindings:
         capability_bindings = tuple(

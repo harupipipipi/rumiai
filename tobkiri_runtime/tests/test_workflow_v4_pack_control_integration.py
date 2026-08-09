@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
 
+import pytest
+
+from core_runtime.authority.v4 import AuthorityStore
+from core_runtime.bootstrap.production_v4 import capture_production_dispatch
+from core_runtime.host_provider_backend_v4 import ExactHostProviderBackendV4
+from core_runtime.host_provider_hooks_v4 import load_host_provider_factory
+from core_runtime.pack_catalog_backend_v4 import PackControlBackendV4
 from core_runtime.bootstrap.profile_capture import (
     capture_default_profile,
     prepare_default_profile_confirmation,
@@ -13,6 +21,10 @@ from core_runtime.pack_control_v4 import (
     PACK_CONTROL_CONTRACT,
     capture_pack_control_session,
 )
+from tobkiri_host.errors import ResolutionError
+from tobkiri_host.models import OpaqueAuthorityRef
+from tobkiri_host.errors import BackendUnavailableError
+from dataclasses import replace
 
 PACK_ID = "tobkiri_workflow_pack"
 SESSION_ID = "workflow-v4-integration"
@@ -119,3 +131,169 @@ def test_optional_workflow_pack_enters_closure_only_after_full_ceremony(
     assert status["installed"] is True
     assert status["approved"] is True
     assert status["enabled"] is True
+
+    # Rebuild the production runtime from only the durable activation and
+    # exercise the exact operation route.  This is the packaged restart path
+    # that previously reapplied a hidden v1-only compatibility constraint.
+    restarted_active = capture_default_profile()
+    authority = AuthorityStore(
+        tmp_path / "user-data" / "authority" / "v4.sqlite3"
+    )
+    restarted = capture_production_dispatch(
+        restarted_active,
+        bundle_root=Path(__file__).resolve().parents[1]
+        / "ecosystem"
+        / "defaultspack"
+        / "v4",
+        ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
+        authority_store=authority,
+    )
+    try:
+        binding = restarted.broker._catalog.resolve_pinned(
+            "tobkiri.workflow.v4",
+            "operation.palette",
+        )
+        assert binding.operation.contract_version == "4.0.0"
+        assert restarted.provider_metadata("tobkiri.workflow.v4")
+        restarted.assert_operation_ready(
+            "tobkiri.workflow.v4",
+            "operation.palette",
+        )
+        workflow_backend = restarted.broker._backends.select(binding)
+        assert isinstance(workflow_backend, ExactHostProviderBackendV4)
+        control_binding = restarted.broker._catalog.resolve_pinned(
+            PACK_CONTROL_CONTRACT,
+            "catalog.read",
+        )
+        assert isinstance(
+            restarted.broker._backends.select(control_binding),
+            PackControlBackendV4,
+        )
+        with pytest.raises(BackendUnavailableError, match="not installed"):
+            restarted.broker._backends.select(
+                replace(
+                    binding,
+                    principal_ref=OpaqueAuthorityRef("sha256:" + "0" * 64),
+                )
+            )
+        tampered_root = tmp_path / PACK_ID
+        shutil.copytree(
+            Path(__file__).resolve().parents[1] / "ecosystem" / PACK_ID,
+            tampered_root,
+        )
+        executable = tampered_root / "runtime" / "provider.py"
+        executable.write_text(
+            executable.read_text(encoding="utf-8") + "\n# tampered\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(Exception, match="digest"):
+            load_host_provider_factory(tampered_root, binding)
+        with pytest.raises(ResolutionError, match="incompatible"):
+            restarted.broker._catalog.resolve(
+                "tobkiri.workflow.v4",
+                "operation.palette",
+                ">=1,<2",
+            )
+        palette = restarted.invoke(
+            "tobkiri.workflow.v4",
+            "operation.palette",
+            {"_session_id": "workflow-operation"},
+        )
+        step_target = next(
+            item
+            for item in palette["operations"]
+            if item["contract_id"] == "conversation.turn.v1"
+            and item["operation_id"] == "complete"
+        )
+        document = {
+            "workflow_api_version": "io.tobkiri.workflow.v4",
+            "name": "Restart-persistent skipped step",
+            "max_concurrency": 1,
+            "steps": [
+                {
+                    "id": "skip",
+                    "when": "false",
+                    "request": {
+                        "contract_id": step_target["contract_id"],
+                        "contract_revision_digest": step_target[
+                            "contract_revision_digest"
+                        ],
+                        "operation_id": step_target["operation_id"],
+                        "function_principal_id": step_target[
+                            "function_principal_id"
+                        ],
+                        "input": {"messages": "${inputs.messages}"},
+                    },
+                    "retry": {"max_attempts": 1, "backoff_ms": 0},
+                }
+            ],
+        }
+        created = restarted.invoke(
+            "tobkiri.workflow.v4",
+            "definition.create",
+            {
+                "_session_id": "workflow-operation",
+                "definition_id": "workflow.restart-proof",
+                "document": document,
+            },
+        )
+        restarted.invoke(
+            "tobkiri.workflow.v4",
+            "definition.publish",
+            {
+                "_session_id": "workflow-operation",
+                "definition_id": "workflow.restart-proof",
+                "if_match": created["etag"],
+            },
+        )
+        run = restarted.invoke(
+            "tobkiri.workflow.v4",
+            "run.create",
+            {
+                "_session_id": "workflow-operation",
+                "definition_id": "workflow.restart-proof",
+                "run_id": "workflow-run-restart-proof",
+                "inputs": {"messages": [{"role": "user"}]},
+            },
+        )
+        assert run["state"] == "queued"
+        attempt = restarted.invoke(
+            "tobkiri.workflow.v4",
+            "run.step.execute",
+            {
+                "_session_id": "workflow-operation",
+                "run_id": run["run_id"],
+                "step_id": "skip",
+            },
+        )
+        assert attempt["state"] == "succeeded"
+        assert attempt["skipped"] is True
+    finally:
+        restarted.close()
+
+    restarted_again = capture_production_dispatch(
+        capture_default_profile(),
+        bundle_root=Path(__file__).resolve().parents[1]
+        / "ecosystem"
+        / "defaultspack"
+        / "v4",
+        ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
+        authority_store=AuthorityStore(
+            tmp_path / "user-data" / "authority" / "v4.sqlite3"
+        ),
+    )
+    try:
+        persisted = restarted_again.invoke(
+            "tobkiri.workflow.v4",
+            "run.get",
+            {
+                "_session_id": "workflow-operation-restart",
+                "run_id": "workflow-run-restart-proof",
+            },
+        )
+        assert persisted["run"]["state"] == "succeeded"
+        assert len(persisted["attempts"]) == 1
+        assert persisted["attempts"][0]["state"] == "succeeded"
+        assert persisted["attempts"][0]["skipped"] is True
+    finally:
+        restarted_again.close()

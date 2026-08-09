@@ -85,6 +85,15 @@ class PackCatalogBackendV4:
             raise PackControlDenied("Pack catalog Provider envelope is invalid")
         return ProviderOutcome(self._reader.read())
 
+    def supports(self, binding: ResolvedOperationBinding) -> bool:
+        """Return true only for the captured read-only contribution."""
+        return bool(
+            binding.principal_ref.value == self._target_principal_id
+            and binding.operation.contract_id == PACK_CONTROL_CONTRACT
+            and binding.operation.operation_id == "catalog.read"
+            and binding.function.implementation_digest == self._implementation_digest
+        )
+
     def cancel(self, request_id: str) -> None:
         """Accept cancellation without exposing another operation."""
 
@@ -143,6 +152,16 @@ class PackControlBackendV4:
             backend_digest=self.status.backend_digest,
             authenticated_channel=True,
             nonce_fresh=True,
+        )
+
+    def supports(self, binding: ResolvedOperationBinding) -> bool:
+        """Return true only for an exact captured Pack control contribution."""
+        key = (binding.operation.contract_id, binding.operation.operation_id)
+        expected = self._targets.get(key)
+        return bool(
+            expected is not None
+            and expected[0] == binding.principal_ref.value
+            and expected[1] == binding.function.implementation_digest
         )
 
     def invoke(self, request: object) -> ProviderOutcome:

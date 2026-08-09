@@ -86,7 +86,7 @@ class DispatchSession(Protocol):
         operation_id: str,
         payload: Mapping[str, object],
         *,
-        version_range: str = ">=1,<2",
+        version_range: str | None = None,
     ) -> Mapping[str, object]:
         """Invoke one exact qualified operation through RequestBroker."""
 

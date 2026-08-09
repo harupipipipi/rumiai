@@ -15580,102 +15580,102 @@
             {
               "entrypoint_id": "definition.archive",
               "id": "definition.archive",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "definition.create",
               "id": "definition.create",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "definition.delete",
               "id": "definition.delete",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "definition.get",
               "id": "definition.get",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "definition.list",
               "id": "definition.list",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "definition.publish",
               "id": "definition.publish",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "definition.update",
               "id": "definition.update",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "definition.validate",
               "id": "definition.validate",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "definition.compile-preview",
               "id": "definition.compile-preview",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "operation.palette",
               "id": "operation.palette",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "run.cancel",
               "id": "run.cancel",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "run.advance",
               "id": "run.advance",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "run.create",
               "id": "run.create",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "run.get",
               "id": "run.get",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "run.pause",
               "id": "run.pause",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "run.reconcile-recovery",
               "id": "run.reconcile-recovery",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "run.resume",
               "id": "run.resume",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "run.step.execute",
               "id": "run.step.execute",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "run.step.resume",
               "id": "run.step.resume",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
               "entrypoint_id": "run.step.retry",
               "id": "run.step.retry",
-              "implementation_digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669"
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             }
           ],
           "owner": "tobkiri_workflow_pack",
@@ -15727,7 +15727,7 @@
       "required_contracts": [],
       "runtime_artifacts": [
         {
-          "digest": "sha256:0afde424340aa74c94de80d15a9e71ad9b0014502effa80c2edec1109e698669",
+          "digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3",
           "index_role": "runtime",
           "kind": "executable",
           "path": "runtime/provider.py"
@@ -15769,7 +15769,7 @@
           "path": "frontend_contract_map.v4.json"
         },
         {
-          "digest": "sha256:ce84a7baf87c3cd5d5eafac3f231fcc6ad08220154f5f7ec580ce9652695c0bf",
+          "digest": "sha256:8adffdea48b03eaf76d1a6f7d06c230731e058338180a73cd6e7e92b8199e1bf",
           "index_role": "asset",
           "kind": "asset",
           "path": "backend-integrity.v4.json"
@@ -15790,6 +15790,11 @@
         {
           "digest": "sha256:4fda245ac2e586d999b1e7698cf516b4960803297473a2b76500e0a0dbbee12b",
           "path": "core_runtime/workflow_v4/engine.py",
+          "rule_id": "workflow-v4-canonical-source"
+        },
+        {
+          "digest": "sha256:98290d3c4ae825fa4d3643dadd042665954b2d2c6b1d836d0ec9baf4d69dcda4",
+          "path": "core_runtime/workflow_v4/integration.py",
           "rule_id": "workflow-v4-canonical-source"
         },
         {
@@ -15843,7 +15848,7 @@
           "rule_id": "workflow-v4-canonical-source"
         },
         {
-          "digest": "sha256:ce84a7baf87c3cd5d5eafac3f231fcc6ad08220154f5f7ec580ce9652695c0bf",
+          "digest": "sha256:8adffdea48b03eaf76d1a6f7d06c230731e058338180a73cd6e7e92b8199e1bf",
           "path": "ecosystem/tobkiri_workflow_pack/backend-integrity.v4.json",
           "rule_id": "workflow-v4-canonical-source"
         }

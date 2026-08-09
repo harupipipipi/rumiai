@@ -80,9 +80,14 @@ class BackendRegistry:
 
     def __init__(self, backends: Iterable[ExecutionBackend]) -> None:
         items = tuple(backends)
-        self._backends = {backend.status.backend_id: backend for backend in items}
-        if len(self._backends) != len(items):
-            raise BackendUnavailableError("duplicate backend registration")
+        grouped: dict[str, list[ExecutionBackend]] = {}
+        for backend in items:
+            grouped.setdefault(backend.status.backend_id, []).append(backend)
+        self._backends = {
+            backend_id: tuple(candidates)
+            for backend_id, candidates in grouped.items()
+        }
+        self._registered = items
 
     def select(
         self,
@@ -91,9 +96,18 @@ class BackendRegistry:
         production: bool = True,
     ) -> ExecutionBackend:
         """Select the variant-pinned backend and enforce its feature gates."""
-        backend = self._backends.get(binding.variant.backend)
-        if backend is None:
+        candidates = self._backends.get(binding.variant.backend, ())
+        matching = tuple(
+            backend
+            for backend in candidates
+            if not callable(getattr(backend, "supports", None))
+            or bool(backend.supports(binding))  # type: ignore[attr-defined]
+        )
+        if not matching:
             raise BackendUnavailableError("pinned backend is not installed")
+        if len(matching) != 1:
+            raise BackendUnavailableError("pinned backend contribution is ambiguous")
+        backend = matching[0]
         status = backend.status
         if status.enforces_platform:
             requested_platform = (
@@ -117,13 +131,19 @@ class BackendRegistry:
     @property
     def statuses(self) -> tuple[BackendStatus, ...]:
         """Return registered backend status in deterministic ID order."""
-        return tuple(self._backends[backend_id].status for backend_id in sorted(self._backends))
+        return tuple(
+            backend.status
+            for backend in sorted(
+                self._registered,
+                key=lambda item: (item.status.backend_id, item.status.backend_digest),
+            )
+        )
 
     @property
     def registered(self) -> tuple[ExecutionBackend, ...]:
         """Return exact registered backends for composition-root extension."""
 
-        return tuple(self._backends[backend_id] for backend_id in sorted(self._backends))
+        return self._registered
 
 
 def production_backend_registry(

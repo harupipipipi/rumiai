@@ -127,6 +127,35 @@ class OperationCatalog:
             raise ResolutionError("pinned Contract version is incompatible")
         return binding
 
+    def pinned_version_range(self, contract_id: str, operation_id: str) -> str:
+        """Return an exact constraint for the version pinned by the active plan.
+
+        This is the Host-owned path for callers that did not supply a Contract
+        compatibility requirement.  It does not widen compatibility: the
+        returned constraint names the one executable version already bound by
+        the immutable ResolvedPlan.
+        """
+        binding = self._bindings.get((contract_id, operation_id))
+        if binding is None:
+            raise ResolutionError("operation is not pinned by the active plan")
+        try:
+            version = Version(binding.operation.contract_version)
+        except InvalidVersion as exc:
+            raise ResolutionError("invalid pinned Contract version") from exc
+        return f"=={version}"
+
+    def resolve_pinned(
+        self,
+        contract_id: str,
+        operation_id: str,
+    ) -> ResolvedOperationBinding:
+        """Resolve against the exact Contract version in the active plan."""
+        return self.resolve(
+            contract_id,
+            operation_id,
+            self.pinned_version_range(contract_id, operation_id),
+        )
+
     @staticmethod
     def validate_input(
         binding: ResolvedOperationBinding,

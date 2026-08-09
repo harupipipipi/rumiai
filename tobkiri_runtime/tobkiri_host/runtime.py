@@ -99,6 +99,7 @@ class ProductionRuntimeV4:
         authority_control: AuthorityV4Adapter | None = None,
         current_capture_check: Callable[[], None] | None = None,
         owned_authority_store: AuthorityStore | None = None,
+        close_callbacks: tuple[Callable[[], None], ...] = (),
     ) -> "V4DispatchSession":
         """Bind request ports to identities from this captured composition."""
         return V4DispatchSession(
@@ -111,6 +112,7 @@ class ProductionRuntimeV4:
             authority_control=authority_control,
             current_capture_check=current_capture_check,
             owned_authority_store=owned_authority_store,
+            close_callbacks=close_callbacks,
         )
 
 
@@ -127,11 +129,14 @@ class V4DispatchSession:
     authority_control: AuthorityV4Adapter | None = None
     current_capture_check: Callable[[], None] | None = None
     owned_authority_store: AuthorityStore | None = None
+    close_callbacks: tuple[Callable[[], None], ...] = ()
 
     def close(self) -> None:
         """Close the Broker, then its owned Authority database, idempotently."""
 
         self.broker.close()
+        for callback in self.close_callbacks:
+            callback()
         if self.owned_authority_store is not None:
             self.owned_authority_store.close()
 
@@ -165,11 +170,7 @@ class V4DispatchSession:
     def assert_operation_ready(self, contract_id: str, operation_id: str) -> None:
         """Require an exact selected binding and production-ready backend."""
 
-        binding = self.broker._catalog.resolve(
-            contract_id,
-            operation_id,
-            ">=1,<2",
-        )
+        binding = self.broker._catalog.resolve_pinned(contract_id, operation_id)
         backend = self.broker._backends.select(binding)
         providers = tuple(
             item
@@ -198,9 +199,14 @@ class V4DispatchSession:
         operation_id: str,
         payload: Mapping[str, Any],
         *,
-        version_range: str = ">=1,<2",
+        version_range: str | None = None,
     ) -> Mapping[str, Any]:
-        """Dispatch through the captured Broker without identity from payload."""
+        """Dispatch through the captured Broker without identity from payload.
+
+        An omitted compatibility requirement is bound to the exact Contract
+        version in the immutable plan.  A caller-supplied range remains a
+        strict additional constraint and can never select another Provider.
+        """
         arguments = dict(payload)
         session_id = str(arguments.pop("_session_id", "")).strip()
         parameter_count = len(inspect.signature(self.context_for).parameters)
@@ -213,7 +219,11 @@ class V4DispatchSession:
         return self.broker.invoke(
             InvocationFrame(
                 contract_id=contract_id,
-                version_range=version_range,
+                version_range=(
+                    version_range
+                    if version_range is not None
+                    else self.broker.pinned_version_range(contract_id, operation_id)
+                ),
                 operation_id=operation_id,
                 payload=arguments,
             ),

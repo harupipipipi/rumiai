@@ -30,7 +30,7 @@ class V4ContractDispatch(Protocol):
         operation_id: str,
         payload: Mapping[str, Any],
         *,
-        version_range: str = ">=1,<2",
+        version_range: str | None = None,
     ) -> Mapping[str, Any]:
         """Invoke one exact ResolvedPlan route."""
 
