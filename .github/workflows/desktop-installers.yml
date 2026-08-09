@@ -260,12 +260,26 @@ jobs:
             --signing-key-id 'github-actions:${{ github.run_id }}:${{ matrix.target }}' `
             --output-dir $env:RELEASE_ROOT
 
-      - name: Build desktop installer
+      - name: Build signed macOS application
         if: runner.os == 'macOS'
         working-directory: tobkiri_launcher
         env:
           TOBKIRI_PRESENTATION_RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
-        run: cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --ci ${{ matrix.signing_args }}
+        run: cargo tauri build --target ${{ matrix.target }} --bundles app --ci ${{ matrix.signing_args }}
+
+      - name: Build macOS DMG installer
+        if: runner.os == 'macOS'
+        working-directory: tobkiri_launcher
+        shell: bash
+        env:
+          TOBKIRI_PRESENTATION_RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
+        run: |
+          set -o pipefail
+          bash scripts/package_macos_dmg.sh \
+            --app-bundle "src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app" \
+            --target '${{ matrix.target }}' \
+            --output-dir "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" \
+            2>&1 | tee "$RUNNER_TEMP/tobkiri-macos-dmg-${{ matrix.target }}.log"
 
       - name: Build desktop installer
         if: runner.os == 'Windows'
@@ -317,3 +331,37 @@ jobs:
             tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
             tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
           if-no-files-found: error
+
+      - name: Capture macOS installer diagnostics
+        if: failure() && runner.os == 'macOS'
+        working-directory: tobkiri_launcher
+        shell: bash
+        run: |
+          diagnostic="$RUNNER_TEMP/tobkiri-macos-dmg-${{ matrix.target }}-diagnostic.txt"
+          {
+            echo "target=${{ matrix.target }}"
+            echo "runner=${RUNNER_OS:-unknown}"
+            sw_vers || true
+            uname -a || true
+            df -h . || true
+            command -v hdiutil || true
+            hdiutil info || true
+            ps auxww | grep -E '[h]diutil|[d]iskimages' || true
+            bundle_dir="src-tauri/target/${{ matrix.target }}/release/bundle"
+            find "$bundle_dir" -maxdepth 3 -type f -o -type d | sort || true
+            generated_script="$bundle_dir/dmg/bundle_dmg.sh"
+            if [[ -f "$generated_script" ]]; then
+              echo '--- generated bundle_dmg.sh (first 240 lines) ---'
+              sed -n '1,240p' "$generated_script"
+            fi
+          } > "$diagnostic" 2>&1
+
+      - name: Upload macOS installer diagnostics
+        if: failure() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tobkiri-${{ matrix.artifact_suffix }}-installer-diagnostics-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/tobkiri-macos-dmg-${{ matrix.target }}.log
+            ${{ runner.temp }}/tobkiri-macos-dmg-${{ matrix.target }}-diagnostic.txt
+          if-no-files-found: warn

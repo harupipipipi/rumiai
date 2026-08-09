@@ -17,6 +17,7 @@ SHELL_RUNTIME = TAURI_ROOT / "src" / "shell_runtime.rs"
 LAUNCHER_RUNTIME = TAURI_ROOT / "src" / "lib.rs"
 RESOURCE_PREPARER = ROOT / ".github" / "scripts" / "prepare_tauri_resources.py"
 PACK_SHELL_SEALER = ROOT / ".github" / "scripts" / "seal_pack_shell.py"
+MACOS_DMG_PACKAGER = ROOT / "tobkiri_launcher" / "scripts" / "package_macos_dmg.sh"
 TEST_WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
 DEV_REQUIREMENTS = ROOT / "tobkiri_runtime" / "requirements-dev.txt"
 DEV_PYPROJECT = ROOT / "tobkiri_runtime" / "pyproject.toml"
@@ -104,6 +105,53 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
         assert "cargo tauri build" in contents
         assert "Prepare bundled Rumi runtime" not in contents
         assert "python .github/scripts/prepare_tauri_resources.py" not in contents
+
+
+def test_macos_installer_uses_finder_free_verified_dmg_packager():
+    assert MACOS_DMG_PACKAGER.is_file()
+    packager = MACOS_DMG_PACKAGER.read_text(encoding="utf-8")
+    for required in (
+        "codesign --verify --deep --strict",
+        "ditto",
+        "ln -s /Applications",
+        "hdiutil create",
+        "-fs APFS",
+        "-format UDZO",
+        "hdiutil verify",
+        "unsafe version for a DMG filename",
+    ):
+        assert required in packager
+    assert "osascript" not in packager
+    assert "bundle_dmg.sh" not in packager
+
+    desktop_workflow = (
+        ROOT / ".github" / "workflows" / "desktop-installers.yml"
+    ).read_text(encoding="utf-8")
+    desktop_macos = desktop_workflow[
+        desktop_workflow.index("Build signed macOS application") : desktop_workflow.index(
+            "Build desktop installer\n        if: runner.os == 'Windows'"
+        )
+    ]
+    assert "--bundles app" in desktop_macos
+    assert "scripts/package_macos_dmg.sh" in desktop_macos
+    assert "2>&1 | tee" in desktop_macos
+    assert "--target '${{ matrix.target }}'" in desktop_macos
+
+    release_workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+    release_macos = release_workflow[
+        release_workflow.index("Build signed macOS application") : release_workflow.index(
+            "Build with cargo tauri\n        if: runner.os != 'macOS'"
+        )
+    ]
+    assert "--bundles app" in release_macos
+    assert "scripts/package_macos_dmg.sh" in release_macos
+    assert "2>&1 | tee" in release_macos
+
+    for workflow in (desktop_workflow, release_workflow):
+        assert "Capture macOS installer diagnostics" in workflow
+        assert "hdiutil info || true" in workflow
 
 
 def test_debug_pack_shell_is_built_and_sealed_before_launcher_rust_checks():
