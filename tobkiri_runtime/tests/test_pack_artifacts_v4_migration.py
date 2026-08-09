@@ -138,7 +138,7 @@ def test_all_packs_have_valid_deterministic_v4_artifacts() -> None:
         "packs": 142,
         "valid": 142,
         "contracts": 160,
-        "operations": 226,
+        "operations": 228,
     }
     payload = _catalog()
     assert payload["excluded_packs"] == sorted(EXCLUDED_PACKS)
@@ -225,4 +225,4 @@ def test_global_catalog_has_no_duplicate_provider_or_operation() -> None:
             assert operation["operation_id"] not in operations
             operations.add(operation["operation_id"])
     assert len(providers) == 160
-    assert len(operations) == 226
+    assert len(operations) == 228

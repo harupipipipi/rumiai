@@ -145,3 +145,50 @@ def test_generated_inventory_excludes_python_cache_artifacts() -> None:
 
     assert all("__pycache__" not in path.parts for path in included)
     assert all(path.suffix != ".pyc" for path in included)
+
+
+def _signed_distribution() -> dict[str, object]:
+    payload: dict[str, object] = {
+        "distribution_api_version": "io.tobkiri.distribution.v1",
+        "distribution_id": "example.normal-packs",
+        "version": "1.0.0",
+        "packs": [{"pack_id": "example.pack", "artifact_digest": DIGEST}],
+        "provenance": {
+            "schema": "io.tobkiri.provenance.v1",
+            "source_kind": "external",
+            "source_path": "distribution.json",
+            "source_digest": DIGEST,
+            "repository_commit": "working-tree",
+            "repository_tree": "a" * 64,
+            "generator": "distribution-test",
+            "generator_version": "1.0.0",
+            "normative": True,
+            "evidence": [],
+        },
+    }
+    digest = canonical_digest(payload)
+    payload["integrity"] = {
+        "algorithm": "sha256-canonical-v1",
+        "manifest_digest": digest,
+    }
+    payload["signature_envelope"] = {
+        "algorithm": "ed25519",
+        "publisher_id": "publisher.example",
+        "key_id": "publisher.example.key-1",
+        "signed_digest": digest,
+        "signature": "A" * 86 + "==",
+    }
+    return payload
+
+
+def test_distribution_requires_digest_bound_signature_envelope() -> None:
+    document = _signed_distribution()
+    assert validate_document(document, "distribution") == document
+    unsigned = dict(document)
+    unsigned.pop("signature_envelope")
+    with pytest.raises(SchemaValidationError, match="required property"):
+        validate_document(unsigned, "distribution")
+    tampered = json.loads(json.dumps(document))
+    tampered["packs"][0]["pack_id"] = "example.other"
+    with pytest.raises(SchemaValidationError, match="digest does not match"):
+        validate_document(tampered, "distribution")

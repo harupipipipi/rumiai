@@ -15,7 +15,8 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
     BundledCatalog,
 )
 from tobkiri_host.admission import AdmissionEstimate, QueueScope, ResourceReservation
-from tobkiri_host.backends import BackendRegistry, BackendStatus
+from tobkiri_host.artifact_materialization import capture_materialized_artifact
+from tobkiri_host.backends import BackendRegistry, BackendStatus, ExecutionBackend
 from tobkiri_host.broker import AdmissionTicket, RequestAdmissionPort
 from tobkiri_host.composition import AuthorityCeilings
 from tobkiri_host.contracts import AdapterPlanner, ResolvedOperationBinding, StructuralAdapter
@@ -58,7 +59,7 @@ from ..pack_control_v4 import (
     capture_pack_control_session,
     capture_valid_pack_approval,
 )
-from ..pack_boundary import resolve_selected_pack_roots
+from ..external_pack_catalog_v4 import resolve_admitted_pack_roots
 
 
 _PACK_CATALOG_KEY = (PACK_CONTROL_CONTRACT, "catalog.read")
@@ -496,11 +497,26 @@ def capture_production_dispatch(
         caller_by_operation[key] = caller
 
     binding_pack_ids = {str(item["pack_id"]) for item in plan["bindings"]}
-    pack_roots = resolve_selected_pack_roots(
+    pack_roots = resolve_admitted_pack_roots(
         tuple(sorted(binding_pack_ids)),
         ecosystem_root,
     )
     captured_pack_root_identities = _pack_root_identities(pack_roots)
+
+    def artifact_resolver(binding: ResolvedOperationBinding) -> Any:
+        pack_id = binding.artifact.pack_id
+        root = pack_roots.get(pack_id)
+        expected_identity = captured_pack_root_identities.get(pack_id)
+        if root is None or expected_identity is None:
+            raise AuthorityDenied("resolved Pack artifact root is unavailable")
+        before = root.lstat()
+        if root.is_symlink() or (int(before.st_dev), int(before.st_ino)) != expected_identity:
+            raise AuthorityDenied("resolved Pack artifact root identity changed")
+        artifact = capture_materialized_artifact(root, binding)
+        after = root.lstat()
+        if root.is_symlink() or (int(after.st_dev), int(after.st_ino)) != expected_identity:
+            raise AuthorityDenied("resolved Pack artifact root changed during materialization")
+        return artifact
     effective = {
         str(item["identity"]): str(item["artifact_digest"]) for item in lock["effective_set"]
     }
@@ -653,6 +669,15 @@ def capture_production_dispatch(
             pack_approval_revision=pack_approval_revision,
         )
     registered_backends = tuple((backends or BackendRegistry(())).registered)
+    for registered_backend in registered_backends:
+        if registered_backend.status.backend_id != _PYTHON_PACK_BACKEND_ID:
+            continue
+        binder = getattr(registered_backend, "bind_artifact_resolver", None)
+        if binder is None:
+            raise AuthorityDenied(
+                "production PackVM backend cannot bind authenticated artifacts"
+            )
+        binder(artifact_resolver)
     if not any(item.status.backend_id == _PYTHON_PACK_BACKEND_ID for item in registered_backends):
         # The descriptor remains unavailable unless the composition root
         # supplies a real authenticated supervisor.  Registering the exact
@@ -769,10 +794,11 @@ def capture_production_dispatch(
             ">=1,<2",
         )
         backend_error: str | None = None
+        projected_backend: ExecutionBackend | None
         try:
-            selected_backend = broker._backends.select(resolved_binding)
+            projected_backend = broker._backends.select(resolved_binding)
         except Exception as error:
-            selected_backend = None
+            projected_backend = None
             backend_error = str(error) or "production backend is unavailable"
         function_principal = binding["function_principal"]
         providers.setdefault(binding["contract_id"], ())
@@ -787,10 +813,10 @@ def capture_production_dispatch(
                 "artifact_digest": binding["artifact_digest"],
                 **(
                     {
-                        "backend_id": selected_backend.status.backend_id,
-                        "backend_digest": selected_backend.status.backend_digest,
+                        "backend_id": projected_backend.status.backend_id,
+                        "backend_digest": projected_backend.status.backend_digest,
                     }
-                    if selected_backend is not None
+                    if projected_backend is not None
                     else {}
                 ),
                 **(

@@ -103,7 +103,7 @@ def test_repository_authority_catalog_is_exact_and_has_no_loader_gaps() -> None:
 
 
 def test_all_repository_legacy_manifests_validate_without_silent_exclusion() -> None:
-    """The authoritative legacy scan must accept all 139 repository manifests."""
+    """The legacy projection audit must accept all 140 repository manifests."""
     paths = sorted(ECOSYSTEM.glob("*/ecosystem.json"))
     errors: list[str] = []
     for path in paths:

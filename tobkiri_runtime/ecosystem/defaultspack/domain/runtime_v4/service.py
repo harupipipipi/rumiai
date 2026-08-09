@@ -288,7 +288,10 @@ def dynamic_profile_edges(
     if len(caller_functions) != 1:
         raise ProfileResolutionDenied("dynamic Pack Shell caller role is absent or ambiguous")
     caller_function_id = selected_caller_id
-    pending = [(str(pack_id), caller_function_id, 0, None) for pack_id in additional_pack_ids]
+    pending: list[tuple[str, str, int, tuple[str, ...] | None]] = [
+        (str(pack_id), caller_function_id, 0, None)
+        for pack_id in additional_pack_ids
+    ]
     caller_for_pack: dict[str, str] = {}
     depth_for_pack: dict[str, int] = {}
     contracts_for_pack: dict[str, tuple[str, ...] | None] = {}

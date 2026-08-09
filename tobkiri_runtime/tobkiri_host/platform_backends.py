@@ -11,6 +11,7 @@ import secrets
 import time
 from typing import Any, Callable, Iterable, Mapping, Protocol
 
+from .artifact_materialization import MaterializedPackArtifact
 from .backends import BackendStatus, REQUIRED_PRODUCTION_GATES
 from .contracts import ResolvedOperationBinding
 from .errors import BackendUnavailableError
@@ -52,6 +53,7 @@ class IsolationLaunch:
     isolation_profile: str
     reservation_id: str
     lease: IsolationLease
+    artifact: MaterializedPackArtifact
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,9 @@ class PlatformAttestation:
     backend_digest: str
     platform: str
     executable_digest: str
+    artifact_digest: str
+    materialization_digest: str
+    guest_artifact_identity: str
     isolation_profile: str
     attestation_digest: str
     lease_id: str
@@ -73,6 +78,9 @@ class PlatformAttestation:
     def __post_init__(self) -> None:
         require_digest(self.backend_digest, "attested backend")
         require_digest(self.executable_digest, "attested executable")
+        require_digest(self.artifact_digest, "attested artifact")
+        require_digest(self.materialization_digest, "attested materialization")
+        require_digest(self.guest_artifact_identity, "guest artifact identity")
         require_digest(self.attestation_digest, "platform attestation")
 
 
@@ -142,11 +150,16 @@ class ProductionIsolationBackend:
         self,
         driver: PlatformIsolationDriver,
         *,
+        artifact_resolver: Callable[
+            [ResolvedOperationBinding], MaterializedPackArtifact
+        ]
+        | None = None,
         lease_seconds: float = 300.0,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         ready, reason = driver.capability()
         self._driver = driver
+        self._artifact_resolver = artifact_resolver
         self._clock = clock
         self._lease_seconds = lease_seconds
         self._domains: dict[str, PlatformAttestation] = {}
@@ -165,6 +178,22 @@ class ProductionIsolationBackend:
             requires_platform_attestation=True,
         )
 
+    def bind_artifact_resolver(
+        self,
+        resolver: Callable[
+            [ResolvedOperationBinding], MaterializedPackArtifact
+        ],
+    ) -> None:
+        """Bind the activation-captured artifact source before materialization."""
+
+        if self._domains or self._reservations:
+            raise BackendUnavailableError(
+                "artifact resolver cannot change after materialization"
+            )
+        if self._artifact_resolver is not None and self._artifact_resolver is not resolver:
+            raise BackendUnavailableError("artifact resolver is already bound")
+        self._artifact_resolver = resolver
+
     def materialize(
         self,
         binding: ResolvedOperationBinding,
@@ -180,6 +209,26 @@ class ProductionIsolationBackend:
             raise BackendUnavailableError("platform backend requires a PackVM variant")
         if reservation_id in self._reservations:
             raise BackendUnavailableError("resource reservation is already materialized")
+        if self._artifact_resolver is None:
+            raise BackendUnavailableError(
+                "authenticated Pack artifact materializer is unavailable"
+            )
+        try:
+            artifact = self._artifact_resolver(binding)
+        except Exception as exc:
+            raise BackendUnavailableError(
+                "authenticated Pack artifact materialization failed"
+            ) from exc
+        if (
+            artifact.pack_id != binding.artifact.pack_id
+            or artifact.artifact_digest != binding.artifact.digest
+            or artifact.function_id != binding.function.function_id
+            or artifact.implementation_digest
+            != binding.function.implementation_digest
+        ):
+            raise BackendUnavailableError(
+                "authenticated Pack artifact does not match resolved binding"
+            )
         lease = IsolationLease(
             lease_id=_digest(
                 {
@@ -199,6 +248,7 @@ class ProductionIsolationBackend:
             isolation_profile=binding.route.execution_domain_profile,
             reservation_id=reservation_id,
             lease=lease,
+            artifact=artifact,
         )
         attestation = self._driver.launch(launch)
         try:
@@ -255,6 +305,9 @@ class ProductionIsolationBackend:
             or attestation.backend_digest != self.status.backend_digest
             or attestation.platform != launch.platform
             or attestation.executable_digest != launch.executable_digest
+            or attestation.artifact_digest != launch.artifact_digest
+            or attestation.materialization_digest
+            != launch.artifact.materialization_digest
             or attestation.isolation_profile != launch.isolation_profile
             or attestation.lease_id != launch.lease.lease_id
             or attestation.reservation_id != launch.reservation_id
@@ -267,40 +320,64 @@ class ProductionIsolationBackend:
 class MacOSVZBackend(ProductionIsolationBackend):
     """macOS Virtualization.framework PackVM backend."""
 
-    def __init__(self, driver: PlatformIsolationDriver) -> None:
+    def __init__(
+        self,
+        driver: PlatformIsolationDriver,
+        *,
+        artifact_resolver: Callable[
+            [ResolvedOperationBinding], MaterializedPackArtifact
+        ]
+        | None = None,
+    ) -> None:
         if (
             driver.backend_id != PYTHON_PACKVM_BACKEND
             or driver.substrate_id != "macos-vz"
             or not driver.platform.startswith("macos-")
         ):
             raise BackendUnavailableError("macOS VZ driver identity mismatch")
-        super().__init__(driver)
+        super().__init__(driver, artifact_resolver=artifact_resolver)
 
 
 class WindowsWHPXBackend(ProductionIsolationBackend):
     """Windows Hypervisor Platform PackVM backend."""
 
-    def __init__(self, driver: PlatformIsolationDriver) -> None:
+    def __init__(
+        self,
+        driver: PlatformIsolationDriver,
+        *,
+        artifact_resolver: Callable[
+            [ResolvedOperationBinding], MaterializedPackArtifact
+        ]
+        | None = None,
+    ) -> None:
         if (
             driver.backend_id != PYTHON_PACKVM_BACKEND
             or driver.substrate_id != "windows-whpx"
             or not driver.platform.startswith("windows-")
         ):
             raise BackendUnavailableError("Windows WHPX driver identity mismatch")
-        super().__init__(driver)
+        super().__init__(driver, artifact_resolver=artifact_resolver)
 
 
 class LinuxFirecrackerBackend(ProductionIsolationBackend):
     """Linux Firecracker/KVM PackVM backend."""
 
-    def __init__(self, driver: PlatformIsolationDriver) -> None:
+    def __init__(
+        self,
+        driver: PlatformIsolationDriver,
+        *,
+        artifact_resolver: Callable[
+            [ResolvedOperationBinding], MaterializedPackArtifact
+        ]
+        | None = None,
+    ) -> None:
         if (
             driver.backend_id != PYTHON_PACKVM_BACKEND
             or driver.substrate_id != "linux-firecracker"
             or not driver.platform.startswith("linux-")
         ):
             raise BackendUnavailableError("Linux Firecracker driver identity mismatch")
-        super().__init__(driver)
+        super().__init__(driver, artifact_resolver=artifact_resolver)
 
 
 def build_platform_backend(
@@ -308,6 +385,10 @@ def build_platform_backend(
     platform_system: str | None = None,
     machine: str | None = None,
     drivers: Iterable[PlatformIsolationDriver] = (),
+    artifact_resolver: Callable[
+        [ResolvedOperationBinding], MaterializedPackArtifact
+    ]
+    | None = None,
 ) -> ProductionIsolationBackend:
     """Build exactly the documented backend for the selected Host platform."""
     system = platform_system or host_platform.system()
@@ -317,7 +398,7 @@ def build_platform_backend(
         driver: PlatformIsolationDriver = UnavailablePlatformDriver(
             "unsupported-packvm", f"{system.lower()}-{architecture}", "unsupported Host platform"
         )
-        return ProductionIsolationBackend(driver)
+        return ProductionIsolationBackend(driver, artifact_resolver=artifact_resolver)
     substrate_id, dependency = spec
     platform_id = f"{system.lower().replace('darwin', 'macos')}-{architecture}"
     candidates = [
@@ -335,7 +416,7 @@ def build_platform_backend(
             "windows-whpx": WindowsWHPXBackend,
             "linux-firecracker": LinuxFirecrackerBackend,
         }[substrate_id]
-        return backend_class(candidates[0])
+        return backend_class(candidates[0], artifact_resolver=artifact_resolver)
     reason = (
         f"required substrate dependency is unavailable: {dependency}"
         if not Path(dependency).exists()
@@ -347,7 +428,8 @@ def build_platform_backend(
             platform_id,
             reason,
             substrate_id=substrate_id,
-        )
+        ),
+        artifact_resolver=artifact_resolver,
     )
 
 
@@ -359,7 +441,7 @@ class ManagedLimaPackVMDriver:
 
     def __init__(self, provisioner: Any) -> None:
         self._provisioner = provisioner
-        self._domains: set[str] = set()
+        self._domains: dict[str, PlatformAttestation] = {}
         self._seen_launches: set[str] = set()
         doctor = provisioner.doctor()
         self.platform = str(doctor.platform)
@@ -393,12 +475,40 @@ class ManagedLimaPackVMDriver:
                 "reservation_id": request.reservation_id,
                 "lease_id": request.lease.lease_id,
                 "executable_digest": request.executable_digest,
+                "artifact_digest": request.artifact_digest,
+                "materialization_digest": request.artifact.materialization_digest,
                 "backend_digest": self.backend_digest,
             }
         )
         if launch_key in self._seen_launches:
             raise BackendUnavailableError("managed Lima PackVM launch replay")
         self._seen_launches.add(launch_key)
+        materialization_nonce = secrets.token_hex(32)
+        try:
+            staged = self._provisioner.materialize_artifact(
+                request.artifact.request_payload(nonce=materialization_nonce)
+            )
+        except Exception as exc:
+            raise BackendUnavailableError(
+                "managed Lima PackVM artifact staging failed"
+            ) from exc
+        expected_staging = {
+            "ok": True,
+            "protocol": "io.tobkiri.packvm-supervisor.v1",
+            "artifact_digest": request.artifact_digest,
+            "materialization_digest": request.artifact.materialization_digest,
+        }
+        if any(staged.get(key) != value for key, value in expected_staging.items()):
+            raise BackendUnavailableError(
+                "managed Lima PackVM artifact staging identity mismatch"
+            )
+        guest_artifact_identity = str(staged.get("guest_artifact_identity") or "")
+        try:
+            require_digest(guest_artifact_identity, "guest artifact identity")
+        except Exception as exc:
+            raise BackendUnavailableError(
+                "managed Lima PackVM artifact staging identity is invalid"
+            ) from exc
         attestation_nonce = secrets.token_hex(32)
         domain_id = (
             "packvm:"
@@ -409,23 +519,28 @@ class ManagedLimaPackVMDriver:
                 }
             )[7:]
         )
-        self._domains.add(domain_id)
         attestation_digest = _digest(
             {
                 "domain_id": domain_id,
                 "backend_digest": self.backend_digest,
                 "executable_digest": request.executable_digest,
+                "artifact_digest": request.artifact_digest,
+                "materialization_digest": request.artifact.materialization_digest,
+                "guest_artifact_identity": guest_artifact_identity,
                 "lease_id": request.lease.lease_id,
                 "reservation_id": request.reservation_id,
                 "attestation_nonce": attestation_nonce,
             }
         )
-        return PlatformAttestation(
+        attestation = PlatformAttestation(
             domain_id=domain_id,
             backend_id=self.backend_id,
             backend_digest=self.backend_digest,
             platform=self.platform,
             executable_digest=request.executable_digest,
+            artifact_digest=request.artifact_digest,
+            materialization_digest=request.artifact.materialization_digest,
+            guest_artifact_identity=guest_artifact_identity,
             isolation_profile=request.isolation_profile,
             attestation_digest=attestation_digest,
             lease_id=request.lease.lease_id,
@@ -433,16 +548,24 @@ class ManagedLimaPackVMDriver:
             authenticated_channel=True,
             nonce_fresh=True,
         )
+        self._domains[domain_id] = attestation
+        return attestation
 
     def invoke(self, request: object) -> object:
         domain = getattr(getattr(request, "target_domain", None), "value", None)
-        if domain not in self._domains:
+        if not isinstance(domain, str):
+            raise BackendUnavailableError("managed Lima PackVM domain is invalid")
+        attestation = self._domains.get(domain)
+        if attestation is None:
             raise BackendUnavailableError("managed Lima PackVM domain is unavailable")
         context = getattr(request, "context", None)
         payload = {
             "operation": "invoke",
             "request_id": getattr(context, "request_id", None),
             "target_domain": domain,
+            "artifact_digest": attestation.artifact_digest,
+            "materialization_digest": attestation.materialization_digest,
+            "guest_artifact_identity": attestation.guest_artifact_identity,
             "contract_id": getattr(request, "contract_id", None),
             "contract_version": getattr(request, "contract_version", None),
             "operation_id": getattr(request, "operation_id", None),
@@ -465,7 +588,7 @@ class ManagedLimaPackVMDriver:
             self._provisioner.invoke_guest({"operation": "cancel", "request_id": request_id})
 
     def terminate(self, domain_id: str) -> None:
-        self._domains.discard(domain_id)
+        self._domains.pop(domain_id, None)
 
 
 def _normalize_machine(value: str) -> str:

@@ -806,6 +806,30 @@ Phase 1: Protocol、schema、generated SDK
 
 Phase 2: Artifact CAS、Distribution、install/update
 
+現在実装済みの外部Normal Sandbox Pack admission境界:
+
+  - bundled canonical catalog (`schemas/pack_v4_catalog.v1.json`) は有限・生成物・不変のまま保つ。
+  - Host専用API `core_runtime.external_pack_catalog_v4.admit_signed_external_pack`
+    だけが、Host policyで指定されたpublisher trust storeを使って外部Packを受け入れる。
+    client routeはPack IDだけを扱い、source path、catalog record、approved/enabled値を受け取らない。
+  - `pack.v4.json` の kind は `normal_sandbox` に固定する。Host Extensionは別package
+    kind、別trust namespace、別install APIであり、このcatalogへ入れない。
+  - signed file inventoryをno-followで検証して非実行quarantineへ複製し、artifact digestで
+    pinしたHost-owned CASへatomic promotionする。CAS rootのdevice/inodeと全file digestを
+    読み出しごとに再検証する。
+  - `external_normal_pack_catalog.v4.json` はHost HMACで認証し、schemaは
+    `tobkiri_protocol/schemas/external_normal_pack_catalog_v4.schema.json` とする。
+    installed journalはsequence、previous digest、event digestを持つappend-only chainである。
+  - 同じPack IDと同じartifact digestの再admissionは冪等。同じIDの異なるdigest、bundled ID
+    shadow、署名/manifest/file-set/CAS/journal不整合は拒否する。
+  - admission commitとProfile activationは別transaction。admissionはinstall/approval/enableを
+    暗黙実行せず、approve+enableだけが新しいimmutable Profile revisionを生成する。
+  - prepared/promoted faultでは未commit entryをreaderへ公開せず、catalog/journalのatomic
+    replace失敗時も以前のcommitted viewを保持する。
+
+これはPhase 2全体（download/TUF/update/retention）の完了宣言ではなく、外部Normal Packを
+legacy mutable ecosystemやHost Extensionへ迂回させない最小のHost-owned admission境界である。
+
 実装:
 
   - untrusted stagingへstream download

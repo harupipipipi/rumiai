@@ -61,10 +61,19 @@ class _CapturedBackend:
         )
         self.target_domain_id = ""
         self.target_executable_digest = ""
+        self.artifact_resolver = None
+
+    def bind_artifact_resolver(self, resolver) -> None:
+        assert self.artifact_resolver is None
+        self.artifact_resolver = resolver
 
     def materialize(self, binding, reservation_id: str) -> RuntimeEvidence:
         assert reservation_id
         assert binding.variant.backend == self.status.backend_id
+        assert self.artifact_resolver is not None
+        artifact = self.artifact_resolver(binding)
+        assert artifact.artifact_digest == binding.artifact.digest
+        assert artifact.implementation_digest == binding.function.implementation_digest
         return RuntimeEvidence(
             domain_ref=OpaqueAuthorityRef(self.target_domain_id),
             executable_digest=self.target_executable_digest,
@@ -137,23 +146,13 @@ def test_clean_home_broker_dispatches_then_revocation_fails_closed(
     caller = control._principals.resolve_principal(context.caller_principal)
     resolved_target = control._principals.resolve_principal(OpaqueAuthorityRef(target.principal_id))
     assert resolved_target == target
-    caller_domain = _domain(
-        domain_id=context.caller_domain_id,
-        principal=caller,
-        active=active,
-        boundary=DomainBoundary.UNPRIVILEGED_WORKER,
-    )
+    caller_domain = store.get_domain(context.caller_domain_id)
+    assert caller_domain is not None
     target_domain = _domain(
         domain_id=context.target_domain_id,
         principal=target,
         active=active,
         boundary=DomainBoundary.DEDICATED_PROCESS,
-    )
-    control.register_execution_domain(
-        caller_domain,
-        session_id=context.caller_session_id,
-        channel_digest=caller_domain.authenticated_channel_digest,
-        principal_ref=context.caller_principal,
     )
     control.register_execution_domain(
         target_domain,

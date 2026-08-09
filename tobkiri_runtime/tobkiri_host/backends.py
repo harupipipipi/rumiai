@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterable, Protocol
+from typing import TYPE_CHECKING, Callable, Iterable, Protocol
 
 from .contracts import ResolvedOperationBinding
 from .errors import BackendUnavailableError
 from .models import ExecutionKind, RuntimeEvidence
 
 if TYPE_CHECKING:
+    from .artifact_materialization import MaterializedPackArtifact
     from .platform_backends import PlatformIsolationDriver
 
 
@@ -130,6 +131,10 @@ def production_backend_registry(
     platform_system: str | None = None,
     machine: str | None = None,
     drivers: Iterable[PlatformIsolationDriver] = (),
+    artifact_resolver: Callable[
+        [ResolvedOperationBinding], MaterializedPackArtifact
+    ]
+    | None = None,
 ) -> BackendRegistry:
     """Register the one documented PackVM substrate for the current platform.
 
@@ -144,6 +149,7 @@ def production_backend_registry(
         platform_system=platform_system,
         machine=machine,
         drivers=drivers,
+        artifact_resolver=artifact_resolver,
     )
     return BackendRegistry((backend,))
 

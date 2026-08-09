@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from .canonical import canonical_json, strict_loads
+from .canonical import canonical_digest, canonical_json, strict_loads
 from .errors import ProtocolError, SchemaValidationError
 from .ids import (
     validate_artifact_digest,
@@ -47,6 +47,7 @@ SCHEMA_ALIASES = {
     "pack_artifact_index": "pack_artifact_index_v4.schema.json",
     "pack_contract_catalog": "pack_contract_catalog_v4.schema.json",
     "executable_catalog": "executable_catalog_v4.schema.json",
+    "external_pack_catalog": "external_normal_pack_catalog_v4.schema.json",
 }
 
 _ID_FIELDS = {
@@ -228,6 +229,27 @@ def _semantic_diagnostics(
         diagnostics.extend(_shell_security_diagnostics(document))
     if schema_name in {"function_principal", "function_principal_v1.schema.json"}:
         diagnostics.extend(_principal_digest_diagnostics(document))
+    if schema_name in {"distribution", "distribution_v1.schema.json"}:
+        diagnostics.extend(_distribution_integrity_diagnostics(document))
+    return diagnostics
+
+
+def _distribution_integrity_diagnostics(document: Mapping[str, Any]) -> list[str]:
+    payload = {
+        key: value
+        for key, value in document.items()
+        if key not in {"integrity", "signature_envelope"}
+    }
+    expected = canonical_digest(payload)
+    integrity = document.get("integrity")
+    envelope = document.get("signature_envelope")
+    if not isinstance(integrity, Mapping) or not isinstance(envelope, Mapping):
+        return []
+    diagnostics: list[str] = []
+    if integrity.get("manifest_digest") != expected:
+        diagnostics.append("$.integrity.manifest_digest: canonical digest does not match")
+    if envelope.get("signed_digest") != expected:
+        diagnostics.append("$.signature_envelope.signed_digest: signed digest does not match")
     return diagnostics
 
 

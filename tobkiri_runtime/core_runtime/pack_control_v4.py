@@ -18,7 +18,12 @@ from typing import Any, Mapping
 from tobkiri_host.errors import HostCoreError
 from tobkiri_protocol.validation import validate_document
 
-from .pack_boundary import load_pack_catalog, resolve_pack_root
+from .external_pack_catalog_v4 import (
+    control_catalog_revision,
+    external_pack_content_digest,
+    load_admitted_pack_catalog as load_pack_catalog,
+    resolve_admitted_pack_root as resolve_pack_root,
+)
 
 
 PACK_CONTROL_CONTRACT = "tobkiri.host.pack-control.v4"
@@ -177,10 +182,12 @@ class CapturedPackControlSession:
 
     def _install(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         pack_id, record, root = _pack(arguments)
-        _pack_snapshot(pack_id, root)
+        content_digest = _pack_snapshot(pack_id, root)
         state = _read_control_state(self._binding.profile_id)
         state[pack_id] = {
             "artifact_digest": _record_digest(record),
+            "pack_artifact_digest": _pack_manifest_artifact_digest(pack_id),
+            "content_digest": content_digest,
             "catalog_revision": self._binding.catalog_revision,
         }
         _write_control_state(self._binding.profile_id, state)
@@ -590,7 +597,7 @@ def _declared_operations(record: Mapping[str, Any]) -> list[dict[str, Any]]:
 def _capture_binding() -> _Binding:
     state, profile = _active_profile()
     resolved_profile = state["resolved_profile"]
-    catalog_revision = str(resolved_profile["catalog_revision"])
+    catalog_revision = control_catalog_revision()
     profile_revision = "sha256:" + _digest(resolved_profile)
     catalog = load_pack_catalog()
     selected = tuple(str(item or "").strip() for item in profile.get("packs") or [])
@@ -682,9 +689,19 @@ def _activate_pack_set(state: Mapping[str, Any], pack_ids: list[str]) -> None:
             manifest = validate_document(manifest_path.read_bytes(), "pack")
         except Exception as error:
             raise PackControlDenied("Pack v4 manifest is invalid") from error
+        external_normal = (
+            record.get("authority") == "host-signed-external-normal-v4"
+        )
         if (
             manifest["pack"]["id"] != pack_id
-            or manifest["integrity"]["artifact_set_digest"] != manifest["pack"]["artifact_digest"]
+            or (
+                external_normal
+                and (
+                    manifest["pack"]["kind"] != "normal_sandbox"
+                    or manifest["pack"]["artifact_digest"]
+                    != record.get("artifact_digest")
+                )
+            )
         ):
             raise PackControlDenied("Pack v4 manifest identity is inconsistent")
         external_packs[pack_id] = manifest
@@ -875,7 +892,20 @@ def _require_install_binding(
     binding: _Binding,
 ) -> None:
     del binding
-    if not isinstance(entry, Mapping) or (entry.get("artifact_digest") != _record_digest(record)):
+    try:
+        root = resolve_pack_root(pack_id)
+        content_digest = _pack_snapshot(pack_id, root)
+        pack_artifact_digest = _pack_manifest_artifact_digest(pack_id)
+    except Exception as error:
+        raise PackControlDenied(
+            f"installed Pack binding is stale or tampered: {pack_id}"
+        ) from error
+    if (
+        not isinstance(entry, Mapping)
+        or entry.get("artifact_digest") != _record_digest(record)
+        or entry.get("pack_artifact_digest") != pack_artifact_digest
+        or entry.get("content_digest") != content_digest
+    ):
         raise PackControlDenied(f"installed Pack binding is stale or tampered: {pack_id}")
 
 
@@ -997,6 +1027,7 @@ def _approval_status(
         "owner": pack_id,
         "profile_id": binding.profile_id,
         "workspace_id": binding.workspace_id,
+        "catalog_revision": binding.catalog_revision,
         "artifact_digest": _record_digest(record),
     }
     if any(payload.get(key) != value for key, value in expected.items()):
@@ -1074,6 +1105,9 @@ def _pack_manifest_artifact_digest(pack_id: str) -> str:
 
 
 def _pack_snapshot(pack_id: str, root: Path) -> str:
+    external_digest = external_pack_content_digest(pack_id)
+    if external_digest is not None:
+        return external_digest
     if root.is_symlink() or not root.is_dir():
         raise PackControlDenied("cataloged Pack root is missing or symlinked")
     resolved_root = root.resolve(strict=True)

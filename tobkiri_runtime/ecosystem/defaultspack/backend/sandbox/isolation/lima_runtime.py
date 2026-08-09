@@ -40,6 +40,7 @@ PACKVM_PROTOCOL = "io.tobkiri.packvm-supervisor.v1"
 PACKVM_ATTESTATION_VERSION = 1
 PACKVM_CONFIRMATION_PREFIX = "PROVISION"
 PACKVM_CLEANUP_PREFIX = "DELETE"
+MAX_PACKVM_ARTIFACT_REQUEST_BYTES = 700 * 1024 * 1024
 _PACKVM_RESOURCE_ROOT = Path(__file__).with_name("resources")
 _PACKVM_CONFIG = _PACKVM_RESOURCE_ROOT / "packvm-lima.v1.yaml"
 _PACKVM_RUNNER = _PACKVM_RESOURCE_ROOT / "packvm_guest_runner.py"
@@ -536,7 +537,7 @@ class PackVMLimaProvisioner:
             architecture=self._machine,
             image_source=str(image["url"]),
             image_digest=str(image["digest"]),
-            image_size_bytes=int(image["size_bytes"]),
+            image_size_bytes=int(str(image["size_bytes"])),
             image_download_required=bool(facts["image_download_required"]),
             config_digest=str(facts["config_digest"]),
             guest_runner_digest=str(facts["guest_runner_digest"]),
@@ -618,7 +619,7 @@ class PackVMLimaProvisioner:
             state["attestation_digest"] = _canonical_digest(state)
             state["authentication"] = self._sign_state(state)
             _atomic_private_json(self.state_path, state)
-            self._audit("provisioned", state["attestation_digest"])
+            self._audit("provisioned", str(state["attestation_digest"]))
             return self.doctor()
         except Exception:
             if created and plan.limactl:
@@ -715,6 +716,36 @@ class PackVMLimaProvisioner:
             raise ValueError("PackVM supervisor returned an unauthenticated response")
         return response
 
+    def materialize_artifact(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Stage one Host-captured artifact through the root-owned guest supervisor."""
+
+        if request.get("operation") != "materialize":
+            raise ValueError("PackVM artifact request operation is invalid")
+        health = self.doctor()
+        if not health.ready:
+            raise ValueError(health.reason or "managed PackVM is unavailable")
+        encoded = json.dumps(request, sort_keys=True, separators=(",", ":"))
+        encoded_size = len(encoded.encode())
+        if encoded_size > MAX_PACKVM_ARTIFACT_REQUEST_BYTES:
+            raise ValueError("PackVM artifact request is too large")
+        result = self._checked_call(
+            (
+                self._require_command(),
+                "shell",
+                self._instance,
+                "--",
+                "sudo",
+                PACKVM_GUEST_RUNNER,
+            ),
+            input_text=encoded,
+            timeout=180,
+            max_stdin_bytes=MAX_PACKVM_ARTIFACT_REQUEST_BYTES,
+        )
+        response = json.loads(_decode(result.stdout))
+        if not isinstance(response, dict) or response.get("protocol") != PACKVM_PROTOCOL:
+            raise ValueError("PackVM supervisor returned an unauthenticated response")
+        return response
+
     def _plan_for_consumed_nonce(self, nonce: str) -> PackVMProvisioningPlan:
         # Rebuild immutable facts while preserving the already reviewed nonce.
         image = _PACKVM_IMAGES[self._machine]
@@ -742,7 +773,7 @@ class PackVMLimaProvisioner:
             self._machine,
             str(image["url"]),
             str(image["digest"]),
-            int(image["size_bytes"]),
+            int(str(image["size_bytes"])),
             bool(facts["image_download_required"]),
             str(facts["config_digest"]),
             str(facts["guest_runner_digest"]),
@@ -907,6 +938,7 @@ class PackVMLimaProvisioner:
         *,
         input_text: str | None = None,
         timeout: float,
+        max_stdin_bytes: int = 1024 * 1024,
     ) -> Any:
         if self._runner is not None:
             return self._runner(command, input_text, timeout)
@@ -927,7 +959,7 @@ class PackVMLimaProvisioner:
                 allowed_argv=(argv,),
                 allowed_cwds=(cwd,),
                 allowed_environment=frozenset(environment),
-                max_stdin_bytes=1024 * 1024,
+                max_stdin_bytes=max_stdin_bytes,
                 max_stdout_bytes=MAX_LIMA_STATE_BYTES,
                 max_stderr_bytes=MAX_LIMA_STATE_BYTES,
                 max_timeout_seconds=bounded_timeout,
@@ -941,9 +973,19 @@ class PackVMLimaProvisioner:
         )
 
     def _checked_call(
-        self, command: Sequence[str], *, timeout: float, input_text: str | None = None
+        self,
+        command: Sequence[str],
+        *,
+        timeout: float,
+        input_text: str | None = None,
+        max_stdin_bytes: int = 1024 * 1024,
     ) -> Any:
-        result = self._call(command, input_text=input_text, timeout=timeout)
+        result = self._call(
+            command,
+            input_text=input_text,
+            timeout=timeout,
+            max_stdin_bytes=max_stdin_bytes,
+        )
         if result.returncode != 0:
             raise ValueError(_decode(result.stderr)[:1000] or f"command failed: {command[1]}")
         return result

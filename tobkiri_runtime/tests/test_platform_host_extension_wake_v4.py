@@ -18,6 +18,10 @@ from core_runtime.authority.v4 import (
     ExecutionDomain,
     FunctionPrincipal,
 )
+from tobkiri_host.artifact_materialization import (
+    MaterializedArtifactFile,
+    MaterializedPackArtifact,
+)
 from tobkiri_host.backends import production_backend_registry
 from tobkiri_host.contracts import OperationCatalog, OperationRoute
 from tobkiri_host.errors import (
@@ -55,6 +59,7 @@ from tobkiri_host.triggers import (
     WakeRegistrationLease,
 )
 from tobkiri_host.tauri_roles import validate_production_tauri_roles
+from tobkiri_protocol.canonical import canonical_digest
 
 
 def digest(seed: str) -> str:
@@ -116,6 +121,41 @@ def binding():
     )
 
 
+def materialized_artifact() -> MaterializedPackArtifact:
+    artifact_file = MaterializedArtifactFile(
+        path="runtime/handler.py",
+        digest=digest("function"),
+        executable=False,
+        content=b"function",
+    )
+    identity = {
+        "pack_id": "extension.files",
+        "artifact_digest": digest("artifact"),
+        "function_id": "extension.files.read",
+        "implementation_digest": digest("function"),
+        "implementation_path": "runtime/handler.py",
+        "files": [
+            {
+                "path": artifact_file.path,
+                "digest": artifact_file.digest,
+                "executable": artifact_file.executable,
+                "size": len(artifact_file.content),
+            }
+        ],
+    }
+    return MaterializedPackArtifact(
+        pack_id="extension.files",
+        artifact_digest=digest("artifact"),
+        function_id="extension.files.read",
+        implementation_digest=digest("function"),
+        implementation_path="runtime/handler.py",
+        materialization_digest=canonical_digest(identity),
+        root_device=1,
+        root_inode=2,
+        files=(artifact_file,),
+    )
+
+
 class Driver:
     backend_id = "tobkiri.python-pack-v4"
     substrate_id = "macos-vz"
@@ -138,6 +178,9 @@ class Driver:
             backend_digest=self.backend_digest,
             platform=self.platform,
             executable_digest=request.executable_digest,
+            artifact_digest=request.artifact_digest,
+            materialization_digest=request.artifact.materialization_digest,
+            guest_artifact_identity=digest("guest-artifact"),
             isolation_profile=request.isolation_profile,
             attestation_digest=digest("attestation"),
             lease_id=request.lease.lease_id,
@@ -199,7 +242,10 @@ def test_platform_selection_and_attestation_fail_closed() -> None:
     with pytest.raises(BackendUnavailableError, match="supervisor"):
         unavailable.select(selected)
     driver = Driver()
-    backend = ProductionIsolationBackend(driver)
+    backend = ProductionIsolationBackend(
+        driver,
+        artifact_resolver=lambda _binding: materialized_artifact(),
+    )
     evidence = backend.materialize(selected, "reservation-1")
     assert evidence.resource_reservation_id == "reservation-1"
     assert driver.last_launch is not None
@@ -250,6 +296,16 @@ class Provisioner:
             "payload": {"inside_guest": True},
         }
 
+    def materialize_artifact(self, request):
+        self.requests.append(request)
+        return {
+            "ok": True,
+            "protocol": "io.tobkiri.packvm-supervisor.v1",
+            "artifact_digest": request["artifact_digest"],
+            "materialization_digest": request["materialization_digest"],
+            "guest_artifact_identity": digest("guest-artifact"),
+        }
+
 
 def test_managed_lima_driver_invokes_only_authenticated_guest_and_rejects_replay() -> None:
     provisioner = Provisioner()
@@ -263,6 +319,7 @@ def test_managed_lima_driver_invokes_only_authenticated_guest_and_rejects_replay
         isolation_profile="packvm.default.v1",
         reservation_id="reservation-1",
         lease=lease,
+        artifact=materialized_artifact(),
     )
     attestation = driver.launch(launch)
     request = SimpleNamespace(
@@ -278,7 +335,8 @@ def test_managed_lima_driver_invokes_only_authenticated_guest_and_rejects_replay
 
     outcome = driver.invoke(request)
     assert outcome.payload == {"inside_guest": True}
-    assert provisioner.requests[0]["operation"] == "invoke"
+    assert provisioner.requests[0]["operation"] == "materialize"
+    assert provisioner.requests[1]["operation"] == "invoke"
     driver.terminate(attestation.domain_id)
     with pytest.raises(BackendUnavailableError, match="replay"):
         driver.launch(launch)
