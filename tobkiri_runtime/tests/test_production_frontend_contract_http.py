@@ -34,6 +34,7 @@ pytestmark = pytest.mark.contract
 
 
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
+FRONTEND_MUTATION_TIMEOUT_SECONDS = 10
 BUNDLE_ROOT = RUNTIME_ROOT / "ecosystem" / "defaultspack" / "v4"
 MAP_PATH = (
     RUNTIME_ROOT / "ecosystem" / "defaultspack" / "defaultspack" / "frontend_contract_map.v4.json"
@@ -52,7 +53,14 @@ def _request(
     body: object | None = None,
     headers: Mapping[str, str] | None = None,
 ) -> tuple[int, dict[str, object], list[tuple[str, str]]]:
-    connection = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
+    # Keep the real-server contract aligned with the production frontend's
+    # mutation deadline. Profile mutations synchronously verify and recapture
+    # the complete authority-bound runtime before returning success.
+    connection = http.client.HTTPConnection(
+        "127.0.0.1",
+        server.port,
+        timeout=FRONTEND_MUTATION_TIMEOUT_SECONDS,
+    )
     encoded = None if body is None else json.dumps(body).encode("utf-8")
     request_headers = dict(headers or {})
     if encoded is not None:
