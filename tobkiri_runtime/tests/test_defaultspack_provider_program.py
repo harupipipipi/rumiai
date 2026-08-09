@@ -73,18 +73,11 @@ def _v4_provider_fixture(
         packs[pack_id] = json.loads(pack_path.read_text(encoding="utf-8"))
         assert packs[pack_id]["requirements"]["network"]["allowed_domains"] == []
 
-    provider_edge = {
-        "caller_function_id": "rumi_provider_registry_pack.provider-registry.resource",
-        "target_provider_id": ("rumi_provider_adapters_pack.provider.compatibility.generate"),
-        "contract_id": "tobkiri.service.ai.provider.generate.v1",
-        "operation_id": "rumi_provider_adapters_pack.provider-generate",
-        "requested_scope_template": {"provider_id": provider_id},
-    }
     source_profile = copy.deepcopy(catalog.profiles["defaults"])
-    source_profile["requested_edges"] = [
-        *source_profile["requested_edges"],
-        provider_edge,
-    ]
+    requested_pack_ids = {item["pack_id"] for item in source_profile["packs"]}
+    additional_pack_ids = tuple(
+        pack_id for pack_id in provider_packs if pack_id not in requested_pack_ids
+    )
     profiles = dict(catalog.profiles)
     profiles["defaults"] = source_profile
     catalog = BundledCatalog(
@@ -95,15 +88,6 @@ def _v4_provider_fixture(
         profiles,
     )
 
-    edge_key = "|".join(
-        provider_edge[field]
-        for field in (
-            "caller_function_id",
-            "target_provider_id",
-            "contract_id",
-            "operation_id",
-        )
-    )
     authority_bindings = {
         "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": (
             "authority-ref:conversation.default"
@@ -116,7 +100,6 @@ def _v4_provider_fixture(
         "tobkiri.service.file.inspect.v1|rumi_file_inspect_pack.file-inspect": (
             "authority-ref:file.inspect.default"
         ),
-        edge_key: "authority-ref:provider.generate",
     }
     for requested_edge in source_profile["requested_edges"]:
         if requested_edge["target_provider_id"] != "tobkiri.host.pack-control":
@@ -134,6 +117,20 @@ def _v4_provider_fixture(
             requested_edge_key,
             f"authority-ref:pack-control.{requested_edge['operation_id']}",
         )
+    for index, requested_edge in enumerate(source_profile["requested_edges"]):
+        requested_edge_key = "|".join(
+            requested_edge[field]
+            for field in (
+                "caller_function_id",
+                "target_provider_id",
+                "contract_id",
+                "operation_id",
+            )
+        )
+        authority_bindings.setdefault(
+            requested_edge_key,
+            f"authority-ref:provider-fixture.{index}",
+        )
     resolved = resolve_default_profile(
         catalog,
         "defaults",
@@ -143,7 +140,7 @@ def _v4_provider_fixture(
         authority_snapshot_digest="sha256:" + "9" * 64,
         authority_bindings=authority_bindings,
         security_epoch=1,
-        additional_pack_ids=provider_packs,
+        additional_pack_ids=additional_pack_ids,
     )
     workspace = fixture_root / "workspace"
     workspace.mkdir(parents=True)

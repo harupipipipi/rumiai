@@ -149,13 +149,15 @@ def test_manifest_detection_uses_dedicated_vercel_adapter(tmp_path, monkeypatch)
 
 
 def test_openrouter_invocation_uses_catalog_without_network_refresh(monkeypatch):
+    from domain.ai_client.providers import openrouter_provider
+
     monkeypatch.setattr(
-        "domain.ai_client.providers.openrouter_provider.openrouter_provider_options",
+        openrouter_provider,
+        "openrouter_provider_options",
         lambda: {},
     )
-    from domain.ai_client.providers.openrouter_provider import OpenRouterProvider
 
-    provider = OpenRouterProvider(
+    provider = openrouter_provider.OpenRouterProvider(
         known_models=[
             {
                 "id": "openrouter/openai/test-model",
