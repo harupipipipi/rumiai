@@ -221,3 +221,19 @@ test('store revoke action clears pending and surfaces a timeout without changing
     'POST request timed out after 10000ms: /api/pack-control/approval-revoke',
   ]);
 });
+
+test('required Profile Pack is rejected before a revoke request is sent', async () => {
+  const routes = installFetch(async (route) => {
+    assert.fail(`unexpected route: ${route}`);
+  });
+  useAppStore.setState({
+    packs: [{...samplePack, required: true}],
+    packApprovalPending: {},
+  });
+
+  await useAppStore.getState().revokePackApproval(samplePack.id);
+
+  assert.deepEqual(routes, []);
+  assert.deepEqual(useAppStore.getState().packApprovalPending, {});
+  assert.equal(useAppStore.getState().packs[0].approved, true);
+});

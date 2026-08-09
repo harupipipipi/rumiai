@@ -43,6 +43,7 @@ export interface ApiPack extends PackControlBinding {
   version: string;
   description: string;
   is_core: boolean;
+  required?: boolean;
   installed: boolean;
   enabled: boolean;
   artifact_digest: string;

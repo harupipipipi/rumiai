@@ -293,3 +293,17 @@ test('disable rejects a duplicate submission while the first request is pending'
   assert.deepEqual(useAppStore.getState().packTogglePending, {});
   assert.deepEqual(errors, []);
 });
+
+test('required Profile Pack is rejected before a disable request is sent', async () => {
+  const routes = installFetch(async (route) => {
+    assert.fail(`unexpected route: ${route}`);
+  });
+  const errors: string[] = [];
+  setStore(errors);
+  useAppStore.setState({packs: [{...samplePack, required: true}]});
+
+  assert.equal(await useAppStore.getState().togglePack(samplePack.id), false);
+  assert.deepEqual(routes, []);
+  assert.equal(useAppStore.getState().packs[0].enabled, true);
+  assert.deepEqual(useAppStore.getState().packTogglePending, {});
+});

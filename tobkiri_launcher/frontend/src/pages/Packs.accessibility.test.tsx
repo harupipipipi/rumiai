@@ -176,3 +176,44 @@ test('Packs requires installation before approval or enablement', async () => {
     dom.window.close();
   }
 });
+
+test('Packs exposes required Profile Packs without revoke or toggle actions', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
+    url: 'http://localhost/packs',
+  });
+  const previousState = useAppStore.getState();
+  Object.defineProperties(globalThis, {
+    window: {value: dom.window, configurable: true},
+    document: {value: dom.window.document, configurable: true},
+    navigator: {value: dom.window.navigator, configurable: true},
+    localStorage: {value: dom.window.localStorage, configurable: true},
+  });
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  useAppStore.setState({
+    packs: [{...samplePack, required: true}],
+    isLoading: false,
+    loadPacks: async () => {},
+  });
+  const container = document.querySelector<HTMLElement>('#root');
+  assert.ok(container);
+  const root: Root = createRoot(container);
+  await act(async () => {
+    root.render(
+      <MemoryRouter initialEntries={['/packs']}>
+        <Routes>
+          <Route path="/packs" element={<Packs />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  });
+
+  try {
+    assert.match(container.textContent ?? '', /Required by Defaults Profile/);
+    assert.equal(container.querySelector('[role="switch"]'), null);
+    assert.equal(container.querySelector('[aria-label^="Revoke approval"]'), null);
+  } finally {
+    await act(async () => root.unmount());
+    useAppStore.setState(previousState, true);
+    dom.window.close();
+  }
+});

@@ -3,15 +3,15 @@
     "file": "assets/tobkiri-launcher-icon-A0Q09elZ.png",
     "src": "../assets/app-icon/tobkiri-launcher-icon.png"
   },
-  "_Input-C-PTuTYZ.js": {
-    "file": "assets/Input-C-PTuTYZ.js",
+  "_Input-suPHc_2s.js": {
+    "file": "assets/Input-suPHc_2s.js",
     "name": "Input",
     "imports": [
       "index.html"
     ]
   },
   "index.html": {
-    "file": "assets/index-7nAZQ3kD.js",
+    "file": "assets/index-B2KL_glL.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -34,23 +34,23 @@
     "isDynamicEntry": true
   },
   "src/pages/PackDetail.tsx": {
-    "file": "assets/PackDetail-Cu4iyQLb.js",
+    "file": "assets/PackDetail-BqYRhPgi.js",
     "name": "PackDetail",
     "src": "src/pages/PackDetail.tsx",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
-      "_Input-C-PTuTYZ.js"
+      "_Input-suPHc_2s.js"
     ]
   },
   "src/pages/Packs.tsx": {
-    "file": "assets/Packs-CNUGij30.js",
+    "file": "assets/Packs-D4wbh0X3.js",
     "name": "Packs",
     "src": "src/pages/Packs.tsx",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
-      "_Input-C-PTuTYZ.js"
+      "_Input-suPHc_2s.js"
     ]
   }
 }

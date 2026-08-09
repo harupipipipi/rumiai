@@ -191,3 +191,20 @@ test('PackDetail renders typed backend-unavailable diagnostics without exposing 
     dom.window.close();
   }
 });
+
+test('PackDetail exposes required Profile Packs without revoke or toggle actions', async () => {
+  const previousState = useAppStore.getState();
+  const {dom, container, root} = createSurface();
+  configureStore({...pack, required: true});
+
+  try {
+    await renderDetail(root);
+    assert.match(container.textContent ?? '', /Required by Defaults Profile/);
+    assert.equal(container.querySelector('[role="switch"]'), null);
+    assert.equal(container.querySelector('[aria-label^="Revoke approval"]'), null);
+  } finally {
+    act(() => root.unmount());
+    useAppStore.setState(previousState, true);
+    dom.window.close();
+  }
+});

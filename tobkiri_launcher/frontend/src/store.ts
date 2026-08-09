@@ -80,6 +80,7 @@ export interface Pack {
   name: string;
   version: string;
   type: 'core' | 'community';
+  required?: boolean;
   installed: boolean;
   enabled: boolean;
   description: string;
@@ -551,6 +552,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       || !pack.installed
       || !pack.approved
       || pack.type === 'core'
+      || pack.required
       || state.packApprovalPending[id]
     ) return;
 
@@ -608,7 +610,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   togglePack: async (id) => {
     const state = get();
     const pack = state.packs.find((candidate) => candidate.id === id);
-    if (!pack || state.packTogglePending[id]) return false;
+    if (!pack || pack.required || state.packTogglePending[id]) return false;
 
     const version = (packMutationVersions.get(id) ?? 0) + 1;
     packMutationVersions.set(id, version);

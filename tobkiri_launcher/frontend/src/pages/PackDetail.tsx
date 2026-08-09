@@ -148,7 +148,7 @@ export function PackDetail() {
   );
 
   const handleRevoke = () => {
-    if (!pack.installed || !pack.approved || pack.type === 'core') return;
+    if (!pack.installed || !pack.approved || pack.type === 'core' || pack.required) return;
     showDialog({
       title: `Revoke ${pack.name} approval?`,
       message: `This will revoke Tobkiri approval and access for ${pack.name}. The Pack will be disabled, and its capabilities will be unavailable until a new approval succeeds.`,
@@ -203,6 +203,8 @@ export function PackDetail() {
                   Approve
                 </Button>
               </div>
+            ) : pack.required ? (
+              <Badge variant="secondary">Required by Defaults Profile</Badge>
             ) : (
               <>
                 <Button

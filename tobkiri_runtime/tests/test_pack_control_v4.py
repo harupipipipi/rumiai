@@ -26,6 +26,7 @@ import core_runtime.pack_control_v4 as pack_control
 
 
 TARGET_PACK = "rumi_git_read_pack"
+REQUIRED_PACK = "rumi_file_inspect_pack"
 
 
 @pytest.fixture
@@ -121,6 +122,46 @@ def test_enable_does_not_require_unrelated_pack_install_or_approval(
         _invoke(restarted, "pack.status", {"pack_id": unrelated})["approved"]
         is False
     )
+
+
+def test_required_pack_rejects_disable_and_revoke_before_side_effects(
+    captured_session,
+) -> None:
+    """A bundled Profile Pack cannot be disabled or partially revoked."""
+
+    session, _state_path, user_data = captured_session
+    initial = _invoke(session, "pack.status", {"pack_id": REQUIRED_PACK})
+    assert initial["required"] is True
+    candidate = _invoke(
+        session,
+        "approval.candidate",
+        {"pack_id": REQUIRED_PACK},
+    )
+    _invoke(
+        session,
+        "approval.approve",
+        {"pack_id": REQUIRED_PACK, "candidate_id": candidate["candidate_id"]},
+    )
+    approval_path = (
+        user_data
+        / "pack_control"
+        / "approvals"
+        / "defaults"
+        / f"{REQUIRED_PACK}.json"
+    )
+    approval_before = approval_path.read_bytes()
+    activation_before = capture_default_profile().activation["activation_id"]
+
+    with pytest.raises(PackControlDenied, match="required Pack cannot be disabled"):
+        _invoke(session, "pack.disable", {"pack_id": REQUIRED_PACK})
+    with pytest.raises(PackControlDenied, match="required Pack approval cannot be revoked"):
+        _invoke(session, "approval.revoke", {"pack_id": REQUIRED_PACK})
+
+    assert approval_path.read_bytes() == approval_before
+    assert capture_default_profile().activation["activation_id"] == activation_before
+    status = _invoke(session, "pack.status", {"pack_id": REQUIRED_PACK})
+    assert status["approved"] is True
+    assert status["enabled"] is True
 
 
 def test_approval_is_session_bound_one_shot_and_not_implicit(captured_session) -> None:

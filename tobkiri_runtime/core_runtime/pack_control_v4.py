@@ -248,6 +248,8 @@ class CapturedPackControlSession:
 
     def _revoke_approval(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         pack_id = _installed_pack(arguments, self._binding)
+        if pack_id in _required_profile_pack_ids(self._binding.profile_id):
+            raise PackControlDenied("required Pack approval cannot be revoked")
         record = load_pack_catalog()[pack_id]
         approval = _load_valid_approval(pack_id, record, self._binding)
         approval_revision = str(approval["approval_revision"])
@@ -299,6 +301,8 @@ class CapturedPackControlSession:
 
     def _set_enabled(self, arguments: Mapping[str, Any], enabled: bool) -> dict[str, Any]:
         pack_id = _installed_pack(arguments, self._binding)
+        if not enabled and pack_id in _required_profile_pack_ids(self._binding.profile_id):
+            raise PackControlDenied("required Pack cannot be disabled")
         record = load_pack_catalog()[pack_id]
         approved, reason = _approval_status(pack_id, record, self._binding)
         if enabled and not approved:
@@ -420,6 +424,7 @@ def _catalog_payload(binding: _Binding) -> dict[str, Any]:
     state, active_profile = _active_profile()
     active = set(active_profile.get("packs") or [])
     active_grant_bindings = _active_grant_bindings(state)
+    required_pack_ids = _required_profile_pack_ids(binding.profile_id)
     plan_bindings = {
         (str(item.get("contract_id") or ""), str(item.get("operation_id") or ""))
         for item in state["resolved_plan"].get("bindings") or []
@@ -462,6 +467,7 @@ def _catalog_payload(binding: _Binding) -> dict[str, Any]:
                 "version": str(record.get("version") or "0.0.0"),
                 "description": str(record.get("description") or ""),
                 "is_core": record.get("kind") == "base",
+                "required": pack_id in required_pack_ids,
                 "installed": is_installed,
                 "enabled": pack_id in active and approved,
                 "approved": bool(approved),
@@ -482,6 +488,32 @@ def _catalog_payload(binding: _Binding) -> dict[str, Any]:
             }
         )
     return {"packs": packs, "count": len(packs), **_binding_payload(binding)}
+
+
+def _required_profile_pack_ids(profile_id: str) -> frozenset[str]:
+    """Return the immutable Pack closure declared by the bundled Profile."""
+
+    from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+
+    from .bootstrap.profile_capture import _bundle_root
+
+    catalog = BundledCatalog.load(_bundle_root())
+    source = catalog.profiles.get(profile_id)
+    if source is None:
+        raise PackControlDenied("bundled Defaults Profile is unavailable")
+    selected = [str(item["pack_id"]) for item in source["packs"]]
+    pending = list(selected)
+    while pending:
+        current_id = pending.pop(0)
+        manifest = catalog.packs.get(current_id)
+        if manifest is None:
+            raise PackControlDenied("bundled Defaults dependency is unavailable")
+        for dependency_id in manifest["requirements"]["pack_dependencies"]:
+            dependency = str(dependency_id)
+            if dependency not in selected:
+                selected.append(dependency)
+                pending.append(dependency)
+    return frozenset(selected)
 
 
 def _active_grant_bindings(state: Mapping[str, Any]) -> set[tuple[str, str]]:

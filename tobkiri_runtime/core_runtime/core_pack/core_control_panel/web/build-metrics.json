@@ -3,13 +3,13 @@
   "initial_javascript": {
     "files": [
       {
-        "file": "assets/index-7nAZQ3kD.js",
-        "raw_bytes": 385504,
-        "gzip_bytes": 117550
+        "file": "assets/index-B2KL_glL.js",
+        "raw_bytes": 385553,
+        "gzip_bytes": 117563
       }
     ],
-    "raw_bytes": 385504,
-    "gzip_bytes": 117550
+    "raw_bytes": 385553,
+    "gzip_bytes": 117563
   },
   "initial_css": {
     "files": [
@@ -25,9 +25,9 @@
   "initial_assets": {
     "files": [
       {
-        "file": "assets/index-7nAZQ3kD.js",
-        "raw_bytes": 385504,
-        "gzip_bytes": 117550
+        "file": "assets/index-B2KL_glL.js",
+        "raw_bytes": 385553,
+        "gzip_bytes": 117563
       },
       {
         "file": "assets/index-kZE3Hf9H.css",
@@ -35,20 +35,20 @@
         "gzip_bytes": 11619
       }
     ],
-    "raw_bytes": 446887,
-    "gzip_bytes": 129169
+    "raw_bytes": 446936,
+    "gzip_bytes": 129182
   },
   "all_javascript": {
     "files": [
       {
-        "file": "assets/Input-C-PTuTYZ.js",
+        "file": "assets/Input-suPHc_2s.js",
         "raw_bytes": 3439,
-        "gzip_bytes": 1413
+        "gzip_bytes": 1412
       },
       {
-        "file": "assets/index-7nAZQ3kD.js",
-        "raw_bytes": 385504,
-        "gzip_bytes": 117550
+        "file": "assets/index-B2KL_glL.js",
+        "raw_bytes": 385553,
+        "gzip_bytes": 117563
       },
       {
         "file": "assets/core-SwWLTXZB.js",
@@ -56,18 +56,18 @@
         "gzip_bytes": 1054
       },
       {
-        "file": "assets/PackDetail-Cu4iyQLb.js",
-        "raw_bytes": 31037,
-        "gzip_bytes": 7997
+        "file": "assets/PackDetail-BqYRhPgi.js",
+        "raw_bytes": 31135,
+        "gzip_bytes": 8021
       },
       {
-        "file": "assets/Packs-CNUGij30.js",
-        "raw_bytes": 6577,
-        "gzip_bytes": 2421
+        "file": "assets/Packs-D4wbh0X3.js",
+        "raw_bytes": 6700,
+        "gzip_bytes": 2456
       }
     ],
-    "raw_bytes": 429263,
-    "gzip_bytes": 130435
+    "raw_bytes": 429533,
+    "gzip_bytes": 130506
   },
   "routes": {
     "src/pages/Setup.tsx": {
@@ -80,45 +80,45 @@
       "present": true,
       "files": [
         {
-          "file": "assets/Packs-CNUGij30.js",
-          "raw_bytes": 6577,
-          "gzip_bytes": 2421
+          "file": "assets/Packs-D4wbh0X3.js",
+          "raw_bytes": 6700,
+          "gzip_bytes": 2456
         },
         {
-          "file": "assets/index-7nAZQ3kD.js",
-          "raw_bytes": 385504,
-          "gzip_bytes": 117550
+          "file": "assets/index-B2KL_glL.js",
+          "raw_bytes": 385553,
+          "gzip_bytes": 117563
         },
         {
-          "file": "assets/Input-C-PTuTYZ.js",
+          "file": "assets/Input-suPHc_2s.js",
           "raw_bytes": 3439,
-          "gzip_bytes": 1413
+          "gzip_bytes": 1412
         }
       ],
-      "raw_bytes": 395520,
-      "gzip_bytes": 121384
+      "raw_bytes": 395692,
+      "gzip_bytes": 121431
     },
     "src/pages/PackDetail.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/PackDetail-Cu4iyQLb.js",
-          "raw_bytes": 31037,
-          "gzip_bytes": 7997
+          "file": "assets/PackDetail-BqYRhPgi.js",
+          "raw_bytes": 31135,
+          "gzip_bytes": 8021
         },
         {
-          "file": "assets/index-7nAZQ3kD.js",
-          "raw_bytes": 385504,
-          "gzip_bytes": 117550
+          "file": "assets/index-B2KL_glL.js",
+          "raw_bytes": 385553,
+          "gzip_bytes": 117563
         },
         {
-          "file": "assets/Input-C-PTuTYZ.js",
+          "file": "assets/Input-suPHc_2s.js",
           "raw_bytes": 3439,
-          "gzip_bytes": 1413
+          "gzip_bytes": 1412
         }
       ],
-      "raw_bytes": 419980,
-      "gzip_bytes": 126960
+      "raw_bytes": 420127,
+      "gzip_bytes": 126996
     }
   }
 }

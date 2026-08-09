@@ -10,6 +10,7 @@ test('transformPack preserves approval state from panel packs API', () => {
     version: '1.0.0',
     description: 'Demo pack',
     is_core: false,
+    required: true,
     installed: true,
     enabled: true,
     artifact_digest: 'sha256:artifact-a',
@@ -40,6 +41,7 @@ test('transformPack preserves approval state from panel packs API', () => {
 
   assert.equal(pack.id, 'pack_a');
   assert.equal(pack.installed, true);
+  assert.equal(pack.required, true);
   assert.equal(pack.artifactDigest, 'sha256:artifact-a');
   assert.equal(pack.profileId, 'profile-a');
   assert.equal(pack.workspaceId, 'workspace-a');

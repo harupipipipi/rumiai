@@ -22,6 +22,7 @@ export function transformPack(api: ApiPack): Pack {
     name: api.name,
     version: api.version,
     type: api.is_core ? 'core' : 'community',
+    required: api.required === true,
     installed: api.installed,
     enabled: api.enabled,
     description: api.description,
