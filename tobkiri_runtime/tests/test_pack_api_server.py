@@ -110,6 +110,24 @@ def _panel_session(
     return cookie.split(";", 1)[0], exchange["data"]["csrf_token"], origin
 
 
+def _assert_retired_generic_dispatch(
+    status: int,
+    payload: Mapping[str, object],
+) -> None:
+    """Assert the typed no-write retirement contract for generic dispatch."""
+
+    assert status == 410
+    assert payload["data"] == {
+        "api_version": "io.tobkiri.pack-api.v4",
+        "state": "legacy_api_retired",
+        "retired_route": "/api/v4/dispatch",
+        "write_set": [],
+    }
+    assert payload["error"] == (
+        "Legacy API route is retired; use an exact Pack v4 operation"
+    )
+
+
 @pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1"])
 def test_runtime_http_config_canonicalizes_loopback(host: str) -> None:
     assert RuntimeHTTPConfig.verify(host, 8765).host == "127.0.0.1"
@@ -353,17 +371,17 @@ def test_dispatch_requires_panel_cookie_and_csrf(
         "operation_id": "catalog.read",
         "payload": {},
     }
-    status, _, _ = _request(server, "POST", "/api/v4/dispatch", body=body)
-    assert status == 401
+    status, payload, _ = _request(server, "POST", "/api/v4/dispatch", body=body)
+    _assert_retired_generic_dispatch(status, payload)
     cookie, csrf, origin = _panel_session(server)
-    status, _, _ = _request(
+    status, payload, _ = _request(
         server,
         "POST",
         "/api/v4/dispatch",
         body=body,
         headers={"Cookie": cookie, "Origin": origin},
     )
-    assert status == 401
+    _assert_retired_generic_dispatch(status, payload)
     status, payload, _ = _request(
         server,
         "POST",
@@ -375,17 +393,15 @@ def test_dispatch_requires_panel_cookie_and_csrf(
             "X-Rumi-CSRF": csrf,
         },
     )
-    assert status == 200
-    assert payload["data"]["operation_id"] == "catalog.read"
-    assert dispatch.calls[0][0:2] == ("pack.control.v4", "catalog.read")
-    assert dispatch.calls[0][2]["_session_id"]
+    _assert_retired_generic_dispatch(status, payload)
+    assert dispatch.calls == []
 
 
-def test_authenticated_http_catalog_uses_production_broker_only(
+def test_authenticated_generic_dispatch_is_retired_before_production_broker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The real panel route reaches only selected production Broker bindings."""
+    """Retired generic dispatch cannot reach the production Broker or ledger."""
     user_data = tmp_path / "clean-home"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
@@ -404,6 +420,8 @@ def test_authenticated_http_catalog_uses_production_broker_only(
     server.start()
     try:
         cookie, csrf, origin = _panel_session(server)
+        with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
+            audit_before = authority.audit_events()
         headers = {
             "Cookie": cookie,
             "Origin": origin,
@@ -420,9 +438,7 @@ def test_authenticated_http_catalog_uses_production_broker_only(
             },
             headers=headers,
         )
-        assert status == 200
-        assert payload["data"]["count"] == 142
-        assert payload["data"]["profile_id"] == "defaults"
+        _assert_retired_generic_dispatch(status, payload)
 
         status, payload, _ = _request(
             server,
@@ -435,9 +451,9 @@ def test_authenticated_http_catalog_uses_production_broker_only(
             },
             headers=headers,
         )
-        assert status == 200
-        assert payload["data"]["pack_id"] == "rumi_git_read_pack"
-        assert payload["data"]["installed"] is True
+        _assert_retired_generic_dispatch(status, payload)
+        with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
+            assert authority.audit_events() == audit_before
     finally:
         server.stop()
 
@@ -449,7 +465,7 @@ def test_dispatch_rejects_non_object_json_roots(
 ) -> None:
     server, dispatch = live_server
     cookie, csrf, origin = _panel_session(server)
-    status, _, _ = _request(
+    status, payload, _ = _request(
         server,
         "POST",
         "/api/v4/dispatch",
@@ -460,7 +476,7 @@ def test_dispatch_rejects_non_object_json_roots(
             "X-Rumi-CSRF": csrf,
         },
     )
-    assert status == 400
+    _assert_retired_generic_dispatch(status, payload)
     assert dispatch.calls == []
 
 
