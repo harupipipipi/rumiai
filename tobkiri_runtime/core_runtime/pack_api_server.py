@@ -11,7 +11,8 @@ import time
 import uuid
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Mapping, Protocol
+from pathlib import Path
+from typing import Callable, Mapping, Protocol
 from urllib.parse import urlparse
 
 from .api.api_response import APIResponse
@@ -180,6 +181,7 @@ class PackAPIHandler(
     _dispatch_session: DispatchSession | None = None
     _contract_routes: Mapping[tuple[str, str], FrontendContractBinding] = {}
     _contract_replay_guard: _RequestReplayGuard | None = None
+    _runtime_refresh: Callable[[DispatchSession | None], None] | None = None
     _instance_web_mounts: tuple[WebMountEntry, ...] | None = None
     app_lifecycle_manager: LifecyclePort | None = None
     _runtime_port = 8765
@@ -197,6 +199,7 @@ class PackAPIHandler(
         contract_routes: Mapping[tuple[str, str], FrontendContractBinding] | None = None,
         replay_guard: _RequestReplayGuard | None = None,
         web_mounts: tuple[WebMountEntry, ...] | None = None,
+        runtime_refresh: Callable[[DispatchSession | None], None] | None = None,
     ) -> type["PackAPIHandler"]:
         """Create an isolated handler bound to one captured runtime session."""
 
@@ -206,6 +209,7 @@ class PackAPIHandler(
         bound_contract_routes = dict(contract_routes or {})
         bound_replay_guard = replay_guard
         bound_web_mounts = web_mounts
+        bound_runtime_refresh = runtime_refresh
 
         class BoundPackAPIHandler(PackAPIHandler):
             _panel_auth_manager = bound_panel_auth
@@ -214,6 +218,31 @@ class PackAPIHandler(
             _contract_routes = bound_contract_routes
             _contract_replay_guard = bound_replay_guard
             _instance_web_mounts = bound_web_mounts
+            _runtime_refresh = (
+                staticmethod(bound_runtime_refresh)
+                if bound_runtime_refresh is not None
+                else None
+            )
+
+            def _setup_install_pack(self, body: dict[str, object]) -> dict[str, object]:
+                result = super()._setup_install_pack(body)
+                if (
+                    result.get("state") == "active"
+                    and bound_runtime_refresh is not None
+                ):
+                    try:
+                        bound_runtime_refresh(self.__class__._dispatch_session)
+                    except Exception:
+                        from .app_lifecycle_manager import mark_runtime_failed
+
+                        mark_runtime_failed("canonical runtime capture failed")
+                        return {
+                            "error": "Defaults runtime capture failed",
+                            "status_code": 503,
+                            "state": "runtime_capture_failed",
+                            "write_set": [],
+                        }
+                return result
 
             @staticmethod
             def _fixed_web_mounts() -> tuple[WebMountEntry, ...]:
@@ -410,6 +439,7 @@ class PackAPIHandler(
                 target.operation_id,
                 payload,
             )
+            self._refresh_after_operation(target.operation_id)
         except (HostCoreError, KeyError, RuntimeError, ValueError) as error:
             self._send_response(
                 APIResponse(
@@ -426,6 +456,17 @@ class PackAPIHandler(
         presented = self._present_contract_result(route_binding, result)
         self._send_response(APIResponse(True, data=presented))
         return True
+
+    def _refresh_after_operation(self, operation_id: str) -> None:
+        """Publish a fresh runtime capture after an activation boundary."""
+
+        refresh = self._runtime_refresh
+        if refresh is not None and operation_id in {
+            "pack.enable",
+            "pack.disable",
+            "runtime.restart",
+        }:
+            refresh(None)
 
     def _select_contract_target(
         self,
@@ -761,6 +802,7 @@ class PackAPIHandler(
                 operation_value.strip(),
                 payload,
             )
+            self._refresh_after_operation(operation_value.strip())
         except (HostCoreError, KeyError, RuntimeError, ValueError) as error:
             code = getattr(error, "code", "invalid_dispatch")
             self._send_response(
@@ -1024,6 +1066,7 @@ class PackAPIServer:
                 contract_routes=self._contract_routes,
                 replay_guard=self._replay_guard,
                 web_mounts=self._web_mounts,
+                runtime_refresh=self._refresh_runtime_capture,
             )
             server = _PackThreadingHTTPServer((self.host, self.port), handler)
             actual_port = int(server.server_address[1])
@@ -1039,15 +1082,23 @@ class PackAPIServer:
     def _validate_contract_runtime(self) -> None:
         """Verify the exact capture and route ownership before binding a socket."""
 
-        if not self._contract_routes:
+        self._validate_contract_capture(self._dispatch_session, self._contract_routes)
+
+    def _validate_contract_capture(
+        self,
+        session: DispatchSession | None,
+        routes: Mapping[tuple[str, str], FrontendContractBinding],
+    ) -> None:
+        """Validate a complete session/map pair before publishing either value."""
+
+        if not routes:
             return
-        session = self._dispatch_session
         if session is None:
             raise RuntimeError("frontend contracts require a captured v4 session")
         session.assert_current()
         if session.profile_id != "defaults" or not session.plan_digest.startswith("sha256:"):
             raise RuntimeError("frontend contracts require the exact Defaults Profile")
-        for binding in self._contract_routes.values():
+        for binding in routes.values():
             for target in binding.targets:
                 providers = session.provider_metadata(target.contract_id)
                 exact = tuple(
@@ -1069,6 +1120,86 @@ class PackAPIServer:
                 root = mount["web_root"]
                 if not root.is_dir() or not (root / mount["index_file"]).is_file():
                     raise RuntimeError("frontend contract web mount is unavailable")
+
+    def _refresh_runtime_capture(
+        self, activated_session: DispatchSession | None = None
+    ) -> None:
+        """Atomically publish a current Broker session and canonical route map."""
+
+        from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+        from tobkiri_host.runtime import install_dispatch_session
+
+        from .authority.v4 import AuthorityStore
+        from .bootstrap.production_v4 import capture_production_dispatch
+        from .bootstrap.profile_capture import (
+            capture_default_profile,
+            runtime_user_data_root,
+        )
+        from .di_container import get_container
+        from .frontend_contract_routes import load_frontend_contract_bindings
+
+        runtime_root = Path(__file__).resolve().parents[1]
+        session = activated_session
+        created_session = False
+        if session is None:
+            active = capture_default_profile()
+            authority = AuthorityStore(
+                runtime_user_data_root() / "authority" / "v4.sqlite3"
+            )
+            try:
+                session = capture_production_dispatch(
+                    active,
+                    bundle_root=runtime_root / "ecosystem" / "defaultspack" / "v4",
+                    ecosystem_root=runtime_root / "ecosystem",
+                    authority_store=authority,
+                )
+                created_session = True
+            except Exception:
+                authority.close()
+                raise
+        try:
+            catalog = BundledCatalog.load(
+                runtime_root / "ecosystem" / "defaultspack" / "v4"
+            )
+            bindings = load_frontend_contract_bindings(
+                runtime_root
+                / "ecosystem"
+                / "defaultspack"
+                / "defaultspack"
+                / "frontend_contract_map.v4.json",
+                catalog.packs["runtime.tauri.application.default"],
+            )
+            routes = contract_binding_map(bindings)
+            self._validate_contract_capture(session, routes)
+        except Exception:
+            if created_session and session is not None:
+                close = getattr(session, "close", None)
+                if callable(close):
+                    close()
+            raise
+
+        with self._lifecycle_lock:
+            previous = self._dispatch_session
+            handler = PackAPIHandler.canonical_v4_server_handler(
+                panel_auth_manager=self._panel_auth_manager,
+                dispatch_session=session,
+                app_lifecycle_manager=self.app_lifecycle_manager,
+                contract_routes=routes,
+                replay_guard=self._replay_guard,
+                web_mounts=self._web_mounts,
+                runtime_refresh=self._refresh_runtime_capture,
+            )
+            handler._runtime_port = self.port
+            self._dispatch_session = session
+            self._contract_routes = routes
+            self.handler_class = handler
+            if self.server is not None:
+                self.server.RequestHandlerClass = handler
+            install_dispatch_session(get_container(), session)
+        if previous is not None and previous is not session:
+            close = getattr(previous, "close", None)
+            if callable(close):
+                close()
 
     def stop(self) -> None:
         """Stop the server and discard its captured handler bindings."""

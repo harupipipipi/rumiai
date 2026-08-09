@@ -151,7 +151,7 @@ def test_clean_home_broker_dispatches_then_revocation_fails_closed(
     )
     control.register_execution_domain(
         caller_domain,
-        session_id=session_id,
+        session_id=context.caller_session_id,
         channel_digest=caller_domain.authenticated_channel_digest,
         principal_ref=context.caller_principal,
     )

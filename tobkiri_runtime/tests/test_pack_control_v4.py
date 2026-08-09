@@ -58,7 +58,7 @@ def _approve_target(session) -> None:
 
 def test_catalog_install_approve_enable_and_restart_read_back(captured_session) -> None:
     """The positive lifecycle survives a fresh captured session."""
-    session, _state_path, _user_data = captured_session
+    session, _state_path, user_data = captured_session
     initial = _invoke(session, "catalog.read")
     assert initial["count"] == 142
     target = next(item for item in initial["packs"] if item["pack_id"] == TARGET_PACK)
@@ -78,14 +78,48 @@ def test_catalog_install_approve_enable_and_restart_read_back(captured_session) 
         {"pack_id": TARGET_PACK, "candidate_id": candidate["candidate_id"]},
     )
     assert approved["approved"] is True
-    with pytest.raises(PackControlDenied, match="immutable"):
-        _invoke(session, "pack.enable", {"pack_id": TARGET_PACK})
+    enabled = _invoke(session, "pack.enable", {"pack_id": TARGET_PACK})
+    assert enabled["enabled"] is True
 
     restarted = capture_pack_control_session()
     status = _invoke(restarted, "pack.status", {"pack_id": TARGET_PACK})
     assert status["installed"] is True
     assert status["approved"] is True
-    assert status["enabled"] is False
+    assert status["enabled"] is True
+
+    first_activation = capture_default_profile().activation["activation_id"]
+    assert (
+        _invoke(restarted, "pack.disable", {"pack_id": TARGET_PACK})["enabled"]
+        is False
+    )
+    recaptured = capture_pack_control_session()
+    assert (
+        _invoke(recaptured, "pack.status", {"pack_id": TARGET_PACK})["enabled"]
+        is False
+    )
+    assert capture_default_profile().activation["activation_id"] != first_activation
+
+    from core_runtime.authority.v4 import AuthorityStore
+
+    with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
+        assert authority.active_activation_reservation(str(first_activation)) is None
+
+
+def test_enable_does_not_require_unrelated_pack_install_or_approval(
+    captured_session,
+) -> None:
+    """Activation approval is limited to the requested Pack dependency closure."""
+
+    session, _state_path, _user_data = captured_session
+    unrelated = "defaults"
+    assert _invoke(session, "pack.status", {"pack_id": unrelated})["installed"] is False
+    _approve_target(session)
+    assert _invoke(session, "pack.enable", {"pack_id": TARGET_PACK})["enabled"] is True
+    restarted = capture_pack_control_session()
+    assert (
+        _invoke(restarted, "pack.status", {"pack_id": unrelated})["approved"]
+        is False
+    )
 
 
 def test_approval_is_session_bound_one_shot_and_not_implicit(captured_session) -> None:
@@ -278,15 +312,18 @@ def test_real_http_local_auth_dispatch_lifecycle_has_zero_legacy_calls(
         assert_post_denied("/api/v4/dispatch", dispatch_body, 401)
 
         def dispatch(operation_id: str, payload: dict | None = None) -> dict:
-            envelope = post(
-                "/api/v4/dispatch",
-                {
-                    "contract_id": PACK_CONTROL_CONTRACT,
-                    "operation_id": operation_id,
-                    "payload": payload or {},
-                },
-                {"X-Rumi-CSRF": csrf},
-            )
+            try:
+                envelope = post(
+                    "/api/v4/dispatch",
+                    {
+                        "contract_id": PACK_CONTROL_CONTRACT,
+                        "operation_id": operation_id,
+                        "payload": payload or {},
+                    },
+                    {"X-Rumi-CSRF": csrf},
+                )
+            except urllib.error.HTTPError as error:
+                pytest.fail(error.read().decode("utf-8"))
             assert envelope["success"] is True
             return envelope["data"]
 
@@ -300,16 +337,19 @@ def test_real_http_local_auth_dispatch_lifecycle_has_zero_legacy_calls(
                 "candidate_id": candidate["candidate_id"],
             },
         )
-        with pytest.raises(urllib.error.HTTPError) as conflict:
-            dispatch("pack.enable", {"pack_id": TARGET_PACK})
-        assert conflict.value.code == 409
+        assert dispatch("pack.enable", {"pack_id": TARGET_PACK})["enabled"] is True
         assert dispatch("runtime.restart")["restart_requested"] is True
         restarted_status = dispatch(
             "pack.status",
             {"pack_id": TARGET_PACK},
         )
-        assert restarted_status["enabled"] is False
+        assert restarted_status["enabled"] is True
         assert restarted_status["approved"] is True
+        assert dispatch("pack.disable", {"pack_id": TARGET_PACK})["enabled"] is False
+        assert dispatch("runtime.restart")["restart_requested"] is True
+        disabled_status = dispatch("pack.status", {"pack_id": TARGET_PACK})
+        assert disabled_status["enabled"] is False
+        assert disabled_status["approved"] is True
         assert all(path != "/api/panel/packs" for path in paths)
         assert not any(path.startswith("/api/panel/packs/") for path in paths)
     finally:

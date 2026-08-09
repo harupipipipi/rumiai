@@ -369,6 +369,7 @@ def capture_production_dispatch(
             "Authority store is not bound to the captured Defaults activation"
         )
     active = persisted_active
+    activation_suffix = str(active.activation["fencing_token"])
 
     catalog = BundledCatalog.load(bundle_root)
     profile = active.resolved.profile
@@ -444,7 +445,7 @@ def capture_production_dispatch(
             target = FunctionPrincipal.from_dict(control_binding["function_principal"])
             target_suffix = target.principal_id.removeprefix("sha256:")[:24]
             target_domain = _execution_domain(
-                domain_id=f"domain.provider.{target_suffix}",
+                domain_id=f"domain.provider.{target_suffix}.{activation_suffix}",
                 principal=target,
                 active=active,
                 boundary=DomainBoundary.DEDICATED_PROCESS,
@@ -454,7 +455,10 @@ def capture_production_dispatch(
                 authority_store,
                 authority_control,
                 target_domain,
-                session_id=f"session.provider.pack-control.{operation_id}",
+                session_id=(
+                    f"session.provider.pack-control.{operation_id}."
+                    f"{activation_suffix}"
+                ),
                 principal=target,
             )
             scope = _operation_scope(PACK_CONTROL_CONTRACT, operation_id, target)
@@ -524,8 +528,9 @@ def capture_production_dispatch(
         caller = caller_by_operation[key]
         target = target_by_operation[key]
         target_suffix = target.principal_id.removeprefix("sha256:")[:24]
+        authority_session_id = f"{session_id}.{activation_suffix}"
         caller_suffix = canonical_digest(
-            {"session_id": session_id, "caller": caller.principal_id}
+            {"session_id": authority_session_id, "caller": caller.principal_id}
         ).removeprefix("sha256:")[:24]
         context = RequestContext(
             request_id="request." + secrets.token_hex(16),
@@ -536,10 +541,10 @@ def capture_production_dispatch(
             activation_digest=activation_digest,
             plan_digest=str(plan["plan_digest"]),
             security_epoch=int(active.activation["security_epoch"]),
-            caller_session_id=session_id,
-            caller_domain_id=f"domain.panel.{caller_suffix}",
+            caller_session_id=authority_session_id,
+            caller_domain_id=f"domain.panel.{caller_suffix}.{activation_suffix}",
             caller_boot_epoch=1,
-            target_domain_id=f"domain.provider.{target_suffix}",
+            target_domain_id=f"domain.provider.{target_suffix}.{activation_suffix}",
             target_boot_epoch=1,
             target_backend_digest=(target_backend_digests or {}).get(
                 target.principal_id,
@@ -556,7 +561,7 @@ def capture_production_dispatch(
         )
         if contract_id == PACK_CONTROL_CONTRACT:
             with caller_sessions_lock:
-                if session_id not in caller_sessions:
+                if authority_session_id not in caller_sessions:
                     caller_domain = _execution_domain(
                         domain_id=context.caller_domain_id,
                         principal=caller,
@@ -568,10 +573,10 @@ def capture_production_dispatch(
                         authority_store,
                         authority_control,
                         caller_domain,
-                        session_id=session_id,
+                        session_id=authority_session_id,
                         principal=caller,
                     )
-                    caller_sessions.add(session_id)
+                    caller_sessions.add(authority_session_id)
         return context
 
     providers: dict[str, tuple[Mapping[str, Any], ...]] = {}

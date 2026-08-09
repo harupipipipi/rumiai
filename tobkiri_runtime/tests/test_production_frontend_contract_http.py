@@ -122,6 +122,7 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
     production_server,
 ) -> None:
     server, _session, authority = production_server
+    authority_path = authority.path
     cookie, csrf, origin = _authenticate(server)
     read_headers = {
         "Cookie": cookie,
@@ -225,11 +226,47 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
         )[0]
         == 200
     )
-    assert post("/api/pack-control/enable", {"pack_id": "defaultspack"})[0] == 200
+    enable_status, enabled = post("/api/pack-control/enable", {"pack_id": target_pack})
+    assert enable_status == 200, enabled
+    assert enabled["data"]["enabled"] is True
+    assert post("/api/pack-control/restart", {})[0] == 200
+    status, refreshed_catalog, _ = _request(
+        server,
+        "GET",
+        _contract("GET", "/api/ui/catalog"),
+        headers={
+            "Cookie": cookie,
+            "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+        },
+    )
+    assert status == 200, refreshed_catalog
+    refreshed_host = refreshed_catalog["data"]["dynamic_host"]
+    refreshed_status = next(
+        item
+        for item in refreshed_host["contributions"]
+        if item["label"] == "pack.status"
+    )
+    status, persisted = post(
+        "/api/ui/capability/invoke",
+        {
+            "request_id": str(uuid.uuid4()),
+            "expires_at": time.time() + 30,
+            "profile_id": refreshed_host["profile_id"],
+            "plan_hash": refreshed_host["plan_hash"],
+            "catalog_hash": refreshed_host["catalog_hash"],
+            "contribution_id": refreshed_status["contribution_id"],
+            "owner_pack_id": refreshed_status["owner_pack_id"],
+            "contract_id": refreshed_status["action_contract"],
+            "payload": {"pack_id": target_pack},
+        },
+    )
+    assert status == 200, persisted
+    assert persisted["data"]["enabled"] is True
     assert post("/api/pack-control/disable", {"pack_id": target_pack})[0] == 200
     assert post("/api/pack-control/restart", {})[0] == 200
 
-    audit_before_legacy = len(authority.audit_events())
+    with AuthorityStore(authority_path) as current_authority:
+        audit_before_legacy = len(current_authority.audit_events())
     status, retired, _ = _request(
         server,
         "GET",
@@ -238,7 +275,8 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
     )
     assert status == 410
     assert retired["data"]["state"] == "legacy_api_retired"
-    assert len(authority.audit_events()) == audit_before_legacy
+    with AuthorityStore(authority_path) as current_authority:
+        assert len(current_authority.audit_events()) == audit_before_legacy
 
 
 def test_contract_replay_unknown_and_stale_capture_fail_closed(

@@ -11,10 +11,12 @@ import tempfile
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
 from tobkiri_host.errors import HostCoreError
+from tobkiri_protocol.validation import validate_document
 
 from .pack_boundary import load_pack_catalog, resolve_pack_root
 
@@ -245,9 +247,7 @@ class CapturedPackControlSession:
             if pack_id == str(profile.get("base_pack") or ""):
                 raise PackControlDenied("the active Base Pack cannot be disabled")
             packs.remove(pack_id)
-        profile["packs"] = packs
-        profile["updated_at"] = int(time.time())
-        _save_active_profile(state, profile)
+        _activate_pack_set(state, packs)
         self._recapture()
         return {"pack_id": pack_id, "enabled": enabled, **self._binding_payload()}
 
@@ -422,9 +422,159 @@ def _active_profile() -> tuple[dict[str, Any], dict[str, Any]]:
     }, profile
 
 
-def _save_active_profile(state: dict[str, Any], profile: dict[str, Any]) -> None:
-    del state, profile
-    raise PackControlDenied("active Profile is immutable; submit a finite v4 Profile transaction")
+def _activate_pack_set(state: Mapping[str, Any], pack_ids: list[str]) -> None:
+    """Resolve and atomically activate a new immutable Profile Pack set."""
+
+    del state
+
+    from ecosystem.defaultspack.domain.runtime_v4 import (
+        ActivationStore,
+        BundledCatalog,
+        resolve_default_profile,
+    )
+
+    from .authority.v4 import AuthorityStore
+    from .bootstrap.profile_capture import (
+        _authority_reference,
+        _authority_snapshot_digest,
+        _bundle_root,
+        _edge_key,
+    )
+
+    user_data = _user_data_root()
+    bundle_root = _bundle_root()
+    catalog = BundledCatalog.load(bundle_root)
+    bundled_pack_ids = frozenset(catalog.packs)
+    external_packs = dict(catalog.packs)
+    pending = [pack_id for pack_id in pack_ids if pack_id not in external_packs]
+    requested_closure = set(pending)
+    while pending:
+        pack_id = pending.pop(0)
+        if pack_id in external_packs:
+            continue
+        record = load_pack_catalog().get(pack_id)
+        if record is None:
+            raise PackControlDenied("Pack is absent from the canonical v4 catalog")
+        root = resolve_pack_root(pack_id)
+        manifest_path = root / "pack.v4.json"
+        if manifest_path.is_symlink() or not manifest_path.is_file():
+            raise PackControlDenied("Pack v4 manifest is unavailable")
+        try:
+            manifest = validate_document(manifest_path.read_bytes(), "pack")
+        except Exception as error:
+            raise PackControlDenied("Pack v4 manifest is invalid") from error
+        if (
+            manifest["pack"]["id"] != pack_id
+            or manifest["integrity"]["artifact_set_digest"]
+            != manifest["pack"]["artifact_digest"]
+        ):
+            raise PackControlDenied("Pack v4 manifest identity is inconsistent")
+        external_packs[pack_id] = manifest
+        dependencies = set(manifest["requirements"]["pack_dependencies"])
+        requested_closure.update(dependencies)
+        pending.extend(
+            dependency
+            for dependency in dependencies
+            if dependency not in external_packs
+        )
+    catalog = BundledCatalog(
+        root=catalog.root,
+        packs=external_packs,
+        bases=catalog.bases,
+        shells=catalog.shells,
+        profiles=catalog.profiles,
+    )
+    source = catalog.profiles.get("defaults")
+    if source is None:
+        raise PackControlDenied("bundled Defaults Profile is unavailable")
+
+    requested = tuple(dict.fromkeys(str(pack_id) for pack_id in pack_ids))
+    if len(requested) != len(pack_ids) or any(
+        pack_id not in catalog.packs for pack_id in requested
+    ):
+        raise PackControlDenied("requested Profile Pack set is invalid")
+
+    authority_path = user_data / "authority" / "v4.sqlite3"
+    workspace = user_data / "workspaces" / "defaults"
+    with AuthorityStore(authority_path) as authority:
+        bundle_lock_digest = "sha256:" + hashlib.sha256(
+            (bundle_root / "bundle.lock.json").read_bytes()
+        ).hexdigest()
+        snapshot_digest = _authority_snapshot_digest(authority, bundle_lock_digest)
+        bindings = {
+            _edge_key(edge): _authority_reference(edge, snapshot_digest)
+            for edge in source["requested_edges"]
+        }
+        verified_digests = {
+            str(manifest["pack"]["artifact_digest"])
+            for manifest in catalog.packs.values()
+        }
+        baseline = resolve_default_profile(
+            catalog,
+            "defaults",
+            approved_artifact_digests=verified_digests,
+            authority_snapshot_digest=snapshot_digest,
+            authority_bindings=bindings,
+            security_epoch=authority.security_epoch,
+        )
+        mandatory = {
+            str(item["pack_id"])
+            for item in baseline.profile["packs"]
+            if item.get("role") != "application"
+        }
+        if not mandatory.issubset(requested):
+            raise PackControlDenied(
+                "the bundled Defaults Profile Pack set is immutable"
+            )
+        additional_pack_ids = tuple(
+            pack_id for pack_id in requested if pack_id not in mandatory
+        )
+        approved_digests = {
+            str(item["artifact_digest"])
+            for item in baseline.lock["effective_set"]
+        }
+        installed = _read_control_state("defaults")
+        binding = _capture_binding()
+        external_selected = {
+            pack_id for pack_id in requested_closure if pack_id not in bundled_pack_ids
+        }
+        for pack_id in external_selected:
+            record = load_pack_catalog()[pack_id]
+            if pack_id not in installed:
+                raise PackControlDenied("Pack must be installed before activation")
+            _require_install_binding(
+                pack_id,
+                record,
+                installed[pack_id],
+                binding,
+            )
+            approved, reason = _approval_status(pack_id, record, binding)
+            if not approved:
+                raise PackControlDenied(reason or "Pack approval is required")
+            approved_digests.add(str(catalog.packs[pack_id]["pack"]["artifact_digest"]))
+        resolved = resolve_default_profile(
+            catalog,
+            "defaults",
+            approved_artifact_digests=approved_digests,
+            authority_snapshot_digest=snapshot_digest,
+            authority_bindings=bindings,
+            security_epoch=authority.security_epoch,
+            additional_pack_ids=additional_pack_ids,
+        )
+        store = ActivationStore(
+            workspace / "activation",
+            workspace,
+            profile_id="defaults",
+            authority=authority,
+        )
+        activation_id = (
+            "activation:defaults-"
+            + resolved.plan["plan_digest"].removeprefix("sha256:")[:16]
+            + "-"
+            + secrets.token_hex(8)
+        )
+        created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        store.activate(resolved, activation_id=activation_id, created_at=created_at)
 
 
 def _control_state_path(profile_id: str) -> Path:
@@ -510,9 +660,9 @@ def _require_install_binding(
     entry: object,
     binding: _Binding,
 ) -> None:
+    del binding
     if not isinstance(entry, Mapping) or (
         entry.get("artifact_digest") != _record_digest(record)
-        or entry.get("catalog_revision") != binding.catalog_revision
     ):
         raise PackControlDenied(f"installed Pack binding is stale or tampered: {pack_id}")
 
@@ -604,7 +754,6 @@ def _approval_status(
         "owner": pack_id,
         "profile_id": binding.profile_id,
         "workspace_id": binding.workspace_id,
-        "catalog_revision": binding.catalog_revision,
         "artifact_digest": _record_digest(record),
     }
     if any(payload.get(key) != value for key, value in expected.items()):

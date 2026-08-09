@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import http.cookiejar
 import socket
 import urllib.error
+import urllib.request
+import uuid
 from pathlib import Path
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 import pytest
@@ -14,6 +18,7 @@ from core_runtime.authority.v4 import AuthorityStoreError
 from core_runtime.bootstrap.runtime import Kernel
 from core_runtime.bootstrap.profile_capture import capture_default_profile
 from core_runtime.di_container import get_container
+from core_runtime.panel_auth import PanelAuthManager, reset_panel_auth_manager_for_tests
 from tobkiri_host.broker import RequestBroker
 from tobkiri_host.runtime import V4DispatchSession
 
@@ -33,6 +38,9 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
     monkeypatch.setenv("RUMI_PORT", str(port))
     monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
     monkeypatch.setenv("RUMI_LOG_DIR", str(tmp_path / "logs"))
+    reset_panel_auth_manager_for_tests(
+        PanelAuthManager(bootstrap_secret="first-request-bootstrap")
+    )
 
     kernel = Kernel()
     try:
@@ -45,9 +53,7 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
         assert envelope["data"]["panel_ready"] is True
         assert envelope["data"]["runtime_ready"] is False
 
-        with urlopen(
-            f"http://127.0.0.1:{port}/api/setup/packs", timeout=5
-        ) as response:
+        with urlopen(f"http://127.0.0.1:{port}/api/setup/packs", timeout=5) as response:
             setup = json.load(response)["data"]
         assert setup["state"] == "review_required"
         request = Request(
@@ -69,9 +75,42 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
             activated = json.load(response)["data"]
         assert activated["state"] == "active"
         assert activated["audit_receipt"]["state"] == "committed"
-        assert activated["audit_receipt"]["activation_id"] == activated[
-            "activation_id"
-        ]
+        assert activated["audit_receipt"]["activation_id"] == activated["activation_id"]
+        opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
+        )
+        bootstrap_request = Request(
+            f"http://127.0.0.1:{port}/api/panel/auth/bootstrap",
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "X-Rumi-Desktop-Bootstrap": "first-request-bootstrap",
+            },
+            data=b"{}",
+        )
+        with opener.open(bootstrap_request, timeout=5) as response:
+            login_code = json.load(response)["data"]["code"]
+        exchange_request = Request(
+            f"http://127.0.0.1:{port}/api/panel/auth/exchange",
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Origin": f"http://127.0.0.1:{port}",
+            },
+            data=json.dumps({"code": login_code}).encode(),
+        )
+        with opener.open(exchange_request, timeout=5):
+            pass
+        for contract_path in ("/api/home/dashboard", "/api/pack-control/catalog"):
+            first_request = Request(
+                "http://127.0.0.1:"
+                f"{port}/api/contracts/defaultspack/"
+                + quote(f"GET {contract_path}", safe=""),
+                headers={"X-Tobkiri-Request-ID": str(uuid.uuid4())},
+            )
+            with opener.open(first_request, timeout=5) as response:
+                first_payload = json.load(response)
+            assert first_payload["success"] is True
         with pytest.raises(urllib.error.HTTPError) as replay:
             urlopen(request, timeout=5)
         assert replay.value.code == 401
@@ -93,9 +132,7 @@ def test_clean_bootstrap_captures_and_restarts_without_legacy_profile(
         prepare_default_profile_confirmation,
     )
 
-    first = capture_default_profile(
-        confirmation=prepare_default_profile_confirmation()
-    )
+    first = capture_default_profile(confirmation=prepare_default_profile_confirmation())
     restarted = capture_default_profile()
 
     assert first.activation == restarted.activation
