@@ -30,6 +30,9 @@ from core_runtime.workflow_v4.models import (
 from ecosystem.tobkiri_workflow_pack.generate_v4 import PACK_ROOT, generate
 from tobkiri_protocol.validation import validate_document
 
+RUNTIME_ROOT = Path(__file__).resolve().parents[1]
+WORKFLOW_BACKEND_ROOT = RUNTIME_ROOT / "core_runtime" / "workflow_v4"
+
 CATALOG_REVISION = "sha256:" + "1" * 64
 CATALOG_DIGEST = "sha256:" + "2" * 64
 ACTIVATION_DIGEST = "sha256:" + "3" * 64
@@ -447,7 +450,8 @@ def test_pack_artifacts_are_deterministic_valid_and_have_no_legacy_dispatch() ->
     }.issubset(frontend_operations)
     integrity = json.loads((PACK_ROOT / "backend-integrity.v4.json").read_text(encoding="utf-8"))
     assert set(integrity["files"]) == {
-        path.as_posix() for path in Path("core_runtime/workflow_v4").glob("*.py")
+        path.relative_to(RUNTIME_ROOT).as_posix()
+        for path in WORKFLOW_BACKEND_ROOT.glob("*.py")
     }
     assert pack["migration"] == {
         "compatibility": "none",
@@ -461,7 +465,8 @@ def test_pack_artifacts_are_deterministic_valid_and_have_no_legacy_dispatch() ->
         item["operation_id"] for item in executables["variants"][0]["operations"]
     )
     sources = "\n".join(
-        path.read_text(encoding="utf-8") for path in Path("core_runtime/workflow_v4").glob("*.py")
+        path.read_text(encoding="utf-8")
+        for path in WORKFLOW_BACKEND_ROOT.glob("*.py")
     )
     for forbidden in (
         "FunctionRegistry",
