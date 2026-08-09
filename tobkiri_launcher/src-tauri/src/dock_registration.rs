@@ -1427,7 +1427,9 @@ mod tests {
                         .contains("authorization: bearer local-token"));
                 }
                 stream
-                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                    )
                     .unwrap();
             }
         });
