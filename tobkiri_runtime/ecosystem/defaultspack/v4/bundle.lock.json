@@ -34,7 +34,7 @@
     {
       "path": "packs/runtime.tauri.application.default.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:61e5b6fcf6238ad07baf4c79e6c9945e80b1bc9f8f7774afd2c869d1a7138bd2"
+      "digest": "sha256:11267a2bc8e51ee5c58939566671ba0844fc93b4a522a167e6aa4fddc6fe5206"
     },
     {
       "path": "packs/shell.cli.default.pack.v4.json",
