@@ -49,15 +49,31 @@ def test_legacy_registry_module_is_not_an_adapter() -> None:
 
 def test_profile_resolver_delegates_dependency_order_to_effective_set() -> None:
     resolved = _resolve(_catalog())
-    assert [item["identity"] for item in resolved.lock["effective_set"]] == [
+    effective_order = [item["identity"] for item in resolved.lock["effective_set"]]
+    assert effective_order == [
         "defaults-basepack",
         "shell.tauri.default",
         "defaultspack",
         "rumi_file_inspect_pack",
         "tobkiri_host_pack_control",
         "runtime.tauri.application.default",
+        "rumi_ai_gateway_pack",
+        "rumi_model_catalog_pack",
+        "rumi_model_registry_pack",
+        "rumi_ai_pipeline_pack",
+        "rumi_provider_adapters_pack",
+        "rumi_ai_routing_pack",
+        "rumi_ai_stream_pack",
+        "rumi_ai_tool_bridge_pack",
+        "rumi_ai_usage_pack",
+        "rumi_provider_registry_pack",
         "rumi_workspace_mount_pack",
         "rumi_host_authority_bridge_pack",
+    ]
+    assert effective_order == [
+        resolved.profile["base"]["pack_id"],
+        resolved.profile["shell"]["pack_id"],
+        *(item["pack_id"] for item in resolved.profile["packs"]),
     ]
 
 

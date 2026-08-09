@@ -207,8 +207,10 @@ def _provider_tool_action_enum(prepared, tool_name: str) -> list[str]:
 
 def test_prepare_chat_run_creates_message_chain_ir_and_context(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
+    from domain.ai_client.model_search import get_model_capabilities
     from domain.chat.store import ChatStore
 
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
     store = _setup_store(tmp_path, monkeypatch)
     conv = store.create_conversation(model="stub/default")
     store.add_message(conv["id"], {"role": "user", "content": [{"type": "text", "text": "old"}]})
@@ -222,7 +224,10 @@ def test_prepare_chat_run_creates_message_chain_ir_and_context(tmp_path, monkeyp
     assert "Current date/time:" in prepared.standard_messages[1]["content"]
     assert prepared.standard_messages[-1] == {"role": "user", "content": "new"}
     assert prepared.chat_ir.schema_version == "rumi.chat.ir.v2"
-    assert prepared.provider_planning["model"] == "stub/default"
+    assert prepared.provider_planning["model"] == "cerebras/gpt-oss-120b"
+    selected_capabilities = get_model_capabilities(prepared.model)
+    assert selected_capabilities is not None
+    assert selected_capabilities["availability"]["status"] == "unconfigured"
     assert prepared.request_context["current_date"]
     assert prepared.request_context["conversation_workspace_dir"]
     assert prepared.tool_context["history_json_path"].endswith("history.json")
