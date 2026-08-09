@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
@@ -18,9 +18,14 @@ export function PackDetail() {
   const packsLoading = useAppStore(state => state.packsLoading);
   const packsError = useAppStore(state => state.packsError);
   const packTogglePending = useAppStore(state => state.packTogglePending);
+  const packInstallPending = useAppStore(state => state.packInstallPending);
   const loadPacks = useAppStore(state => state.loadPacks);
+  const installPack = useAppStore(state => state.installPack);
+  const approvePack = useAppStore(state => state.approvePack);
   const togglePack = useAppStore(state => state.togglePack);
   const addToast = useAppStore(state => state.addToast);
+  const [installing, setInstalling] = useState(false);
+  const [approving, setApproving] = useState(false);
 
   const pack = packs.find(p => p.id === id);
 
@@ -70,6 +75,24 @@ export function PackDetail() {
     if (await togglePack(pack.id)) addToast(t(key, { name: pack.name }), 'success');
   };
 
+  const handleInstall = async () => {
+    setInstalling(true);
+    try {
+      await installPack(pack.id);
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  const handleApprove = async () => {
+    setApproving(true);
+    try {
+      await approvePack(pack.id);
+    } finally {
+      setApproving(false);
+    }
+  };
+
   return (
     <div className="flex-1 overflow-y-auto page-enter">
       <div className="mx-auto max-w-4xl px-6 py-8 flex flex-col gap-6">
@@ -84,20 +107,65 @@ export function PackDetail() {
                 <h1 className="text-xl font-semibold tracking-tight text-text-main">{pack.name}</h1>
                 <Badge variant="outline">{pack.version}</Badge>
                 <Badge variant={pack.type === 'core' ? 'default' : 'secondary'}>{pack.type}</Badge>
+                <Badge variant={pack.installed ? 'success' : 'outline'}>
+                  {pack.installed ? 'Installed' : 'Available'}
+                </Badge>
               </div>
               <p className="mt-0.5 text-sm text-text-muted">{pack.description}</p>
             </div>
           </div>
           <div className="flex items-center gap-3 shrink-0">
-            <span className="text-sm text-text-muted">{pack.enabled ? t('packs.enabled') : t('packs.disabled')}</span>
-            <Switch
-              checked={pack.enabled}
-              disabled={Boolean(packTogglePending[pack.id])}
-              onCheckedChange={() => { void handleToggle(); }}
-              aria-label={`Toggle ${pack.name}`}
-            />
+            {!pack.installed ? (
+              <Button
+                size="sm"
+                onClick={() => void handleInstall()}
+                loading={installing || Boolean(packInstallPending[pack.id])}
+              >
+                Install
+              </Button>
+            ) : !pack.approved ? (
+              <Button size="sm" onClick={() => void handleApprove()} loading={approving}>
+                Approve
+              </Button>
+            ) : (
+              <>
+                <span className="text-sm text-text-muted">{pack.enabled ? t('packs.enabled') : t('packs.disabled')}</span>
+                <Switch
+                  checked={pack.enabled}
+                  disabled={Boolean(packTogglePending[pack.id])}
+                  onCheckedChange={() => { void handleToggle(); }}
+                  aria-label={`Toggle ${pack.name}`}
+                />
+              </>
+            )}
           </div>
         </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>v4 artifact binding</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="grid gap-3 text-xs text-text-muted sm:grid-cols-2">
+              <div>
+                <dt className="font-medium text-text-main">Artifact digest</dt>
+                <dd className="mt-1 break-all font-mono">{pack.artifactDigest || 'Unavailable'}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-text-main">Catalog revision</dt>
+                <dd className="mt-1 break-all font-mono">{pack.catalogRevision || 'Unavailable'}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-text-main">Profile revision</dt>
+                <dd className="mt-1 break-all font-mono">{pack.profileRevision || 'Unavailable'}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-text-main">Plan digest</dt>
+                <dd className="mt-1 break-all font-mono">{pack.planDigest || 'Unavailable'}</dd>
+              </div>
+            </dl>
+          </CardContent>
+        </Card>
 
         {/* Content grid */}
         <div className="grid gap-6 lg:grid-cols-2">

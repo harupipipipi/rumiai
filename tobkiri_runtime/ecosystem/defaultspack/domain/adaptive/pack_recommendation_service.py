@@ -15,16 +15,7 @@ class PackRecommendationServiceMixin:
         }
 
     def _pack_recommendations(self, args: dict[str, Any]) -> list[dict[str, Any]]:
-        setup_pack_recommendations = self._setup_pack_recommendations(args)
-        if setup_pack_recommendations:
-            return setup_pack_recommendations
         return self._component_pack_recommendations(args)
-
-    def _setup_pack_recommendations(self, args: dict[str, Any]) -> list[dict[str, Any]]:
-        del args
-        # Setup Pack selection is retired. The Launcher reads the finite v4
-        # Host Pack Control catalog instead of importing a mutable manager.
-        return []
 
     def _component_pack_recommendations(self, args: dict[str, Any]) -> list[dict[str, Any]]:
         answers = self._answers_from(args)
@@ -61,7 +52,10 @@ class PackRecommendationServiceMixin:
         if not desired:
             desired.extend(["context", "memory", "tool"])
 
-        components = self._component_manifest()
+        # Pack selection is owned by the finite v4 Host Pack Control catalog.
+        # The defaultspack service must not synthesize authority from legacy
+        # ecosystem manifests or a mutable Setup Pack manager.
+        components: dict[str, Any] = {}
         recommendations: list[dict[str, Any]] = []
         for component_id in desired:
             component = components.get(component_id)
@@ -80,7 +74,3 @@ class PackRecommendationServiceMixin:
                 }
             )
         return recommendations
-
-    def _component_manifest(self) -> dict[str, Any]:
-        # Legacy ecosystem components are not Pack v4 recommendation authority.
-        return {}

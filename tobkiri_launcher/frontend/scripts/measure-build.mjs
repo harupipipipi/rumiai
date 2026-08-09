@@ -15,7 +15,6 @@ const ROUTE_SOURCES = [
   'src/pages/AiInputInspector.tsx',
   'src/pages/ApiMap.tsx',
   'src/pages/ProfileWorkspace.tsx',
-  'src/pages/StartupProfiles.tsx',
   'src/pages/Flows.tsx',
   'src/pages/Settings.tsx',
 ];

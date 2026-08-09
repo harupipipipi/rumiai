@@ -6,7 +6,7 @@ import { panelRouteMeta, panelRoutes, viewerNavGroups, type PanelRouteKey } from
 import { Avatar } from '@/src/components/ui/Avatar';
 import { LAUNCHER_DISPLAY_NAME } from '@/src/lib/launcherBrand';
 import { preloadPanelRoute } from '@/src/lib/routeModules';
-import { BrainCircuit, Folder, FolderCog, LayoutGrid, Network, Settings, PanelLeft, Home, GitBranch, Share2, Route, Rocket } from 'lucide-react';
+import { BrainCircuit, Folder, FolderCog, LayoutGrid, Network, Settings, PanelLeft, Home, GitBranch, Share2, Route } from 'lucide-react';
 
 type NavGroup = {
   id: 'workspace' | 'advanced';
@@ -26,7 +26,6 @@ const routeIcons: Record<PanelRouteKey, typeof Home> = {
   aiInput: BrainCircuit,
   apiMap: Route,
   profileWorkspace: FolderCog,
-  startup: Rocket,
   flows: LayoutGrid,
   settings: Settings,
 };

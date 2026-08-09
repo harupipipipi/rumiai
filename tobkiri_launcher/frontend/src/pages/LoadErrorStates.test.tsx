@@ -13,7 +13,10 @@ import {ProfileWorkspace} from './ProfileWorkspace';
 
 const cachedPack: Pack = {
   id: 'cached', name: 'Cached Pack', version: '1.0.0', type: 'community', enabled: true,
+  installed: true,
   description: 'Previously loaded', approvalStatus: 'approved', approvalReason: null,
+  artifactDigest: 'sha256:cached-artifact', profileId: 'profile-a', workspaceId: 'workspace-a',
+  profileRevision: 'sha256:profile-a', planDigest: 'sha256:plan-a', catalogRevision: 'catalog-a',
   approved: true, hashValid: true, criticalChanged: false, approvalIssues: [],
   capabilities: [], flows: [], dependencies: [],
 };

@@ -1,6 +1,7 @@
 import type {
   ApiResponse,
   PacksResponseData,
+  PackInstallResponseData,
   PackApprovalResponseData,
   PackToggleResponseData,
   StartupProfilesResponseData,
@@ -575,12 +576,11 @@ export function fetchPacks(): Promise<PacksResponseData> {
   return dispatchPackControl<PacksResponseData>('catalog.read');
 }
 
-export async function installPack(id: string): Promise<{pack_id: string; installed: boolean}> {
+export async function installPack(id: string): Promise<PackInstallResponseData> {
   return dispatchPackControl('pack.install', {pack_id: id});
 }
 
 export async function approvePack(id: string): Promise<PackApprovalResponseData> {
-  await installPack(id);
   const candidate = await dispatchPackControl<{candidate_id: string}>('approval.candidate', {pack_id: id});
   return dispatchPackControl<PackApprovalResponseData>('approval.approve', {
     pack_id: id,

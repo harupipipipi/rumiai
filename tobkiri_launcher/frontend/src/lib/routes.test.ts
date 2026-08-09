@@ -21,7 +21,6 @@ test('panel routes stay basename-relative', () => {
   assert.equal(panelRoutes.aiInput, '/ai-input');
   assert.equal(panelRoutes.apiMap, '/api-map');
   assert.equal(panelRoutes.profileWorkspace, '/profile-workspace');
-  assert.equal(panelRoutes.startup, '/startup');
   assert.equal(panelRoutes.flows, '/flows');
   assert.equal(panelRoutes.settings, '/settings');
   assert.equal(panelRoutes.packDetail('defaultspack'), '/packs/defaultspack');
@@ -45,7 +44,6 @@ test('registered panel routes expose stable header title metadata', () => {
     'aiInput',
     'apiMap',
     'profileWorkspace',
-    'startup',
     'flows',
     'settings',
   ] as const;

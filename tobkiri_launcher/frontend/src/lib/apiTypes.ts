@@ -19,14 +19,24 @@ export interface ApiResponse<T> {
 // Backend data types (as returned inside envelope's `data`)
 // ============================================================
 
-/** POST /api/v4/dispatch catalog.read → data.packs[] */
-export interface ApiPack {
+export interface PackControlBinding {
+  profile_id: string;
+  workspace_id: string;
+  profile_revision: string;
+  plan_digest: string;
+  catalog_revision: string;
+}
+
+/** GET /api/pack-control/catalog → data.packs[] */
+export interface ApiPack extends PackControlBinding {
   pack_id: string;
   name: string;
   version: string;
   description: string;
   is_core: boolean;
+  installed: boolean;
   enabled: boolean;
+  artifact_digest: string;
   approval_status?: string;
   approval_reason?: string | null;
   approved?: boolean;
@@ -258,17 +268,22 @@ export interface DebugApprovalStatus {
 // Endpoint-specific response data shapes (inside envelope)
 // ============================================================
 
-export interface PacksResponseData {
+export interface PacksResponseData extends PackControlBinding {
   packs: ApiPack[];
   count: number;
 }
 
-export interface PackToggleResponseData {
+export interface PackInstallResponseData extends PackControlBinding {
+  pack_id: string;
+  installed: boolean;
+}
+
+export interface PackToggleResponseData extends PackControlBinding {
   pack_id: string;
   enabled: boolean;
 }
 
-export interface PackApprovalResponseData {
+export interface PackApprovalResponseData extends PackControlBinding {
   pack_id: string;
   approved: boolean;
   approval_status: string;

@@ -21,6 +21,7 @@ import {
   fetchDebugApprovalStatus,
   fetchPresentationState,
   fetchPacks,
+  installPack,
   hasPendingPanelBootstrapCode,
   isDesktopShellAvailable,
   launchDefaultspackDesktop,
@@ -482,6 +483,7 @@ test('Pack production transport uses only canonical contract routes', async () =
   };
 
   await fetchPacks();
+  await installPack('pack-a');
   await approvePack('pack-a');
   await enablePack('pack-a');
   await disablePack('pack-a');

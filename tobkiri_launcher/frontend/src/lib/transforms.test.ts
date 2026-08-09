@@ -10,7 +10,14 @@ test('transformPack preserves approval state from panel packs API', () => {
     version: '1.0.0',
     description: 'Demo pack',
     is_core: false,
+    installed: true,
     enabled: true,
+    artifact_digest: 'sha256:artifact-a',
+    profile_id: 'profile-a',
+    workspace_id: 'workspace-a',
+    profile_revision: 'sha256:profile-a',
+    plan_digest: 'sha256:plan-a',
+    catalog_revision: 'catalog-a',
     approval_status: 'modified',
     approval_reason: 'hash_mismatch',
     approved: false,
@@ -20,6 +27,13 @@ test('transformPack preserves approval state from panel packs API', () => {
   });
 
   assert.equal(pack.id, 'pack_a');
+  assert.equal(pack.installed, true);
+  assert.equal(pack.artifactDigest, 'sha256:artifact-a');
+  assert.equal(pack.profileId, 'profile-a');
+  assert.equal(pack.workspaceId, 'workspace-a');
+  assert.equal(pack.profileRevision, 'sha256:profile-a');
+  assert.equal(pack.planDigest, 'sha256:plan-a');
+  assert.equal(pack.catalogRevision, 'catalog-a');
   assert.equal(pack.approvalStatus, 'modified');
   assert.equal(pack.approvalReason, 'hash_mismatch');
   assert.equal(pack.approved, false);

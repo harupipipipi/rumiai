@@ -3,6 +3,7 @@ import {
   checkHealth,
   fetchDashboard,
   approvePack as apiApprovePack,
+  installPack as apiInstallPack,
   fetchPacks,
   fetchFlows,
   fetchProfile,
@@ -84,8 +85,15 @@ export interface Pack {
   name: string;
   version: string;
   type: 'core' | 'community';
+  installed: boolean;
   enabled: boolean;
   description: string;
+  artifactDigest: string;
+  profileId: string;
+  workspaceId: string;
+  profileRevision: string;
+  planDigest: string;
+  catalogRevision: string;
   approvalStatus: string;
   approvalReason: string | null;
   approved: boolean;
@@ -195,8 +203,10 @@ interface AppState {
   packs: Pack[];
   packsLoading: boolean;
   packsError: string | null;
+  packInstallPending: Record<string, boolean>;
   packTogglePending: Record<string, boolean>;
   loadPacks: () => Promise<void>;
+  installPack: (id: string) => Promise<void>;
   approvePack: (id: string) => Promise<void>;
   togglePack: (id: string) => Promise<boolean>;
 
@@ -375,6 +385,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   packs: [],
   packsLoading: false,
   packsError: null,
+  packInstallPending: {},
   packTogglePending: {},
 
   loadPacks: () => {
@@ -404,6 +415,29 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ packsLoading: false });
     });
     return packsLoadPromise;
+  },
+
+  installPack: async (id) => {
+    const state = get();
+    if (state.packInstallPending[id]) return;
+    set((current) => ({
+      packInstallPending: {...current.packInstallPending, [id]: true},
+    }));
+    try {
+      await apiInstallPack(id);
+      await get().loadPacks();
+      get().addToast('Pack installed.', 'success');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to install pack';
+      get().addToast(msg, 'error');
+      throw e;
+    } finally {
+      set((current) => {
+        const pending = {...current.packInstallPending};
+        delete pending[id];
+        return {packInstallPending: pending};
+      });
+    }
   },
 
   approvePack: async (id) => {

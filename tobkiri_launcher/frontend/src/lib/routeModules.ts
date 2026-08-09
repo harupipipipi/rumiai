@@ -11,7 +11,6 @@ export type AdvancedRouteModuleKey =
   | 'aiInput'
   | 'apiMap'
   | 'profileWorkspace'
-  | 'startup'
   | 'flows'
   | 'settings';
 
@@ -32,7 +31,6 @@ const rawRouteModuleLoaders: Record<AdvancedRouteModuleKey, RouteModuleLoader> =
   aiInput: () => import('../pages/AiInputInspector'),
   apiMap: () => import('../pages/ApiMap'),
   profileWorkspace: () => import('../pages/ProfileWorkspace'),
-  startup: () => import('../pages/StartupProfiles'),
   flows: () => Promise.all([
     import('@xyflow/react/dist/style.css'),
     import('../pages/Flows'),
@@ -49,7 +47,6 @@ export const advancedRouteModuleSources: Record<AdvancedRouteModuleKey, string> 
   aiInput: 'src/pages/AiInputInspector.tsx',
   apiMap: 'src/pages/ApiMap.tsx',
   profileWorkspace: 'src/pages/ProfileWorkspace.tsx',
-  startup: 'src/pages/StartupProfiles.tsx',
   flows: 'src/pages/Flows.tsx',
   settings: 'src/pages/Settings.tsx',
 };
@@ -76,7 +73,6 @@ const panelRouteToModule: Partial<Record<PanelRouteKey, AdvancedRouteModuleKey>>
   aiInput: 'aiInput',
   apiMap: 'apiMap',
   profileWorkspace: 'profileWorkspace',
-  startup: 'startup',
   flows: 'flows',
   settings: 'settings',
 };
@@ -108,6 +104,5 @@ export const LazyProfileGraphEditor = lazyNamedRoute('profileGraph', 'ProfileGra
 export const LazyAiInputInspector = lazyNamedRoute('aiInput', 'AiInputInspector');
 export const LazyApiMap = lazyNamedRoute('apiMap', 'ApiMap');
 export const LazyProfileWorkspace = lazyNamedRoute('profileWorkspace', 'ProfileWorkspace');
-export const LazyStartupProfiles = lazyNamedRoute('startup', 'StartupProfiles');
 export const LazyFlows = lazyNamedRoute('flows', 'Flows');
 export const LazySettings = lazyNamedRoute('settings', 'Settings');

@@ -9,7 +9,6 @@ export const panelRoutes = {
   aiInput: '/ai-input',
   apiMap: '/api-map',
   profileWorkspace: '/profile-workspace',
-  startup: '/startup',
   flows: '/flows',
   settings: '/settings',
 } as const;
@@ -32,7 +31,6 @@ export const panelRouteMeta: Record<PanelRouteKey, PanelRouteMeta> = {
   aiInput: { path: panelRoutes.aiInput, titleKey: 'nav.ai_input', navKey: 'nav.ai_input' },
   apiMap: { path: panelRoutes.apiMap, titleKey: 'nav.api_map', navKey: 'nav.api_map' },
   profileWorkspace: { path: panelRoutes.profileWorkspace, titleKey: 'nav.profile_workspace', navKey: 'nav.profile_workspace' },
-  startup: { path: panelRoutes.startup, titleKey: 'nav.startup', navKey: 'nav.startup' },
   flows: { path: panelRoutes.flows, titleKey: 'nav.flows', navKey: 'nav.flows' },
   settings: { path: panelRoutes.settings, titleKey: 'nav.settings', navKey: 'nav.settings' },
 };

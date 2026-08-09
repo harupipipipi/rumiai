@@ -11,7 +11,6 @@ function source(path: string): string {
 
 test('viewer popover trigger exposes keyboard and menu semantics', () => {
   const popover = source('components/ui/Popover.tsx');
-  const profileCard = source('components/dashboard/ProfileCard.tsx');
 
   assert.match(popover, /<button[\s\S]*aria-haspopup="menu"[\s\S]*aria-expanded=\{Boolean\(isOpen\)\}/);
   assert.match(popover, /event\.key === "Escape"/);
@@ -21,9 +20,7 @@ test('viewer popover trigger exposes keyboard and menu semantics', () => {
   assert.match(popover, /createPortal/);
   assert.match(popover, /document\.body/);
   assert.match(popover, /position: "fixed"/);
-  assert.match(profileCard, /role="menuitem"/);
   assert.match(popover, /onClose\?\.\(\)/);
-  assert.doesNotMatch(profileCard, /opacity-0[\s\S]{0,80}group-hover:opacity-100/);
 });
 
 test('viewer shell has a mobile navigation fallback and persistent desktop sidebar state', () => {

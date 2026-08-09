@@ -22,7 +22,6 @@ import {
   LazyProfileGraphEditor,
   LazyProfileWorkspace,
   LazySettings,
-  LazyStartupProfiles,
 } from '@/src/lib/routeModules';
 
 export default function App() {
@@ -164,7 +163,6 @@ function DeferredRouteTree({ isSetupDone }: { isSetupDone: boolean }) {
           <Route path={panelRoutes.aiInput.slice(1)} element={<LazyAiInputInspector />} />
           <Route path={panelRoutes.apiMap.slice(1)} element={<LazyApiMap />} />
           <Route path={panelRoutes.profileWorkspace.slice(1)} element={<LazyProfileWorkspace />} />
-          <Route path={panelRoutes.startup.slice(1)} element={<LazyStartupProfiles />} />
           <Route path={panelRoutes.flows.slice(1)} element={<LazyFlows />} />
           <Route path={panelRoutes.settings.slice(1)} element={<LazySettings />} />
         </Route>
