@@ -14,6 +14,10 @@ import urllib.request
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core_runtime.panel_auth import PanelAuthManager
 
 _DIAGNOSTIC_ENV_KEYS = (
     "DEFAULTS_HTTP_HOST",
@@ -361,6 +365,20 @@ def _wait_until_chat_ready(url: str, timeout: float = 10.0) -> bool:
     return False
 
 
+def _require_host_panel_auth_manager() -> PanelAuthManager:
+    """Return the singleton bound to the exact Launcher-owned Host contract."""
+    from core_runtime.host_contract import host_contract_value
+    from core_runtime.panel_auth import get_panel_auth_manager
+
+    bootstrap_secret = host_contract_value("panel_bootstrap_secret")
+    if not bootstrap_secret:
+        raise RuntimeError("Launcher-owned panel bootstrap secret is required")
+    manager = get_panel_auth_manager()
+    if not manager.validate_bootstrap_secret(bootstrap_secret):
+        raise RuntimeError("Panel auth manager is not bound to the active Host contract")
+    return manager
+
+
 def main(argv: list[str] | None = None) -> int:
     if argv is not None:
         _parse_cli_args(argv)
@@ -385,7 +403,6 @@ def main(argv: list[str] | None = None) -> int:
         _write_launch_event("secrets_load_skipped", error=repr(exc), port=port, url=url)
     from core_runtime.api.web_mounts import WebMountEntry
     from core_runtime.pack_api_server import PackAPIServer
-    from core_runtime.panel_auth import PanelAuthManager
 
     ui_root = _pack_root() / "ui"
     web_mounts: tuple[WebMountEntry, ...] = (
@@ -404,7 +421,7 @@ def main(argv: list[str] | None = None) -> int:
             "auth_required": True,
         },
     )
-    auth = PanelAuthManager()
+    auth = _require_host_panel_auth_manager()
     server = PackAPIServer(
         host="127.0.0.1",
         port=int(port),

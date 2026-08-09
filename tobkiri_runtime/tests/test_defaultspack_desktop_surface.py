@@ -17,6 +17,8 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
 class TestDefaultspackDesktopSurface(unittest.TestCase):
+    _PANEL_BOOTSTRAP_SECRET = "desktop-surface-host-secret"
+
     @staticmethod
     def _activate_defaults(user_data: Path) -> None:
         from core_runtime.bootstrap.profile_capture import (
@@ -35,6 +37,35 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
             capture_default_profile(
                 confirmation=prepare_default_profile_confirmation()
             )
+        user_data.chmod(0o700)
+        contract_path = user_data / "host_contract.json"
+        contract_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "tobkiri.host-contract.v1",
+                    "profile_id": "defaults",
+                    "values": {
+                        "panel_bootstrap_secret": (
+                            TestDefaultspackDesktopSurface._PANEL_BOOTSTRAP_SECRET
+                        )
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        contract_path.chmod(0o600)
+        from core_runtime.panel_auth import (
+            PanelAuthManager,
+            reset_panel_auth_manager_for_tests,
+        )
+
+        reset_panel_auth_manager_for_tests(
+            PanelAuthManager(
+                bootstrap_secret=(
+                    TestDefaultspackDesktopSurface._PANEL_BOOTSTRAP_SECRET
+                )
+            )
+        )
 
     def test_desktop_app_help_exits_before_runtime_setup(self):
         from defaultspack import desktop_app
@@ -82,6 +113,9 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
                     "RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND": "1",
                     "TOBKIRI_USER_DATA": str(user_data),
                     "RUMI_USER_DATA": str(user_data),
+                    "TOBKIRI_HOST_CONTRACT_PATH": str(
+                        user_data / "host_contract.json"
+                    ),
                 },
                 clear=False,
             ):
@@ -237,6 +271,9 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
                     "RUMI_DEFAULTSPACK_SURFACE": "webview",
                     "TOBKIRI_USER_DATA": str(user_data),
                     "RUMI_USER_DATA": str(user_data),
+                    "TOBKIRI_HOST_CONTRACT_PATH": str(
+                        user_data / "host_contract.json"
+                    ),
                 },
                 clear=True,
             ):
@@ -276,6 +313,9 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
                 "RUMI_DEFAULTSPACK_PORT": "8766",
                 "TOBKIRI_USER_DATA": str(user_data),
                 "RUMI_USER_DATA": str(user_data),
+                "TOBKIRI_HOST_CONTRACT_PATH": str(
+                    user_data / "host_contract.json"
+                ),
             }
             with patch.dict(os.environ, env, clear=True):
                 with patch("core_runtime.pack_api_server.PackAPIServer", return_value=fake_server):
