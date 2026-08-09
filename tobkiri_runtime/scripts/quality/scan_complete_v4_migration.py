@@ -12,6 +12,8 @@ import argparse
 import ast
 import importlib.util
 import json
+import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -29,6 +31,7 @@ DEFAULT_OUTPUT = (
     / "evidence"
     / "complete_v4_migration_red_64b2240e.json"
 )
+COMMIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _load_gate_module() -> ModuleType:
@@ -115,11 +118,74 @@ def _semantic_document(evidence: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def provenance_errors(
+    *,
+    tracked_sha: object,
+    event_name: str,
+    current_sha: str,
+    current_parents: tuple[str, ...],
+    pr_head_sha: str = "",
+    pr_head_parents: tuple[str, ...] = (),
+) -> list[str]:
+    """Validate evidence provenance against one explicit CI event topology."""
+
+    if not isinstance(tracked_sha, str) or not COMMIT_SHA_RE.fullmatch(tracked_sha):
+        return [f"tracked observed_head_sha is missing or malformed: {tracked_sha!r}"]
+    if not COMMIT_SHA_RE.fullmatch(current_sha) or any(
+        not COMMIT_SHA_RE.fullmatch(parent) for parent in current_parents
+    ):
+        return ["checkout commit topology is malformed"]
+
+    accepted: set[str]
+    if event_name == "push":
+        accepted = {current_sha}
+        if current_parents:
+            accepted.add(current_parents[0])
+    elif event_name == "pull_request":
+        if not COMMIT_SHA_RE.fullmatch(pr_head_sha):
+            return ["pull_request head SHA is missing or malformed"]
+        if pr_head_sha not in current_parents:
+            return ["pull_request head SHA is not a direct checkout parent"]
+        if not pr_head_parents or any(
+            not COMMIT_SHA_RE.fullmatch(parent) for parent in pr_head_parents
+        ):
+            return ["pull_request head topology is missing or malformed"]
+        accepted = {pr_head_sha, pr_head_parents[0]}
+    else:
+        return [f"unsupported or missing CI event name: {event_name!r}"]
+
+    if tracked_sha not in accepted:
+        return [
+            "tracked observed_head_sha is stale for "
+            f"{event_name}: expected one of {sorted(accepted)}, got {tracked_sha!r}"
+        ]
+    return []
+
+
+def _git_sha(*args: str) -> str:
+    """Return one exact commit SHA or fail the freshness check."""
+
+    return subprocess.check_output(["git", *args], cwd=ROOT, text=True).strip()
+
+
+def _git_parents(revision: str) -> tuple[str, ...]:
+    """Return the ordered direct parents for one verified revision."""
+
+    verified = _git_sha("rev-parse", "--verify", f"{revision}^{{commit}}")
+    if not COMMIT_SHA_RE.fullmatch(verified):
+        raise RuntimeError(f"invalid commit revision: {revision}")
+    parents = _git_sha("show", "-s", "--format=%P", verified)
+    return tuple(parents.split()) if parents else ()
+
+
 def evidence_drift(
     tracked: dict[str, Any],
     observed: dict[str, Any],
+    *,
+    event_name: str,
+    pr_head_sha: str = "",
 ) -> list[str]:
-    """Return fail-closed freshness errors for checked-in migration evidence."""
+    """Return fail-closed semantic and provenance evidence errors."""
 
     errors: list[str] = []
     if _semantic_document(tracked) != _semantic_document(observed):
@@ -127,21 +193,27 @@ def evidence_drift(
 
     source = tracked.get("source")
     tracked_sha = source.get("observed_head_sha") if isinstance(source, dict) else None
-    current_sha = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
-    ).strip()
-    parent_sha = subprocess.check_output(
-        ["git", "rev-parse", "HEAD^"], cwd=ROOT, text=True
-    ).strip()
-    # Evidence generated in the same commit necessarily records that commit's
-    # parent: embedding the final commit SHA would be self-referential.  No
-    # older provenance is accepted, so the next repository change must refresh
-    # and semantically compare the evidence again.
-    if tracked_sha not in {current_sha, parent_sha}:
-        errors.append(
-            "tracked observed_head_sha is stale: "
-            f"expected {current_sha} or {parent_sha}, got {tracked_sha!r}"
+    try:
+        current_sha = _git_sha("rev-parse", "--verify", "HEAD^{commit}")
+        current_parents = _git_parents(current_sha)
+        pr_head_parents = (
+            _git_parents(pr_head_sha)
+            if event_name == "pull_request" and COMMIT_SHA_RE.fullmatch(pr_head_sha)
+            else ()
         )
+    except (OSError, subprocess.CalledProcessError, RuntimeError) as error:
+        errors.append(f"evidence provenance cannot inspect git topology: {error}")
+        return errors
+    errors.extend(
+        provenance_errors(
+            tracked_sha=tracked_sha,
+            event_name=event_name,
+            current_sha=current_sha,
+            current_parents=current_parents,
+            pr_head_sha=pr_head_sha,
+            pr_head_parents=pr_head_parents,
+        )
+    )
     return errors
 
 
@@ -158,6 +230,16 @@ def main() -> int:
         "--check-against",
         type=Path,
         help="compare the temporary scan against checked-in evidence",
+    )
+    parser.add_argument(
+        "--event-name",
+        default=os.environ.get("GITHUB_EVENT_NAME", ""),
+        help="explicit CI event name (push or pull_request)",
+    )
+    parser.add_argument(
+        "--pr-head-sha",
+        default=os.environ.get("TOBKIRI_PR_HEAD_SHA", ""),
+        help="exact pull_request head SHA supplied by the workflow event",
     )
     args = parser.parse_args()
     output = args.output if args.output.is_absolute() else ROOT / args.output
@@ -182,7 +264,12 @@ def main() -> int:
             if not isinstance(tracked, dict):
                 drift = ["tracked evidence is not a JSON object"]
             else:
-                drift = evidence_drift(tracked, evidence)
+                drift = evidence_drift(
+                    tracked,
+                    evidence,
+                    event_name=args.event_name,
+                    pr_head_sha=args.pr_head_sha,
+                )
     counts = evidence["counts"]
     try:
         output_name = output.relative_to(ROOT).as_posix()

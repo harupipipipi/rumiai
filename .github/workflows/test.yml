@@ -317,6 +317,8 @@ jobs:
           --output "${RUNNER_TEMP}/complete-v4-migration.json"
           --check-against
           tobkiri_runtime/scripts/quality/evidence/complete_v4_migration_red_64b2240e.json
+          --event-name "${{ github.event_name }}"
+          --pr-head-sha "${{ github.event.pull_request.head.sha || '' }}"
 
       - name: Set up Node for Launcher panel gate
         uses: actions/setup-node@v4
