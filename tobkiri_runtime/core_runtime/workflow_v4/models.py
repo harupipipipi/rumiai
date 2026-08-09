@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum
 from typing import Any, Mapping
 
 from tobkiri_protocol.canonical import canonical_digest
@@ -29,7 +29,13 @@ class WorkflowNotFound(WorkflowError):
     """Raised when a Workflow v4 record is unavailable."""
 
 
-class DefinitionState(StrEnum):
+class _StrEnum(str, Enum):
+    """Backport the string formatting behavior of enum.StrEnum."""
+
+    __str__ = str.__str__
+
+
+class DefinitionState(_StrEnum):
     """Definition lifecycle states."""
 
     DRAFT = "draft"
@@ -37,7 +43,7 @@ class DefinitionState(StrEnum):
     ARCHIVED = "archived"
 
 
-class RunState(StrEnum):
+class RunState(_StrEnum):
     """Workflow run lifecycle states."""
 
     QUEUED = "queued"
@@ -51,7 +57,7 @@ class RunState(StrEnum):
     NEEDS_RECONCILIATION = "needs_reconciliation"
 
 
-class StepAttemptState(StrEnum):
+class StepAttemptState(_StrEnum):
     """One immutable attempt's state."""
 
     PENDING = "pending"
@@ -65,7 +71,7 @@ class StepAttemptState(StrEnum):
     AMBIGUOUS_EFFECT = "ambiguous_effect"
 
 
-class ApprovalState(StrEnum):
+class ApprovalState(_StrEnum):
     """States returned by the injected Authority provider."""
 
     RESERVED = "reserved"
