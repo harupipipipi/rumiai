@@ -152,6 +152,14 @@ class CapturedPackControlSession:
             },
         )
 
+    def bind_capability_reader(
+        self,
+        reader: Callable[[], Mapping[str, Any]],
+    ) -> None:
+        """Bind the Host's exact PackAPI capability snapshot once."""
+
+        self._runtime_surface.bind_capability_reader(reader)
+
     def invoke(
         self,
         contract_id: str,

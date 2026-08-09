@@ -145,6 +145,8 @@ class AppLifecycleManager:
             runtime_user_data_root,
         )
         from .di_container import get_container
+        from .frontend_contract_routes import load_frontend_contract_bindings
+        from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
         from tobkiri_host.runtime import install_dispatch_session
 
         with self._activation_lock:
@@ -154,13 +156,24 @@ class AppLifecycleManager:
             )
             runtime_root = Path(__file__).resolve().parents[1]
             user_data = runtime_user_data_root(self.base_dir)
+            bundle_root = runtime_root / "ecosystem" / "defaultspack" / "v4"
+            catalog = BundledCatalog.load(bundle_root)
+            bindings = load_frontend_contract_bindings(
+                runtime_root
+                / "ecosystem"
+                / "defaultspack"
+                / "defaultspack"
+                / "frontend_contract_map.v4.json",
+                catalog.packs["runtime.tauri.application.default"],
+            )
             session = capture_production_dispatch(
                 active,
-                bundle_root=runtime_root / "ecosystem" / "defaultspack" / "v4",
+                bundle_root=bundle_root,
                 ecosystem_root=runtime_root / "ecosystem",
                 authority_store=AuthorityStore(
                     user_data / "authority" / "v4.sqlite3"
                 ),
+                frontend_contract_bindings=bindings,
             )
             install_dispatch_session(get_container(), session)
             mark_runtime_ready()

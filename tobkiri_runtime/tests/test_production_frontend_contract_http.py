@@ -101,16 +101,17 @@ def production_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
     authority = AuthorityStore(user_data / "authority" / "v4.sqlite3")
+    catalog = BundledCatalog.load(BUNDLE_ROOT)
+    bindings = load_frontend_contract_bindings(
+        MAP_PATH,
+        catalog.packs["runtime.tauri.application.default"],
+    )
     session = capture_production_dispatch(
         active,
         bundle_root=BUNDLE_ROOT,
         ecosystem_root=RUNTIME_ROOT / "ecosystem",
         authority_store=authority,
-    )
-    catalog = BundledCatalog.load(BUNDLE_ROOT)
-    bindings = load_frontend_contract_bindings(
-        MAP_PATH,
-        catalog.packs["runtime.tauri.application.default"],
+        frontend_contract_bindings=bindings,
     )
     server = PackAPIServer(
         port=0,
@@ -360,6 +361,69 @@ def test_runtime_surface_reads_use_the_canonical_broker_contract(
     assert verified
     assert all(item["route"]["function_id"] for item in verified)
     assert any(event["event_state"] == "committed" for event in authority.audit_events())
+
+
+def test_runtime_surface_operation_identity_invokes_exact_capability_binding(
+    production_server,
+) -> None:
+    server, _session, _authority = production_server
+    cookie, csrf, origin = _authenticate(server)
+    status, payload, _ = _request(
+        server,
+        "GET",
+        _contract("GET", "/api/runtime-surface/topology/operations"),
+        headers={"Cookie": cookie, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+    )
+    assert status == 200, payload
+    envelope = payload["data"]
+    status_operations = [
+        item for item in envelope["data"]["operations"] if item["operation_id"] == "pack.status"
+    ]
+    assert any(item["invokable"] is True for item in status_operations), json.dumps(
+        status_operations, indent=2
+    )
+    operation = next(item for item in status_operations if item["invokable"] is True)
+    base = {
+        "request_id": str(uuid.uuid4()),
+        "expires_at": time.time() + 30,
+        "profile_id": envelope["profile_id"],
+        "plan_hash": envelope["plan_digest"],
+        "catalog_hash": operation["invocation_catalog_hash"],
+        "contribution_id": operation["invocation_contribution_id"],
+        "owner_pack_id": operation["invocation_owner_pack_id"],
+        "contract_id": operation["contract_id"],
+        "payload": {"pack_id": "defaultspack"},
+    }
+    headers = {
+        "Cookie": cookie,
+        "Origin": origin,
+        "X-Rumi-CSRF": csrf,
+    }
+
+    def invoke(body: Mapping[str, object]) -> tuple[int, dict[str, object]]:
+        code, response, _ = _request(
+            server,
+            "POST",
+            _contract("POST", "/api/ui/capability/invoke"),
+            body=body,
+            headers={**headers, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+        )
+        return code, response
+
+    code, response = invoke(base)
+    assert code == 200, response
+    assert response["data"]["pack_id"] == "defaultspack"
+
+    denied_requests = (
+        {**base, "request_id": str(uuid.uuid4()), "catalog_hash": "sha256:" + "0" * 64},
+        {**base, "request_id": str(uuid.uuid4()), "contribution_id": "pack.forged.operation"},
+        {**base, "request_id": str(uuid.uuid4()), "expires_at": time.time() - 1},
+        {**base, "request_id": str(uuid.uuid4()), "owner_pack_id": "forged-pack"},
+    )
+    for denied in denied_requests:
+        denied_code, denied_response = invoke(denied)
+        assert denied_code == 404
+        assert denied_response["success"] is False
 
 
 def test_profile_ceremony_uses_four_canonical_broker_operations(

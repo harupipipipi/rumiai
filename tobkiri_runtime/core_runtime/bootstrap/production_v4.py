@@ -453,6 +453,7 @@ def capture_production_dispatch(
     target_backend_digests: Mapping[str, str] | None = None,
     packvm_provisioner: Any | None = None,
     packvm_readiness_reader: Callable[[], Mapping[str, Any]] | None = None,
+    frontend_contract_bindings: tuple[Any, ...] = (),
 ) -> V4DispatchSession:
     """Capture ProductionRuntimeV4 and its RequestBroker from verified records."""
 
@@ -895,7 +896,7 @@ def capture_production_dispatch(
             if current_approval.get("approval_revision") != approval_revision:
                 raise AuthorityDenied("captured optional Pack approval changed")
 
-    return runtime.dispatch_session(
+    dispatch = runtime.dispatch_session(
         broker=broker,
         context_for=context_for,
         effect_scope_for=lambda contract_id, operation_id, _payload: {
@@ -913,6 +914,34 @@ def capture_production_dispatch(
         current_capture_check=assert_current_capture,
         owned_authority_store=authority_store,
     )
+    if control_session is not None and frontend_contract_bindings:
+        capability_bindings = tuple(
+            binding
+            for binding in frontend_contract_bindings
+            if getattr(binding, "method", "") == "POST"
+            and getattr(binding, "path", "") == "/api/ui/capability/invoke"
+        )
+        if len(capability_bindings) != 1:
+            dispatch.close()
+            raise AuthorityDenied("capability invocation binding is absent or ambiguous")
+        capability_binding = capability_bindings[0]
+
+        def capability_binding_reader() -> Mapping[str, Any]:
+            from ..capability_bindings_v4 import capture_capability_binding_snapshot
+            from ..pack_control_v4 import capture_pack_catalog_reader
+
+            snapshot = capture_capability_binding_snapshot(
+                capability_binding,
+                session=dispatch,
+                catalog=capture_pack_catalog_reader().read(),
+            )
+            return snapshot.to_mapping(
+                profile_id=dispatch.profile_id,
+                plan_digest=dispatch.plan_digest,
+            )
+
+        control_session.bind_capability_reader(capability_binding_reader)
+    return dispatch
 
 
 __all__ = ["capture_production_dispatch"]

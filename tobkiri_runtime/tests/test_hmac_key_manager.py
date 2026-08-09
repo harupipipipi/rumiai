@@ -68,7 +68,7 @@ from tobkiri_runtime.core_runtime.hmac_key_manager import (  # noqa: E402
     verify_data_hmac,
     DEFAULT_GRACE_PERIOD_SECONDS,
 )
-from tobkiri_runtime.core_runtime import hmac_key_manager as hmac_key_manager_module
+from tobkiri_runtime.core_runtime import hmac_key_manager as hmac_key_manager_module  # noqa: E402
 
 
 def _write_owner_key(
@@ -250,9 +250,9 @@ class TestGenerateOrLoadSigningKey:
         assert kwargs == {
             "check": True,
             "capture_output": True,
-            "text": False,
+            "text": True,
             "timeout": 15,
-            "input": base64.b64encode(str(key_path).encode("utf-8")),
+            "input": base64.b64encode(str(key_path).encode("utf-8")).decode("ascii"),
         }
 
     @pytest.mark.parametrize(
@@ -291,7 +291,7 @@ class TestGenerateOrLoadSigningKey:
             assert "[Convert]::FromBase64String($encodedTarget)" in command
             assert "[System.Text.UTF8Encoding]::new($false, $true)" in command
             payload = kwargs["input"]
-            assert isinstance(payload, bytes)
+            assert isinstance(payload, str)
             decoded_path = base64.b64decode(payload, validate=True).decode("utf-8")
             assert tuple(map(ord, decoded_path)) == expected_code_points
 

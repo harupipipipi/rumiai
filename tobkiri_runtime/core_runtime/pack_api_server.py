@@ -23,6 +23,10 @@ from .api.request_body import RequestBodyMixin
 from .api.setup_handlers import SetupHandlersMixin
 from .api.web_mounts import WebMountMixin
 from .api.web_mounts import WebMountEntry
+from .capability_bindings_v4 import (
+    CapabilityBindingSnapshot,
+    capture_capability_binding_snapshot,
+)
 from .frontend_contract_routes import (
     ContractRouteError,
     FrontendContractBinding,
@@ -71,24 +75,6 @@ _RETIRED_API_ROOTS = frozenset(
         "webhooks",
     }
 )
-
-
-def _dynamic_payload_keys(contract_id: str, operation_id: str) -> frozenset[str]:
-    """Return the narrow request schema for a dynamic Pack contribution."""
-
-    if contract_id == "tobkiri.service.media.inspect.v1":
-        return frozenset(
-            {
-                "name",
-                "path",
-                "encoding",
-                "max_bytes",
-                "start_line",
-                "end_line",
-            }
-        )
-    del operation_id
-    return frozenset()
 
 
 class DispatchSession(Protocol):
@@ -707,25 +693,7 @@ class PackAPIHandler(
         )
 
     def _frontend_catalog_hash(self, binding: FrontendContractBinding) -> str:
-        session = self._dispatch_session
-        targets = self._capability_targets(binding)
-        return canonical_digest(
-            {
-                "profile_id": session.profile_id if session is not None else "",
-                "plan_digest": session.plan_digest if session is not None else "",
-                "contributions": [
-                    {
-                        "contribution_id": target.contribution_id,
-                        "contract_id": target.contract_id,
-                        "operation_id": target.operation_id,
-                        "provider_id": target.provider_id,
-                        "function_id": target.function_id,
-                        "artifact_digest": target.artifact_digest,
-                    }
-                    for target in targets
-                ],
-            }
-        )
+        return self._capability_snapshot(binding).catalog_hash
 
     def _capability_targets(
         self,
@@ -734,11 +702,27 @@ class PackAPIHandler(
     ) -> tuple[FrontendContractTarget, ...]:
         """Return static map targets plus exact enabled Pack contributions."""
 
-        if binding.path != "/api/ui/capability/invoke":
-            return binding.targets
+        return self._capability_snapshot(binding, catalog).targets
+
+    def _capability_snapshot(
+        self,
+        binding: FrontendContractBinding,
+        catalog: Mapping[str, object] | None = None,
+    ) -> CapabilityBindingSnapshot:
+        """Capture the exact targets and hash used by selection and presentation."""
+
         session = self._dispatch_session
         if session is None:
-            return binding.targets
+            return CapabilityBindingSnapshot(
+                catalog_hash=canonical_digest(
+                    {
+                        "profile_id": "",
+                        "plan_digest": "",
+                        "contributions": [],
+                    }
+                ),
+                targets=binding.targets,
+            )
         if catalog is None:
             catalog = getattr(self, "_capability_catalog_cache", None)
             if catalog is None:
@@ -751,68 +735,13 @@ class PackAPIHandler(
                     # database scans for hash and target selection.
                     self._capability_catalog_cache = catalog
                 except Exception:
-                    return binding.targets
-        packs = catalog.get("packs") if isinstance(catalog, Mapping) else None
-        if not isinstance(packs, list):
-            return binding.targets
-        dynamic: list[FrontendContractTarget] = []
-        for pack in packs:
-            if not isinstance(pack, Mapping):
-                continue
-            pack_id = str(pack.get("pack_id") or "").strip()
-            if not pack_id or pack.get("enabled") is not True or pack.get("approved") is not True:
-                continue
-            operations = pack.get("operations")
-            if not isinstance(operations, list):
-                continue
-            for operation in operations:
-                if not isinstance(operation, Mapping):
-                    continue
-                if operation.get("invokable") is not True:
-                    continue
-                contract_id = str(operation.get("contract_id") or "").strip()
-                operation_id = str(operation.get("operation_id") or "").strip()
-                provider_id = str(operation.get("provider_id") or "").strip()
-                function_id = str(operation.get("function_id") or provider_id).strip()
-                artifact_digest = str(pack.get("artifact_digest") or "").strip()
-                if not contract_id or not operation_id or not provider_id:
-                    continue
-                providers = tuple(
-                    item
-                    for item in session.provider_metadata(contract_id)
-                    if item.get("provider_id") == provider_id
-                    and item.get("function_id") == function_id
-                    and item.get("operation_id") == operation_id
-                    and item.get("profile_id") == session.profile_id
-                    and item.get("plan_digest") == session.plan_digest
-                )
-                if len(providers) != 1:
-                    continue
-                try:
-                    session.assert_operation_ready(contract_id, operation_id)
-                except Exception:
-                    continue
-                dynamic.append(
-                    FrontendContractTarget(
-                        contribution_id=f"pack.{pack_id}.{operation_id}",
-                        contract_id=contract_id,
-                        operation_id=operation_id,
-                        provider_id=provider_id,
-                        function_id=function_id,
-                        allowed_payload_keys=_dynamic_payload_keys(contract_id, operation_id),
-                        owner_pack_id=pack_id,
-                        artifact_digest=artifact_digest,
-                    )
-                )
-        return tuple(binding.targets) + tuple(
-            sorted(
-                dynamic,
-                key=lambda target: (
-                    target.owner_pack_id,
-                    target.contract_id,
-                    target.operation_id,
-                ),
-            )
+                    catalog = {"packs": []}
+        if not isinstance(catalog, Mapping):
+            catalog = {"packs": []}
+        return capture_capability_binding_snapshot(
+            binding,
+            session=session,
+            catalog=catalog,
         )
 
     def _capability_diagnostics(
@@ -1447,6 +1376,15 @@ class PackAPIServer:
         from .frontend_contract_routes import load_frontend_contract_bindings
 
         runtime_root = Path(__file__).resolve().parents[1]
+        catalog = BundledCatalog.load(runtime_root / "ecosystem" / "defaultspack" / "v4")
+        bindings = load_frontend_contract_bindings(
+            runtime_root
+            / "ecosystem"
+            / "defaultspack"
+            / "defaultspack"
+            / "frontend_contract_map.v4.json",
+            catalog.packs["runtime.tauri.application.default"],
+        )
         session = activated_session
         created_session = False
         if session is None:
@@ -1459,21 +1397,13 @@ class PackAPIServer:
                     ecosystem_root=runtime_root / "ecosystem",
                     authority_store=authority,
                     packvm_readiness_reader=self._packvm_lifecycle.readiness_snapshot,
+                    frontend_contract_bindings=bindings,
                 )
                 created_session = True
             except Exception:
                 authority.close()
                 raise
         try:
-            catalog = BundledCatalog.load(runtime_root / "ecosystem" / "defaultspack" / "v4")
-            bindings = load_frontend_contract_bindings(
-                runtime_root
-                / "ecosystem"
-                / "defaultspack"
-                / "defaultspack"
-                / "frontend_contract_map.v4.json",
-                catalog.packs["runtime.tauri.application.default"],
-            )
             routes = contract_binding_map(bindings)
             self._validate_contract_capture(session, routes)
         except Exception:

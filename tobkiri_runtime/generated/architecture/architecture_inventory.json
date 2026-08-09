@@ -68,14 +68,14 @@
       },
       {
         "evidence": "pack_api_server",
-        "line": 97,
+        "line": 98,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/bootstrap/runtime.py",
         "rule_id": "legacy_direct_pack_route"
       },
       {
         "evidence": "pack_api_server",
-        "line": 135,
+        "line": 136,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/bootstrap/runtime.py",
         "rule_id": "legacy_direct_pack_route"
@@ -103,42 +103,42 @@
       },
       {
         "evidence": "pack_api_server",
-        "line": 1524,
+        "line": 1466,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/pack_api_server.py",
         "rule_id": "legacy_direct_pack_route"
       },
       {
         "evidence": "pack_api_server",
-        "line": 1530,
+        "line": 1472,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/pack_api_server.py",
         "rule_id": "legacy_direct_pack_route"
       },
       {
         "evidence": "pack_api_server",
-        "line": 1563,
+        "line": 1505,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/pack_api_server.py",
         "rule_id": "legacy_direct_pack_route"
       },
       {
         "evidence": "pack_api_server",
-        "line": 1576,
+        "line": 1518,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/pack_api_server.py",
         "rule_id": "legacy_direct_pack_route"
       },
       {
         "evidence": "pack_api_server",
-        "line": 1577,
+        "line": 1519,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/pack_api_server.py",
         "rule_id": "legacy_direct_pack_route"
       },
       {
         "evidence": "pack_api_server",
-        "line": 1578,
+        "line": 1520,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/pack_api_server.py",
         "rule_id": "legacy_direct_pack_route"
@@ -152,7 +152,7 @@
       },
       {
         "evidence": "pack_api_server",
-        "line": 405,
+        "line": 406,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/ecosystem/defaultspack/defaultspack/desktop_app.py",
         "rule_id": "legacy_direct_pack_route"
@@ -9919,7 +9919,7 @@
         "version": "0.1.0"
       },
       {
-        "digest": "sha256:ef480bb0546a756359a6c29e9045e03e70c6da24aea78ab82ac12f927ba6c5e3",
+        "digest": "sha256:46c0164067b6b6a0e82a941946766e6126de8409748408d9e1b8a2fea33cdda3",
         "identity": "tobkiri_host_pack_control",
         "kind": "manifest",
         "legacy": true,
@@ -9977,20 +9977,20 @@
         "rule_id": "legacy_direct_pack_route"
       },
       {
-        "evidence_digest": "sha256:4bbd6be16ad3312ed5a7bfdf6835acc1a5b2f56fd9911de2050994c16365ad07",
+        "evidence_digest": "sha256:09b18e84399861b60f5b3b1058f1d103d7cb5e374b64fe78ac318a757f2696fe",
         "line": 22,
         "path": "tobkiri_runtime/core_runtime/bootstrap/runtime.py",
         "rule_id": "legacy_direct_pack_route"
       },
       {
-        "evidence_digest": "sha256:4bbd6be16ad3312ed5a7bfdf6835acc1a5b2f56fd9911de2050994c16365ad07",
-        "line": 97,
+        "evidence_digest": "sha256:09b18e84399861b60f5b3b1058f1d103d7cb5e374b64fe78ac318a757f2696fe",
+        "line": 98,
         "path": "tobkiri_runtime/core_runtime/bootstrap/runtime.py",
         "rule_id": "legacy_direct_pack_route"
       },
       {
-        "evidence_digest": "sha256:4bbd6be16ad3312ed5a7bfdf6835acc1a5b2f56fd9911de2050994c16365ad07",
-        "line": 135,
+        "evidence_digest": "sha256:09b18e84399861b60f5b3b1058f1d103d7cb5e374b64fe78ac318a757f2696fe",
+        "line": 136,
         "path": "tobkiri_runtime/core_runtime/bootstrap/runtime.py",
         "rule_id": "legacy_direct_pack_route"
       },
@@ -10013,38 +10013,38 @@
         "rule_id": "legacy_direct_pack_route"
       },
       {
-        "evidence_digest": "sha256:6db0caa7c894f5d0343e261a31f890ad363aab4d9527e0808060c8257f5fdc35",
-        "line": 1524,
+        "evidence_digest": "sha256:0a3cf1e61690dc7d63c7f140fc9244b928429a2b13c71346066f75ef43012aae",
+        "line": 1466,
         "path": "tobkiri_runtime/core_runtime/pack_api_server.py",
         "rule_id": "legacy_direct_pack_route"
       },
       {
-        "evidence_digest": "sha256:6db0caa7c894f5d0343e261a31f890ad363aab4d9527e0808060c8257f5fdc35",
-        "line": 1530,
+        "evidence_digest": "sha256:0a3cf1e61690dc7d63c7f140fc9244b928429a2b13c71346066f75ef43012aae",
+        "line": 1472,
         "path": "tobkiri_runtime/core_runtime/pack_api_server.py",
         "rule_id": "legacy_direct_pack_route"
       },
       {
-        "evidence_digest": "sha256:6db0caa7c894f5d0343e261a31f890ad363aab4d9527e0808060c8257f5fdc35",
-        "line": 1563,
+        "evidence_digest": "sha256:0a3cf1e61690dc7d63c7f140fc9244b928429a2b13c71346066f75ef43012aae",
+        "line": 1505,
         "path": "tobkiri_runtime/core_runtime/pack_api_server.py",
         "rule_id": "legacy_direct_pack_route"
       },
       {
-        "evidence_digest": "sha256:6db0caa7c894f5d0343e261a31f890ad363aab4d9527e0808060c8257f5fdc35",
-        "line": 1576,
+        "evidence_digest": "sha256:0a3cf1e61690dc7d63c7f140fc9244b928429a2b13c71346066f75ef43012aae",
+        "line": 1518,
         "path": "tobkiri_runtime/core_runtime/pack_api_server.py",
         "rule_id": "legacy_direct_pack_route"
       },
       {
-        "evidence_digest": "sha256:6db0caa7c894f5d0343e261a31f890ad363aab4d9527e0808060c8257f5fdc35",
-        "line": 1577,
+        "evidence_digest": "sha256:0a3cf1e61690dc7d63c7f140fc9244b928429a2b13c71346066f75ef43012aae",
+        "line": 1519,
         "path": "tobkiri_runtime/core_runtime/pack_api_server.py",
         "rule_id": "legacy_direct_pack_route"
       },
       {
-        "evidence_digest": "sha256:6db0caa7c894f5d0343e261a31f890ad363aab4d9527e0808060c8257f5fdc35",
-        "line": 1578,
+        "evidence_digest": "sha256:0a3cf1e61690dc7d63c7f140fc9244b928429a2b13c71346066f75ef43012aae",
+        "line": 1520,
         "path": "tobkiri_runtime/core_runtime/pack_api_server.py",
         "rule_id": "legacy_direct_pack_route"
       },
@@ -10055,8 +10055,8 @@
         "rule_id": "legacy_direct_pack_route"
       },
       {
-        "evidence_digest": "sha256:d441d0e57da1d124fe3bd815372025be04d536ee21b495bcc7a0f0f0d3b674bf",
-        "line": 405,
+        "evidence_digest": "sha256:211c81922a321cabd360c4f178c442b800f210dbf6fbf307081dd69b5dcc0d86",
+        "line": 406,
         "path": "tobkiri_runtime/ecosystem/defaultspack/defaultspack/desktop_app.py",
         "rule_id": "legacy_direct_pack_route"
       },
@@ -14765,7 +14765,7 @@
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:ef480bb0546a756359a6c29e9045e03e70c6da24aea78ab82ac12f927ba6c5e3",
+        "evidence_digest": "sha256:46c0164067b6b6a0e82a941946766e6126de8409748408d9e1b8a2fea33cdda3",
         "line": 5,
         "path": "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/ecosystem.json",
         "rule_id": "legacy_host_execution"
@@ -15035,13 +15035,13 @@
         "rule_id": "legacy_permissive_mode"
       },
       {
-        "evidence_digest": "sha256:d139bb7c683f0c3eaab2cc07932eb53b64959f3f7fb5b053e0246b8263940d0d",
+        "evidence_digest": "sha256:d8f3b896e08e6e7b4c928ef495187c77ab2c07aa339d6b8ffc1d869482491b63",
         "line": 607,
         "path": "tobkiri_runtime/core_runtime/hmac_key_manager.py",
         "rule_id": "legacy_permissive_mode"
       },
       {
-        "evidence_digest": "sha256:d139bb7c683f0c3eaab2cc07932eb53b64959f3f7fb5b053e0246b8263940d0d",
+        "evidence_digest": "sha256:d8f3b896e08e6e7b4c928ef495187c77ab2c07aa339d6b8ffc1d869482491b63",
         "line": 682,
         "path": "tobkiri_runtime/core_runtime/hmac_key_manager.py",
         "rule_id": "legacy_permissive_mode"
@@ -18182,7 +18182,7 @@
       },
       {
         "legacy": true,
-        "manifest_digest": "sha256:ef480bb0546a756359a6c29e9045e03e70c6da24aea78ab82ac12f927ba6c5e3",
+        "manifest_digest": "sha256:46c0164067b6b6a0e82a941946766e6126de8409748408d9e1b8a2fea33cdda3",
         "pack_id": "tobkiri_host_pack_control",
         "path": "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/ecosystem.json",
         "version": "1.0.0"
@@ -18354,8 +18354,8 @@
     ]
   },
   "repository": {
-    "commit": "4b70b411ce7cb465e25fb02df9601a65e6efa388",
-    "tree_digest": "bf43f04888fa13fe45e727aff86c84ad81a6f12ce446bf2ab915594ebf43ecc4"
+    "commit": "75a89c5a80ee6d4fc48cff73cc5c56dd63edc541",
+    "tree_digest": "0d03ff2ce47d4ec1c7907480c7a4b0e3b8d4092b073e5c8a27ff4739ba0471ca"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
   "schema": "io.tobkiri.architecture.inventory.v1"

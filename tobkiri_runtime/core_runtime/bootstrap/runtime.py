@@ -72,17 +72,6 @@ class Kernel:
             if active_default_profile_exists():
                 active = capture_default_profile()
                 authority_store = AuthorityStore(user_data / "authority" / "v4.sqlite3")
-                try:
-                    dispatch_session = capture_production_dispatch(
-                        active,
-                        bundle_root=(runtime_root / "ecosystem" / "defaultspack" / "v4"),
-                        ecosystem_root=runtime_root / "ecosystem",
-                        authority_store=authority_store,
-                    )
-                except Exception:
-                    authority_store.close()
-                    raise
-                install_dispatch_session(get_container(), dispatch_session)
                 catalog = BundledCatalog.load(runtime_root / "ecosystem" / "defaultspack" / "v4")
                 contract_bindings = load_frontend_contract_bindings(
                     runtime_root
@@ -92,6 +81,18 @@ class Kernel:
                     / "frontend_contract_map.v4.json",
                     catalog.packs["runtime.tauri.application.default"],
                 )
+                try:
+                    dispatch_session = capture_production_dispatch(
+                        active,
+                        bundle_root=(runtime_root / "ecosystem" / "defaultspack" / "v4"),
+                        ecosystem_root=runtime_root / "ecosystem",
+                        authority_store=authority_store,
+                        frontend_contract_bindings=contract_bindings,
+                    )
+                except Exception:
+                    authority_store.close()
+                    raise
+                install_dispatch_session(get_container(), dispatch_session)
                 self._dispatch_session = dispatch_session
             port = resolve_runtime_port()
             self._server = initialize_pack_api_server(

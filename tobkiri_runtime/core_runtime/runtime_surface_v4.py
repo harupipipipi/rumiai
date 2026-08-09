@@ -14,9 +14,9 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, cast
 
 from ecosystem.defaultspack.domain.runtime_v4 import (
     ActiveDefaultProfile,
@@ -30,7 +30,7 @@ from tobkiri_protocol.validation import validate_document
 RUNTIME_SURFACE_API_VERSION = "io.tobkiri.launcher.runtime-surface.v4"
 
 
-class RuntimeSurfaceErrorCode(StrEnum):
+class RuntimeSurfaceErrorCode(str, Enum):
     """Stable fail-closed error codes consumed by Tobkiri Launcher."""
 
     PROFILE_NOT_ACTIVE = "PROFILE_NOT_ACTIVE"
@@ -87,6 +87,7 @@ SnapshotLoader = Callable[[], ActiveDefaultProfile]
 CatalogLoader = Callable[[], BundledCatalog]
 UserSettingsReader = Callable[[], Mapping[str, object]]
 PackVMReadinessReader = Callable[[], Mapping[str, object]]
+CapabilityBindingReader = Callable[[], Mapping[str, object]]
 
 
 @dataclass(frozen=True)
@@ -172,6 +173,7 @@ class RuntimeProfileChangeService:
             resolved = resolve_profile_pack_set(pack_ids)
         except Exception as error:
             raise _map_change_error(error) from error
+        current_data = cast(Mapping[str, Any], current["data"])
         review = {
             "profile": dict(resolved.profile),
             "profile_lock": dict(resolved.lock),
@@ -179,7 +181,7 @@ class RuntimeProfileChangeService:
             "predecessor": {
                 "profile_revision": revision,
                 "plan_digest": plan_digest,
-                "activation_id": current["data"]["activation_record"]["activation_id"],
+                "activation_id": current_data["activation_record"]["activation_id"],
             },
         }
         candidate_id = secrets.token_urlsafe(32)
@@ -210,14 +212,15 @@ class RuntimeProfileChangeService:
     def review(self, body: Mapping[str, object], *, session_id: str) -> dict[str, object]:
         """Acknowledge the exact resolved candidate for later approval."""
 
-        candidate = self._consume_candidate(
-            self._resolved,
-            body,
-            session_id=session_id,
-            id_key="candidate_id",
-            digest_key="candidate_digest",
-        )
         with self._lock:
+            candidate = self._validated_candidate(
+                self._resolved,
+                body,
+                session_id=session_id,
+                id_key="candidate_id",
+                digest_key="candidate_digest",
+            )
+            self._resolved.pop(candidate.candidate_id)
             self._reviewed[candidate.candidate_id] = candidate
         return {
             "runtime_surface_api_version": RUNTIME_SURFACE_API_VERSION,
@@ -231,28 +234,29 @@ class RuntimeProfileChangeService:
     def approve(self, body: Mapping[str, object], *, session_id: str) -> dict[str, object]:
         """Create a one-shot server approval from a reviewed candidate."""
 
-        candidate = self._consume_candidate(
-            self._reviewed,
-            body,
-            session_id=session_id,
-            id_key="candidate_id",
-            digest_key="candidate_digest",
-        )
-        authority_record = _commit_authority_profile_approval(
-            candidate,
-            session_id=session_id,
-        )
-        approval_id = secrets.token_urlsafe(32)
-        approval_digest = str(authority_record.digest)
-        approval = _ProfileApproval(
-            approval_id=approval_id,
-            session_id=session_id,
-            candidate=candidate,
-            approval_digest=approval_digest,
-            authority_record_id=str(authority_record.approval_id),
-            expires_at=self._clock() + self._ttl_seconds,
-        )
         with self._lock:
+            candidate = self._validated_candidate(
+                self._reviewed,
+                body,
+                session_id=session_id,
+                id_key="candidate_id",
+                digest_key="candidate_digest",
+            )
+            authority_record = _commit_authority_profile_approval(
+                candidate,
+                session_id=session_id,
+            )
+            approval_id = secrets.token_urlsafe(32)
+            approval_digest = str(authority_record.digest)
+            approval = _ProfileApproval(
+                approval_id=approval_id,
+                session_id=session_id,
+                candidate=candidate,
+                approval_digest=approval_digest,
+                authority_record_id=str(authority_record.approval_id),
+                expires_at=self._clock() + self._ttl_seconds,
+            )
+            self._reviewed.pop(candidate.candidate_id)
             self._approved[approval_id] = approval
         return {
             "runtime_surface_api_version": RUNTIME_SURFACE_API_VERSION,
@@ -282,35 +286,36 @@ class RuntimeProfileChangeService:
         approval_digest = _required_string(body.get("approval_digest"))
         with self._lock:
             self._prune()
-            approval = self._approved.pop(approval_id, None)
-        if approval is None:
-            raise RuntimeSurfaceError(
-                RuntimeSurfaceErrorCode.UNAPPROVED,
-                "Profile activation approval is missing or already used",
-            )
-        if approval.session_id != session_id or not hmac.compare_digest(
-            approval.approval_digest, approval_digest
-        ):
-            raise RuntimeSurfaceError(
-                RuntimeSurfaceErrorCode.UNAPPROVED,
-                "Profile activation approval does not match",
-            )
-        candidate = approval.candidate
-        self._surface().read_profile(
-            expected_profile_revision=candidate.expected_profile_revision,
-            expected_plan_digest=candidate.expected_plan_digest,
-        )
-        _verify_authority_profile_approval(approval)
-        try:
-            from .pack_control_v4 import activate_resolved_profile_pack_set
-
-            activation = activate_resolved_profile_pack_set(
-                candidate.resolved,
+            approval = self._approved.get(approval_id)
+            if approval is None:
+                raise RuntimeSurfaceError(
+                    RuntimeSurfaceErrorCode.UNAPPROVED,
+                    "Profile activation approval is missing or already used",
+                )
+            if approval.session_id != session_id or not hmac.compare_digest(
+                approval.approval_digest, approval_digest
+            ):
+                raise RuntimeSurfaceError(
+                    RuntimeSurfaceErrorCode.UNAPPROVED,
+                    "Profile activation approval does not match",
+                )
+            candidate = approval.candidate
+            self._surface().read_profile(
                 expected_profile_revision=candidate.expected_profile_revision,
                 expected_plan_digest=candidate.expected_plan_digest,
             )
-        except Exception as error:
-            raise _map_change_error(error) from error
+            _verify_authority_profile_approval(approval)
+            try:
+                from .pack_control_v4 import activate_resolved_profile_pack_set
+
+                activation = activate_resolved_profile_pack_set(
+                    candidate.resolved,
+                    expected_profile_revision=candidate.expected_profile_revision,
+                    expected_plan_digest=candidate.expected_plan_digest,
+                )
+            except Exception as error:
+                raise _map_change_error(error) from error
+            self._approved.pop(approval_id)
         return {
             "runtime_surface_api_version": RUNTIME_SURFACE_API_VERSION,
             "state": "active",
@@ -326,7 +331,7 @@ class RuntimeProfileChangeService:
             self._surface_service = RuntimeSurfaceService()
         return self._surface_service
 
-    def _consume_candidate(
+    def _validated_candidate(
         self,
         collection: dict[str, _ProfileCandidate],
         body: Mapping[str, object],
@@ -342,9 +347,8 @@ class RuntimeProfileChangeService:
             )
         candidate_id = _required_string(body.get(id_key))
         digest = _required_string(body.get(digest_key))
-        with self._lock:
-            self._prune()
-            candidate = collection.pop(candidate_id, None)
+        self._prune()
+        candidate = collection.get(candidate_id)
         if candidate is None:
             raise RuntimeSurfaceError(
                 RuntimeSurfaceErrorCode.TIMEOUT,
@@ -377,6 +381,7 @@ class RuntimeSurfaceService:
         catalog_loader: CatalogLoader | None = None,
         user_settings_reader: UserSettingsReader | None = None,
         packvm_readiness_reader: PackVMReadinessReader | None = None,
+        capability_binding_reader: CapabilityBindingReader | None = None,
         frontend_contract_bindings: tuple[object, ...] | None = None,
         read_timeout_seconds: float = 5.0,
         clock: Callable[[], float] = time.monotonic,
@@ -387,9 +392,17 @@ class RuntimeSurfaceService:
         self._catalog_loader = catalog_loader or self._load_catalog
         self._user_settings_reader = user_settings_reader
         self._packvm_readiness_reader = packvm_readiness_reader
+        self._capability_binding_reader = capability_binding_reader
         self._frontend_contract_bindings = frontend_contract_bindings
         self._read_timeout_seconds = read_timeout_seconds
         self._clock = clock
+
+    def bind_capability_reader(self, reader: CapabilityBindingReader) -> None:
+        """Install the one Host-captured PackAPI capability snapshot reader."""
+
+        if self._capability_binding_reader is not None:
+            raise RuntimeError("capability binding reader is already installed")
+        self._capability_binding_reader = reader
 
     @staticmethod
     def _load_active() -> ActiveDefaultProfile:
@@ -447,6 +460,7 @@ class RuntimeSurfaceService:
         advanced = self._advanced_projection(
             snapshot,
             packvm_readiness=self._packvm_readiness(),
+            capability_binding=self._capability_binding(),
             frontend_bindings=self._frontend_bindings(snapshot),
         )
         data = {normalized: advanced[normalized]}
@@ -599,6 +613,7 @@ class RuntimeSurfaceService:
         advanced = self._advanced_projection(
             snapshot,
             packvm_readiness=self._packvm_readiness(),
+            capability_binding=self._capability_binding(),
             frontend_bindings=self._frontend_bindings(snapshot),
         )
         application = next(
@@ -639,8 +654,9 @@ class RuntimeSurfaceService:
         snapshot: RuntimeSurfaceSnapshot,
         *,
         packvm_readiness: Mapping[str, object] | None,
+        capability_binding: Mapping[str, object] | None,
         frontend_bindings: tuple[object, ...],
-    ) -> dict[str, list[object]]:
+    ) -> dict[str, Any]:
         active = snapshot.active
         contract_catalogs = _validated_contract_catalogs(snapshot)
         lifecycle = _captured_lifecycle_projection()
@@ -780,7 +796,7 @@ class RuntimeSurfaceService:
                 ),
                 {},
             )
-            row = {
+            row: dict[str, object] = {
                 "pack_id": str(binding["pack_id"]),
                 "owner_pack_id": str(binding["pack_id"]),
                 "contract_id": str(binding["contract_id"]),
@@ -809,9 +825,12 @@ class RuntimeSurfaceService:
                     RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
                     "ResolvedPlan binding has no verified Contract document",
                 )
+            verified_operation_catalog = cast(
+                list[Mapping[str, Any]], contract_row["operation_catalog"]
+            )
             operation_rows = [
                 item
-                for item in contract_row["operation_catalog"]
+                for item in verified_operation_catalog
                 if item["operation_id"] == str(binding["operation_id"])
             ]
             if contract_row["schema_state"] == "verified" and len(operation_rows) != 1:
@@ -822,42 +841,40 @@ class RuntimeSurfaceService:
             row["schema"] = (
                 dict(operation_rows[0]) if len(operation_rows) == 1 else {"state": "unavailable"}
             )
+            semantics = contract_row["provider_semantics"]
             row["provider_semantics"] = (
-                dict(contract_row["provider_semantics"])
-                if contract_row["provider_semantics"] is not None
-                else None
+                dict(cast(Mapping[str, Any], semantics)) if semantics is not None else None
             )
             lifecycle_pack = lifecycle_packs.get(str(binding["pack_id"]), {})
-            lifecycle_operations = lifecycle_pack.get("operations") or []
-            lifecycle_operation = next(
-                (
-                    item
-                    for item in lifecycle_operations
-                    if item.get("contract_id") == str(binding["contract_id"])
-                    and item.get("operation_id") == str(binding["operation_id"])
-                ),
-                None,
-            )
             pack_kind = next(
                 (item["kind"] for item in packs if item["pack_id"] == str(binding["pack_id"])),
                 "",
             )
-            lifecycle_invokable = bool(
-                lifecycle_operation and lifecycle_operation.get("invokable") is True
+            capability_target = _capability_invocation_target(
+                capability_binding,
+                active=active,
+                operation=row,
+            )
+            row["invokable"] = capability_target is not None
+            row["invocation_reason"] = (
+                None
+                if capability_target is not None
+                else str(lifecycle_pack.get("approval_reason") or "capability_binding_unavailable")
             )
             if pack_kind == "normal_sandbox" and not _packvm_attested(packvm_readiness):
                 row["invokable"] = False
                 row["invocation_reason"] = "packvm_attestation_not_current"
-            else:
-                row["invokable"] = lifecycle_invokable
-                row["invocation_reason"] = (
-                    None
-                    if lifecycle_invokable
-                    else str(
-                        lifecycle_pack.get("approval_reason")
-                        or "active_authority_grant_unavailable"
-                    )
-                )
+            row["invocation_contribution_id"] = (
+                str(capability_target["contribution_id"]) if capability_target is not None else None
+            )
+            row["invocation_owner_pack_id"] = (
+                str(capability_target["owner_pack_id"]) if capability_target is not None else None
+            )
+            row["invocation_catalog_hash"] = (
+                str(capability_binding["catalog_hash"])
+                if capability_target is not None and capability_binding is not None
+                else None
+            )
             operations.append(row)
             principals.append(
                 {
@@ -925,6 +942,14 @@ class RuntimeSurfaceService:
             return None
         try:
             return dict(self._packvm_readiness_reader())
+        except Exception:
+            return None
+
+    def _capability_binding(self) -> Mapping[str, object] | None:
+        if self._capability_binding_reader is None:
+            return None
+        try:
+            return dict(self._capability_binding_reader())
         except Exception:
             return None
 
@@ -1215,6 +1240,59 @@ def _packvm_attested(value: Mapping[str, object] | None) -> bool:
     return hmac.compare_digest(attestation_digest, canonical_digest(attested))
 
 
+def _capability_invocation_target(
+    value: Mapping[str, object] | None,
+    *,
+    active: ActiveDefaultProfile,
+    operation: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    """Return one exact PackAPI invoke target after catalog hash verification."""
+
+    if value is None:
+        return None
+    profile_id = str(active.resolved.profile["profile_id"])
+    plan_digest = str(active.resolved.plan["plan_digest"])
+    if value.get("profile_id") != profile_id or value.get("plan_digest") != plan_digest:
+        return None
+    targets = value.get("targets")
+    if not isinstance(targets, list) or any(not isinstance(item, Mapping) for item in targets):
+        return None
+    required = (
+        "contribution_id",
+        "contract_id",
+        "operation_id",
+        "provider_id",
+        "function_id",
+        "artifact_digest",
+    )
+    digest_targets: list[dict[str, str]] = []
+    for target in targets:
+        if any(not isinstance(target.get(key), str) for key in required) or not isinstance(
+            target.get("owner_pack_id"), str
+        ):
+            return None
+        digest_targets.append({key: str(target[key]) for key in required})
+    expected_hash = canonical_digest(
+        {
+            "profile_id": profile_id,
+            "plan_digest": plan_digest,
+            "contributions": digest_targets,
+        }
+    )
+    if not hmac.compare_digest(str(value.get("catalog_hash") or ""), expected_hash):
+        return None
+    exact = [
+        target
+        for target in targets
+        if target.get("contract_id") == operation.get("contract_id")
+        and target.get("operation_id") == operation.get("operation_id")
+        and target.get("provider_id") == operation.get("target_provider_id")
+        and target.get("function_id") == operation.get("function_id")
+        and target.get("artifact_digest") == operation.get("artifact_digest")
+    ]
+    return exact[0] if len(exact) == 1 else None
+
+
 def _validated_contract_catalogs(
     snapshot: RuntimeSurfaceSnapshot,
 ) -> dict[str, Mapping[str, Any]]:
@@ -1409,15 +1487,15 @@ def _commit_authority_profile_approval(
     from .authority.v4 import ApprovalRecord, AuthorityStore, FunctionPrincipal
     from .authority.v4_models import authority_digest
     from .bootstrap.profile_capture import runtime_user_data_root
+    from .pack_control_v4 import CONTROL_PRESENTATION_CONTRACT
 
     bindings = candidate.resolved.plan.get("bindings")
     approval_bindings = [
         binding
         for binding in bindings or []
         if isinstance(binding, Mapping)
-        and binding.get("contract_id") == "tobkiri.host.control-presentation.v4"
+        and binding.get("contract_id") == CONTROL_PRESENTATION_CONTRACT
         and binding.get("operation_id") == "profile.change.approve"
-        and binding.get("pack_id") == "tobkiri_host_pack_control"
         and binding.get("function_principal", {}).get("function_id")
         == "tobkiri.host.control-presentation"
     ]

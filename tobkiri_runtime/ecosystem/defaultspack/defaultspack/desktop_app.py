@@ -230,15 +230,16 @@ def _restore_active_profile_contracts():
     application = catalog.packs.get("runtime.tauri.application.default")
     if application is None:
         raise RuntimeError("Defaults application Pack is not selected")
+    bindings = load_frontend_contract_bindings(
+        Path(__file__).with_name("frontend_contract_map.v4.json"),
+        application,
+    )
     session = capture_production_dispatch(
         active,
         bundle_root=bundle_root,
         ecosystem_root=ecosystem_root,
         authority_store=AuthorityStore(runtime_user_data_root() / "authority" / "v4.sqlite3"),
-    )
-    bindings = load_frontend_contract_bindings(
-        Path(__file__).with_name("frontend_contract_map.v4.json"),
-        application,
+        frontend_contract_bindings=bindings,
     )
     install_dispatch_session(get_container(), session)
     _write_launch_event(

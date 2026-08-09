@@ -174,7 +174,7 @@ $file.SetAccessControl($acl)
 
 def _run_windows_signing_key_acl(key_path: Path, *, harden: bool) -> None:
     """Harden or validate one Windows signing-key ACL without leaking its path."""
-    encoded_path = base64.b64encode(str(key_path).encode("utf-8"))
+    encoded_path = base64.b64encode(str(key_path).encode("utf-8")).decode("ascii")
     script = (
         _WINDOWS_SIGNING_KEY_ACL_HARDEN
         if harden
@@ -204,7 +204,7 @@ def _run_windows_signing_key_acl(key_path: Path, *, harden: bool) -> None:
             ],
             check=True,
             capture_output=True,
-            text=False,
+            text=True,
             timeout=15,
             input=encoded_path,
         )

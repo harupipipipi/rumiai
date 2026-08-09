@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 import time
@@ -59,6 +60,38 @@ def _control_output_schema() -> dict[str, object]:
     )
     digest = contract["operations"][0]["output_schema_digest"]
     return contract["schema_catalog"][digest]
+
+
+def _capability_snapshot(active_runtime, operations) -> dict[str, object]:
+    targets = [
+        {
+            "contribution_id": f"pack.{row['owner_pack_id']}.{row['operation_id']}",
+            "contract_id": row["contract_id"],
+            "operation_id": row["operation_id"],
+            "provider_id": row["target_provider_id"],
+            "function_id": row["function_id"],
+            "artifact_digest": row["artifact_digest"],
+            "owner_pack_id": row["owner_pack_id"],
+        }
+        for row in operations
+    ]
+    digest_targets = [
+        {key: target[key] for key in target if key != "owner_pack_id"} for target in targets
+    ]
+    profile_id = str(active_runtime.resolved.profile["profile_id"])
+    plan_digest = str(active_runtime.resolved.plan["plan_digest"])
+    return {
+        "profile_id": profile_id,
+        "plan_digest": plan_digest,
+        "catalog_hash": canonical_digest(
+            {
+                "profile_id": profile_id,
+                "plan_digest": plan_digest,
+                "contributions": digest_targets,
+            }
+        ),
+        "targets": targets,
+    }
 
 
 def test_profile_read_model_is_derived_from_verified_v4_graph(active_runtime) -> None:
@@ -276,6 +309,10 @@ def test_packvm_invocation_requires_fresh_matching_host_attestation(
     ready = _service(
         active_runtime,
         packvm_readiness_reader=lambda: snapshot,
+        capability_binding_reader=lambda: _capability_snapshot(
+            active_runtime,
+            packvm_rows,
+        ),
     ).read_advanced("operations")["data"]["operations"]
     ready_packvm = [item for item in ready if item["domain_kind"] == "pack_vm"]
     assert any(item["invokable"] is True for item in ready_packvm)
@@ -402,7 +439,12 @@ def test_profile_ceremony_is_ordered_digest_bound_and_one_shot(
     )
     activated: list[object] = []
 
+    activation_attempts = [0]
+
     def activate(resolved, **_bindings):
+        activation_attempts[0] += 1
+        if activation_attempts[0] == 1:
+            raise RuntimeError("temporary activation failure")
         activated.append(resolved)
         return active_runtime.activation
 
@@ -429,11 +471,31 @@ def test_profile_ceremony_is_ordered_digest_bound_and_one_shot(
         },
         session_id="session-a",
     )
+    real_commit = runtime_surface._commit_authority_profile_approval
+    approval_attempts = [0]
+
+    def commit_with_temporary_denial(candidate, *, session_id):
+        approval_attempts[0] += 1
+        if approval_attempts[0] == 1:
+            raise RuntimeSurfaceError(
+                RuntimeSurfaceErrorCode.UNAPPROVED,
+                "temporary Authority denial",
+            )
+        return real_commit(candidate, session_id=session_id)
+
+    monkeypatch.setattr(
+        runtime_surface,
+        "_commit_authority_profile_approval",
+        commit_with_temporary_denial,
+    )
+    approve_request = {
+        "candidate_id": reviewed["candidate_id"],
+        "candidate_digest": reviewed["candidate_digest"],
+    }
+    with pytest.raises(RuntimeSurfaceError):
+        ceremony.approve(approve_request, session_id="session-a")
     approved = ceremony.approve(
-        {
-            "candidate_id": reviewed["candidate_id"],
-            "candidate_digest": reviewed["candidate_digest"],
-        },
+        approve_request,
         session_id="session-a",
     )
     Draft202012Validator(_control_output_schema()).validate(approved)
@@ -443,13 +505,13 @@ def test_profile_ceremony_is_ordered_digest_bound_and_one_shot(
     assert authority_approval.decision == "approved"
     assert authority_approval.target.function_id == ("tobkiri.host.control-presentation")
     assert authority_approval.target.operation_id == "profile.change.approve"
-    result = ceremony.activate(
-        {
-            "approval_id": approved["approval_id"],
-            "approval_digest": approved["approval_digest"],
-        },
-        session_id="session-a",
-    )
+    activation_request = {
+        "approval_id": approved["approval_id"],
+        "approval_digest": approved["approval_digest"],
+    }
+    with pytest.raises(RuntimeSurfaceError):
+        ceremony.activate(activation_request, session_id="session-a")
+    result = ceremony.activate(activation_request, session_id="session-a")
 
     assert result["state"] == "active"
     assert activated == [active_runtime.resolved]
@@ -496,6 +558,14 @@ def test_profile_ceremony_rejects_cross_session_and_expired_review(
             session_id="session-b",
         )
     assert wrong_session.value.code is RuntimeSurfaceErrorCode.DIGEST_MISMATCH
+    reviewed = ceremony.review(
+        {
+            "candidate_id": resolved["candidate_id"],
+            "candidate_digest": resolved["candidate_digest"],
+        },
+        session_id="session-a",
+    )
+    assert reviewed["state"] == "reviewed"
 
     second = ceremony.resolve(
         {
@@ -516,3 +586,55 @@ def test_profile_ceremony_rejects_cross_session_and_expired_review(
             session_id="session-a",
         )
     assert expired.value.code is RuntimeSurfaceErrorCode.TIMEOUT
+
+
+def test_profile_activation_concurrent_double_use_has_one_winner(
+    active_runtime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "core_runtime.pack_control_v4.resolve_profile_pack_set",
+        lambda _pack_ids: active_runtime.resolved,
+    )
+    monkeypatch.setattr(
+        "core_runtime.pack_control_v4.activate_resolved_profile_pack_set",
+        lambda _resolved, **_bindings: active_runtime.activation,
+    )
+    ceremony = RuntimeProfileChangeService(surface_service=_service(active_runtime))
+    resolved = ceremony.resolve(
+        {
+            "profile_id": "defaults",
+            "expected_profile_revision": active_runtime.resolved.plan["profile_revision"],
+            "expected_plan_digest": active_runtime.resolved.plan["plan_digest"],
+            "desired_pack_ids": ["defaultspack"],
+        },
+        session_id="session-a",
+    )
+    reviewed = ceremony.review(
+        {
+            "candidate_id": resolved["candidate_id"],
+            "candidate_digest": resolved["candidate_digest"],
+        },
+        session_id="session-a",
+    )
+    approved = ceremony.approve(
+        {
+            "candidate_id": reviewed["candidate_id"],
+            "candidate_digest": reviewed["candidate_digest"],
+        },
+        session_id="session-a",
+    )
+    request = {
+        "approval_id": approved["approval_id"],
+        "approval_digest": approved["approval_digest"],
+    }
+
+    def activate_once() -> str:
+        try:
+            return str(ceremony.activate(request, session_id="session-a")["state"])
+        except RuntimeSurfaceError as error:
+            return error.code.value
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = sorted(executor.map(lambda _index: activate_once(), range(2)))
+
+    assert outcomes == ["UNAPPROVED", "active"]
