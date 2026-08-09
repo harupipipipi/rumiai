@@ -68,3 +68,20 @@ def test_v4_dispatch_session_uses_captured_context_and_scope() -> None:
     assert frame.payload == payload
     assert not hasattr(frame, "profile_id")
     assert not hasattr(frame, "activation_id")
+
+
+def test_v4_dispatch_session_leaves_omitted_version_to_captured_broker() -> None:
+    """An omitted range uses the Broker/catalog immutable binding contract."""
+    broker = _RecordingBroker()
+    session = V4DispatchSession(
+        broker=broker,  # type: ignore[arg-type]
+        context_for=lambda _contract, _operation: object(),
+        effect_scope_for=lambda _contract, _operation, _payload: {},
+        providers={},
+        profile_id="profile:captured",
+        plan_digest="sha256:" + "1" * 64,
+    )
+
+    session.invoke("tobkiri.service.example.v1", "read", {})
+
+    assert broker.calls[0][0].version_range is None

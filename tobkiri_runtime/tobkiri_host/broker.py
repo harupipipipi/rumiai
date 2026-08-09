@@ -274,10 +274,6 @@ class RequestBroker:
         finally:
             self._admission.release(ticket)
 
-    def pinned_version_range(self, contract_id: str, operation_id: str) -> str:
-        """Return the active plan's exact Contract constraint for one route."""
-        return self._catalog.pinned_version_range(contract_id, operation_id)
-
     def _authorize(
         self,
         context: RequestContext,

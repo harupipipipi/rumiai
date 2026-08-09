@@ -112,12 +112,19 @@ class OperationCatalog:
         self,
         contract_id: str,
         operation_id: str,
-        version_range: str,
+        version_range: str | None,
     ) -> ResolvedOperationBinding:
-        """Return one exact binding without performing live provider discovery."""
+        """Return one exact binding without performing live provider discovery.
+
+        An omitted caller constraint resolves against the exact Contract
+        version already captured in the immutable plan. An explicit range is
+        an additional constraint and cannot select a different binding.
+        """
         binding = self._bindings.get((contract_id, operation_id))
         if binding is None:
             raise ResolutionError("operation is not pinned by the active plan")
+        if version_range is None:
+            version_range = self.pinned_version_range(contract_id, operation_id)
         try:
             specifier = SpecifierSet(version_range)
             version = Version(binding.operation.contract_version)

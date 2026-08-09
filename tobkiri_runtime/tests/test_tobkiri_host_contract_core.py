@@ -154,6 +154,10 @@ def test_operation_catalog_host_owned_resolution_uses_exact_pinned_version() -> 
         catalog.resolve_pinned("io.tobkiri.math.v1", "increment").operation.contract_version
         == "1.2.0"
     )
+    assert (
+        catalog.resolve("io.tobkiri.math.v1", "increment", None).operation.contract_version
+        == "1.2.0"
+    )
     with pytest.raises(ResolutionError, match="incompatible"):
         catalog.resolve("io.tobkiri.math.v1", "increment", ">=2,<3")
 

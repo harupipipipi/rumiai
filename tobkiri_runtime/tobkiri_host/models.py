@@ -191,7 +191,7 @@ class InvocationFrame:
     """Caller-controlled invocation fields; identity is intentionally absent."""
 
     contract_id: str
-    version_range: str
+    version_range: str | None
     operation_id: str
     payload: Mapping[str, Any]
     timeout_ms: int | None = None

@@ -219,11 +219,7 @@ class V4DispatchSession:
         return self.broker.invoke(
             InvocationFrame(
                 contract_id=contract_id,
-                version_range=(
-                    version_range
-                    if version_range is not None
-                    else self.broker.pinned_version_range(contract_id, operation_id)
-                ),
+                version_range=version_range,
                 operation_id=operation_id,
                 payload=arguments,
             ),

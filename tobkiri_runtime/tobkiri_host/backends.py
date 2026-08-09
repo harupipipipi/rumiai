@@ -143,7 +143,12 @@ class BackendRegistry:
     def registered(self) -> tuple[ExecutionBackend, ...]:
         """Return exact registered backends for composition-root extension."""
 
-        return self._registered
+        return tuple(
+            sorted(
+                self._registered,
+                key=lambda item: (item.status.backend_id, item.status.backend_digest),
+            )
+        )
 
 
 def production_backend_registry(
