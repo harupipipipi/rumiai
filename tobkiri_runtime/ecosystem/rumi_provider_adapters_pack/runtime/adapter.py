@@ -10,8 +10,14 @@ from core_runtime.global_contract_dispatch import (
     GlobalContractInvocationError,
 )
 
-REGISTRY_CONTRACT = "rumi.resource.ai.provider.registry.v1"
-REGISTRY_OPERATION = "rumi_provider_registry_pack.provider-registry-resource"
+REGISTRY_CONTRACT = "tobkiri.resource.ai.provider.registry.v1"
+REGISTRY_GENERATE_OPERATION = (
+    "rumi_provider_registry_pack.provider-registry-resource.generate"
+)
+REGISTRY_STREAM_OPERATION = (
+    "rumi_provider_registry_pack.provider-registry-resource.stream"
+)
+REGISTRY_OPERATION = REGISTRY_GENERATE_OPERATION
 DEFAULT_JSON_HEADERS = {
     "Content-Type": "application/json",
     "Accept": "application/json",
@@ -45,7 +51,7 @@ def _operation(client: GlobalContractClient, *, streaming: bool):
         if name not in allowed:
             raise ValueError(f"unknown provider adapter operation: {name}")
         request = dict(payload)
-        connection = _connection(client, request)
+        connection = _connection(client, request, streaming=streaming)
         credential_handle = _credential_handle(
             request,
             connection,
@@ -94,6 +100,8 @@ def _modality_operation(client: GlobalContractClient, *, kind: str):
 def _connection(
     client: GlobalContractClient,
     request: Mapping[str, Any],
+    *,
+    streaming: bool = False,
 ) -> dict[str, Any]:
     provider_id = str(request.get("provider_id") or "").strip()
     if not provider_id:
@@ -102,7 +110,11 @@ def _connection(
     profile_id = str(request.get("profile_id") or "").strip()
     if profile_id:
         registry_payload["profile_id"] = profile_id
-    result = client.invoke(REGISTRY_CONTRACT, REGISTRY_OPERATION, registry_payload)
+    result = client.invoke(
+        REGISTRY_CONTRACT,
+        REGISTRY_STREAM_OPERATION if streaming else REGISTRY_GENERATE_OPERATION,
+        registry_payload,
+    )
     providers = result.get("providers") if isinstance(result, Mapping) else None
     providers = providers if isinstance(providers, list) else []
     expected = f"provider.{provider_id}"

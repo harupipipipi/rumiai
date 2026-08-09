@@ -35,7 +35,12 @@ def create_cost_operation(client: Any):
     del client
 
     def operation(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-        if name not in {"calculate", "normalize"}:
+        if name not in {
+            "calculate",
+            "normalize",
+            "rumi_ai_usage_pack.ai-usage-cost.generate",
+            "rumi_ai_usage_pack.ai-usage-cost.stream",
+        }:
             raise ValueError(f"unknown usage cost operation: {name}")
         usage = payload.get("usage")
         pricing = payload.get("pricing")
@@ -84,4 +89,3 @@ def _number(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return result if math.isfinite(result) and result >= 0 else None
-

@@ -16,6 +16,7 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
     ProfileResolutionDenied,
     resolve_default_profile,
 )
+from tobkiri_protocol.canonical import canonical_digest
 
 ROOT = Path(__file__).resolve().parent.parent
 BUNDLE_ROOT = ROOT / "ecosystem" / "defaultspack" / "v4"
@@ -58,14 +59,33 @@ def _approved(catalog: BundledCatalog) -> set[str]:
     return {str(manifest["pack"]["artifact_digest"]) for manifest in catalog.packs.values()}
 
 
+def _edge_key(edge: dict[str, object]) -> str:
+    return "|".join(
+        str(edge[field])
+        for field in (
+            "caller_function_id",
+            "target_provider_id",
+            "contract_id",
+            "operation_id",
+        )
+    )
+
+
 def _resolve(catalog: BundledCatalog | None = None):
     selected_catalog = catalog or _catalog()
+    authority_bindings = dict(AUTHORITY_BINDINGS)
+    for edge in selected_catalog.profiles["defaults"]["requested_edges"]:
+        authority_bindings.setdefault(
+            _edge_key(edge),
+            "authority-ref:test."
+            + canonical_digest(_edge_key(edge)).removeprefix("sha256:"),
+        )
     return resolve_default_profile(
         selected_catalog,
         "defaults",
         approved_artifact_digests=_approved(selected_catalog),
         authority_snapshot_digest=SNAPSHOT_DIGEST,
-        authority_bindings=AUTHORITY_BINDINGS,
+        authority_bindings=authority_bindings,
         security_epoch=7,
     )
 
@@ -84,8 +104,18 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
     assert set(catalog.packs) == {
         "defaults-basepack",
         "defaultspack",
+        "rumi_ai_gateway_pack",
+        "rumi_ai_pipeline_pack",
+        "rumi_ai_routing_pack",
+        "rumi_ai_stream_pack",
+        "rumi_ai_tool_bridge_pack",
+        "rumi_ai_usage_pack",
         "rumi_file_inspect_pack",
         "rumi_host_authority_bridge_pack",
+        "rumi_model_catalog_pack",
+        "rumi_model_registry_pack",
+        "rumi_provider_adapters_pack",
+        "rumi_provider_registry_pack",
         "rumi_workspace_mount_pack",
         "runtime.tauri.application.default",
         "dev.tauri.toolchain.default",
@@ -100,8 +130,18 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
     assert resolved.profile["profile_authority_snapshot_digest"] == SNAPSHOT_DIGEST
     assert {item["pack_id"] for item in resolved.profile["packs"]} == {
         "defaultspack",
+        "rumi_ai_gateway_pack",
+        "rumi_ai_pipeline_pack",
+        "rumi_ai_routing_pack",
+        "rumi_ai_stream_pack",
+        "rumi_ai_tool_bridge_pack",
+        "rumi_ai_usage_pack",
         "rumi_file_inspect_pack",
         "rumi_host_authority_bridge_pack",
+        "rumi_model_catalog_pack",
+        "rumi_model_registry_pack",
+        "rumi_provider_adapters_pack",
+        "rumi_provider_registry_pack",
         "rumi_workspace_mount_pack",
         "runtime.tauri.application.default",
         "tobkiri_host_pack_control",
@@ -113,6 +153,29 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
     }
     assert [item["function_principal"]["function_id"] for item in resolved.plan["bindings"]] == [
         "defaultspack.conversation",
+        "rumi_ai_gateway_pack.ai-gateway.generate",
+        "rumi_ai_gateway_pack.ai-gateway.stream",
+        "rumi_ai_pipeline_pack.ai-pipeline.prepare",
+        "rumi_ai_pipeline_pack.ai-pipeline.prepare",
+        "rumi_provider_registry_pack.provider-registry.health",
+        "rumi_provider_registry_pack.provider-registry.health",
+        "rumi_model_catalog_pack.model-catalog.bundled",
+        "rumi_model_catalog_pack.model-catalog.bundled",
+        "rumi_model_registry_pack.model-registry.profile",
+        "rumi_model_registry_pack.model-registry.profile",
+        "rumi_ai_pipeline_pack.ai-pipeline.failover",
+        "rumi_ai_pipeline_pack.ai-pipeline.failover",
+        "rumi_provider_adapters_pack.provider.compatibility.generate",
+        "rumi_provider_adapters_pack.provider.compatibility.stream",
+        "rumi_ai_routing_pack.ai-routing.default",
+        "rumi_ai_routing_pack.ai-routing.default",
+        "rumi_ai_stream_pack.ai-stream.normalize",
+        "rumi_ai_tool_bridge_pack.ai-tool-bridge.normalize",
+        "rumi_ai_tool_bridge_pack.ai-tool-bridge.normalize",
+        "rumi_ai_usage_pack.ai-usage.cost",
+        "rumi_ai_usage_pack.ai-usage.cost",
+        "rumi_provider_registry_pack.provider-registry.resource",
+        "rumi_provider_registry_pack.provider-registry.resource",
         "tobkiri.host.pack-control",
         "tobkiri.host.pack-control",
         "tobkiri.host.pack-control",
@@ -126,6 +189,48 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
         "rumi_file_inspect_pack.file-inspect.service",
     ]
     assert resolved.lock["plan_digest"] == resolved.plan["plan_digest"]
+
+
+def test_unreferenced_caller_cannot_piggyback_on_shared_provider_operation() -> None:
+    catalog = _catalog()
+    profile = copy.deepcopy(catalog.profiles["defaults"])
+    shared_edge = next(
+        edge
+        for edge in profile["requested_edges"]
+        if edge["operation_id"]
+        == "rumi_model_catalog_pack.bundled-model-catalog.generate"
+    )
+    unreferenced_edge = {
+        **shared_edge,
+        "caller_function_id": "unreferenced.ai.consumer",
+    }
+    profile["requested_edges"].append(unreferenced_edge)
+    profiles = dict(catalog.profiles)
+    profiles["defaults"] = profile
+    tampered = replace(catalog, profiles=profiles)
+    authority_bindings = dict(AUTHORITY_BINDINGS)
+    for edge in catalog.profiles["defaults"]["requested_edges"]:
+        authority_bindings.setdefault(
+            _edge_key(edge),
+            "authority-ref:test."
+            + canonical_digest(_edge_key(edge)).removeprefix("sha256:"),
+        )
+    authority_bindings[_edge_key(unreferenced_edge)] = (
+        "authority-ref:test.unreferenced-caller"
+    )
+
+    with pytest.raises(
+        ProfileResolutionDenied,
+        match="caller is not in the selected Profile closure",
+    ):
+        resolve_default_profile(
+            tampered,
+            "defaults",
+            approved_artifact_digests=_approved(tampered),
+            authority_snapshot_digest=SNAPSHOT_DIGEST,
+            authority_bindings=authority_bindings,
+            security_epoch=7,
+        )
 
 
 def test_duplicate_pack_and_legacy_route_authorities_are_absent() -> None:

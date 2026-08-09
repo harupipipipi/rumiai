@@ -39,7 +39,21 @@ def test_resolved_plan_has_one_binding_per_selected_function() -> None:
     assert len(resolved.plan["bindings"]) == len(resolved.profile["requested_edges"])
     assert {item["function_principal"]["function_id"] for item in resolved.plan["bindings"]} == {
         "defaultspack.conversation",
+        "rumi_ai_gateway_pack.ai-gateway.generate",
+        "rumi_ai_gateway_pack.ai-gateway.stream",
+        "rumi_ai_pipeline_pack.ai-pipeline.failover",
+        "rumi_ai_pipeline_pack.ai-pipeline.prepare",
+        "rumi_ai_routing_pack.ai-routing.default",
+        "rumi_ai_stream_pack.ai-stream.normalize",
+        "rumi_ai_tool_bridge_pack.ai-tool-bridge.normalize",
+        "rumi_ai_usage_pack.ai-usage.cost",
         "rumi_file_inspect_pack.file-inspect.service",
+        "rumi_model_catalog_pack.model-catalog.bundled",
+        "rumi_model_registry_pack.model-registry.profile",
+        "rumi_provider_adapters_pack.provider.compatibility.generate",
+        "rumi_provider_adapters_pack.provider.compatibility.stream",
+        "rumi_provider_registry_pack.provider-registry.health",
+        "rumi_provider_registry_pack.provider-registry.resource",
         "tobkiri.host.pack-control",
     }
 

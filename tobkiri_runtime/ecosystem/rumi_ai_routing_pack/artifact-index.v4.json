@@ -1,13 +1,13 @@
 {
-  "artifact_set_digest": "sha256:27c99a7bd9d7ce76eed8a2964cc1bb10bc568543a670459606d51f5f417b7b9f",
+  "artifact_set_digest": "sha256:2f2594474c717110c03e023bd8ac38fd36d5f7046e971e93acfe6f02ec65bbaa",
   "artifacts": [
     {
-      "digest": "sha256:d1653d9ceaa744babc2013562d96fc4210156be17527e340e745290f06f4a1db",
+      "digest": "sha256:274c874afe15bf8f650a3c1e68c01ded644daf5492dcc9afd66c60d085e53634",
       "path": "pack.v4.json",
       "role": "canonical_manifest"
     },
     {
-      "digest": "sha256:fcb1a79c596e01795a277d44a3e9f7ecdf28ed27e78608824ca0cffb7becdefc",
+      "digest": "sha256:9ea74ae27d91b6c516c8edc1897cbe8121123f277fab41ea34ad82189786c999",
       "path": "contracts.v4.json",
       "role": "contract_catalog"
     },
@@ -17,7 +17,7 @@
       "role": "runtime"
     },
     {
-      "digest": "sha256:3cf865a705af10d35702981ec38e8f838320a31530096dedd570df2218d2b220",
+      "digest": "sha256:e0d076c92b7d45707e7ef90b74c922f1461aeec09b1d9eb429f351a0c12a21fa",
       "path": "runtime/router.py",
       "role": "runtime"
     }
@@ -25,8 +25,8 @@
   "index_api_version": "io.tobkiri.pack-artifact-index.v4",
   "integrity_seal": {
     "algorithm": "sha256-canonical-v1",
-    "signed_digest": "sha256:3c626d34d98a8c59361b38250d3caabc27e458f88ca16a2f3e21bbc7d0481661"
+    "signed_digest": "sha256:babd26413de83779e8e5682c1e23ef1e9baf40d4c5f81e67a014939b6871a1f8"
   },
   "pack_id": "rumi_ai_routing_pack",
-  "source_identity": "sha256:f9d047128fbd9ab98f808c518295ceb5d0ef33bb6cf6b9d490645cd1c148d36d"
+  "source_identity": "sha256:e84a4d5e56d3a4e451bd118cb7c12a253e8d4522ce201fb9566b0b12a11b6710"
 }

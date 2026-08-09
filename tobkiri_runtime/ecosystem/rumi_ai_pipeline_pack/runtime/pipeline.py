@@ -30,7 +30,12 @@ def create_prepare_operation(
     del client
 
     def operation(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-        if name not in {"prepare", "normalize"}:
+        if name not in {
+            "prepare",
+            "normalize",
+            "rumi_ai_pipeline_pack.ai-request-prepare.generate",
+            "rumi_ai_pipeline_pack.ai-request-prepare.stream",
+        }:
             raise ValueError(f"unknown AI pipeline operation: {name}")
         decision_time = _number(payload.get("decision_time"))
         if decision_time is None:
@@ -86,7 +91,12 @@ def create_failover_operation(
     del client
 
     def operation(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-        if name not in {"decide", "allow"}:
+        if name not in {
+            "decide",
+            "allow",
+            "rumi_ai_pipeline_pack.ai-failover-decide.generate",
+            "rumi_ai_pipeline_pack.ai-failover-decide.stream",
+        }:
             raise ValueError(f"unknown AI failover operation: {name}")
         error_code = str(payload.get("error_code") or "")
         attempt = max(1, int(payload.get("attempt") or 1))

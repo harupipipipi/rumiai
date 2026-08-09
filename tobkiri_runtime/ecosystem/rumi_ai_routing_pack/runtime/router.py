@@ -10,7 +10,12 @@ def create_route_operation(client: Any):
     del client
 
     def operation(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-        if name not in {"route", "match"}:
+        if name not in {
+            "route",
+            "match",
+            "rumi_ai_routing_pack.ai-route.generate",
+            "rumi_ai_routing_pack.ai-route.stream",
+        }:
             raise ValueError(f"unknown AI routing operation: {name}")
         models = payload.get("models")
         providers = payload.get("execution_providers")
@@ -226,4 +231,3 @@ def _number(value: Any) -> float | None:
         return float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
-

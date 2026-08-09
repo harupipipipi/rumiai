@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:d48282027ddebc59583a940c7495dbbf33583740663ce08758d7ebed626c709e",
+  "catalog_digest": "sha256:e6a4dca6920bdf0d9dc3d0f669bc5630afab566dbfa515874413355695597d2a",
   "pack_id": "rumi_provider_adapters_pack",
-  "source_identity": "sha256:3c3c4131aa77b55af0683074e619319a8e99bcafd448c06fac7949dda8ff80d0",
+  "source_identity": "sha256:020e57371acae5bed0bf24e4ccffdc8674e46aa97c80a010f47451e0c4273853",
   "variants": [
     {
       "architecture": "any",
@@ -10,7 +10,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_provider_adapters_pack.provider.compatibility.embedding",
-      "implementation_digest": "sha256:310ba97abc2c5f4e16f9f84dbbfda45787b2df5cf7353e715df514c93fc072d6",
+      "implementation_digest": "sha256:221d2a1c56f4eb6e2333fed7e52ac181759ce608a7ed266e438b4e48d9838eb9",
       "implementation_path": "runtime/adapter.py",
       "materialization_mode": "on_demand",
       "operations": [
@@ -44,7 +44,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_provider_adapters_pack.provider.compatibility.generate",
-      "implementation_digest": "sha256:310ba97abc2c5f4e16f9f84dbbfda45787b2df5cf7353e715df514c93fc072d6",
+      "implementation_digest": "sha256:221d2a1c56f4eb6e2333fed7e52ac181759ce608a7ed266e438b4e48d9838eb9",
       "implementation_path": "runtime/adapter.py",
       "materialization_mode": "on_demand",
       "operations": [
@@ -78,7 +78,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_provider_adapters_pack.provider.compatibility.image",
-      "implementation_digest": "sha256:310ba97abc2c5f4e16f9f84dbbfda45787b2df5cf7353e715df514c93fc072d6",
+      "implementation_digest": "sha256:221d2a1c56f4eb6e2333fed7e52ac181759ce608a7ed266e438b4e48d9838eb9",
       "implementation_path": "runtime/adapter.py",
       "materialization_mode": "on_demand",
       "operations": [
@@ -112,7 +112,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_provider_adapters_pack.provider.compatibility.stream",
-      "implementation_digest": "sha256:310ba97abc2c5f4e16f9f84dbbfda45787b2df5cf7353e715df514c93fc072d6",
+      "implementation_digest": "sha256:221d2a1c56f4eb6e2333fed7e52ac181759ce608a7ed266e438b4e48d9838eb9",
       "implementation_path": "runtime/adapter.py",
       "materialization_mode": "on_demand",
       "operations": [

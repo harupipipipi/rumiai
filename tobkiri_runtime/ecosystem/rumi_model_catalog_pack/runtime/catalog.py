@@ -31,7 +31,13 @@ def create_model_catalog_operation(client: Any):
     del client
 
     def operation(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-        if name not in {"list", "get", "providers"}:
+        if name not in {
+            "list",
+            "get",
+            "providers",
+            "rumi_model_catalog_pack.bundled-model-catalog.generate",
+            "rumi_model_catalog_pack.bundled-model-catalog.stream",
+        }:
             raise ValueError(f"unknown model catalog operation: {name}")
         providers, models = _load_catalog()
         provider_id = str(payload.get("provider_id") or "").strip()

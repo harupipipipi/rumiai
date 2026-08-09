@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:83673af566b0edc650e2025d3bb1f5b93c37a59cf90221dc4abb1d9c82059c1e",
+  "catalog_digest": "sha256:b540c87fd59cbb72ef389a95b39371c8f15704c88e7c4fa3c6d0529e0b91ae7a",
   "pack_id": "rumi_ai_stream_pack",
-  "source_identity": "sha256:541e57fa65e186ed203fbbbddf554a7672d3a98a2a4bc135cab99e8d95e309ff",
+  "source_identity": "sha256:4e9d5f841be5dbac042b2e1f93be49b1477c17eb1001882181cd7c788e86fa65",
   "variants": [
     {
       "architecture": "any",
@@ -10,7 +10,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_ai_stream_pack.ai-stream.normalize",
-      "implementation_digest": "sha256:f46e5681c2974a9e7e9c37a2479a701742b5a6cada61defc507fe4766180d333",
+      "implementation_digest": "sha256:f79be5b06a11067b796db983762ad268ffcffa774ce34024e3a01ce1457deda0",
       "implementation_path": "runtime/normalizer.py",
       "materialization_mode": "on_demand",
       "operations": [

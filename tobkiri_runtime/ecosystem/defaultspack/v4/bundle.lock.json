@@ -9,7 +9,7 @@
     {
       "path": "packs/defaultspack.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:7464ee5bfa6cc68e6b9bfa40d98acfba284976980b2e073f9cd12e3c7aefd5f6"
+      "digest": "sha256:7a5620c8b54904f68abecd8ab8156c17a19779ff2b13c07e11acd290e56ec560"
     },
     {
       "path": "packs/dev.tauri.toolchain.default.pack.v4.json",
@@ -30,6 +30,56 @@
       "path": "packs/rumi-workspace-mount.pack.v4.json",
       "kind": "pack",
       "digest": "sha256:82d4a833716dd809894612b0172d4aa73cc25f0bb4e690aa0813de87189caf51"
+    },
+    {
+      "path": "packs/rumi_ai_gateway_pack.pack.v4.json",
+      "kind": "pack",
+      "digest": "sha256:f32154fce60df91869f98c5067f0136f5d8e00bef73e8bc7cef6021af6838407"
+    },
+    {
+      "path": "packs/rumi_ai_pipeline_pack.pack.v4.json",
+      "kind": "pack",
+      "digest": "sha256:1ebd3a5bbcdc462a9aa9875d69b83029232b1cabd84c7f50ca2dd4bee66ec8fa"
+    },
+    {
+      "path": "packs/rumi_ai_routing_pack.pack.v4.json",
+      "kind": "pack",
+      "digest": "sha256:274c874afe15bf8f650a3c1e68c01ded644daf5492dcc9afd66c60d085e53634"
+    },
+    {
+      "path": "packs/rumi_ai_stream_pack.pack.v4.json",
+      "kind": "pack",
+      "digest": "sha256:ebe1c89a5f06cb567ed725a0e12d43d6846a3ce769ddd51d0b0bef508c4d36a0"
+    },
+    {
+      "path": "packs/rumi_ai_tool_bridge_pack.pack.v4.json",
+      "kind": "pack",
+      "digest": "sha256:23eed1a81a0974419b992c31659ca422f46c497a6a95acb39db71d59d3840b06"
+    },
+    {
+      "path": "packs/rumi_ai_usage_pack.pack.v4.json",
+      "kind": "pack",
+      "digest": "sha256:185326dae6d1105e3a2a1ea61bde85e1bfbe13e4f3f4ff0e5f7b3f50fb8deaa5"
+    },
+    {
+      "path": "packs/rumi_model_catalog_pack.pack.v4.json",
+      "kind": "pack",
+      "digest": "sha256:c987a194a7d49f0e70428cc3128dbf6c602f5b617e88f5af1b0c3309b52a25d8"
+    },
+    {
+      "path": "packs/rumi_model_registry_pack.pack.v4.json",
+      "kind": "pack",
+      "digest": "sha256:66aec234e86b1041838510fb54419db5bdeca61309ee32e9cb8e4f58e3b3ce65"
+    },
+    {
+      "path": "packs/rumi_provider_adapters_pack.pack.v4.json",
+      "kind": "pack",
+      "digest": "sha256:4dc9b27c50db890157143a7d1900098ec581c08a81bce8b8bb44e87133cf97c7"
+    },
+    {
+      "path": "packs/rumi_provider_registry_pack.pack.v4.json",
+      "kind": "pack",
+      "digest": "sha256:4e8ad15db1e223478b8faa4e68a5ced0304916d81cda4dd1babaa41877afaa87"
     },
     {
       "path": "packs/runtime.tauri.application.default.pack.v4.json",
@@ -69,7 +119,7 @@
     {
       "path": "defaults.profile.v4.json",
       "kind": "profile",
-      "digest": "sha256:20a760b1b8759e112c5258c13c978c00bf48dd0de5bfb711abc53e36dfe8d29a"
+      "digest": "sha256:3204578dc37d0c916fc7e4c91ed1de54099c022bca6915b8ede20e2160903d4a"
     }
   ]
 }

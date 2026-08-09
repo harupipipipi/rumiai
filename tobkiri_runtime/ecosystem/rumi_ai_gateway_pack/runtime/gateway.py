@@ -14,17 +14,62 @@ from core_runtime.global_contract_dispatch import (
     GlobalContractUnavailable,
 )
 
-CATALOG_CONTRACT = "rumi.resource.ai.model.catalog.v1"
-GENERATE_PROVIDER_CONTRACT = "rumi.service.ai.provider.generate.v1"
-STREAM_PROVIDER_CONTRACT = "rumi.service.ai.provider.stream.v1"
-HEALTH_CONTRACT = "rumi.resource.ai.provider.health.v1"
-USAGE_CONTRACT = "rumi.service.ai.usage.cost.v1"
-ROUTING_CONTRACT = "rumi.service.ai.route.v1"
-STREAM_NORMALIZE_CONTRACT = "rumi.service.ai.stream.normalize.v1"
-TOOL_BRIDGE_CONTRACT = "rumi.service.ai.tool_intent.normalize.v1"
-REQUEST_PREPARE_CONTRACT = "rumi.service.ai.request.prepare.v1"
-FAILOVER_CONTRACT = "rumi.service.ai.failover.decide.v1"
-MODEL_PROFILE_CONTRACT = "rumi.resource.ai.model.profile.v1"
+CATALOG_CONTRACT = "tobkiri.resource.ai.model.catalog.v1"
+CATALOG_GENERATE_OPERATION = (
+    "rumi_model_catalog_pack.bundled-model-catalog.generate"
+)
+CATALOG_STREAM_OPERATION = "rumi_model_catalog_pack.bundled-model-catalog.stream"
+CATALOG_OPERATION = CATALOG_GENERATE_OPERATION
+GENERATE_PROVIDER_CONTRACT = "tobkiri.service.ai.provider.generate.v1"
+GENERATE_PROVIDER_OPERATION = "rumi_provider_adapters_pack.provider-generate"
+STREAM_PROVIDER_CONTRACT = "tobkiri.service.ai.provider.stream.v1"
+STREAM_PROVIDER_OPERATION = "rumi_provider_adapters_pack.provider-stream"
+HEALTH_CONTRACT = "tobkiri.resource.ai.provider.health.v1"
+HEALTH_GENERATE_OPERATION = (
+    "rumi_provider_registry_pack.provider-registry-health.generate"
+)
+HEALTH_STREAM_OPERATION = (
+    "rumi_provider_registry_pack.provider-registry-health.stream"
+)
+HEALTH_OPERATION = HEALTH_GENERATE_OPERATION
+USAGE_CONTRACT = "tobkiri.service.ai.usage.cost.v1"
+USAGE_GENERATE_OPERATION = "rumi_ai_usage_pack.ai-usage-cost.generate"
+USAGE_STREAM_OPERATION = "rumi_ai_usage_pack.ai-usage-cost.stream"
+USAGE_OPERATION = USAGE_GENERATE_OPERATION
+ROUTING_CONTRACT = "tobkiri.service.ai.route.v1"
+ROUTING_GENERATE_OPERATION = "rumi_ai_routing_pack.ai-route.generate"
+ROUTING_STREAM_OPERATION = "rumi_ai_routing_pack.ai-route.stream"
+ROUTING_OPERATION = ROUTING_GENERATE_OPERATION
+STREAM_NORMALIZE_CONTRACT = "tobkiri.service.ai.stream.normalize.v1"
+STREAM_NORMALIZE_OPERATION = "rumi_ai_stream_pack.ai-stream-normalize"
+TOOL_BRIDGE_CONTRACT = "tobkiri.service.ai.tool_intent.normalize.v1"
+TOOL_BRIDGE_GENERATE_OPERATION = (
+    "rumi_ai_tool_bridge_pack.ai-tool-intent-normalize.generate"
+)
+TOOL_BRIDGE_STREAM_OPERATION = (
+    "rumi_ai_tool_bridge_pack.ai-tool-intent-normalize.stream"
+)
+TOOL_BRIDGE_OPERATION = TOOL_BRIDGE_GENERATE_OPERATION
+REQUEST_PREPARE_CONTRACT = "tobkiri.service.ai.request.prepare.v1"
+REQUEST_PREPARE_GENERATE_OPERATION = (
+    "rumi_ai_pipeline_pack.ai-request-prepare.generate"
+)
+REQUEST_PREPARE_STREAM_OPERATION = (
+    "rumi_ai_pipeline_pack.ai-request-prepare.stream"
+)
+REQUEST_PREPARE_OPERATION = REQUEST_PREPARE_GENERATE_OPERATION
+FAILOVER_CONTRACT = "tobkiri.service.ai.failover.decide.v1"
+FAILOVER_GENERATE_OPERATION = "rumi_ai_pipeline_pack.ai-failover-decide.generate"
+FAILOVER_STREAM_OPERATION = "rumi_ai_pipeline_pack.ai-failover-decide.stream"
+FAILOVER_OPERATION = FAILOVER_GENERATE_OPERATION
+MODEL_PROFILE_CONTRACT = "tobkiri.resource.ai.model.profile.v1"
+MODEL_PROFILE_GENERATE_OPERATION = (
+    "rumi_model_registry_pack.model-profile-resource.generate"
+)
+MODEL_PROFILE_STREAM_OPERATION = (
+    "rumi_model_registry_pack.model-profile-resource.stream"
+)
+MODEL_PROFILE_OPERATION = MODEL_PROFILE_GENERATE_OPERATION
 
 _DIAGNOSTIC_LIMIT = 256
 _DIAGNOSTICS: list[dict[str, Any]] = []
@@ -73,7 +118,12 @@ def create_generate_operation(client: GlobalContractClient):
     """Create the global non-streaming gateway operation."""
 
     def operation(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-        if name not in {"generate", "invoke", "resolve"}:
+        if name not in {
+            "generate",
+            "invoke",
+            "resolve",
+            "rumi_ai_gateway_pack.ai-gateway.generate",
+        }:
             raise ValueError(f"unknown generate operation: {name}")
         return _invoke(
             client,
@@ -88,7 +138,11 @@ def create_stream_operation(client: GlobalContractClient):
     """Create the global streaming gateway operation."""
 
     def operation(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-        if name not in {"stream", "invoke"}:
+        if name not in {
+            "stream",
+            "invoke",
+            "rumi_ai_gateway_pack.ai-gateway.stream",
+        }:
             raise ValueError(f"unknown stream operation: {name}")
         return _invoke(client, payload, streaming=True)
 
@@ -121,7 +175,11 @@ def _invoke(
     resolve_only = bool(payload.get("resolve_only"))
     prepared = client.invoke(
         REQUEST_PREPARE_CONTRACT,
-        "prepare",
+        (
+            REQUEST_PREPARE_STREAM_OPERATION
+            if streaming
+            else REQUEST_PREPARE_GENERATE_OPERATION
+        ),
         {
             **dict(payload),
             "request_id": str(payload.get("request_id") or uuid.uuid4()),
@@ -133,7 +191,7 @@ def _invoke(
             "invalid_response", "AI pipeline returned an invalid request"
         )
     request = dict(prepared)
-    _resolve_model_reference(client, request)
+    _resolve_model_reference(client, request, streaming=streaming)
     request_id = str(request["request_id"])
     deadline = float(request["deadline"])
     requirement = _requirement(request)
@@ -149,12 +207,13 @@ def _invoke(
             "missing_provider",
             f"no selected provider for {provider_contract}",
         )
-    health = _health(client)
+    health = _health(client, streaming=streaming)
     candidates, excluded = _catalog_candidates(
         client,
         provider_metadata,
         requirement,
         health,
+        streaming=streaming,
         explicit_pricing=request.get("_resolved_model_pricing"),
     )
     exact_binding = bool(
@@ -250,14 +309,14 @@ def _invoke(
         try:
             value = client.invoke(
                 provider_contract,
-                "stream" if streaming else "generate",
+                STREAM_PROVIDER_OPERATION if streaming else GENERATE_PROVIDER_OPERATION,
                 invocation,
                 provider_instance_id=attempt_candidate.provider_instance_id,
             )
             if streaming:
                 normalized = client.invoke(
                     STREAM_NORMALIZE_CONTRACT,
-                    "normalize",
+                    STREAM_NORMALIZE_OPERATION,
                     {
                         "request_id": request_id,
                         "provider_attempt": attempt_number,
@@ -288,12 +347,14 @@ def _invoke(
                 client,
                 result["tool_intents"],
                 request_id,
+                streaming=streaming,
             )
             result["usage_cost"] = _usage_cost(
                 client,
                 result["usage"],
                 attempt_candidate,
                 result["usage_provenance"],
+                streaming=streaming,
             )
             result["attempts"] = attempts
             return result
@@ -314,7 +375,7 @@ def _invoke(
         )
         failover = client.invoke(
             FAILOVER_CONTRACT,
-            "decide",
+            FAILOVER_STREAM_OPERATION if streaming else FAILOVER_GENERATE_OPERATION,
             {
                 "allow_failover": request.get("allow_failover"),
                 "idempotency_key": request.get("idempotency_key"),
@@ -377,6 +438,8 @@ def _requirement(request: Mapping[str, Any]) -> RouteRequirement:
 def _resolve_model_reference(
     client: GlobalContractClient,
     request: dict[str, Any],
+    *,
+    streaming: bool,
 ) -> None:
     explicit = str(request.get("model_profile_id") or "").strip()
     legacy = str(request.get("model_reference") or "").strip()
@@ -386,7 +449,11 @@ def _resolve_model_reference(
     try:
         resolved = client.invoke(
             MODEL_PROFILE_CONTRACT,
-            "resolve",
+            (
+                MODEL_PROFILE_STREAM_OPERATION
+                if streaming
+                else MODEL_PROFILE_GENERATE_OPERATION
+            ),
             {"identifier": identifier},
         )
     except GlobalContractInvocationError:
@@ -464,14 +531,18 @@ def _merge_requirements(
     return result
 
 
-def _health(client: GlobalContractClient) -> dict[str, dict[str, Any]]:
+def _health(
+    client: GlobalContractClient,
+    *,
+    streaming: bool,
+) -> dict[str, dict[str, Any]]:
     values: dict[str, dict[str, Any]] = {}
     for provider in client.providers(HEALTH_CONTRACT):
         provider_id = str(provider.get("provider_instance_id") or "")
         try:
             result = client.invoke(
                 HEALTH_CONTRACT,
-                "get",
+                HEALTH_STREAM_OPERATION if streaming else HEALTH_GENERATE_OPERATION,
                 {},
                 provider_instance_id=provider_id,
             )
@@ -490,6 +561,7 @@ def _catalog_candidates(
     requirement: RouteRequirement,
     health: Mapping[str, Mapping[str, Any]],
     *,
+    streaming: bool,
     explicit_pricing: Any = None,
 ) -> tuple[list[Candidate], list[dict[str, str]]]:
     catalog_models: list[dict[str, Any]] = []
@@ -499,7 +571,7 @@ def _catalog_candidates(
         )
         result = client.invoke(
             CATALOG_CONTRACT,
-            "list",
+            CATALOG_STREAM_OPERATION if streaming else CATALOG_GENERATE_OPERATION,
             {},
             provider_instance_id=catalog_provider_id,
         )
@@ -517,7 +589,7 @@ def _catalog_candidates(
     )
     routed = client.invoke(
         ROUTING_CONTRACT,
-        "route",
+        ROUTING_STREAM_OPERATION if streaming else ROUTING_GENERATE_OPERATION,
         {
             "models": catalog_models,
             "execution_providers": list(providers.values()),
@@ -697,6 +769,7 @@ def _attach_stream_usage_cost(
                 usage,
                 candidate,
                 "provider_reported",
+                streaming=True,
             )
 
 
@@ -710,7 +783,12 @@ def _attach_stream_tool_intents(
         if event.get("type") == "tool_intent_delta" and isinstance(
             intent, Mapping
         ):
-            normalized = _tool_intents(client, [intent], request_id)
+            normalized = _tool_intents(
+                client,
+                [intent],
+                request_id,
+                streaming=True,
+            )
             event["tool_intent"] = normalized[0]
 
 
@@ -718,10 +796,12 @@ def _tool_intents(
     client: GlobalContractClient,
     intents: list[Any],
     request_id: str,
+    *,
+    streaming: bool,
 ) -> list[dict[str, Any]]:
     result = client.invoke(
         TOOL_BRIDGE_CONTRACT,
-        "normalize",
+        TOOL_BRIDGE_STREAM_OPERATION if streaming else TOOL_BRIDGE_GENERATE_OPERATION,
         {"request_id": request_id, "intents": intents},
     )
     values = result.get("intents") if isinstance(result, Mapping) else None
@@ -737,10 +817,12 @@ def _usage_cost(
     usage: Mapping[str, Any],
     candidate: Candidate,
     provenance: str,
+    *,
+    streaming: bool,
 ) -> dict[str, Any]:
     return client.invoke(
         USAGE_CONTRACT,
-        "calculate",
+        USAGE_STREAM_OPERATION if streaming else USAGE_GENERATE_OPERATION,
         {
             "usage": dict(usage),
             "usage_provenance": provenance,

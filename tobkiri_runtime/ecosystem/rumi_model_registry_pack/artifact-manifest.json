@@ -10,7 +10,7 @@
     },
     {
       "path": "runtime/service.py",
-      "sha256": "sha256:b0634153bbff49a3bb069946548febc6bf59c0c314e501a9ff301cf5eb1c0381"
+      "sha256": "sha256:cf5f52f64cdf4d62d49d6137c6fd6f09b7e87d124753a06e0ea99b81d49b1bf2"
     },
     {
       "path": "runtime/process.py",

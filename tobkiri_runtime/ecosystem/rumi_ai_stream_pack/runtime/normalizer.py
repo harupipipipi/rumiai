@@ -22,7 +22,11 @@ def create_stream_normalize_operation(client: Any):
     del client
 
     def operation(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-        if name not in {"normalize", "validate"}:
+        if name not in {
+            "normalize",
+            "validate",
+            "rumi_ai_stream_pack.ai-stream-normalize",
+        }:
             raise ValueError(f"unknown stream normalization operation: {name}")
         request_id = str(payload.get("request_id") or "").strip()
         provider_attempt = int(payload.get("provider_attempt") or 1)
@@ -74,4 +78,3 @@ def create_stream_normalize_operation(client: Any):
         return {"events": normalized}
 
     return operation
-

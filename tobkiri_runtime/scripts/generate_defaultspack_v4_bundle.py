@@ -34,6 +34,36 @@ CANONICAL_PACK_FILES = {
     "tobkiri-host-pack-control.pack.v4.json": (
         ROOT / "ecosystem" / "tobkiri_host_pack_control" / "pack.v4.json"
     ),
+    "rumi_ai_gateway_pack.pack.v4.json": (
+        ROOT / "ecosystem" / "rumi_ai_gateway_pack" / "pack.v4.json"
+    ),
+    "rumi_model_catalog_pack.pack.v4.json": (
+        ROOT / "ecosystem" / "rumi_model_catalog_pack" / "pack.v4.json"
+    ),
+    "rumi_model_registry_pack.pack.v4.json": (
+        ROOT / "ecosystem" / "rumi_model_registry_pack" / "pack.v4.json"
+    ),
+    "rumi_ai_pipeline_pack.pack.v4.json": (
+        ROOT / "ecosystem" / "rumi_ai_pipeline_pack" / "pack.v4.json"
+    ),
+    "rumi_provider_adapters_pack.pack.v4.json": (
+        ROOT / "ecosystem" / "rumi_provider_adapters_pack" / "pack.v4.json"
+    ),
+    "rumi_ai_routing_pack.pack.v4.json": (
+        ROOT / "ecosystem" / "rumi_ai_routing_pack" / "pack.v4.json"
+    ),
+    "rumi_ai_stream_pack.pack.v4.json": (
+        ROOT / "ecosystem" / "rumi_ai_stream_pack" / "pack.v4.json"
+    ),
+    "rumi_ai_tool_bridge_pack.pack.v4.json": (
+        ROOT / "ecosystem" / "rumi_ai_tool_bridge_pack" / "pack.v4.json"
+    ),
+    "rumi_ai_usage_pack.pack.v4.json": (
+        ROOT / "ecosystem" / "rumi_ai_usage_pack" / "pack.v4.json"
+    ),
+    "rumi_provider_registry_pack.pack.v4.json": (
+        ROOT / "ecosystem" / "rumi_provider_registry_pack" / "pack.v4.json"
+    ),
 }
 TAURI_ROLE_PACKS = {
     "runtime.tauri.application.default.pack.v4.json": {

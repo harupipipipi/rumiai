@@ -370,6 +370,19 @@ def resolve_default_profile(
             f"found {len(foundational)}"
         )
 
+    available_function_ids = {
+        function["id"]
+        for manifest in selected
+        for function in manifest["functions"]
+    }
+    for edge in source["requested_edges"]:
+        caller_function_id = edge["caller_function_id"]
+        if caller_function_id not in available_function_ids:
+            raise ProfileResolutionDenied(
+                "requested edge caller is not in the selected Profile closure: "
+                f"{caller_function_id}"
+            )
+
     bindings: list[dict[str, Any]] = []
     resolved_edges: list[dict[str, Any]] = []
     references: list[str] = []
