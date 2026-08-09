@@ -6,7 +6,7 @@ import {JSDOM} from 'jsdom';
 import {MemoryRouter, Route, Routes} from 'react-router';
 
 import {type Pack, useAppStore} from '@/src/store';
-import type {ApiDynamicFrontendCatalog} from '@/src/lib/apiTypes';
+import type {ApiDynamicFrontendCatalog, ApiPackVMDoctor} from '@/src/lib/apiTypes';
 import {PackDetail} from './PackDetail';
 
 const operation = {
@@ -61,6 +61,15 @@ const catalog: ApiDynamicFrontendCatalog = {
   catalog_hash: 'sha256:catalog',
 };
 
+const healthyDoctor: ApiPackVMDoctor = {
+  ready: true,
+  backend_id: 'tobkiri.python-pack-v4',
+  platform: 'macos',
+  instance: 'tobkiri-packvm-v4',
+  reason: null,
+  attestation_digest: `sha256:${'a'.repeat(64)}`,
+};
+
 function createSurface(): {dom: JSDOM; container: HTMLElement; root: Root} {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
     url: `http://localhost/packs/${pack.id}`,
@@ -97,6 +106,9 @@ function configureStore(currentPack: Pack, currentCatalog = catalog): void {
     frontendCatalog: currentCatalog,
     frontendCatalogLoading: false,
     frontendCatalogError: null,
+    packVmDoctor: healthyDoctor,
+    packVmDoctorLoading: false,
+    refreshPackVMDoctor: async () => healthyDoctor,
     packOperationPending: {},
     loadPacks: async () => {},
     loadFrontendCatalog: async () => {},

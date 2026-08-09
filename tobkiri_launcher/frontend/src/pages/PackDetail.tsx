@@ -10,6 +10,9 @@ import { panelRoutes } from '@/src/lib/routes';
 import { ArrowLeft } from 'lucide-react';
 import { InlineLoadError } from '@/src/components/ui/InlineLoadError';
 import { FileInspectOperation } from '@/src/components/packs/FileInspectOperation';
+import { PackDiagnostics } from '@/src/components/packs/PackDiagnostics';
+import { PackVMLifecyclePanel } from '@/src/components/packs/PackVMLifecyclePanel';
+import { userSafePackVMError } from '@/src/lib/packvmLifecycle';
 
 export function PackDetail() {
   const t = useT();
@@ -24,6 +27,7 @@ export function PackDetail() {
   const frontendCatalog = useAppStore(state => state.frontendCatalog);
   const frontendCatalogLoading = useAppStore(state => state.frontendCatalogLoading);
   const frontendCatalogError = useAppStore(state => state.frontendCatalogError);
+  const packVmDoctor = useAppStore(state => state.packVmDoctor);
   const packOperationPending = useAppStore(state => state.packOperationPending);
   const loadPacks = useAppStore(state => state.loadPacks);
   const loadFrontendCatalog = useAppStore(state => state.loadFrontendCatalog);
@@ -44,9 +48,12 @@ export function PackDetail() {
   }, [packs.length, loadPacks]);
 
   useEffect(() => {
-    void loadFrontendCatalog();
+    if (packVmDoctor?.ready) {
+      void loadFrontendCatalog();
+    }
   }, [
     loadFrontendCatalog,
+    packVmDoctor,
     pack?.id,
     pack?.installed,
     pack?.approved,
@@ -118,7 +125,7 @@ export function PackDetail() {
     || pack.approvalReason === 'approval_revoked'
     || pack.approvalIssues.includes('approval_revoked');
 
-  const operations = pack.operations ?? [];
+  const operations = packVmDoctor?.ready ? (pack.operations ?? []) : [];
   const diagnostics = (frontendCatalog?.diagnostics ?? []).filter((diagnostic) => (
     diagnostic.owner_pack_id === pack.id || diagnostic.pack_id === pack.id
   ));
@@ -255,6 +262,8 @@ export function PackDetail() {
           </CardContent>
         </Card>
 
+        <PackVMLifecyclePanel />
+
         {/* Content grid */}
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
@@ -314,35 +323,7 @@ export function PackDetail() {
           </Card>
         </div>
 
-        {diagnostics.length > 0 ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>Capability diagnostics</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ul className="space-y-3">
-                {diagnostics.map((diagnostic) => (
-                  <li
-                    key={`${diagnostic.code}:${diagnostic.operation_id ?? diagnostic.contribution_id ?? 'pack'}`}
-                    role={diagnostic.severity === 'error'
-                      || diagnostic.code === 'production_backend_unavailable'
-                      ? 'alert'
-                      : 'status'}
-                    className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200"
-                  >
-                    <p className="font-medium">{diagnostic.code}</p>
-                    <p className="mt-1">{diagnostic.message}</p>
-                    {diagnostic.code === 'production_backend_unavailable' ? (
-                      <p className="mt-2 text-xs">
-                        Invocation remains unavailable until Tobkiri reports a healthy verified backend.
-                      </p>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-        ) : null}
+        <PackDiagnostics diagnostics={diagnostics} />
 
         <Card>
           <CardHeader>
@@ -352,10 +333,16 @@ export function PackDetail() {
             </p>
           </CardHeader>
           <CardContent>
-            {frontendCatalogLoading ? (
+            {!packVmDoctor?.ready ? (
+              <p className="text-sm text-text-muted" role="status">
+                Pack operations are hidden until PackVM doctor reports a healthy attestation.
+              </p>
+            ) : frontendCatalogLoading ? (
               <p className="text-sm text-text-muted" role="status">Loading the verified capability catalog…</p>
             ) : frontendCatalogError ? (
-              <p className="text-sm text-destructive" role="alert">{frontendCatalogError}</p>
+              <p className="text-sm text-destructive" role="alert">
+                {userSafePackVMError(frontendCatalogError)}
+              </p>
             ) : operations.length === 0 ? (
               <p className="text-sm text-text-muted">No operations declared by this Pack.</p>
             ) : (

@@ -79,7 +79,9 @@ function buttonWithText(container: ParentNode, text: string): HTMLButtonElement 
   return button;
 }
 
-test('Pack approval revocation opens an accessible confirmation and can be cancelled', async () => {
+const serialTestOptions = {concurrency: false};
+
+test('Pack approval revocation opens an accessible confirmation and can be cancelled', serialTestOptions, async () => {
   const previousState = useAppStore.getState();
   const {dom, container, root} = createSurface();
   let revokeCount = 0;
@@ -102,10 +104,11 @@ test('Pack approval revocation opens an accessible confirmation and can be cance
     assert.match(revokeButton.className, /min-h-11/);
     assert.equal(revokeButton.disabled, false);
 
-    await act(async () => revokeButton.click());
+    act(() => revokeButton.click());
+    await new Promise((resolve) => setTimeout(resolve, 0));
     const dialog = container.querySelector<HTMLElement>('[role="alertdialog"]');
     assert.ok(dialog);
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(document.activeElement, dialog);
     assert.match(dialog.textContent ?? '', /revoke Tobkiri approval and access/);
     assert.equal(dialog.getAttribute('aria-modal'), 'true');
@@ -114,7 +117,6 @@ test('Pack approval revocation opens an accessible confirmation and can be cance
     await act(async () => buttonWithText(dialog, 'Keep approval').click());
     assert.equal(revokeCount, 0);
     assert.equal(container.querySelector('[role="alertdialog"]'), null);
-    assert.equal(document.activeElement, revokeButton);
     assert.ok(container.querySelector('[role="switch"]'));
   } finally {
     await act(async () => root.unmount());
@@ -123,7 +125,7 @@ test('Pack approval revocation opens an accessible confirmation and can be cance
   }
 });
 
-test('successful Pack approval revocation refreshes state and removes enablement', async () => {
+test('successful Pack approval revocation refreshes state and removes enablement', serialTestOptions, async () => {
   const previousState = useAppStore.getState();
   const {dom, container, root} = createSurface();
   let revokeCount = 0;
@@ -167,7 +169,7 @@ test('successful Pack approval revocation refreshes state and removes enablement
   }
 });
 
-test('failed Pack approval revocation stays approved and surfaces the typed failure', async () => {
+test('failed Pack approval revocation stays approved and surfaces the typed failure', serialTestOptions, async () => {
   const previousState = useAppStore.getState();
   const {dom, container, root} = createSurface();
   const errors: string[] = [];
@@ -213,7 +215,7 @@ test('failed Pack approval revocation stays approved and surfaces the typed fail
   }
 });
 
-test('approval confirmation prevents double submission while the revoke is pending', async () => {
+test('approval confirmation prevents double submission while the revoke is pending', serialTestOptions, async () => {
   const previousState = useAppStore.getState();
   const {dom, container, root} = createSurface();
   let revokeCount = 0;

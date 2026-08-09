@@ -2,6 +2,7 @@ import {create} from 'zustand';
 import {
   approvePack as apiApprovePack,
   checkHealth,
+  fetchPackVMDoctor as apiFetchPackVMDoctor,
   disablePack as apiDisablePack,
   enablePack as apiEnablePack,
   fetchFrontendCatalog,
@@ -10,7 +11,11 @@ import {
   invokeFrontendCapability,
   revokePackApproval as apiRevokePackApproval,
 } from './lib/api';
-import type {ApiDynamicFrontendCatalog, ApiSupervisorDashboard} from './lib/apiTypes';
+import type {
+  ApiDynamicFrontendCatalog,
+  ApiPackVMDoctor,
+  ApiSupervisorDashboard,
+} from './lib/apiTypes';
 import {transformPacks} from './lib/transforms';
 import {
   COLOR_MODE_STORAGE_KEY,
@@ -167,8 +172,13 @@ interface AppState {
   frontendCatalogLoading: boolean;
   frontendCatalogError: string | null;
   packOperationPending: Record<string, boolean>;
+  packVmDoctor: ApiPackVMDoctor | null;
+  packVmDoctorLoading: boolean;
+  packVmError: string | null;
   loadPacks: () => Promise<void>;
   loadFrontendCatalog: () => Promise<void>;
+  refreshPackVMDoctor: () => Promise<ApiPackVMDoctor | null>;
+  setPackVMDoctor: (doctor: ApiPackVMDoctor | null) => void;
   invokePackOperation: (
     packId: string,
     operationId: string,
@@ -191,6 +201,7 @@ const defaultProfile: Profile = {
 
 let packsLoadPromise: Promise<void> | null = null;
 let frontendCatalogLoadPromise: Promise<void> | null = null;
+let packVmDoctorLoadPromise: Promise<ApiPackVMDoctor | null> | null = null;
 const packMutationVersions = new Map<string, number>();
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -283,6 +294,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   frontendCatalogLoading: false,
   frontendCatalogError: null,
   packOperationPending: {},
+  packVmDoctor: null,
+  packVmDoctorLoading: false,
+  packVmError: null,
 
   loadPacks: () => {
     if (packsLoadPromise) return packsLoadPromise;
@@ -332,6 +346,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   loadFrontendCatalog: () => {
+    if (!get().packVmDoctor?.ready) {
+      set({
+        frontendCatalog: null,
+        frontendCatalogError: 'PackVM catalog access is blocked until healthy attestation.',
+      });
+      return Promise.resolve();
+    }
     if (frontendCatalogLoadPromise) return frontendCatalogLoadPromise;
     set({
       frontendCatalogLoading: true,
@@ -341,6 +362,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     frontendCatalogLoadPromise = (async () => {
       try {
         const catalog = await fetchFrontendCatalog();
+        if (!get().packVmDoctor?.ready) {
+          set({
+            frontendCatalog: null,
+            frontendCatalogError: 'PackVM catalog access is blocked until healthy attestation.',
+          });
+          return;
+        }
         if (
           !catalog.profile_id
           || !catalog.plan_hash
@@ -363,9 +391,67 @@ export const useAppStore = create<AppState>((set, get) => ({
     return frontendCatalogLoadPromise;
   },
 
+  setPackVMDoctor: (doctor) => {
+    set({
+      packVmDoctor: doctor,
+      ...(doctor?.ready
+        ? {packVmError: null}
+        : {
+          frontendCatalog: null,
+          frontendCatalogError: doctor?.reason
+            || 'PackVM catalog access is blocked until healthy attestation.',
+        }),
+    });
+  },
+
+  refreshPackVMDoctor: () => {
+    if (packVmDoctorLoadPromise) return packVmDoctorLoadPromise;
+    set({packVmDoctorLoading: true, packVmError: null});
+    packVmDoctorLoadPromise = (async () => {
+      try {
+        const doctor = await apiFetchPackVMDoctor();
+        set({
+          packVmDoctor: doctor,
+          packVmError: doctor.ready
+            ? null
+            : (doctor.reason || 'PackVM is not ready for Pack operations.'),
+        });
+        if (doctor.ready) {
+          await Promise.all([get().loadPacks(), get().loadFrontendCatalog()]);
+        } else {
+          set({
+            frontendCatalog: null,
+            frontendCatalogError: doctor.reason || 'PackVM is not attested and ready.',
+          });
+        }
+        return doctor;
+      } catch (error) {
+        const message = error instanceof Error
+          ? error.message
+          : 'PackVM readiness could not be verified.';
+        set({
+          packVmDoctor: null,
+          packVmError: message,
+          frontendCatalog: null,
+          frontendCatalogError: message,
+        });
+        return null;
+      }
+    })().finally(() => {
+      packVmDoctorLoadPromise = null;
+      set({packVmDoctorLoading: false});
+    });
+    return packVmDoctorLoadPromise;
+  },
+
   invokePackOperation: async (packId, operationId, payload) => {
     const operationKey = `${packId}:${operationId}`;
     const state = get();
+    if (!state.packVmDoctor?.ready) {
+      throw new Error(
+        'Tobkiri keeps Pack operations unavailable until PackVM health is attested.',
+      );
+    }
     const pack = state.packs.find((candidate) => candidate.id === packId);
     if (!pack || !pack.installed || !pack.enabled || !pack.approved) {
       throw new Error(

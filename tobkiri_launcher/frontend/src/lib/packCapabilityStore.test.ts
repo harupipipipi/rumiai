@@ -3,6 +3,7 @@ import {afterEach, beforeEach, test} from 'node:test';
 import {JSDOM} from 'jsdom';
 
 import {type Pack, useAppStore} from '@/src/store';
+import type {ApiPackVMDoctor} from '@/src/lib/apiTypes';
 
 const operation = {
   operation_id: 'rumi_file_inspect_pack.file-inspect',
@@ -62,6 +63,15 @@ const frontendCatalog = {
   diagnostics: [],
   quarantined_pack_ids: [],
   catalog_hash: 'sha256:catalog',
+};
+
+const healthyDoctor: ApiPackVMDoctor = {
+  ready: true,
+  backend_id: 'tobkiri.python-pack-v4',
+  platform: 'macos',
+  instance: 'tobkiri-packvm-v4',
+  reason: null,
+  attestation_digest: `sha256:${'a'.repeat(64)}`,
 };
 
 let dom: JSDOM | null = null;
@@ -161,6 +171,7 @@ function readyState(): void {
     frontendCatalog,
     frontendCatalogError: null,
     frontendCatalogLoading: false,
+    packVmDoctor: healthyDoctor,
     packOperationPending: {},
   });
 }
@@ -216,7 +227,12 @@ test('missing approval or a revoked Pack fails closed before any capability requ
     approvalReason: 'approval_revoked',
     approvalIssues: ['approval_revoked'],
   };
-  useAppStore.setState({packs: [unapproved], frontendCatalog, packOperationPending: {}});
+  useAppStore.setState({
+    packs: [unapproved],
+    frontendCatalog,
+    packVmDoctor: healthyDoctor,
+    packOperationPending: {},
+  });
 
   await assert.rejects(
     useAppStore.getState().invokePackOperation(unapproved.id, operation.operation_id, {
@@ -235,6 +251,7 @@ test('missing verified contribution fails closed instead of falling back to a pr
   useAppStore.setState({
     packs: [samplePack],
     frontendCatalog: {...frontendCatalog, contributions: []},
+    packVmDoctor: healthyDoctor,
     packOperationPending: {},
   });
 

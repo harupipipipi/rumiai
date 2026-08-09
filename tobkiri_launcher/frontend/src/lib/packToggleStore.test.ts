@@ -3,6 +3,7 @@ import {afterEach, beforeEach, test} from 'node:test';
 import {JSDOM} from 'jsdom';
 
 import {type Pack, useAppStore} from '@/src/store';
+import type {ApiPackVMDoctor} from '@/src/lib/apiTypes';
 
 const samplePack: Pack = {
   id: 'research-pack',
@@ -27,6 +28,15 @@ const samplePack: Pack = {
   capabilities: [],
   flows: [],
   dependencies: [],
+};
+
+const healthyDoctor: ApiPackVMDoctor = {
+  ready: true,
+  backend_id: 'tobkiri.python-pack-v4',
+  platform: 'macos',
+  instance: 'tobkiri-packvm-v4',
+  reason: null,
+  attestation_digest: `sha256:${'a'.repeat(64)}`,
 };
 
 let dom: JSDOM | null = null;
@@ -117,6 +127,7 @@ function setStore(errors: string[]): void {
     packTogglePending: {},
     frontendCatalog: null,
     frontendCatalogError: null,
+    packVmDoctor: healthyDoctor,
     addToast: (message, type) => {
       if (type === 'error') errors.push(message);
     },
@@ -252,13 +263,21 @@ test('disable rejects a duplicate submission while the first request is pending'
     release = resolve;
   });
   const routes = installFetch(async (route, init) => {
-    assert.equal(route, 'POST /api/pack-control/disable');
-    assert.deepEqual(JSON.parse(String(init?.body)), {pack_id: samplePack.id});
-    await pending;
-    return new Response(JSON.stringify({
-      success: true,
-      data: {...binding(), pack_id: samplePack.id, enabled: false},
-    }), {headers: {'Content-Type': 'application/json'}});
+    if (route === 'POST /api/pack-control/disable') {
+      assert.deepEqual(JSON.parse(String(init?.body)), {pack_id: samplePack.id});
+      await pending;
+      return new Response(JSON.stringify({
+        success: true,
+        data: {...binding(), pack_id: samplePack.id, enabled: false},
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
+    if (route === 'GET /api/pack-control/catalog') {
+      return new Response(JSON.stringify({
+        success: true,
+        data: {...binding(), packs: [catalogPack(false)], count: 1},
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
+    assert.fail(`unexpected route: ${route}`);
   });
   const errors: string[] = [];
   setStore(errors);

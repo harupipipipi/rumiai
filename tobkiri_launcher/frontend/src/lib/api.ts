@@ -1,6 +1,11 @@
 import type {
   ApiDashboard,
   ApiDynamicFrontendCatalog,
+  ApiPackVMConsent,
+  ApiPackVMCleanupResult,
+  ApiPackVMDoctor,
+  ApiPackVMOperation,
+  ApiPackVMProvisioningPlan,
   ApiPresentationSelection,
   ApiResponse,
   ApiPresentationState,
@@ -22,6 +27,13 @@ import {
   RequestInvalidatedError,
   type GetRequestSnapshot,
 } from './getRequestCoordinator';
+import {
+  normalizePackVMConsent,
+  normalizePackVMCleanup,
+  normalizePackVMDoctor,
+  normalizePackVMOperation,
+  normalizePackVMPlan,
+} from './packvmLifecycle';
 
 const API_BASE_URL =
   (import.meta as ImportMeta & {env?: Record<string, string>}).env?.VITE_API_BASE_URL ?? '';
@@ -75,8 +87,12 @@ function isFrontendContractPath(path: string): boolean {
   return path.startsWith('/api/contracts/defaultspack/');
 }
 
+function isPackVMLifecyclePath(path: string): boolean {
+  return path === '/api/v4/packvm' || path.startsWith('/api/v4/packvm/');
+}
+
 function isPanelSessionApiPath(path: string): boolean {
-  return isSetupApiPath(path) || isFrontendContractPath(path);
+  return isSetupApiPath(path) || isFrontendContractPath(path) || isPackVMLifecyclePath(path);
 }
 
 function frontendContractPath(method: string, target: string): string {
@@ -310,7 +326,7 @@ export async function apiFetch<T>(
       'Content-Type': 'application/json',
       ...(options.headers as Record<string, string> | undefined),
     };
-    if (isFrontendContractPath(path)) {
+    if (isFrontendContractPath(path) || (isPackVMLifecyclePath(path) && isUnsafeMethod(method))) {
       headers['X-Tobkiri-Request-ID'] = crypto.randomUUID();
     }
     if (isUnsafeMethod(method)) {
@@ -459,6 +475,62 @@ export async function fetchFrontendCatalog(): Promise<ApiDynamicFrontendCatalog>
     throw new Error('Tobkiri dynamic frontend catalog is unavailable.');
   }
   return data.dynamic_host;
+}
+
+const PACKVM_API_ROOT = '/api/v4/packvm';
+
+function packVMLifecyclePost<T>(
+  operation: string,
+  payload: Record<string, unknown>,
+): Promise<T> {
+  return apiFetch<T>(`${PACKVM_API_ROOT}/${operation}`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function preparePackVM(): Promise<ApiPackVMProvisioningPlan> {
+  return packVMLifecyclePost<unknown>('prepare', {}).then(normalizePackVMPlan);
+}
+
+export function consentPackVM(
+  payload: {
+    plan_digest: string;
+    ceremony_nonce: string;
+    confirmation: string;
+    approve_image_download: boolean;
+  },
+): Promise<ApiPackVMConsent> {
+  return packVMLifecyclePost<unknown>('consent', payload).then(normalizePackVMConsent);
+}
+
+export function provisionPackVM(
+  payload: {consent_id: string; operation_id: string},
+): Promise<ApiPackVMOperation> {
+  return packVMLifecyclePost<unknown>('provision', payload).then(normalizePackVMOperation);
+}
+
+export function fetchPackVMProgress(operationId: string): Promise<ApiPackVMOperation> {
+  return apiFetch<unknown>(
+    `${PACKVM_API_ROOT}/progress?operation_id=${encodeURIComponent(operationId)}`,
+  ).then(normalizePackVMOperation);
+}
+
+export function cancelPackVM(operationId: string): Promise<ApiPackVMOperation> {
+  return packVMLifecyclePost<unknown>('cancel', {operation_id: operationId})
+    .then(normalizePackVMOperation);
+}
+
+export function fetchPackVMDoctor(): Promise<ApiPackVMDoctor> {
+  return apiFetch<unknown>(`${PACKVM_API_ROOT}/doctor`).then(normalizePackVMDoctor);
+}
+
+export function stopPackVM(): Promise<ApiPackVMDoctor> {
+  return packVMLifecyclePost<unknown>('stop', {}).then(normalizePackVMDoctor);
+}
+
+export function cleanupPackVM(confirmation: string): Promise<ApiPackVMCleanupResult> {
+  return packVMLifecyclePost<unknown>('cleanup', {confirmation}).then(normalizePackVMCleanup);
 }
 
 export function invokeFrontendCapability(

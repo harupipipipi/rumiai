@@ -107,6 +107,66 @@ export interface FrontendCapabilityInvocation {
   payload: Record<string, unknown>;
 }
 
+export interface ApiPackVMProvisioningPlan {
+  backend_id: string;
+  instance: string;
+  launcher_reason: string | null;
+  architecture: string;
+  image_source: string;
+  image_digest: string;
+  image_size_bytes: number;
+  image_download_required: boolean;
+  config_digest: string;
+  guest_runner_digest: string;
+  host_build_digest: string;
+  ceremony_nonce: string;
+  plan_digest: string;
+  confirmation: string;
+}
+
+export interface ApiPackVMConsent {
+  consent_id: string;
+  plan_digest: string;
+  image_source: string;
+  image_digest: string;
+  image_size_bytes: number;
+  image_download_approved: boolean;
+}
+
+export type ApiPackVMOperationState =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted';
+
+export interface ApiPackVMOperation {
+  operation_id: string;
+  consent_digest?: string;
+  state: ApiPackVMOperationState;
+  plan_digest: string;
+  updated_unix: number;
+  doctor?: ApiPackVMDoctor;
+  error?: string;
+  error_type?: string;
+}
+
+export interface ApiPackVMDoctor {
+  ready: boolean;
+  backend_id: string;
+  platform: string;
+  instance: string;
+  reason: string | null;
+  attestation_digest: string | null;
+}
+
+export interface ApiPackVMCleanupResult {
+  ready: false;
+  instance: string;
+  cleanup_confirmation: string;
+}
+
 export interface ApiDashboard {
   packs: {total: number; enabled: number; disabled: number};
   flows: {total: number};
