@@ -5653,6 +5653,13 @@
         "rule_id": "legacy_host_execution"
       },
       {
+        "evidence": "host_execution",
+        "line": 5,
+        "message": "legacy execution or authority path is present",
+        "path": "tobkiri_runtime/ecosystem/tobkiri_workflow_pack/ecosystem.json",
+        "rule_id": "legacy_host_execution"
+      },
+      {
         "evidence": "RUMI_ALLOW_HOST_EXECUTION",
         "line": 225,
         "message": "legacy execution or authority path is present",
@@ -7979,6 +7986,7 @@
       "tobkiri_runtime/ecosystem/rumi_workspace_pack/ecosystem.json",
       "tobkiri_runtime/ecosystem/search_home_pack/ecosystem.json",
       "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/ecosystem.json",
+      "tobkiri_runtime/ecosystem/tobkiri_workflow_pack/ecosystem.json",
       "tobkiri_runtime/tobkiri_protocol/README.md",
       "tobkiri_runtime/tobkiri_protocol/__init__.py",
       "tobkiri_runtime/tobkiri_protocol/canonical.py",
@@ -9925,6 +9933,14 @@
         "legacy": true,
         "path": "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/ecosystem.json",
         "version": "1.0.0"
+      },
+      {
+        "digest": "sha256:739e2eba392e6f7a6024e3d00984057a109c1cd637fe53e89d7f6b3718d284db",
+        "identity": "tobkiri_workflow_pack",
+        "kind": "manifest",
+        "legacy": true,
+        "path": "tobkiri_runtime/ecosystem/tobkiri_workflow_pack/ecosystem.json",
+        "version": "4.0.0"
       }
     ],
     "execution_routes": [
@@ -14771,6 +14787,12 @@
         "rule_id": "legacy_host_execution"
       },
       {
+        "evidence_digest": "sha256:739e2eba392e6f7a6024e3d00984057a109c1cd637fe53e89d7f6b3718d284db",
+        "line": 5,
+        "path": "tobkiri_runtime/ecosystem/tobkiri_workflow_pack/ecosystem.json",
+        "rule_id": "legacy_host_execution"
+      },
+      {
         "evidence_digest": "sha256:499809f9ead5cde6c7e6a3b602d25999004f6efeef603d60d129a8387a4e03aa",
         "line": 225,
         "path": "tobkiri_runtime/core_runtime/pack_function_runtime.py",
@@ -18186,6 +18208,13 @@
         "pack_id": "tobkiri_host_pack_control",
         "path": "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/ecosystem.json",
         "version": "1.0.0"
+      },
+      {
+        "legacy": true,
+        "manifest_digest": "sha256:739e2eba392e6f7a6024e3d00984057a109c1cd637fe53e89d7f6b3718d284db",
+        "pack_id": "tobkiri_workflow_pack",
+        "path": "tobkiri_runtime/ecosystem/tobkiri_workflow_pack/ecosystem.json",
+        "version": "4.0.0"
       }
     ],
     "state_owners": [
@@ -18354,8 +18383,8 @@
     ]
   },
   "repository": {
-    "commit": "75a89c5a80ee6d4fc48cff73cc5c56dd63edc541",
-    "tree_digest": "0d03ff2ce47d4ec1c7907480c7a4b0e3b8d4092b073e5c8a27ff4739ba0471ca"
+    "commit": "e9eae0d4243763d3a5abbe086c209132defb7fe9",
+    "tree_digest": "a03f9302fc8b67c66e1a395b64a44f68b1fef7864d5d5b077e22ee1fa99273a7"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
   "schema": "io.tobkiri.architecture.inventory.v1"

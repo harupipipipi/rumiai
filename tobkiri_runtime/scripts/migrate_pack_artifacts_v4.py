@@ -730,7 +730,10 @@ def _manifest_document(
     contract_catalog_digest: str,
 ) -> dict[str, Any]:
     contract_by_id = {item["contract_id"]: item for item in contracts}
-    artifact_set = record["runtime_artifacts"]
+    artifact_set = [
+        {key: value for key, value in item.items() if key != "index_role"}
+        for item in record["runtime_artifacts"]
+    ]
     artifact_set_digest = _artifact_set_digest(artifact_set)
     functions = []
     operation_catalog = []
@@ -884,7 +887,11 @@ def _render_record(record: Mapping[str, Any]) -> dict[str, str]:
                 "role": "contract_catalog",
             },
             *[
-                {"path": item["path"], "digest": item["digest"], "role": "runtime"}
+                {
+                    "path": item["path"],
+                    "digest": item["digest"],
+                    "role": item.get("index_role", "runtime"),
+                }
                 for item in record["runtime_artifacts"]
             ],
         ],
@@ -971,8 +978,8 @@ def _validate_catalog_payload(payload: Mapping[str, Any]) -> list[Mapping[str, A
         raise PackV4MigrationError("canonical catalog contains duplicate Pack IDs")
     if pack_ids != sorted(pack_ids) or record_ids != pack_ids:
         raise PackV4MigrationError("canonical catalog has missing or unknown Pack IDs")
-    if len(records) != 142:
-        raise PackV4MigrationError("canonical catalog must contain exactly 142 Packs")
+    if len(records) != 143:
+        raise PackV4MigrationError("canonical catalog must contain exactly 143 Packs")
     required = {
         "version",
         "kind",

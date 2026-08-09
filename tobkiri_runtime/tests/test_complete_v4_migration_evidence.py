@@ -21,7 +21,7 @@ def _evidence(sha: str = PARENT) -> dict[str, object]:
     return {
         "schema": "io.tobkiri.quality.complete-v4-migration-evidence.v1",
         "source": {"observed_head_sha": sha, "test_file": "gate.py"},
-        "counts": {"production_pack_directories": 142},
+        "counts": {"production_pack_directories": 143},
         "findings": {"legacy": []},
     }
 
@@ -114,7 +114,7 @@ def test_semantic_drift_fails_even_with_valid_push_provenance(monkeypatch) -> No
     )
     tracked = _evidence(CURRENT)
     observed = deepcopy(tracked)
-    observed["counts"]["production_pack_directories"] = 143  # type: ignore[index]
+    observed["counts"]["production_pack_directories"] = 144  # type: ignore[index]
     assert scanner.evidence_drift(
         tracked,
         observed,

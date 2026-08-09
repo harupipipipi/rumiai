@@ -10,7 +10,7 @@ the completed cutover result. It is not a compatibility promise.
 ## Cutover result
 
 The production cutover is complete. The tracked complete-v4 scanner currently
-classifies all 142 bundled production Packs as `v4-authoritative`, requires four
+classifies all 143 bundled production Packs as `v4-authoritative`, requires four
 canonical v4 artifacts per Pack, and reports zero findings for artifact
 contracts, Authority/ResolvedPlan scope, reachable legacy lookup/fallback,
 double authority, Launcher safety, and offline projection identity. The exact

@@ -141,7 +141,8 @@
     "rumi_workspace_mount_pack": "v4-authoritative",
     "rumi_workspace_pack": "v4-authoritative",
     "search_home_pack": "v4-authoritative",
-    "tobkiri_host_pack_control": "v4-authoritative"
+    "tobkiri_host_pack_control": "v4-authoritative",
+    "tobkiri_workflow_pack": "v4-authoritative"
   },
   "version": 1
 }

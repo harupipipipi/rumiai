@@ -132,13 +132,13 @@ def test_v3_import_hashes_entrypoint_bytes_not_stale_projection_hashes(
 
 
 def test_all_packs_have_valid_deterministic_v4_artifacts() -> None:
-    """All 142 owned Packs must match a second byte-identical generation."""
+    """All 143 owned Packs must match a second byte-identical generation."""
     result = generate(check=True)
     assert result == {
-        "packs": 142,
-        "valid": 142,
-        "contracts": 160,
-        "operations": 228,
+        "packs": 143,
+        "valid": 143,
+        "contracts": 162,
+        "operations": 258,
     }
     payload = _catalog()
     assert payload["excluded_packs"] == sorted(EXCLUDED_PACKS)
@@ -161,7 +161,7 @@ def test_normal_generation_has_no_v3_or_legacy_authority_reads(
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", guarded_read)
-    assert generate(check=True)["valid"] == 142
+    assert generate(check=True)["valid"] == 143
 
 
 @pytest.mark.parametrize("failure", ["duplicate", "missing", "unknown", "malformed"])
@@ -224,5 +224,5 @@ def test_global_catalog_has_no_duplicate_provider_or_operation() -> None:
         for operation in manifest["operation_catalog"]:
             assert operation["operation_id"] not in operations
             operations.add(operation["operation_id"])
-    assert len(providers) == 160
-    assert len(operations) == 228
+    assert len(providers) == 162
+    assert len(operations) == 258
