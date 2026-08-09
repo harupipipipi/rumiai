@@ -11,7 +11,9 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
-pytestmark = pytest.mark.usefixtures("defaultspack_conversation_owner")
+pytestmark = pytest.mark.usefixtures(
+    "defaultspack_conversation_owner", "defaultspack_v4_tool_dispatch"
+)
 
 
 def test_chat_run_engine_streams_tool_call_events_and_final_message(tmp_path, monkeypatch):

@@ -14,6 +14,8 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
+pytestmark = pytest.mark.usefixtures("defaultspack_component_catalog_selected")
+
 from domain.tool.executor import ToolExecutor  # noqa: E402
 from domain.tool.registry import ToolRegistry  # noqa: E402
 from domain.tool.ui_compiler_tools import ui_commit_plan  # noqa: E402

@@ -13,7 +13,11 @@ from ecosystem.defaultspack.domain.tool.mcp_client import McpClient
 from ecosystem.defaultspack.domain.tool.registry import ToolRegistry
 from domain.tool_policy.internal_context import mark_tool_server_approval_context
 
-pytestmark = pytest.mark.usefixtures("wave7_owner_bindings")
+pytestmark = pytest.mark.usefixtures(
+    "wave7_owner_bindings",
+    "defaultspack_component_catalog_selected",
+    "defaultspack_v4_tool_dispatch",
+)
 
 
 @pytest.fixture(autouse=True)

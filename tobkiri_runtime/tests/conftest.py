@@ -562,8 +562,8 @@ _REAL_GET_CONTAINER = _REAL_DI_CONTAINER_MODULE.get_container
 # ---------------------------------------------------------------------------
 # 共通 fixture
 # ---------------------------------------------------------------------------
-import os
-import pytest
+import os  # noqa: E402
+import pytest  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -1268,7 +1268,7 @@ def defaultspack_conversation_owner(request, monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def defaultspack_v4_tool_dispatch(defaultspack_conversation_owner):
+def defaultspack_v4_tool_dispatch(defaultspack_conversation_owner, monkeypatch):
     """Bind a test-only v4 tool-definition session to the active Defaults Profile.
 
     Production intentionally fails closed when no captured v4 dispatch session exists.
@@ -1281,9 +1281,18 @@ def defaultspack_v4_tool_dispatch(defaultspack_conversation_owner):
 
     from core_runtime.di_container import get_container
     from core_runtime.global_contract_dispatch import GlobalContractUnavailable
+    from ecosystem.rumi_default_tool_projection_pack.runtime import projection
     from ecosystem.rumi_default_tool_projection_pack.runtime.projection import (
         create_source_operation,
     )
+    from domain.tool.registry import ToolRegistry as RuntimeToolRegistry
+
+    # The projection pack is imported through its installed package name in
+    # production, while compatibility tests may import the same source as the
+    # top-level ``domain`` package.  Dynamic MCP tools must enter the same
+    # canonical registry that the MCP block mutates; otherwise the test
+    # dispatch session would silently project a second, stale registry.
+    monkeypatch.setattr(projection, "ToolRegistry", RuntimeToolRegistry)
 
     snapshot = _defaultspack_v4_snapshot()
     definition_contract = "rumi.resource.tool.definition.v1"

@@ -68,8 +68,8 @@ def test_openai_compatible_provider_can_be_added_by_manifest_without_a_static_mo
     configured_cloud_provider,
 ):
     extension_root = _write_openai_compatible_extension(tmp_path / "extensions")
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_EXTENSION_ROOTS", str(extension_root))
 
+    from domain.extensions import runtime as extension_runtime
     from domain.extensions.runtime import get_extension_registry
     from domain.ai_client.api_key_store import set_provider_api_key
     from domain.ai_client.providers import (
@@ -78,6 +78,14 @@ def test_openai_compatible_provider_can_be_added_by_manifest_without_a_static_mo
         get_provider_catalog_map,
     )
 
+    monkeypatch.setattr(
+        extension_runtime,
+        "get_extensions_roots",
+        lambda: extension_runtime.build_extensions_roots(
+            DEFAULTSPACK_ROOT,
+            extra_roots=[extension_root],
+        ),
+    )
     result = set_provider_api_key(
         "acme",
         "test-key",

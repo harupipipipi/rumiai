@@ -64,6 +64,22 @@ def _write_v2_skill(skill_dir, *, skill_id, display_name, trigger, instruction):
     (skill_dir / "SKILL.md").write_text(instruction, encoding="utf-8")
 
 
+def _inject_test_extension_roots(monkeypatch, *extra_roots: Path) -> None:
+    """Inject temporary roots through the explicit test-only builder seam."""
+    from domain.extensions import runtime as extension_runtime
+
+    roots = tuple(extra_roots)
+    monkeypatch.setattr(
+        extension_runtime,
+        "get_extensions_roots",
+        lambda: extension_runtime.build_extensions_roots(
+            DEFAULTSPACK_ROOT,
+            extra_roots=roots,
+        ),
+    )
+    extension_runtime.get_extension_registry(force_reload=True)
+
+
 def test_computer_use_action_suffix_tool_name_is_normalized():
     from domain.chat.stream_engine import _normalize_tool_call_name_and_arguments
 
@@ -489,8 +505,8 @@ def test_prepare_chat_run_promotes_profile_and_agent_ids_into_tool_context(tmp_p
         {"run_source": "scheduler"},
     )
 
-    assert prepared.request_context["profile_id"] == "defaultspack.mimo_coding_company"
-    assert prepared.tool_context["profile_id"] == "defaultspack.mimo_coding_company"
+    assert prepared.request_context["profile_id"] == "defaults"
+    assert prepared.tool_context["profile_id"] == "defaults"
     assert prepared.request_context["agent_id"] == "project_manager"
     assert prepared.tool_context["agent_id"] == "project_manager"
     ChatStore._instance = None
@@ -649,7 +665,7 @@ def test_prepare_chat_run_injects_matched_skill_and_chat_references(tmp_path, mo
         instruction="This must not appear in unrelated LINE prompts.",
     )
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_EXTENSION_ROOTS", str(extensions_root))
+    _inject_test_extension_roots(monkeypatch, extensions_root)
     ChatStore._instance = None
 
     store = ChatStore()
@@ -719,7 +735,7 @@ def test_prepare_chat_run_leaves_unmatched_skills_out_of_system_context(tmp_path
         instruction="For LINE group chats, respond only when Rumi is mentioned.",
     )
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_EXTENSION_ROOTS", str(extensions_root))
+    _inject_test_extension_roots(monkeypatch, extensions_root)
     ChatStore._instance = None
 
     store = ChatStore()

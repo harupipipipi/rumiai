@@ -17,6 +17,25 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
 class TestDefaultspackDesktopSurface(unittest.TestCase):
+    @staticmethod
+    def _activate_defaults(user_data: Path) -> None:
+        from core_runtime.bootstrap.profile_capture import (
+            capture_default_profile,
+            prepare_default_profile_confirmation,
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "TOBKIRI_USER_DATA": str(user_data),
+                "RUMI_USER_DATA": str(user_data),
+            },
+            clear=False,
+        ):
+            capture_default_profile(
+                confirmation=prepare_default_profile_confirmation()
+            )
+
     def test_desktop_app_help_exits_before_runtime_setup(self):
         from defaultspack import desktop_app
 
@@ -51,30 +70,35 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
             def start(self):
                 raise OSError("address already in use")
 
-        with patch.dict(
-            os.environ,
-            {
-                "DEFAULTS_HTTP_HOST": "127.0.0.1",
-                "DEFAULTS_HTTP_PORT": "18776",
-                "RUMI_DEFAULTSPACK_PORT": "18776",
-                "RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND": "1",
-            },
-            clear=False,
-        ):
-            with patch(
-                "transport.http.DefaultsHttpServer",
-                return_value=BindFailureServer(),
+        with tempfile.TemporaryDirectory() as tmp:
+            user_data = Path(tmp) / "user_data"
+            self._activate_defaults(user_data)
+            with patch.dict(
+                os.environ,
+                {
+                    "DEFAULTS_HTTP_HOST": "127.0.0.1",
+                    "DEFAULTS_HTTP_PORT": "18776",
+                    "RUMI_DEFAULTSPACK_PORT": "18776",
+                    "RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND": "1",
+                    "TOBKIRI_USER_DATA": str(user_data),
+                    "RUMI_USER_DATA": str(user_data),
+                },
+                clear=False,
             ):
-                with patch.object(
-                    desktop_app, "_wait_until_ready"
-                ) as wait_until_ready:
-                    with patch(
-                        "domain.scheduler.daemon.start_scheduler_daemon"
-                    ) as start_scheduler:
-                        with self.assertRaisesRegex(
-                            OSError, "address already in use"
-                        ):
-                            desktop_app.main()
+                with patch(
+                    "core_runtime.pack_api_server.PackAPIServer",
+                    return_value=BindFailureServer(),
+                ):
+                    with patch.object(
+                        desktop_app, "_wait_until_ready"
+                    ) as wait_until_ready:
+                        with patch(
+                            "domain.scheduler.daemon.start_scheduler_daemon"
+                        ) as start_scheduler:
+                            with self.assertRaisesRegex(
+                                OSError, "address already in use"
+                            ):
+                                desktop_app.main()
 
         wait_until_ready.assert_not_called()
         start_scheduler.assert_not_called()
@@ -191,18 +215,30 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
 
         fake_server = FakeServer()
 
-        with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_OPEN_BROWSER": "1", "RUMI_DEFAULTSPACK_SURFACE": "webview"}, clear=True):
-            with patch("transport.http.DefaultsHttpServer", return_value=fake_server):
-                with patch.object(desktop_app, "_wait_until_ready", return_value=True):
-                    with patch.object(desktop_app, "_wait_until_chat_ready", return_value=True):
-                        with patch("defaultspack.native_webview.open_desktop_surface", return_value="webview"):
-                            result = desktop_app.main()
+        with tempfile.TemporaryDirectory() as tmp:
+            user_data = Path(tmp) / "user_data"
+            self._activate_defaults(user_data)
+            with patch.dict(
+                os.environ,
+                {
+                    "RUMI_DEFAULTSPACK_OPEN_BROWSER": "1",
+                    "RUMI_DEFAULTSPACK_SURFACE": "webview",
+                    "TOBKIRI_USER_DATA": str(user_data),
+                    "RUMI_USER_DATA": str(user_data),
+                },
+                clear=True,
+            ):
+                with patch("core_runtime.pack_api_server.PackAPIServer", return_value=fake_server):
+                    with patch.object(desktop_app, "_wait_until_ready", return_value=True):
+                        with patch.object(desktop_app, "_wait_until_chat_ready", return_value=True):
+                            with patch("defaultspack.native_webview.open_desktop_surface", return_value="webview"):
+                                result = desktop_app.main()
 
         self.assertEqual(result, 0)
         self.assertTrue(fake_server.started)
         self.assertTrue(fake_server.stopped)
 
-    def test_desktop_app_main_logs_and_exits_when_existing_server_is_reused(self):
+    def test_desktop_app_main_fails_closed_when_server_bind_is_busy(self):
         from defaultspack import desktop_app
 
         class PortBusyServer:
@@ -219,14 +255,18 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             log_path = Path(tmp) / "defaultspack-launch.jsonl"
+            user_data = Path(tmp) / "user_data"
+            self._activate_defaults(user_data)
             env = {
                 "DEFAULTS_HTTP_PORT": "8766",
                 "RUMI_DEFAULTSPACK_LAUNCH_LOG": str(log_path),
                 "RUMI_DEFAULTSPACK_OPEN_BROWSER": "1",
                 "RUMI_DEFAULTSPACK_PORT": "8766",
+                "TOBKIRI_USER_DATA": str(user_data),
+                "RUMI_USER_DATA": str(user_data),
             }
             with patch.dict(os.environ, env, clear=True):
-                with patch("transport.http.DefaultsHttpServer", return_value=fake_server):
+                with patch("core_runtime.pack_api_server.PackAPIServer", return_value=fake_server):
                     with patch.object(desktop_app, "_wait_until_ready", return_value=True):
                         with patch.object(desktop_app, "_wait_until_chat_ready", return_value=True):
                             with patch.object(
@@ -235,17 +275,20 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
                                 return_value=[{"pid": "123", "command": "python3"}],
                             ):
                                 with patch("defaultspack.native_webview.open_desktop_surface", return_value="browser"):
-                                    result = desktop_app.main()
+                                    with self.assertRaisesRegex(
+                                        OSError, "address already in use"
+                                    ):
+                                        desktop_app.main()
 
-            self.assertEqual(result, 0)
             self.assertFalse(fake_server.stopped)
             events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
 
         event_names = [event["event"] for event in events]
         self.assertIn("server_start_oserror", event_names)
-        self.assertIn("duplicate_launcher_exit", event_names)
+        self.assertNotIn("duplicate_launcher_exit", event_names)
         busy_event = next(event for event in events if event["event"] == "server_start_oserror")
-        self.assertTrue(busy_event["existing_ready"])
+        self.assertFalse(busy_event["existing_ready"])
+        self.assertTrue(busy_event["own_bind_required"])
         self.assertEqual(busy_event["port_owners"], [{"pid": "123", "command": "python3"}])
         self.assertNotIn("RUMI_API_TOKEN", events[0]["env"])
 

@@ -4,11 +4,15 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 HERE = Path(__file__).resolve().parent
 PROJECT_ROOT = HERE.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+pytestmark = pytest.mark.usefixtures("defaultspack_component_catalog_selected")
 
 
 def test_providers_init_imports_importlib():
@@ -35,8 +39,8 @@ def test_detect_available_providers_fails_closed_when_legacy_module_is_absent(mo
     assert providers == {}
 
 
-def test_tool_registry_fallback_keeps_all_builtin_tools():
-    import ecosystem.defaultspack.domain.tool.registry as tool_registry_module
+def test_selected_v4_catalog_keeps_builtin_tools_without_legacy_fallback():
+    import domain.tool.registry as tool_registry_module
 
     tool_registry_module.ToolRegistry._instance = None
 

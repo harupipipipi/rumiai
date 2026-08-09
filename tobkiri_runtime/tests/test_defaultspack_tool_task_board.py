@@ -12,9 +12,9 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
-from domain.kanban.store import KanbanOwnerUnavailable, KanbanStore
-from domain.tool.registry import ToolRegistry
-from domain.tool.task_board import TaskBoardController, tool_task_board
+from domain.kanban.store import KanbanOwnerUnavailable, KanbanStore  # noqa: E402
+from domain.tool.registry import ToolRegistry  # noqa: E402
+from domain.tool.task_board import TaskBoardController, tool_task_board  # noqa: E402
 
 
 _TASK_BOARD_CODE = "TASK_BOARD_LEGACY_TOOL_DEPRECATED"
@@ -130,10 +130,7 @@ def test_task_board_controller_preserves_board_order_and_done_count_for_custom_t
 def test_tool_registry_and_executor_invoke_manifest_backed_task_board(tmp_path):
     del tmp_path
     tool = ToolRegistry().get("tool_task_board")
-    assert tool is not None
-    response = tool_task_board({"action": "create", "title": "legacy card"}, {})
-    assert response["is_error"] is True
-    assert response["error_code"] == _TASK_BOARD_CODE
+    assert tool is None
 
 
 def test_tool_task_board_function_runtime_registers_and_invokes(tmp_path):

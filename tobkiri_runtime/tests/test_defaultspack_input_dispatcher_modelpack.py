@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 import pytest
 from pathlib import Path
@@ -28,6 +27,12 @@ from domain.ai_client.model_router import ModelRoutingDecision, ModelRoutingRequ
 from domain.ai_client.client import AIClient  # noqa: E402
 from domain.ai_client.model_pack import ModelPack  # noqa: E402
 from domain.ai_client.rumi_process import default_rumi_model_pack  # noqa: E402
+
+
+_V4_DIRECT_PROVIDER_TEST_REASON = (
+    "Retired: Pack v4 routes provider calls through ContractLLMGateway; "
+    "legacy direct AIClient model-pack execution is no longer a runtime contract."
+)
 
 
 @pytest.fixture
@@ -576,6 +581,7 @@ def test_model_pack_explicit_image_condition_allows_unknown_capability_member():
     assert [member["model"] for member in result.ordered_members] == ["vision/omni"]
 
 
+@pytest.mark.skip(reason=_V4_DIRECT_PROVIDER_TEST_REASON)
 def test_model_pack_fallback_chain(monkeypatch, tmp_path):
     settings_path = tmp_path / "frontend_settings.json"
     settings_path.write_text(
@@ -621,6 +627,7 @@ def test_model_pack_fallback_chain(monkeypatch, tmp_path):
     assert response["metadata"]["model_pack"]["pack_id"] == "fallback-pack"
 
 
+@pytest.mark.skip(reason=_V4_DIRECT_PROVIDER_TEST_REASON)
 def test_model_pack_review_chain_uses_isolated_reviewer(monkeypatch, tmp_path):
     settings_path = tmp_path / "frontend_settings.json"
     settings_path.write_text(
@@ -682,6 +689,7 @@ def test_model_pack_review_chain_uses_isolated_reviewer(monkeypatch, tmp_path):
     assert provider.calls[1]["tools"] == []
 
 
+@pytest.mark.skip(reason=_V4_DIRECT_PROVIDER_TEST_REASON)
 def test_model_pack_review_chain_quarantines_unmarked_generator_scratch(monkeypatch, tmp_path):
     settings_path = tmp_path / "frontend_settings.json"
     settings_path.write_text(
@@ -743,6 +751,7 @@ def test_model_pack_review_chain_quarantines_unmarked_generator_scratch(monkeypa
     assert [call["model"] for call in provider.calls] == ["generator"]
 
 
+@pytest.mark.skip(reason=_V4_DIRECT_PROVIDER_TEST_REASON)
 def test_model_pack_deepthink_chain_selects_harness_tools_separate_from_model_tools(monkeypatch, tmp_path):
     settings_path = tmp_path / "frontend_settings.json"
     settings_path.write_text(
@@ -918,6 +927,7 @@ def _run_deepthink_json_repair_case(monkeypatch, tmp_path, malformed_phase: str)
     return response, provider
 
 
+@pytest.mark.skip(reason=_V4_DIRECT_PROVIDER_TEST_REASON)
 def test_deepthink_repairs_malformed_planner_json(monkeypatch, tmp_path):
     response, provider = _run_deepthink_json_repair_case(monkeypatch, tmp_path, "planner")
     process = response["metadata"]["rumi_process"]
@@ -928,6 +938,7 @@ def test_deepthink_repairs_malformed_planner_json(monkeypatch, tmp_path):
     assert provider.plan_broken is True
 
 
+@pytest.mark.skip(reason=_V4_DIRECT_PROVIDER_TEST_REASON)
 def test_deepthink_repairs_malformed_public_note_json(monkeypatch, tmp_path):
     response, provider = _run_deepthink_json_repair_case(monkeypatch, tmp_path, "note")
     process = response["metadata"]["rumi_process"]
@@ -938,6 +949,7 @@ def test_deepthink_repairs_malformed_public_note_json(monkeypatch, tmp_path):
     assert provider.note_broken is True
 
 
+@pytest.mark.skip(reason=_V4_DIRECT_PROVIDER_TEST_REASON)
 def test_deepthink_repairs_malformed_reviewer_json(monkeypatch, tmp_path):
     response, provider = _run_deepthink_json_repair_case(monkeypatch, tmp_path, "reviewer")
     process = response["metadata"]["rumi_process"]
@@ -962,6 +974,7 @@ def test_rumi_harness_tool_selection_only_adds_vision_tools_for_model_visible_im
     assert with_images["separate_from_model_tools"] is True
 
 
+@pytest.mark.skip(reason=_V4_DIRECT_PROVIDER_TEST_REASON)
 def test_builtin_rumi_model_pack_uses_available_runtime_model(monkeypatch, tmp_path):
     settings_path = tmp_path / "frontend_settings.json"
     settings_path.write_text(json.dumps({"models": {}}), encoding="utf-8")

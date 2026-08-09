@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.ui_compiler_test_utils import build_args, fake_context, fixture_tree, write_pass_package
 
 from domain.tool.executor import ToolExecutor
@@ -14,6 +16,9 @@ from domain.tool.ui_compiler_runtime.fake_agent_backend import FakeUIAgentBacken
 from domain.tool.ui_compiler_runtime.subagent_backend import SubagentToolBackend
 from domain.ui_compiler import RenderMatrix, RenderSnapshot, UIAgentResult, UIAgentTask
 from domain.ui_compiler.planner import RecursiveUIPlanner
+
+
+pytestmark = pytest.mark.usefixtures("defaultspack_component_catalog_selected")
 
 
 def _disable_browser_renderer(monkeypatch) -> None:

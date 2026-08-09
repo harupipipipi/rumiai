@@ -18,6 +18,7 @@ def test_v4_registration_is_catalog_backed() -> None:
     assert set(catalog.packs) == {
         "defaults-basepack",
         "defaultspack",
+        "tobkiri_host_pack_control",
         "rumi_file_inspect_pack",
         "rumi_host_authority_bridge_pack",
         "rumi_workspace_mount_pack",

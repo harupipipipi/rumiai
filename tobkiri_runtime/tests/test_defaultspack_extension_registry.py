@@ -398,6 +398,17 @@ def test_build_extensions_roots_filters_to_v4_effective_set(tmp_path: Path, monk
     assert extra_root.resolve() in roots
 
 
+def test_get_extensions_roots_ignores_ambient_extension_root(tmp_path: Path, monkeypatch):
+    import ecosystem.defaultspack.domain.extensions.runtime as runtime
+
+    ambient_root = tmp_path / "ambient_extensions"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_EXTENSION_ROOTS", str(ambient_root))
+
+    roots = {path.resolve() for path in runtime.get_extensions_roots()}
+
+    assert ambient_root.resolve() not in roots
+
+
 def test_build_extensions_roots_fails_closed_on_invalid_setup_selection(tmp_path: Path, monkeypatch):
     import ecosystem.defaultspack.domain.extensions.runtime as runtime
     rumi_root = tmp_path / "tobkiri_runtime"

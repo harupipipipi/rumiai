@@ -62,7 +62,7 @@ def test_defaultspack_snapshot_writes_manifest_lock(tmp_path: Path):
         flow_ids=["chat_turn"],
     )
 
-    manifest_path = tmp_path / "user_data" / "profiles" / "default-profile" / "ecosystem" / "snapshots" / "defaultspack" / "manifest.lock.json"
+    manifest_path = tmp_path / "user_data" / "workspaces" / "default-profile" / "snapshots" / "defaultspack" / "manifest.lock.json"
     assert manifest_path.is_file()
     assert manifest["items"][0]["type"] == "flow"
 
@@ -128,9 +128,8 @@ def test_snapshot_does_not_follow_traversal_or_symlink_sources(tmp_path: Path):
     snapshot_root = (
         tmp_path
         / "user_data"
-        / "profiles"
+        / "workspaces"
         / "p1"
-        / "ecosystem"
         / "snapshots"
         / "defaultspack"
     )

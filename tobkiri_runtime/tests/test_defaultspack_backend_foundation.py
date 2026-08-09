@@ -613,7 +613,10 @@ def test_ai_client_can_opt_into_default_local_runtime_providers(monkeypatch):
     assert "lmstudio" in provider_ids
 
 
-def test_permission_policy_persists_and_blocks_tool_list_and_invoke(tmp_path):
+def test_permission_policy_persists_and_blocks_tool_list_and_invoke(
+    tmp_path, defaultspack_component_catalog_selected
+):
+    del defaultspack_component_catalog_selected
     from ecosystem.defaultspack.backend.tool.permission_policy import ToolPermissionPolicyStore
     from ecosystem.defaultspack.blocks.tool.invoke import run as invoke_tool
     from ecosystem.defaultspack.blocks.tool.list import run as list_tools

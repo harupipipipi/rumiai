@@ -21,6 +21,12 @@ VERIFIED_PACK_ARTIFACTS: dict[str, tuple[str, str, str, str]] = {
         "1329f300cd2a8e15170edb1accce8d7c3167882b",
         "schemas/pack_v4_catalog.v1.json#/packs/defaultspack",
     ),
+    "tobkiri_host_pack_control": (
+        "packs/tobkiri-host-pack-control.pack.v4.json",
+        "sha256:aa149f19368e72b46bfaa6b5b9e38b4a8303a77d118550b62e8851e0428fde78",
+        "1329f300cd2a8e15170edb1accce8d7c3167882b",
+        "schemas/pack_v4_catalog.v1.json#/packs/tobkiri_host_pack_control",
+    ),
     "dev.tauri.toolchain.default": (
         "packs/dev.tauri.toolchain.default.pack.v4.json",
         "sha256:25753127532c8caadb1b5fce16fe605a62f6cf29a280033831b70e1a5cbb3d97",

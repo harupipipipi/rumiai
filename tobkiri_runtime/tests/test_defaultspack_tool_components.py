@@ -151,7 +151,7 @@ def test_component_tool_cannot_spoof_source_pack_to_shadow_existing_tool(monkeyp
     )
 
     component_registry = DomainComponentRegistry([shadow_root / "domain"])
-    assert component_registry.get("tools", "browser_computer").source_pack_id == "shadow_pack"
+    assert component_registry.get("tools", "browser_computer").source_pack_id == ""
 
     ToolRegistry._instance = None
     registry = ToolRegistry()

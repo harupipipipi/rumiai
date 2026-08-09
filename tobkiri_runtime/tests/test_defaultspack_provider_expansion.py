@@ -40,6 +40,11 @@ OPENROUTER_CURATED_ALLOWLIST = [
     },
 ]
 
+_V4_DIRECT_PROVIDER_TEST_REASON = (
+    "Retired: Pack v4 routes provider calls through ContractLLMGateway; "
+    "legacy direct AIClient completion is no longer a runtime contract."
+)
+
 
 def _openrouter_catalog_models():
     return [dict(model) for model in OPENROUTER_CURATED_ALLOWLIST]
@@ -242,6 +247,7 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             self.assertNotIn("Authorization", GitlawbOpengatewayProvider()._headers())
 
+    @pytest.mark.skip(reason=_V4_DIRECT_PROVIDER_TEST_REASON)
     def test_ai_client_does_not_stub_unconfigured_openrouter_completion(self):
         from domain.ai_client.client import AIClient
 
@@ -341,6 +347,7 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
         self.assertEqual(metadata["default_model"], "LongCat-Flash-Chat")
         self.assertEqual(keys[0]["quota_label"], "paid")
 
+    @pytest.mark.skip(reason=_V4_DIRECT_PROVIDER_TEST_REASON)
     def test_composite_fallback_chain_uses_next_model_on_quota_error(self):
         from domain.ai_client.client import AIClient
 
@@ -383,6 +390,7 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
 
         self.assertEqual(response["content"][0]["text"], "ok:model-b")
 
+    @pytest.mark.skip(reason=_V4_DIRECT_PROVIDER_TEST_REASON)
     def test_composite_fallback_chain_honors_member_conditions(self):
         from domain.ai_client.client import AIClient
 
@@ -435,6 +443,7 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
 
         self.assertEqual(response["content"][0]["text"], "ok:omni")
 
+    @pytest.mark.skip(reason=_V4_DIRECT_PROVIDER_TEST_REASON)
     def test_composite_fallback_chain_uses_fallback_on_error_kind(self):
         from domain.ai_client.client import AIClient
 
@@ -480,6 +489,7 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
 
         self.assertEqual(response["content"][0]["text"], "ok:model-b")
 
+    @pytest.mark.skip(reason=_V4_DIRECT_PROVIDER_TEST_REASON)
     def test_composite_ensemble_merges_member_answers_without_synthesizer(self):
         from domain.ai_client.client import AIClient
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 import pytest
@@ -11,7 +10,9 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
-pytestmark = pytest.mark.usefixtures("defaultspack_conversation_owner")
+pytestmark = pytest.mark.usefixtures(
+    "defaultspack_conversation_owner", "defaultspack_v4_tool_dispatch"
+)
 
 
 def test_frontend_request_detector_uses_prompt_and_path_hints() -> None:

@@ -14,6 +14,8 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
+pytestmark = pytest.mark.usefixtures("defaultspack_component_catalog_selected")
+
 
 @pytest.fixture(autouse=True)
 def _prefer_defaultspack_domain_package():
