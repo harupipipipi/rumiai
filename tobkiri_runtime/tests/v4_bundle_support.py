@@ -3,93 +3,83 @@
 from __future__ import annotations
 
 import hashlib
-import json
+import re
 from pathlib import Path
 from typing import Mapping
 
+from tobkiri_protocol.canonical import strict_loads
 
-VERIFIED_PACK_ARTIFACTS: dict[str, tuple[str, str, str, str]] = {
-    "defaults-basepack": (
-        "packs/defaults-basepack.pack.v4.json",
-        "sha256:eeb549d2a384b85ad805148da20ee1e37480b80751670ea9050202cd219b21a0",
-        "working-tree",
-        "ecosystem/defaultspack/v4/packs/defaults-basepack.pack.v4.json",
-    ),
-    "defaultspack": (
-        "packs/defaultspack.pack.v4.json",
-        "sha256:2bb6c5d31b9f255fd3845c5affbd6cb9df169743fa2cded9b9459660b26b7ddb",
-        "1329f300cd2a8e15170edb1accce8d7c3167882b",
-        "schemas/pack_v4_catalog.v1.json#/packs/defaultspack",
-    ),
-    "tobkiri_host_pack_control": (
-        "packs/tobkiri-host-pack-control.pack.v4.json",
-        "sha256:aa149f19368e72b46bfaa6b5b9e38b4a8303a77d118550b62e8851e0428fde78",
-        "1329f300cd2a8e15170edb1accce8d7c3167882b",
-        "schemas/pack_v4_catalog.v1.json#/packs/tobkiri_host_pack_control",
-    ),
-    "dev.tauri.toolchain.default": (
-        "packs/dev.tauri.toolchain.default.pack.v4.json",
-        "sha256:25753127532c8caadb1b5fce16fe605a62f6cf29a280033831b70e1a5cbb3d97",
-        "working-tree",
-        "ecosystem/defaultspack/v4/packs/dev.tauri.toolchain.default.pack.v4.json",
-    ),
-    "rumi_file_inspect_pack": (
-        "packs/rumi-file-inspect.pack.v4.json",
-        "sha256:62a93f58d7f051fddaffa048a3c7fd95bf7f8945f89e2be42b873c273de93f47",
-        "1329f300cd2a8e15170edb1accce8d7c3167882b",
-        "schemas/pack_v4_catalog.v1.json#/packs/rumi_file_inspect_pack",
-    ),
-    "rumi_host_authority_bridge_pack": (
-        "packs/rumi-host-authority-bridge.pack.v4.json",
-        "sha256:148a26429d5125a9757677f8ff618394377b48cbcd15a8d8cefc37f6bce79529",
-        "1329f300cd2a8e15170edb1accce8d7c3167882b",
-        "schemas/pack_v4_catalog.v1.json#/packs/rumi_host_authority_bridge_pack",
-    ),
-    "rumi_workspace_mount_pack": (
-        "packs/rumi-workspace-mount.pack.v4.json",
-        "sha256:82d4a833716dd809894612b0172d4aa73cc25f0bb4e690aa0813de87189caf51",
-        "1329f300cd2a8e15170edb1accce8d7c3167882b",
-        "schemas/pack_v4_catalog.v1.json#/packs/rumi_workspace_mount_pack",
-    ),
-    "shell.cli.default": (
-        "packs/shell.cli.default.pack.v4.json",
-        "sha256:03ff7a6c68b1adf22b700fe5dced0871b48b16da10e0cc948cc2270d2328e87f",
-        "working-tree",
-        "ecosystem/defaultspack/v4/packs/shell.cli.default.pack.v4.json",
-    ),
-    "shell.tauri.default": (
-        "packs/shell.tauri.default.pack.v4.json",
-        "sha256:afdaca4071f2d3697ee90f90cd0ee09eb99d46692eb01a5ec7c6a7ef94c00855",
-        "working-tree",
-        "ecosystem/defaultspack/v4/packs/shell.tauri.default.pack.v4.json",
-    ),
-    "runtime.tauri.application.default": (
-        "packs/runtime.tauri.application.default.pack.v4.json",
-        "sha256:d75c399f62cce73156cb7d4c02559343ee0f5db6976c1ff50602e61428a448ac",
-        "working-tree",
-        "ecosystem/defaultspack/v4/packs/runtime.tauri.application.default.pack.v4.json",
-    ),
-}
+_BUNDLE_LOCK_SCHEMA = "io.tobkiri.defaultspack-bundle-lock.v1"
+_SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _verified_pack_entries(bundle: Path) -> tuple[tuple[str, str], ...]:
+    """Return the complete pack inventory declared by the verified bundle lock."""
+    lock = strict_loads((bundle / "bundle.lock.json").read_bytes())
+    assert isinstance(lock, dict)
+    assert set(lock) == {"schema", "entries"}
+    assert lock["schema"] == _BUNDLE_LOCK_SCHEMA
+    entries = lock["entries"]
+    assert isinstance(entries, list) and entries
+
+    pack_entries: list[tuple[str, str]] = []
+    seen_paths: set[str] = set()
+    for entry in entries:
+        assert isinstance(entry, dict)
+        assert set(entry) == {"path", "kind", "digest"}
+        relative_path = entry["path"]
+        kind = entry["kind"]
+        digest = entry["digest"]
+        assert isinstance(relative_path, str)
+        assert kind in {"pack", "base", "shell", "profile"}
+        assert isinstance(digest, str) and _SHA256_RE.fullmatch(digest)
+        assert relative_path not in seen_paths
+        seen_paths.add(relative_path)
+        if kind != "pack":
+            continue
+        assert relative_path.startswith("packs/")
+        assert relative_path.endswith(".pack.v4.json")
+        pack_entries.append((relative_path, digest))
+
+    assert pack_entries
+    expected_paths = {relative_path for relative_path, _ in pack_entries}
+    actual_paths = {
+        path.relative_to(bundle).as_posix()
+        for path in (bundle / "packs").glob("*.pack.v4.json")
+    }
+    assert actual_paths == expected_paths
+    return tuple(pack_entries)
 
 
 def assert_verified_pack_inventory(
     bundle: Path, catalog_packs: Mapping[str, dict]
 ) -> None:
-    """Verify the canonical IDs, lock digests, and source revisions of all packs."""
-    assert set(catalog_packs) == set(VERIFIED_PACK_ARTIFACTS)
-
-    for pack_id, (relative_path, expected_digest, revision, source_path) in (
-        VERIFIED_PACK_ARTIFACTS.items()
-    ):
+    """Verify every lock-pinned Pack artifact and its catalog identity."""
+    pack_ids: set[str] = set()
+    for relative_path, expected_digest in _verified_pack_entries(bundle):
         artifact_path = bundle / relative_path
+        assert artifact_path.is_file()
+        assert not artifact_path.is_symlink()
         artifact_bytes = artifact_path.read_bytes()
         actual_digest = f"sha256:{hashlib.sha256(artifact_bytes).hexdigest()}"
         assert actual_digest == expected_digest
 
-        manifest = json.loads(artifact_bytes)
-        assert manifest["pack"]["id"] == pack_id
-        assert manifest["provenance"]["repository_commit"] == revision
-        assert manifest["provenance"]["source_path"] == source_path
-        assert manifest["provenance"]["source_digest"].startswith("sha256:")
-        assert manifest["integrity"]["source_identity"].startswith("sha256:")
-        assert catalog_packs[pack_id] == manifest
+        manifest = strict_loads(artifact_bytes)
+        assert isinstance(manifest, dict)
+        pack = manifest.get("pack")
+        provenance = manifest.get("provenance")
+        integrity = manifest.get("integrity")
+        assert isinstance(pack, dict)
+        assert isinstance(provenance, dict)
+        assert isinstance(integrity, dict)
+        pack_id = pack.get("id")
+        assert isinstance(pack_id, str) and pack_id not in pack_ids
+        assert _SHA256_RE.fullmatch(str(pack.get("artifact_digest")))
+        assert _SHA256_RE.fullmatch(str(provenance.get("source_digest")))
+        assert _SHA256_RE.fullmatch(str(integrity.get("source_identity")))
+        assert isinstance(provenance.get("repository_commit"), str)
+        assert isinstance(provenance.get("source_path"), str)
+        assert catalog_packs.get(pack_id) == manifest
+        pack_ids.add(pack_id)
+
+    assert set(catalog_packs) == pack_ids

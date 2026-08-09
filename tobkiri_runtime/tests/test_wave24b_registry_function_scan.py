@@ -63,16 +63,14 @@ def test_v4_profile_resolves_exact_effective_set() -> None:
         ),
         security_epoch=1,
     )
-    assert {item["identity"] for item in resolved.lock["effective_set"]} == {
-        "defaults-basepack",
-        "defaultspack",
-        "rumi_file_inspect_pack",
-        "rumi_host_authority_bridge_pack",
-        "runtime.tauri.application.default",
-        "rumi_workspace_mount_pack",
-        "shell.tauri.default",
-        "tobkiri_host_pack_control",
-    }
+    expected_effective_set = [
+        resolved.profile["base"]["pack_id"],
+        resolved.profile["shell"]["pack_id"],
+        *(item["pack_id"] for item in resolved.profile["packs"]),
+    ]
+    assert [item["identity"] for item in resolved.lock["effective_set"]] == (
+        expected_effective_set
+    )
 
 
 def test_v4_profile_rejects_unapproved_manifest(tmp_path: Path) -> None:

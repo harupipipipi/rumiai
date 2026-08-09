@@ -134,6 +134,16 @@ class FakeLima:
         raise AssertionError(argv)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_packvm_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep host Lima image-cache discovery inside each test's temp home."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+
 @pytest.fixture
 def provisioner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     test_home = tmp_path / "home"

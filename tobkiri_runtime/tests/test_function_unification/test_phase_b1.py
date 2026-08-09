@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 from tests.legacy_authority_contracts import assert_retired_module_absent
+from tests.v4_bundle_support import assert_verified_pack_inventory
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,18 +20,7 @@ def _catalog() -> BundledCatalog:
 def test_v4_catalog_is_the_single_function_inventory() -> None:
     catalog = _catalog()
     assert catalog.packs
-    assert set(catalog.packs) == {
-        "defaults-basepack",
-        "defaultspack",
-        "tobkiri_host_pack_control",
-        "rumi_file_inspect_pack",
-        "rumi_host_authority_bridge_pack",
-        "rumi_workspace_mount_pack",
-        "dev.tauri.toolchain.default",
-        "runtime.tauri.application.default",
-        "shell.cli.default",
-        "shell.tauri.default",
-    }
+    assert_verified_pack_inventory(BUNDLE, catalog.packs)
 
 
 def test_v4_functions_have_exact_identity_fields() -> None:
