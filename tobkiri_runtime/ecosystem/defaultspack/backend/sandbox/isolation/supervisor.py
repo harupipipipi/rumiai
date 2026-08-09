@@ -47,6 +47,7 @@ MAX_CODING_WORKSPACE_EXPORT_FILE_BYTES = 4 * 1024 * 1024
 GUEST_TIMEOUT_EXIT_CODE = 124
 SANDBOX_ROOT_MARKER = ".rumi-sandbox-root"
 PACK_DATA_MIGRATION_MARKER = ".rumi-host-pack-data-migration-v1"
+CHILD_PROCESS_POLICY_ENV = "RUMI_SANDBOX_DENY_CHILD_PROCESS"
 
 
 def _run_bounded_process(
@@ -266,6 +267,7 @@ class ManagedSandboxSupervisor:
                     argv=("python3", f"/workspace/{runner_path.name}", "--input-file", "/workspace/input.json"),
                     env={
                         "RUMI_PROFILE_RUNTIME": str(request.get("profile_runtime") or ""),
+                        CHILD_PROCESS_POLICY_ENV: "1",
                     },
                     network_enabled=False,
                 )
@@ -365,6 +367,7 @@ class ManagedSandboxSupervisor:
                         "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
                         "PYTHONDONTWRITEBYTECODE": "1",
                         "PYTHONNOUSERSITE": "1",
+                        CHILD_PROCESS_POLICY_ENV: "1",
                         "RUMI_PROFILE_RUNTIME": str(request.get("profile_runtime") or ""),
                         "RUMI_SANDBOX_ID": sandbox_id,
                     },

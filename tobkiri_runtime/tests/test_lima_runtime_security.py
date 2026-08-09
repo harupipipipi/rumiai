@@ -10,6 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from ecosystem.defaultspack.backend.sandbox.isolation import (
+    supervisor as supervisor_module,
+)
 from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
     LIMA_GUEST_WORKSPACE_ROOT,
     LIMA_GUEST_PACK_DATA_ROOT,
@@ -271,6 +274,72 @@ def test_pack_data_migration_rolls_back_when_marker_commit_fails(
     assert not (data_dir / ".migration-lock").exists()
 
 
+def test_lima_capability_injects_child_process_policy_only_into_pack_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    function_dir = tmp_path / "function"
+    function_dir.mkdir()
+    main_py = function_dir / "main.py"
+    main_py.write_text(
+        "def run(context, args):\n    return {'safe': True}\n",
+        encoding="utf-8",
+    )
+    runner_path = Path(__file__).resolve().parents[1] / "core_runtime" / "function_runner.py"
+    commands: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(
+        supervisor_module,
+        "resolve_attested_lima_runtime",
+        lambda: ("/opt/homebrew/bin/limactl", "rumi-managed-runtime"),
+    )
+    monkeypatch.setattr(
+        supervisor_module,
+        "_lima_import_workspace",
+        lambda **_kwargs: SimpleNamespace(returncode=0, stderr=b""),
+    )
+    monkeypatch.setattr(
+        supervisor_module,
+        "_lima_remove_workspace",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def run(command, **_kwargs):
+        commands.append(tuple(command))
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout='{"safe": true}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr(supervisor_module, "_run_bounded_process", run)
+
+    result = ManagedSandboxSupervisor()._execute_capability_lima(
+        {
+            "pack_id": "third_party_pack",
+            "function_id": "safe_operation",
+            "function_dir": str(function_dir),
+            "main_py_path": str(main_py),
+            "entrypoint": "main.py:run",
+            "runner_path": str(runner_path),
+            "timeout_seconds": 10,
+        }
+    )
+
+    assert result["success"] is True
+    assert len(commands) == 1
+    command = commands[0]
+    policy_index = command.index("RUMI_SANDBOX_DENY_CHILD_PROCESS")
+    assert command[policy_index - 1] == "--setenv"
+    assert command[policy_index + 1] == "1"
+    separator = command.index("--", policy_index)
+    assert command[separator + 1 : separator + 3] == (
+        "python3",
+        "/workspace/function_runner.py",
+    )
+
+
 @pytest.mark.skipif(
     os.environ.get("RUMI_RUN_LIMA_INTEGRATION") != "1",
     reason="real Lima sandbox integration is opt-in",
@@ -345,6 +414,32 @@ def test_real_macos_lima_boundary_blocks_host_siblings_and_network(
         "sibling_pack_secret": False,
         "network": False,
     }
+
+    main_py.write_text(
+        "import subprocess\n"
+        "\n"
+        "def run(context, args):\n"
+        "    subprocess.run(['/bin/sh', '-c', 'exit 0'], check=True)\n"
+        "    return {'unexpected': True}\n",
+        encoding="utf-8",
+    )
+    child_process = ManagedSandboxSupervisor().execute_capability(
+        {
+            "pack_id": "third_party_pack",
+            "function_id": "child_process_probe",
+            "function_dir": str(function_dir),
+            "main_py_path": str(main_py),
+            "entrypoint": "main.py:run",
+            "runner_path": str(runner_path),
+            "timeout_seconds": 10,
+        }
+    )
+    assert child_process["success"] is False
+    assert child_process["execution_boundary"] == "managed_sandbox"
+    assert child_process["error_type"] == "sandbox_policy_denied"
+    assert child_process["error"] == (
+        "Sandbox Pack functions cannot create child processes"
+    )
 
     coding_workspace = tmp_path / "coding"
     coding_workspace.mkdir()
