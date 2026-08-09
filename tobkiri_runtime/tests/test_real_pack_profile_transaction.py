@@ -283,6 +283,80 @@ def _catalog(port: int, auth: Mapping[str, str]) -> dict[str, Any]:
     return data
 
 
+def _activate_current_profile(
+    port: int,
+    auth: Mapping[str, str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run one complete Profile ceremony through the production HTTP surface."""
+
+    status, payload = _contract_request(
+        port,
+        auth,
+        "GET",
+        "/api/runtime-surface/profile",
+    )
+    assert status == 200, payload
+    profile = payload["data"]
+    desired = [
+        item["pack_id"]
+        for item in profile["data"]["profile_document"]["packs"]
+        if item.get("role") != "application"
+    ]
+    status, resolved = _contract_request(
+        port,
+        auth,
+        "POST",
+        "/api/runtime-surface/profile-change/resolve",
+        body={
+            "profile_id": "defaults",
+            "expected_profile_revision": profile["profile_revision"],
+            "expected_plan_digest": profile["plan_digest"],
+            "desired_pack_ids": desired,
+        },
+    )
+    assert status == 200, resolved
+    assert resolved["data"]["state"] == "resolved"
+    status, reviewed = _contract_request(
+        port,
+        auth,
+        "POST",
+        "/api/runtime-surface/profile-change/review",
+        body={
+            "candidate_id": resolved["data"]["candidate_id"],
+            "candidate_digest": resolved["data"]["candidate_digest"],
+        },
+    )
+    assert status == 200, reviewed
+    assert reviewed["data"]["state"] == "reviewed"
+    status, approved = _contract_request(
+        port,
+        auth,
+        "POST",
+        "/api/runtime-surface/profile-change/approve",
+        body={
+            "candidate_id": reviewed["data"]["candidate_id"],
+            "candidate_digest": reviewed["data"]["candidate_digest"],
+        },
+    )
+    assert status == 200, approved
+    assert approved["data"]["state"] == "approved"
+    activation_request = {
+        "approval_id": approved["data"]["approval_id"],
+        "approval_digest": approved["data"]["approval_digest"],
+    }
+    status, activated = _contract_request(
+        port,
+        auth,
+        "POST",
+        "/api/runtime-surface/profile-change/activate",
+        body=activation_request,
+    )
+    assert status == 200, activated
+    assert activated["data"]["state"] == "active"
+    assert activated["data"]["authoritative_snapshot"]["state"] == "ready"
+    return activation_request, activated["data"]
+
+
 def _pack_status(port: int, auth: Mapping[str, str], pack_id: str) -> dict[str, Any]:
     status, payload = _contract_request(port, auth, "GET", "/api/ui/catalog")
     assert status == 200, payload
@@ -439,6 +513,7 @@ def test_real_pack_profile_transaction_survives_process_restart_and_revocation(
 
         enabled_catalog = _catalog(int(first_state["port"]), first_auth)
         enabled_disk = _disk_profile_state(user_data)
+        enabled_activation_id = enabled_disk["activation_id"]
         enabled_set = {item[0] for item in enabled_disk["effective_pack_set"]}
         assert TARGET_PACK in enabled_set
         assert enabled_disk["profile_id"] == initial_disk["profile_id"]
@@ -451,6 +526,46 @@ def test_real_pack_profile_transaction_survives_process_restart_and_revocation(
             item for item in enabled_catalog["packs"] if item["pack_id"] == TARGET_PACK
         )
         assert enabled_pack["enabled"] is True
+        approval_path = (
+            user_data / "pack_control" / "approvals" / "defaults" / f"{TARGET_PACK}.json"
+        )
+        stable_pack_approval = approval_path.read_bytes()
+
+        # Repeat the full UI-facing ceremony twice without changing the Pack
+        # catalog.  Each activation is a new immutable authority generation;
+        # the persistent Pack approval and stable principals remain the same.
+        first_activation_request, first_activation = _activate_current_profile(
+            int(first_state["port"]),
+            first_auth,
+        )
+        first_ceremony_disk = _disk_profile_state(user_data)
+        assert first_activation["activation_id"] == first_ceremony_disk["activation_id"]
+        assert first_ceremony_disk["activation_id"] != enabled_disk["activation_id"]
+        second_activation_request, second_activation = _activate_current_profile(
+            int(first_state["port"]),
+            first_auth,
+        )
+        second_ceremony_disk = _disk_profile_state(user_data)
+        assert second_activation["activation_id"] == second_ceremony_disk["activation_id"]
+        assert second_ceremony_disk["activation_id"] != first_ceremony_disk["activation_id"]
+        assert second_ceremony_disk["effective_pack_set"] == (
+            first_ceremony_disk["effective_pack_set"]
+        )
+        assert approval_path.read_bytes() == stable_pack_approval
+        status, replay = _contract_request(
+            int(first_state["port"]),
+            first_auth,
+            "POST",
+            "/api/runtime-surface/profile-change/activate",
+            body=first_activation_request,
+        )
+        assert status == 200, replay
+        assert replay["data"]["state"] == "error"
+        assert replay["data"]["code"] == "UNAPPROVED"
+        assert second_activation_request != first_activation_request
+        enabled_disk = second_ceremony_disk
+        enabled_snapshots = _activation_snapshots(user_data)
+
         operation_before_restart = _pack_status(int(first_state["port"]), first_auth, TARGET_PACK)
         assert operation_before_restart["pack_id"] == TARGET_PACK
         assert operation_before_restart["enabled"] is True
@@ -474,9 +589,6 @@ def test_real_pack_profile_transaction_survives_process_restart_and_revocation(
         operation_after_restart = _pack_status(int(second_state["port"]), second_auth, TARGET_PACK)
         assert operation_after_restart["enabled"] is True
 
-        approval_path = (
-            user_data / "pack_control" / "approvals" / "defaults" / f"{TARGET_PACK}.json"
-        )
         approved_payload = approval_path.read_bytes()
         status, disabled = _contract_request(
             int(second_state["port"]),
@@ -585,6 +697,47 @@ def test_real_pack_profile_transaction_survives_process_restart_and_revocation(
 
         with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
             events = authority.audit_events()
+            grants = authority.list_grants()
+            providers = authority.list_provider_authorities()
+        target_artifact_digest = next(
+            digest
+            for pack_id, digest in enabled_disk["effective_pack_set"]
+            if pack_id == TARGET_PACK
+        )
+        dynamic_grants = [
+            grant
+            for grant in grants
+            if grant.grant_id.startswith("grant.defaults.dynamic-pack.")
+            and grant.target.parent_artifact_digest == target_artifact_digest
+        ]
+        assert {
+            enabled_activation_id,
+            first_ceremony_disk["activation_id"],
+            second_ceremony_disk["activation_id"],
+        }.issubset({grant.activation_id for grant in dynamic_grants})
+        assert len({grant.grant_id for grant in dynamic_grants}) == len(dynamic_grants)
+        dynamic_providers = [
+            provider
+            for provider in providers
+            if provider.record_id.startswith("provider.defaults.dynamic-pack.")
+            and provider.provider.parent_artifact_digest == target_artifact_digest
+        ]
+        principals_by_operation: dict[str, set[str]] = {}
+        for provider in dynamic_providers:
+            principals_by_operation.setdefault(provider.provider.operation_id, set()).add(
+                provider.provider.principal_id
+            )
+        assert principals_by_operation
+        assert all(len(principals) == 1 for principals in principals_by_operation.values())
+        dynamic_approval_ids = {
+            str(record["record_id"])
+            for event in events
+            if event["event_type"] == "authority_records_committed"
+            for record in event["payload"].get("records", [])
+            if record["record_type"] == "approval"
+            and str(record["record_id"]).startswith("approval.defaults.dynamic-pack.")
+        }
+        assert len(dynamic_approval_ids) >= 3
         assert any(
             event["event_type"] == "pack_approval_revoked"
             and event["event_state"] == "committed"

@@ -368,8 +368,15 @@ def _commit_pack_control_authority(
         if pack_approval_revision is not None
         else identity_suffix
     )
+    # A Pack approval revision names the stable user decision, not one runtime
+    # activation.  The immutable Authority snapshot below is activation-bound,
+    # so every record in its bundle must use the activation generation as part
+    # of its durable identity.  This preserves prior rows without replaying or
+    # colliding with them when an unchanged Pack is activated again.
     approval = ApprovalRecord(
-        approval_id=(f"approval.defaults.{authority_label}.{operation_suffix}.{approval_identity}"),
+        approval_id=(
+            f"approval.defaults.{authority_label}.{operation_suffix}.{record_identity}"
+        ),
         snapshot_digest=canonical_digest(
             {
                 "ceremony": "defaults.activate",
