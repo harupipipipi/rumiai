@@ -31,8 +31,11 @@ Pack architecture v4について文書が矛盾する場合は、次の順で優
 4. migration guides and current implementation notes
 5. legacy runtime, namespace, fallback, Pack authoring documents
 
-v4移行完了まで既存文書は現行実装の説明として残りますが、新しいauthority、
-isolation、activation、distribution、timeout設計の根拠には使用しません。
+production v4 cutoverは完了済みです。既存文書は履歴またはoffline migrationの
+説明として残りますが、authority、isolation、activation、distribution、timeout
+設計の根拠には使用しません。現在の実装状態は
+[status/current-status.md](./status/current-status.md) とtracked complete-v4 evidenceを
+参照してください。
 
 ## まずここを見れば全体像が分かる3本
 

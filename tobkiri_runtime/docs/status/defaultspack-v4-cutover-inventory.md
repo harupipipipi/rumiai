@@ -4,8 +4,24 @@ Inventory baseline: repository commit
 `64b2240e2e3d019c97920b6fb0e278cca83d6691` (2026-08-05).
 
 This document records the pre-cutover difference between the normative Protocol
-v4/Authority Kernel model and the bundled defaults implementation. It is an
-implementation checklist, not a compatibility promise.
+v4/Authority Kernel model and the bundled defaults implementation, together with
+the completed cutover result. It is not a compatibility promise.
+
+## Cutover result
+
+The production cutover is complete. The tracked complete-v4 scanner currently
+classifies all 142 bundled production Packs as `v4-authoritative`, requires four
+canonical v4 artifacts per Pack, and reports zero findings for artifact
+contracts, Authority/ResolvedPlan scope, reachable legacy lookup/fallback,
+double authority, Launcher safety, and offline projection identity. The exact
+counts and source commit are generated in:
+
+- `generated/architecture/architecture_inventory.json`
+- `scripts/quality/evidence/complete_v4_migration_red_64b2240e.json`
+- `tests/test_complete_v4_migration_gate.py`
+
+The baseline tables below are retained as historical removal evidence. They do
+not describe a live production fallback.
 
 ## Normative authority
 
@@ -69,7 +85,7 @@ extension:
 
 ## Required negative regression
 
-The cutover is incomplete unless tests deny all of the following:
+The cutover remains complete only while tests deny all of the following:
 
 - missing or duplicate foundational conversation Provider;
 - unapproved, hash-drifted, or unlisted artifacts;
@@ -81,6 +97,5 @@ The cutover is incomplete unless tests deny all of the following:
 - an unknown legacy route, function alias, or Registry lookup;
 - restart from any record other than the last atomically committed v4 activation.
 
-Generated inventories and projections are deliberately excluded from this core
-change. They are regenerated offline after the handwritten cutover and are never
-read by the runtime authority path.
+Generated inventories and projections are now checked in and freshness-gated.
+They are regenerated offline and are never read as runtime authority inputs.

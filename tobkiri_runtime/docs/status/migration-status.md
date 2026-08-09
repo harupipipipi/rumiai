@@ -1,6 +1,6 @@
 # Migration Status
 
-Last updated: 2026-07-10
+Last updated: 2026-08-10
 
 ## `defaults` -> `defaultspack`
 
@@ -15,16 +15,19 @@ Status:
 - v4 generation and integrity checks use canonical Function identities and real implementation hashes.
 - The verified-unused `defaults.model_runtime.*` group is not a v4 Function identity.
 
-## Handwritten API -> `api_routes`
+## Handwritten API -> v4 contract routes
 
 - Control-panel API routes are manifest-driven.
 - Shared system GET routes are now declared in `core_runtime/core_pack/core_system_api/ecosystem.json`.
-- `PackAPIHandler.do_GET()` now relies on route dispatch for core system routes before pack-route fallback.
-- Remaining verb-handler and mixin families are inventoried in `docs/status/handwritten-route-inventory.md`.
+- `PackAPIHandler` exposes a finite, authenticated frontend contract map and
+  PackVM lifecycle API.
+- Direct Pack-specific legacy URLs do not become runtime authority and return a
+  closed response outside the selected contract map.
 
 Status:
-- Major route families are already table-driven.
-- Some transport-specific and migration-specific branches still remain in verb handlers.
+- Production Pack operations are contract-selected and Broker-dispatched.
+- Remaining verb handlers are transport adapters, authentication/bootstrap, or
+  explicitly bounded lifecycle endpoints; they are not legacy execution fallback.
 
 ## HTTP block route -> function route
 
@@ -34,8 +37,10 @@ Status:
 - The chat-channel compatibility family is not a v4 executable identity.
 
 Status:
-- Many block-backed routes can now resolve through a function boundary first.
-- Some routes remain explicit legacy fallbacks until replacement functions exist.
+- Production v4 routes resolve to one exact Function principal and backend.
+- Unknown, stale, replayed, or unselected calls fail closed.
+- Legacy HTTP metadata is accepted only by the offline projection generator and
+  is unreachable from production dispatch.
 
 ## Implicit domain imports -> declared boundaries
 
@@ -43,5 +48,6 @@ Status:
 - `scripts/quality/scan_defaultspack_boundaries.py` checks cross-domain imports against that policy.
 
 Status:
-- Baseline policy is captured and enforced.
-- Tightening the policy is a follow-up migration, not finished work.
+- The declared boundary policy and zero-finding complete-v4 reachability gate are
+  enforced in CI.
+- Future policy narrowing is ordinary hardening, not unfinished v4 cutover work.

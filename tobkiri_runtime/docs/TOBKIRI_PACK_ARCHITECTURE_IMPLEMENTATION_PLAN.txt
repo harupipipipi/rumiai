@@ -1,17 +1,36 @@
 Tobkiri Pack Architecture 再設計・実装計画
 ============================================
 
-文書状態: Normative / Accepted architecture baseline（実装前）
+文書状態: Normative / Accepted architecture baseline（production v4 cutover実装済み）
 文書owner: Tobkiri Runtime / Pack Architecture
 対象リポジトリ: harupipipipi/tobkiri
 対象ブランチ: codex/pack-architecture-program-soon
 確認コミット: b04ca0bff0220d83a03625acd5e53afe60bf7d9a
 作成日: 2026-08-03
+実装状態更新: 2026-08-10
 Supersedes: 既存のnamespace/runtime/fallback文書のうち本計画と矛盾する部分
 Must be read with:
   - ADR-014_BOUNDARY_CAPABILITY_GRANTS.txt
   - ADR-015_RUNTIME_SECURITY_LIFECYCLE.txt
   - ADR-016_BASE_SHELL_APPLICATION_MODEL.txt
+
+実装結果:
+
+  - bundled production inventoryは142 Packすべてがv4-authoritativeである。
+  - 各Packはpack.v4.json、contracts.v4.json、artifact-index.v4.json、
+    executables.v4.jsonの4 artifactを持つ。
+  - defaults Profileは明示Base、shell.tauri.default、Application、Authority
+    snapshot、ProfileLock、ResolvedPlan、ActivationRecordだけから構成される。
+  - 到達可能なlegacy Registry/installed lookup、implicit fallback、二重authority、
+    unverified Shell launchはcomplete-v4 gateで0件を強制する。
+  - legacy文書から生成する有限projectionはoffline migration artifactであり、
+    activation、dispatch、approval、identityのauthorityにはならない。
+  - 外部Normal Packは署名/CAS admission、approval、Profile再解決後にのみPackVMへ
+    dispatchされる。PackVMは明示prepare/consent/provisionとauthenticated
+    attestationを要求し、Host fallbackを持たない。
+  - 実装証拠の正本はgenerated/architecture/architecture_inventory.json、
+    scripts/quality/evidence/complete_v4_migration_red_64b2240e.json、
+    tests/test_complete_v4_migration_gate.pyである。
 
 
 0. この文書の目的
@@ -39,9 +58,9 @@ canonical vector、生成可能なinventoryとする。ダウンロード済み�
 注意:
 
   - v1.1のメモリ・ディスク・起動時間はengineering estimateであり実測値ではない。
-  - このプロジェクトは未完成で、既存Packの後方互換や重要stateの保持を必須にしない。
-  - したがって、旧Runtimeへ継ぎ足すより、新しい正規経路を別packageとして作り、既存Packを移植後に旧経路を削除する。
-  - この文書自体の作成以外に、実装コードは変更しない。
+  - 設計開始時は既存Packの後方互換や重要stateの保持を必須にしない前提だった。
+    実装済みcutoverでは既存Packをv4 artifactへ移行し、旧production経路を
+    到達不能にしたうえで、必要なユーザーstateを明示migration境界で扱う。
   - 実装開始前に、repo commit、対象tree、入力ファイルpath/digest、scanner versionを
     持つtracked inventory JSONを生成し、CIで再生成差分を検査する。
   - bundleを将来normative inputへ昇格する場合は、本体または不変URI、byte size、
