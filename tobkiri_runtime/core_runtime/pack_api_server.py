@@ -560,7 +560,6 @@ class PackAPIHandler(
             )
             fresh = replay_guard.consume(session_id, request_id)
             try:
-                operation_journal.prepare_for_operation()
                 operation_record, created = operation_journal.begin_operation(
                     request_id=request_id,
                     session_id=session_id,

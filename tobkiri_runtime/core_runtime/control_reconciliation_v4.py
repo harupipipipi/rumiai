@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
+import shutil
 import sqlite3
+import stat
+import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.errors import CanonicalizationError
@@ -21,63 +26,179 @@ class ControlReconciliationError(RuntimeError):
 class ControlReconciliationStore:
     """SQLite-backed exact-once state for Host control mutations."""
 
-    def __init__(self, path: Path, *, instance_id: str = "") -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        instance_id: str = "",
+        lease_timeout_seconds: float = 30.0,
+        heartbeat_interval_seconds: float | None = None,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        if lease_timeout_seconds <= 0:
+            raise ValueError("lease_timeout_seconds must be positive")
+        heartbeat_interval = heartbeat_interval_seconds or min(5.0, lease_timeout_seconds / 3.0)
+        if heartbeat_interval <= 0 or heartbeat_interval >= lease_timeout_seconds:
+            raise ValueError("heartbeat interval must be positive and shorter than lease")
         self.path = Path(path)
-        self.instance_id = instance_id
+        self.instance_id = instance_id or f"store-{secrets.token_hex(16)}"
+        self._process_id = os.getpid()
+        self._process_token = secrets.token_hex(32)
+        self._lease_timeout_seconds = lease_timeout_seconds
+        self._heartbeat_interval_seconds = heartbeat_interval
+        self._clock = clock
         self._initialization_lock = threading.RLock()
         self._initialized = False
-        self._operation_recovery_complete = False
+        self._heartbeat_lock = threading.Lock()
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_thread: threading.Thread | None = None
 
     def _prepare_path(self) -> None:
-        if self.path.is_symlink():
-            raise ControlReconciliationError("control journal path cannot be a symlink")
-        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if self.path.parent.is_symlink():
-            raise ControlReconciliationError("control journal parent cannot be a symlink")
+        try:
+            if self.path.is_symlink():
+                raise ControlReconciliationError("control journal path cannot be a symlink")
+            self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if self.path.parent.is_symlink():
+                raise ControlReconciliationError("control journal parent cannot be a symlink")
+        except ControlReconciliationError:
+            raise
+        except OSError as error:
+            raise ControlReconciliationError("control journal path is unavailable") from error
 
     def _open_connection(self) -> sqlite3.Connection:
-        connection: sqlite3.Connection | None = None
-        try:
-            connection = sqlite3.connect(
-                str(self.path),
-                timeout=30.0,
-                isolation_level=None,
-            )
-            connection.row_factory = sqlite3.Row
-            connection.execute("PRAGMA journal_mode=WAL")
-            connection.execute("PRAGMA synchronous=FULL")
-            connection.execute("PRAGMA trusted_schema=OFF")
-            connection.execute("PRAGMA foreign_keys=ON")
-            return connection
-        except (OSError, sqlite3.Error) as error:
-            if connection is not None:
-                connection.close()
-            raise ControlReconciliationError("control journal is unavailable") from error
+        for attempt in range(50):
+            connection: sqlite3.Connection | None = None
+            try:
+                connection = sqlite3.connect(
+                    str(self.path),
+                    timeout=30.0,
+                    isolation_level=None,
+                )
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA busy_timeout=30000")
+                connection.execute("PRAGMA journal_mode=WAL")
+                connection.execute("PRAGMA synchronous=FULL")
+                connection.execute("PRAGMA trusted_schema=OFF")
+                connection.execute("PRAGMA foreign_keys=ON")
+                return connection
+            except sqlite3.OperationalError as error:
+                if connection is not None:
+                    connection.close()
+                if "locked" not in str(error).lower() or attempt == 49:
+                    raise ControlReconciliationError("control journal is unavailable") from error
+                time.sleep(min(0.01 * (attempt + 1), 0.1))
+            except (OSError, sqlite3.Error) as error:
+                if connection is not None:
+                    connection.close()
+                raise ControlReconciliationError("control journal is unavailable") from error
+        raise ControlReconciliationError("control journal is unavailable")  # pragma: no cover
 
     def _connect(self) -> sqlite3.Connection:
         self._initialize()
         return self._open_connection()
 
-    def _connect_existing(self) -> sqlite3.Connection:
-        """Open existing durable state without creating files or sidecars."""
+    @contextmanager
+    def _connect_existing(self) -> Iterator[sqlite3.Connection]:
+        """Read a stable private snapshot without touching source sidecars."""
 
-        if self.path.is_symlink() or self.path.parent.is_symlink():
-            raise ControlReconciliationError("control journal path is unsafe")
-        if not self.path.is_file():
-            raise ControlReconciliationError("control journal is unavailable")
         connection: sqlite3.Connection | None = None
         try:
-            uri = f"{self.path.absolute().as_uri()}?mode=ro"
-            connection = sqlite3.connect(uri, timeout=30.0, uri=True)
-            connection.row_factory = sqlite3.Row
-            connection.execute("PRAGMA query_only=ON")
-            connection.execute("PRAGMA trusted_schema=OFF")
-            connection.execute("PRAGMA foreign_keys=ON")
-            return connection
-        except (OSError, sqlite3.Error) as error:
+            with tempfile.TemporaryDirectory(prefix="tobkiri-control-read-") as temporary:
+                snapshot = Path(temporary) / self.path.name
+                self._copy_immutable_snapshot(snapshot)
+                connection = sqlite3.connect(
+                    str(snapshot),
+                    timeout=30.0,
+                    isolation_level=None,
+                )
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA query_only=ON")
+                connection.execute("PRAGMA trusted_schema=OFF")
+                connection.execute("PRAGMA foreign_keys=ON")
+                yield connection
+        except ControlReconciliationError:
+            raise
+        except OSError as error:
+            raise ControlReconciliationError("control journal path is unavailable") from error
+        except sqlite3.Error as error:
+            raise ControlReconciliationError("control journal is unavailable") from error
+        finally:
             if connection is not None:
                 connection.close()
-            raise ControlReconciliationError("control journal is unavailable") from error
+
+    def _copy_immutable_snapshot(self, snapshot: Path) -> None:
+        """Copy a stable database/WAL pair through no-follow file descriptors."""
+
+        source_paths = (self.path, Path(f"{self.path}-wal"))
+        fingerprints: dict[Path, tuple[int, int, int, int]] = {}
+        try:
+            if self.path.parent.is_symlink():
+                raise ControlReconciliationError("control journal path is unsafe")
+            for source in source_paths:
+                try:
+                    metadata = source.lstat()
+                except FileNotFoundError:
+                    if source == self.path:
+                        raise ControlReconciliationError("control journal is unavailable") from None
+                    continue
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise ControlReconciliationError("control journal path is unsafe")
+                fingerprints[source] = (
+                    metadata.st_dev,
+                    metadata.st_ino,
+                    metadata.st_size,
+                    metadata.st_mtime_ns,
+                )
+            no_follow = getattr(os, "O_NOFOLLOW", 0)
+            for source, fingerprint in fingerprints.items():
+                descriptor = os.open(source, os.O_RDONLY | no_follow)
+                try:
+                    opened = os.fstat(descriptor)
+                    opened_fingerprint = (
+                        opened.st_dev,
+                        opened.st_ino,
+                        opened.st_size,
+                        opened.st_mtime_ns,
+                    )
+                    if opened_fingerprint != fingerprint:
+                        raise ControlReconciliationError(
+                            "control journal changed during immutable read"
+                        )
+                    target = snapshot if source == self.path else Path(f"{snapshot}-wal")
+                    with os.fdopen(os.dup(descriptor), "rb") as reader:
+                        with target.open("wb") as writer:
+                            shutil.copyfileobj(reader, writer)
+                finally:
+                    os.close(descriptor)
+            for source, fingerprint in fingerprints.items():
+                metadata = source.lstat()
+                current = (
+                    metadata.st_dev,
+                    metadata.st_ino,
+                    metadata.st_size,
+                    metadata.st_mtime_ns,
+                )
+                if current != fingerprint:
+                    raise ControlReconciliationError(
+                        "control journal changed during immutable read"
+                    )
+        except ControlReconciliationError:
+            raise
+        except OSError as error:
+            raise ControlReconciliationError("control journal path is unavailable") from error
+
+    def _read_existing_one(
+        self,
+        query: str,
+        parameters: tuple[object, ...],
+    ) -> sqlite3.Row | None:
+        try:
+            with self._connect_existing() as connection:
+                return connection.execute(query, parameters).fetchone()
+        except ControlReconciliationError:
+            raise
+        except (OSError, sqlite3.Error) as error:
+            raise ControlReconciliationError("control journal read failed") from error
 
     def _initialize(self) -> None:
         if self._initialized:
@@ -122,6 +243,9 @@ class ControlReconciliationStore:
                     request_digest TEXT NOT NULL,
                     state TEXT NOT NULL,
                     owner_instance TEXT NOT NULL,
+                    owner_pid INTEGER NOT NULL,
+                    owner_process_token TEXT NOT NULL,
+                    lease_expires_at REAL NOT NULL,
                     result_json TEXT,
                     result_digest TEXT,
                     record_refs_json TEXT NOT NULL,
@@ -131,8 +255,33 @@ class ControlReconciliationStore:
                 );
                 CREATE INDEX IF NOT EXISTS control_operation_state_idx
                     ON control_operations(state, updated_at);
+                CREATE TABLE IF NOT EXISTS control_recovery_audit (
+                    recovery_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    recovered_at REAL NOT NULL,
+                    recovered_by_instance TEXT NOT NULL,
+                    recovered_by_process_token TEXT NOT NULL,
+                    abandoned_owner_instance TEXT NOT NULL,
+                    abandoned_owner_pid INTEGER NOT NULL,
+                    abandoned_owner_process_token TEXT NOT NULL,
+                    recovered_count INTEGER NOT NULL,
+                    reason TEXT NOT NULL
+                );
                 """
                     )
+                    columns = {
+                        str(row[1])
+                        for row in connection.execute("PRAGMA table_info(control_operations)")
+                    }
+                    migrations = {
+                        "owner_pid": "INTEGER NOT NULL DEFAULT 0",
+                        "owner_process_token": "TEXT NOT NULL DEFAULT ''",
+                        "lease_expires_at": "REAL NOT NULL DEFAULT 0",
+                    }
+                    for column, declaration in migrations.items():
+                        if column not in columns:
+                            connection.execute(
+                                f"ALTER TABLE control_operations ADD COLUMN {column} {declaration}"
+                            )
                     connection.commit()
                 if os.name != "nt":
                     os.chmod(self.path, 0o600)
@@ -141,14 +290,57 @@ class ControlReconciliationStore:
             self._initialized = True
 
     def prepare_for_operation(self) -> None:
-        """Initialize and recover once at an authorized mutation boundary."""
+        """Initialize and recover only provably expired operation leases."""
 
         with self._initialization_lock:
-            if self._operation_recovery_complete:
-                return
             self._initialize()
             self.recover_abandoned_operations()
-            self._operation_recovery_complete = True
+
+    def close(self) -> None:
+        """Stop this store's lease heartbeat without altering durable state."""
+
+        self._heartbeat_stop.set()
+        thread = self._heartbeat_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=max(1.0, self._heartbeat_interval_seconds * 2.0))
+
+    def _ensure_heartbeat(self) -> None:
+        with self._heartbeat_lock:
+            if self._heartbeat_thread is not None and self._heartbeat_thread.is_alive():
+                return
+            self._heartbeat_stop.clear()
+            thread = threading.Thread(
+                target=self._heartbeat_loop,
+                name=f"control-reconciliation-{self.instance_id}",
+                daemon=True,
+            )
+            self._heartbeat_thread = thread
+            thread.start()
+
+    def _heartbeat_loop(self) -> None:
+        while not self._heartbeat_stop.wait(self._heartbeat_interval_seconds):
+            try:
+                with self._connect() as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    cursor = connection.execute(
+                        """
+                        UPDATE control_operations
+                        SET lease_expires_at=?, updated_at=?
+                        WHERE state='pending' AND owner_instance=?
+                            AND owner_process_token=?
+                        """,
+                        (
+                            self._clock() + self._lease_timeout_seconds,
+                            self._clock(),
+                            self.instance_id,
+                            self._process_token,
+                        ),
+                    )
+                    connection.commit()
+                    if cursor.rowcount == 0:
+                        return
+            except (ControlReconciliationError, OSError, sqlite3.Error):
+                continue
 
     @staticmethod
     def session_digest(session_id: str) -> str:
@@ -231,11 +423,10 @@ class ControlReconciliationStore:
     ) -> Mapping[str, Any]:
         """Load one exact session-bound ceremony record."""
 
-        with self._connect_existing() as connection:
-            row = connection.execute(
-                "SELECT * FROM profile_ceremonies WHERE candidate_id = ?",
-                (candidate_id,),
-            ).fetchone()
+        row = self._read_existing_one(
+            "SELECT * FROM profile_ceremonies WHERE candidate_id = ?",
+            (candidate_id,),
+        )
         record = _ceremony_record(row)
         if record is None:
             raise ControlReconciliationError("Profile ceremony candidate is unknown")
@@ -252,11 +443,10 @@ class ControlReconciliationStore:
     ) -> Mapping[str, Any] | None:
         """Return the candidate uniquely bound to a digest and session."""
 
-        with self._connect_existing() as connection:
-            row = connection.execute(
-                "SELECT * FROM profile_ceremonies WHERE candidate_digest = ?",
-                (candidate_digest,),
-            ).fetchone()
+        row = self._read_existing_one(
+            "SELECT * FROM profile_ceremonies WHERE candidate_digest = ?",
+            (candidate_digest,),
+        )
         record = _ceremony_record(row)
         if record is None:
             return None
@@ -375,11 +565,10 @@ class ControlReconciliationStore:
     ) -> Mapping[str, Any]:
         """Load one durable approval without accepting client authority claims."""
 
-        with self._connect_existing() as connection:
-            row = connection.execute(
-                "SELECT * FROM profile_ceremonies WHERE approval_id = ?",
-                (approval_id,),
-            ).fetchone()
+        row = self._read_existing_one(
+            "SELECT * FROM profile_ceremonies WHERE approval_id = ?",
+            (approval_id,),
+        )
         record = _ceremony_record(row)
         if record is None or record["state"] not in {"approved", "activated"}:
             raise ControlReconciliationError("Profile approval is unavailable")
@@ -443,7 +632,8 @@ class ControlReconciliationStore:
     ) -> tuple[Mapping[str, Any], bool]:
         """Reserve an unsafe frontend request or return its prior outcome."""
 
-        now = time.time()
+        self.prepare_for_operation()
+        now = self._clock()
         session_digest = self.session_digest(session_id)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -466,9 +656,10 @@ class ControlReconciliationStore:
                 """
                 INSERT INTO control_operations(
                     request_id, session_digest, operation_id, contract_id,
-                    request_digest, state, owner_instance, record_refs_json,
+                    request_digest, state, owner_instance, owner_pid,
+                    owner_process_token, lease_expires_at, record_refs_json,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, 'pending', ?, '[]', ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, '[]', ?, ?)
                 """,
                 (
                     request_id,
@@ -477,11 +668,15 @@ class ControlReconciliationStore:
                     contract_id,
                     request_digest,
                     self.instance_id,
+                    self._process_id,
+                    self._process_token,
+                    now + self._lease_timeout_seconds,
                     now,
                     now,
                 ),
             )
             connection.commit()
+        self._ensure_heartbeat()
         return self.operation_status(request_id, session_id=session_id), True
 
     def finish_operation(
@@ -500,6 +695,7 @@ class ControlReconciliationStore:
             raise ControlReconciliationError("operation terminal state is invalid")
         result_value = dict(result) if result is not None else None
         result_digest = canonical_digest(result_value) if result_value is not None else None
+        stop_heartbeat = False
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
@@ -518,6 +714,11 @@ class ControlReconciliationStore:
                     raise ControlReconciliationError("operation outcome is immutable")
                 connection.commit()
                 return self._operation_projection(record)
+            if (
+                record["owner_instance"] != self.instance_id
+                or record["owner_process_token"] != self._process_token
+            ):
+                raise ControlReconciliationError("operation lease ownership changed")
             connection.execute(
                 """
                 UPDATE control_operations
@@ -531,21 +732,33 @@ class ControlReconciliationStore:
                     result_digest,
                     _json(record_refs or []),
                     safe_error_code,
-                    time.time(),
+                    self._clock(),
                     request_id,
                 ),
             )
+            stop_heartbeat = (
+                connection.execute(
+                    """
+                    SELECT COUNT(*) FROM control_operations
+                    WHERE state='pending' AND owner_instance=?
+                        AND owner_process_token=?
+                    """,
+                    (self.instance_id, self._process_token),
+                ).fetchone()[0]
+                == 0
+            )
             connection.commit()
+        if stop_heartbeat:
+            self._heartbeat_stop.set()
         return self.operation_status(request_id, session_id=session_id)
 
     def operation_status(self, request_id: str, *, session_id: str) -> Mapping[str, Any]:
         """Read one durable operation outcome for its originating session."""
 
-        with self._connect_existing() as connection:
-            row = connection.execute(
-                "SELECT * FROM control_operations WHERE request_id = ?",
-                (request_id,),
-            ).fetchone()
+        row = self._read_existing_one(
+            "SELECT * FROM control_operations WHERE request_id = ?",
+            (request_id,),
+        )
         record = _operation_record(row)
         if record is None:
             raise ControlReconciliationError("operation request is unknown")
@@ -554,19 +767,60 @@ class ControlReconciliationStore:
         return self._operation_projection(record)
 
     def recover_abandoned_operations(self) -> int:
-        """Mark another process's unresolved operations indeterminate, never delete them."""
+        """Mark only expired operation leases indeterminate and audit recovery."""
 
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            now = self._clock()
+            expired = connection.execute(
+                """
+                SELECT owner_instance, owner_pid, owner_process_token, COUNT(*)
+                FROM control_operations
+                WHERE state='pending' AND lease_expires_at <= ?
+                    AND NOT (
+                        owner_instance=? AND owner_process_token=?
+                    )
+                GROUP BY owner_instance, owner_pid, owner_process_token
+                """,
+                (now, self.instance_id, self._process_token),
+            ).fetchall()
             cursor = connection.execute(
                 """
                 UPDATE control_operations
                 SET state='indeterminate', safe_error_code='PROCESS_RESTART',
                     updated_at=?
-                WHERE state='pending' AND owner_instance != ?
+                WHERE state='pending' AND lease_expires_at <= ?
+                    AND NOT (
+                        owner_instance=? AND owner_process_token=?
+                    )
                 """,
-                (time.time(), self.instance_id),
+                (
+                    now,
+                    now,
+                    self.instance_id,
+                    self._process_token,
+                ),
             )
+            for row in expired:
+                connection.execute(
+                    """
+                    INSERT INTO control_recovery_audit(
+                        recovered_at, recovered_by_instance,
+                        recovered_by_process_token, abandoned_owner_instance,
+                        abandoned_owner_pid, abandoned_owner_process_token,
+                        recovered_count, reason
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'lease_expired')
+                    """,
+                    (
+                        now,
+                        self.instance_id,
+                        self._process_token,
+                        str(row[0]),
+                        int(row[1]),
+                        str(row[2]),
+                        int(row[3]),
+                    ),
+                )
             connection.commit()
             return int(cursor.rowcount)
 
