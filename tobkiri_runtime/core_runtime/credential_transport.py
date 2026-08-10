@@ -115,8 +115,8 @@ class CredentialTransportBinding:
             raise ValueError("credential transport requires an opaque handle")
         if self.security_epoch < 1 or self.target_boot_epoch < 1:
             raise ValueError("credential transport epoch is invalid")
-        if _origin(self.endpoint_origin) != self.endpoint_origin:
-            raise ValueError("credential transport origin is not canonical")
+        if _credential_origin(self.endpoint_origin) != self.endpoint_origin:
+            raise ValueError("credential transport requires a canonical HTTPS origin")
 
 
 class HostBoundCredentialTransport:
@@ -164,6 +164,9 @@ class HostBoundCredentialTransport:
         clock: Callable[[], float] = time.time,
     ) -> "HostBoundCredentialTransport":
         """Capture a transport lease from the Broker-authenticated envelope."""
+        bound_origin = _credential_origin(endpoint_origin)
+        if not bound_origin:
+            raise CredentialTransportDenied("credential transport denied")
         context = envelope.context
         try:
             invocation_token = envelope.lease.token.decode("ascii")
@@ -203,7 +206,7 @@ class HostBoundCredentialTransport:
             provider_instance_id=provider_instance_id,
             credential_scope=credential_scope,
             credential_purpose=credential_purpose,
-            endpoint_origin=_origin(endpoint_origin),
+            endpoint_origin=bound_origin,
             consumer_pack_id=consumer_pack_id,
         )
         return cls(
@@ -320,7 +323,7 @@ class HostBoundCredentialTransport:
         valid = (
             self._current_security_epoch() == binding.security_epoch
             and self._authority_still_active()
-            and _origin(endpoint) == binding.endpoint_origin
+            and _credential_origin(endpoint) == binding.endpoint_origin
             and credential_handle == binding.credential_handle
             and provider_instance_id == binding.provider_instance_id
             and credential_scope == binding.credential_scope
@@ -418,6 +421,14 @@ def _origin(value: str) -> str:
     default_port = 80 if parsed.scheme == "http" else 443
     port_text = "" if port in {None, default_port} else f":{port}"
     return f"{parsed.scheme}://{rendered_host}{port_text}"
+
+
+def _credential_origin(value: str) -> str:
+    """Return a canonical origin only when credential transport is TLS-protected."""
+    origin = _origin(value)
+    if not origin or urllib.parse.urlsplit(origin).scheme != "https":
+        return ""
+    return origin
 
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):

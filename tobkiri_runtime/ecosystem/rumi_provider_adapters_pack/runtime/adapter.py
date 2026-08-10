@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from typing import Any, Callable, Mapping
+import urllib.parse
 
 from core_runtime.global_contract_dispatch import (
     GlobalContractClient,
@@ -152,6 +153,16 @@ def _credential_handle(
     if not str(handle).startswith(("credential:", "opaque:")):
         raise GlobalContractInvocationError(
             "denied", "provider adapter accepts only opaque credentials"
+        )
+    endpoint = urllib.parse.urlsplit(str(connection.get("endpoint") or ""))
+    if (
+        endpoint.scheme != "https"
+        or not endpoint.hostname
+        or endpoint.username is not None
+        or endpoint.password is not None
+    ):
+        raise GlobalContractInvocationError(
+            "denied", "credentialed provider endpoint requires HTTPS"
         )
     return str(handle)
 

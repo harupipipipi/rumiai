@@ -10558,7 +10558,7 @@
             {
               "entrypoint_id": "provider-embedding",
               "id": "rumi_provider_adapters_pack.provider-embedding",
-              "implementation_digest": "sha256:221d2a1c56f4eb6e2333fed7e52ac181759ce608a7ed266e438b4e48d9838eb9"
+              "implementation_digest": "sha256:385b53d916de6e9e2c151a6f31c5dbd3b9df6075be7c97ece3850e84b2645539"
             }
           ],
           "owner": "rumi_provider_adapters_pack",
@@ -10594,7 +10594,7 @@
             {
               "entrypoint_id": "provider-generate",
               "id": "rumi_provider_adapters_pack.provider-generate",
-              "implementation_digest": "sha256:221d2a1c56f4eb6e2333fed7e52ac181759ce608a7ed266e438b4e48d9838eb9"
+              "implementation_digest": "sha256:385b53d916de6e9e2c151a6f31c5dbd3b9df6075be7c97ece3850e84b2645539"
             }
           ],
           "owner": "rumi_human_operator_provider_pack",
@@ -10630,7 +10630,7 @@
             {
               "entrypoint_id": "provider-image",
               "id": "rumi_provider_adapters_pack.provider-image",
-              "implementation_digest": "sha256:221d2a1c56f4eb6e2333fed7e52ac181759ce608a7ed266e438b4e48d9838eb9"
+              "implementation_digest": "sha256:385b53d916de6e9e2c151a6f31c5dbd3b9df6075be7c97ece3850e84b2645539"
             }
           ],
           "owner": "rumi_provider_adapters_pack",
@@ -10666,7 +10666,7 @@
             {
               "entrypoint_id": "provider-stream",
               "id": "rumi_provider_adapters_pack.provider-stream",
-              "implementation_digest": "sha256:221d2a1c56f4eb6e2333fed7e52ac181759ce608a7ed266e438b4e48d9838eb9"
+              "implementation_digest": "sha256:385b53d916de6e9e2c151a6f31c5dbd3b9df6075be7c97ece3850e84b2645539"
             }
           ],
           "owner": "rumi_human_operator_provider_pack",
@@ -10704,7 +10704,7 @@
           "path": "runtime/__init__.py"
         },
         {
-          "digest": "sha256:221d2a1c56f4eb6e2333fed7e52ac181759ce608a7ed266e438b4e48d9838eb9",
+          "digest": "sha256:385b53d916de6e9e2c151a6f31c5dbd3b9df6075be7c97ece3850e84b2645539",
           "kind": "executable",
           "path": "runtime/adapter.py"
         }
@@ -10717,7 +10717,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:351a1540c0353012b005958d0a5997387189045d2b932cc73ee10fbbcf24457f",
+      "digest": "sha256:b1ac91a1e6a2d129b7334d69cddece76bdd32f701cdf5084d8c7749ffb5bee51",
           "path": "ecosystem/rumi_provider_adapters_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -10904,7 +10904,7 @@
           "path": "runtime/process.py"
         },
         {
-          "digest": "sha256:158458df2b9d81fdbcf79f53d30a1d896fc7c2787f2c6a17fa3c890cf1e9a23d",
+          "digest": "sha256:825de1b62ebb90906c1c90de4cb0d0a6a50eed220d35d36a4c1c1f194d5d1615",
           "kind": "executable",
           "path": "runtime/registry.py"
         },
@@ -10922,7 +10922,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:450767c1a62b3d600d9c474c27798ed7fcda5b303dbe2234cbae00df6ab708c5",
+      "digest": "sha256:9da5b4c30ee0c6ae49dc4b12bc4833df5ad4806350919593b54caed63ec3103c",
           "path": "ecosystem/rumi_provider_registry_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }

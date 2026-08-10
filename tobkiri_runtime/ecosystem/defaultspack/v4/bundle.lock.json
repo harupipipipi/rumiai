@@ -74,12 +74,12 @@
     {
       "path": "packs/rumi_provider_adapters_pack.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:4dc9b27c50db890157143a7d1900098ec581c08a81bce8b8bb44e87133cf97c7"
+      "digest": "sha256:8fb5d9079fa655c1f231ec588d6911233802df9ba5fb8080896f39641ba8d526"
     },
     {
       "path": "packs/rumi_provider_registry_pack.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:4e8ad15db1e223478b8faa4e68a5ced0304916d81cda4dd1babaa41877afaa87"
+      "digest": "sha256:615e96114c1874f8388f6940159b2008a49187484670f4b3d4636e660305f496"
     },
     {
       "path": "packs/runtime.tauri.application.default.pack.v4.json",

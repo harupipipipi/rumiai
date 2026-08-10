@@ -16,7 +16,7 @@
       "path": "runtime/process.py"
     },
     {
-      "digest": "sha256:158458df2b9d81fdbcf79f53d30a1d896fc7c2787f2c6a17fa3c890cf1e9a23d",
+      "digest": "sha256:825de1b62ebb90906c1c90de4cb0d0a6a50eed220d35d36a4c1c1f194d5d1615",
       "kind": "executable",
       "path": "runtime/registry.py"
     },
@@ -90,9 +90,9 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:e6138df16eccc45b3f44b55c7097016074037dc502e6b740676c8c4657598979",
-    "contract_catalog_digest": "sha256:364b89347dab4f3fe20bb6d4bbac1ca5e2d03d69a856a4a31fedabf711ca9065",
-    "source_identity": "sha256:bd6c21f0340252863c731a29292ecf30c7c80271edf92cabe659fc36358c5406"
+    "artifact_set_digest": "sha256:c63a610a081d8a8ed4f42fc4ec788119b32c18a8c61ca09f7d8a3dfdb42ec50b",
+    "contract_catalog_digest": "sha256:e51fe3de9cb9d762c8b3fcc70c370113ac66aefadf17bf552d4e7559237778a4",
+    "source_identity": "sha256:b16476fb8d04b39d837b05e861b939bc0269b2cf933682850ace3e135d29e29a"
   },
   "migration": {
     "compatibility": "read_only",
@@ -186,7 +186,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:e6138df16eccc45b3f44b55c7097016074037dc502e6b740676c8c4657598979",
+    "artifact_digest": "sha256:c63a610a081d8a8ed4f42fc4ec788119b32c18a8c61ca09f7d8a3dfdb42ec50b",
     "display_name": "Rumi Provider Registry",
     "id": "rumi_provider_registry_pack",
     "kind": "host_extension",
@@ -196,7 +196,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:bd6c21f0340252863c731a29292ecf30c7c80271edf92cabe659fc36358c5406",
+        "digest": "sha256:b16476fb8d04b39d837b05e861b939bc0269b2cf933682850ace3e135d29e29a",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -207,7 +207,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:bd6c21f0340252863c731a29292ecf30c7c80271edf92cabe659fc36358c5406",
+    "source_digest": "sha256:b16476fb8d04b39d837b05e861b939bc0269b2cf933682850ace3e135d29e29a",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_provider_registry_pack"
   },
