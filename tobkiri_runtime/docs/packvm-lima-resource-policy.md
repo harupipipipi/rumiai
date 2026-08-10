@@ -67,6 +67,26 @@ The previous `rumi-managed-runtime` instance is not resized, deleted, or adopted
 The policy applies only to the dedicated `tobkiri-packvm-v4` lifecycle. Existing
 disks are never shrunk in place.
 
+## Destructive identity binding
+
+Stop and delete re-authenticate the Host attestation or failed-provision recovery
+proof immediately before each destructive `limactl` call. Verification covers
+the canonical non-symlink dedicated `LIMA_HOME`, its filesystem identity, the
+fixed instance directory identity, the current Lima config, pinned image and
+Host inputs, and—while the guest is running—the machine ID, installed supervisor
+digest, and supervisor challenge. A replaced same-name instance is classified as
+foreign/orphaned and is not mutated. The user's default `~/.lima` namespace is
+never a command target.
+
+Lima's destructive interface accepts an instance name rather than an open
+directory descriptor, so another local process with access to the dedicated Lima
+home could still race in the interval after final verification and before Lima
+resolves that name. Tobkiri minimizes this unavoidable external race by using the
+verified executable, fixed instance name, and minimal environment pinned to the
+dedicated `LIMA_HOME`; failed-provision stop/delete also re-verifies between the
+two commands. The final GUI validation must still exercise this behavior against
+the supported real Lima build.
+
 ## Low-space hosts
 
 A host with only 1-2 GiB free cannot safely provision this image. The pinned

@@ -164,6 +164,14 @@ class PackVMProcessError(RuntimeError):
         }
 
 
+class PackVMForeignInstanceError(RuntimeError):
+    """A destructive command target no longer matches Host-owned evidence."""
+
+
+class PackVMOrphanReconciliationRequired(PackVMForeignInstanceError):
+    """An orphan cannot be mutated without exact authenticated identity proof."""
+
+
 @dataclass(frozen=True)
 class _LimaCallResult:
     returncode: int
@@ -292,12 +300,7 @@ def _validate_lima_directory(value: str, variable: str) -> str:
     differently are rejected to keep symlink and traversal escapes fail-closed.
     """
 
-    if (
-        not isinstance(value, str)
-        or not value
-        or value != value.strip()
-        or "\x00" in value
-    ):
+    if not isinstance(value, str) or not value or value != value.strip() or "\x00" in value:
         raise ValueError(f"{variable} must be a non-empty absolute directory path")
     path = Path(value)
     if not path.is_absolute():
@@ -811,12 +814,19 @@ class PackVMLimaProvisioner:
                 "instance": self._instance,
                 "instance_machine_id": machine_id,
                 "instance_config_hash": stable_lima_config_hash(self._instance, payload),
+                **self._instance_directory_identity(),
                 "config_digest": plan.config_digest,
                 "image_digest": plan.image_digest,
                 "limactl_digest": _file_digest(Path(plan.limactl)),
                 "guest_runner_digest": runner_digest,
                 "host_build_digest": plan.host_build_digest,
                 "ceremony_nonce_digest": _sha256(request.ceremony_nonce.encode()),
+                "session_digest": (
+                    request.session_digest
+                    if request.session_digest is not None
+                    else _sha256(b"direct-local-lifecycle")
+                ),
+                "plan_digest": request.plan_digest,
                 "created_unix": int(time.time()),
                 **self.recovery_identity(),
             }
@@ -857,6 +867,9 @@ class PackVMLimaProvisioner:
             for field, value in self.recovery_identity().items():
                 if state.get(field) != value:
                     raise ValueError(f"managed PackVM {field} changed")
+            for field, value in self._instance_directory_identity().items():
+                if state.get(field) != value:
+                    raise ValueError(f"managed PackVM {field} changed")
             payload = lima_instance_payload(
                 limactl,
                 self._instance,
@@ -884,7 +897,7 @@ class PackVMLimaProvisioner:
                 self._instance,
                 attestation_digest=str(state["attestation_digest"]),
             )
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, PackVMForeignInstanceError) as exc:
             return PackVMDoctor(
                 False, PACKVM_BACKEND_ID, platform_id, self._instance, reason=str(exc)
             )
@@ -910,6 +923,44 @@ class PackVMLimaProvisioner:
             **{key: value for key, value in state.items() if key != "authentication"},
         }
 
+    def recover_provision_operation(
+        self,
+        expected_proof: Mapping[str, Any],
+    ) -> PackVMDoctor:
+        """Recover success only for the exact session and plan now attested live."""
+
+        state = self._load_authenticated_state()
+        proof_fields = {
+            "backend_id",
+            "instance",
+            "session_digest",
+            "plan_digest",
+            "ceremony_nonce_digest",
+            "config_digest",
+            "image_digest",
+            "guest_runner_digest",
+            "host_build_digest",
+            "limactl_digest",
+            "lima_home_digest",
+            "lima_home_device",
+            "lima_home_inode",
+        }
+        for field in proof_fields:
+            expected = expected_proof.get(field)
+            actual = state.get(field)
+            if not isinstance(expected, (str, int)) or type(expected) is not type(actual):
+                raise ValueError("PackVM provision recovery proof is incomplete")
+            if isinstance(expected, str):
+                if not hmac.compare_digest(expected, str(actual)):
+                    raise ValueError(f"PackVM provision recovery {field} changed")
+            elif expected != actual:
+                raise ValueError(f"PackVM provision recovery {field} changed")
+        self._verify_exact_current_instance(state, require_guest=True)
+        doctor = self.doctor()
+        if not doctor.ready:
+            raise ValueError(doctor.reason or "managed PackVM is unavailable")
+        return doctor
+
     def stop(self, confirmation: str) -> None:
         """Stop only the authenticated instance after exact confirmation."""
         state = self._load_authenticated_state()
@@ -917,7 +968,7 @@ class PackVMLimaProvisioner:
         expected = f"{PACKVM_STOP_PREFIX} {self._instance}"
         if not hmac.compare_digest(confirmation, expected):
             raise ValueError(f"PackVM stop requires exact confirmation: {expected}")
-        limactl = self._require_command()
+        limactl = self._verify_exact_current_instance(state, require_guest=True)
         self._checked_call((limactl, "stop", "--force", self._instance), timeout=60)
         self._audit("stopped", None)
 
@@ -930,6 +981,7 @@ class PackVMLimaProvisioner:
             raise ValueError(f"PackVM cleanup requires exact confirmation: {expected}")
         limactl = self._require_command()
         if self._instance_exists(limactl):
+            limactl = self._verify_exact_current_instance(state, require_guest=False)
             self._checked_call(
                 (limactl, "delete", "--force", self._instance),
                 timeout=120,
@@ -995,7 +1047,7 @@ class PackVMLimaProvisioner:
         limactl = self._require_command()
         missing = not self._instance_exists(limactl)
         if not missing:
-            self._verify_dedicated_instance_directory()
+            limactl = self._verify_exact_recovery_instance(recovery)
             self._checked_call(
                 (limactl, "delete", "--force", self._instance),
                 timeout=120,
@@ -1373,8 +1425,8 @@ class PackVMLimaProvisioner:
             if recovery.get(field) != value:
                 raise ValueError(f"PackVM recovery {field} changed")
 
-    def _verify_dedicated_instance_directory(self) -> None:
-        """Reject symlink, path escape, foreign ownership, and unsafe config."""
+    def _instance_directory_identity(self) -> dict[str, int]:
+        """Return the stable filesystem identity of the fixed Lima instance."""
 
         instance_dir = self._lima_home / self._instance
         metadata = instance_dir.lstat()
@@ -1384,19 +1436,129 @@ class PackVMLimaProvisioner:
             or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
             or instance_dir.parent != self._lima_home
         ):
-            raise ValueError("PackVM recovery instance directory is unsafe")
+            raise PackVMForeignInstanceError(
+                "PackVM current instance directory is unsafe; reconciliation is required"
+            )
+        return {
+            "instance_directory_device": int(metadata.st_dev),
+            "instance_directory_inode": int(metadata.st_ino),
+        }
+
+    def _current_instance_payload(self, limactl: str) -> dict[str, Any]:
+        """Load the fixed-name instance through the canonical dedicated Lima root."""
+
+        instance_dir = self._lima_home / self._instance
+        self._instance_directory_identity()
         payload = lima_instance_payload(
-            self._require_command(),
+            limactl,
             self._instance,
             runner=self._runner,
             environment=self._lima_process_environment(),
         )
         payload_dir = Path(str(payload.get("dir") or ""))
         if payload_dir != instance_dir or payload_dir.is_symlink():
-            raise ValueError("PackVM recovery instance escaped the dedicated Lima home")
+            raise PackVMForeignInstanceError(
+                "PackVM current instance escaped the dedicated Lima home; "
+                "reconciliation is required"
+            )
         violation = validate_lima_instance_config(payload)
         if violation:
-            raise ValueError(violation)
+            raise PackVMForeignInstanceError(f"{violation}; PackVM reconciliation is required")
+        return payload
+
+    def _verify_exact_current_instance(
+        self,
+        state: Mapping[str, Any],
+        *,
+        require_guest: bool,
+    ) -> str:
+        """Bind one destructive target to the complete authenticated attestation.
+
+        Lima exposes destructive operations only by name, so an external process
+        can still race after this final verification.  The command is nevertheless
+        pinned to the verified executable, fixed name, and isolated ``LIMA_HOME``;
+        no default/user Lima namespace is ever consulted.
+        """
+
+        try:
+            local_identity = {
+                "config_digest": _sha256(self._rendered_config()),
+                "image_digest": _PACKVM_IMAGES[self._machine]["digest"],
+                "guest_runner_digest": _file_digest(_PACKVM_RUNNER),
+                "host_build_digest": _file_digest(Path(__file__)),
+            }
+            for field, value in local_identity.items():
+                if state.get(field) != value:
+                    raise ValueError(f"managed PackVM {field} changed")
+            self._verify_attested_host_binding(state)
+            limactl = self._require_command()
+            identity = self._instance_directory_identity()
+            for field, value in identity.items():
+                if state.get(field) != value:
+                    raise ValueError(f"managed PackVM {field} changed")
+            payload = self._current_instance_payload(limactl)
+            if state.get("instance_config_hash") != stable_lima_config_hash(
+                self._instance, payload
+            ):
+                raise ValueError("managed PackVM config changed")
+            is_running = str(payload.get("status") or "").casefold() == "running"
+            if require_guest and not is_running:
+                raise ValueError("managed PackVM instance is not running")
+            if is_running:
+                if state.get("instance_machine_id") != self._guest_machine_id(limactl):
+                    raise ValueError("managed PackVM instance identity changed")
+                if state.get("guest_runner_digest") != self._guest_runner_digest(limactl):
+                    raise ValueError("managed PackVM guest supervisor changed")
+                self._verify_guest_doctor(limactl)
+            return limactl
+        except PackVMForeignInstanceError:
+            raise
+        except (OSError, ValueError) as exc:
+            raise PackVMForeignInstanceError(
+                "PackVM current instance does not match authenticated state; "
+                "reconciliation is required"
+            ) from exc
+
+    def _verify_exact_recovery_instance(self, recovery: Mapping[str, Any]) -> str:
+        """Bind orphan deletion to authenticated recovery and directory evidence."""
+
+        try:
+            self._verify_recovery_environment(recovery)
+            limactl = self._require_command()
+            identity = self._instance_directory_identity()
+            for field, value in identity.items():
+                if recovery.get(field) != value:
+                    raise ValueError(f"PackVM recovery {field} changed")
+            payload = self._current_instance_payload(limactl)
+            config_hash = recovery.get("instance_config_hash")
+            if not isinstance(config_hash, str) or config_hash != stable_lima_config_hash(
+                self._instance, payload
+            ):
+                raise ValueError("PackVM recovery instance config changed")
+            return limactl
+        except PackVMForeignInstanceError as exc:
+            raise PackVMOrphanReconciliationRequired(str(exc)) from exc
+        except (OSError, ValueError) as exc:
+            raise PackVMOrphanReconciliationRequired(
+                "PackVM orphan identity is incomplete or changed; reconciliation is required"
+            ) from exc
+
+    def _bind_recovery_instance(self, recovery: Mapping[str, Any]) -> dict[str, Any]:
+        """Authenticate the created instance identity before any recovery mutation."""
+
+        limactl = self._require_command()
+        payload = self._current_instance_payload(limactl)
+        updated = {
+            **recovery,
+            **self._instance_directory_identity(),
+            "instance_config_hash": stable_lima_config_hash(self._instance, payload),
+            "phase": "instance_bound",
+            "updated_unix": int(time.time()),
+        }
+        updated.pop("authentication", None)
+        updated["authentication"] = self._sign_recovery(updated)
+        _atomic_private_json(self.recovery_path, updated)
+        return updated
 
     def _write_recovery_phase(
         self,
@@ -1420,15 +1582,22 @@ class PackVMLimaProvisioner:
             return "missing"
         try:
             self._verify_recovery_environment(recovery)
-            self._verify_dedicated_instance_directory()
-            self._call((limactl, "stop", "--force", self._instance), timeout=60)
+            bound_recovery = self._bind_recovery_instance(recovery)
+            limactl = self._verify_exact_recovery_instance(bound_recovery)
+            self._checked_call(
+                (limactl, "stop", "--force", self._instance),
+                timeout=60,
+                stage="reconcile_stop",
+            )
+            limactl = self._verify_exact_recovery_instance(bound_recovery)
             self._checked_call(
                 (limactl, "delete", "--force", self._instance),
                 timeout=120,
                 stage="reconcile_delete",
             )
         except Exception:
-            self._write_recovery_phase(recovery, "orphaned")
+            current_recovery = bound_recovery if "bound_recovery" in locals() else recovery
+            self._write_recovery_phase(current_recovery, "orphaned")
             return "orphaned"
         self.recovery_path.unlink(missing_ok=True)
         self._audit("failed_provision_reconciled", None)
@@ -1709,9 +1878,7 @@ class PackVMLimaProvisioner:
                 or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
             ):
                 raise ValueError("PackVM audit history is unsafe")
-            encoded = (
-                json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
-            ).encode()
+            encoded = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode()
             os.write(descriptor, encoded)
             os.fsync(descriptor)
         finally:

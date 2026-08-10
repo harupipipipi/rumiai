@@ -1338,6 +1338,8 @@ def _packvm_attested(value: Mapping[str, object] | None) -> bool:
         "instance",
         "instance_machine_id",
         "instance_config_hash",
+        "instance_directory_device",
+        "instance_directory_inode",
         "config_digest",
         "image_digest",
         "limactl_digest",
@@ -1347,6 +1349,8 @@ def _packvm_attested(value: Mapping[str, object] | None) -> bool:
         "guest_runner_digest",
         "host_build_digest",
         "ceremony_nonce_digest",
+        "session_digest",
+        "plan_digest",
         "created_unix",
     )
     if any(key not in value for key in required):

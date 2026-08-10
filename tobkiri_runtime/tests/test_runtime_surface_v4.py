@@ -292,6 +292,8 @@ def test_packvm_invocation_requires_fresh_matching_host_attestation(
         "instance": "tobkiri-packvm-v4",
         "instance_machine_id": "machine.test",
         "instance_config_hash": "sha256:" + "1" * 64,
+        "instance_directory_device": 3,
+        "instance_directory_inode": 4,
         "config_digest": "sha256:" + "2" * 64,
         "image_digest": "sha256:" + "3" * 64,
         "limactl_digest": "sha256:" + "4" * 64,
@@ -301,6 +303,8 @@ def test_packvm_invocation_requires_fresh_matching_host_attestation(
         "guest_runner_digest": "sha256:" + "5" * 64,
         "host_build_digest": "sha256:" + "6" * 64,
         "ceremony_nonce_digest": "sha256:" + "7" * 64,
+        "session_digest": "sha256:" + "9" * 64,
+        "plan_digest": "sha256:" + "a" * 64,
         "created_unix": int(time.time()) - 1,
     }
     snapshot = {

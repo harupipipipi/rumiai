@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import hmac
 import os
 import platform
 import shutil
@@ -25,6 +26,7 @@ from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
     PACKVM_LIMA_INSTANCE,
     PACKVM_PINNED_IMAGE_VIRTUAL_SIZE_BYTES,
     PackVMLimaProvisioner,
+    PackVMForeignInstanceError,
     PackVMProcessError,
     PackVMProvisioningRequest,
 )
@@ -45,6 +47,7 @@ class FakeLima:
         self.running = False
         self.runner_digest = ""
         self.machine_id = MACHINE_ID
+        self.config_marker = "original"
         self.commands: list[tuple[str, ...]] = []
         self.fail_install = False
         self.fail_start_after_create = False
@@ -98,6 +101,7 @@ class FakeLima:
                 "vmType": "vz",
                 "dir": str(self.instance_dir),
                 "config": {
+                    "identityMarker": self.config_marker,
                     "vmType": "vz",
                     "mounts": [],
                     "networks": [],
@@ -161,9 +165,7 @@ class FakeLima:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_packvm_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _isolate_packvm_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep host Lima image-cache discovery inside each test's temp home."""
     home = tmp_path / "home"
     home.mkdir()
@@ -227,6 +229,29 @@ def _write_environment_probe(path: Path) -> None:
         encoding="utf-8",
     )
     path.chmod(0o700)
+
+
+def _resign_operations(manager: PackVMLimaProvisioner, payload: dict[str, object]) -> None:
+    """Write an intentionally modified but authentically signed operation state."""
+
+    operations_path = manager.state_path.parent / "packvm-operations.json"
+    unsigned = {key: value for key, value in payload.items() if key != "authentication"}
+    key = (manager.state_path.parent / "packvm-operations.key").read_bytes()
+    authentication = hmac.new(
+        key,
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    operations_path.write_text(
+        json.dumps(
+            {**unsigned, "authentication": authentication},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    operations_path.chmod(0o600)
 
 
 def test_call_passes_only_validated_lima_environment_to_real_subprocess(
@@ -639,6 +664,117 @@ def test_provision_doctor_stop_and_cleanup_are_authenticated(provisioner) -> Non
     assert fake.exists is False
 
 
+@pytest.mark.parametrize(
+    "action, mutation",
+    [
+        ("stop", "machine"),
+        ("stop", "runner"),
+        ("stop", "config"),
+        ("stop", "image"),
+        ("stop", "directory"),
+        ("cleanup", "machine"),
+        ("cleanup", "runner"),
+        ("cleanup", "config"),
+        ("cleanup", "image"),
+        ("cleanup", "directory"),
+        ("cleanup", "symlink"),
+    ],
+)
+def test_destructive_actions_refuse_same_name_replacement_and_identity_swaps(
+    provisioner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+    mutation: str,
+) -> None:
+    manager, fake, command = provisioner
+    assert manager.provision(_request(manager.prepare())).ready
+    user_lima = tmp_path / "home" / ".lima"
+    user_lima.mkdir()
+    marker = user_lima / "do-not-touch"
+    marker.write_text("user instance", encoding="utf-8")
+    before = len(fake.commands)
+
+    if mutation == "machine":
+        fake.machine_id = "f" * 32
+    elif mutation == "runner":
+        fake.runner_digest = "sha256:" + "f" * 64
+    elif mutation == "config":
+        fake.config_marker = "foreign"
+    elif mutation == "image":
+        from ecosystem.defaultspack.backend.sandbox.isolation import lima_runtime
+
+        replacement = dict(lima_runtime._PACKVM_IMAGES["arm64"])
+        replacement["digest"] = "sha256:" + "a" * 64
+        monkeypatch.setitem(lima_runtime._PACKVM_IMAGES, "arm64", replacement)
+    else:
+        fake.instance_dir.rmdir()
+        if mutation == "directory":
+            fake.instance_dir.mkdir()
+        else:
+            target = tmp_path / "foreign-instance"
+            target.mkdir()
+            fake.instance_dir.symlink_to(target, target_is_directory=True)
+
+    confirmation = (
+        f"STOP {PACKVM_LIMA_INSTANCE}" if action == "stop" else f"DELETE {PACKVM_LIMA_INSTANCE}"
+    )
+    with pytest.raises(PackVMForeignInstanceError, match="reconciliation"):
+        getattr(manager, action)(confirmation)
+
+    destructive = {
+        command_tuple[1]
+        for command_tuple in fake.commands[before:]
+        if len(command_tuple) > 1 and command_tuple[1] in {"stop", "delete"}
+    }
+    assert destructive == set()
+    assert fake.exists is True
+    assert marker.read_text(encoding="utf-8") == "user instance"
+    assert command.parent != user_lima
+
+
+def test_restarted_provisioner_refuses_replaced_fixed_name_instance(
+    provisioner,
+) -> None:
+    manager, fake, command = provisioner
+    assert manager.provision(_request(manager.prepare())).ready
+    fake.instance_dir.rmdir()
+    fake.instance_dir.mkdir()
+    restarted = PackVMLimaProvisioner(
+        command_path=str(command),
+        runner=fake,
+        state_dir=manager.state_path.parent,
+        machine="arm64",
+    )
+
+    assert restarted.doctor().ready is False
+    before = len(fake.commands)
+    with pytest.raises(PackVMForeignInstanceError, match="reconciliation"):
+        restarted.cleanup(f"DELETE {PACKVM_LIMA_INSTANCE}")
+    assert not any(
+        len(item) > 1 and item[1] in {"stop", "delete"} for item in fake.commands[before:]
+    )
+
+
+def test_failed_provision_cleanup_refuses_replaced_same_name_orphan(
+    provisioner,
+) -> None:
+    manager, fake, _command = provisioner
+    fake.fail_start_after_create = True
+    fake.fail_delete = True
+    with pytest.raises(PackVMProcessError):
+        manager.provision(_request(manager.prepare()))
+    recovery = manager._load_authenticated_recovery()
+    fake.instance_dir.rmdir()
+    fake.instance_dir.mkdir()
+    fake.fail_delete = False
+    before = len(fake.commands)
+
+    with pytest.raises(PackVMForeignInstanceError, match="reconciliation"):
+        manager.cleanup_failed_provision(f"DELETE {PACKVM_LIMA_INSTANCE}", recovery)
+    assert not any(len(item) > 1 and item[1] == "delete" for item in fake.commands[before:])
+
+
 def test_runtime_surface_recomputes_exact_packvm_attestation_digest(
     provisioner,
 ) -> None:
@@ -917,9 +1053,7 @@ def test_orphan_cleanup_rejects_symlinked_dedicated_lima_home(
     original.symlink_to(moved, target_is_directory=True)
 
     with pytest.raises(ValueError, match="symlinks|unsafe"):
-        manager.cleanup_failed_provision(
-            f"DELETE {PACKVM_LIMA_INSTANCE}", recovery
-        )
+        manager.cleanup_failed_provision(f"DELETE {PACKVM_LIMA_INSTANCE}", recovery)
     assert fake.exists is True
 
 
@@ -1029,6 +1163,174 @@ def test_typed_consent_is_one_shot_and_attestation_survives_restart(provisioner)
     operations_path.chmod(0o600)
     with pytest.raises(ValueError, match="authentication failed"):
         PackVMLifecycleV4(restarted)
+
+
+def test_restart_recovers_only_exact_session_plan_and_recovery_proof(
+    provisioner,
+) -> None:
+    manager, _fake, _command = provisioner
+    lifecycle = PackVMLifecycleV4(manager)
+    session_id = "panel-session-a"
+    plan = lifecycle.prepare(session_id=session_id)
+    consent = lifecycle.consent(
+        {
+            "plan_digest": plan["plan_digest"],
+            "ceremony_nonce": plan["ceremony_nonce"],
+            "confirmation": plan["confirmation"],
+            "approve_image_download": True,
+        },
+        session_id=session_id,
+    )
+    operation_id = str(uuid.uuid4())
+    lifecycle.provision(
+        {"consent_id": consent["consent_id"], "operation_id": operation_id},
+        session_id=session_id,
+    )
+    assert _wait_operation(lifecycle, operation_id, session_id=session_id)["state"] == ("succeeded")
+
+    operations_path = manager.state_path.parent / "packvm-operations.json"
+    payload = json.loads(operations_path.read_text(encoding="utf-8"))
+    exact = payload["operations"][operation_id]
+    exact["state"] = "running"
+    different_plan_id = str(uuid.uuid4())
+    different_plan = json.loads(json.dumps(exact))
+    different_plan.update(
+        {
+            "operation_id": different_plan_id,
+            "state": "queued",
+            "consent_digest": "sha256:" + hashlib.sha256(b"different").hexdigest(),
+            "plan_digest": "sha256:" + "d" * 64,
+        }
+    )
+    different_plan["recovery_proof"]["plan_digest"] = "sha256:" + "d" * 64
+    tampered_proof_id = str(uuid.uuid4())
+    tampered_proof = json.loads(json.dumps(exact))
+    tampered_proof.update(
+        {
+            "operation_id": tampered_proof_id,
+            "state": "running",
+            "consent_digest": "sha256:" + hashlib.sha256(b"tampered").hexdigest(),
+        }
+    )
+    tampered_proof["recovery_proof"]["guest_runner_digest"] = "sha256:" + "e" * 64
+    payload["operations"][different_plan_id] = different_plan
+    payload["operations"][tampered_proof_id] = tampered_proof
+    _resign_operations(manager, payload)
+
+    restarted = PackVMLifecycleV4(manager)
+    recovered = restarted.progress(operation_id, session_id=session_id)
+    assert recovered["state"] == "succeeded"
+    for mismatched_id in (different_plan_id, tampered_proof_id):
+        interrupted = restarted.progress(mismatched_id, session_id=session_id)
+        assert interrupted["state"] == "interrupted"
+        assert interrupted["error_type"] == "PackVMReconciliationRequired"
+        assert "reconciliation is required" in str(interrupted["error"])
+    assert (
+        restarted.provision(
+            {"consent_id": consent["consent_id"], "operation_id": operation_id},
+            session_id=session_id,
+        )["state"]
+        == "succeeded"
+    )
+    with pytest.raises(ValueError, match="another consent"):
+        restarted.provision(
+            {"consent_id": "foreign-consent", "operation_id": operation_id},
+            session_id=session_id,
+        )
+
+
+def test_operation_journal_compacts_with_authenticated_replay_and_dependencies(
+    provisioner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core_runtime import packvm_lifecycle_v4
+
+    class InertThread:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def start(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        packvm_lifecycle_v4,
+        "threading",
+        SimpleNamespace(Thread=InertThread, RLock=threading.RLock),
+    )
+    manager, _fake, _command = provisioner
+    lifecycle = PackVMLifecycleV4(manager)
+    session_id = "panel-session-a"
+    session_digest = "sha256:" + hashlib.sha256(session_id.encode()).hexdigest()
+    operation_ids: list[str] = []
+    consent_ids: dict[str, str] = {}
+    for _index in range(140):
+        plan = lifecycle.prepare(session_id=session_id)
+        consent = lifecycle.consent(
+            {
+                "plan_digest": plan["plan_digest"],
+                "ceremony_nonce": plan["ceremony_nonce"],
+                "confirmation": plan["confirmation"],
+                "approve_image_download": True,
+            },
+            session_id=session_id,
+        )
+        operation_id = str(uuid.uuid4())
+        operation_ids.append(operation_id)
+        consent_ids[operation_id] = str(consent["consent_id"])
+        lifecycle.provision(
+            {"consent_id": consent["consent_id"], "operation_id": operation_id},
+            session_id=session_id,
+        )
+        cancelled = lifecycle.cancel({"operation_id": operation_id}, session_id=session_id)
+        assert cancelled["state"] == "cancelled"
+    source_id = str(uuid.uuid4())
+    cleanup_id = str(uuid.uuid4())
+    lifecycle._operations[source_id] = {
+        "operation_id": source_id,
+        "operation_kind": "provision",
+        "session_digest": session_digest,
+        "state": "failed",
+        "plan_digest": "sha256:" + "a" * 64,
+        "recovery_proof": {"retained": True},
+        "cleanup_operation_id": cleanup_id,
+        "updated_unix": 200,
+    }
+    lifecycle._operations[cleanup_id] = {
+        "operation_id": cleanup_id,
+        "operation_kind": "cleanup",
+        "session_digest": session_digest,
+        "source_operation_id": source_id,
+        "state": "running",
+        "plan_digest": "sha256:" + "a" * 64,
+        "updated_unix": 201,
+    }
+    lifecycle._persist_operations()
+
+    archive_path = manager.state_path.parent / "packvm-operations-archive.jsonl"
+    assert archive_path.exists()
+    assert len(lifecycle._operations) < 128
+    assert source_id in lifecycle._operations
+    assert cleanup_id in lifecycle._operations
+    assert len(operation_ids) == 140
+    archived_id = next(iter(lifecycle._archived_operations))
+
+    restarted = PackVMLifecycleV4(manager)
+    assert restarted.progress(archived_id, session_id=session_id)["state"] == "cancelled"
+    assert restarted.progress(source_id, session_id=session_id)["state"] == "failed"
+    assert restarted.progress(cleanup_id, session_id=session_id)["state"] == "interrupted"
+    with pytest.raises(ValueError, match="another authenticated session"):
+        restarted.progress(archived_id, session_id="foreign-session")
+    replay = restarted.provision(
+        {"consent_id": consent_ids[archived_id], "operation_id": archived_id},
+        session_id=session_id,
+    )
+    assert replay["state"] == "cancelled"
+
+    encoded = archive_path.read_bytes()
+    archive_path.write_bytes(encoded.replace(b'"state":"cancelled"', b'"state":"tampered"', 1))
+    archive_path.chmod(0o600)
+    with pytest.raises(ValueError, match="authentication failed|digest failed"):
+        PackVMLifecycleV4(manager)
 
 
 def test_guest_runner_executes_only_the_explicit_staged_python_abi(tmp_path: Path) -> None:
