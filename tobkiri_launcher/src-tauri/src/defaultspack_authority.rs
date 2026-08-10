@@ -110,6 +110,7 @@ pub(crate) fn resolve(config: &AppConfig) -> Result<GuardianAuthority> {
         Path::new("ecosystem/defaultspack"),
         "Defaultspack Pack root",
     )?;
+    verify_symlink_free_tree(&pack_root, &pack_root)?;
     let bundle_root = canonical_child_directory(&pack_root, Path::new("v4"), "Pack v4 root")?;
     let entries = verify_bundle_lock(&bundle_root)?;
 
@@ -123,9 +124,15 @@ pub(crate) fn resolve(config: &AppConfig) -> Result<GuardianAuthority> {
         DEFAULTSPACK_PACK_PATH,
         catalog.source_manifest_digests.get("defaultspack"),
     )?;
-    // Shell, Application, and Profile are intentional packaged successors of
-    // the signed source definitions. Their exact bytes are bound by the sealed
-    // bundle lock; the selected release artifact is independently bound below.
+    require_catalog_digest(
+        &entries,
+        PROFILE_PATH,
+        Some(&catalog.default_profile_digest),
+    )?;
+    // Shell and Application are intentional packaged successors of the signed
+    // source definitions. Their exact bytes are bound by the sealed bundle
+    // lock; Profile is additionally bound to the catalog above, and the
+    // selected release artifact is independently bound below.
     for path in [SHELL_PACK_PATH, RUNTIME_PACK_PATH, PROFILE_PATH] {
         if !entries.contains_key(path) {
             bail!("packaged authority is absent from the bundle lock: {path}");
@@ -343,6 +350,36 @@ fn canonical_child_directory(root: &Path, relative: &Path, label: &str) -> Resul
         bail!("{label} escapes the packaged application root");
     }
     Ok(child)
+}
+
+fn verify_symlink_free_tree(root: &Path, current: &Path) -> Result<()> {
+    for entry in fs::read_dir(current)
+        .with_context(|| format!("failed to inspect packaged tree at {}", current.display()))?
+    {
+        let entry = entry.context("failed to inspect packaged tree entry")?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path).with_context(|| {
+            format!(
+                "failed to inspect packaged tree entry at {}",
+                path.display()
+            )
+        })?;
+        if metadata.file_type().is_symlink() {
+            bail!(
+                "packaged tree contains a symlink: {}",
+                path.strip_prefix(root).unwrap_or(&path).display()
+            );
+        }
+        if metadata.is_dir() {
+            verify_symlink_free_tree(root, &path)?;
+        } else if !metadata.is_file() {
+            bail!(
+                "packaged tree contains an unsupported entry: {}",
+                path.strip_prefix(root).unwrap_or(&path).display()
+            );
+        }
+    }
+    Ok(())
 }
 
 fn read_regular_file(path: &Path, label: &str) -> Result<Vec<u8>> {
@@ -700,7 +737,88 @@ mod tests {
         rewrite_locked_document(config, RUNTIME_PACK_PATH, mutate);
     }
 
-    fn package_fixture_application(config: &AppConfig) {
+    fn clone_authoritative_fixture_source(repository: &Path, destination: &Path) -> String {
+        let status = Command::new("git")
+            .args(["clone", "--quiet", "--shared", "--no-checkout", "--no-tags"])
+            .arg(repository)
+            .arg(destination)
+            .status()
+            .expect("authoritative fixture source clone should run");
+        assert!(
+            status.success(),
+            "authoritative fixture source clone failed"
+        );
+        let status = Command::new("git")
+            .args([
+                "sparse-checkout",
+                "set",
+                "tobkiri_runtime/scripts",
+                "tobkiri_runtime/tobkiri_protocol",
+                "tobkiri_runtime/ecosystem/defaultspack/domain/runtime_v4",
+                "tobkiri_runtime/ecosystem/defaultspack/v4",
+                "tobkiri_runtime/ecosystem/defaultspack/runtime",
+                "tobkiri_runtime/ecosystem/defaultspack/defaultspack",
+                "tobkiri_launcher/src-tauri/bundled",
+            ])
+            .current_dir(destination)
+            .status()
+            .expect("authoritative fixture sparse checkout should run");
+        assert!(
+            status.success(),
+            "authoritative fixture sparse checkout failed"
+        );
+        let status = Command::new("git")
+            .args(["checkout", "--quiet", "HEAD"])
+            .current_dir(destination)
+            .status()
+            .expect("authoritative fixture checkout should run");
+        assert!(status.success(), "authoritative fixture checkout failed");
+        let revision = Command::new("git")
+            .args(["rev-parse", "--verify", "HEAD^{commit}"])
+            .current_dir(destination)
+            .output()
+            .expect("authoritative fixture revision should be readable");
+        assert!(
+            revision.status.success(),
+            "authoritative fixture revision lookup failed"
+        );
+        let revision = String::from_utf8(revision.stdout)
+            .expect("authoritative fixture revision should be UTF-8")
+            .trim()
+            .to_owned();
+        assert!(
+            revision.len() == 40
+                && revision
+                    .bytes()
+                    .all(|character| character.is_ascii_hexdigit()
+                        && !character.is_ascii_uppercase()),
+            "authoritative fixture revision must be a full lowercase SHA"
+        );
+        assert_clean_fixture_source(destination);
+        revision
+    }
+
+    fn assert_clean_fixture_source(source_checkout: &Path) {
+        let status = Command::new("git")
+            .args(["status", "--porcelain=v1", "--untracked-files=all"])
+            .current_dir(source_checkout)
+            .output()
+            .expect("authoritative fixture status should be readable");
+        assert!(
+            status.status.success(),
+            "authoritative fixture status failed"
+        );
+        assert!(
+            status.stdout.is_empty(),
+            "authoritative fixture source must remain clean"
+        );
+    }
+
+    fn package_fixture_application(
+        config: &AppConfig,
+        source_checkout: &Path,
+        source_revision: &str,
+    ) {
         let source = config.app_dir.join("fixture-release/Tobkiri.app");
         let executable = source.join("Contents/MacOS/tobkiri-shell");
         fs::create_dir_all(executable.parent().unwrap()).unwrap();
@@ -723,11 +841,10 @@ mod tests {
         )
         .unwrap();
 
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
         let status = std::process::Command::new(python)
             .arg(
-                repository
+                source_checkout
                     .join("tobkiri_runtime/scripts/generate_packaged_defaultspack_v4_bundle.py"),
             )
             .arg("--source-artifact")
@@ -750,27 +867,42 @@ mod tests {
             .arg("arm64")
             .arg("--bundle-identity")
             .arg("io.tobkiri.shell.tauri")
-            .current_dir(repository)
+            .arg("--source-commit")
+            .arg(source_revision)
+            .current_dir(source_checkout)
             .status()
             .unwrap();
         assert!(
             status.success(),
             "official packaged Profile generator failed"
         );
-        let profile: Value = serde_json::from_slice(
-            &fs::read(
-                config
-                    .app_dir
-                    .join("ecosystem/defaultspack/v4/defaults.profile.v4.json"),
-            )
-            .unwrap(),
+        assert_clean_fixture_source(source_checkout);
+        let bundle_root = config.app_dir.join("ecosystem/defaultspack/v4");
+        let profile_raw = fs::read(bundle_root.join(PROFILE_PATH)).unwrap();
+        let mut catalog: Value = serde_json::from_slice(
+            &fs::read(config.app_dir.join("bundled/presentation_catalog.json")).unwrap(),
         )
         .unwrap();
-        assert_eq!(
-            value_str(&profile, "/provenance/repository_commit"),
-            Some("working-tree"),
-            "synthetic fixtures must not claim clean release provenance"
-        );
+        catalog["default_profile_digest"] = Value::String(sha256(&profile_raw));
+        fs::write(
+            config.app_dir.join("bundled/presentation_catalog.json"),
+            serde_json::to_vec(&catalog).unwrap(),
+        )
+        .unwrap();
+        for relative in [
+            PROFILE_PATH,
+            "shell.tauri.default.shell.v1.json",
+            SHELL_PACK_PATH,
+            RUNTIME_PACK_PATH,
+        ] {
+            let document: Value =
+                serde_json::from_slice(&fs::read(bundle_root.join(relative)).unwrap()).unwrap();
+            assert_eq!(
+                value_str(&document, "/provenance/repository_commit"),
+                Some(source_revision),
+                "packaged fixture must retain its isolated release provenance"
+            );
+        }
     }
 
     fn copy_tree(source: &Path, destination: &Path) {
@@ -796,11 +928,16 @@ mod tests {
             "tobkiri-defaultspack-authority-{name}-{}-{unique}",
             std::process::id()
         ));
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let source_checkout = root.join("authoritative-source");
+        let source_revision = clone_authoritative_fixture_source(&repository, &source_checkout);
+        let source_checkout = source_checkout
+            .canonicalize()
+            .expect("authoritative fixture source should be canonical");
         let app_dir = layout
             .iter()
             .fold(root.clone(), |path, component| path.join(component));
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let source_pack = repository.join("tobkiri_runtime/ecosystem/defaultspack");
+        let source_pack = source_checkout.join("tobkiri_runtime/ecosystem/defaultspack");
         let destination_pack = app_dir.join("ecosystem/defaultspack");
         copy_tree(&source_pack.join("v4"), &destination_pack.join("v4"));
         for relative in [
@@ -818,7 +955,7 @@ mod tests {
         }
         fs::create_dir_all(app_dir.join("bundled")).unwrap();
         fs::copy(
-            repository.join("tobkiri_launcher/src-tauri/bundled/presentation_catalog.json"),
+            source_checkout.join("tobkiri_launcher/src-tauri/bundled/presentation_catalog.json"),
             app_dir.join("bundled/presentation_catalog.json"),
         )
         .unwrap();
@@ -833,7 +970,7 @@ mod tests {
             kernel_port: 8765,
             dev_workspace_root: None,
         };
-        package_fixture_application(&config);
+        package_fixture_application(&config, &source_checkout, &source_revision);
         (root, config)
     }
 
