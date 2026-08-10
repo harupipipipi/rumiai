@@ -7,9 +7,24 @@ DEFAULTSPACK_WEBAPP_ROOT="$REPO_ROOT/tobkiri_runtime/ecosystem/defaultspack/weba
 
 target=""
 has_target=0
+mode=""
+has_bundles=0
+forwarded_args=()
 for ((index = 1; index <= $#; index++)); do
   argument="${!index}"
   case "$argument" in
+    --mode)
+      next=$((index + 1))
+      [[ "$next" -le "$#" ]] || {
+        echo "--mode requires production or local-dev" >&2
+        exit 64
+      }
+      mode="${!next}"
+      index="$next"
+      ;;
+    --mode=*)
+      mode="${argument#--mode=}"
+      ;;
     --target)
       next=$((index + 1))
       [[ "$next" -le "$#" ]] || {
@@ -18,21 +33,51 @@ for ((index = 1; index <= $#; index++)); do
       }
       target="${!next}"
       has_target=1
+      index="$next"
       ;;
     --target=*)
       target="${argument#--target=}"
       has_target=1
       ;;
-    --debug|--no-bundle)
-      echo "build-and-sign only creates production packages; $argument is not allowed" >&2
+    --debug)
+      if [[ "$mode" != "local-dev" ]]; then
+        echo "--debug is allowed only with explicit --mode local-dev" >&2
+        exit 64
+      fi
+      ;;
+    --no-bundle)
+      echo "--no-bundle is not a package output mode" >&2
       exit 64
       ;;
     --config|--config=*)
       echo "build-and-sign owns the production Tauri configuration; $argument is not allowed" >&2
       exit 64
       ;;
+    --bundles)
+      has_bundles=1
+      forwarded_args+=("$argument")
+      ;;
+    --bundles=*)
+      has_bundles=1
+      forwarded_args+=("$argument")
+      ;;
+    *)
+      forwarded_args+=("$argument")
+      ;;
   esac
 done
+
+case "$mode" in
+  production|local-dev) ;;
+  "")
+    echo "build-and-sign requires explicit --mode production or --mode local-dev" >&2
+    exit 64
+    ;;
+  *)
+    echo "unsupported build-and-sign mode: $mode" >&2
+    exit 64
+    ;;
+esac
 
 if [[ -z "$target" ]]; then
   target="${TAURI_ENV_TARGET_TRIPLE:-}"
@@ -92,6 +137,15 @@ case "$target" in
     ;;
 esac
 
+python3 "$REPO_ROOT/scripts/release_gate.py" signing \
+  --mode "$mode" \
+  --platform "$presentation_platform" \
+  --check-tools
+
+if [[ "$presentation_platform" == "macos" && -z "${APPLE_CERTIFICATE:-}" ]]; then
+  export APPLE_CERTIFICATE="${APPLE_CERTIFICATE_BASE64:-}"
+fi
+
 if [[ -n "${TOBKIRI_PRESENTATION_RELEASE_ROOT:-}" ]]; then
   echo "TOBKIRI_PRESENTATION_RELEASE_ROOT is owned by build-and-sign and may not be overridden" >&2
   exit 64
@@ -135,9 +189,23 @@ echo "=== Building canonical Defaultspack webapp ($target) ==="
 )
 
 python3 "$LAUNCHER_ROOT/scripts/prepare_viewer_runtime.py" \
-  --mode release \
+  --mode "$([[ "$mode" == "production" ]] && echo release || echo dev)" \
   --repo-root "$REPO_ROOT" \
   --target "$target"
+
+if [[ "$mode" == "local-dev" ]]; then
+  echo "=== Building LOCAL-DEV ONLY Tobkiri Launcher package ($target) ==="
+  local_args=("${forwarded_args[@]}")
+  if [[ "$has_bundles" == "0" ]]; then
+    local_args+=(--bundles "$shell_bundles")
+  fi
+  (cd "$LAUNCHER_ROOT" && cargo tauri build \
+    --debug \
+    --target "$target" \
+    "${local_args[@]}")
+  echo "LOCAL-DEV ONLY: unsigned/ad-hoc output is not a production release"
+  exit 0
+fi
 
 echo "=== Building current-source Tobkiri Shell ($target) ==="
 (cd "$LAUNCHER_ROOT" && cargo tauri build \
@@ -154,6 +222,21 @@ fi
   echo "Tauri Shell release artifact was not produced: ${artifact:-<empty>}" >&2
   exit 1
 }
+
+if [[ "$presentation_platform" == "macos" ]]; then
+  python3 "$REPO_ROOT/scripts/release_gate.py" sign-artifacts \
+    --repo-root "$REPO_ROOT" \
+    --mode production \
+    --platform macos \
+    --app-bundle "$artifact" \
+    --artifact "$artifact"
+elif [[ "$presentation_platform" == "windows" ]]; then
+  python3 "$REPO_ROOT/scripts/release_gate.py" sign-artifacts \
+    --repo-root "$REPO_ROOT" \
+    --mode production \
+    --platform windows \
+    --artifact "$artifact"
+fi
 
 manifest="$release_parent/shell-build-output.v4.json"
 python3 "$LAUNCHER_ROOT/scripts/write_shell_build_output.py" \
@@ -172,15 +255,45 @@ python3 "$LAUNCHER_ROOT/scripts/package_presentation_artifact.py" \
   --repository-root "$REPO_ROOT" \
   --output-dir "$release_root"
 
-outer_args=("$@")
-if ((has_target == 0)); then
-  outer_args+=(--target "$target")
-fi
+outer_args=("${forwarded_args[@]}")
+outer_args+=(--target "$target")
 
 echo "=== Building sealed Tobkiri Launcher package ($target) ==="
 (cd "$LAUNCHER_ROOT" && \
   TOBKIRI_PRESENTATION_RELEASE_ROOT="$release_root" \
   cargo tauri build "${outer_args[@]}")
+
+if [[ "$presentation_platform" == "macos" ]]; then
+  app_bundle="$LAUNCHER_ROOT/src-tauri/target/$target/release/bundle/macos/Tobkiri Launcher.app"
+  notary_args=(--artifact "$app_bundle")
+  mapfile -t notarized_artifacts < <(
+    find "$LAUNCHER_ROOT/src-tauri/target/$target/release/bundle" \
+      -type f -name '*.dmg' -print
+  )
+  for artifact in "${notarized_artifacts[@]}"; do
+    notary_args+=(--artifact "$artifact")
+  done
+  python3 "$REPO_ROOT/scripts/release_gate.py" sign-artifacts \
+    --repo-root "$REPO_ROOT" \
+    --mode production \
+    --platform macos \
+    --app-bundle "$app_bundle" \
+    "${notary_args[@]}"
+elif [[ "$presentation_platform" == "windows" ]]; then
+  mapfile -t signed_artifacts < <(
+    find "$LAUNCHER_ROOT/src-tauri/target/$target/release/bundle/nsis" \
+      -maxdepth 1 -type f -name '*.exe' -print
+  )
+  sign_args=()
+  for artifact in "${signed_artifacts[@]}"; do
+    sign_args+=(--artifact "$artifact")
+  done
+  python3 "$REPO_ROOT/scripts/release_gate.py" sign-artifacts \
+    --repo-root "$REPO_ROOT" \
+    --mode production \
+    --platform windows \
+    "${sign_args[@]}"
+fi
 
 cat <<'EOF'
 

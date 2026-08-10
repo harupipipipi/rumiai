@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   TOBKIRI_RELEASE_REPOSITORY: harupipipipi/tobkiri
@@ -51,6 +51,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Verify release repository binding
         shell: bash
@@ -79,8 +81,58 @@ jobs:
               character not in "0123456789abcdef" for character in source_revision
           ):
               raise SystemExit("checked-out source revision is not a full lowercase SHA")
+          tag_revision = subprocess.check_output(
+              ["git", "rev-parse", "--verify", f"{os.environ['GITHUB_REF_NAME']}^{{commit}}"],
+              text=True,
+          ).strip()
+          if tag_revision != source_revision:
+              raise SystemExit("checked-out source revision does not match the release tag")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"source_revision={source_revision}\n")
+
+      - name: Verify exact release tag, versions, and production trust policy
+        shell: python
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: https://timestamp.digicert.com
+        run: |
+          import os
+          import subprocess
+          import sys
+
+          root = os.environ["GITHUB_WORKSPACE"]
+          subprocess.run(
+              [
+                  sys.executable,
+                  "scripts/release_gate.py",
+                  "version",
+                  "--repo-root",
+                  root,
+                  "--tag",
+                  os.environ["GITHUB_REF_NAME"],
+              ],
+              check=True,
+          )
+          subprocess.run(
+              [
+                  sys.executable,
+                  "scripts/release_gate.py",
+                  "signing",
+                  "--mode",
+                  "production",
+                  "--platform",
+                  "${{ matrix.presentation_platform }}",
+                  "--check-tools",
+              ],
+              check=True,
+          )
 
       - name: Install Shell release signing dependency
         run: python -m pip install -r tobkiri_runtime/requirements.txt
@@ -119,38 +171,6 @@ jobs:
         run: |
           set -euo pipefail
           cargo clean --manifest-path pack-shell/Cargo.toml --target "${{ matrix.target }}"
-
-      - name: Require macOS release signing and notarization configuration
-        if: runner.os == 'macOS'
-        shell: bash
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          set -euo pipefail
-          for variable in \
-            APPLE_CERTIFICATE \
-            APPLE_CERTIFICATE_PASSWORD \
-            APPLE_SIGNING_IDENTITY \
-            APPLE_ID \
-            APPLE_PASSWORD \
-            APPLE_TEAM_ID; do
-            if [[ -z "${!variable:-}" ]]; then
-              echo "Required macOS release setting is missing: ${variable}" >&2
-              exit 1
-            fi
-          done
-          case "$APPLE_SIGNING_IDENTITY" in
-            "Developer ID Application: "*) ;;
-            *)
-              echo "APPLE_SIGNING_IDENTITY must name a Developer ID Application identity" >&2
-              exit 1
-              ;;
-          esac
 
       - name: Install Tauri CLI
         shell: bash
@@ -225,6 +245,45 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.shell.conf.json --bundles ${{ matrix.shell_bundles }} --ci
+
+      - name: Notarize and staple macOS Shell artifact
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          artifact="$(find "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -type d -name 'Tobkiri.app' -print -quit)"
+          test -n "$artifact"
+          python scripts/release_gate.py sign-artifacts \
+            --repo-root "$GITHUB_WORKSPACE" \
+            --mode production \
+            --platform macos \
+            --app-bundle "$artifact" \
+            --artifact "$artifact"
+
+      - name: Authenticode-sign and verify Windows Shell artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: https://timestamp.digicert.com
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifact = Join-Path $env:GITHUB_WORKSPACE "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/tobkiri-shell.exe"
+          if (-not (Test-Path -LiteralPath $artifact -PathType Leaf)) { throw "Tauri Shell binary not found: $artifact" }
+          python scripts/release_gate.py sign-artifacts `
+            --repo-root $env:GITHUB_WORKSPACE `
+            --mode production `
+            --platform windows `
+            --artifact $artifact
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Shell Authenticode signing failed' }
 
       - name: Stage verified macOS Tauri Shell artifact
         if: runner.os == 'macOS'
@@ -333,35 +392,28 @@ jobs:
 
       - name: Notarize and staple macOS release DMG
         if: runner.os == 'macOS'
-        working-directory: tobkiri_launcher
         shell: bash
         env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          NOTARY_PROFILE_NAME: tobkiri-release
-          NOTARY_KEYCHAIN: ${{ runner.temp }}/tobkiri-notary.keychain-db
         run: |
           set -euo pipefail
-          dmg="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          app="tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app"
+          test -d "$app"
+          dmg="$(find "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
           test -n "$dmg"
           test -s "$dmg"
-          rm -f "$NOTARY_KEYCHAIN"
-          xcrun notarytool store-credentials "$NOTARY_PROFILE_NAME" \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --keychain "$NOTARY_KEYCHAIN"
-          xcrun notarytool history \
-            --keychain-profile "$NOTARY_PROFILE_NAME" \
-            --keychain "$NOTARY_KEYCHAIN" >/dev/null
-          xcrun notarytool submit "$dmg" \
-            --keychain-profile "$NOTARY_PROFILE_NAME" \
-            --keychain "$NOTARY_KEYCHAIN" \
-            --wait
-          xcrun stapler staple -v "$dmg"
-          xcrun stapler validate -v "$dmg"
-          spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg"
+          python scripts/release_gate.py sign-artifacts \
+            --repo-root "$GITHUB_WORKSPACE" \
+            --mode production \
+            --platform macos \
+            --app-bundle "$app" \
+            --artifact "$app" \
+            --artifact "$dmg"
 
       - name: Build with cargo tauri
         if: runner.os != 'macOS'
@@ -373,48 +425,84 @@ jobs:
       - name: Sign and verify Windows installer
         if: runner.os == 'Windows'
         shell: pwsh
-        working-directory: tobkiri_launcher
         env:
           WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
           WINDOWS_TIMESTAMP_URL: https://timestamp.digicert.com
         run: |
           $ErrorActionPreference = 'Stop'
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) {
-            throw 'WINDOWS_CERTIFICATE_BASE64 is required for release installers'
+          $installers = @(Get-ChildItem -LiteralPath "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/nsis" -Filter '*.exe' -File)
+          if ($installers.Count -eq 0) { throw 'No Windows NSIS installer was produced' }
+          $arguments = @(
+            'scripts/release_gate.py',
+            'sign-artifacts',
+            '--repo-root', $env:GITHUB_WORKSPACE,
+            '--mode', 'production',
+            '--platform', 'windows'
+          )
+          foreach ($installer in $installers) {
+            $arguments += @('--artifact', $installer.FullName)
           }
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
-            throw 'WINDOWS_CERTIFICATE_PASSWORD is required for release installers'
-          }
+          python @arguments
+          if ($LASTEXITCODE -ne 0) { throw 'Windows installer Authenticode signing failed' }
 
-          $signtool = Get-ChildItem -Path @(
-            "$env:ProgramFiles\Windows Kits\10\bin\*\x64\signtool.exe",
-            "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe"
-          ) -File -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
-          if ($null -eq $signtool) { throw 'signtool.exe is required for release installers' }
+      - name: Prepare immutable target release upload
+        shell: python
+        env:
+          RELEASE_UPLOAD_ROOT: ${{ runner.temp }}/tobkiri-release-upload/${{ matrix.target }}
+          SOURCE_REVISION: ${{ steps.checked_out_source.outputs.source_revision }}
+        run: |
+          import os
+          import subprocess
+          import sys
 
-          $certificatePath = Join-Path $env:RUNNER_TEMP 'tobkiri-release-signing.pfx'
-          try {
-            [IO.File]::WriteAllBytes(
-              $certificatePath,
-              [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64)
-            )
-            $securePassword = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
-            Get-PfxData -FilePath $certificatePath -Password $securePassword | Out-Null
+          runner_os = "${{ runner.os }}"
+          target = "${{ matrix.target }}"
+          bundle_root = os.path.join(
+              os.environ["GITHUB_WORKSPACE"],
+              "tobkiri_launcher",
+              "src-tauri",
+              "target",
+              target,
+              "release",
+              "bundle",
+          )
+          if runner_os == "Linux":
+              source_dirs = [
+                  os.path.join(bundle_root, "deb"),
+                  os.path.join(bundle_root, "appimage"),
+              ]
+          elif runner_os == "Windows":
+              source_dirs = [os.path.join(bundle_root, "nsis")]
+          else:
+              source_dirs = [os.path.join(bundle_root, "dmg")]
+          command = [
+              sys.executable,
+              "scripts/release_inventory.py",
+              "collect-target",
+              "--output-root",
+              os.environ["RELEASE_UPLOAD_ROOT"],
+              "--source-revision",
+              os.environ["SOURCE_REVISION"],
+              "--target",
+              target,
+              "--platform",
+              "${{ matrix.presentation_platform }}",
+              "--architecture",
+              "${{ matrix.presentation_architecture }}",
+          ]
+          for source_dir in source_dirs:
+              command.extend(["--source-dir", source_dir])
+          subprocess.run(command, check=True)
 
-            $installers = @(Get-ChildItem -LiteralPath "src-tauri/target/${{ matrix.target }}/release/bundle/nsis" -Filter '*.exe' -File)
-            if ($installers.Count -eq 0) { throw 'No Windows NSIS installer was produced' }
-            foreach ($installer in $installers) {
-              & $signtool.FullName sign /fd SHA256 /f $certificatePath /p $env:WINDOWS_CERTIFICATE_PASSWORD /tr $env:WINDOWS_TIMESTAMP_URL /td SHA256 /d 'Tobkiri Launcher' $installer.FullName
-              if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for $($installer.Name)" }
-              & $signtool.FullName verify /pa /all /tw /v $installer.FullName
-              if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for $($installer.Name)" }
-            }
-          } finally {
-            Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
-          }
+      - name: Upload immutable target release artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tobkiri-release-${{ matrix.target }}-${{ steps.checked_out_source.outputs.source_revision }}
+          path: ${{ runner.temp }}/tobkiri-release-upload
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Capture macOS installer diagnostics
         if: failure() && runner.os == 'macOS'
@@ -450,16 +538,202 @@ jobs:
             ${{ runner.temp }}/tobkiri-macos-dmg-${{ matrix.target }}-diagnostic.txt
           if-no-files-found: warn
 
-      - name: Upload release artifacts
+  gather:
+    name: Gather, verify, and attest release assets
+    if: ${{ needs.build.result == 'success' }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      attestations: write
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Resolve checked-out source revision
+        id: checked_out_source
+        shell: python
+        run: |
+          import os
+          import subprocess
+
+          source_revision = subprocess.check_output(
+              ["git", "rev-parse", "--verify", "HEAD"], text=True
+          ).strip()
+          if len(source_revision) != 40 or any(
+              character not in "0123456789abcdef" for character in source_revision
+          ):
+              raise SystemExit("checked-out source revision is not a full lowercase SHA")
+          tag_revision = subprocess.check_output(
+              ["git", "rev-parse", "--verify", f"{os.environ['GITHUB_REF_NAME']}^{{commit}}"],
+              text=True,
+          ).strip()
+          if tag_revision != source_revision:
+              raise SystemExit("checked-out source revision does not match the release tag")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"source_revision={source_revision}\n")
+
+      - name: Verify exact release tag and synchronized version
+        shell: python
+        run: |
+          import os
+          import subprocess
+          import sys
+
+          subprocess.run(
+              [
+                  sys.executable,
+                  "scripts/release_gate.py",
+                  "version",
+                  "--repo-root",
+                  os.environ["GITHUB_WORKSPACE"],
+                  "--tag",
+                  os.environ["GITHUB_REF_NAME"],
+              ],
+              check=True,
+          )
+
+      - name: Download all immutable target release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tobkiri-release-*-${{ steps.checked_out_source.outputs.source_revision }}
+          path: ${{ runner.temp }}/tobkiri-release-gather
+          merge-multiple: true
+
+      - name: Create one SHA-256 release inventory
+        id: create_inventory
+        shell: python
+        env:
+          SOURCE_REVISION: ${{ steps.checked_out_source.outputs.source_revision }}
+          GATHER_ROOT: ${{ runner.temp }}/tobkiri-release-gather
+        run: |
+          import hashlib
+          import os
+          import subprocess
+          import sys
+
+          root = os.environ["GATHER_ROOT"]
+          inventory_path = os.path.join(root, "release-inventory.json")
+          subprocess.run(
+              [
+                  sys.executable,
+                  "scripts/release_inventory.py",
+                  "create",
+                  "--root",
+                  root,
+                  "--output",
+                  inventory_path,
+                  "--assets-dir",
+                  os.path.join(root, "release-assets"),
+                  "--source-revision",
+                  os.environ["SOURCE_REVISION"],
+                  "--tag",
+                  os.environ["GITHUB_REF_NAME"],
+              ],
+              check=True,
+          )
+          with open(inventory_path, "rb") as inventory_file:
+              inventory_sha256 = "sha256:" + hashlib.sha256(
+                  inventory_file.read()
+              ).hexdigest()
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"inventory_sha256={inventory_sha256}\n")
+
+      - name: Verify gathered release inventory before attestation
+        shell: python
+        env:
+          INVENTORY_SHA256: ${{ steps.create_inventory.outputs.inventory_sha256 }}
+          SOURCE_REVISION: ${{ steps.checked_out_source.outputs.source_revision }}
+          GATHER_ROOT: ${{ runner.temp }}/tobkiri-release-gather
+        run: |
+          import os
+          import subprocess
+          import sys
+
+          subprocess.run(
+              [
+                  sys.executable,
+                  "scripts/release_inventory.py",
+                  "verify",
+                  "--inventory",
+                  os.path.join(os.environ["GATHER_ROOT"], "release-inventory.json"),
+                  "--assets-dir",
+                  os.path.join(os.environ["GATHER_ROOT"], "release-assets"),
+                  "--source-revision",
+                  os.environ["SOURCE_REVISION"],
+                  "--tag",
+                  os.environ["GITHUB_REF_NAME"],
+                  "--inventory-sha256",
+                  os.environ["INVENTORY_SHA256"],
+              ],
+              check=True,
+          )
+
+      - name: Attest the single release inventory subject
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ runner.temp }}/tobkiri-release-gather/release-inventory.json
+
+      - name: Add attested inventory to final release assets
+        shell: python
+        env:
+          GATHER_ROOT: ${{ runner.temp }}/tobkiri-release-gather
+        run: |
+          import os
+          import shutil
+
+          root = os.environ["GATHER_ROOT"]
+          shutil.copyfile(
+              os.path.join(root, "release-inventory.json"),
+              os.path.join(root, "release-assets", "release-inventory.json"),
+          )
+
+      - name: Verify final release assets after attestation
+        shell: python
+        env:
+          INVENTORY_SHA256: ${{ steps.create_inventory.outputs.inventory_sha256 }}
+          SOURCE_REVISION: ${{ steps.checked_out_source.outputs.source_revision }}
+          GATHER_ROOT: ${{ runner.temp }}/tobkiri-release-gather
+        run: |
+          import os
+          import subprocess
+          import sys
+
+          subprocess.run(
+              [
+                  sys.executable,
+                  "scripts/release_inventory.py",
+                  "verify",
+                  "--inventory",
+                  os.path.join(os.environ["GATHER_ROOT"], "release-inventory.json"),
+                  "--assets-dir",
+                  os.path.join(os.environ["GATHER_ROOT"], "release-assets"),
+                  "--source-revision",
+                  os.environ["SOURCE_REVISION"],
+                  "--tag",
+                  os.environ["GITHUB_REF_NAME"],
+                  "--inventory-sha256",
+                  os.environ["INVENTORY_SHA256"],
+              ],
+              check=True,
+          )
+
+      - name: Upload one reviewable draft release
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          files: |
-            tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-            tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
-            tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
-            tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
-          # Tags create a reviewable draft. A maintainer must publish it after
-          # verifying the artifacts and release notes.
+          files: ${{ runner.temp }}/tobkiri-release-gather/release-assets/*
+          # Tags create a reviewable draft. A maintainer must publish it only
+          # after checking the attested inventory and release notes.
           draft: true
           generate_release_notes: true

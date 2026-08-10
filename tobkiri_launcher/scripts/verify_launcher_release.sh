@@ -71,7 +71,7 @@ run_logged tauri-rust-tests cargo test --locked --manifest-path "$TAURI_MANIFEST
 
 if ((SKIP_TAURI == 0)); then
   if [[ "$(uname -s)" == "Darwin" ]]; then
-    run_logged tauri-macos-production-build bash "$REPO_ROOT/scripts/build-and-sign.sh" --bundles app
+    run_logged tauri-macos-production-build bash "$REPO_ROOT/scripts/build-and-sign.sh" --mode production --bundles app
   elif ((REQUIRE_MACOS == 1)); then
     echo "macOS is required for the requested Tauri app verification" >&2
     exit 3

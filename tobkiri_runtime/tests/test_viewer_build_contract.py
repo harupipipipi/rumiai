@@ -25,6 +25,7 @@ MACOS_CONFIG = TAURI_ROOT / "tauri.macos.conf.json"
 MACOS_DEV_CONFIG = TAURI_ROOT / "tauri.macos.dev.conf.json"
 MACOS_RELEASE_VERIFIER = ROOT / "tobkiri_launcher" / "scripts" / "verify_macos_release.sh"
 MACOS_DMG_PACKAGER = ROOT / "tobkiri_launcher" / "scripts" / "package_macos_dmg.sh"
+RELEASE_GATE = ROOT / "scripts" / "release_gate.py"
 TEST_WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
 DEV_REQUIREMENTS = ROOT / "tobkiri_runtime" / "requirements-dev.txt"
 DEV_PYPROJECT = ROOT / "tobkiri_runtime" / "pyproject.toml"
@@ -249,6 +250,7 @@ def test_build_and_sign_rebuilds_canonical_defaultspack_before_staging():
 
 def test_release_platform_signing_is_fail_closed_and_ad_hoc_is_dev_only():
     workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    release_gate = RELEASE_GATE.read_text(encoding="utf-8")
     verifier = MACOS_RELEASE_VERIFIER.read_text(encoding="utf-8")
     mac_config = _read_json(MACOS_CONFIG)
     dev_config = _read_json(MACOS_DEV_CONFIG)
@@ -262,15 +264,20 @@ def test_release_platform_signing_is_fail_closed_and_ad_hoc_is_dev_only():
         "APPLE_TEAM_ID",
         "WINDOWS_CERTIFICATE_BASE64",
         "WINDOWS_CERTIFICATE_PASSWORD",
-        "signtool.exe",
-        "signtool.FullName sign",
-        "signtool.FullName verify",
-        "xcrun notarytool store-credentials",
-        "xcrun notarytool submit",
-        "xcrun stapler staple",
-        "xcrun stapler validate",
+        "scripts/release_gate.py sign-artifacts",
     ):
         assert required in workflow
+
+    for required in (
+        "signtool.exe",
+        '"sign"',
+        '"verify"',
+        '"notarytool"',
+        '"stapler"',
+        '"spctl"',
+        '"ditto"',
+    ):
+        assert required in release_gate
 
     for required in (
         "Developer ID Application: ",
@@ -279,8 +286,6 @@ def test_release_platform_signing_is_fail_closed_and_ad_hoc_is_dev_only():
         "Authority=-",
     ):
         assert required in verifier
-
-    assert "spctl --assess --type open" in workflow
 
     assert mac_config["bundle"]["targets"] == ["dmg"]
     assert "signingIdentity" not in mac_config["bundle"].get("macOS", {})
@@ -297,7 +302,7 @@ def test_release_platform_signing_is_fail_closed_and_ad_hoc_is_dev_only():
     dmg_at = workflow.index("Build macOS DMG installer")
     notarize_at = workflow.index("Notarize and staple macOS release DMG")
     windows_sign_at = workflow.index("Sign and verify Windows installer")
-    upload_at = workflow.index("Upload release artifacts")
+    upload_at = workflow.index("Upload one reviewable draft release")
     assert verify_at < dmg_at < notarize_at < upload_at
     assert windows_sign_at < upload_at
 
