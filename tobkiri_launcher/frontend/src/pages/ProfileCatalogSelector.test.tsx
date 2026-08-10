@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {act} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {JSDOM} from 'jsdom';
-import test from 'node:test';
+import test, {afterEach, beforeEach} from 'node:test';
 
 import {ProfileCatalogSelector} from '@/src/components/advanced/ProfileCatalogSelector';
 import type {
@@ -184,17 +184,36 @@ function catalogState(
 }
 
 function createDom(): {dom: JSDOM; container: HTMLElement; root: Root} {
-  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>');
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
+    url: 'http://localhost/panel/',
+  });
   Object.defineProperties(globalThis, {
     window: {value: dom.window, configurable: true},
     document: {value: dom.window.document, configurable: true},
     navigator: {value: dom.window.navigator, configurable: true},
+    localStorage: {value: dom.window.localStorage, configurable: true},
+    sessionStorage: {value: dom.window.sessionStorage, configurable: true},
   });
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const container = dom.window.document.querySelector<HTMLElement>('#root');
   assert.ok(container);
   return {dom, container, root: createRoot(container)};
 }
+
+let previousLocalStorage: unknown;
+let previousSessionStorage: unknown;
+
+beforeEach(() => {
+  previousLocalStorage = (globalThis as typeof globalThis & {localStorage?: unknown}).localStorage;
+  previousSessionStorage = (globalThis as typeof globalThis & {sessionStorage?: unknown}).sessionStorage;
+});
+
+afterEach(() => {
+  Object.defineProperties(globalThis, {
+    localStorage: {value: previousLocalStorage, configurable: true},
+    sessionStorage: {value: previousSessionStorage, configurable: true},
+  });
+});
 
 function buttonByLabel(container: HTMLElement, label: string): HTMLButtonElement {
   const button = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);

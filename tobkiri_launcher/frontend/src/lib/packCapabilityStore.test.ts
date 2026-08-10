@@ -294,11 +294,15 @@ test('double invocation is rejected while the first canonical request is pending
     release = resolve;
   });
   const {routes} = installFetch(async (route) => {
-    assert.equal(route, 'POST /api/ui/capability/invoke');
-    await pending;
-    return new Response(JSON.stringify({success: true, data: {ok: true}}), {
-      headers: {'Content-Type': 'application/json'},
-    });
+    if (route === 'POST /api/ui/capability/invoke') {
+      await pending;
+      return new Response(JSON.stringify({success: true, data: {ok: true}}), {
+        headers: {'Content-Type': 'application/json'},
+      });
+    }
+    if (route === 'GET /api/pack-control/catalog') return packsResponse();
+    if (route === 'GET /api/ui/catalog') return catalogResponse();
+    throw new Error(`unexpected route ${route}`);
   });
 
   try {
@@ -320,4 +324,41 @@ test('double invocation is rejected while the first canonical request is pending
     release?.();
   }
   assert.deepEqual(useAppStore.getState().packOperationPending, {});
+});
+
+test('a lost capability response transitions to unknown and never sends a replacement POST', async () => {
+  readyState();
+  let postCount = 0;
+  const {routes} = installFetch(async (route) => {
+    if (route === 'POST /api/ui/capability/invoke') {
+      postCount += 1;
+      throw new Error('POST request timed out after 10000ms');
+    }
+    if (route === 'GET /api/pack-control/catalog') return packsResponse();
+    if (route === 'GET /api/ui/catalog') return catalogResponse();
+    throw new Error(`unexpected route ${route}`);
+  });
+
+  await assert.rejects(
+    useAppStore.getState().invokePackOperation(samplePack.id, operation.operation_id, {
+      name: 'stat',
+      path: 'docs/example.txt',
+    }),
+    /result is unknown/,
+  );
+  await assert.rejects(
+    useAppStore.getState().invokePackOperation(samplePack.id, operation.operation_id, {
+      name: 'stat',
+      path: 'docs/example.txt',
+    }),
+    /result is unknown/,
+  );
+  assert.equal(postCount, 1);
+  assert.deepEqual(routes, [
+    'POST /api/ui/capability/invoke',
+    'GET /api/pack-control/catalog',
+    'GET /api/ui/catalog',
+  ]);
+  assert.deepEqual(useAppStore.getState().packOperationPending, {});
+  assert.equal(Object.keys(useAppStore.getState().packOperationUnknown).length, 1);
 });

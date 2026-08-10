@@ -12,7 +12,7 @@ function source(path: string): string {
 test('viewer popover trigger exposes keyboard and menu semantics', () => {
   const popover = source('components/ui/Popover.tsx');
 
-  assert.match(popover, /<button[\s\S]*aria-haspopup="menu"[\s\S]*aria-expanded=\{Boolean\(isOpen\)\}/);
+  assert.match(popover, /aria-haspopup=\{props\['aria-haspopup'\] \?\? 'menu'\}/);
   assert.match(popover, /event\.key === "Escape"/);
   assert.match(popover, /pointerdown/);
   assert.match(popover, /firstFocusable\?\.focus\(\)/);
@@ -30,8 +30,12 @@ test('viewer shell has a mobile navigation fallback and persistent desktop sideb
 
   assert.match(sidebar, /hidden[\s\S]*md:flex/);
   assert.match(header, /aria-label=\{t\('nav.open_menu'\)\}/);
+  assert.match(header, /aria-haspopup="menu"/);
   assert.match(header, /aria-haspopup="dialog"/);
-  assert.match(header, /role="presentation"/);
+  assert.match(header, /role="menu"/);
+  assert.match(header, /role="menuitem"/);
+  assert.match(header, /role="dialog"/);
+  assert.match(header, /aria-label="Profile menu"/);
   assert.match(header, /viewerNavGroups\.map/);
   assert.match(header, /aria-label=\{t\('nav.mobile_navigation'\)\}/);
   assert.match(store, /SIDEBAR_STORAGE_KEY = 'tobkiri-launcher-sidebar-open'/);
