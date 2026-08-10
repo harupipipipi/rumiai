@@ -11,6 +11,8 @@ import subprocess
 import sys
 import threading
 import time
+import tempfile
+import urllib.parse
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -1463,24 +1465,20 @@ def test_lima_handoff_rejects_staging_replacement_and_never_writes_outside_jail(
         )
         staged = manager._staging_image_path(authority)
         if mutation == "pathname":
-            assert not staged.exists()
-            staged.write_bytes(b"unverified replacement")
-            staged.chmod(0o400)
+            assert staged.exists()
+            with pytest.raises(PermissionError):
+                staged.write_bytes(b"unverified replacement")
         else:
             displaced_parent = staged.parent.with_name("displaced-staging")
-            staged.parent.rename(displaced_parent)
-            staged.parent.symlink_to(outside, target_is_directory=True)
+            with pytest.raises(PermissionError):
+                staged.parent.rename(displaced_parent)
 
     fake.before_start = swap
-    if mutation == "pathname":
-        assert manager.provision(_request(manager.prepare())).ready is True
-    else:
-        with pytest.raises(ValueError, match="staged image identity changed"):
-            manager.provision(_request(manager.prepare()))
+    assert manager.provision(_request(manager.prepare())).ready is True
 
     assert list(outside.iterdir()) == []
-    assert fake.exists is (mutation == "pathname")
-    assert manager.state_path.exists() is (mutation == "pathname")
+    assert fake.exists is True
+    assert manager.state_path.exists()
 
 
 def test_lima_handoff_rejects_same_inode_parent_alias_then_retarget(
@@ -1498,26 +1496,22 @@ def test_lima_handoff_rejects_same_inode_parent_alias_then_retarget(
             operation_id="staging",
         )
         staged = manager._staging_image_path(authority)
-        assert not staged.exists()
+        assert staged.exists()
         original_inode = staged.parent.stat().st_ino
         displaced = staged.parent.with_name("displaced-staging-chain")
-        staged.parent.rename(displaced)
-        staged.parent.symlink_to(displaced, target_is_directory=True)
+        with pytest.raises(PermissionError):
+            staged.parent.rename(displaced)
         assert staged.parent.stat().st_ino == original_inode
-        staged.parent.unlink()
-        (outside / staged.name).write_bytes(b"retargeted replacement")
-        staged.parent.symlink_to(outside, target_is_directory=True)
 
     fake.before_start = alias_then_retarget
-    with pytest.raises(ValueError, match="staged image identity changed"):
-        manager.provision(_request(manager.prepare()))
+    assert manager.provision(_request(manager.prepare())).ready is True
 
-    assert fake.exists is False
-    assert not manager.state_path.exists()
+    assert fake.exists is True
+    assert manager.state_path.exists()
 
 
 @pytest.mark.skipif(os.name != "posix", reason="PackVM Lima is a POSIX runtime")
-def test_lima_child_consumes_pinned_image_fd_and_stdin_config_during_parent_swap(
+def test_lima_child_consumes_immutable_file_before_uninherited_hostagent_boundary(
     provisioner,
     tmp_path: Path,
 ) -> None:
@@ -1536,18 +1530,24 @@ def test_lima_child_consumes_pinned_image_fd_and_stdin_config_during_parent_swap
             if argv[1:3] != ("start", "--name"):
                 return fake(command, input_text, timeout, inherited_fds)
             assert argv[-1] == "-"
-            assert len(inherited_fds) == 1
+            assert inherited_fds == ()
             config = str(input_text).encode("utf-8")
             self.expected_config_digest = hashlib.sha256(config).hexdigest()
+            location = yaml.safe_load(config)["images"][0]["location"]
+            image_path = urllib.parse.urlparse(location).path
             code = (
-                "import hashlib,json,os,pathlib,sys,time;"
+                "import hashlib,json,pathlib,subprocess,sys,time;"
                 "ready=pathlib.Path(sys.argv[1]);release=pathlib.Path(sys.argv[2]);"
-                "output=pathlib.Path(sys.argv[3]);fd=int(sys.argv[4]);"
+                "output=pathlib.Path(sys.argv[3]);image_path=pathlib.Path(sys.argv[4]);"
                 "ready.write_text('ready');"
                 "deadline=time.monotonic()+5;"
                 "\nwhile not release.exists() and time.monotonic()<deadline: time.sleep(.01)\n"
-                "config=sys.stdin.buffer.read();os.lseek(fd,0,os.SEEK_SET);"
-                "image=os.read(fd,4096);"
+                "config=sys.stdin.buffer.read();image=image_path.read_bytes();"
+                "digest=hashlib.sha256(image).hexdigest();"
+                "helper=subprocess.run([sys.executable,'-c',"
+                "'import pathlib,sys;pathlib.Path(sys.argv[1]).write_text(sys.argv[2])',"
+                "str(output),digest]);"
+                "assert helper.returncode == 0;"
                 "output.write_text(json.dumps({'config':hashlib.sha256(config).hexdigest(),"
                 "'image':hashlib.sha256(image).hexdigest()}))"
             )
@@ -1559,10 +1559,9 @@ def test_lima_child_consumes_pinned_image_fd_and_stdin_config_during_parent_swap
                     str(ready),
                     str(release),
                     str(consumed),
-                    str(inherited_fds[0]),
+                    image_path,
                 ],
                 input=config,
-                pass_fds=tuple(inherited_fds),
                 capture_output=True,
                 timeout=10,
             )
@@ -1597,11 +1596,13 @@ def test_lima_child_consumes_pinned_image_fd_and_stdin_config_during_parent_swap
     )
     staged = manager._staging_image_path(authority)
     staging = staged.parent
-    assert not staged.exists()
+    assert staged.exists()
     displaced = staging.with_name("displaced-child-handoff")
-    staging.rename(displaced)
+    with pytest.raises(PermissionError):
+        staging.rename(displaced)
+    with pytest.raises(PermissionError):
+        staged.write_bytes(b"unverified replacement")
     (outside / staged.name).write_bytes(b"unverified replacement")
-    staging.symlink_to(outside, target_is_directory=True)
     (manager.state_path.parent / "attacker-config.yaml").write_text(
         "images: [{location: file:///unverified}]\n", encoding="utf-8"
     )
@@ -1609,13 +1610,13 @@ def test_lima_child_consumes_pinned_image_fd_and_stdin_config_during_parent_swap
     worker.join(timeout=10)
 
     assert not worker.is_alive()
-    assert result and "staged image identity changed" in str(result[0])
+    assert result == []
     child_result = json.loads(consumed.read_text(encoding="utf-8"))
     assert child_result["config"] == consumer.expected_config_digest
     assert child_result["image"] == hashlib.sha256(
         b"fixture image boundary"
     ).hexdigest()
-    assert fake.exists is False
+    assert fake.exists is True
 
 
 def test_failed_start_timeout_preserves_typed_bounded_diagnostic(provisioner) -> None:
@@ -1844,14 +1845,13 @@ def test_executed_stdin_config_must_match_reviewed_semantics(
             verified_image,
             image_descriptor=image_descriptor,
         )
-        if image_descriptor is None:
+        if verified_image is None:
             return rendered
         if mutation == "cpus":
             return rendered.replace(b"cpus: 2", b"cpus: 3")
-        return rendered.replace(
-            b"file:///dev/fd/__TOBKIRI_PACKVM_IMAGE_FD_0__",
-            b"file:///tmp/unverified.img",
-        )
+        loaded = yaml.safe_load(rendered)
+        loaded["images"][0]["location"] = "file:///tmp/unverified.img"
+        return yaml.safe_dump(loaded).encode("utf-8")
 
     monkeypatch.setattr(manager, "_rendered_config", mutate_only_executed)
     with pytest.raises(ValueError, match="config|locator"):
@@ -1860,35 +1860,155 @@ def test_executed_stdin_config_must_match_reviewed_semantics(
     assert not any(command[1:3] == ("start", "--name") for command in fake.commands)
 
 
-def test_staged_equal_size_inode_overwrite_is_rejected_before_child_spawn(
+def test_progress_retained_writable_inode_cannot_change_lima_handoff(
     provisioner,
 ) -> None:
     manager, fake, _command = provisioner
-    mutated = False
+    retained: list[int] = []
+    callback_inode = 0
 
-    def overwrite(progress: PackVMImageProgress) -> None:
-        nonlocal mutated
-        if progress.stage != "verified" or mutated:
+    def retain_writer(progress: PackVMImageProgress) -> None:
+        nonlocal callback_inode
+        if progress.stage != "verified" or retained:
             return
-        staging = manager.state_path.parent / "packvm-image-staging"
-        candidates = list(staging.glob("*.img"))
-        if not candidates:
-            return
-        staged = candidates[0]
-        original = staged.read_bytes()
-        replacement = bytes([original[0] ^ 0xFF]) + original[1:]
-        staged.chmod(0o600)
-        staged.write_bytes(replacement)
-        staged.chmod(0o400)
-        assert staged.stat().st_ino == candidates[0].stat().st_ino
-        assert staged.stat().st_size == len(original)
-        mutated = True
+        authority = manager._image_authority(
+            plan_digest="sha256:" + "0" * 64,
+            session_digest="sha256:" + "0" * 64,
+            operation_id="staging",
+        )
+        staged = manager._staging_image_path(authority)
+        staged.write_bytes(b"x" * progress.total_bytes)
+        descriptor = os.open(staged, os.O_RDWR)
+        callback_inode = os.fstat(descriptor).st_ino
+        retained.append(descriptor)
 
-    with pytest.raises(ValueError, match="digest changed before execution"):
-        manager.provision(_request(manager.prepare()), progress=overwrite)
-    assert mutated is True
+    def consume(config: bytes, inherited_fds: tuple[int, ...]) -> None:
+        assert inherited_fds == ()
+        os.pwrite(retained[0], b"y" * len(b"fixture image boundary"), 0)
+        assert os.fstat(retained[0]).st_ino == callback_inode
+        location = yaml.safe_load(config)["images"][0]["location"]
+        consumed_path = Path(urllib.parse.urlparse(location).path)
+        consumed = consumed_path.read_bytes()
+        assert consumed == b"fixture image boundary"
+        assert consumed_path.stat().st_ino != callback_inode
+        with pytest.raises(PermissionError):
+            consumed_path.write_bytes(b"y" * len(consumed))
+        with pytest.raises(PermissionError):
+            consumed_path.parent.rename(consumed_path.parent.with_name("swapped"))
+
+    fake.before_start = consume
+    try:
+        assert manager.provision(
+            _request(manager.prepare()), progress=retain_writer
+        ).ready is True
+    finally:
+        for descriptor in retained:
+            os.close(descriptor)
+
+
+def test_final_progress_cancellation_prevents_staging_and_start(provisioner) -> None:
+    manager, fake, _command = provisioner
+    cancel_requested = False
+
+    def request_cancel(progress: PackVMImageProgress) -> None:
+        nonlocal cancel_requested
+        if progress.stage == "verified":
+            cancel_requested = True
+
+    with pytest.raises(PackVMImageCancelled):
+        manager.provision(
+            _request(manager.prepare()),
+            progress=request_cancel,
+            cancelled=lambda: cancel_requested,
+        )
+
     assert fake.exists is False
+    assert not manager.state_path.exists()
     assert not any(command[1:3] == ("start", "--name") for command in fake.commands)
+    staging = manager.state_path.parent / "packvm-image-staging"
+    assert not list(staging.glob("*.img"))
+
+
+def test_cancellation_after_final_seal_prevents_start(
+    provisioner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager, fake, _command = provisioner
+    cancel_requested = False
+    original_seal = manager._seal_staged_image
+
+    def seal_then_cancel(staged) -> None:
+        nonlocal cancel_requested
+        original_seal(staged)
+        cancel_requested = True
+
+    monkeypatch.setattr(manager, "_seal_staged_image", seal_then_cancel)
+    with pytest.raises(PackVMImageCancelled):
+        manager.provision(
+            _request(manager.prepare()), cancelled=lambda: cancel_requested
+        )
+
+    assert fake.exists is False
+    assert not manager.recovery_path.exists()
+    assert not any(command[1:3] == ("start", "--name") for command in fake.commands)
+
+
+@pytest.mark.skipif(platform.system() != "Darwin", reason="Lima VZ is macOS-only")
+def test_installed_lima_220_consumes_stable_local_file_before_vm_start() -> None:
+    """Exercise Lima's real local-image prepare path without a VM or download."""
+
+    limactl = shutil.which("limactl")
+    if limactl is None:
+        pytest.skip("installed Lima compatibility probe requires limactl")
+    version = subprocess.run(
+        (limactl, "--version"), capture_output=True, text=True, timeout=5
+    )
+    if version.returncode != 0 or "version 2.2.0" not in version.stdout:
+        pytest.skip("compatibility probe is pinned to installed Lima 2.2.0")
+
+    root = Path(tempfile.mkdtemp(prefix="pv", dir="/tmp")).resolve()
+    try:
+        home = root / "h"
+        lima_home = root / "l"
+        home.mkdir(mode=0o700)
+        lima_home.mkdir(mode=0o700)
+        image = root / "i"
+        content = b"packvm-local-image-probe\n"
+        image.write_bytes(content)
+        config = {
+            "vmType": "vz",
+            "arch": "aarch64",
+            "cpus": 1,
+            "memory": "1GiB",
+            "disk": "1GiB",
+            "plain": True,
+            "containerd": {"system": False, "user": False},
+            "images": [{
+                "location": image.as_uri(),
+                "digest": "sha256:" + hashlib.sha256(content).hexdigest(),
+            }],
+            "mounts": [],
+            "networks": [],
+        }
+        result = subprocess.run(
+            (limactl, "create", "--name", "p", "-"),
+            input=yaml.safe_dump(config),
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env={
+                "PATH": "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin",
+                "HOME": str(home),
+                "LIMA_HOME": str(lima_home),
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        assert f"Downloaded the image from `{image.as_uri()}`" in result.stderr
+        assert "http://" not in result.stderr
+        assert "https://" not in result.stderr
+        assert (lima_home / "p" / "disk").exists()
+        assert not (lima_home / "p" / "ha.sock").exists()
+    finally:
+        shutil.rmtree(root)
 
 
 def test_doctor_rejects_a_changed_host_build(

@@ -1355,14 +1355,34 @@ class PackVMImageCache:
 
     @contextmanager
     def _exclusive_lock(self, pinned: _PinnedEntry, name: str) -> Iterator[int]:
+        """Hold the stable cache-root lock across any entry mutation.
+
+        Entry-local locks cannot safely be unlinked during GC: another caller
+        can create a new lock inode at the same name while the old inode remains
+        locked.  One root-owned lock has a lifetime independent of generations,
+        so entry removal and recreation cannot split exclusivity.
+        """
+
         flags = os.O_CREAT | os.O_RDWR
         if hasattr(os, "O_NOFOLLOW"):
             flags |= os.O_NOFOLLOW
-        descriptor = os.open(name, flags, 0o600, dir_fd=pinned.entry_descriptor)
+        descriptor = os.open(
+            "cache.lock", flags, 0o600, dir_fd=pinned.root_descriptor
+        )
         locked = False
         try:
             metadata = os.fstat(descriptor)
-            if not _safe_regular(metadata) or metadata.st_nlink != 1:
+            current = os.stat(
+                "cache.lock",
+                dir_fd=pinned.root_descriptor,
+                follow_symlinks=False,
+            )
+            if (
+                not _safe_regular(metadata)
+                or metadata.st_nlink != 1
+                or (current.st_dev, current.st_ino)
+                != (metadata.st_dev, metadata.st_ino)
+            ):
                 raise PackVMImageError(
                     "packvm_image_lock_unsafe", "PackVM image lock is unsafe"
                 )
@@ -1374,6 +1394,18 @@ class PackVMImageCache:
                     "packvm_image_concurrent_writer",
                     "Another PackVM image writer is active",
                 ) from exc
+            current = os.stat(
+                "cache.lock",
+                dir_fd=pinned.root_descriptor,
+                follow_symlinks=False,
+            )
+            if (current.st_dev, current.st_ino) != (
+                metadata.st_dev,
+                metadata.st_ino,
+            ):
+                raise PackVMImageError(
+                    "packvm_image_lock_unsafe", "PackVM image lock identity changed"
+                )
             yield descriptor
         finally:
             try:
@@ -1385,25 +1417,22 @@ class PackVMImageCache:
     def _remove_locked_entry(
         self, entry: Path, pinned: _PinnedEntry, lock_descriptor: int
     ) -> None:
-        """Unlink the held lock and empty entry without opening a lock race."""
+        """Remove an empty entry while the stable cache-root lock is held."""
 
         self._require_pinned_identity(entry, pinned)
         lock_metadata = os.fstat(lock_descriptor)
         current = os.stat(
-            "download.lock",
-            dir_fd=pinned.entry_descriptor,
-            follow_symlinks=False,
+            "cache.lock", dir_fd=pinned.root_descriptor, follow_symlinks=False
         )
-        if (
-            not _safe_regular(lock_metadata)
-            or lock_metadata.st_nlink != 1
-            or (current.st_dev, current.st_ino)
-            != (lock_metadata.st_dev, lock_metadata.st_ino)
-        ):
+        if not _safe_regular(lock_metadata) or lock_metadata.st_nlink != 1 or (
+            current.st_dev,
+            current.st_ino,
+        ) != (lock_metadata.st_dev, lock_metadata.st_ino):
             raise PackVMImageError(
                 "packvm_image_lock_unsafe", "PackVM image lock identity changed"
             )
-        os.unlink("download.lock", dir_fd=pinned.entry_descriptor)
+        # Remove legacy entry-local locks only under the stable root lock.
+        self._unlink_regular_if_present(entry / "download.lock", pinned)
         os.fsync(pinned.entry_descriptor)
         os.rmdir(entry.name, dir_fd=pinned.root_descriptor)
         os.fsync(pinned.root_descriptor)

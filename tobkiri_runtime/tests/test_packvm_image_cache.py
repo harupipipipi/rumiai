@@ -763,7 +763,7 @@ def test_concurrent_writer_is_rejected_without_waiting(tmp_path: Path) -> None:
     cache = _cache(tmp_path, opener)
     entry = cache.image_path(_authority(content)).parent
     entry.mkdir(parents=True, mode=0o700)
-    lock = entry / "download.lock"
+    lock = cache.root / "cache.lock"
     descriptor = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -892,7 +892,7 @@ def test_gc_removes_only_authenticated_old_generations(tmp_path: Path) -> None:
     ) == 0
 
 
-def test_gc_preserves_locked_entry_then_removes_lock_and_directory(
+def test_gc_preserves_locked_entry_then_removes_directory_but_not_root_lock(
     tmp_path: Path,
 ) -> None:
     fcntl = pytest.importorskip("fcntl")
@@ -917,7 +917,9 @@ def test_gc_preserves_locked_entry_then_removes_lock_and_directory(
     )
     stale_entry = cache.prefetch(stale).path.parent
     cache.prefetch(current)
-    lock_descriptor = os.open(stale_entry / "download.lock", os.O_RDWR)
+    root_lock = cache.root / "cache.lock"
+    root_lock_identity = root_lock.stat().st_dev, root_lock.stat().st_ino
+    lock_descriptor = os.open(root_lock, os.O_RDWR)
     try:
         fcntl.flock(lock_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         assert cache.garbage_collect(
@@ -936,6 +938,14 @@ def test_gc_preserves_locked_entry_then_removes_lock_and_directory(
         quota_bytes=len(current_content),
     ) == 1
     assert not stale_entry.exists()
+    assert root_lock.exists()
+    assert (root_lock.stat().st_dev, root_lock.stat().st_ino) == root_lock_identity
+    assert cache.garbage_collect(
+        current,
+        maximum_generations=1,
+        quota_bytes=len(current_content),
+    ) == 0
+    assert (root_lock.stat().st_dev, root_lock.stat().st_ino) == root_lock_identity
 
 
 def test_gc_reclaims_authenticated_stale_partial_but_preserves_current(
