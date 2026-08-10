@@ -1392,6 +1392,7 @@ class PackAPIServer:
         from .authority.v4 import AuthorityStore
         from .bootstrap.production_v4 import capture_production_dispatch
         from .bootstrap.profile_capture import (
+            _bundle_root,
             capture_default_profile,
             runtime_user_data_root,
         )
@@ -1399,7 +1400,8 @@ class PackAPIServer:
         from .frontend_contract_routes import load_frontend_contract_bindings
 
         runtime_root = Path(__file__).resolve().parents[1]
-        catalog = BundledCatalog.load(runtime_root / "ecosystem" / "defaultspack" / "v4")
+        bundle_root = _bundle_root()
+        catalog = BundledCatalog.load(bundle_root)
         bindings = load_frontend_contract_bindings(
             runtime_root
             / "ecosystem"
@@ -1416,7 +1418,7 @@ class PackAPIServer:
             try:
                 session = capture_production_dispatch(
                     active,
-                    bundle_root=runtime_root / "ecosystem" / "defaultspack" / "v4",
+                    bundle_root=bundle_root,
                     ecosystem_root=runtime_root / "ecosystem",
                     authority_store=authority,
                     packvm_readiness_reader=self._packvm_lifecycle.readiness_snapshot,

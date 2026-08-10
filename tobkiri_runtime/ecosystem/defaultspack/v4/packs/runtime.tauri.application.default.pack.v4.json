@@ -4,13 +4,13 @@
     "id": "runtime.tauri.application.default",
     "version": "1.0.0",
     "kind": "application",
-    "artifact_digest": "sha256:9de8bae248436fe0dfa800da7641fc9edcb61de5334a0958ead2e6ed9d5584e6",
+    "artifact_digest": "sha256:6dcd53a6833979c3fec4cc1e507a3bd4e3dd7e7028ec4b7abf0c9f8e92f1c5b8",
     "display_name": "Tobkiri Tauri Application Runtime"
   },
   "functions": [
     {
       "id": "runtime.tauri.application.default",
-      "implementation_digest": "sha256:211c81922a321cabd360c4f178c442b800f210dbf6fbf307081dd69b5dcc0d86",
+      "implementation_digest": "sha256:6dcd53a6833979c3fec4cc1e507a3bd4e3dd7e7028ec4b7abf0c9f8e92f1c5b8",
       "contract_revision_digest": "sha256:fd443fd9faf828ba60f0c81b26a5f6eed613cd8382368af32938121f147481c9",
       "operations": [
         "launch"
@@ -30,29 +30,21 @@
   ],
   "artifacts": [
     {
-      "path": "defaultspack/desktop_app.py",
-      "digest": "sha256:211c81922a321cabd360c4f178c442b800f210dbf6fbf307081dd69b5dcc0d86",
-      "kind": "executable",
-      "platform": "host",
-      "entrypoint": "defaultspack/desktop_app.py",
-      "argv": []
-    },
-    {
       "path": "defaultspack/frontend_contract_map.v4.json",
       "digest": "sha256:b46fde48be7d67dc2ab6527d0e80058c2c83e2bbe904191db7e411b70bef6f2c",
       "kind": "asset",
-      "platform": "host"
+      "platform": "all"
     }
   ],
   "provenance": {
     "schema": "io.tobkiri.provenance.v1",
-    "source_kind": "repository",
+    "source_kind": "generated",
     "source_path": "ecosystem/defaultspack/v4/packs/runtime.tauri.application.default.pack.v4.json",
-    "source_digest": "sha256:1021f6cb25156f8768cf2836d61909a5769d272f916831ef0dbb6541e353f94d",
-    "repository_commit": "working-tree",
-    "repository_tree": "82cb47a45264cdba7e3a778bd7f603f75395f3cb1e0c6e7ae4e8234d1f2cd4f9",
+    "source_digest": "sha256:b41dadec625e7ff33005527f316ddb4bc0ba77ffc0b8bc81b890953c780ed843",
+    "repository_commit": "a2cae0ca5b2b9d23391cd6dc3d2708e9c6b7645e",
+    "repository_tree": "1742279a0400f326ff5b550809cb18f203638739a1908865eb173bdb6697715a",
     "generator": "defaultspack-v4-core",
-    "generator_version": "1.0.0",
+    "generator_version": "2.0.0",
     "normative": true,
     "evidence": []
   },
@@ -96,8 +88,8 @@
     }
   ],
   "integrity": {
-    "source_identity": "sha256:6f530c9fabbef45ffa45bf8553957ea5551d27c96013ca9748dc509c80245218",
-    "artifact_set_digest": "sha256:9de8bae248436fe0dfa800da7641fc9edcb61de5334a0958ead2e6ed9d5584e6",
+    "source_identity": "sha256:50c3e3ac986472dfbc46253c7bc0deda3a6db18e63c389a8ce15b94164eca4ea",
+    "artifact_set_digest": "sha256:2a6af47c0e72925c54ba0bea24586e2ab63b0dbe3f499741092215108766f26d",
     "contract_catalog_digest": "sha256:0df46117366f419dbad8685b74340a655d45e46e71fc5a0c1eb30c9fce00f614"
   }
 }

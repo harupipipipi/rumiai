@@ -1,6 +1,7 @@
 {
   "files": {
-    "activation_record_v1.schema.json": "sha256:378fc09325da2e12573677c7f843a81c371db89b3e4977ab99b623283b1fc2e3",
+    "activation_record_v1.schema.json": "sha256:1cb4d94739cf37f62234001ba618baa25708c72357bb0cf334fd83bf075fb3ed",
+    "activation_record_v2.schema.json": "sha256:769bc251efc4655bca294dba54b8926a6712a61f4c132abfba446cfcaa5b21d0",
     "base_definition_v4.schema.json": "sha256:ecf1dd9e8e3db61accdf02fc7f400f113062a883b87dee958f48a4f041fa0fac",
     "cli_io_v1.schema.json": "sha256:158d24717c24b04b066acc21d5284eca322931c9ce125466a8bdd2be78c1a982",
     "common_v1.schema.json": "sha256:8bf407b91311d661744a9c2b160eeda5c54d480ca4859edf92ff4f23471da557",
@@ -14,13 +15,17 @@
     "pack_artifact_index_v4.schema.json": "sha256:861c30621208af2aac98c2e8c678171c6aba493d8fcec4d37b6ed00d769af305",
     "pack_contract_catalog_v4.schema.json": "sha256:132c18aeb94952853a914a3bb962150898dd2f8f9d24ec245b7252012603eebf",
     "pack_manifest_v4.schema.json": "sha256:631876d5f930e352e54f09070d85d2dee6e767e33f8296b442dd92edd283524e",
-    "profile_lock_v4.schema.json": "sha256:fbea0aee923ef1490b77d4c30953c5941d7b21e4fcf59f2b3f635a2033a0f6f0",
+    "profile_lock_v4.schema.json": "sha256:879f2e8b975b9877a59f057e686b785ab4dd81357df688e6efa07927ec89e45e",
+    "profile_lock_v5.schema.json": "sha256:ca9bf711182486d9e8aea29a84e980f9f28b1e960893da3568427fd493ee6f50",
     "profile_v4.schema.json": "sha256:b8e026f38d7477903f6ccbd04a0e855123491652c86c5bed6ae62c54cf146e85",
+    "profile_v5.schema.json": "sha256:8b31667b1e6e5ba80a62b625ad560a1423b8fa31712791cfbed2520deb4299e8",
     "provenance_v1.schema.json": "sha256:34e1d1104613a7764e627bba147086381fb70f8b4d184bdb1d8f47ba024899da",
     "request_envelope_v1.schema.json": "sha256:b1e73e73b803b183dced2ae6565518ce95e1cdf11efed996149f0eb5eab9760b",
     "request_frame_v1.schema.json": "sha256:c8f54f0453faeb682103611a4b11e5996dd6f81d526588b7a2e7aebf8c7cba90",
-    "resolved_plan_v1.schema.json": "sha256:4b580ab9c438841563887bc59d659bcdc08e1324891fa6113edc94eb7c10b607",
-    "shell_definition_v4.schema.json": "sha256:aab24bda1033cf6ca8b2d670d4c0545475566a91db675da39fa184a8bbba80b4"
+    "resolved_plan_v1.schema.json": "sha256:c02a20f1c851ffd0957ee88bf0e1da914f45fef033cdc1f472a93ffbe41fde16",
+    "resolved_plan_v2.schema.json": "sha256:8bbfff98ad91a8b119a5bcc07043c4eb4e28e3d4edb48e27a93fbca60c022fd5",
+    "shell_definition_v4.schema.json": "sha256:eb2c2fa49cb7903c11e57be4083154a840f099baecce23ab4daa4581a0902053",
+    "shell_definition_v5.schema.json": "sha256:860fd013dad7f54b1fc36442fb125f9ded0c3728c0fd08a0cc30d8d1b9a6d2d8"
   },
   "generator": "tobkiri-protocol",
   "generator_version": "1.0.0",

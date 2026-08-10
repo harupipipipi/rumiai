@@ -28,6 +28,7 @@ from ..runtime_port import resolve_runtime_port
 from tobkiri_host.runtime import V4DispatchSession, install_dispatch_session
 from .production_v4 import capture_production_dispatch
 from .profile_capture import (
+    _bundle_root,
     active_default_profile_exists,
     capture_default_profile,
     runtime_user_data_root,
@@ -72,7 +73,8 @@ class Kernel:
             if active_default_profile_exists():
                 active = capture_default_profile()
                 authority_store = AuthorityStore(user_data / "authority" / "v4.sqlite3")
-                catalog = BundledCatalog.load(runtime_root / "ecosystem" / "defaultspack" / "v4")
+                bundle_root = _bundle_root()
+                catalog = BundledCatalog.load(bundle_root)
                 contract_bindings = load_frontend_contract_bindings(
                     runtime_root
                     / "ecosystem"
@@ -84,7 +86,7 @@ class Kernel:
                 try:
                     dispatch_session = capture_production_dispatch(
                         active,
-                        bundle_root=(runtime_root / "ecosystem" / "defaultspack" / "v4"),
+                        bundle_root=bundle_root,
                         ecosystem_root=runtime_root / "ecosystem",
                         authority_store=authority_store,
                         frontend_contract_bindings=contract_bindings,

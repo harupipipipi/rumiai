@@ -906,6 +906,7 @@ def resolve_profile_pack_set(
         bases=catalog.bases,
         shells=catalog.shells,
         profiles=catalog.profiles,
+        artifact_root=catalog.artifact_root,
     )
     source = catalog.profiles.get(profile_id)
     if source is None:

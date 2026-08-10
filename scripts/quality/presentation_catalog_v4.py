@@ -154,6 +154,25 @@ def _validate_v4_documents(bundle: V4Bundle) -> tuple[str, ...]:
         profile = catalog.profiles.get("defaults")
         if profile is None:
             raise PresentationCatalogError("v4 bundle has no defaults profile")
+        selected_ids = {
+            str(profile["base"]["pack_id"]),
+            str(profile["shell"]["pack_id"]),
+            *(str(item["pack_id"]) for item in profile["packs"]),
+        }
+        pending = list(selected_ids)
+        while pending:
+            manifest = catalog.packs.get(pending.pop())
+            if manifest is None:
+                raise PresentationCatalogError(
+                    "source Profile selects a Pack outside the v4 bundle"
+                )
+            for dependency_id in manifest["requirements"]["pack_dependencies"]:
+                if dependency_id not in selected_ids:
+                    selected_ids.add(str(dependency_id))
+                    pending.append(str(dependency_id))
+        shell = catalog.shells.get(str(profile["shell"]["provider_id"]))
+        if shell is not None and shell.get("availability") == "build_required":
+            return tuple(sorted(selected_ids))
         authority_bindings = {}
         for index, edge in enumerate(profile.get("requested_edges", ())):
             key = "|".join(
@@ -512,17 +531,10 @@ def _shell_descriptor(
         raise PresentationCatalogError(
             f"defaults profile Shell selection does not pin {shell.identity}"
         )
-    shell_artifact_digest = _validate_digest(
-        value.get("artifact_digest"), f"Shell {shell.identity} artifact_digest"
-    )
-    manifest_artifact_digest = _validate_digest(
+    _validate_digest(
         pack_value.get("artifact_digest"),
         f"Shell {shell.identity} manifest artifact_digest",
     )
-    if shell_artifact_digest != manifest_artifact_digest:
-        raise PresentationCatalogError(
-            f"Shell {shell.identity} does not pin its exact Pack artifact"
-        )
     contract_id = str(value.get("contract_id") or "")
     revision = contract_revisions.get(contract_id)
     if revision is None:
@@ -543,8 +555,42 @@ def _shell_descriptor(
         edge_contract_id = edge.get("contract_id")
         if isinstance(edge_contract_id, str) and edge_contract_id not in consumed:
             consumed.append(edge_contract_id)
-    if launch.get("prebuilt_only") is not True or not isinstance(variants, list) or not variants:
+    if launch.get("prebuilt_only") is not True or not isinstance(variants, list):
         raise PresentationCatalogError(f"Shell {shell.identity} must be prebuilt-only")
+    if value.get("availability") == "build_required":
+        if value.get("artifact_digest") is not None or variants:
+            raise PresentationCatalogError(
+                f"unavailable Shell {shell.identity} fabricates a launch artifact"
+            )
+        effect_scope = sorted({contract_id, *consumed})
+        return {
+            "provider_id": str(value["provider_id"]),
+            "display_name": str(pack_value.get("display_name") or value["provider_id"]),
+            "contract_id": contract_id,
+            "contract_revision_digest": revision["digest"],
+            "experience_role": "shell",
+            "presentation_kind": str(presentation.get("kind") or ""),
+            "presentation_family": str(presentation.get("family") or ""),
+            "technology": str(presentation.get("technology") or ""),
+            "capabilities": list(capabilities),
+            "consumes_contracts": list(consumed),
+            "contributions": [],
+            "artifact_variants": [],
+            "approval": _approval(
+                authority_mode="lease_only",
+                execution_domain=f"shell:{value['provider_id']}",
+                effect_scope=effect_scope,
+                blast_radius=(
+                    "Shell requests use the Host Broker; the Shell has no ambient "
+                    "Host authority."
+                ),
+            ),
+        }
+    shell_artifact_digest = _validate_digest(
+        value.get("artifact_digest"), f"Shell {shell.identity} artifact_digest"
+    )
+    if not variants:
+        raise PresentationCatalogError(f"verified Shell {shell.identity} has no variant")
     artifact_variants: list[dict[str, Any]] = []
     seen_targets: set[tuple[str, str]] = set()
     seen_ids: set[str] = set()
@@ -630,6 +676,8 @@ def _release_binding(
     existing: Mapping[str, Any], variants: list[Mapping[str, Any]]
 ) -> dict[str, Any] | None:
     value = existing.get("release_binding")
+    if not variants:
+        return None
     if value is None:
         return None
     if not isinstance(value, Mapping):

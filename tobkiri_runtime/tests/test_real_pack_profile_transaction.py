@@ -40,7 +40,12 @@ from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 
 
 ROOT = Path(os.environ["TOBKIRI_TEST_RUNTIME_ROOT"])
-BUNDLE_ROOT = ROOT / "ecosystem" / "defaultspack" / "v4"
+BUNDLE_ROOT = Path(
+    os.environ.get(
+        "TOBKIRI_DEFAULTS_BUNDLE_ROOT",
+        str(ROOT / "ecosystem" / "defaultspack" / "v4"),
+    )
+)
 MAP_PATH = (
     ROOT
     / "ecosystem"
@@ -151,8 +156,7 @@ def _spawn_child(
     line = process.stdout.readline()
     if not line:
         process.terminate()
-        process.communicate(timeout=10)
-        stderr = process.stderr.read() if process.stderr is not None else ""
+        _stdout, stderr = process.communicate(timeout=10)
         raise AssertionError(f"production child exited before readiness: {stderr}")
     try:
         state = json.loads(line)

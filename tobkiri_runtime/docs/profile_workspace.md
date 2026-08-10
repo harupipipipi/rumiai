@@ -14,11 +14,18 @@ workspaces/<profile_id>/
   audit/events.jsonl
 ```
 
-The verified `Profile v4 -> ProfileLock v4 -> ResolvedPlan -> ActivationStore`
-chain is the only source of active identity, Pack membership, providers,
+The verified `Profile v5 -> ProfileLock v5 -> ResolvedPlan v2 -> ActivationRecord
+v2` chain is the only source of active identity, Pack membership, providers,
 permissions, policy, Shell, and resource bindings. Files inside a workspace may
 store application state and audit evidence, but runtime code must not interpret
 them as authority.
+
+Frozen Profile v4, ProfileLock v4, ResolvedPlan v1, and ActivationRecord v1
+records are accepted only by the restart migrator. Migration validates the
+legacy envelope and Authority reservation, reconstructs current records from
+the signed bundle, and atomically publishes the successor. It is not a general
+legacy configuration importer and cannot fill missing trust data from the
+workspace or client input.
 
 The retired layout is not read or generated:
 

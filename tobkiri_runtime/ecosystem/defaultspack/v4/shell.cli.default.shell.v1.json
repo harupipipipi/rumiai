@@ -1,26 +1,15 @@
 {
-  "artifact_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-  "contract_id": "app.shell.v1",
-  "definition_revision": "sha256:a3cc86455d1e70b1f26020866fd37bd3b0168b8369017f47522dc1069ecac0e8",
-  "launch": {
-    "prebuilt_only": true,
-    "variants": [
-      {
-        "architecture": "arm64",
-        "artifact_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-        "bundle_identity": "io.tobkiri.shell.cli.default",
-        "entrypoint": "tobkiri-shell",
-        "platform": "macos",
-        "relative_path": "bin/tobkiri-shell"
-      }
-    ]
-  },
-  "local_auth": {
-    "audience": "runtime-profile",
-    "protocol": "io.tobkiri.local-auth.v1"
-  },
+  "shell_api_version": "io.tobkiri.shell.v5",
+  "provider_id": "shell.cli.default",
   "pack_id": "shell.cli.default",
+  "availability": "build_required",
+  "artifact_digest": null,
+  "definition_revision": "sha256:3ec874b7ad5d4b99369bc9e03efcbc3f7056af510d8e559dd000db66f3b0a56e",
+  "contract_id": "app.shell.v1",
   "presentation": {
+    "family": "terminal",
+    "kind": "terminal_stdio",
+    "technology": "cli",
     "capabilities": [
       "commands",
       "interactive_prompt",
@@ -31,23 +20,26 @@
     ],
     "consumes_contribution_contracts": [
       "conversation.turn.v1"
-    ],
-    "family": "terminal",
-    "kind": "terminal_stdio",
-    "technology": "cli"
+    ]
+  },
+  "launch": {
+    "prebuilt_only": true,
+    "variants": []
+  },
+  "local_auth": {
+    "protocol": "io.tobkiri.local-auth.v1",
+    "audience": "runtime-profile"
   },
   "provenance": {
-    "evidence": [],
-    "generator": "defaultspack-v4-core",
-    "generator_version": "1.0.0",
-    "normative": true,
-    "repository_commit": "working-tree",
-    "repository_tree": "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
-    "source_kind": "repository",
-    "source_path": "ecosystem/defaultspack/v4/shell.cli.default.shell.v1.json"
-  },
-  "provider_id": "shell.cli.default",
-  "shell_api_version": "io.tobkiri.shell.v4"
+    "source_kind": "generated",
+    "source_path": "ecosystem/defaultspack/v4/shell.cli.default.shell.v1.json",
+    "source_digest": "sha256:d7d65bbef4356b6cf6a972fef7dd3222394de63074cde874d62e768c57e9e404",
+    "repository_commit": "a2cae0ca5b2b9d23391cd6dc3d2708e9c6b7645e",
+    "repository_tree": "35174a18441c6487341c3bbb536c529fbc2a587d62fc154f9b81bf6c1245f9e6",
+    "generator": "defaultspack-v4-core",
+    "generator_version": "2.0.0",
+    "normative": true,
+    "evidence": []
+  }
 }

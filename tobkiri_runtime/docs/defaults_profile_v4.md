@@ -1,4 +1,4 @@
-# Canonical Defaults Profile v4
+# Canonical Defaults Profile bundle
 
 The bundled `defaults` Profile is the sole canonical product Profile currently
 defined by the finite Defaultspack v4 bundle. `shell.tauri.default` and
@@ -35,6 +35,41 @@ SecurityEpoch, and monotonically increasing fencing token. Restart reloads the
 atomic activation envelope and rejects any stale or independently re-digested
 Profile, Lock, Plan, activation, Authority reservation, epoch, or fence.
 
+The current record chain is Profile v5, ProfileLock v5, ResolvedPlan v2, and
+ActivationRecord v2. The v4/v4/v1/v1 schemas remain frozen readers for
+pre-e853 activation envelopes. On restart, ActivationStore validates the full
+predecessor and its committed Authority reservation, re-resolves it from the
+signed current bundle, verifies that no edge or normalized scope changed, and
+publishes a successor envelope through the normal fenced atomic transaction.
+It never copies new trust fields from the old record. Missing catalog evidence,
+digest drift, scope drift, stale Authority, or an interrupted transaction fails
+closed; retry after an Authority-committed interruption is idempotent.
+
+## Requested authority scope
+
+Every requested edge uses a closed `requested_scope_template`. An empty source
+template means only `operation.invoke` for that edge's exact Contract,
+Operation, and semantics digest. Unknown fields, wildcards, a different
+Contract/Operation, opaque scope, or a mismatched semantics digest are rejected.
+Normalized templates and their digests are committed into the Profile and
+ResolvedPlan. Authority ceilings, grants, authorization, and dispatch all use
+that committed scope, so a narrower reviewed dimension or quota cannot be
+expanded later.
+
+## Platform artifact selection
+
+The tracked source catalog deliberately marks Tauri and CLI Shell artifacts as
+`build_required`; it contains no launch variants or placeholder executable
+digests and cannot be activated. A packaging build stages its actual
+Application/Shell bytes and then runs
+`scripts/generate_packaged_defaultspack_v4_bundle.py`. That generator rejects
+missing paths, symlinks, sentinel or mismatched digests, wrong platform or CPU
+architecture, and a mismatched macOS bundle identifier. It writes one verified
+variant to the staged Shell definition and the same path and byte digest to the
+Application Pack and bundle lock. Runtime resolution verifies those bytes
+again, and production capture consumes the selected definition variant rather
+than synthesizing one from Function metadata.
+
 ## Transactions and settings
 
 Named Profile selection is the four-step server ceremony:
@@ -58,11 +93,19 @@ change only runtime Profile settings and cannot mutate User Settings.
 The canonical bundle is generated only by:
 
 ```bash
-python scripts/generate_defaultspack_v4_bundle.py
-python scripts/generate_defaultspack_v4_bundle.py --check
+python scripts/generate_defaultspack_v4_bundle.py --source-commit <trusted-commit>
+python scripts/generate_defaultspack_v4_bundle.py --check --source-commit <trusted-commit>
 ```
 
 Generation must be deterministic across consecutive runs. The complete-v4,
 architecture, integrity, boundary, and checked-in evidence generators remain
 the release authority; runtime Registry or installed-Pack discovery is never a
 Profile source.
+
+Normative provenance is derived from a canonical payload that excludes its own
+provenance field. `repository_commit` must be a real 40-hex Git commit and the
+source and tree digests are derived from that explicit payload and path, so no
+self-referential digest cycle exists. An implicit commit is accepted only from
+a clean tracked worktree. Dirty builds must receive a commit from their trusted
+build context; generation otherwise stops instead of recording
+`working-tree`, placeholder, or sentinel provenance.

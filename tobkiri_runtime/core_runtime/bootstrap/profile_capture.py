@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -33,6 +34,9 @@ def runtime_user_data_root(base_dir: Path | None = None) -> Path:
 
 def _bundle_root(base_dir: Path | None = None) -> Path:
     del base_dir
+    configured = os.getenv("TOBKIRI_DEFAULTS_BUNDLE_ROOT")
+    if configured:
+        return Path(configured).resolve()
     runtime_root = Path(__file__).resolve().parents[2]
     return runtime_root / "ecosystem" / "defaultspack" / "v4"
 
@@ -216,12 +220,14 @@ def capture_default_profile(
         if confirmation is not None:
             raise ProfileResolutionDenied("Defaults activation confirmation was replayed")
         workspace = user_data / "workspaces" / "defaults"
+        catalog = BundledCatalog.load(_bundle_root(base_dir))
         with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
             store = ActivationStore(
                 state_root,
                 workspace,
                 profile_id="defaults",
                 authority=authority,
+                catalog=catalog,
             )
             return store.load_active_snapshot()
     if active_pointer.exists():
@@ -244,6 +250,7 @@ def capture_default_profile(
             workspace,
             profile_id="defaults",
             authority=authority,
+            catalog=BundledCatalog.load(_bundle_root(base_dir)),
         )
         store.recover()
         activation_id = (

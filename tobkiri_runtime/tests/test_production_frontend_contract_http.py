@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import time
 import uuid
 from pathlib import Path
@@ -101,14 +102,15 @@ def production_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
     authority = AuthorityStore(user_data / "authority" / "v4.sqlite3")
-    catalog = BundledCatalog.load(BUNDLE_ROOT)
+    bundle_root = Path(os.environ["TOBKIRI_DEFAULTS_BUNDLE_ROOT"])
+    catalog = BundledCatalog.load(bundle_root)
     bindings = load_frontend_contract_bindings(
         MAP_PATH,
         catalog.packs["runtime.tauri.application.default"],
     )
     session = capture_production_dispatch(
         active,
-        bundle_root=BUNDLE_ROOT,
+        bundle_root=bundle_root,
         ecosystem_root=RUNTIME_ROOT / "ecosystem",
         authority_store=authority,
         frontend_contract_bindings=bindings,

@@ -15,6 +15,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tobkiri_protocol.canonical import canonical_digest  # noqa: E402
+from tobkiri_protocol.profile_scope import (  # noqa: E402
+    normalize_requested_scope_template,
+)
+from tobkiri_protocol.provenance import (  # noqa: E402
+    normative_generated_provenance,
+    trusted_source_commit,
+)
 from tobkiri_protocol.validation import validate_document  # noqa: E402
 
 
@@ -168,34 +175,45 @@ def _normalize_pack(document: dict[str, Any]) -> dict[str, Any]:
     return validate_document(document, "pack")
 
 
-def _tauri_role_pack(spec: dict[str, str]) -> dict[str, Any]:
+def _generated_provenance(
+    document: dict[str, Any], source_path: str, source_commit: str
+) -> dict[str, Any]:
+    payload = {
+        key: value
+        for key, value in document.items()
+        if key not in {"provenance", "integrity", "definition_revision"}
+    }
+    return normative_generated_provenance(
+        source_path=source_path,
+        payload=payload,
+        repository_commit_value=source_commit,
+        generator="defaultspack-v4-core",
+        generator_version="2.0.0",
+    )
+
+
+def _tauri_role_pack(spec: dict[str, str], source_commit: str) -> dict[str, Any]:
     """Generate one canonical Tauri role without projecting shell authority."""
     pack_id = spec["pack_id"]
     contract_id = spec["contract_id"]
     operation_id = spec["operation_id"]
     contract_digest = canonical_digest({"contract_id": contract_id, "operations": [operation_id]})
     if pack_id == "runtime.tauri.application.default":
-        entrypoint = ROOT / "ecosystem" / "defaultspack" / DEFAULTSPACK_DESKTOP_ENTRYPOINT
+        implementation_digest = canonical_digest(
+            {"pack_id": pack_id, "availability": "build_required"}
+        )
         contract_map = ROOT / "ecosystem" / "defaultspack" / DEFAULTSPACK_FRONTEND_CONTRACT_MAP
-        implementation_digest = "sha256:" + hashlib.sha256(entrypoint.read_bytes()).hexdigest()
-        contract_map_digest = "sha256:" + hashlib.sha256(contract_map.read_bytes()).hexdigest()
         artifacts = [
             {
-                "path": DEFAULTSPACK_DESKTOP_ENTRYPOINT,
-                "digest": implementation_digest,
-                "kind": "executable",
-                "platform": "host",
-                "entrypoint": DEFAULTSPACK_DESKTOP_ENTRYPOINT,
-                "argv": [],
-            },
-            {
                 "path": DEFAULTSPACK_FRONTEND_CONTRACT_MAP,
-                "digest": contract_map_digest,
+                "digest": "sha256:" + hashlib.sha256(contract_map.read_bytes()).hexdigest(),
                 "kind": "asset",
-                "platform": "host",
-            },
+                "platform": "all",
+            }
         ]
-        artifact_digest = canonical_digest(artifacts)
+        artifact_digest = canonical_digest(
+            {"pack_id": pack_id, "availability": "build_required"}
+        )
     else:
         implementation_digest = canonical_digest(
             {"pack_id": pack_id, "contract": contract_digest, "operation": operation_id}
@@ -243,20 +261,7 @@ def _tauri_role_pack(spec: dict[str, str]) -> dict[str, Any]:
             }
         ],
         "artifacts": artifacts,
-        "provenance": {
-            "schema": "io.tobkiri.provenance.v1",
-            "source_kind": "repository",
-            "source_path": source_path,
-            "source_digest": canonical_digest({"source": source_path}),
-            "repository_commit": "working-tree",
-            "repository_tree": canonical_digest({"tree": "defaultspack-v4"}).removeprefix(
-                "sha256:"
-            ),
-            "generator": "defaultspack-v4-core",
-            "generator_version": "1.0.0",
-            "normative": True,
-            "evidence": [],
-        },
+        "provenance": {},
         "migration": {
             "compatibility": "none",
             "legacy_ids": [],
@@ -264,6 +269,9 @@ def _tauri_role_pack(spec: dict[str, str]) -> dict[str, Any]:
             "sunset_at": "2026-08-05",
         },
     }
+    document["provenance"] = _generated_provenance(
+        document, source_path, source_commit
+    )
     normalized = _normalize_pack(document)
     if pack_id.startswith("dev.tauri."):
         normalized["requirements"].update(
@@ -282,6 +290,48 @@ def _tauri_role_pack(spec: dict[str, str]) -> dict[str, Any]:
         }
         normalized = validate_document(normalized, "pack")
     return normalized
+
+
+def _unavailable_shell_pack(
+    document: dict[str, Any], source_commit: str
+) -> dict[str, Any]:
+    """Remove fabricated launch bytes from a source-only Shell Pack."""
+
+    pack_id = str(document["pack"]["id"])
+    unavailable_digest = canonical_digest(
+        {"pack_id": pack_id, "availability": "build_required"}
+    )
+    document["pack"]["artifact_digest"] = unavailable_digest
+    document["artifacts"] = []
+    for function in document["functions"]:
+        function["implementation_digest"] = canonical_digest(
+            {
+                "pack_id": pack_id,
+                "function_id": function["id"],
+                "availability": "build_required",
+            }
+        )
+    source_path = f"ecosystem/defaultspack/v4/packs/{pack_id}.pack.v4.json"
+    document["provenance"] = _generated_provenance(
+        document, source_path, source_commit
+    )
+    return _normalize_pack(document)
+
+
+def _declarative_base_pack(
+    document: dict[str, Any], source_commit: str
+) -> dict[str, Any]:
+    pack_id = str(document["pack"]["id"])
+    document["pack"]["artifact_digest"] = canonical_digest(
+        {"pack_id": pack_id, "declarative_definition": True}
+    )
+    document["artifacts"] = []
+    document["provenance"] = _generated_provenance(
+        document,
+        f"ecosystem/defaultspack/v4/packs/{pack_id}.pack.v4.json",
+        source_commit,
+    )
+    return _normalize_pack(document)
 
 
 def _normalize_base(document: dict[str, Any]) -> dict[str, Any]:
@@ -322,37 +372,39 @@ def _normalize_base(document: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_shell(document: dict[str, Any]) -> dict[str, Any]:
-    if document.get("shell_api_version") == "io.tobkiri.shell.v4":
-        document["definition_revision"] = canonical_digest(
-            {key: value for key, value in document.items() if key != "definition_revision"}
+    presentation = document.get("presentation")
+    if isinstance(presentation, dict):
+        family = presentation["family"]
+        kind = presentation["kind"]
+        technology = presentation["technology"]
+        capabilities = list(presentation["capabilities"])
+        contribution_contracts = list(
+            presentation["consumes_contribution_contracts"]
         )
-        return validate_document(document, "shell")
+    else:
+        family = "terminal"
+        kind = "terminal_stdio"
+        technology = "cli"
+        capabilities = list(document["required_capabilities"])
+        contribution_contracts = list(document["consumes_contribution_contracts"])
     normalized = {
-        "shell_api_version": "io.tobkiri.shell.v4",
+        "shell_api_version": "io.tobkiri.shell.v5",
         "provider_id": document["provider_id"],
         "pack_id": document["pack_id"],
-        "artifact_digest": document["artifact_digest"],
+        "availability": "build_required",
+        "artifact_digest": None,
         "definition_revision": "sha256:" + "0" * 64,
         "contract_id": "app.shell.v1",
         "presentation": {
-            "family": "terminal",
-            "kind": "terminal_stdio",
-            "technology": "cli",
-            "capabilities": list(document["required_capabilities"]),
-            "consumes_contribution_contracts": list(document["consumes_contribution_contracts"]),
+            "family": family,
+            "kind": kind,
+            "technology": technology,
+            "capabilities": capabilities,
+            "consumes_contribution_contracts": contribution_contracts,
         },
         "launch": {
             "prebuilt_only": True,
-            "variants": [
-                {
-                    "platform": "macos",
-                    "architecture": "arm64",
-                    "artifact_digest": document["artifact_digest"],
-                    "relative_path": "bin/tobkiri-shell",
-                    "entrypoint": "tobkiri-shell",
-                    "bundle_identity": "io.tobkiri.shell.cli.default",
-                }
-            ],
+            "variants": [],
         },
         "local_auth": {
             "protocol": "io.tobkiri.local-auth.v1",
@@ -367,17 +419,20 @@ def _normalize_shell(document: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_profile(document: dict[str, Any]) -> dict[str, Any]:
+    document["profile_api_version"] = "io.tobkiri.profile.v5"
     document.setdefault("mode", "interactive")
     document.setdefault("catalog_revision", None)
     document["base"].setdefault("definition_revision", None)
     if document["shell"] is not None:
         document["shell"].setdefault("definition_revision", None)
+        document["shell"].setdefault("executable_artifact_digest", None)
         document["shell"].setdefault("platform", "macos")
         document["shell"].setdefault("architecture", "arm64")
-    return validate_document(document, "profile")
+    return document
 
 
-def _render() -> dict[Path, bytes]:
+def _render(source_commit: str | None = None) -> dict[Path, bytes]:
+    source_commit = trusted_source_commit(ROOT.parent, source_commit)
     rendered: dict[Path, bytes] = {}
     pack_paths = (
         set(PACKS.glob("*.pack.v4.json"))
@@ -388,10 +443,14 @@ def _render() -> dict[Path, bytes]:
         canonical = CANONICAL_PACK_FILES.get(path.name)
         role_spec = TAURI_ROLE_PACKS.get(path.name)
         document = (
-            _tauri_role_pack(role_spec)
+            _tauri_role_pack(role_spec, source_commit)
             if role_spec is not None
             else json.loads((canonical or path).read_text(encoding="utf-8"))
         )
+        if str(document["pack"]["id"]).startswith("shell."):
+            document = _unavailable_shell_pack(document, source_commit)
+        elif document["pack"]["id"] == "defaults-basepack":
+            document = _declarative_base_pack(document, source_commit)
         rendered[path] = _pretty(
             validate_document(document, "pack")
             if canonical is not None or role_spec is not None
@@ -403,13 +462,32 @@ def _render() -> dict[Path, bytes]:
     profile_paths = sorted(BUNDLE.glob("*.profile.v4.json"))
     if not profile_paths:
         raise ValueError("defaultspack v4 bundle has no Profile definitions")
-    base = _normalize_base(json.loads(base_path.read_text(encoding="utf-8")))
-    shells = [
-        (path, _normalize_shell(json.loads(path.read_text(encoding="utf-8"))))
-        for path in shell_paths
-    ]
+    base_source = json.loads(base_path.read_text(encoding="utf-8"))
+    base_pack = json.loads(rendered[PACKS / "defaults-basepack.pack.v4.json"])
+    base_source["artifact_digest"] = base_pack["pack"]["artifact_digest"]
+    base_source["provenance"] = _generated_provenance(
+        base_source,
+        base_path.relative_to(ROOT).as_posix(),
+        source_commit,
+    )
+    base = _normalize_base(base_source)
+    shells: list[tuple[Path, dict[str, Any]]] = []
+    for path in shell_paths:
+        shell = _normalize_shell(json.loads(path.read_text(encoding="utf-8")))
+        shell["provenance"] = _generated_provenance(
+            shell, path.relative_to(ROOT).as_posix(), source_commit
+        )
+        shell["definition_revision"] = canonical_digest(
+            {key: value for key, value in shell.items() if key != "definition_revision"}
+        )
+        shells.append((path, validate_document(shell, "shell")))
     for profile_path in profile_paths:
         profile = _normalize_profile(json.loads(profile_path.read_text(encoding="utf-8")))
+        profile["provenance"] = _generated_provenance(
+            profile,
+            profile_path.relative_to(ROOT).as_posix(),
+            source_commit,
+        )
         for pack in profile["packs"]:
             if pack["pack_id"] == "rumi-file-inspect":
                 pack["pack_id"] = "rumi_file_inspect_pack"
@@ -434,7 +512,31 @@ def _render() -> dict[Path, bytes]:
                         "operation_id": "rumi_file_inspect_pack.file-inspect",
                     }
                 )
-        rendered[profile_path] = _pretty(profile)
+            template = edge["requested_scope_template"]
+            if template and "dimensions" not in template:
+                template = {
+                    "dimensions": {
+                        str(key): [str(value)] for key, value in template.items()
+                    }
+                }
+            contract_digest = next(
+                contract["revision_digest"]
+                for raw in rendered.values()
+                for pack in [json.loads(raw)]
+                if isinstance(pack, dict)
+                for function in pack.get("functions", [])
+                if function.get("id") == edge["target_provider_id"]
+                for contract in pack.get("contracts", [])
+                if contract.get("contract_id") == edge["contract_id"]
+                and edge["operation_id"] in contract.get("operations", [])
+            )
+            edge["requested_scope_template"] = normalize_requested_scope_template(
+                template,
+                contract_id=edge["contract_id"],
+                operation_id=edge["operation_id"],
+                semantics_digest=contract_digest,
+            )
+        rendered[profile_path] = _pretty(validate_document(profile, "profile"))
     rendered[base_path] = _pretty(base)
     for shell_path, shell in shells:
         rendered[shell_path] = _pretty(shell)
@@ -468,8 +570,9 @@ def _render() -> dict[Path, bytes]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--source-commit")
     args = parser.parse_args()
-    rendered = _render()
+    rendered = _render(args.source_commit)
     stale = [
         path for path, raw in rendered.items() if not path.exists() or path.read_bytes() != raw
     ]

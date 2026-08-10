@@ -22,6 +22,8 @@ from packaging.version import InvalidVersion, Version
 from tobkiri_protocol.canonical import canonical_digest, canonical_json, strict_loads
 from tobkiri_protocol.durability import write_bytes_atomic
 from tobkiri_protocol.errors import ProtocolError, SchemaValidationError
+from tobkiri_protocol.profile_scope import normalize_requested_scope_template
+from tobkiri_protocol.platform_artifact import verify_platform_artifact
 from tobkiri_protocol.validation import validate_document
 
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -111,9 +113,12 @@ class BundledCatalog:
     bases: Mapping[str, Mapping[str, Any]]
     shells: Mapping[str, Mapping[str, Any]]
     profiles: Mapping[str, Mapping[str, Any]]
+    artifact_root: Path | None = None
 
     @classmethod
-    def load(cls, root: Path) -> "BundledCatalog":
+    def load(
+        cls, root: Path, *, artifact_root: Path | None = None
+    ) -> "BundledCatalog":
         """Load only files named by ``bundle.lock.json`` and verify every byte."""
         requested_root = Path(root)
         if requested_root.is_symlink():
@@ -197,6 +202,13 @@ class BundledCatalog:
             bases=collections["base"],
             shells=collections["shell"],
             profiles=collections["profile"],
+            artifact_root=(
+                artifact_root.resolve(strict=True)
+                if artifact_root
+                else (root.parent / "platform-artifacts").resolve(strict=True)
+                if (root.parent / "platform-artifacts").is_dir()
+                else None
+            ),
         )
 
 
@@ -453,11 +465,28 @@ def resolve_default_profile(
     shell_definition = catalog.shells.get(provider_id)
     if shell_definition is None:
         raise ProfileResolutionDenied(f"Shell Provider is not inventoried: {provider_id}")
+    if shell_definition.get("availability") != "verified":
+        raise ProfileResolutionDenied(
+            f"Shell artifact is unavailable for this source/build: {provider_id}"
+        )
+    variants = [
+        variant
+        for variant in shell_definition["launch"]["variants"]
+        if variant["platform"] == shell_request["platform"]
+        and variant["architecture"] == shell_request["architecture"]
+    ]
+    if len(variants) != 1 or catalog.artifact_root is None:
+        raise ProfileResolutionDenied("verified Shell platform artifact is unavailable")
+    selected_variant = variants[0]
+    try:
+        verify_platform_artifact(catalog.artifact_root, selected_variant)
+    except ProtocolError as exc:
+        raise ProfileResolutionDenied(f"verified Shell artifact rejected: {exc}") from exc
     shell_pack_id = shell_definition["pack_id"]
     shell_manifest = catalog.packs.get(shell_pack_id)
     if shell_manifest is None or shell_manifest["pack"]["kind"] != "shell":
         raise ProfileResolutionDenied(f"Shell Pack is missing or invalid: {shell_pack_id}")
-    if shell_definition["artifact_digest"] != shell_manifest["pack"]["artifact_digest"]:
+    if shell_definition["artifact_digest"] != selected_variant["artifact_digest"]:
         raise ProfileResolutionDenied("Shell definition does not pin its exact artifact")
     if not set(base_definition["shell_requirements"]["required_capabilities"]).issubset(
         set(shell_definition["presentation"]["capabilities"])
@@ -482,6 +511,33 @@ def resolve_default_profile(
     ):
         raise ProfileResolutionDenied(
             "canonical defaults Application must be a Pack v4 application"
+        )
+    application_artifacts = application_manifest["artifacts"]
+    expected_application = (
+        selected_variant["relative_path"],
+        selected_variant["artifact_digest"],
+        f"{selected_variant['platform']}-{selected_variant['architecture']}",
+        selected_variant["entrypoint"],
+    )
+    actual_applications = [
+        (
+            item.get("path"),
+            item.get("digest"),
+            item.get("platform"),
+            item.get("entrypoint"),
+        )
+        for item in application_artifacts
+        if item.get("kind") == "executable"
+    ]
+    if (
+        actual_applications != [expected_application]
+        or any(
+            function["implementation_digest"] != selected_variant["artifact_digest"]
+            for function in application_manifest["functions"]
+        )
+    ):
+        raise ProfileResolutionDenied(
+            "Application Pack does not pin the selected packaged artifact"
         )
     selected_ids = [base_id, shell_pack_id, *requested_pack_ids, *additional_pack_ids]
     pending = list(selected_ids)
@@ -572,10 +628,21 @@ def resolve_default_profile(
                 f"Authority Kernel reference is missing for edge {_edge_key(edge)}"
             )
         edge["authority_reference"] = reference
-        resolved_edges.append(edge)
         if reference not in references:
             references.append(reference)
         manifest, function, contract = candidates[0]
+        try:
+            edge["requested_scope_template"] = normalize_requested_scope_template(
+                edge["requested_scope_template"],
+                contract_id=str(edge["contract_id"]),
+                operation_id=str(edge["operation_id"]),
+                semantics_digest=str(contract["revision_digest"]),
+            )
+        except ProtocolError as exc:
+            raise ProfileResolutionDenied(
+                f"requested scope is invalid for edge {_edge_key(edge)}: {exc}"
+            ) from exc
+        resolved_edges.append(edge)
         principal = {
             "parent_artifact_digest": manifest["pack"]["artifact_digest"],
             "function_implementation_digest": function["implementation_digest"],
@@ -612,6 +679,7 @@ def resolve_default_profile(
         "provider_id": provider_id,
         "pack_id": shell_pack_id,
         "artifact_digest": shell_manifest["pack"]["artifact_digest"],
+        "executable_artifact_digest": selected_variant["artifact_digest"],
         "definition_revision": shell_definition["definition_revision"],
         "contract_id": "app.shell.v1",
         "platform": shell_request["platform"],
@@ -675,11 +743,12 @@ def resolve_default_profile(
     application = {
         "pack_id": application_ids[0],
         "artifact_digest": application_manifest["pack"]["artifact_digest"],
+        "executable_artifact_digest": selected_variant["artifact_digest"],
         "definition_digest": canonical_digest(application_manifest),
     }
 
     plan: dict[str, Any] = {
-        "plan_api_version": "io.tobkiri.resolved-plan.v1",
+        "plan_api_version": "io.tobkiri.resolved-plan.v2",
         "profile_id": profile_id,
         "profile_revision": profile_revision,
         "profile_definition_digest": profile_definition_digest,
@@ -696,6 +765,7 @@ def resolve_default_profile(
             "provider_id": provider_id,
             "pack_id": shell_pack_id,
             "artifact_digest": shell_manifest["pack"]["artifact_digest"],
+            "executable_artifact_digest": selected_variant["artifact_digest"],
             "contract_id": "app.shell.v1",
             "definition_digest": canonical_digest(shell_definition),
         },
@@ -714,7 +784,7 @@ def resolve_default_profile(
     plan = validate_document(plan, "resolved_plan")
 
     lock: dict[str, Any] = {
-        "lock_api_version": "io.tobkiri.profile-lock.v4",
+        "lock_api_version": "io.tobkiri.profile-lock.v5",
         "profile_id": profile_id,
         "profile_revision": profile_revision,
         "profile_definition_digest": profile_definition_digest,
@@ -754,6 +824,7 @@ class ActivationStore:
         *,
         profile_id: str,
         authority: ActivationAuthority,
+        catalog: BundledCatalog | None = None,
         fault: Callable[[str], None] | None = None,
     ) -> None:
         requested_state_root = Path(state_root)
@@ -766,6 +837,7 @@ class ActivationStore:
         self.workspace_root = requested_workspace_root.resolve(strict=True)
         self.profile_id = profile_id
         self._authority = authority
+        self._catalog = catalog
         self._fault = fault or (lambda _stage: None)
         if not self.workspace_root.is_dir():
             raise ProfileResolutionDenied("workspace_root must be a directory")
@@ -1160,7 +1232,7 @@ class ActivationStore:
         committed_at: str | None = None,
     ) -> Mapping[str, Any]:
         record: dict[str, Any] = {
-            "activation_api_version": "io.tobkiri.activation-record.v1",
+            "activation_api_version": "io.tobkiri.activation-record.v2",
             "profile_id": profile["profile_id"],
             "profile_revision": plan["profile_revision"],
             "activation_id": activation_id,
@@ -1284,6 +1356,26 @@ class ActivationStore:
             raise ProfileResolutionDenied("activation plan record is invalid")
         if not isinstance(activation_value, (dict, str, bytes)):
             raise ProfileResolutionDenied("activation envelope records are invalid")
+        if (
+            isinstance(lock_value, dict)
+            and isinstance(plan_value, dict)
+            and isinstance(activation_value, dict)
+            and (
+                lock_value.get("lock_api_version") == "io.tobkiri.profile-lock.v4"
+                or plan_value.get("plan_api_version") == "io.tobkiri.resolved-plan.v1"
+                or activation_value.get("activation_api_version")
+                == "io.tobkiri.activation-record.v1"
+            )
+        ):
+            self._migrate_legacy_activation_locked(
+                pointer=pointer,
+                envelope=envelope,
+                profile_value=profile_value,
+                lock_value=lock_value,
+                plan_value=plan_value,
+                activation_value=activation_value,
+            )
+            return self._load_active_snapshot_locked()
         profile = validate_document(profile_value, "profile")
         lock = validate_document(lock_value, "profile_lock")
         plan = validate_document(plan_value, "resolved_plan")
@@ -1330,6 +1422,171 @@ class ActivationStore:
         return ActiveDefaultProfile(
             resolved=ResolvedDefaultProfile(profile=profile, lock=lock, plan=plan),
             activation=activation,
+        )
+
+    def _migrate_legacy_activation_locked(
+        self,
+        *,
+        pointer: Mapping[str, Any],
+        envelope: Mapping[str, Any],
+        profile_value: Mapping[str, Any] | str | bytes,
+        lock_value: Mapping[str, Any],
+        plan_value: Mapping[str, Any],
+        activation_value: Mapping[str, Any],
+    ) -> None:
+        """Re-resolve one frozen pre-v2 activation and publish its successor."""
+
+        del pointer, envelope
+        if self._catalog is None:
+            raise ProfileResolutionDenied(
+                "legacy activation migration requires the verified bundle catalog"
+            )
+        if not isinstance(profile_value, Mapping):
+            raise ProfileResolutionDenied("legacy activation profile is invalid")
+        profile = validate_document(profile_value, "profile")
+        lock = validate_document(lock_value, "profile_lock")
+        plan = validate_document(plan_value, "resolved_plan")
+        activation = validate_document(activation_value, "activation")
+        if (
+            lock["lock_api_version"] != "io.tobkiri.profile-lock.v4"
+            or plan["plan_api_version"] != "io.tobkiri.resolved-plan.v1"
+            or activation["activation_api_version"]
+            != "io.tobkiri.activation-record.v1"
+        ):
+            raise ProfileResolutionDenied("legacy activation versions do not form one record set")
+        expected_plan_digest = canonical_digest(
+            {key: value for key, value in plan.items() if key != "plan_digest"}
+        )
+        expected_lock_digest = canonical_digest(
+            {key: value for key, value in lock.items() if key != "lock_digest"}
+        )
+        if (
+            canonical_digest(profile) != plan["profile_revision"]
+            or lock["profile_revision"] != plan["profile_revision"]
+            or expected_plan_digest != plan["plan_digest"]
+            or lock["plan_digest"] != plan["plan_digest"]
+            or expected_lock_digest != lock["lock_digest"]
+            or activation["plan_digest"] != plan["plan_digest"]
+            or activation["profile_authority_snapshot_digest"]
+            != profile["profile_authority_snapshot_digest"]
+            or activation["security_epoch"] != plan["security_epoch"]
+            or activation["security_epoch"] != self._authority.security_epoch
+            or activation["state"] != "active"
+        ):
+            raise ProfileResolutionDenied("legacy activation predecessor is stale or tampered")
+        legacy_effective = {
+            (item["identity"], item["artifact_digest"])
+            for item in lock["effective_set"]
+        }
+        profile_effective = {
+            (profile["base"]["pack_id"], profile["base"]["artifact_digest"]),
+            (profile["shell"]["pack_id"], profile["shell"]["artifact_digest"]),
+            *(
+                (item["pack_id"], item["artifact_digest"])
+                for item in profile["packs"]
+            ),
+        }
+        if (
+            profile["profile_id"] != self.profile_id
+            or lock["profile_id"] != self.profile_id
+            or plan["profile_id"] != self.profile_id
+            or activation["profile_id"] != self.profile_id
+            or lock["catalog_revision"] != profile["catalog_revision"]
+            or lock["base"]["pack_id"] != plan["base"]["pack_id"]
+            or lock["base"]["artifact_digest"] != plan["base"]["artifact_digest"]
+            or lock["shell"]["pack_id"] != plan["shell"]["pack_id"]
+            or lock["shell"]["artifact_digest"] != plan["shell"]["artifact_digest"]
+            or legacy_effective != profile_effective
+        ):
+            raise ProfileResolutionDenied("legacy activation record graph is inconsistent")
+        authority = self._authority.active_activation_reservation(
+            str(activation["activation_id"])
+        )
+        authority_binding = (
+            authority.get("profile_id"),
+            authority.get("plan_digest"),
+            authority.get("profile_authority_digest"),
+            authority.get("security_epoch"),
+            authority.get("fencing_token"),
+        ) if authority is not None else ()
+        if authority_binding != (
+            activation["profile_id"],
+            activation["plan_digest"],
+            activation["profile_authority_snapshot_digest"],
+            activation["security_epoch"],
+            activation["fencing_token"],
+        ):
+            raise ProfileResolutionDenied("legacy activation Authority record is unavailable")
+        edge_keys = {_edge_key(edge) for edge in profile["requested_edges"]}
+        if len(edge_keys) != len(profile["requested_edges"]):
+            raise ProfileResolutionDenied("legacy activation edge set is ambiguous")
+        bindings = {
+            _edge_key(edge): str(edge.get("authority_reference") or "")
+            for edge in profile["requested_edges"]
+        }
+        if set(bindings) != edge_keys or any(
+            not reference.startswith("authority-ref:")
+            for reference in bindings.values()
+        ):
+            raise ProfileResolutionDenied("legacy activation Authority bindings are incomplete")
+        approved = {
+            str(manifest["pack"]["artifact_digest"])
+            for manifest in self._catalog.packs.values()
+        }
+        successor = resolve_default_profile(
+            self._catalog,
+            self.profile_id,
+            approved_artifact_digests=approved,
+            authority_snapshot_digest=str(
+                activation["profile_authority_snapshot_digest"]
+            ),
+            authority_bindings=bindings,
+            security_epoch=int(activation["security_epoch"]),
+        )
+        if {
+            _edge_key(edge) for edge in successor.profile["requested_edges"]
+        } != edge_keys:
+            raise ProfileResolutionDenied("legacy activation edge set changed during migration")
+        successor_edges = {
+            _edge_key(edge): edge for edge in successor.profile["requested_edges"]
+        }
+        for legacy_edge in profile["requested_edges"]:
+            successor_edge = successor_edges[_edge_key(legacy_edge)]
+            legacy_template = legacy_edge["requested_scope_template"]
+            if legacy_template and "dimensions" not in legacy_template:
+                legacy_template = {
+                    "dimensions": {
+                        str(key): [str(value)]
+                        for key, value in legacy_template.items()
+                    }
+                }
+            try:
+                normalized_legacy = normalize_requested_scope_template(
+                    legacy_template,
+                    contract_id=str(legacy_edge["contract_id"]),
+                    operation_id=str(legacy_edge["operation_id"]),
+                    semantics_digest=str(
+                        successor_edge["requested_scope_template"][
+                            "semantics_digest"
+                        ]
+                    ),
+                )
+            except ProtocolError as exc:
+                raise ProfileResolutionDenied(
+                    "legacy activation requested scope cannot be reconstructed"
+                ) from exc
+            if normalized_legacy != successor_edge["requested_scope_template"]:
+                raise ProfileResolutionDenied(
+                    "legacy activation requested scope changed during migration"
+                )
+        successor_id = (
+            f"activation:{self.profile_id}-migration-"
+            + successor.plan["plan_digest"].removeprefix("sha256:")[:16]
+        )
+        self._activate_locked(
+            successor,
+            activation_id=successor_id,
+            created_at=str(activation.get("committed_at") or activation["created_at"]),
         )
 
     @staticmethod

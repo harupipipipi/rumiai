@@ -289,7 +289,7 @@ def compose_runtime_profile(
         }
     )
     lock: dict[str, Any] = {
-        "lock_api_version": "io.tobkiri.profile-lock.v4",
+        "lock_api_version": "io.tobkiri.profile-lock.v5",
         "profile_id": resolved["profile_id"],
         "profile_revision": profile_revision,
         "profile_definition_digest": profile_definition_digest,

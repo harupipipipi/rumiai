@@ -1,5 +1,5 @@
 {
-  "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "artifact_digest": "sha256:82894dea351dc4b6be97bc625db30c144dfd3bde8245708b275b1c5c37833077",
   "base_api_version": "io.tobkiri.base.v4",
   "capability_foundation": {
     "provided_contracts": [
@@ -8,7 +8,7 @@
     ],
     "required_contracts": []
   },
-  "definition_revision": "sha256:87b8beec3375d3b4467760a6ebb18866495a2ecf4bce2e1d831584815e7358b8",
+  "definition_revision": "sha256:dce3c1e4c7e1224f543dec3d54f343be540067eb2e607ce4b3f45a651f88b800",
   "dependencies": [],
   "pack_id": "defaults-basepack",
   "policy_foundation": {
@@ -17,16 +17,16 @@
     "policy_digest": "sha256:a49520a95e91553c6729ab93b7bae564510205fdddf7af2e2c62540d49f1286d"
   },
   "provenance": {
-    "evidence": [],
-    "generator": "defaultspack-v4-core",
-    "generator_version": "1.0.0",
-    "normative": true,
-    "repository_commit": "working-tree",
-    "repository_tree": "a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3",
-    "source_kind": "repository",
-    "source_path": "ecosystem/defaultspack/v4/defaults-basepack.base.v1.json"
+    "source_kind": "generated",
+    "source_path": "ecosystem/defaultspack/v4/defaults-basepack.base.v1.json",
+    "source_digest": "sha256:d77ab5ddd24c978e196c451cca7cac67608606de3d6f23ef124de77820c18fca",
+    "repository_commit": "a2cae0ca5b2b9d23391cd6dc3d2708e9c6b7645e",
+    "repository_tree": "b4cadf235c2163f166c631d070babbe6b35bd2ded61a2f30d9d3d700dbae7386",
+    "generator": "defaultspack-v4-core",
+    "generator_version": "2.0.0",
+    "normative": true,
+    "evidence": []
   },
   "shell_requirements": {
     "mode": "interactive",

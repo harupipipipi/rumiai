@@ -32,16 +32,16 @@ SCHEMA_ALIASES = {
     "request": "request_frame_v1.schema.json",
     "request_frame": "request_frame_v1.schema.json",
     "request_envelope": "request_envelope_v1.schema.json",
-    "profile": "profile_v4.schema.json",
-    "profile_lock": "profile_lock_v4.schema.json",
+    "profile": "profile_v5.schema.json",
+    "profile_lock": "profile_lock_v5.schema.json",
     "composition_catalog": "composition_catalog_v4.schema.json",
-    "resolved_plan": "resolved_plan_v1.schema.json",
+    "resolved_plan": "resolved_plan_v2.schema.json",
     "base": "base_definition_v4.schema.json",
-    "shell": "shell_definition_v4.schema.json",
+    "shell": "shell_definition_v5.schema.json",
     "cli_io": "cli_io_v1.schema.json",
     "function_principal": "function_principal_v1.schema.json",
     "provenance": "provenance_v1.schema.json",
-    "activation": "activation_record_v1.schema.json",
+    "activation": "activation_record_v2.schema.json",
     "distribution": "distribution_v1.schema.json",
     "inventory": "inventory_v1.schema.json",
     "pack_artifact_index": "pack_artifact_index_v4.schema.json",
@@ -153,6 +153,7 @@ def validate_document(
     if not isinstance(parsed, dict):
         raise SchemaValidationError("serialized protocol document must be an object")
 
+    schema_name = _versioned_schema_name(parsed, schema_name)
     schema = load_schema(schema_name)
     if Draft202012Validator is None or FormatChecker is None or RefResolver is None:
         raise SchemaValidationError("jsonschema is unavailable; refusing to validate")
@@ -166,6 +167,52 @@ def validate_document(
             f"{schema_name} validation failed", diagnostics=tuple(diagnostics)
         )
     return parsed
+
+
+def _versioned_schema_name(document: Mapping[str, Any], schema_name: str) -> str:
+    """Select record schemas by their serialized API version."""
+
+    versions = {
+        "profile": {
+            "io.tobkiri.profile.v4": "profile_v4.schema.json",
+            "io.tobkiri.profile.v5": "profile_v5.schema.json",
+        },
+        "profile_lock": {
+            "io.tobkiri.profile-lock.v4": "profile_lock_v4.schema.json",
+            "io.tobkiri.profile-lock.v5": "profile_lock_v5.schema.json",
+        },
+        "resolved_plan": {
+            "io.tobkiri.resolved-plan.v1": "resolved_plan_v1.schema.json",
+            "io.tobkiri.resolved-plan.v2": "resolved_plan_v2.schema.json",
+        },
+        "activation": {
+            "io.tobkiri.activation-record.v1": "activation_record_v1.schema.json",
+            "io.tobkiri.activation-record.v2": "activation_record_v2.schema.json",
+        },
+        "shell": {
+            "io.tobkiri.shell.v4": "shell_definition_v4.schema.json",
+            "io.tobkiri.shell.v5": "shell_definition_v5.schema.json",
+        },
+    }
+    version_fields = {
+        "profile": "profile_api_version",
+        "profile_lock": "lock_api_version",
+        "resolved_plan": "plan_api_version",
+        "activation": "activation_api_version",
+        "shell": "shell_api_version",
+    }
+    choices = versions.get(schema_name)
+    if choices is None:
+        return schema_name
+    document_version = document.get(version_fields[schema_name])
+    selected = (
+        choices.get(document_version)
+        if isinstance(document_version, str)
+        else None
+    )
+    if selected is None:
+        raise SchemaValidationError(f"unsupported {schema_name} API version")
+    return selected
 
 
 def validate_file(path: Path, schema_name: str) -> dict[str, Any]:
@@ -210,6 +257,7 @@ def _semantic_diagnostics(
             in {
                 "profile",
                 "profile_v4.schema.json",
+                "profile_v5.schema.json",
                 "pack",
                 "pack_manifest",
                 "pack_manifest_v4.schema.json",
@@ -223,9 +271,13 @@ def _semantic_diagnostics(
 
     if not inventory_document:
         diagnostics.extend(_duplicate_identity_diagnostics(document))
-    if schema_name in {"profile", "profile_v4.schema.json"}:
+    if schema_name in {"profile", "profile_v4.schema.json", "profile_v5.schema.json"}:
         diagnostics.extend(_profile_security_diagnostics(document))
-    if schema_name in {"shell", "shell_definition_v4.schema.json"}:
+    if schema_name in {
+        "shell",
+        "shell_definition_v4.schema.json",
+        "shell_definition_v5.schema.json",
+    }:
         diagnostics.extend(_shell_security_diagnostics(document))
     if schema_name in {"function_principal", "function_principal_v1.schema.json"}:
         diagnostics.extend(_principal_digest_diagnostics(document))

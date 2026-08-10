@@ -4,7 +4,7 @@
     {
       "path": "packs/defaults-basepack.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:eeb549d2a384b85ad805148da20ee1e37480b80751670ea9050202cd219b21a0"
+      "digest": "sha256:e4aa11dd0825cff9a514d57cf1c4a8f2f146215fded0104ec9dddaa992566d74"
     },
     {
       "path": "packs/defaultspack.pack.v4.json",
@@ -14,7 +14,7 @@
     {
       "path": "packs/dev.tauri.toolchain.default.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:25753127532c8caadb1b5fce16fe605a62f6cf29a280033831b70e1a5cbb3d97"
+      "digest": "sha256:e227aaea89c97c2b38bbe0ef86ed83462969457ebbb2e8d024f1e24cd07f7dc3"
     },
     {
       "path": "packs/rumi-file-inspect.pack.v4.json",
@@ -84,17 +84,17 @@
     {
       "path": "packs/runtime.tauri.application.default.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:006dab6936cb025687f37ae4f8d99697122606ae7e5e3dbeaf02e7d68ea019a1"
+      "digest": "sha256:c555e5a1c855449b8ea0d5b3161f1864bac9191e0f342a6d8c3bdcf7b3e24349"
     },
     {
       "path": "packs/shell.cli.default.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:03ff7a6c68b1adf22b700fe5dced0871b48b16da10e0cc948cc2270d2328e87f"
+      "digest": "sha256:6414c2a71e1e9cf720464acc99f7ebefc0d0e0f4e49e74534e897fed7e509a3e"
     },
     {
       "path": "packs/shell.tauri.default.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:569c65ced37700ceebab93957adb504fc0273714c114f475604c13446a1ae624"
+      "digest": "sha256:bf4d429b0dcbbfc93916db29f2baddee903fd9d064ae900373f02a37914ad893"
     },
     {
       "path": "packs/tobkiri-host-pack-control.pack.v4.json",
@@ -104,22 +104,22 @@
     {
       "path": "defaults-basepack.base.v1.json",
       "kind": "base",
-      "digest": "sha256:d7af601063a1f81d7e1c79b3dcf5673f5c74923b6c39ef99ea80629f7a66bada"
+      "digest": "sha256:9e15cc4fea41f23b8f92473de2c1c6fb91b03303d9abcafe0343ff3f8356113c"
     },
     {
       "path": "shell.cli.default.shell.v1.json",
       "kind": "shell",
-      "digest": "sha256:247eadde1c724f9baaf24a733691d24d5873e479742c765b9cfd8085b0b2ed25"
+      "digest": "sha256:15f02f73fb600156cae12e9d4843e54c63f459a13f967cef17dd6fe060bd6c21"
     },
     {
       "path": "shell.tauri.default.shell.v1.json",
       "kind": "shell",
-      "digest": "sha256:f2dd6fd4bda358a9012164cd001ec61de2805457a5574207a7acad109a08b00a"
+      "digest": "sha256:cdad210835203cd0ed8aee594ccfe56325d4698f223d06d667d62eba6453981d"
     },
     {
       "path": "defaults.profile.v4.json",
       "kind": "profile",
-      "digest": "sha256:97f611cc1dd66d30376eed79f8b0f969f527f1fccdb94177ca277ffdb4b3a7e4"
+      "digest": "sha256:ad4f64487a4f75f34d720aa8c470dd9406024ea7f37ac33f1b7de901db336975"
     }
   ]
 }

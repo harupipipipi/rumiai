@@ -50,28 +50,21 @@ def test_v4_catalog_is_byte_identical_and_uninstalled_variants_fail_closed(
     assert "shell.cli.default" not in catalog["source_manifest_digests"]
     shell = catalog["shell_providers"][0]
     assert shell["provider_id"] == "shell.tauri.default"
-    variants = shell["artifact_variants"]
-    assert [variant["artifact_id"] for variant in variants] == [
-        "shell.tauri.default.macos-arm64",
-        "shell.tauri.default.macos-x86_64",
-        "shell.tauri.default.windows-x86_64",
-        "shell.tauri.default.linux-x86_64",
-    ]
-    assert variants[0]["bundle_identifier"] == "io.tobkiri.shell.tauri"
-    for variant in variants:
-        assert all(
-            variant[field] is None
-            for field in ("path", "sha256", "size", "source_identity", "source_revision")
-        )
+    assert shell["artifact_variants"] == []
+    assert "release_binding" not in catalog
 
 
-def test_v4_catalog_preserves_installed_metadata_and_release_binding(
+def test_source_catalog_drops_stale_installed_metadata_and_release_binding(
     tmp_path: Path,
 ) -> None:
     target = tmp_path / "catalog.json"
     MODULE.write_presentation_catalog(ROOT, target)
     catalog = json.loads(target.read_text(encoding="utf-8"))
-    variant = catalog["shell_providers"][0]["artifact_variants"][0]
+    variant = {
+        "artifact_id": "shell.tauri.default.macos-arm64",
+        "platform": "macos",
+        "architecture": "arm64",
+    }
     installed = {
         "path": "bundled/presentation-artifacts/shell.tauri.default.macos-arm64/Tobkiri.app",
         "sha256": "sha256:" + "1" * 64,
@@ -80,6 +73,7 @@ def test_v4_catalog_preserves_installed_metadata_and_release_binding(
         "source_revision": "release-2026-08-05",
     }
     variant.update(installed)
+    catalog["shell_providers"][0]["artifact_variants"] = [variant]
     binding = {
         "schema": "io.tobkiri.shell.release.v4",
         "artifact_index_path": "bundled/shell_artifact_index.v4.json",
@@ -100,9 +94,8 @@ def test_v4_catalog_preserves_installed_metadata_and_release_binding(
     )
 
     generated = MODULE.generate_presentation_catalog(ROOT, target)
-    generated_variant = generated["shell_providers"][0]["artifact_variants"][0]
-    assert {field: generated_variant[field] for field in installed} == installed
-    assert generated["release_binding"] == binding
+    assert generated["shell_providers"][0]["artifact_variants"] == []
+    assert "release_binding" not in generated
 
 
 @pytest.mark.parametrize(

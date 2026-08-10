@@ -38,13 +38,13 @@
   ],
   "provenance": {
     "schema": "io.tobkiri.provenance.v1",
-    "source_kind": "repository",
+    "source_kind": "generated",
     "source_path": "ecosystem/defaultspack/v4/packs/dev.tauri.toolchain.default.pack.v4.json",
-    "source_digest": "sha256:8a97b75870b7d56f344413599cbf4b738e1019983cf273d72c7a0f539083c6fc",
-    "repository_commit": "working-tree",
-    "repository_tree": "82cb47a45264cdba7e3a778bd7f603f75395f3cb1e0c6e7ae4e8234d1f2cd4f9",
+    "source_digest": "sha256:ce452495b94542933300e9bb49fe379048cd98346dfcd77e4ba16462302324b3",
+    "repository_commit": "a2cae0ca5b2b9d23391cd6dc3d2708e9c6b7645e",
+    "repository_tree": "db477bbae53fe8f827d25853ef55b2b855e108ca49ae90b8b18ae15c62092a6a",
     "generator": "defaultspack-v4-core",
-    "generator_version": "1.0.0",
+    "generator_version": "2.0.0",
     "normative": true,
     "evidence": []
   },
@@ -88,7 +88,7 @@
     }
   ],
   "integrity": {
-    "source_identity": "sha256:ed63fe9314ef8da188093bdc61d067e4ad44484e93577d5b882bfa67e2d63114",
+    "source_identity": "sha256:9a6c9e704592640b7a38059711a1971d02d13e5f96742d79ea36649fb32583d6",
     "artifact_set_digest": "sha256:e19f5bc57ad14078a6df58890859a0712b798415ed320c9bb269efeeacec223f",
     "contract_catalog_digest": "sha256:29b7531b0c085b4f6b9cb3bcd1fe08480b3927b9ee6640c3a2297587c9f53bbc"
   }

@@ -475,8 +475,9 @@ class RuntimeSurfaceService:
 
     @staticmethod
     def _load_catalog() -> BundledCatalog:
-        runtime_root = Path(__file__).resolve().parents[1]
-        return BundledCatalog.load(runtime_root / "ecosystem" / "defaultspack" / "v4")
+        from .bootstrap.profile_capture import _bundle_root
+
+        return BundledCatalog.load(_bundle_root())
 
     def read_profile(
         self,

@@ -141,6 +141,7 @@ class AppLifecycleManager:
         from .authority.v4 import AuthorityStore
         from .bootstrap.production_v4 import capture_production_dispatch
         from .bootstrap.profile_capture import (
+            _bundle_root,
             capture_default_profile,
             runtime_user_data_root,
         )
@@ -156,7 +157,7 @@ class AppLifecycleManager:
             )
             runtime_root = Path(__file__).resolve().parents[1]
             user_data = runtime_user_data_root(self.base_dir)
-            bundle_root = runtime_root / "ecosystem" / "defaultspack" / "v4"
+            bundle_root = _bundle_root(self.base_dir)
             catalog = BundledCatalog.load(bundle_root)
             bindings = load_frontend_contract_bindings(
                 runtime_root

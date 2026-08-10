@@ -20,7 +20,7 @@
     {
       "contract_revision_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
       "id": "shell.tauri.default",
-      "implementation_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "implementation_digest": "sha256:18c9dd40e572aa0c2ce68bb9391bf9ecb81bdcf5666df881eb43a2917d5d01b1",
       "isolation": "dedicated_process",
       "operations": [
         "present"
@@ -30,7 +30,7 @@
     {
       "contract_revision_digest": "sha256:3434343434343434343434343434343434343434343434343434343434343434",
       "id": "shell.tauri.pack-control",
-      "implementation_digest": "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "implementation_digest": "sha256:435f9c44587ec626203fbdafd1fdf64bc6d047edd8c80d8d6218e5b8e2a1ca93",
       "isolation": "dedicated_process",
       "operations": [
         "request"
@@ -45,7 +45,7 @@
     "sunset_at": "2026-08-05"
   },
   "pack": {
-    "artifact_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "artifact_digest": "sha256:75e4452baa85b5034a50746b452d0e65055e8951aae06577921ee9f115f6d507",
     "display_name": "Tobkiri Tauri Shell",
     "id": "shell.tauri.default",
     "kind": "shell",
@@ -53,16 +53,16 @@
   },
   "pack_api_version": "io.tobkiri.pack.v4",
   "provenance": {
-    "evidence": [],
-    "generator": "defaultspack-v4-core",
-    "generator_version": "1.0.0",
-    "normative": true,
-    "repository_commit": "working-tree",
-    "repository_tree": "e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
-    "source_kind": "repository",
-    "source_path": "ecosystem/defaultspack/v4/packs/shell.tauri.default.pack.v4.json"
+    "source_kind": "generated",
+    "source_path": "ecosystem/defaultspack/v4/packs/shell.tauri.default.pack.v4.json",
+    "source_digest": "sha256:84fa8cdae6b2bebfad1740d7ab3e756cd818c0558f3f2c5bc0b263ef5f4b38cd",
+    "repository_commit": "a2cae0ca5b2b9d23391cd6dc3d2708e9c6b7645e",
+    "repository_tree": "dfe2d3982fce857128cb8b4533313302add3c9ef6f1f50eb6de85f1c40ce5338",
+    "generator": "defaultspack-v4-core",
+    "generator_version": "2.0.0",
+    "normative": true,
+    "evidence": []
   },
   "requirements": {
     "pack_dependencies": {},
@@ -114,7 +114,7 @@
     }
   ],
   "integrity": {
-    "source_identity": "sha256:42877474f6c9213787fed3ccf23a0602fe6e42acc617841a224e43c157f233bf",
+    "source_identity": "sha256:409fa6114feaaceb0df52b24f1ec4040be589185fcfb75c4c3307d305bc2f458",
     "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     "contract_catalog_digest": "sha256:f51dbfa1120d6407bc86a1cc888af22f515a39a55218f0d8efc9eb0eb786d335"
   }

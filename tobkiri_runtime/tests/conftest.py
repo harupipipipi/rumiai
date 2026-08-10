@@ -566,6 +566,32 @@ import os  # noqa: E402
 import pytest  # noqa: E402
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _verified_packaged_profile_bundle(tmp_path_factory):
+    """Route bootstrap tests through the official packaged-bundle generator."""
+
+    from tests.conformance_support.packaged_profile import (
+        build_packaged_profile_bundle,
+    )
+
+    source_bundle = _PROJECT_ROOT / "ecosystem" / "defaultspack" / "v4"
+    profile = json.loads(
+        (source_bundle / "defaults.profile.v4.json").read_text(encoding="utf-8")
+    )
+    bundle = build_packaged_profile_bundle(
+        source_bundle,
+        tmp_path_factory.mktemp("verified-packaged-profile"),
+        source_commit=str(profile["provenance"]["repository_commit"]),
+    )
+    previous = os.environ.get("TOBKIRI_DEFAULTS_BUNDLE_ROOT")
+    os.environ["TOBKIRI_DEFAULTS_BUNDLE_ROOT"] = str(bundle)
+    yield
+    if previous is None:
+        os.environ.pop("TOBKIRI_DEFAULTS_BUNDLE_ROOT", None)
+    else:
+        os.environ["TOBKIRI_DEFAULTS_BUNDLE_ROOT"] = previous
+
+
 @pytest.fixture(autouse=True)
 def _bind_legacy_chat_facade_to_test_owner(request, tmp_path, monkeypatch):
     """Give legacy compatibility tests an explicit canonical conversation owner.
@@ -1043,7 +1069,7 @@ def _defaultspack_v4_snapshot() -> _V4TestResolvedSnapshot:
         resolve_default_profile,
     )
 
-    bundle_root = _PROJECT_ROOT / "ecosystem" / "defaultspack" / "v4"
+    bundle_root = Path(os.environ["TOBKIRI_DEFAULTS_BUNDLE_ROOT"])
     catalog = BundledCatalog.load(bundle_root)
     source = catalog.profiles["defaults"]
     authority_bindings = {

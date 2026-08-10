@@ -109,7 +109,71 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Fail unless bundled uv and pack-shell are present.",
     )
+    parser.add_argument(
+        "--profile-artifact",
+        type=Path,
+        help="Verified built Shell/Application artifact to select into the Profile bundle.",
+    )
+    parser.add_argument("--profile-entrypoint")
+    parser.add_argument("--profile-bundle-identity")
+    parser.add_argument(
+        "--source-commit",
+        help="Trusted source commit for normative generated Profile records.",
+    )
     return parser.parse_args()
+
+
+def inject_packaged_profile_artifact(
+    repo_root: Path,
+    dest_root: Path,
+    *,
+    source: Path,
+    entrypoint: str,
+    bundle_identity: str,
+    target: str,
+    source_commit: str | None,
+) -> None:
+    """Copy and select the exact built artifact through the official generator."""
+
+    source = source.resolve(strict=True)
+    if source.is_symlink() or not (source.is_file() or source.is_dir()):
+        raise RuntimeError("Profile artifact must be a regular file or directory")
+    if "apple-darwin" in target:
+        platform_name = "macos"
+    elif is_windows_target(target):
+        platform_name = "windows"
+    else:
+        platform_name = "linux"
+    architecture = "arm64" if target.startswith("aarch64-") else "x86_64"
+    artifact_root = dest_root / "ecosystem" / "defaultspack" / "platform-artifacts"
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    destination = artifact_root / source.name
+    if source.is_dir():
+        shutil.copytree(source, destination)
+    else:
+        copy_file(source, destination)
+    script = repo_root / "tobkiri_runtime" / "scripts" / "generate_packaged_defaultspack_v4_bundle.py"
+    command = [
+        sys.executable,
+        str(script),
+        "--bundle-root",
+        str(dest_root / "ecosystem" / "defaultspack" / "v4"),
+        "--artifact-root",
+        str(artifact_root),
+        "--relative-path",
+        source.name,
+        "--entrypoint",
+        f"{source.name}/{entrypoint}" if source.is_dir() else source.name,
+        "--platform",
+        platform_name,
+        "--architecture",
+        architecture,
+        "--bundle-identity",
+        bundle_identity,
+    ]
+    if source_commit:
+        command.extend(("--source-commit", source_commit))
+    subprocess.run(command, cwd=repo_root, check=True)
 
 
 def path_parts(rel: str) -> list[str]:
@@ -1024,6 +1088,32 @@ def main() -> int:
     tracked_count = copy_tracked_runtime_files(repo_root, source_root, dest_root)
     stage_canonical_host_package(source_root, dest_root)
     generated_count = copy_generated_resource_dirs(source_root, dest_root)
+
+    artifact_options = (
+        args.profile_artifact,
+        args.profile_entrypoint,
+        args.profile_bundle_identity,
+    )
+    if any(artifact_options) and not all(artifact_options):
+        print(
+            "--profile-artifact, --profile-entrypoint, and "
+            "--profile-bundle-identity must be supplied together",
+            file=sys.stderr,
+        )
+        return 2
+    if args.profile_artifact:
+        if not args.target:
+            print("--profile-artifact requires --target", file=sys.stderr)
+            return 2
+        inject_packaged_profile_artifact(
+            repo_root,
+            dest_root,
+            source=args.profile_artifact,
+            entrypoint=args.profile_entrypoint,
+            bundle_identity=args.profile_bundle_identity,
+            target=args.target,
+            source_commit=args.source_commit,
+        )
 
     validate_bundle(
         dest_root,

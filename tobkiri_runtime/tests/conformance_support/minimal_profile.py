@@ -15,6 +15,7 @@ from typing import Any, Mapping
 
 from core_runtime.authority.v4 import AuthorityScope, FunctionPrincipal
 from tobkiri_protocol.canonical import canonical_digest
+from tobkiri_protocol.profile_scope import normalize_requested_scope_template
 
 from tobkiri_host.backends import BackendStatus
 from tobkiri_host.contracts import OperationRoute, ResolvedOperationBinding
@@ -280,7 +281,7 @@ def minimal_profile() -> MinimalProfile:
     )
     authority_reference = "authority-ref:conformance.minimal-edge"
     profile: dict[str, Any] = {
-        "profile_api_version": "io.tobkiri.profile.v4",
+        "profile_api_version": "io.tobkiri.profile.v5",
         "profile_id": MINIMAL_PROFILE_ID,
         "state": "resolved",
         "mode": "interactive",
@@ -296,6 +297,7 @@ def minimal_profile() -> MinimalProfile:
             "provider_id": "conformance.minimal.shell-provider",
             "pack_id": shell.pack_id,
             "artifact_digest": shell.digest,
+            "executable_artifact_digest": shell.digest,
             "definition_revision": MINIMAL_SHELL_DEFINITION_DIGEST,
             "contract_id": "app.shell.v1",
             "platform": "linux",
@@ -308,11 +310,12 @@ def minimal_profile() -> MinimalProfile:
                 "target_provider_id": target.function_id,
                 "contract_id": MINIMAL_CONTRACT_ID,
                 "operation_id": MINIMAL_OPERATION_ID,
-                "requested_scope_template": {
-                    "capability": "operation.invoke",
-                    "contract": MINIMAL_CONTRACT_ID,
-                    "operation": MINIMAL_OPERATION_ID,
-                },
+                "requested_scope_template": normalize_requested_scope_template(
+                    {},
+                    contract_id=MINIMAL_CONTRACT_ID,
+                    operation_id=MINIMAL_OPERATION_ID,
+                    semantics_digest=target.contract_revision_digest,
+                ),
                 "authority_reference": authority_reference,
             }
         ],
@@ -348,7 +351,7 @@ def minimal_profile() -> MinimalProfile:
         "adapter_digests": [],
     }
     plan_without_digest: dict[str, Any] = {
-        "plan_api_version": "io.tobkiri.resolved-plan.v1",
+        "plan_api_version": "io.tobkiri.resolved-plan.v2",
         "profile_id": MINIMAL_PROFILE_ID,
         "profile_revision": profile_revision,
         "profile_definition_digest": MINIMAL_PROFILE_DEFINITION_DIGEST,
@@ -365,6 +368,7 @@ def minimal_profile() -> MinimalProfile:
             "provider_id": "conformance.minimal.shell-provider",
             "pack_id": shell.pack_id,
             "artifact_digest": shell.digest,
+            "executable_artifact_digest": shell.digest,
             "contract_id": "app.shell.v1",
             "definition_digest": MINIMAL_SHELL_DEFINITION_DIGEST,
         },
@@ -381,7 +385,7 @@ def minimal_profile() -> MinimalProfile:
         "plan_digest": canonical_digest(plan_without_digest),
     }
     lock_without_digest: dict[str, Any] = {
-        "lock_api_version": "io.tobkiri.profile-lock.v4",
+        "lock_api_version": "io.tobkiri.profile-lock.v5",
         "profile_id": MINIMAL_PROFILE_ID,
         "profile_revision": profile_revision,
         "profile_definition_digest": MINIMAL_PROFILE_DEFINITION_DIGEST,
@@ -397,6 +401,7 @@ def minimal_profile() -> MinimalProfile:
             "provider_id": "conformance.minimal.shell-provider",
             "pack_id": shell.pack_id,
             "artifact_digest": shell.digest,
+            "executable_artifact_digest": shell.digest,
             "definition_revision": MINIMAL_SHELL_DEFINITION_DIGEST,
             "contract_id": "app.shell.v1",
             "platform": "linux",
@@ -416,7 +421,7 @@ def minimal_profile() -> MinimalProfile:
         "lock_digest": canonical_digest(lock_without_digest),
     }
     activation = {
-        "activation_api_version": "io.tobkiri.activation-record.v1",
+        "activation_api_version": "io.tobkiri.activation-record.v2",
         "profile_id": MINIMAL_PROFILE_ID,
         "profile_revision": profile_revision,
         "activation_id": "activation:conformance-minimal-1",

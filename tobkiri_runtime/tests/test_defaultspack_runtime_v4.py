@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import multiprocessing
+import os
 import shutil
 import time
 from dataclasses import replace
@@ -20,9 +21,11 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
     resolve_default_profile,
 )
 from tobkiri_protocol.canonical import canonical_digest
+from tests.conformance_support.packaged_profile import build_packaged_profile_bundle
 
 ROOT = Path(__file__).resolve().parent.parent
 BUNDLE_ROOT = ROOT / "ecosystem" / "defaultspack" / "v4"
+SOURCE_COMMIT = "a9ea44934646b6b353ad2bcab294a35d3b99556d"
 SNAPSHOT_DIGEST = "sha256:" + "9" * 64
 AUTHORITY_BINDINGS = {
     "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": (
@@ -56,7 +59,23 @@ for _operation_id in (
 
 
 def _catalog() -> BundledCatalog:
-    return BundledCatalog.load(BUNDLE_ROOT)
+    return BundledCatalog.load(Path(os.environ.get("TOBKIRI_TEST_BUNDLE_ROOT", BUNDLE_ROOT)))
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _packaged_bundle(tmp_path_factory: pytest.TempPathFactory):
+    bundle = build_packaged_profile_bundle(
+        BUNDLE_ROOT,
+        tmp_path_factory.mktemp("packaged-profile"),
+        source_commit=SOURCE_COMMIT,
+    )
+    previous = os.environ.get("TOBKIRI_TEST_BUNDLE_ROOT")
+    os.environ["TOBKIRI_TEST_BUNDLE_ROOT"] = str(bundle)
+    yield
+    if previous is None:
+        os.environ.pop("TOBKIRI_TEST_BUNDLE_ROOT", None)
+    else:
+        os.environ["TOBKIRI_TEST_BUNDLE_ROOT"] = previous
 
 
 def _approved(catalog: BundledCatalog) -> set[str]:
@@ -163,7 +182,7 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
         "shell.tauri.default",
         "tobkiri_host_pack_control",
     }
-    assert resolved.profile["profile_api_version"] == "io.tobkiri.profile.v4"
+    assert resolved.profile["profile_api_version"] == "io.tobkiri.profile.v5"
     assert resolved.profile["state"] == "resolved"
     assert resolved.profile["shell"]["provider_id"] == "shell.tauri.default"
     assert "shell.cli.default" not in {item["identity"] for item in resolved.lock["effective_set"]}
@@ -249,7 +268,7 @@ def test_lock_plan_and_activation_bind_the_complete_canonical_definition(
     catalog = _catalog()
     resolved = _resolve(catalog)
     expected_bundle_digest = "sha256:" + hashlib.sha256(
-        (BUNDLE_ROOT / "bundle.lock.json").read_bytes()
+        (catalog.root / "bundle.lock.json").read_bytes()
     ).hexdigest()
     application = catalog.packs["runtime.tauri.application.default"]
 
@@ -260,6 +279,9 @@ def test_lock_plan_and_activation_bind_the_complete_canonical_definition(
     assert resolved.lock["application"] == {
         "pack_id": "runtime.tauri.application.default",
         "artifact_digest": application["pack"]["artifact_digest"],
+        "executable_artifact_digest": resolved.profile["shell"][
+            "executable_artifact_digest"
+        ],
         "definition_digest": canonical_digest(application),
     }
     for field in (

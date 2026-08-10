@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -15,6 +16,7 @@ from .ids import validate_artifact_digest
 PROVENANCE_SCHEMA = "io.tobkiri.provenance.v1"
 PROVENANCE_GENERATOR = "tobkiri-protocol"
 PROVENANCE_GENERATOR_VERSION = "1.0.0"
+_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 @dataclass(frozen=True)
@@ -127,6 +129,57 @@ def make_provenance(
         evidence=evidence,
         normative=normative,
     )
+
+
+def normative_generated_provenance(
+    *,
+    source_path: str,
+    payload: Mapping[str, Any],
+    repository_commit_value: str,
+    generator: str,
+    generator_version: str,
+) -> dict[str, Any]:
+    """Create deterministic provenance over a non-self-referential payload."""
+
+    if _COMMIT_RE.fullmatch(repository_commit_value) is None:
+        raise ProtocolError("normative provenance requires an exact repository commit")
+    source_digest = canonical_digest(dict(payload))
+    tree_digest = canonical_digest(
+        {"source_path": source_path, "source_digest": source_digest}
+    ).removeprefix("sha256:")
+    return {
+        "schema": PROVENANCE_SCHEMA,
+        "source_kind": "generated",
+        "source_path": source_path,
+        "source_digest": source_digest,
+        "repository_commit": repository_commit_value,
+        "repository_tree": tree_digest,
+        "generator": generator,
+        "generator_version": generator_version,
+        "normative": True,
+        "evidence": [],
+    }
+
+
+def trusted_source_commit(root: Path, explicit: str | None = None) -> str:
+    """Resolve a trusted source commit, failing on dirty implicit generation."""
+
+    if explicit is not None:
+        if _COMMIT_RE.fullmatch(explicit) is None:
+            raise ProtocolError("explicit source commit must be 40 lowercase hex characters")
+        if _git(root, "rev-parse", f"{explicit}^{{commit}}") != explicit:
+            raise ProtocolError("explicit source commit is not present in this repository")
+        return explicit
+    commit = repository_commit(root)
+    if _COMMIT_RE.fullmatch(commit) is None:
+        raise ProtocolError("normative generation requires a Git commit")
+    dirty = _git(root, "status", "--porcelain", "--untracked-files=no")
+    if dirty:
+        raise ProtocolError(
+            "normative generation refuses a dirty working tree; pass --source-commit "
+            "from a trusted build context"
+        )
+    return commit
 
 
 def provenance_from_dict(value: Mapping[str, Any]) -> ProvenanceRecord:

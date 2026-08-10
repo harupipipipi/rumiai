@@ -201,8 +201,24 @@ def _pack_root_identities(pack_roots: Mapping[str, Path]) -> dict[str, tuple[int
     return identities
 
 
-def _shell_artifact(catalog: BundledCatalog, shell_id: str) -> PackArtifact:
+def _shell_artifact(
+    catalog: BundledCatalog,
+    shell_id: str,
+    selected_shell: Mapping[str, Any],
+) -> PackArtifact:
     manifest = catalog.packs[shell_id]
+    definition = catalog.shells[str(selected_shell["provider_id"])]
+    selected_variants = [
+        item
+        for item in definition["launch"]["variants"]
+        if item["platform"] == selected_shell["platform"]
+        and item["architecture"] == selected_shell["architecture"]
+        and item["artifact_digest"]
+        == selected_shell["executable_artifact_digest"]
+    ]
+    if definition.get("availability") != "verified" or len(selected_variants) != 1:
+        raise AuthorityDenied("captured Shell artifact variant is unavailable or ambiguous")
+    selected_variant = selected_variants[0]
     functions: list[FunctionArtifact] = []
     variants: list[ArtifactVariant] = []
     for index, function in enumerate(manifest["functions"]):
@@ -233,10 +249,10 @@ def _shell_artifact(catalog: BundledCatalog, shell_id: str) -> PackArtifact:
         variants.append(
             ArtifactVariant(
                 variant_id=variant_id,
-                digest=function["implementation_digest"],
+                digest=selected_variant["artifact_digest"],
                 execution_kind=ExecutionKind.HOST_EXTENSION,
-                os=str(manifest["pack"].get("platform") or "any"),
-                architecture="any",
+                os=str(selected_variant["platform"]),
+                architecture=str(selected_variant["architecture"]),
                 runtime_abi="tobkiri-shell-v4",
                 backend="tobkiri.shell-host-v4",
             )
@@ -265,6 +281,23 @@ def _operation_scope(
             "operation": (operation_id,),
         },
     )
+
+
+def _committed_operation_scope(
+    edge: Mapping[str, Any], target: FunctionPrincipal
+) -> AuthorityScope:
+    """Materialize only the normalized scope committed by the ResolvedPlan."""
+
+    template = edge.get("requested_scope_template")
+    if not isinstance(template, Mapping):
+        raise AuthorityDenied("Profile requested scope is unavailable")
+    scope = AuthorityScope.from_dict(template)
+    exact = _operation_scope(
+        str(edge["contract_id"]), str(edge["operation_id"]), target
+    )
+    if not scope.is_subset_of(exact):
+        raise AuthorityDenied("Profile requested scope expands its exact operation edge")
+    return scope
 
 
 def _execution_domain(
@@ -479,6 +512,7 @@ def capture_production_dispatch(
             authority_workspace,
             profile_id="defaults",
             authority=authority_store,
+            catalog=BundledCatalog.load(bundle_root),
         )
         persisted_active = activation_store.load_active_snapshot()
     except Exception as exc:
@@ -500,7 +534,7 @@ def capture_production_dispatch(
     lock = active.resolved.lock
     plan = active.resolved.plan
     shell_id = str(profile["shell"]["pack_id"])
-    shell = _shell_artifact(catalog, shell_id)
+    shell = _shell_artifact(catalog, shell_id, profile["shell"])
     principals: dict[str, FunctionPrincipal] = {}
     for function in shell.functions:
         for operation in function.operations:
@@ -524,25 +558,22 @@ def capture_production_dispatch(
     }
     ceilings: dict[tuple[str, str], AuthorityCeilings] = {}
     caller_by_operation: dict[tuple[str, str], FunctionPrincipal] = {}
+    scope_by_operation: dict[tuple[str, str], AuthorityScope] = {}
     for edge in edges:
         key = (edge["contract_id"], edge["operation_id"])
         binding = binding_by_key[key]
         caller = principals[str(edge["caller_function_id"])]
         target = FunctionPrincipal.from_dict(binding["function_principal"])
-        scope = AuthorityScope(
-            capability="operation.invoke",
-            semantics_digest=target.contract_revision_digest,
-            dimensions={
-                "contract": (str(edge["contract_id"]),),
-                "operation": (str(edge["operation_id"]),),
-            },
-        )
+        scope = _committed_operation_scope(edge, target)
+        if binding["requested_scope_digest"] != canonical_digest(scope.to_dict()):
+            raise AuthorityDenied("ResolvedPlan requested scope binding changed")
         ceilings[(caller.principal_id, target.principal_id)] = AuthorityCeilings(
             caller_effect=scope,
             runtime_safety=scope,
             profile_admin=scope,
         )
         caller_by_operation[key] = caller
+        scope_by_operation[key] = scope
 
     binding_pack_ids = {str(item["pack_id"]) for item in plan["bindings"]}
     pack_roots = resolve_admitted_pack_roots(
@@ -607,7 +638,7 @@ def capture_production_dispatch(
                 session_id=(f"session.provider.pack-control.{operation_id}.{activation_suffix}"),
                 principal=target,
             )
-            scope = _operation_scope(key[0], operation_id, target)
+            scope = scope_by_operation[key]
             caller = caller_by_operation[key]
             _commit_pack_control_authority(
                 authority_store,
@@ -717,7 +748,7 @@ def capture_production_dispatch(
             caller=caller,
             target=target,
             target_domain=target_domain,
-            scope=_operation_scope(contract_id, operation_id, target),
+            scope=scope_by_operation[key],
             authority_label="dynamic-pack",
             pack_approval_revision=pack_approval_revision,
         )
@@ -985,16 +1016,9 @@ def capture_production_dispatch(
     dispatch = runtime.dispatch_session(
         broker=broker,
         context_for=context_for,
-        effect_scope_for=lambda contract_id, operation_id, _payload: {
-            "capability": "operation.invoke",
-            "semantics_digest": target_by_operation[
-                (contract_id, operation_id)
-            ].contract_revision_digest,
-            "dimensions": {
-                "contract": [contract_id],
-                "operation": [operation_id],
-            },
-        },
+        effect_scope_for=lambda contract_id, operation_id, _payload: scope_by_operation[
+            (contract_id, operation_id)
+        ].to_dict(),
         providers=providers,
         authority_control=authority_control,
         current_capture_check=assert_current_capture,

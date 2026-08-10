@@ -13,7 +13,7 @@
     {
       "contract_revision_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
       "id": "shell.cli.default",
-      "implementation_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "implementation_digest": "sha256:0aa3522d45218284f684dba75d9169f6530c0824c3c37fdb80490bc962c1c572",
       "isolation": "dedicated_process",
       "operations": [
         "present"
@@ -22,7 +22,7 @@
     }
   ],
   "integrity": {
-    "source_identity": "sha256:2d2762acc5670e78d632fd41be70d6ac2bc1b689c7f8c174b2bf13ede91163b8",
+    "source_identity": "sha256:dc003a7295e0fe271504873c952451363ef443ff61a15a421f013a97f75fd635",
     "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     "contract_catalog_digest": "sha256:ba36ee3e7bb8d0a8cce3ceed290a5a68fd604bf7edb3be684bd4da0ed889b135"
   },
@@ -43,7 +43,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "artifact_digest": "sha256:00b5cc3f1a10ca88b076c02840a93f9ce59cf2eb4ba3881f30dd8cdb81231cb3",
     "display_name": "Tobkiri CLI Shell",
     "id": "shell.cli.default",
     "kind": "shell",
@@ -51,16 +51,16 @@
   },
   "pack_api_version": "io.tobkiri.pack.v4",
   "provenance": {
-    "evidence": [],
-    "generator": "defaultspack-v4-core",
-    "generator_version": "1.0.0",
-    "normative": true,
-    "repository_commit": "working-tree",
-    "repository_tree": "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
-    "source_kind": "repository",
-    "source_path": "ecosystem/defaultspack/v4/packs/shell.cli.default.pack.v4.json"
+    "source_kind": "generated",
+    "source_path": "ecosystem/defaultspack/v4/packs/shell.cli.default.pack.v4.json",
+    "source_digest": "sha256:cf31300861b05724a360c8dd778393f2ae67094c548d008d09e0c65f6743db8a",
+    "repository_commit": "a2cae0ca5b2b9d23391cd6dc3d2708e9c6b7645e",
+    "repository_tree": "d5d564bef54e74ba119e2d20840ee7ed8f9be0a7d08a26cb56989b719d7e0ccf",
+    "generator": "defaultspack-v4-core",
+    "generator_version": "2.0.0",
+    "normative": true,
+    "evidence": []
   },
   "provider_catalog": [
     {
