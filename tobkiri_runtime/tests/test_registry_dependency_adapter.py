@@ -17,15 +17,15 @@ from tests.v4_batch_support import (
     assert_legacy_registry_fails_closed,
     authority_bindings_for_profile,
 )
+from tests.conformance_support.packaged_profile import load_packaged_profile_catalog
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 SNAPSHOT = "sha256:" + "9" * 64
 
 
 def _catalog() -> BundledCatalog:
-    return BundledCatalog.load(BUNDLE)
+    return load_packaged_profile_catalog()
 
 
 def _approved(catalog: BundledCatalog) -> set[str]:

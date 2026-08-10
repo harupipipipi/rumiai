@@ -13,7 +13,6 @@ import pytest
 
 from core_runtime.authority.v4 import AuthorityDenied, AuthorityScope, GrantLifetime
 from ecosystem.defaultspack.domain.runtime_v4 import (
-    BundledCatalog,
     ProfileResolutionDenied,
     resolve_default_profile,
 )
@@ -22,6 +21,7 @@ from tests.legacy_authority_contracts import (
     assert_profile_resolver_requires_authority_snapshot,
     assert_retired_module_absent,
 )
+from tests.conformance_support.packaged_profile import load_packaged_profile_catalog
 from tests.test_authority_v4_lifecycle import _digest
 from tests.v4_batch_support import (
     assert_lease_is_single_use,
@@ -115,7 +115,7 @@ def test_profile_resolver_requires_authority_snapshot() -> None:
 
 
 def test_profile_resolver_uses_exact_v4_manifest_inventory() -> None:
-    catalog = BundledCatalog.load(BUNDLE)
+    catalog = load_packaged_profile_catalog()
     approved = {str(manifest["pack"]["artifact_digest"]) for manifest in catalog.packs.values()}
     from tests.v4_batch_support import authority_bindings_for_profile
 
@@ -133,7 +133,7 @@ def test_profile_resolver_uses_exact_v4_manifest_inventory() -> None:
 
 
 def test_profile_resolver_rejects_artifact_not_in_approval_snapshot() -> None:
-    catalog = BundledCatalog.load(BUNDLE)
+    catalog = load_packaged_profile_catalog()
     approved = {str(manifest["pack"]["artifact_digest"]) for manifest in catalog.packs.values()}
     approved.remove(catalog.packs["rumi_file_inspect_pack"]["pack"]["artifact_digest"])
     from tests.v4_batch_support import authority_bindings_for_profile

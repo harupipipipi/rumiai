@@ -5,7 +5,9 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 from scripts.generate_packaged_defaultspack_v4_bundle import stage_packaged_bundle
+from tobkiri_protocol.platform_artifact import verify_platform_artifact
 
 
 _INJECTED_BUNDLE_ROOT: Path | None = None
@@ -24,6 +26,12 @@ def packaged_profile_bundle_root() -> Path:
     if _INJECTED_BUNDLE_ROOT is None:
         raise RuntimeError("packaged Profile test dependency was not injected")
     return _INJECTED_BUNDLE_ROOT
+
+
+def load_packaged_profile_catalog() -> BundledCatalog:
+    """Load the session's canonical packaged Profile fixture."""
+
+    return BundledCatalog.load(packaged_profile_bundle_root())
 
 
 def build_packaged_profile_bundle(
@@ -52,11 +60,18 @@ def build_packaged_profile_bundle(
         bundle_identity="io.tobkiri.shell.tauri",
         source_commit=source_commit,
     )
+    catalog = BundledCatalog.load(bundle)
+    shell = catalog.shells["shell.tauri.default"]
+    variants = shell["launch"]["variants"]
+    if len(variants) != 1 or catalog.artifact_root is None:
+        raise AssertionError("packaged Profile fixture has no exact Shell artifact")
+    verify_platform_artifact(catalog.artifact_root, variants[0])
     return bundle
 
 
 __all__ = [
     "build_packaged_profile_bundle",
     "inject_packaged_profile_bundle",
+    "load_packaged_profile_catalog",
     "packaged_profile_bundle_root",
 ]

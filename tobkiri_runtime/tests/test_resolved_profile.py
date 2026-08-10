@@ -24,6 +24,7 @@ from scripts.quality.legacy_selection_migration import (
     plan_legacy_selection_migration,
     rollback_legacy_selection_migration,
 )
+from tests.conformance_support.packaged_profile import load_packaged_profile_catalog
 
 
 _DEFAULTSPACK_ROOT = Path(__file__).resolve().parent.parent / "ecosystem" / "defaultspack"
@@ -87,17 +88,13 @@ def _isolate_profile_resolution_from_pack_install_policy(
 @pytest.fixture
 def captured_v4_profile(request: pytest.FixtureRequest):
     """Bind the checked-in, Host-verified Defaults Profile snapshot."""
-    from ecosystem.defaultspack.domain.runtime_v4 import (
-        BundledCatalog,
-        resolve_default_profile,
-    )
+    from ecosystem.defaultspack.domain.runtime_v4 import resolve_default_profile
     from core_runtime.resolved_profile_scope import (
         activate_resolved_profile,
         restore_resolved_profile,
     )
 
-    bundle_root = _DEFAULTSPACK_ROOT / "v4"
-    catalog = BundledCatalog.load(bundle_root)
+    catalog = load_packaged_profile_catalog()
     source = catalog.profiles["defaults"]
     authority_bindings = {
         "|".join(
@@ -384,16 +381,13 @@ def test_resolution_is_deterministic_immutable_and_dependency_complete(
 def test_selection_is_not_an_authority_grant(captured_v4_profile) -> None:
     """A selected v4 composition is denied when Host authority is absent."""
     from ecosystem.defaultspack.domain.runtime_v4 import (
-        BundledCatalog,
         ProfileResolutionDenied,
         resolve_default_profile,
     )
 
     snapshot = captured_v4_profile
     assert snapshot.profile["state"] == "resolved"
-    catalog = BundledCatalog.load(
-        Path(__file__).resolve().parent.parent / "ecosystem" / "defaultspack" / "v4"
-    )
+    catalog = load_packaged_profile_catalog()
     with pytest.raises(ProfileResolutionDenied, match="Authority Kernel reference"):
         resolve_default_profile(
             catalog,

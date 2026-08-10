@@ -14,6 +14,7 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
     resolve_default_profile,
 )
 from tests.legacy_authority_contracts import assert_retired_module_absent
+from tests.conformance_support.packaged_profile import load_packaged_profile_catalog
 from tests.v4_batch_support import authority_bindings_for_profile
 
 
@@ -23,7 +24,7 @@ SNAPSHOT = "sha256:" + "9" * 64
 
 
 def _catalog() -> BundledCatalog:
-    return BundledCatalog.load(BUNDLE)
+    return load_packaged_profile_catalog()
 
 
 def _approved(catalog: BundledCatalog) -> set[str]:

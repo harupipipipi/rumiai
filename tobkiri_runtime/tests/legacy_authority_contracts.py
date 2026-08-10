@@ -16,14 +16,13 @@ import pytest
 
 from core_runtime.legacy_runtime_removed import removed_authority_service
 from ecosystem.defaultspack.domain.runtime_v4 import (
-    BundledCatalog,
     ProfileResolutionDenied,
     resolve_default_profile,
 )
+from tests.conformance_support.packaged_profile import load_packaged_profile_catalog
 
 
 RUNTIME = Path(__file__).resolve().parents[1]
-BUNDLE_ROOT = RUNTIME / "ecosystem" / "defaultspack" / "v4"
 SNAPSHOT_DIGEST = "sha256:" + "9" * 64
 
 
@@ -61,7 +60,7 @@ def assert_legacy_service_fails_closed() -> None:
 
 def assert_profile_resolver_requires_authority_snapshot() -> None:
     """Require v4 Profile resolution to reject missing Kernel references."""
-    catalog = BundledCatalog.load(BUNDLE_ROOT)
+    catalog = load_packaged_profile_catalog()
     approved = {str(manifest["pack"]["artifact_digest"]) for manifest in catalog.packs.values()}
     with pytest.raises(ProfileResolutionDenied, match="Authority Kernel reference is missing"):
         resolve_default_profile(
@@ -76,7 +75,7 @@ def assert_profile_resolver_requires_authority_snapshot() -> None:
 
 def assert_profile_resolver_rejects_unapproved_artifact() -> None:
     """Require v4 Profile resolution to reject an incomplete approval set."""
-    catalog = BundledCatalog.load(BUNDLE_ROOT)
+    catalog = load_packaged_profile_catalog()
     approved = {str(manifest["pack"]["artifact_digest"]) for manifest in catalog.packs.values()}
     approved.remove(catalog.packs["rumi_file_inspect_pack"]["pack"]["artifact_digest"])
     from tests.v4_batch_support import authority_bindings_for_profile

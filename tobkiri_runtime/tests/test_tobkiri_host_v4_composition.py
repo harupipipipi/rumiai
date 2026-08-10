@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -24,33 +23,15 @@ from tobkiri_host.models import (
     PackageKind,
 )
 from tests.v4_batch_support import authority_bindings_for_profile
-from tests.conformance_support.packaged_profile import build_packaged_profile_bundle
+from tests.conformance_support.packaged_profile import load_packaged_profile_catalog
 
 
 ROOT = Path(__file__).resolve().parent.parent
-BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 SNAPSHOT = "sha256:" + "9" * 64
-SOURCE_COMMIT = "a9ea44934646b6b353ad2bcab294a35d3b99556d"
-
-
-@pytest.fixture(scope="module", autouse=True)
-def _packaged_bundle(tmp_path_factory: pytest.TempPathFactory):
-    bundle = build_packaged_profile_bundle(
-        BUNDLE,
-        tmp_path_factory.mktemp("packaged-host-profile"),
-        source_commit=SOURCE_COMMIT,
-    )
-    previous = os.environ.get("TOBKIRI_TEST_BUNDLE_ROOT")
-    os.environ["TOBKIRI_TEST_BUNDLE_ROOT"] = str(bundle)
-    yield
-    if previous is None:
-        os.environ.pop("TOBKIRI_TEST_BUNDLE_ROOT", None)
-    else:
-        os.environ["TOBKIRI_TEST_BUNDLE_ROOT"] = previous
 
 
 def _resolved():
-    catalog = BundledCatalog.load(Path(os.environ["TOBKIRI_TEST_BUNDLE_ROOT"]))
+    catalog = load_packaged_profile_catalog()
     bindings = authority_bindings_for_profile(catalog.profiles["defaults"])
     resolved = resolve_default_profile(
         catalog,

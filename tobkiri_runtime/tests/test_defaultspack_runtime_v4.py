@@ -4,7 +4,6 @@ import copy
 import hashlib
 import json
 import multiprocessing
-import os
 import shutil
 import time
 from dataclasses import replace
@@ -21,11 +20,13 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
     resolve_default_profile,
 )
 from tobkiri_protocol.canonical import canonical_digest
-from tests.conformance_support.packaged_profile import build_packaged_profile_bundle
+from tests.conformance_support.packaged_profile import (
+    load_packaged_profile_catalog,
+    packaged_profile_bundle_root,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 BUNDLE_ROOT = ROOT / "ecosystem" / "defaultspack" / "v4"
-SOURCE_COMMIT = "a9ea44934646b6b353ad2bcab294a35d3b99556d"
 SNAPSHOT_DIGEST = "sha256:" + "9" * 64
 AUTHORITY_BINDINGS = {
     "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": (
@@ -59,23 +60,7 @@ for _operation_id in (
 
 
 def _catalog() -> BundledCatalog:
-    return BundledCatalog.load(Path(os.environ.get("TOBKIRI_TEST_BUNDLE_ROOT", BUNDLE_ROOT)))
-
-
-@pytest.fixture(scope="module", autouse=True)
-def _packaged_bundle(tmp_path_factory: pytest.TempPathFactory):
-    bundle = build_packaged_profile_bundle(
-        BUNDLE_ROOT,
-        tmp_path_factory.mktemp("packaged-profile"),
-        source_commit=SOURCE_COMMIT,
-    )
-    previous = os.environ.get("TOBKIRI_TEST_BUNDLE_ROOT")
-    os.environ["TOBKIRI_TEST_BUNDLE_ROOT"] = str(bundle)
-    yield
-    if previous is None:
-        os.environ.pop("TOBKIRI_TEST_BUNDLE_ROOT", None)
-    else:
-        os.environ["TOBKIRI_TEST_BUNDLE_ROOT"] = previous
+    return load_packaged_profile_catalog()
 
 
 def _approved(catalog: BundledCatalog) -> set[str]:
@@ -120,6 +105,7 @@ def _authority(path: Path) -> AuthorityStore:
 
 
 def _activation_process(
+    bundle_root: str,
     state_root: str,
     workspace_root: str,
     authority_path: str,
@@ -129,6 +115,7 @@ def _activation_process(
     results: multiprocessing.queues.Queue,
 ) -> None:
     authority = _authority(Path(authority_path))
+    catalog = BundledCatalog.load(Path(bundle_root))
 
     def fault(stage: str) -> None:
         if stage == "after_authority_commit" and committed is not None:
@@ -145,7 +132,7 @@ def _activation_process(
             authority=authority,
             fault=fault,
         ).activate(
-            _resolve(),
+            _resolve(catalog),
             activation_id=activation_id,
             created_at="2026-08-10T00:00:00Z",
         )
@@ -157,6 +144,7 @@ def _activation_process(
 
 
 def _cas_activation_process(
+    bundle_root: str,
     state_root: str,
     workspace_root: str,
     authority_path: str,
@@ -168,6 +156,7 @@ def _cas_activation_process(
     results: multiprocessing.queues.Queue,
 ) -> None:
     authority = _authority(Path(authority_path))
+    catalog = BundledCatalog.load(Path(bundle_root))
     try:
         if barrier.wait(timeout=15) < 0:  # pragma: no cover - defensive API guard
             raise RuntimeError("activation barrier failed")
@@ -177,7 +166,7 @@ def _cas_activation_process(
             profile_id="defaults",
             authority=authority,
         ).activate(
-            _resolve(),
+            _resolve(catalog),
             activation_id=activation_id,
             created_at="2026-08-10T00:01:00Z",
             expected_predecessor_profile_revision=expected_revision,
@@ -734,6 +723,7 @@ def test_independent_process_activations_never_publish_retired_pointer(
     first = context.Process(
         target=_activation_process,
         args=(
+            str(packaged_profile_bundle_root()),
             str(state_root),
             str(workspace),
             str(authority_path),
@@ -746,6 +736,7 @@ def test_independent_process_activations_never_publish_retired_pointer(
     second = context.Process(
         target=_activation_process,
         args=(
+            str(packaged_profile_bundle_root()),
             str(state_root),
             str(workspace),
             str(authority_path),
@@ -840,6 +831,7 @@ def test_cross_process_predecessor_cas_precedes_authority_reservation(
         context.Process(
             target=_cas_activation_process,
             args=(
+                str(packaged_profile_bundle_root()),
                 str(state_root),
                 str(workspace),
                 str(authority_path),

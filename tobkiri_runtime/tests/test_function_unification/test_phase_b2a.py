@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog, resolve_default_profile
+from ecosystem.defaultspack.domain.runtime_v4 import resolve_default_profile
 from tobkiri_protocol.canonical import canonical_digest
 from tests.legacy_authority_contracts import assert_profile_resolver_requires_authority_snapshot
+from tests.conformance_support.packaged_profile import load_packaged_profile_catalog
 from tests.v4_batch_support import authority_bindings_for_profile
 
 
@@ -14,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 SNAPSHOT = "sha256:" + "9" * 64
 def _resolved():
-    catalog = BundledCatalog.load(BUNDLE)
+    catalog = load_packaged_profile_catalog()
     approved = {str(item["pack"]["artifact_digest"]) for item in catalog.packs.values()}
     bindings = authority_bindings_for_profile(catalog.profiles["defaults"])
     return resolve_default_profile(
@@ -50,7 +51,7 @@ def test_resolved_plan_has_one_binding_per_selected_function() -> None:
 def test_resolved_plan_binds_exact_authority_references() -> None:
     resolved = _resolved()
     bindings = authority_bindings_for_profile(
-        BundledCatalog.load(BUNDLE).profiles["defaults"]
+        load_packaged_profile_catalog().profiles["defaults"]
     )
     assert set(resolved.profile["authority_references"]) == set(bindings.values())
     assert {edge["authority_reference"] for edge in resolved.profile["requested_edges"]} == set(
