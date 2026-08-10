@@ -725,24 +725,6 @@ mod tests {
 
         let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
-        let source_revision = Command::new("git")
-            .args(["rev-parse", "--verify", "HEAD^{commit}"])
-            .current_dir(&repository)
-            .output()
-            .expect("source checkout revision should be readable");
-        assert!(
-            source_revision.status.success(),
-            "source checkout revision lookup failed"
-        );
-        let source_revision = String::from_utf8(source_revision.stdout)
-            .expect("source checkout revision should be UTF-8")
-            .trim()
-            .to_owned();
-        assert_eq!(
-            source_revision.len(),
-            40,
-            "source revision must be full SHA"
-        );
         let status = std::process::Command::new(python)
             .arg(
                 repository
@@ -768,14 +750,26 @@ mod tests {
             .arg("arm64")
             .arg("--bundle-identity")
             .arg("io.tobkiri.shell.tauri")
-            .arg("--source-commit")
-            .arg(source_revision)
             .current_dir(repository)
             .status()
             .unwrap();
         assert!(
             status.success(),
             "official packaged Profile generator failed"
+        );
+        let profile: Value = serde_json::from_slice(
+            &fs::read(
+                config
+                    .app_dir
+                    .join("ecosystem/defaultspack/v4/defaults.profile.v4.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            value_str(&profile, "/provenance/repository_commit"),
+            Some("working-tree"),
+            "synthetic fixtures must not claim clean release provenance"
         );
     }
 
