@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import http.cookiejar
+import os
+import shutil
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -489,3 +491,64 @@ def test_generic_dispatch_is_retired_without_client_selected_execution(
         assert state_path.read_bytes() == before
     finally:
         server.stop()
+
+
+def test_pack_control_state_hardlink_fails_closed(captured_session) -> None:
+    session, _state_path, user_data = captured_session
+    state = user_data / "pack_control" / "defaults.v4.json"
+    state.parent.mkdir(parents=True, exist_ok=True)
+    outside = user_data / "outside-state"
+    outside.write_text(
+        '{"version":"io.tobkiri.pack-control-state.v4",'
+        '"profile_id":"defaults","installed":{}}\n',
+        encoding="utf-8",
+    )
+    os.link(outside, state)
+
+    with pytest.raises(PackControlDenied, match="state is unreadable"):
+        _invoke(session, "catalog.read")
+
+
+def test_pack_approval_hardlink_fails_closed(captured_session) -> None:
+    session, _state_path, user_data = captured_session
+    _approve_target(session)
+    approval = (
+        user_data
+        / "pack_control"
+        / "approvals"
+        / "defaults"
+        / f"{TARGET_PACK}.json"
+    )
+    outside = user_data / "outside-approval"
+    shutil.copyfile(approval, outside)
+    approval.unlink()
+    os.link(outside, approval)
+
+    status = _invoke(session, "pack.status", {"pack_id": TARGET_PACK})
+    assert status["approved"] is False
+    assert status["approval_reason"] == "approval_unreadable"
+
+
+def test_pack_control_root_replacement_fails_closed(captured_session) -> None:
+    session, _state_path, user_data = captured_session
+    _invoke(session, "catalog.read")
+    root = user_data / "pack_control"
+    displaced = user_data / "pack-control-displaced"
+    root.rename(displaced)
+    root.mkdir()
+
+    with pytest.raises(PackControlDenied, match="state is unreadable"):
+        _invoke(session, "catalog.read")
+
+
+def test_pack_approval_root_replacement_fails_closed(captured_session) -> None:
+    session, _state_path, user_data = captured_session
+    _approve_target(session)
+    root = user_data / "pack_control" / "approvals" / "defaults"
+    displaced = user_data / "approval-displaced"
+    root.rename(displaced)
+    root.mkdir()
+
+    status = _invoke(session, "pack.status", {"pack_id": TARGET_PACK})
+    assert status["approved"] is False
+    assert status["approval_reason"] == "approval_unreadable"

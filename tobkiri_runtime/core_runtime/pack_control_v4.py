@@ -8,7 +8,6 @@ import json
 import os
 import re
 import secrets
-import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -18,6 +17,10 @@ from typing import Any, Callable, Mapping
 
 from tobkiri_host.errors import HostCoreError
 from tobkiri_protocol.validation import validate_document
+from tobkiri_protocol.secure_persistence import (
+    SecureDirectory,
+    SecurePersistenceError,
+)
 
 from .external_pack_catalog_v4 import (
     control_catalog_revision,
@@ -61,6 +64,8 @@ PACK_CONTROL_OPERATIONS = frozenset(
     }
 )
 _CANDIDATE_TTL_SECONDS = 120.0
+_PERSISTENCE_STORES: dict[Path, SecureDirectory] = {}
+_PERSISTENCE_STORES_LOCK = threading.RLock()
 
 
 class PackControlDenied(HostCoreError):
@@ -1099,6 +1104,44 @@ def _control_state_path(profile_id: str) -> Path:
     return _user_data_root() / "pack_control" / f"{profile_id}.v4.json"
 
 
+def _persistence_store() -> SecureDirectory:
+    """Return the process-pinned Pack control persistence boundary."""
+
+    root = (_user_data_root() / "pack_control").absolute()
+    with _PERSISTENCE_STORES_LOCK:
+        store = _PERSISTENCE_STORES.get(root)
+        if store is None:
+            try:
+                store = SecureDirectory(root, create=True)
+            except (OSError, SecurePersistenceError) as error:
+                raise PackControlDenied("Pack control persistence is unavailable") from error
+            _PERSISTENCE_STORES[root] = store
+        return store
+
+
+def _approval_store(profile_id: str) -> SecureDirectory:
+    """Return the process-pinned approval root for one canonical Profile."""
+
+    _safe_identity(profile_id, "Profile ID")
+    root = (
+        _user_data_root() / "pack_control" / "approvals" / profile_id
+    ).absolute()
+    with _PERSISTENCE_STORES_LOCK:
+        store = _PERSISTENCE_STORES.get(root)
+        if store is None:
+            try:
+                store = SecureDirectory(root, create=True)
+            except OSError as error:
+                raise PackControlDenied("Pack approval persistence is unavailable") from error
+            _PERSISTENCE_STORES[root] = store
+        return store
+
+
+def _control_state_relative(profile_id: str) -> Path:
+    _safe_identity(profile_id, "Profile ID")
+    return Path(f"{profile_id}.v4.json")
+
+
 def _panel_session_root(authority_session_id: str) -> str:
     """Recover the authenticated panel binding from a Host-derived session ID."""
 
@@ -1114,14 +1157,13 @@ def _panel_session_root(authority_session_id: str) -> str:
 
 
 def _read_control_state(profile_id: str) -> dict[str, Any]:
-    path = _control_state_path(profile_id)
-    if path.is_symlink():
-        raise PackControlDenied("Pack control state cannot be a symlink")
-    if not path.exists():
-        return {}
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+        store = _persistence_store()
+        relative = _control_state_relative(profile_id)
+        if not store.exists(relative):
+            return {}
+        value = json.loads(store.read_bytes(relative))
+    except (OSError, SecurePersistenceError, json.JSONDecodeError) as error:
         raise PackControlDenied("Pack control state is unreadable") from error
     if not isinstance(value, Mapping) or not isinstance(value.get("installed"), Mapping):
         raise PackControlDenied("Pack control state is invalid")
@@ -1133,7 +1175,7 @@ def _read_control_state(profile_id: str) -> dict[str, Any]:
 
 def _write_control_state(profile_id: str, installed: Mapping[str, Any]) -> None:
     _atomic_json(
-        _control_state_path(profile_id),
+        _control_state_relative(profile_id),
         {
             "version": "io.tobkiri.pack-control-state.v4",
             "profile_id": profile_id,
@@ -1142,26 +1184,22 @@ def _write_control_state(profile_id: str, installed: Mapping[str, Any]) -> None:
     )
 
 
-def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.parent.is_symlink() or path.is_symlink():
-        raise PackControlDenied("Pack control persistence boundary is symlinked")
-    descriptor, temporary = tempfile.mkstemp(
-        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
-    )
+def _atomic_json(
+    path: Path,
+    value: Mapping[str, Any],
+    *,
+    store: SecureDirectory | None = None,
+) -> None:
+    data = json.dumps(
+        dict(value),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8") + b"\n"
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(
-                dict(value), handle, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-            )
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(temporary, 0o600)
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+        (store or _persistence_store()).write_bytes_atomic(path, data)
+    except OSError as error:
+        raise PackControlDenied("Pack control persistence is unavailable") from error
 
 
 def _pack(arguments: Mapping[str, Any]) -> tuple[str, Mapping[str, Any], Path]:
@@ -1213,6 +1251,12 @@ def _approval_path(profile_id: str, pack_id: str) -> Path:
     _safe_identity(profile_id, "Profile ID")
     _safe_identity(pack_id, "Pack ID")
     return _user_data_root() / "pack_control" / "approvals" / profile_id / f"{pack_id}.json"
+
+
+def _approval_relative(profile_id: str, pack_id: str) -> Path:
+    _safe_identity(profile_id, "Profile ID")
+    _safe_identity(pack_id, "Pack ID")
+    return Path(f"{pack_id}.json")
 
 
 def _authority_key() -> bytes:
@@ -1270,7 +1314,11 @@ def _persist_approval(
         _canonical_bytes(payload),
         hashlib.sha256,
     ).hexdigest()
-    _atomic_json(_approval_path(binding.profile_id, pack_id), payload)
+    _atomic_json(
+        _approval_relative(binding.profile_id, pack_id),
+        payload,
+        store=_approval_store(binding.profile_id),
+    )
 
 
 def _persist_revoked_approval(
@@ -1292,7 +1340,12 @@ def _persist_revoked_approval(
         _canonical_bytes(payload),
         hashlib.sha256,
     ).hexdigest()
-    _atomic_json(_approval_path(str(payload["profile_id"]), pack_id), payload)
+    profile_id = str(payload["profile_id"])
+    _atomic_json(
+        _approval_relative(profile_id, pack_id),
+        payload,
+        store=_approval_store(profile_id),
+    )
 
 
 def _approval_status(
@@ -1300,14 +1353,15 @@ def _approval_status(
     record: Mapping[str, Any],
     binding: _Binding,
 ) -> tuple[bool, str | None]:
-    path = _approval_path(binding.profile_id, pack_id)
-    if path.is_symlink():
-        return False, "approval_symlinked"
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(
+            _approval_store(binding.profile_id).read_bytes(
+                _approval_relative(binding.profile_id, pack_id)
+            )
+        )
     except FileNotFoundError:
         return False, "approval_required"
-    except (OSError, json.JSONDecodeError):
+    except (OSError, SecurePersistenceError, json.JSONDecodeError):
         return False, "approval_unreadable"
     if not isinstance(payload, dict):
         return False, "approval_invalid"
@@ -1357,19 +1411,22 @@ def _load_valid_approval(
     record: Mapping[str, Any],
     binding: _Binding,
 ) -> dict[str, Any]:
-    path = _approval_path(binding.profile_id, pack_id)
+    relative = _approval_relative(binding.profile_id, pack_id)
     try:
-        raw = path.read_bytes()
-    except OSError as error:
+        raw = _approval_store(binding.profile_id).read_bytes(relative)
+    except (OSError, SecurePersistenceError) as error:
         raise PackControlDenied("Pack approval is unreadable") from error
     approved, reason = _approval_status(pack_id, record, binding)
     if not approved:
         raise PackControlDenied(reason or "Pack approval is unavailable")
     try:
-        if not hmac.compare_digest(raw, path.read_bytes()):
+        if not hmac.compare_digest(
+            raw,
+            _approval_store(binding.profile_id).read_bytes(relative),
+        ):
             raise PackControlDenied("Pack approval changed during revocation")
         payload = json.loads(raw)
-    except OSError as error:
+    except (OSError, SecurePersistenceError) as error:
         raise PackControlDenied("Pack approval is unreadable") from error
     except json.JSONDecodeError as error:
         raise PackControlDenied("Pack approval is invalid") from error

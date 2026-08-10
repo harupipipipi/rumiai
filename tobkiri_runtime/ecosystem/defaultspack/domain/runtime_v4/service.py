@@ -9,8 +9,11 @@ Profile, ProfileLock, ResolvedPlan, and Activation records.
 from __future__ import annotations
 
 import hashlib
+import importlib
+import errno
 import os
 import re
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,10 +23,13 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 from tobkiri_protocol.canonical import canonical_digest, canonical_json, strict_loads
-from tobkiri_protocol.durability import write_bytes_atomic
 from tobkiri_protocol.errors import ProtocolError, SchemaValidationError
 from tobkiri_protocol.profile_scope import normalize_requested_scope_template
 from tobkiri_protocol.platform_artifact import verify_platform_artifact
+from tobkiri_protocol.secure_persistence import (
+    SecureDirectory,
+    SecurePersistenceError,
+)
 from tobkiri_protocol.validation import validate_document
 
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -45,6 +51,10 @@ class BundleIntegrityError(DefaultProfileV4Error):
 
 class ProfileResolutionDenied(DefaultProfileV4Error):
     """Raised when an exact, approved v4 composition cannot be produced."""
+
+
+class ActivationLockTimeout(ProfileResolutionDenied):
+    """Raised when the activation process lock is unavailable by its deadline."""
 
 
 class ActivationAuthority(Protocol):
@@ -108,11 +118,6 @@ def _require_optional_pin(
 
     if requested is not None and requested != actual:
         raise ProfileResolutionDenied(f"{field} is stale or mismatched")
-
-
-def _write_atomic(path: Path, payload: Mapping[str, Any]) -> None:
-    data = canonical_json(dict(payload)) + b"\n"
-    write_bytes_atomic(path, data)
 
 
 @dataclass(frozen=True)
@@ -954,6 +959,9 @@ class ActivationStore:
         authority: ActivationAuthority,
         catalog: BundledCatalog | None = None,
         fault: Callable[[str], None] | None = None,
+        lock_timeout_seconds: float = 5.0,
+        monotonic_clock: Callable[[], float] = time.monotonic,
+        retry_sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         requested_state_root = Path(state_root)
         requested_workspace_root = Path(workspace_root)
@@ -961,15 +969,52 @@ class ActivationStore:
             raise ProfileResolutionDenied("state_root must not be a symlink")
         if requested_workspace_root.is_symlink():
             raise ProfileResolutionDenied("workspace_root must not be a symlink")
-        self.state_root = requested_state_root.resolve()
+        if lock_timeout_seconds <= 0 or lock_timeout_seconds > 30.0:
+            raise ValueError("lock_timeout_seconds must be positive and bounded")
+        self.state_root = requested_state_root.absolute()
         self.workspace_root = requested_workspace_root.resolve(strict=True)
         self.profile_id = profile_id
         self._authority = authority
         self._catalog = catalog
         self._fault = fault or (lambda _stage: None)
+        self._lock_timeout_seconds = lock_timeout_seconds
+        self._monotonic_clock = monotonic_clock
+        self._retry_sleep = retry_sleep
+        self._lock_platform = os.name
         if not self.workspace_root.is_dir():
             raise ProfileResolutionDenied("workspace_root must be a directory")
+        try:
+            self._state = SecureDirectory(self.state_root, create=True)
+        except SecurePersistenceError as exc:
+            raise ProfileResolutionDenied("activation state root is unsafe") from exc
         self._workspace_digest = canonical_digest({"workspace_root": str(self.workspace_root)})
+
+    def _write_state(self, relative: str | Path, payload: Mapping[str, Any]) -> None:
+        """Write canonical activation state below the pinned state root."""
+
+        try:
+            self._state.write_bytes_atomic(
+                relative,
+                canonical_json(dict(payload)) + b"\n",
+            )
+        except (OSError, SecurePersistenceError) as exc:
+            raise ProfileResolutionDenied("activation persistence is unavailable") from exc
+
+    def _read_state(self, relative: str | Path, label: str) -> Any:
+        """Read and decode one pinned activation record."""
+
+        try:
+            return strict_loads(self._state.read_bytes(relative))
+        except (OSError, ProtocolError, SecurePersistenceError) as exc:
+            raise ProfileResolutionDenied(f"{label} is unavailable: {exc}") from exc
+
+    def _unlink_state(self, relative: str | Path, *, missing_ok: bool = False) -> None:
+        """Remove one pinned activation record."""
+
+        try:
+            self._state.unlink(relative, missing_ok=missing_ok)
+        except (OSError, SecurePersistenceError) as exc:
+            raise ProfileResolutionDenied("activation persistence is unavailable") from exc
 
     def resolve_workspace_path(self, relative_path: str) -> Path:
         """Resolve a relative resource and reject traversal or workspace escape."""
@@ -1033,7 +1078,7 @@ class ActivationStore:
         active: ActiveDefaultProfile | None = None
         if (
             any(value is not None for value in expected_predecessor)
-            and (self.state_root / "active.json").exists()
+            and self._state.exists("active.json")
         ):
             active = self._load_active_snapshot_locked()
             if active.activation["activation_id"] == activation_id:
@@ -1063,11 +1108,6 @@ class ActivationStore:
             security_epoch=plan["security_epoch"],
         )
         envelope_path = self.state_root / "activations" / f"{activation_id[11:]}.json"
-        pending_path = self.state_root / "pending.json"
-        self._reject_symlink(self.state_root / "activations", "activation directory")
-        self._reject_symlink(envelope_path, "activation envelope")
-        self._reject_symlink(pending_path, "pending activation journal")
-        self._reject_symlink(self.state_root / "active.json", "active pointer")
         state = "prepared"
         try:
             activation = self._activation_record(
@@ -1081,9 +1121,9 @@ class ActivationStore:
                 created_at=created_at,
             )
             envelope = self._envelope(profile, lock, plan, activation)
-            _write_atomic(envelope_path, envelope)
-            _write_atomic(
-                pending_path,
+            self._write_state(Path("activations") / envelope_path.name, envelope)
+            self._write_state(
+                "pending.json",
                 self._pending_record(
                     reservation_id,
                     activation_id,
@@ -1111,9 +1151,9 @@ class ActivationStore:
                 created_at=created_at,
             )
             envelope = self._envelope(profile, lock, plan, activation)
-            _write_atomic(envelope_path, envelope)
-            _write_atomic(
-                pending_path,
+            self._write_state(Path("activations") / envelope_path.name, envelope)
+            self._write_state(
+                "pending.json",
                 self._pending_record(
                     reservation_id,
                     activation_id,
@@ -1140,7 +1180,10 @@ class ActivationStore:
                 fencing_token=fencing_token,
                 created_at=created_at,
             )
-            _write_atomic(envelope_path, self._envelope(profile, lock, plan, activation))
+            self._write_state(
+                Path("activations") / envelope_path.name,
+                self._envelope(profile, lock, plan, activation),
+            )
             self._fault("committing")
 
             activation = self._activation_record(
@@ -1156,9 +1199,9 @@ class ActivationStore:
             )
             envelope = self._envelope(profile, lock, plan, activation)
             envelope_digest = canonical_digest(envelope)
-            _write_atomic(envelope_path, envelope)
-            _write_atomic(
-                pending_path,
+            self._write_state(Path("activations") / envelope_path.name, envelope)
+            self._write_state(
+                "pending.json",
                 self._pending_record(
                     reservation_id,
                     activation_id,
@@ -1184,11 +1227,11 @@ class ActivationStore:
                 fencing_token=fencing_token,
             )
             self._verify_selected_artifact(profile)
-            _write_atomic(
-                self.state_root / "active.json",
+            self._write_state(
+                "active.json",
                 self._active_pointer(activation_id, envelope_path, envelope_digest),
             )
-            pending_path.unlink(missing_ok=True)
+            self._unlink_state("pending.json", missing_ok=True)
             return activation
         except Exception:
             if state != "active":
@@ -1201,8 +1244,11 @@ class ActivationStore:
                             new_state="aborted",
                         )
                 finally:
-                    pending_path.unlink(missing_ok=True)
-                    envelope_path.unlink(missing_ok=True)
+                    self._unlink_state("pending.json", missing_ok=True)
+                    self._unlink_state(
+                        Path("activations") / envelope_path.name,
+                        missing_ok=True,
+                    )
             raise
 
     def recover(self) -> None:
@@ -1214,9 +1260,7 @@ class ActivationStore:
     def _recover_locked(self) -> None:
         """Recover state while the profile's process lock is held."""
 
-        pending_path = self.state_root / "pending.json"
-        self._reject_symlink(pending_path, "pending activation journal")
-        if not pending_path.exists():
+        if not self._state.exists("pending.json"):
             for reservation in self._authority.incomplete_activation_reservations(self.profile_id):
                 self._authority.transition_activation(
                     str(reservation["reservation_id"]),
@@ -1224,10 +1268,7 @@ class ActivationStore:
                     new_state="aborted",
                 )
             return
-        try:
-            pending = strict_loads(pending_path.read_bytes())
-        except (OSError, ProtocolError) as exc:
-            raise ProfileResolutionDenied(f"pending activation journal is invalid: {exc}") from exc
+        pending = self._read_state("pending.json", "pending activation journal")
         expected_keys = {
             "schema",
             "reservation_id",
@@ -1265,16 +1306,12 @@ class ActivationStore:
         if Path(envelope_name).name != envelope_name:
             raise ProfileResolutionDenied("pending activation envelope path is invalid")
         envelope_path = self.state_root / "activations" / envelope_name
-        self._reject_symlink(self.state_root / "activations", "activation directory")
-        self._reject_symlink(envelope_path, "activation envelope")
         state = str(reservation["state"])
         if state == "active":
-            try:
-                envelope = strict_loads(envelope_path.read_bytes())
-            except (OSError, ProtocolError) as exc:
-                raise ProfileResolutionDenied(
-                    "committed activation envelope is unavailable"
-                ) from exc
+            envelope = self._read_state(
+                Path("activations") / envelope_name,
+                "committed activation envelope",
+            )
             if (
                 not isinstance(envelope, dict)
                 or canonical_digest(envelope) != pending["envelope_digest"]
@@ -1292,15 +1329,15 @@ class ActivationStore:
             if not isinstance(envelope.get("profile"), Mapping):
                 raise ProfileResolutionDenied("committed activation profile is invalid")
             self._verify_selected_artifact(envelope["profile"])
-            _write_atomic(
-                self.state_root / "active.json",
+            self._write_state(
+                "active.json",
                 self._active_pointer(
                     str(pending["activation_id"]),
                     envelope_path,
                     str(pending["envelope_digest"]),
                 ),
             )
-            pending_path.unlink(missing_ok=True)
+            self._unlink_state("pending.json", missing_ok=True)
             return
         if state in {"prepared", "ready_without_authority", "committing"}:
             self._authority.transition_activation(
@@ -1310,8 +1347,8 @@ class ActivationStore:
             )
         elif state != "aborted":
             raise ProfileResolutionDenied("pending activation has an invalid authority state")
-        pending_path.unlink(missing_ok=True)
-        envelope_path.unlink(missing_ok=True)
+        self._unlink_state("pending.json", missing_ok=True)
+        self._unlink_state(Path("activations") / envelope_name, missing_ok=True)
 
     def _revalidate_publish_reservation(
         self,
@@ -1354,41 +1391,64 @@ class ActivationStore:
     @contextmanager
     def _activation_lock(self) -> Iterator[None]:
         """Serialize activation recovery and publication across Host processes."""
-        self.state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self._reject_symlink(self.state_root, "activation state root")
         profile_digest = hashlib.sha256(self.profile_id.encode("utf-8")).hexdigest()[:24]
-        lock_path = self.state_root / f".activation-{profile_digest}.lock"
-        self._reject_symlink(lock_path, "activation process lock")
-        flags = os.O_RDWR | os.O_CREAT
-        if hasattr(os, "O_NOFOLLOW"):
-            flags |= os.O_NOFOLLOW
-        descriptor = os.open(lock_path, flags, 0o600)
-        if os.name != "nt":
-            os.fchmod(descriptor, 0o600)
+        lock_name = f".activation-{profile_digest}.lock"
         try:
-            if os.name == "nt":
-                import msvcrt
-
-                os.lseek(descriptor, 0, os.SEEK_SET)
-                os.write(descriptor, b"0")
-                os.lseek(descriptor, 0, os.SEEK_SET)
-                getattr(msvcrt, "locking")(descriptor, getattr(msvcrt, "LK_LOCK"), 1)
+            descriptor = self._state.open_lock(lock_name)
+        except (OSError, SecurePersistenceError) as exc:
+            raise ProfileResolutionDenied("activation process lock is unavailable") from exc
+        acquired = False
+        try:
+            if self._lock_platform == "nt":
+                if os.fstat(descriptor).st_size == 0:
+                    os.write(descriptor, b"0")
+                    os.fsync(descriptor)
+                backend = importlib.import_module("msvcrt")
+                lock_mode = getattr(backend, "LK_NBLCK")
             else:
-                import fcntl
-
-                fcntl.flock(descriptor, fcntl.LOCK_EX)
+                backend = importlib.import_module("fcntl")
+                lock_mode = getattr(backend, "LOCK_EX") | getattr(backend, "LOCK_NB")
+            deadline = self._monotonic_clock() + self._lock_timeout_seconds
+            while True:
+                try:
+                    if self._lock_platform == "nt":
+                        os.lseek(descriptor, 0, os.SEEK_SET)
+                        getattr(backend, "locking")(descriptor, lock_mode, 1)
+                    else:
+                        getattr(backend, "flock")(descriptor, lock_mode)
+                    acquired = True
+                    break
+                except OSError as exc:
+                    if exc.errno not in {None, errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                        raise ProfileResolutionDenied(
+                            "activation process lock is unavailable"
+                        ) from exc
+                    remaining = deadline - self._monotonic_clock()
+                    if remaining <= 0:
+                        raise ActivationLockTimeout(
+                            "activation process lock deadline exceeded"
+                        ) from exc
+                    self._retry_sleep(min(0.01, remaining))
+            self._state.validate_open_file(lock_name, descriptor)
             yield
+            self._state.validate_open_file(lock_name, descriptor)
         finally:
-            if os.name == "nt":
-                import msvcrt
-
-                os.lseek(descriptor, 0, os.SEEK_SET)
-                getattr(msvcrt, "locking")(descriptor, getattr(msvcrt, "LK_UNLCK"), 1)
-            else:
-                import fcntl
-
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
-            os.close(descriptor)
+            try:
+                if acquired:
+                    if self._lock_platform == "nt":
+                        os.lseek(descriptor, 0, os.SEEK_SET)
+                        getattr(backend, "locking")(
+                            descriptor,
+                            getattr(backend, "LK_UNLCK"),
+                            1,
+                        )
+                    else:
+                        getattr(backend, "flock")(
+                            descriptor,
+                            getattr(backend, "LOCK_UN"),
+                        )
+            finally:
+                os.close(descriptor)
 
     def _activation_record(
         self,
@@ -1477,12 +1537,7 @@ class ActivationStore:
     def _load_active_snapshot_locked(self) -> ActiveDefaultProfile:
         """Load one snapshot while holding the profile's process lock."""
         self._recover_locked()
-        pointer_path = self.state_root / "active.json"
-        self._reject_symlink(pointer_path, "active pointer")
-        try:
-            pointer = strict_loads(pointer_path.read_bytes())
-        except (OSError, ProtocolError) as exc:
-            raise ProfileResolutionDenied(f"active activation is unavailable: {exc}") from exc
+        pointer = self._read_state("active.json", "active pointer")
         expected_pointer_keys = {
             "schema",
             "activation_id",
@@ -1499,14 +1554,10 @@ class ActivationStore:
         envelope_name = pointer["envelope_path"]
         if not isinstance(envelope_name, str) or Path(envelope_name).name != envelope_name:
             raise ProfileResolutionDenied("active envelope path is invalid")
-        activation_directory = self.state_root / "activations"
-        envelope_path = activation_directory / envelope_name
-        self._reject_symlink(activation_directory, "activation directory")
-        self._reject_symlink(envelope_path, "activation envelope")
-        try:
-            envelope = strict_loads(envelope_path.read_bytes())
-        except (OSError, ProtocolError) as exc:
-            raise ProfileResolutionDenied(f"activation envelope is unavailable: {exc}") from exc
+        envelope = self._read_state(
+            Path("activations") / envelope_name,
+            "activation envelope",
+        )
         if (
             not isinstance(envelope, dict)
             or canonical_digest(envelope) != pointer["envelope_digest"]
@@ -1838,13 +1889,6 @@ class ActivationStore:
             verify_platform_artifact(self._catalog.artifact_root, variants[0])
         except ProtocolError as exc:
             raise ProfileResolutionDenied(f"active Profile Shell artifact rejected: {exc}") from exc
-
-    @staticmethod
-    def _reject_symlink(path: Path, label: str) -> None:
-        """Reject direct symlink indirection at an authoritative state path."""
-
-        if path.is_symlink():
-            raise ProfileResolutionDenied(f"{label} must not be a symlink")
 
     def load_active(self) -> ResolvedDefaultProfile:
         """Load validated Profile/Lock/Plan records for compatibility callers."""

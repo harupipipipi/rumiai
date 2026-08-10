@@ -2,6 +2,7 @@
 
 from .service import (
     ActiveDefaultProfile,
+    ActivationLockTimeout,
     ActivationStore,
     BundleIntegrityError,
     BundledCatalog,
@@ -14,6 +15,7 @@ from .service import (
 
 __all__ = [
     "ActiveDefaultProfile",
+    "ActivationLockTimeout",
     "ActivationStore",
     "BundleIntegrityError",
     "BundledCatalog",

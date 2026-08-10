@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import multiprocessing
+import os
 import shutil
 import time
 from dataclasses import replace
@@ -11,8 +12,10 @@ from pathlib import Path
 
 import pytest
 
+import ecosystem.defaultspack.domain.runtime_v4.service as runtime_service
 from core_runtime.authority.v4 import AuthorityDenied, AuthorityStore
 from ecosystem.defaultspack.domain.runtime_v4 import (
+    ActivationLockTimeout,
     ActivationStore,
     BundleIntegrityError,
     BundledCatalog,
@@ -1048,3 +1051,176 @@ def test_activation_candidate_aborts_on_epoch_revoke_and_token_is_not_reused(
         if event["event_type"] == "activation" and event["event_state"] == "prepared"
     ]
     assert reservations[0]["fencing_token"] == 1
+
+
+def test_activation_root_and_lock_hardlink_fail_closed(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = _authority(tmp_path / "authority.sqlite3")
+    state = tmp_path / "state"
+    store = ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+    )
+    profile_digest = hashlib.sha256(b"defaults").hexdigest()[:24]
+    outside = tmp_path / "outside-lock"
+    outside.write_bytes(b"0")
+    os.link(outside, state / f".activation-{profile_digest}.lock")
+
+    with pytest.raises(ProfileResolutionDenied, match="process lock is unavailable"):
+        store.recover()
+    assert authority.incomplete_activation_reservations("defaults") == ()
+
+
+def test_activation_ancestor_replacement_is_rejected(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = _authority(tmp_path / "authority.sqlite3")
+    owner = tmp_path / "owner"
+    state = owner / "state"
+    store = ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+    )
+    displaced = tmp_path / "displaced-owner"
+    owner.rename(displaced)
+    owner.mkdir()
+    state.mkdir()
+
+    with pytest.raises(ProfileResolutionDenied, match="process lock is unavailable"):
+        store.recover()
+
+
+def test_activation_lock_deadline_then_recovery(tmp_path: Path) -> None:
+    fcntl = pytest.importorskip("fcntl")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = _authority(tmp_path / "authority.sqlite3")
+    state = tmp_path / "state"
+    store = ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        lock_timeout_seconds=0.03,
+    )
+    profile_digest = hashlib.sha256(b"defaults").hexdigest()[:24]
+    lock_path = state / f".activation-{profile_digest}.lock"
+    descriptor = os.open(
+        lock_path,
+        os.O_CREAT | os.O_RDWR,
+        0o600,
+    )
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        started = time.monotonic()
+        with pytest.raises(ActivationLockTimeout, match="deadline exceeded"):
+            store.recover()
+        assert time.monotonic() - started < 0.5
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+    store.recover()
+
+
+def test_windows_activation_lock_adapter_uses_nonblocking_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = _authority(tmp_path / "authority.sqlite3")
+    store = ActivationStore(
+        tmp_path / "state",
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        lock_timeout_seconds=1.0,
+        retry_sleep=lambda _delay: None,
+    )
+    calls: list[int] = []
+
+    class Backend:
+        LK_NBLCK = 1
+        LK_UNLCK = 2
+
+        @staticmethod
+        def locking(_descriptor: int, mode: int, _length: int) -> None:
+            calls.append(mode)
+            if calls == [Backend.LK_NBLCK]:
+                raise BlockingIOError()
+
+    ticks = iter((0.0, 0.1))
+    monkeypatch.setattr(store, "_lock_platform", "nt")
+    monkeypatch.setattr(
+        runtime_service.importlib,
+        "import_module",
+        lambda name: Backend if name == "msvcrt" else None,
+    )
+    monkeypatch.setattr(store, "_monotonic_clock", lambda: next(ticks))
+
+    store.recover()
+    assert calls == [Backend.LK_NBLCK, Backend.LK_NBLCK, Backend.LK_UNLCK]
+
+
+def test_activation_persistence_failure_keeps_old_pointer_and_aborts_reservation(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = _authority(tmp_path / "authority.sqlite3")
+    state = tmp_path / "state"
+    first_store = ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+    )
+    first_store.activate(
+        _resolve(),
+        activation_id="activation:defaults-old-pointer",
+        created_at="2026-08-11T00:00:00Z",
+    )
+    old_pointer = (state / "active.json").read_bytes()
+
+    def replace_pending(stage: str) -> None:
+        if stage != "prepared":
+            return
+        pending = state / "pending.json"
+        displaced = state / "pending.displaced"
+        pending.rename(displaced)
+        os.link(displaced, pending)
+
+    failing = ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        fault=replace_pending,
+    )
+    with pytest.raises(ProfileResolutionDenied, match="persistence"):
+        failing.activate(
+            _resolve(),
+            activation_id="activation:defaults-failed-pointer",
+            created_at="2026-08-11T00:01:00Z",
+        )
+
+    assert (state / "active.json").read_bytes() == old_pointer
+    failed = next(
+        event["payload"]
+        for event in authority.audit_events()
+        if event["event_type"] == "activation"
+        and event["event_state"] == "prepared"
+        and event["payload"]["activation_id"]
+        == "activation:defaults-failed-pointer"
+    )
+    reservation = authority.activation_reservation(str(failed["reservation_id"]))
+    assert reservation is not None
+    assert reservation["state"] == "aborted"
+    assert authority.active_activation_reservation(
+        "activation:defaults-failed-pointer"
+    ) is None
