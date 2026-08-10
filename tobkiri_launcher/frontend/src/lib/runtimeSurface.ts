@@ -209,8 +209,13 @@ export interface RuntimeJsonSchema {
   default?: unknown;
 }
 
+/** The formal v4 action for invoking a declared Contract operation. */
+export const RUNTIME_CONTRACT_INVOKE_ACTION = 'contract_invoke' as const;
+export type RuntimeOperationAction = typeof RUNTIME_CONTRACT_INVOKE_ACTION;
+
 /** Exact operation metadata published by the v4 operation catalog. */
 export interface RuntimeOperationDescriptor {
+  action: RuntimeOperationAction;
   operation_id: string;
   contract_id: string;
   owner_pack_id: string;
@@ -381,7 +386,7 @@ export function runtimeSurfaceErrorMessage(code: RuntimeSurfaceErrorCode): strin
       return 'The active Profile is unavailable. The UI remains fail-closed.';
     case 'STALE':
     case 'DIGEST_MISMATCH':
-      return 'The Profile or plan digest changed. Read-only stale data is shown and actions are locked.';
+      return 'The Profile, Plan, or Catalog digest changed. The accepted snapshot is stale and actions are locked.';
     case 'APPROVAL_DENIED':
       return 'Host approval denied this operation. The UI remains fail-closed.';
     case 'INVALID':
@@ -1334,7 +1339,8 @@ export function extractExactOperationDescriptors(
   return extractExactArray(value, 'operations').flatMap((candidate) => {
     const schema = candidate.schema;
     if (
-      !validString(candidate.owner_pack_id)
+      (candidate.action !== undefined && candidate.action !== RUNTIME_CONTRACT_INVOKE_ACTION)
+      || !validString(candidate.owner_pack_id)
       || !validString(candidate.contribution_id)
       || !validString(candidate.target_provider_id)
       || !isSha256Digest(candidate.artifact_digest)
@@ -1402,6 +1408,7 @@ export function extractExactOperationDescriptors(
     const providerId = candidate.provider_id;
     const label = candidate.label;
     return [{
+      action: RUNTIME_CONTRACT_INVOKE_ACTION,
       operation_id: candidate.operation_id,
       contract_id: candidate.contract_id,
       owner_pack_id: candidate.owner_pack_id,
@@ -1431,13 +1438,13 @@ export function extractExactOperationDescriptors(
 /** Read invokable operation keys only from the authoritative Packs projection. */
 export function extractAuthoritativeInvokableOperationKeys(value: unknown): Set<string> | null {
   const rows = extractExactArray(value, 'packs');
-  if (rows.length === 0) return null;
+  const packs = extractExactPackDescriptors(value);
+  if (rows.length === 0 || packs.length !== rows.length || packs.some((pack) => !pack.enabled || !pack.approved)) {
+    return null;
+  }
   const keys = new Set<string>();
-  for (const row of rows) {
-    if (!Array.isArray(row.invokable_operations) || row.invokable_operations.some((item) => !validString(item))) {
-      return null;
-    }
-    for (const item of row.invokable_operations) keys.add(item);
+  for (const pack of packs) {
+    for (const item of pack.invokable_operations) keys.add(item);
   }
   return keys;
 }
@@ -1621,7 +1628,8 @@ function runtimeOperationMatchesSnapshot(
       ? operation.schema.input_schema
       : undefined);
   return acceptedOperations.some((candidate) => (
-    candidate.operation_id === operation.operation_id
+    candidate.action === operation.action
+    && candidate.operation_id === operation.operation_id
     && candidate.contract_id === operation.contract_id
     && candidate.owner_pack_id === operation.owner_pack_id
     && candidate.contribution_id === operation.contribution_id
@@ -1670,13 +1678,18 @@ export function invokeRuntimeOperation({
       'Operation input must be a JSON object declared by the accepted operation schema.',
     ));
   }
+  if (envelope.state !== 'ready') {
+    const code = envelope.state === 'blocked' ? 'APPROVAL_DENIED' : 'STALE';
+    return Promise.reject(new RuntimeSurfaceError(code, runtimeSurfaceErrorMessage(code)));
+  }
   const route = parseRuntimeOperationRoute(operation.route, operation);
   const operationInputSchema = operation.input_schema
     ?? (isRecord(operation.schema) && isRuntimeJsonSchema(operation.schema.input_schema)
       ? operation.schema.input_schema
       : undefined);
   if (
-    !validString(operation.operation_id)
+    operation.action !== RUNTIME_CONTRACT_INVOKE_ACTION
+    || !validString(operation.operation_id)
     || !validString(operation.contract_id)
     || !validString(operation.owner_pack_id)
     || !validString(operation.contribution_id)
@@ -1766,6 +1779,13 @@ export function invokeRuntimeOperation({
     return Promise.reject(new RuntimeSurfaceError(
       'DIGEST_MISMATCH',
       runtimeSurfaceErrorMessage('DIGEST_MISMATCH'),
+    ));
+  }
+  const authoritativeInvokableOperationKeys = extractAuthoritativeInvokableOperationKeys(envelope.data);
+  if (!authoritativeInvokableOperationKeys?.has(`${operation.contract_id}::${operation.operation_id}`)) {
+    return Promise.reject(new RuntimeSurfaceError(
+      'APPROVAL_DENIED',
+      'The selected operation is not listed by an approved, enabled Pack in the accepted snapshot.',
     ));
   }
   if (!operation.invocation_contribution_id || !operation.invocation_owner_pack_id) {

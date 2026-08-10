@@ -151,6 +151,7 @@ test('runtime target and operation revisions fail closed on map or digest mismat
   );
 
   const operation = {
+    action: 'contract_invoke' as const,
     operation_id: 'operation.one',
     contract_id: 'contract.one.v1',
     owner_pack_id: 'provider-pack',
@@ -434,6 +435,37 @@ test('regex labels cannot classify a Pack as Flow or AI Input', () => {
   assert.deepEqual(extractExactOperationDescriptors({operations: [{label: 'AI Input', operation_id: 'operation.one'}]}), []);
 });
 
+test('operation extraction normalizes the formal contract_invoke action and rejects legacy write labels', () => {
+  const raw = {
+    operation_id: 'operation.one',
+    contract_id: 'contract.one.v1',
+    owner_pack_id: 'provider-pack',
+    contribution_id: 'contribution-one',
+    target_provider_id: 'provider.one',
+    artifact_digest: digest('1'),
+    invocation_contribution_id: null,
+    invocation_owner_pack_id: null,
+    invocation_catalog_hash: null,
+    invocation_reason: 'not approved',
+    invokable: false,
+    catalog_digest: digest('c'),
+    function_id: 'function-one',
+    function_principal_id: 'principal.function-one',
+    caller_function_id: 'caller.function-one',
+    authority_reference: 'authority://one',
+    route: {
+      contract_id: 'contract.one.v1',
+      operation_id: 'operation.one',
+      function_id: 'function-one',
+      provider_pack_id: 'provider-pack',
+    },
+    schema: {input_schema: {type: 'object', properties: {}}},
+  };
+  const [normalized] = extractExactOperationDescriptors({operations: [raw]});
+  assert.equal(normalized?.action, 'contract_invoke');
+  assert.deepEqual(extractExactOperationDescriptors({operations: [{...raw, action: 'write'}]}), []);
+});
+
 test('record digests are not exposed as profile files', () => {
   assert.equal(extractFiniteArtifactEntries({resolved_plan: {plan_digest: digest('b')}}), null);
 });
@@ -444,6 +476,7 @@ test('stale or mismatched profile/plan/catalog blocks every surface action', asy
     (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'STALE',
   );
   const operation = {
+    action: 'contract_invoke' as const,
     operation_id: 'operation.one',
     contract_id: 'contract.one.v1',
     owner_pack_id: 'provider-pack',
@@ -531,6 +564,7 @@ test('route projection consumes exact frontend map metadata without synthesizing
 
 test('operation invocation fails before Broker dispatch on stale catalog, denial, or authority payload', async () => {
   const operation = {
+    action: 'contract_invoke' as const,
     operation_id: 'operation.one',
     contract_id: 'contract.one.v1',
     owner_pack_id: 'provider-pack',
@@ -588,5 +622,31 @@ test('operation invocation fails before Broker dispatch on stale catalog, denial
       payload: {approved: true},
     }),
     (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'INVALID',
+  );
+  await assert.rejects(
+    invokeRuntimeOperation({
+      envelope: envelope('operations', {
+        operations: [{...operation, catalog_digest: digest('c')}],
+      }),
+      operation: {...operation, catalog_digest: digest('c')},
+      payload: {},
+    }),
+    (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'APPROVAL_DENIED',
+  );
+  await assert.rejects(
+    invokeRuntimeOperation({
+      envelope: {...validEnvelope, state: 'stale'},
+      operation,
+      payload: {prompt: 'hello'},
+    }),
+    (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'STALE',
+  );
+  await assert.rejects(
+    invokeRuntimeOperation({
+      envelope: {...validEnvelope, state: 'blocked'},
+      operation,
+      payload: {prompt: 'hello'},
+    }),
+    (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'APPROVAL_DENIED',
   );
 });

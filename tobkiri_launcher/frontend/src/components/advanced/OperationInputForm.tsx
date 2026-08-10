@@ -1,9 +1,14 @@
-import {useEffect, useState, type FormEvent} from 'react';
+import {useEffect, useRef, useState, type FormEvent} from 'react';
 
 import {Button} from '@/src/components/ui/Button';
 import {Input} from '@/src/components/ui/Input';
 import {Badge} from '@/src/components/ui/Badge';
-import type {RuntimeJsonSchema, RuntimeOperationDescriptor} from '@/src/lib/runtimeSurface';
+import {
+  advancedActionAllowed,
+  advancedActionMetadata,
+  type LauncherAdvancedViewDescriptor,
+} from '@/src/lib/advancedSurfaces';
+import {RUNTIME_CONTRACT_INVOKE_ACTION, type RuntimeJsonSchema, type RuntimeOperationDescriptor} from '@/src/lib/runtimeSurface';
 
 type InputValue = unknown;
 
@@ -52,23 +57,39 @@ function enumOptionLabel(value: unknown): string {
 
 export function OperationInputForm({
   operation,
+  descriptor,
   busy,
+  canInvoke,
   onInvoke,
 }: {
   operation: RuntimeOperationDescriptor;
+  descriptor: LauncherAdvancedViewDescriptor;
   busy: boolean;
+  /** The parent descriptor/action gate must explicitly authorize invocation. */
+  canInvoke: boolean;
   onInvoke: (payload: Record<string, unknown>) => Promise<void>;
 }) {
+  const actionMetadata = advancedActionMetadata(descriptor);
+  const descriptorAllowsInvocation = advancedActionAllowed(descriptor, RUNTIME_CONTRACT_INVOKE_ACTION)
+    && actionMetadata.showContractInvocationUi
+    && actionMetadata.requiresAuthoritativeInvokableOperation;
+  const invocationAllowed = canInvoke
+    && descriptorAllowsInvocation
+    && operation.action === RUNTIME_CONTRACT_INVOKE_ACTION
+    && operation.invokable;
   const properties = Object.entries(operation.input_schema?.properties ?? {});
   const required = new Set(operation.input_schema?.required ?? []);
   const [values, setValues] = useState<Record<string, InputValue>>({});
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const formBusy = busy || submitting;
   const schemaSignature = JSON.stringify(operation.input_schema ?? {});
 
   useEffect(() => {
     setValues(Object.fromEntries(properties.map(([name, schema]) => [name, initialValue(schema, required.has(name))])));
     setValidationError(null);
-  }, [operation.operation_id, schemaSignature]);
+  }, [operation.action, operation.contract_id, operation.operation_id, schemaSignature]);
 
   const updateValue = (name: string, value: InputValue) => {
     setValues((current) => ({...current, [name]: value}));
@@ -77,6 +98,11 @@ export function OperationInputForm({
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (busy || submittingRef.current) return;
+    if (!invocationAllowed) {
+      setValidationError('This operation is not currently authorized by the accepted Contract action metadata.');
+      return;
+    }
     for (const name of required) {
       const schema = properties.find(([propertyName]) => propertyName === name)?.[1];
       if (!schema || isMissing(values[name], schema)) {
@@ -135,8 +161,17 @@ export function OperationInputForm({
       }
     }
     setValidationError(null);
-    await onInvoke(payload);
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      await onInvoke(payload);
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
   };
+
+  if (!descriptorAllowsInvocation) return null;
 
   return (
     <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
@@ -164,7 +199,7 @@ export function OperationInputForm({
                       updateValue(name, Number.isInteger(index) && index >= 0 ? schema.enum?.[index] : undefined);
                     }}
                     aria-label={label}
-                    disabled={busy}
+                    disabled={formBusy}
                   >
                     {!required.has(name) ? <option value="">Select a value</option> : null}
                     {schema.enum.map((option, index) => (
@@ -183,7 +218,7 @@ export function OperationInputForm({
                     checked={Boolean(value)}
                     onChange={(event) => updateValue(name, event.target.checked)}
                     aria-label={label}
-                    disabled={busy}
+                    disabled={formBusy}
                     className="h-4 w-4 accent-[var(--accent)]"
                   />
                   <span>{label}{required.has(name) ? <span className="ml-1 text-destructive">*</span> : null}</span>
@@ -200,7 +235,7 @@ export function OperationInputForm({
                     value={displayValue(value, schema)}
                     onChange={(event) => updateValue(name, event.target.value)}
                     aria-label={label}
-                    disabled={busy}
+                    disabled={formBusy}
                   />
                   {helper ? <span className="text-xs font-normal text-text-muted">{helper}</span> : null}
                 </label>
@@ -216,14 +251,20 @@ export function OperationInputForm({
                 type={schema.type === 'number' || schema.type === 'integer' ? 'number' : 'text'}
                 value={displayValue(value, schema)}
                 onChange={(event) => updateValue(name, event.target.value)}
-                disabled={busy}
+                disabled={formBusy}
               />
             );
           })}
         </div>
       )}
       {validationError ? <p className="text-sm text-destructive" role="alert">{validationError}</p> : null}
-      <Button type="submit" className="min-h-11 self-start" loading={busy} disabled={busy || !operation.invokable}>
+      <Button
+        type="submit"
+        className="min-h-11 self-start"
+        loading={formBusy}
+        disabled={formBusy || !invocationAllowed}
+        aria-label="Invoke declared contract operation"
+      >
         Invoke declared operation
       </Button>
     </form>

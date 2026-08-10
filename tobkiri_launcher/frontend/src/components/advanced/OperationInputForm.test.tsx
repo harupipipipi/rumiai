@@ -5,12 +5,14 @@ import {JSDOM} from 'jsdom';
 import test from 'node:test';
 
 import {OperationInputForm} from './OperationInputForm';
+import {LAUNCHER_ADVANCED_VIEWS} from '@/src/lib/advancedSurfaces';
 import type {RuntimeOperationDescriptor} from '@/src/lib/runtimeSurface';
 
 const digest = (character: string): string => `sha256:${character.repeat(64)}`;
 
 function operation(invokable = true): RuntimeOperationDescriptor {
   return {
+    action: 'contract_invoke',
     operation_id: 'conversation.turn',
     contract_id: 'conversation.v1',
     owner_pack_id: 'conversation-pack',
@@ -77,7 +79,9 @@ test('OperationInputForm renders the declared schema and invokes the exact paylo
       root.render(
         <OperationInputForm
           operation={operation()}
+          descriptor={LAUNCHER_ADVANCED_VIEWS.aiInput}
           busy={false}
+          canInvoke
           onInvoke={async (payload) => { received = payload; }}
         />,
       );
@@ -107,13 +111,122 @@ test('OperationInputForm disables invocation when Host readiness is not authorit
   try {
     await act(async () => {
       root.render(
-        <OperationInputForm operation={operation(false)} busy={false} onInvoke={async () => {}} />,
+        <OperationInputForm operation={operation(false)} descriptor={LAUNCHER_ADVANCED_VIEWS.aiInput} busy={false} canInvoke={false} onInvoke={async () => {}} />,
       );
     });
     const submit = [...container.querySelectorAll('button')].find((button) => button.type === 'submit');
     assert.ok(submit);
     assert.equal(submit.disabled, true);
     assert.match(container.textContent ?? '', /Invoke declared operation/);
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
+test('OperationInputForm obeys the parent descriptor action gate even for an invokable row', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  let invokes = 0;
+  try {
+    await act(async () => {
+      root.render(
+        <OperationInputForm
+          operation={operation()}
+          descriptor={LAUNCHER_ADVANCED_VIEWS.aiInput}
+          busy={false}
+          canInvoke={false}
+          onInvoke={async () => { invokes += 1; }}
+        />,
+      );
+    });
+    const submit = [...container.querySelectorAll('button')].find((button) => button.type === 'submit');
+    assert.ok(submit);
+    assert.equal(submit.disabled, true);
+    assert.match(submit.className, /min-h-11/);
+    assert.equal(submit.getAttribute('aria-label'), 'Invoke declared contract operation');
+    const form = container.querySelector<HTMLFormElement>('form');
+    assert.ok(form);
+    await act(async () => {
+      form.dispatchEvent(new dom.window.Event('submit', {bubbles: true, cancelable: true}));
+    });
+    assert.equal(invokes, 0);
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
+test('OperationInputForm does not expose invoke UI for a read-only descriptor', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  let invokes = 0;
+  try {
+    await act(async () => {
+      root.render(
+        <OperationInputForm
+          operation={operation()}
+          descriptor={LAUNCHER_ADVANCED_VIEWS.graph}
+          busy={false}
+          canInvoke
+          onInvoke={async () => { invokes += 1; }}
+        />,
+      );
+    });
+    const submit = [...container.querySelectorAll('button')].find((button) => button.type === 'submit');
+    assert.equal(submit, undefined);
+    assert.doesNotMatch(container.textContent ?? '', /Invoke declared operation/);
+    assert.equal(invokes, 0);
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
+test('OperationInputForm keeps the invoke button focusable and rejects a double submit', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  let release: (() => void) | undefined;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  let invokes = 0;
+  try {
+    await act(async () => {
+      root.render(
+        <OperationInputForm
+          operation={operation()}
+          descriptor={LAUNCHER_ADVANCED_VIEWS.aiInput}
+          busy={false}
+          canInvoke
+          onInvoke={async () => {
+            invokes += 1;
+            await pending;
+          }}
+        />,
+      );
+    });
+    const submit = [...container.querySelectorAll('button')].find((button) => button.type === 'submit');
+    assert.ok(submit);
+    assert.match(submit.className, /focus-visible:ring/);
+    const form = container.querySelector<HTMLFormElement>('form');
+    assert.ok(form);
+    await act(async () => {
+      form.dispatchEvent(new dom.window.Event('submit', {bubbles: true, cancelable: true}));
+      form.dispatchEvent(new dom.window.Event('submit', {bubbles: true, cancelable: true}));
+    });
+    assert.equal(invokes, 1);
+    assert.equal(submit.disabled, true);
+    release?.();
+    await act(async () => { await pending; });
+    assert.equal(submit.disabled, false);
   } finally {
     act(() => root.unmount());
     dom.window.close();
@@ -149,7 +262,9 @@ test('OperationInputForm omits blank optional values and preserves JSON enum typ
       root.render(
         <OperationInputForm
           operation={typedOperation}
+          descriptor={LAUNCHER_ADVANCED_VIEWS.aiInput}
           busy={false}
+          canInvoke
           onInvoke={async (payload) => { received = payload; }}
         />,
       );
@@ -207,7 +322,9 @@ test('OperationInputForm omits an untouched optional boolean while keeping it vi
       root.render(
         <OperationInputForm
           operation={booleanOperation}
+          descriptor={LAUNCHER_ADVANCED_VIEWS.aiInput}
           busy={false}
+          canInvoke
           onInvoke={async (payload) => { received = payload; }}
         />,
       );
@@ -251,7 +368,9 @@ test('OperationInputForm submits explicit false and required boolean values', as
       root.render(
         <OperationInputForm
           operation={booleanOperation}
+          descriptor={LAUNCHER_ADVANCED_VIEWS.aiInput}
           busy={false}
+          canInvoke
           onInvoke={async (payload) => { received = payload; }}
         />,
       );
@@ -303,7 +422,9 @@ test('OperationInputForm visibly rejects missing required values and malformed J
       root.render(
         <OperationInputForm
           operation={invalidOperation}
+          descriptor={LAUNCHER_ADVANCED_VIEWS.aiInput}
           busy={false}
+          canInvoke
           onInvoke={async () => { invokes += 1; }}
         />,
       );
@@ -330,7 +451,9 @@ test('OperationInputForm visibly rejects missing required values and malformed J
       root.render(
         <OperationInputForm
           operation={jsonOperation}
+          descriptor={LAUNCHER_ADVANCED_VIEWS.aiInput}
           busy={false}
+          canInvoke
           onInvoke={async () => { invokes += 1; }}
         />,
       );

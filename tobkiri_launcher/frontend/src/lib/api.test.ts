@@ -413,7 +413,23 @@ test('runtime operation invocation uses only its exact invocation contribution a
       properties: {prompt: {type: 'string'}},
     },
   };
-  envelope.data = {operations: [operation]};
+  envelope.data = {
+    operations: [operation],
+    packs: [{
+      pack_id: 'provider-pack',
+      role: 'provider',
+      kind: 'normal',
+      version: '1.0.0',
+      display_name: 'Provider Pack',
+      artifact_digest: digest('1'),
+      artifact_ref: `pack-v4://provider-pack@${digest('1')}`,
+      installed: true,
+      enabled: true,
+      approved: true,
+      required: false,
+      invokable_operations: ['contract.one.v1::operation.one'],
+    }],
+  };
   const [acceptedOperation] = extractExactOperationDescriptors(envelope.data);
   assert.ok(acceptedOperation);
   assert.equal(acceptedOperation.invocation_catalog_hash, digest('c'));

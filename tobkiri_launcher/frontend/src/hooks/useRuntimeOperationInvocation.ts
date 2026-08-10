@@ -43,6 +43,7 @@ export function runtimeOperationIdentity(
     envelope.plan_digest,
     envelope.catalog_revision,
     envelope.records.activation_record.digest,
+    operation.action,
     operation.operation_id,
     operation.contract_id,
     operation.owner_pack_id,

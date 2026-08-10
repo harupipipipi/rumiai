@@ -1,4 +1,10 @@
-import type {RuntimeSurfaceId} from './runtimeSurface';
+import {
+  extractAuthoritativeInvokableOperationKeys,
+  RUNTIME_CONTRACT_INVOKE_ACTION,
+  type RuntimeSurfaceId,
+  type RuntimeOperationDescriptor,
+  type RuntimeSurfaceEnvelope,
+} from './runtimeSurface';
 
 export type LauncherAdvancedViewId =
   | 'profile'
@@ -13,13 +19,176 @@ export type LauncherAdvancedViewId =
 
 export type LauncherViewSupport = 'rebuilt' | 'launcher_local' | 'mapped' | 'partial' | 'retired';
 
+/**
+ * The action vocabulary is intentionally separate from legacy write/read
+ * labels. `contract_invoke` is the only generic Advanced-surface action that
+ * can expose an operation invocation control.
+ */
+export type LauncherAdvancedAction =
+  | 'local'
+  | 'pack_lifecycle'
+  | 'contract_invoke'
+  | 'read_only'
+  | 'none';
+
+export type LauncherAdvancedCapability =
+  | 'launcher_local'
+  | 'runtime_projection'
+  | 'pack_lifecycle'
+  | 'contract_operation';
+
+export interface LauncherAdvancedActionMetadata {
+  capability: LauncherAdvancedCapability;
+  action: LauncherAdvancedAction;
+  label: string;
+  sideEffects: string;
+  approval: string;
+  showContractInvocationUi: boolean;
+  requiresAuthoritativeInvokableOperation: boolean;
+}
+
+/** Action metadata used by every Advanced descriptor and by the frame UI. */
+export const LAUNCHER_ADVANCED_ACTION_METADATA: Record<
+  LauncherAdvancedAction,
+  LauncherAdvancedActionMetadata
+> = {
+  local: {
+    capability: 'launcher_local',
+    action: 'local',
+    label: 'Launcher-local action',
+    sideEffects: 'Changes Launcher-local presentation preferences only; the separate Profile change ceremony has its own digest and approval controls.',
+    approval: 'Host approval is not required for local controls; the separate Profile change ceremony has its own Kernel approval step.',
+    showContractInvocationUi: false,
+    requiresAuthoritativeInvokableOperation: false,
+  },
+  pack_lifecycle: {
+    capability: 'pack_lifecycle',
+    action: 'pack_lifecycle',
+    label: 'Pack lifecycle action',
+    sideEffects: 'May change installed, enabled, or approved runtime Pack state.',
+    approval: 'Pack approval and an authoritative Profile/Plan binding are required.',
+    showContractInvocationUi: false,
+    requiresAuthoritativeInvokableOperation: false,
+  },
+  contract_invoke: {
+    capability: 'contract_operation',
+    action: 'contract_invoke',
+    label: 'Contract operation invoke',
+    sideEffects: 'The provider may perform side effects declared by the Contract.',
+    approval: 'Host approval is required before the operation can be invoked.',
+    showContractInvocationUi: true,
+    requiresAuthoritativeInvokableOperation: true,
+  },
+  read_only: {
+    capability: 'runtime_projection',
+    action: 'read_only',
+    label: 'Read-only projection',
+    sideEffects: 'No runtime side effects are exposed by this surface.',
+    approval: 'No invocation approval applies because invocation is unavailable.',
+    showContractInvocationUi: false,
+    requiresAuthoritativeInvokableOperation: false,
+  },
+  none: {
+    capability: 'runtime_projection',
+    action: 'none',
+    label: 'No action',
+    sideEffects: 'No side effects are exposed by this surface.',
+    approval: 'No action approval applies.',
+    showContractInvocationUi: false,
+    requiresAuthoritativeInvokableOperation: false,
+  },
+};
+
 export interface LauncherAdvancedViewDescriptor {
   id: LauncherAdvancedViewId;
   label: string;
   support: LauncherViewSupport;
   sources: RuntimeSurfaceId[];
   summary: string;
-  actions: 'local' | 'pack_lifecycle' | 'read_only' | 'none';
+  capability: LauncherAdvancedCapability;
+  actions: LauncherAdvancedAction;
+}
+
+export interface AdvancedSurfaceActionState {
+  status: string;
+  stale: boolean;
+  error: unknown | null;
+}
+
+export function advancedActionMetadata(
+  descriptor: LauncherAdvancedViewDescriptor,
+): LauncherAdvancedActionMetadata {
+  return LAUNCHER_ADVANCED_ACTION_METADATA[descriptor.actions];
+}
+
+export function advancedActionAllowed(
+  descriptor: LauncherAdvancedViewDescriptor,
+  action: LauncherAdvancedAction,
+): boolean {
+  return advancedDescriptorMetadataParity(descriptor) && descriptor.actions === action;
+}
+
+export function advancedDescriptorMetadataParity(
+  descriptor: LauncherAdvancedViewDescriptor,
+): boolean {
+  const metadata = advancedActionMetadata(descriptor);
+  return metadata.action === descriptor.actions && metadata.capability === descriptor.capability;
+}
+
+/** Return the exact key used by the authoritative Packs projection. */
+export function authoritativeOperationKey(
+  contractId: string,
+  operationId: string,
+): string {
+  return `${contractId}::${operationId}`;
+}
+
+function operationHasExactInvocationBinding(
+  envelope: RuntimeSurfaceEnvelope<unknown>,
+  operation: RuntimeOperationDescriptor,
+  authoritativeKeys: ReadonlySet<string>,
+): boolean {
+  return operation.action === RUNTIME_CONTRACT_INVOKE_ACTION
+    && operation.invokable
+    && authoritativeKeys.has(authoritativeOperationKey(operation.contract_id, operation.operation_id))
+    && operation.invocation_contribution_id !== null
+    && operation.invocation_owner_pack_id === operation.owner_pack_id
+    && operation.invocation_catalog_hash === envelope.catalog_revision
+    && operation.catalog_digest === envelope.catalog_revision;
+}
+
+/**
+ * Select only operations that a descriptor is allowed to expose. The
+ * authoritative Pack projection, the operation row, and the accepted catalog
+ * digest must all agree before an invoke control is rendered.
+ */
+export function selectAdvancedContractInvokableOperations(
+  descriptor: LauncherAdvancedViewDescriptor,
+  state: AdvancedSurfaceActionState,
+  envelope: RuntimeSurfaceEnvelope<unknown> | null,
+  operations: RuntimeOperationDescriptor[],
+  declaredOperationIds?: ReadonlySet<string>,
+): RuntimeOperationDescriptor[] {
+  if (
+    !advancedDescriptorMetadataParity(descriptor)
+    || !advancedActionAllowed(descriptor, RUNTIME_CONTRACT_INVOKE_ACTION)
+    || !advancedActionMetadata(descriptor).showContractInvocationUi
+    || !advancedActionMetadata(descriptor).requiresAuthoritativeInvokableOperation
+    || state.status !== 'ready'
+    || state.stale
+    || state.error
+    || !envelope
+    || envelope.surface !== 'operations'
+    || envelope.state !== 'ready'
+  ) {
+    return [];
+  }
+  const authoritativeKeys = extractAuthoritativeInvokableOperationKeys(envelope.data);
+  if (!authoritativeKeys) return [];
+  return operations.filter((operation) => (
+    (!declaredOperationIds || declaredOperationIds.has(operation.operation_id))
+    && operationHasExactInvocationBinding(envelope, operation, authoritativeKeys)
+  ));
 }
 
 export const LAUNCHER_ADVANCED_VIEWS: Record<LauncherAdvancedViewId, LauncherAdvancedViewDescriptor> = {
@@ -29,6 +198,7 @@ export const LAUNCHER_ADVANCED_VIEWS: Record<LauncherAdvancedViewId, LauncherAdv
     support: 'rebuilt',
     sources: ['profile', 'profiles'],
     summary: 'Launcher-local preferences with an authoritative Profile catalog and canonical runtime snapshot status.',
+    capability: 'launcher_local',
     actions: 'local',
   },
   settings: {
@@ -37,6 +207,7 @@ export const LAUNCHER_ADVANCED_VIEWS: Record<LauncherAdvancedViewId, LauncherAdv
     support: 'launcher_local',
     sources: ['settings'],
     summary: 'Theme, color mode, language, and avatar are presentation settings owned by Launcher.',
+    capability: 'launcher_local',
     actions: 'local',
   },
   profileWiring: {
@@ -45,6 +216,7 @@ export const LAUNCHER_ADVANCED_VIEWS: Record<LauncherAdvancedViewId, LauncherAdv
     support: 'partial',
     sources: ['profile', 'principals', 'contracts'],
     summary: 'Read-only inspector reserved for exact ResolvedPlan bindings and Function principals.',
+    capability: 'runtime_projection',
     actions: 'read_only',
   },
   profileFiles: {
@@ -53,6 +225,7 @@ export const LAUNCHER_ADVANCED_VIEWS: Record<LauncherAdvancedViewId, LauncherAdv
     support: 'partial',
     sources: ['profile'],
     summary: 'Activation evidence and canonical record digests; no filesystem or profile-file browser.',
+    capability: 'runtime_projection',
     actions: 'read_only',
   },
   flow: {
@@ -60,8 +233,9 @@ export const LAUNCHER_ADVANCED_VIEWS: Record<LauncherAdvancedViewId, LauncherAdv
     label: 'Flow',
     support: 'partial',
     sources: ['operations'],
-    summary: 'Schema-driven Pack composition appears only when an exact Contract/Operation declares it.',
-    actions: 'read_only',
+    summary: 'Contract-declared composition can invoke only an authoritative operation; provider side effects and Host approval are explicit.',
+    capability: 'contract_operation',
+    actions: 'contract_invoke',
   },
   graph: {
     id: 'graph',
@@ -69,6 +243,7 @@ export const LAUNCHER_ADVANCED_VIEWS: Record<LauncherAdvancedViewId, LauncherAdv
     support: 'partial',
     sources: ['profile'],
     summary: 'Read-only Plan binding graph becomes available only with exact bindings from the v4 projection.',
+    capability: 'runtime_projection',
     actions: 'read_only',
   },
   aiInput: {
@@ -76,8 +251,9 @@ export const LAUNCHER_ADVANCED_VIEWS: Record<LauncherAdvancedViewId, LauncherAdv
     label: 'AI Input',
     support: 'partial',
     sources: ['operations', 'contracts'],
-    summary: 'Inputs are generated only from an exact operation schema and invokable snapshot binding.',
-    actions: 'read_only',
+    summary: 'Inputs are generated only for an authoritative Contract operation; provider side effects and Host approval are explicit.',
+    capability: 'contract_operation',
+    actions: 'contract_invoke',
   },
   apiMap: {
     id: 'apiMap',
@@ -85,6 +261,7 @@ export const LAUNCHER_ADVANCED_VIEWS: Record<LauncherAdvancedViewId, LauncherAdv
     support: 'partial',
     sources: ['contracts', 'operations', 'principals'],
     summary: 'Read-only map waits for exact generated route and Contract metadata.',
+    capability: 'runtime_projection',
     actions: 'read_only',
   },
   nodeManager: {
@@ -93,6 +270,7 @@ export const LAUNCHER_ADVANCED_VIEWS: Record<LauncherAdvancedViewId, LauncherAdv
     support: 'mapped',
     sources: ['packs'],
     summary: 'Pack and Pack lifecycle projection using the existing verified catalog actions.',
+    capability: 'pack_lifecycle',
     actions: 'pack_lifecycle',
   },
 };

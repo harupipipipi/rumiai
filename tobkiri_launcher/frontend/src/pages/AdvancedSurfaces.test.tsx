@@ -45,6 +45,7 @@ test('every restored Advanced route renders its named v4 surface and explicit su
         </MemoryRouter>,
       );
       assertRenderedLabel(html, LAUNCHER_ADVANCED_VIEWS[id].label);
+      assert.match(html, new RegExp(`data-advanced-action="${LAUNCHER_ADVANCED_VIEWS[id].actions}"`));
       assert.match(html, /Partial|Mapped|Rebuilt|Launcher local/);
       assert.doesNotMatch(html, /runtime-recovery|Recovery|GraphEditor|aiInputGraph/);
     }
@@ -67,4 +68,20 @@ test('Profile Advanced route presents the authoritative catalog source with Tobk
   assert.match(html, /Advanced Profile catalog/);
   assert.match(html, /Broker-backed Protocol v4 catalog/);
   assert.doesNotMatch(html, /Rumi AI|Rumi Viewer|Tokbiri|Tobikiri/);
+});
+
+test('Advanced action metadata is visible and aligned with desktop/mobile-safe controls', () => {
+  const flow = renderToStaticMarkup(<MemoryRouter><Flow /></MemoryRouter>);
+  const aiInput = renderToStaticMarkup(<MemoryRouter><AiInput /></MemoryRouter>);
+  const graph = renderToStaticMarkup(<MemoryRouter><Graph /></MemoryRouter>);
+  const apiMap = renderToStaticMarkup(<MemoryRouter><ApiMap /></MemoryRouter>);
+
+  assert.match(flow, /data-advanced-action="contract_invoke"/);
+  assert.match(aiInput, /Action: contract_invoke/);
+  assert.match(flow + aiInput, /provider side effects|Provider may perform side effects/i);
+  assert.match(flow + aiInput, /Host approval is required/);
+  assert.doesNotMatch(flow + aiInput, /Partial \/ read-only/);
+  assert.match(graph + apiMap, /data-advanced-action="read_only"/);
+  assert.match(graph + apiMap, /No runtime invocation controls are available/);
+  assert.doesNotMatch(graph + apiMap, /Invoke declared operation/);
 });

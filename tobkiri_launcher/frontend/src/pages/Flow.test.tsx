@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {exactFlowInvokableOperations} from './Flow';
+import {authoritativeOperationKey} from '@/src/lib/advancedSurfaces';
 import type {RuntimeFlowDescriptor, RuntimeOperationDescriptor} from '@/src/lib/runtimeSurface';
 
 function operation(id: string, invokable = true): RuntimeOperationDescriptor {
   return {
+    action: 'contract_invoke',
     operation_id: id,
     contract_id: `${id}.contract`,
     owner_pack_id: 'pack-a',
@@ -41,14 +43,17 @@ const flow = (operationIds: string[]): RuntimeFlowDescriptor => ({
 });
 test('Flow exposes only operations declared by a non-empty Pack composition', () => {
   const operations = [operation('declared'), operation('inventory-only'), operation('not-invokable', false)];
+  const authoritative = new Set([authoritativeOperationKey('declared.contract', 'declared')]);
   assert.deepEqual(
-    exactFlowInvokableOperations([flow(['declared'])], operations).map((item) => item.operation_id),
+    exactFlowInvokableOperations([flow(['declared'])], operations, authoritative).map((item) => item.operation_id),
     ['declared'],
   );
 });
 
 test('Flow keeps missing and empty compositions read-only instead of wildcarding operations', () => {
   const operations = [operation('inventory-only')];
-  assert.deepEqual(exactFlowInvokableOperations([], operations), []);
-  assert.deepEqual(exactFlowInvokableOperations(null, operations), []);
+  const authoritative = new Set([authoritativeOperationKey('inventory-only.contract', 'inventory-only')]);
+  assert.deepEqual(exactFlowInvokableOperations([], operations, authoritative), []);
+  assert.deepEqual(exactFlowInvokableOperations(null, operations, authoritative), []);
+  assert.deepEqual(exactFlowInvokableOperations([flow(['inventory-only'])], operations), []);
 });

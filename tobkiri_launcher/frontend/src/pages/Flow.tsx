@@ -3,15 +3,21 @@ import {ListTree, PlayCircle, ShieldAlert} from 'lucide-react';
 
 import {AdvancedSurfaceFrame, EmptySurfacePanel} from '@/src/components/advanced/AdvancedSurfaceFrame';
 import {OperationInputForm} from '@/src/components/advanced/OperationInputForm';
+import {OperationInvocationMetadata} from '@/src/components/advanced/OperationInvocationMetadata';
 import {RuntimeEvidenceCard} from '@/src/components/advanced/RuntimeEvidenceCard';
 import {Badge} from '@/src/components/ui/Badge';
 import {Card, CardContent, CardHeader, CardTitle} from '@/src/components/ui/Card';
 import {useRuntimeSurface} from '@/src/hooks/useRuntimeSurface';
 import {useRuntimeOperationInvocation} from '@/src/hooks/useRuntimeOperationInvocation';
-import {LAUNCHER_ADVANCED_VIEWS} from '@/src/lib/advancedSurfaces';
+import {
+  authoritativeOperationKey,
+  selectAdvancedContractInvokableOperations,
+  LAUNCHER_ADVANCED_VIEWS,
+} from '@/src/lib/advancedSurfaces';
 import {
   extractExactFlowDescriptors,
   extractExactOperationDescriptors,
+  RUNTIME_CONTRACT_INVOKE_ACTION,
   type RuntimeFlowDescriptor,
   type RuntimeOperationDescriptor,
 } from '@/src/lib/runtimeSurface';
@@ -19,11 +25,19 @@ import {
 export function exactFlowInvokableOperations(
   flows: RuntimeFlowDescriptor[] | null,
   operations: RuntimeOperationDescriptor[],
+  authoritativeInvokableOperationKeys: ReadonlySet<string> = new Set(),
 ): RuntimeOperationDescriptor[] {
   if (!flows || flows.length === 0) return [];
-  const declaredOperationIds = new Set(flows.flatMap((flow) => flow.operation_ids));
+  const declaredOperationIds = new Set(
+    flows.filter((flow) => flow.state === 'ready').flatMap((flow) => flow.operation_ids),
+  );
   return operations.filter((operation) => (
-    operation.invokable && declaredOperationIds.has(operation.operation_id)
+    operation.action === RUNTIME_CONTRACT_INVOKE_ACTION
+      && operation.invokable
+      && declaredOperationIds.has(operation.operation_id)
+      && authoritativeInvokableOperationKeys.has(
+        authoritativeOperationKey(operation.contract_id, operation.operation_id),
+      )
   ));
 }
 
@@ -34,19 +48,36 @@ export function Flow() {
   const operations = surface.data ? extractExactOperationDescriptors(surface.data.data) : [];
   const operationIds = new Set(operations.map((operation) => operation.operation_id));
   const hasDeclaredCompositions = Boolean(flows && flows.length > 0);
-  const invokableOperations = useMemo(
-    () => exactFlowInvokableOperations(flows, operations),
-    [flows, operations],
+  const declaredOperationIds = useMemo(
+    () => (flows
+      ? new Set(flows.filter((flow) => flow.state === 'ready').flatMap((flow) => flow.operation_ids))
+      : undefined),
+    [flows],
   );
-  const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null);
+  const invokableOperations = useMemo(
+    () => selectAdvancedContractInvokableOperations(
+      descriptor,
+      {status: surface.status, stale: surface.stale, error: surface.error},
+      surface.data,
+      operations,
+      declaredOperationIds,
+    ),
+    [descriptor, surface.status, surface.stale, surface.error, surface.data, operations, declaredOperationIds],
+  );
+  const [selectedOperationKey, setSelectedOperationKey] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!selectedOperationId || !invokableOperations.some((operation) => operation.operation_id === selectedOperationId)) {
-      setSelectedOperationId(invokableOperations[0]?.operation_id ?? null);
+    if (!selectedOperationKey || !invokableOperations.some((operation) => (
+      authoritativeOperationKey(operation.contract_id, operation.operation_id) === selectedOperationKey
+    ))) {
+      const first = invokableOperations[0];
+      setSelectedOperationKey(first ? authoritativeOperationKey(first.contract_id, first.operation_id) : null);
     }
-  }, [selectedOperationId, invokableOperations.map((operation) => operation.operation_id).join('\u0000')]);
+  }, [selectedOperationKey, invokableOperations.map((operation) => authoritativeOperationKey(operation.contract_id, operation.operation_id)).join('\u0000')]);
 
-  const selectedOperation = invokableOperations.find((operation) => operation.operation_id === selectedOperationId) ?? null;
+  const selectedOperation = invokableOperations.find((operation) => (
+    authoritativeOperationKey(operation.contract_id, operation.operation_id) === selectedOperationKey
+  )) ?? null;
   const invocation = useRuntimeOperationInvocation(
     surface.data,
     selectedOperation,
@@ -69,6 +100,7 @@ export function Flow() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2"><ListTree className="h-4 w-4" aria-hidden="true" />Pack-declared compositions</CardTitle>
+                <p className="text-sm leading-6 text-text-muted">Authoritative invokable_operations available for this surface: {invokableOperations.length}.</p>
               </CardHeader>
               <CardContent className="grid gap-3">
                 {flows.map((flow) => (
@@ -94,25 +126,30 @@ export function Flow() {
             <Card>
               <CardHeader>
                 <CardTitle>{selectedOperation.label || selectedOperation.operation_id}</CardTitle>
-                <p className="text-sm leading-6 text-text-muted">Invoke a currently invokable operation from the declared Flow composition. Inputs come only from its exact schema.</p>
+                <p className="text-sm leading-6 text-text-muted">Invoke an authoritative operation from the declared Flow composition. Inputs come only from its exact schema.</p>
               </CardHeader>
               <CardContent>
+                <OperationInvocationMetadata operation={selectedOperation} />
                 <div className="mb-4 flex flex-wrap gap-2">
-                  {invokableOperations.map((operation) => (
-                    <button
-                      key={operation.operation_id}
-                      type="button"
-                      className="min-h-11 rounded-lg border border-border px-3 py-2 text-left text-xs text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
-                      aria-pressed={operation.operation_id === selectedOperation.operation_id}
-                      disabled={invocation.busy}
-                      onClick={() => {
-                        if (invocation.busy) return;
-                        setSelectedOperationId(operation.operation_id);
-                      }}
-                    >
-                      {operation.operation_id}
-                    </button>
-                  ))}
+                  {invokableOperations.map((operation) => {
+                    const key = authoritativeOperationKey(operation.contract_id, operation.operation_id);
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        className="min-h-11 rounded-lg border border-border px-3 py-2 text-left text-xs text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
+                        aria-pressed={key === selectedOperationKey}
+                        aria-label={`Select contract operation ${operation.contract_id} / ${operation.operation_id}`}
+                        disabled={invocation.busy}
+                        onClick={() => {
+                          if (invocation.busy) return;
+                          setSelectedOperationKey(key);
+                        }}
+                      >
+                        {operation.operation_id}
+                      </button>
+                    );
+                  })}
                 </div>
                 {invocation.error ? (
                   <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-300/70 bg-amber-50/70 px-3 py-3 text-sm dark:border-amber-800/60 dark:bg-amber-950/20" role="alert">
@@ -126,7 +163,15 @@ export function Flow() {
                   </div>
                 ) : null}
                 {invocation.state === 'succeeded' ? <p className="mb-4 text-sm text-emerald-700 dark:text-emerald-300" role="status">Flow operation accepted by the canonical Broker path.</p> : null}
-                <OperationInputForm operation={selectedOperation} busy={invocation.busy} onInvoke={invocation.invoke} />
+                <OperationInputForm
+                  operation={selectedOperation}
+                  descriptor={descriptor}
+                  busy={invocation.busy}
+                  canInvoke={!invocation.error && invokableOperations.some((operation) => (
+                    authoritativeOperationKey(operation.contract_id, operation.operation_id) === selectedOperationKey
+                  ))}
+                  onInvoke={invocation.invoke}
+                />
               </CardContent>
             </Card>
           ) : (
@@ -141,7 +186,7 @@ export function Flow() {
         <EmptySurfacePanel
           icon={<PlayCircle className="h-6 w-6" />}
           title="No Pack-declared Flow composition is available"
-          message="Flow is read-only until the accepted operations surface publishes at least one declared composition. Pack inventory and invokable operations are not promoted into a wildcard Flow."
+          message="No authoritative Contract operation is available for this declared Flow composition. Pack inventory is never promoted into a wildcard Flow."
         />
       )}
     </AdvancedSurfaceFrame>

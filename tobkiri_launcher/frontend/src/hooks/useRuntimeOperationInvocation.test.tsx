@@ -36,6 +36,7 @@ function envelope(): RuntimeSurfaceEnvelope<unknown> {
 
 function operation(id: string): RuntimeOperationDescriptor {
   return {
+    action: 'contract_invoke',
     operation_id: id,
     contract_id: `${id}.contract`,
     owner_pack_id: 'pack-a',
