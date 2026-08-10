@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import socket
 import sys
+from threading import Thread
 from typing import Any
 from dataclasses import replace
 
@@ -15,7 +18,9 @@ from ecosystem.rumi_credential_broker_pack.runtime.store import CredentialBroker
 from core_runtime.credential_transport import (
     CredentialTransportDenied,
     HostBoundCredentialTransport,
+    _MAX_RESPONSE_BYTES,
 )
+from core_runtime import credential_transport as transport_module
 from core_runtime.global_contract_dispatch import GlobalContractClient
 from ecosystem.rumi_credential_broker_pack.runtime.service import (
     CredentialBrokerService,
@@ -46,8 +51,119 @@ class _Response:
     def __exit__(self, *args: object) -> None:
         return None
 
-    def read(self) -> bytes:
-        return json.dumps(self._value).encode("utf-8")
+    def read(self, amount: int | None = None) -> bytes:
+        return json.dumps(self._value).encode("utf-8")[:amount]
+
+
+class _ControlledProvider(BaseHTTPRequestHandler):
+    response_body = b"{}"
+    response_location: str | None = None
+    received: list[dict[str, str | None]] = []
+
+    def do_POST(self) -> None:
+        """Capture credential headers and emit the configured provider response."""
+        type(self).received.append(
+            {
+                "authorization": self.headers.get("Authorization"),
+                "api_key": self.headers.get("x-api-key"),
+                "host": self.headers.get("Host"),
+                "path": self.path,
+            }
+        )
+        if type(self).response_location is not None:
+            self.send_response(302)
+            self.send_header("Location", type(self).response_location)
+        else:
+            self.send_response(200)
+        self.send_header("Content-Length", str(len(type(self).response_body)))
+        self.end_headers()
+        self.wfile.write(type(self).response_body)
+
+    def log_message(self, _format: str, *_args: object) -> None:
+        """Keep controlled-server traffic out of test diagnostics."""
+
+
+def _start_provider(
+    *,
+    body: bytes = b"{}",
+    location: str | None = None,
+) -> tuple[ThreadingHTTPServer, type[_ControlledProvider]]:
+    class Handler(_ControlledProvider):
+        received: list[dict[str, str | None]] = []
+
+    Handler.response_body = body
+    Handler.response_location = location
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, Handler
+
+
+def _transport_for_server(
+    tmp_path: Path,
+    *,
+    port: int,
+    secret: str = "redirect-secret",
+) -> tuple[HostBoundCredentialTransport, dict[str, Any]]:
+    service = CredentialBrokerService(user_data_root=tmp_path / "credential")
+    created = service.invoke(
+        "create",
+        {
+            "secret_material": {"api_key": secret},
+            "profile_id": "profile-1",
+            "consumer_pack_id": "provider-adapter-pack",
+            "provider_instance_id": "provider.adapter-main",
+            "scopes": ["generate"],
+        },
+    )
+    authority, envelope = _dispatched_envelope(tmp_path / "dispatch")
+    transport = HostBoundCredentialTransport.from_authorized_envelope(
+        envelope,
+        provider_principal=authority.target,
+        store=service.store,
+        authority_store=authority.store,
+        credential_handle=created["handle"],
+        credential_key_version=created["key_version"],
+        provider_instance_id="provider.adapter-main",
+        credential_scope="generate",
+        credential_purpose="provider.invoke",
+        endpoint_origin=f"http://provider.example:{port}",
+        current_security_epoch=lambda: authority.store.security_epoch,
+        consumer_pack_id="provider-adapter-pack",
+    )
+    arguments = {
+        "endpoint": f"http://provider.example:{port}/v1/messages",
+        "headers": {},
+        "body": {},
+        "credential_handle": created["handle"],
+        "provider_instance_id": "provider.adapter-main",
+        "credential_scope": "generate",
+        "credential_scheme": "bearer",
+        "deadline": 9_999_999_999.0,
+    }
+    return transport, arguments
+
+
+def _pin_test_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[list[str], list[tuple[str, int]]]:
+    resolutions: list[str] = []
+    connections: list[tuple[str, int]] = []
+    def resolve(host: str, port: int, **_kwargs: Any) -> list[tuple[Any, ...]]:
+        resolutions.append(host)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+
+    def connect(address: tuple[str, int], *args: Any, **kwargs: Any) -> socket.socket:
+        timeout = args[0] if args else kwargs.get("timeout")
+        connections.append(address)
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.settimeout(timeout)
+        client.connect(("127.0.0.1", address[1]))
+        return client
+
+    monkeypatch.setattr(transport_module.socket, "getaddrinfo", resolve)
+    monkeypatch.setattr(transport_module.socket, "create_connection", connect)
+    return resolutions, connections
 
 
 def test_windows_credential_root_acl_is_hardened_with_argument_vector(
@@ -181,6 +297,7 @@ def test_credential_material_is_encrypted_and_listing_is_redacted(
 
 def test_generic_resolution_is_denied_and_host_transport_applies_once(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = CredentialBrokerService(user_data_root=tmp_path)
     created = service.invoke(
@@ -225,6 +342,8 @@ def test_generic_resolution_is_denied_and_host_transport_applies_once(
             }
         )
 
+    monkeypatch.setattr(transport_module, "_open_pinned_request", opener)
+
     transport = HostBoundCredentialTransport.from_authorized_envelope(
         envelope,
         provider_principal=authority.target,
@@ -238,7 +357,6 @@ def test_generic_resolution_is_denied_and_host_transport_applies_once(
         endpoint_origin="https://provider.example",
         current_security_epoch=lambda: authority.store.security_epoch,
         consumer_pack_id="provider-adapter-pack",
-        opener=opener,
         audit_sink=lambda event: audit.append(dict(event)),
     )
 
@@ -308,6 +426,102 @@ def test_generic_resolution_is_denied_and_host_transport_applies_once(
             credential_scheme="bearer",
             deadline=9_999_999_999.0,
         )
+
+
+@pytest.mark.parametrize("same_port", [True, False])
+def test_transport_does_not_follow_cross_origin_redirect_or_forward_secret(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    same_port: bool,
+) -> None:
+    target, TargetHandler = _start_provider(
+        location="http://third.example/final",
+    )
+    target_port = int(target.server_address[1])
+    source, SourceHandler = _start_provider()
+    source_port = int(source.server_address[1])
+    redirected_port = source_port if same_port else target_port
+    SourceHandler.response_location = (
+        f"http://disallowed.example:{redirected_port}/redirected"
+    )
+    resolutions, connections = _pin_test_network(monkeypatch)
+    transport, arguments = _transport_for_server(
+        tmp_path,
+        port=source_port,
+    )
+    arguments["headers"] = {
+        "authorization": "Bearer attacker-selected",
+        "host": "disallowed.example",
+        "x-api-key": "attacker-selected",
+    }
+    try:
+        with pytest.raises(CredentialTransportDenied, match="denied") as denied:
+            transport.post_json(**arguments)
+    finally:
+        source.shutdown()
+        target.shutdown()
+        source.server_close()
+        target.server_close()
+
+    assert SourceHandler.received == [
+        {
+            "authorization": "Bearer redirect-secret",
+            "api_key": None,
+            "host": f"provider.example:{source_port}",
+            "path": "/v1/messages",
+        }
+    ]
+    assert TargetHandler.received == []
+    assert resolutions == ["provider.example"]
+    assert connections == [("93.184.216.34", source_port)]
+    assert "redirect-secret" not in str(denied.value)
+
+
+def test_transport_rejects_unsafe_resolution_before_secret_connection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport, arguments = _transport_for_server(tmp_path, port=18080)
+    connected: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        transport_module.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 18080))
+        ],
+    )
+    monkeypatch.setattr(
+        transport_module.socket,
+        "create_connection",
+        lambda address, *_args, **_kwargs: connected.append(address),
+    )
+
+    with pytest.raises(CredentialTransportDenied, match="denied") as denied:
+        transport.post_json(**arguments)
+
+    assert connected == []
+    assert "redirect-secret" not in str(denied.value)
+
+
+def test_transport_pins_one_dns_answer_and_caps_response_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    oversized = b'{"value":"' + b"x" * _MAX_RESPONSE_BYTES + b'"}'
+    source, SourceHandler = _start_provider(body=oversized)
+    source_port = int(source.server_address[1])
+    resolutions, connections = _pin_test_network(monkeypatch)
+    transport, arguments = _transport_for_server(tmp_path, port=source_port)
+    try:
+        with pytest.raises(CredentialTransportDenied, match="denied"):
+            transport.post_json(**arguments)
+    finally:
+        source.shutdown()
+        source.server_close()
+
+    assert len(SourceHandler.received) == 1
+    assert resolutions == ["provider.example"]
+    assert connections == [("93.184.216.34", source_port)]
 
 
 def test_revocation_prevents_later_resolution(tmp_path: Path) -> None:

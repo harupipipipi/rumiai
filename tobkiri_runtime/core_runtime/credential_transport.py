@@ -11,7 +11,12 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from email.message import Message
+import http.client
+import ipaddress
 import json
+import socket
+import ssl
 from threading import RLock
 import time
 from typing import Any, Protocol
@@ -38,7 +43,10 @@ class JsonResponse(Protocol):
 
     def __exit__(self, *args: object) -> None: ...
 
-    def read(self) -> bytes: ...
+    def read(self, amount: int | None = None) -> bytes: ...
+
+
+_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
 
 class CredentialMaterialStore(Protocol):
@@ -122,7 +130,6 @@ class HostBoundCredentialTransport:
         invocation_token: str,
         binding: CredentialTransportBinding,
         current_security_epoch: Callable[[], int],
-        opener: Callable[..., JsonResponse] = urllib.request.urlopen,
         audit_sink: Callable[[Mapping[str, Any]], None] | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
@@ -131,7 +138,7 @@ class HostBoundCredentialTransport:
         self._invocation_token = invocation_token
         self._binding = binding
         self._current_security_epoch = current_security_epoch
-        self._opener = opener
+        self._opener = _open_pinned_request
         self._audit_sink = audit_sink
         self._clock = clock
         self._consumed = False
@@ -153,7 +160,6 @@ class HostBoundCredentialTransport:
         endpoint_origin: str,
         current_security_epoch: Callable[[], int],
         consumer_pack_id: str = "rumi_provider_adapters_pack",
-        opener: Callable[..., JsonResponse] = urllib.request.urlopen,
         audit_sink: Callable[[Mapping[str, Any]], None] | None = None,
         clock: Callable[[], float] = time.time,
     ) -> "HostBoundCredentialTransport":
@@ -206,7 +212,6 @@ class HostBoundCredentialTransport:
             invocation_token=invocation_token,
             binding=binding,
             current_security_epoch=current_security_epoch,
-            opener=opener,
             audit_sink=audit_sink,
             clock=clock,
         )
@@ -254,7 +259,11 @@ class HostBoundCredentialTransport:
                 raise CredentialTransportDenied("credential transport denied")
             secret_bytes = bytearray(value.encode("utf-8"))
             secret_text = secret_bytes.decode("utf-8")
-            outbound_headers = dict(headers)
+            outbound_headers = {
+                key: item
+                for key, item in headers.items()
+                if key.lower() not in {"authorization", "host", "x-api-key"}
+            }
             if credential_scheme == "bearer":
                 outbound_headers["Authorization"] = f"Bearer {secret_text}"
             elif credential_scheme == "anthropic":
@@ -269,7 +278,10 @@ class HostBoundCredentialTransport:
                 method="POST",
             )
             with self._opener(request, timeout=timeout) as response:
-                value = json.loads(response.read().decode("utf-8"))
+                response_bytes = response.read(_MAX_RESPONSE_BYTES + 1)
+                if len(response_bytes) > _MAX_RESPONSE_BYTES:
+                    raise CredentialTransportDenied("credential transport denied")
+                value = json.loads(response_bytes.decode("utf-8"))
             if not isinstance(value, dict):
                 raise RuntimeError("provider returned a non-object response")
             audit_status = "completed"
@@ -278,6 +290,8 @@ class HostBoundCredentialTransport:
             audit_status = "denied"
             raise
         except urllib.error.HTTPError as exc:
+            if 300 <= exc.code < 400:
+                raise CredentialTransportDenied("credential transport denied") from None
             code = "quota" if exc.code == 429 else "provider_unavailable"
             raise RuntimeError(f"{code}: provider HTTP {exc.code}") from None
         except (KeyError, PermissionError, ValueError):
@@ -388,9 +402,152 @@ def _safe_text(value: object) -> bool:
 
 def _origin(value: str) -> str:
     parsed = urllib.parse.urlsplit(str(value or ""))
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    try:
+        port = parsed.port
+    except ValueError:
         return ""
-    return f"{parsed.scheme}://{parsed.netloc}"
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return ""
+    host = parsed.hostname.lower()
+    rendered_host = f"[{host}]" if ":" in host else host
+    default_port = 80 if parsed.scheme == "http" else 443
+    port_text = "" if port in {None, default_port} else f":{port}"
+    return f"{parsed.scheme}://{rendered_host}{port_text}"
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """TLS connection whose TCP peer is a previously validated address."""
+
+    def __init__(self, host: str, resolved_ip: str, **kwargs: Any) -> None:
+        super().__init__(host, **kwargs)
+        self._resolved_ip = resolved_ip
+        self._pinned_source_address = kwargs.get("source_address")
+        self._pinned_context = kwargs.get("context") or ssl.create_default_context()
+
+    def connect(self) -> None:
+        """Connect to the vetted IP while authenticating the original hostname."""
+        raw_socket = socket.create_connection(
+            (self._resolved_ip, self.port),
+            self.timeout,
+            self._pinned_source_address,
+        )
+        self.sock = self._pinned_context.wrap_socket(raw_socket, server_hostname=self.host)
+
+
+class _PinnedResponse:
+    """Keep the pinned connection alive until its response is closed."""
+
+    def __init__(
+        self,
+        connection: http.client.HTTPConnection,
+        response: http.client.HTTPResponse,
+    ) -> None:
+        self._connection = connection
+        self._response = response
+
+    def __enter__(self) -> "_PinnedResponse":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self._response.close()
+        self._connection.close()
+
+    def read(self, amount: int | None = None) -> bytes:
+        """Read at most the caller-provided response limit."""
+        return self._response.read(amount)
+
+
+def _open_pinned_request(
+    request: urllib.request.Request,
+    *,
+    timeout: float,
+) -> JsonResponse:
+    """Open one non-redirecting request to an egress-vetted, DNS-pinned peer."""
+    parsed = urllib.parse.urlsplit(request.full_url)
+    origin = _origin(request.full_url)
+    if not origin:
+        raise CredentialTransportDenied("credential transport denied")
+    host = parsed.hostname
+    if host is None:
+        raise CredentialTransportDenied("credential transport denied")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        resolved = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError:
+        raise CredentialTransportDenied("credential transport denied") from None
+    addresses = tuple(dict.fromkeys(str(item[4][0]) for item in resolved))
+    if not addresses or any(not _safe_egress_address(address) for address in addresses):
+        raise CredentialTransportDenied("credential transport denied")
+
+    path = urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
+    headers = {
+        key: item
+        for key, item in request.header_items()
+        if key.lower() != "host"
+    }
+    headers["Host"] = parsed.netloc
+    body = request.data
+    last_error: OSError | None = None
+    for address in addresses:
+        if parsed.scheme == "https":
+            connection: http.client.HTTPConnection = _PinnedHTTPSConnection(
+                host,
+                address,
+                port=port,
+                timeout=timeout,
+                context=ssl.create_default_context(),
+            )
+        else:
+            connection = http.client.HTTPConnection(address, port=port, timeout=timeout)
+        try:
+            connection.request(request.get_method(), path, body=body, headers=headers)
+            response = connection.getresponse()
+        except OSError as exc:
+            connection.close()
+            last_error = exc
+            continue
+        if 300 <= response.status < 400:
+            response.close()
+            connection.close()
+            raise CredentialTransportDenied("credential transport denied")
+        if response.status >= 400:
+            status = response.status
+            response.close()
+            connection.close()
+            raise urllib.error.HTTPError(
+                origin,
+                status,
+                "provider request failed",
+                Message(),
+                None,
+            )
+        return _PinnedResponse(connection, response)
+    if last_error is not None:
+        raise last_error
+    raise CredentialTransportDenied("credential transport denied")
+
+
+def _safe_egress_address(value: str) -> bool:
+    """Allow only globally routable unicast peers for credential-bearing traffic."""
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return address.is_global and not any(
+        (
+            address.is_loopback,
+            address.is_link_local,
+            address.is_multicast,
+            address.is_private,
+            address.is_reserved,
+            address.is_unspecified,
+        )
+    )
 
 
 def _redact_secret(value: Any, secret: str) -> Any:

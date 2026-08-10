@@ -9,10 +9,12 @@ Profile, ProfileLock, ResolvedPlan, and Activation records.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Callable, Iterator, Mapping, Protocol
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
@@ -795,7 +797,25 @@ class ActivationStore:
         self._validate_record_graph(profile, lock, plan)
         if profile["profile_id"] != self.profile_id:
             raise ProfileResolutionDenied("activation Profile identity does not match store")
-        self.recover()
+        with self._activation_lock():
+            return self._activate_locked(
+                resolved=ResolvedDefaultProfile(profile=profile, lock=lock, plan=plan),
+                activation_id=activation_id,
+                created_at=created_at,
+            )
+
+    def _activate_locked(
+        self,
+        resolved: ResolvedDefaultProfile,
+        *,
+        activation_id: str,
+        created_at: str,
+    ) -> Mapping[str, Any]:
+        """Run one activation while holding the profile's process lock."""
+        profile = resolved.profile
+        lock = resolved.lock
+        plan = resolved.plan
+        self._recover_locked()
         reservation_id, fencing_token = self._authority.reserve_activation(
             activation_id=activation_id,
             profile_id=self.profile_id,
@@ -916,6 +936,13 @@ class ActivationStore:
             )
             state = "active"
             self._fault("after_authority_commit")
+            self._revalidate_publish_reservation(
+                reservation_id=reservation_id,
+                activation_id=activation_id,
+                plan=plan,
+                profile=profile,
+                fencing_token=fencing_token,
+            )
             _write_atomic(
                 self.state_root / "active.json",
                 self._active_pointer(activation_id, envelope_path, envelope_digest),
@@ -939,6 +966,12 @@ class ActivationStore:
 
     def recover(self) -> None:
         """Recover a crash to the complete old or complete committed activation."""
+
+        with self._activation_lock():
+            self._recover_locked()
+
+    def _recover_locked(self) -> None:
+        """Recover state while the profile's process lock is held."""
 
         pending_path = self.state_root / "pending.json"
         self._reject_symlink(pending_path, "pending activation journal")
@@ -1008,6 +1041,13 @@ class ActivationStore:
                 or envelope["activation"].get("state") != "active"
             ):
                 raise ProfileResolutionDenied("committed activation envelope changed")
+            self._revalidate_publish_reservation(
+                reservation_id=reservation_id,
+                activation_id=str(pending["activation_id"]),
+                plan=envelope["plan"],
+                profile=envelope["profile"],
+                fencing_token=int(pending["fencing_token"]),
+            )
             _write_atomic(
                 self.state_root / "active.json",
                 self._active_pointer(
@@ -1028,6 +1068,83 @@ class ActivationStore:
             raise ProfileResolutionDenied("pending activation has an invalid authority state")
         pending_path.unlink(missing_ok=True)
         envelope_path.unlink(missing_ok=True)
+
+    def _revalidate_publish_reservation(
+        self,
+        *,
+        reservation_id: str,
+        activation_id: str,
+        plan: Mapping[str, Any],
+        profile: Mapping[str, Any],
+        fencing_token: int,
+    ) -> None:
+        """Reject a retired, replaced, or stale reservation before publishing."""
+        reservation = self._authority.activation_reservation(reservation_id)
+        expected = (
+            activation_id,
+            self.profile_id,
+            plan["plan_digest"],
+            profile["profile_authority_snapshot_digest"],
+            plan["security_epoch"],
+            fencing_token,
+            "active",
+        )
+        actual = (
+            (
+                reservation.get("activation_id"),
+                reservation.get("profile_id"),
+                reservation.get("plan_digest"),
+                reservation.get("profile_authority_digest"),
+                reservation.get("security_epoch"),
+                reservation.get("fencing_token"),
+                reservation.get("state"),
+            )
+            if reservation is not None
+            else ()
+        )
+        if actual != expected or self._authority.security_epoch != plan["security_epoch"]:
+            raise ProfileResolutionDenied(
+                "activation reservation is stale immediately before publish"
+            )
+
+    @contextmanager
+    def _activation_lock(self) -> Iterator[None]:
+        """Serialize activation recovery and publication across Host processes."""
+        self.state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self._reject_symlink(self.state_root, "activation state root")
+        profile_digest = hashlib.sha256(self.profile_id.encode("utf-8")).hexdigest()[:24]
+        lock_path = self.state_root / f".activation-{profile_digest}.lock"
+        self._reject_symlink(lock_path, "activation process lock")
+        flags = os.O_RDWR | os.O_CREAT
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(lock_path, flags, 0o600)
+        if os.name != "nt":
+            os.fchmod(descriptor, 0o600)
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                os.write(descriptor, b"0")
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                getattr(msvcrt, "locking")(descriptor, getattr(msvcrt, "LK_LOCK"), 1)
+            else:
+                import fcntl
+
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+            yield
+        finally:
+            if os.name == "nt":
+                import msvcrt
+
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                getattr(msvcrt, "locking")(descriptor, getattr(msvcrt, "LK_UNLCK"), 1)
+            else:
+                import fcntl
+
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
 
     def _activation_record(
         self,
@@ -1110,7 +1227,12 @@ class ActivationStore:
 
     def load_active_snapshot(self) -> ActiveDefaultProfile:
         """Load the exact activation snapshot and reject stale restart state."""
-        self.recover()
+        with self._activation_lock():
+            return self._load_active_snapshot_locked()
+
+    def _load_active_snapshot_locked(self) -> ActiveDefaultProfile:
+        """Load one snapshot while holding the profile's process lock."""
+        self._recover_locked()
         pointer_path = self.state_root / "active.json"
         self._reject_symlink(pointer_path, "active pointer")
         try:

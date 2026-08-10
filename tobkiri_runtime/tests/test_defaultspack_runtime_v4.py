@@ -3,7 +3,9 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import multiprocessing
 import shutil
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -96,6 +98,43 @@ def _authority(path: Path) -> AuthorityStore:
     while store.security_epoch < 7:
         store.advance_security_epoch("test fixture epoch")
     return store
+
+
+def _activation_process(
+    state_root: str,
+    workspace_root: str,
+    authority_path: str,
+    activation_id: str,
+    committed: multiprocessing.synchronize.Event | None,
+    release: multiprocessing.synchronize.Event | None,
+    results: multiprocessing.queues.Queue,
+) -> None:
+    authority = _authority(Path(authority_path))
+
+    def fault(stage: str) -> None:
+        if stage == "after_authority_commit" and committed is not None:
+            committed.set()
+            assert release is not None
+            if not release.wait(timeout=15):
+                raise RuntimeError("activation interleave release timed out")
+
+    try:
+        activation = ActivationStore(
+            Path(state_root),
+            Path(workspace_root),
+            profile_id="defaults",
+            authority=authority,
+            fault=fault,
+        ).activate(
+            _resolve(),
+            activation_id=activation_id,
+            created_at="2026-08-10T00:00:00Z",
+        )
+        results.put(("ok", activation_id, activation["fencing_token"]))
+    except Exception as exc:  # pragma: no cover - reported to the parent assertion
+        results.put(("error", activation_id, type(exc).__name__, str(exc)))
+    finally:
+        authority.close()
 
 
 def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
@@ -521,6 +560,98 @@ def test_new_activation_atomically_retires_the_previous_authority(
     assert active is not None
     assert active["state"] == "active"
     assert store.load_active_snapshot().activation["activation_id"] == second["activation_id"]
+
+
+def test_independent_process_activations_never_publish_retired_pointer(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state"
+    authority_path = tmp_path / "authority.sqlite3"
+    bootstrap = _authority(authority_path)
+    bootstrap.close()
+    context = multiprocessing.get_context("spawn")
+    committed = context.Event()
+    release = context.Event()
+    results = context.Queue()
+    first_id = "activation:defaults-process-first"
+    second_id = "activation:defaults-process-second"
+    first = context.Process(
+        target=_activation_process,
+        args=(
+            str(state_root),
+            str(workspace),
+            str(authority_path),
+            first_id,
+            committed,
+            release,
+            results,
+        ),
+    )
+    second = context.Process(
+        target=_activation_process,
+        args=(
+            str(state_root),
+            str(workspace),
+            str(authority_path),
+            second_id,
+            None,
+            None,
+            results,
+        ),
+    )
+    first.start()
+    assert committed.wait(timeout=15)
+    second.start()
+    time.sleep(0.25)
+    assert second.is_alive()
+    release.set()
+    first.join(timeout=20)
+    second.join(timeout=20)
+    assert first.exitcode == 0
+    assert second.exitcode == 0
+    outcomes = {results.get(timeout=2), results.get(timeout=2)}
+    assert {item[0] for item in outcomes} == {"ok"}
+
+    first_pointer = json.loads((state_root / "active.json").read_text(encoding="utf-8"))
+    restarted_authority = _authority(authority_path)
+    restarted = ActivationStore(
+        state_root,
+        workspace,
+        profile_id="defaults",
+        authority=restarted_authority,
+    )
+    active = restarted.load_active_snapshot().activation
+    assert active["activation_id"] == second_id
+    first_reservations = [
+        event["payload"]
+        for event in restarted_authority.audit_events()
+        if event["event_type"] == "activation"
+        and event["event_state"] == "prepared"
+        and event["payload"]["activation_id"] == first_id
+    ]
+    second_reservations = [
+        event["payload"]
+        for event in restarted_authority.audit_events()
+        if event["event_type"] == "activation"
+        and event["event_state"] == "prepared"
+        and event["payload"]["activation_id"] == second_id
+    ]
+    assert second_reservations[0]["fencing_token"] > first_reservations[0]["fencing_token"]
+    assert active["security_epoch"] == restarted_authority.security_epoch
+
+    stale_envelope = state_root / "activations" / f"{first_id[11:]}.json"
+    stale_payload = json.loads(stale_envelope.read_text(encoding="utf-8"))
+    first_pointer.update(
+        activation_id=first_id,
+        envelope_path=stale_envelope.name,
+        envelope_digest=canonical_digest(stale_payload),
+    )
+    (state_root / "active.json").write_text(json.dumps(first_pointer), encoding="utf-8")
+    with pytest.raises(ProfileResolutionDenied, match="authority, fence, or SecurityEpoch"):
+        restarted.load_active_snapshot()
+    restarted_authority.close()
 
 
 def test_workspace_traversal_symlink_escape_and_cross_workspace_restart_deny(

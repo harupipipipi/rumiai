@@ -618,6 +618,25 @@ def test_revocation_indices_fence_already_issued_leases(
         )
 
 
+@pytest.mark.parametrize("target_kind", ["credential", "resource_root", "workflow"])
+def test_unenforceable_revocation_kinds_are_rejected_without_success_audit(
+    tmp_path: Path,
+    target_kind: str,
+) -> None:
+    harness = _Harness(tmp_path)
+    baseline = harness.store.audit_events()
+
+    with pytest.raises(ValueError, match="unsupported revocation target"):
+        harness.kernel.revoke(
+            target_kind=target_kind,
+            target_id=f"{target_kind}:review-a",
+            reason="must not report an unenforceable revocation",
+        )
+
+    assert harness.store.is_revoked(target_kind, f"{target_kind}:review-a") is False
+    assert harness.store.audit_events() == baseline
+
+
 def test_host_extension_revocation_terminates_authority_bearing_domain(
     tmp_path: Path,
 ) -> None:
