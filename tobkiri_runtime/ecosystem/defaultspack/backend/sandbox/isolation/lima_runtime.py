@@ -2388,8 +2388,8 @@ class PackVMLimaProvisioner:
                 or metadata.st_nlink != 1
                 or metadata.st_size != verified.size_bytes
                 or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
-                or not metadata.st_flags & stat.UF_IMMUTABLE
-                or not directory_metadata.st_flags & stat.UF_IMMUTABLE
+                or not _darwin_stat_flags(metadata) & stat.UF_IMMUTABLE
+                or not _darwin_stat_flags(directory_metadata) & stat.UF_IMMUTABLE
             ):
                 raise ValueError("PackVM legacy staging residue is unsafe")
             hasher = hashlib.sha256()
@@ -2417,11 +2417,11 @@ class PackVMLimaProvisioner:
                 raise ValueError("PackVM legacy staging residue identity changed")
             _set_descriptor_flags(
                 descriptor,
-                int(metadata.st_flags) & ~int(stat.UF_IMMUTABLE),
+                _darwin_stat_flags(metadata) & ~int(stat.UF_IMMUTABLE),
             )
             _set_descriptor_flags(
                 directory_descriptor,
-                int(directory_metadata.st_flags) & ~int(stat.UF_IMMUTABLE),
+                _darwin_stat_flags(directory_metadata) & ~int(stat.UF_IMMUTABLE),
             )
             os.unlink(staging_path.name, dir_fd=directory_descriptor)
             os.fsync(directory_descriptor)
@@ -3136,6 +3136,12 @@ def _set_descriptor_flags(descriptor: int, flags: int) -> None:
     if function(descriptor, flags) != 0:
         error = ctypes.get_errno()
         raise OSError(error, os.strerror(error))
+
+
+def _darwin_stat_flags(metadata: os.stat_result) -> int:
+    """Read Darwin-only stat flags without requiring them on Linux."""
+
+    return int(getattr(metadata, "st_flags", 0))
 
 
 def _format_gib(value: int) -> str:

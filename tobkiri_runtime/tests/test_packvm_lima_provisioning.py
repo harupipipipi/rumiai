@@ -41,6 +41,7 @@ from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
     _default_packvm_lima_home,
     _FileLockUnavailable,
     _acquire_exclusive_file_lock,
+    _darwin_stat_flags,
     _load_file_lock_module,
     _process_is_alive,
     _release_exclusive_file_lock,
@@ -1981,6 +1982,12 @@ def test_crash_reclaims_complete_unlinked_staging_inode(provisioner) -> None:
     process.join(timeout=5)
     assert process.exitcode is not None
     assert list(staging.iterdir()) == []
+
+
+def test_darwin_stat_flags_is_safe_for_non_darwin_stat_results() -> None:
+    metadata = os.stat(__file__)
+
+    assert _darwin_stat_flags(metadata) == int(getattr(metadata, "st_flags", 0))
 
 
 @pytest.mark.skipif(platform.system() != "Darwin", reason="legacy flags are Darwin-only")
