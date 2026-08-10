@@ -13,14 +13,15 @@ import tempfile
 import threading
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping
+from typing import Any, Callable, Iterator, Literal, Mapping
 
 from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.errors import CanonicalizationError
 
 
-def _current_boot_id() -> str:
+def _current_boot_id() -> str | None:
     """Return a stable local boot identity without creating filesystem state."""
 
     linux_boot_id = Path("/proc/sys/kernel/random/boot_id")
@@ -38,17 +39,41 @@ def _current_boot_id() -> str:
             return canonical_digest({"boot": result.stdout.strip()})
     except (OSError, subprocess.SubprocessError):
         pass
-    return "boot-identity-unavailable"
+    return None
 
 
-def _process_start_identity(process_id: int) -> str | None:
-    """Return a PID start binding, None when dead, or unknown when unobservable."""
+@dataclass(frozen=True)
+class ProcessIdentityEvidence:
+    """Explicit process-liveness evidence that never conflates unknown with dead."""
+
+    state: Literal["live", "dead", "unknown"]
+    identity: str = ""
+
+    def __post_init__(self) -> None:
+        if self.state == "live" and not self.identity:
+            raise ValueError("live process evidence requires an identity")
+        if self.state != "live" and self.identity:
+            raise ValueError("non-live process evidence cannot carry an identity")
+
+
+def _process_start_identity(process_id: int) -> ProcessIdentityEvidence:
+    """Return explicit live, dead, or unavailable PID-start evidence."""
+
+    if process_id <= 0:
+        return ProcessIdentityEvidence("unknown")
+    try:
+        os.kill(process_id, 0)
+    except ProcessLookupError:
+        return ProcessIdentityEvidence("dead")
+    except (PermissionError, OSError):
+        # A denied or unsupported existence probe is not evidence of death.
+        pass
 
     linux_stat = Path(f"/proc/{process_id}/stat")
     try:
         if linux_stat.exists():
             fields = linux_stat.read_text(encoding="ascii").rsplit(")", 1)[1].split()
-            return f"linux:{fields[19]}"
+            return ProcessIdentityEvidence("live", f"linux:{fields[19]}")
         result = subprocess.run(
             ["ps", "-o", "lstart=", "-p", str(process_id)],
             check=False,
@@ -57,12 +82,14 @@ def _process_start_identity(process_id: int) -> str | None:
             timeout=1.0,
         )
         if result.returncode != 0 or not result.stdout.strip():
-            return None
-        return canonical_digest({"process_start": result.stdout.strip()})
+            return ProcessIdentityEvidence("unknown")
+        return ProcessIdentityEvidence(
+            "live", canonical_digest({"process_start": result.stdout.strip()})
+        )
     except FileNotFoundError:
-        return None
+        return ProcessIdentityEvidence("unknown")
     except (IndexError, OSError, subprocess.SubprocessError):
-        return "unknown"
+        return ProcessIdentityEvidence("unknown")
 
 
 class ControlReconciliationError(RuntimeError):
@@ -92,7 +119,7 @@ class ControlReconciliationStore:
         retry_sleep: Callable[[float], None] = time.sleep,
         open_retry_seconds: float = 0.5,
         boot_id: str | None = None,
-        process_start_reader: Callable[[int], str | None] | None = None,
+        process_start_reader: Callable[[int], ProcessIdentityEvidence] | None = None,
     ) -> None:
         if lease_timeout_seconds <= 0:
             raise ValueError("lease_timeout_seconds must be positive")
@@ -111,9 +138,10 @@ class ControlReconciliationStore:
         self._monotonic_clock = monotonic_clock
         self._retry_sleep = retry_sleep
         self._open_retry_seconds = open_retry_seconds
-        self._boot_id = boot_id or _current_boot_id()
+        self._boot_id = boot_id or _current_boot_id() or ""
         self._process_start_reader = process_start_reader or _process_start_identity
-        self._process_start = self._process_start_reader(self._process_id) or "unknown"
+        process_evidence = self._process_start_reader(self._process_id)
+        self._process_start = process_evidence.identity if process_evidence.state == "live" else ""
         self._initialization_lock = threading.RLock()
         self._initialized = False
         self._heartbeat_lock = threading.RLock()
@@ -209,6 +237,7 @@ class ControlReconciliationStore:
                 os.close(descriptor)
 
     def _open_connection(self) -> sqlite3.Connection:
+        self._assert_current_process()
         deadline = self._monotonic_clock() + self._open_retry_seconds
         while True:
             connection: sqlite3.Connection | None = None
@@ -246,6 +275,14 @@ class ControlReconciliationStore:
                 raise ControlReconciliationUnavailableError(
                     "control journal is unavailable"
                 ) from error
+
+    def _assert_current_process(self) -> None:
+        """Reject mutation through a store inherited from another process."""
+
+        if os.getpid() != self._process_id:
+            raise ControlReconciliationUnavailableError(
+                "control reconciliation store cannot be used after fork"
+            )
 
     def _connect(self) -> sqlite3.Connection:
         self._initialize()
@@ -371,6 +408,7 @@ class ControlReconciliationStore:
             raise ControlReconciliationUnavailableError("control journal read failed") from error
 
     def _initialize(self) -> None:
+        self._assert_current_process()
         if self._initialized:
             return
         with self._initialization_lock:
@@ -417,6 +455,7 @@ class ControlReconciliationStore:
                     owner_process_token TEXT NOT NULL,
                     owner_boot_id TEXT NOT NULL,
                     owner_process_start TEXT NOT NULL,
+                    owner_proof_version INTEGER NOT NULL,
                     lease_expires_at REAL NOT NULL,
                     result_json TEXT,
                     result_digest TEXT,
@@ -449,6 +488,7 @@ class ControlReconciliationStore:
                         "owner_process_token": "TEXT NOT NULL DEFAULT ''",
                         "owner_boot_id": "TEXT NOT NULL DEFAULT ''",
                         "owner_process_start": "TEXT NOT NULL DEFAULT ''",
+                        "owner_proof_version": "INTEGER NOT NULL DEFAULT 0",
                         "lease_expires_at": "REAL NOT NULL DEFAULT 0",
                     }
                     for column, declaration in migrations.items():
@@ -481,6 +521,7 @@ class ControlReconciliationStore:
             thread.join(timeout=max(1.0, self._heartbeat_interval_seconds * 2.0))
 
     def _ensure_heartbeat(self) -> None:
+        self._assert_current_process()
         with self._heartbeat_lock:
             if self._heartbeat_thread is not None and self._heartbeat_thread.is_alive():
                 if not self._heartbeat_stop.is_set():
@@ -498,6 +539,7 @@ class ControlReconciliationStore:
             thread.start()
 
     def _heartbeat_loop(self) -> None:
+        self._assert_current_process()
         while not self._heartbeat_stop.wait(self._heartbeat_interval_seconds):
             try:
                 with self._connect() as connection:
@@ -838,9 +880,9 @@ class ControlReconciliationStore:
                     request_id, session_digest, operation_id, contract_id,
                     request_digest, state, owner_instance, owner_pid,
                     owner_process_token, lease_expires_at, record_refs_json,
-                    owner_boot_id, owner_process_start,
+                    owner_boot_id, owner_process_start, owner_proof_version,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, '[]', ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, '[]', ?, ?, 1, ?, ?)
                 """,
                 (
                     request_id,
@@ -1008,7 +1050,8 @@ class ControlReconciliationStore:
                 """
                 SELECT request_id, owner_instance, owner_pid,
                        owner_process_token, owner_boot_id,
-                       owner_process_start, lease_expires_at
+                       owner_process_start, owner_proof_version,
+                       lease_expires_at
                 FROM control_operations
                 WHERE state='pending' AND NOT (
                     owner_instance=? AND owner_process_token=?
@@ -1059,16 +1102,19 @@ class ControlReconciliationStore:
     def _abandonment_reason(self, row: sqlite3.Row, *, now: float) -> str | None:
         owner_boot_id = str(row["owner_boot_id"])
         owner_start = str(row["owner_process_start"])
-        if owner_boot_id and owner_boot_id != self._boot_id:
+        proof_version = int(row["owner_proof_version"])
+        if owner_boot_id and self._boot_id and owner_boot_id != self._boot_id:
             return "host_rebooted"
-        if owner_boot_id and owner_start and owner_start != "unknown":
-            observed_start = self._process_start_reader(int(row["owner_pid"]))
-            if observed_start is None:
+        if proof_version >= 1:
+            if not owner_start:
+                return None
+            observed = self._process_start_reader(int(row["owner_pid"]))
+            if observed.state == "dead":
                 return "process_dead"
-            if observed_start != "unknown" and observed_start != owner_start:
+            if observed.state == "live" and observed.identity != owner_start:
                 return "pid_reused"
             return None
-        if float(row["lease_expires_at"]) <= now:
+        if proof_version == 0 and float(row["lease_expires_at"]) <= now:
             return "legacy_lease_expired"
         return None
 
@@ -1270,4 +1316,5 @@ __all__ = [
     "ControlReconciliationError",
     "ControlReconciliationStore",
     "ControlReconciliationUnavailableError",
+    "ProcessIdentityEvidence",
 ]

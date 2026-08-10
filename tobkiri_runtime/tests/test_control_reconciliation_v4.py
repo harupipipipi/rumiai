@@ -7,15 +7,18 @@ import multiprocessing
 import os
 from pathlib import Path
 import sqlite3
+import subprocess
 import threading
 import time
 
 import pytest
 
+import core_runtime.control_reconciliation_v4 as reconciliation
 from core_runtime.control_reconciliation_v4 import (
     ControlReconciliationError,
     ControlReconciliationStore,
     ControlReconciliationUnavailableError,
+    ProcessIdentityEvidence,
 )
 from tobkiri_protocol.canonical import canonical_digest
 
@@ -69,6 +72,57 @@ def _process_prepare(path_value: str, results: object) -> None:
         results.put("ok")  # type: ignore[attr-defined]
     except Exception as error:  # pragma: no cover - reported to parent
         results.put(type(error).__name__)  # type: ignore[attr-defined]
+
+
+def _fork_inherited_store(
+    inherited: ControlReconciliationStore,
+    path_value: str,
+    request_id: str,
+    connection: object,
+    crash: bool,
+) -> None:
+    inherited_rejected = False
+    try:
+        _begin(inherited, request_id)
+    except ControlReconciliationUnavailableError:
+        inherited_rejected = True
+    stale_heartbeat = bool(
+        inherited._heartbeat_thread is not None  # noqa: SLF001
+        and inherited._heartbeat_thread.is_alive()  # noqa: SLF001
+    )
+    fresh = ControlReconciliationStore(
+        Path(path_value),
+        instance_id="fork-child",
+        lease_timeout_seconds=0.5,
+        heartbeat_interval_seconds=0.05,
+    )
+    _begin(fresh, request_id)
+    connection.send((inherited_rejected, stale_heartbeat))  # type: ignore[attr-defined]
+    if crash:
+        connection.close()  # type: ignore[attr-defined]
+        os._exit(17)
+    fresh.finish_operation(
+        request_id,
+        session_id="session-a",
+        state="succeeded",
+        result={"state": "approved"},
+    )
+    fresh.close()
+    connection.close()  # type: ignore[attr-defined]
+
+
+def _fork_reject_inherited_only(
+    inherited: ControlReconciliationStore,
+    request_id: str,
+    connection: object,
+) -> None:
+    try:
+        _begin(inherited, request_id)
+    except ControlReconciliationUnavailableError:
+        connection.send("rejected")  # type: ignore[attr-defined]
+    else:
+        connection.send("accepted")  # type: ignore[attr-defined]
+    connection.close()  # type: ignore[attr-defined]
 
 
 def _begin(
@@ -204,6 +258,7 @@ def test_legacy_schema_migration_is_atomic_across_processes(tmp_path: Path) -> N
         "owner_process_token",
         "owner_boot_id",
         "owner_process_start",
+        "owner_proof_version",
         "lease_expires_at",
     } <= columns
 
@@ -383,7 +438,7 @@ def test_expired_crashed_operation_is_reclaimed_with_pid_reuse_audit(
         lease_timeout_seconds=10.0,
         heartbeat_interval_seconds=1.0,
         clock=clock,
-        process_start_reader=lambda _pid: "start-a",
+        process_start_reader=lambda _pid: ProcessIdentityEvidence("live", "start-a"),
     )
     request_id = "02020202-0202-4202-8202-020202020202"
     _begin(crashed, request_id)
@@ -401,7 +456,7 @@ def test_expired_crashed_operation_is_reclaimed_with_pid_reuse_audit(
         lease_timeout_seconds=10.0,
         heartbeat_interval_seconds=1.0,
         clock=clock,
-        process_start_reader=lambda _pid: None,
+        process_start_reader=lambda _pid: ProcessIdentityEvidence("dead"),
     )
     assert restarted.recover_abandoned_operations() == 1
     status = restarted.operation_status(request_id, session_id="session-a")
@@ -427,8 +482,8 @@ def test_wall_clock_jump_never_reclaims_demonstrably_live_owner(
     clock = _Clock()
     path = tmp_path / "control" / "reconciliation-v4.sqlite3"
 
-    def process_reader(_pid: int) -> str:
-        return "same-process-start"
+    def process_reader(_pid: int) -> ProcessIdentityEvidence:
+        return ProcessIdentityEvidence("live", "same-process-start")
 
     owner = ControlReconciliationStore(
         path,
@@ -471,7 +526,7 @@ def test_reboot_and_pid_reuse_are_proven_recovery_boundaries(
         path,
         instance_id="owner",
         boot_id="boot-a",
-        process_start_reader=lambda _pid: "same-process-start",
+        process_start_reader=lambda _pid: ProcessIdentityEvidence("live", "same-process-start"),
     )
     request_id = "09090909-0909-4909-8909-090909090909"
     _begin(owner, request_id)
@@ -480,7 +535,7 @@ def test_reboot_and_pid_reuse_are_proven_recovery_boundaries(
         path,
         instance_id="restarted",
         boot_id=boot_id,
-        process_start_reader=lambda _pid: observed_start,
+        process_start_reader=lambda _pid: ProcessIdentityEvidence("live", observed_start),
     )
 
     assert restarted.recover_abandoned_operations() == 1
@@ -491,6 +546,168 @@ def test_reboot_and_pid_reuse_are_proven_recovery_boundaries(
             ).fetchone()[0]
             == reason
         )
+
+
+@pytest.mark.parametrize(
+    "probe_error",
+    [FileNotFoundError(), PermissionError(), subprocess.TimeoutExpired("ps", 1.0)],
+)
+def test_process_probe_errors_are_unknown_not_dead(
+    monkeypatch: pytest.MonkeyPatch,
+    probe_error: BaseException,
+) -> None:
+    monkeypatch.setattr(
+        reconciliation.os, "kill", lambda _pid, _signal: (_ for _ in ()).throw(PermissionError())
+    )
+    monkeypatch.setattr(reconciliation.Path, "exists", lambda _path: False)
+    monkeypatch.setattr(
+        reconciliation.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(probe_error),
+    )
+
+    assert reconciliation._process_start_identity(424242).state == "unknown"
+
+
+def test_unavailable_identity_never_uses_wall_clock_lease_for_new_rows(
+    tmp_path: Path,
+) -> None:
+    clock = _Clock()
+    path = tmp_path / "control" / "reconciliation-v4.sqlite3"
+
+    def unavailable(_pid: int) -> ProcessIdentityEvidence:
+        return ProcessIdentityEvidence("unknown")
+
+    owner = ControlReconciliationStore(
+        path,
+        instance_id="owner",
+        clock=clock,
+        boot_id="boot-a",
+        process_start_reader=unavailable,
+    )
+    request_id = "10101010-1010-4010-8010-101010101010"
+    _begin(owner, request_id)
+    owner.close()
+
+    for jumped_time in (-1_000_000.0, 1_000_000.0):
+        clock.value = jumped_time
+        contender = ControlReconciliationStore(
+            path,
+            instance_id=f"contender-{jumped_time}",
+            clock=clock,
+            boot_id="boot-a",
+            process_start_reader=unavailable,
+        )
+        assert contender.recover_abandoned_operations() == 0
+
+    rebooted = ControlReconciliationStore(
+        path,
+        instance_id="rebooted",
+        clock=clock,
+        boot_id="boot-b",
+        process_start_reader=unavailable,
+    )
+    assert rebooted.recover_abandoned_operations() == 1
+    assert rebooted.operation_status(request_id, session_id="session-a")["state"] == (
+        "indeterminate"
+    )
+
+
+def test_abandonment_reason_requires_explicit_evidence(tmp_path: Path) -> None:
+    path = tmp_path / "control" / "reconciliation-v4.sqlite3"
+    owner = ControlReconciliationStore(
+        path,
+        instance_id="owner",
+        boot_id="boot-a",
+        process_start_reader=lambda _pid: ProcessIdentityEvidence("live", "start-a"),
+    )
+    request_id = "11111111-1010-4010-8010-101010101010"
+    _begin(owner, request_id)
+    owner.close()
+    with sqlite3.connect(path) as connection:
+        connection.row_factory = sqlite3.Row
+        row = connection.execute(
+            "SELECT * FROM control_operations WHERE request_id=?", (request_id,)
+        ).fetchone()
+    assert row is not None
+
+    unknown = ControlReconciliationStore(
+        path,
+        instance_id="unknown",
+        boot_id="boot-a",
+        process_start_reader=lambda _pid: ProcessIdentityEvidence("unknown"),
+    )
+    assert unknown._abandonment_reason(row, now=10**12) is None  # noqa: SLF001
+
+    dead = ControlReconciliationStore(
+        path,
+        instance_id="dead",
+        boot_id="boot-a",
+        process_start_reader=lambda _pid: ProcessIdentityEvidence("dead"),
+    )
+    assert dead._abandonment_reason(row, now=0) == "process_dead"  # noqa: SLF001
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires POSIX fork")
+@pytest.mark.parametrize("crash", [False, True])
+def test_store_inherited_across_fork_is_rejected_and_reconstructed(
+    tmp_path: Path,
+    crash: bool,
+) -> None:
+    context = multiprocessing.get_context("fork")
+    path = tmp_path / "control" / "reconciliation-v4.sqlite3"
+    parent = ControlReconciliationStore(
+        path,
+        instance_id="fork-parent",
+        lease_timeout_seconds=0.5,
+        heartbeat_interval_seconds=0.05,
+    )
+    parent_request = "12121212-1212-4212-8212-121212121212"
+    child_request = "13131313-1313-4313-8313-131313131313"
+    _begin(parent, parent_request)
+    receive, send = context.Pipe(duplex=False)
+    process = context.Process(
+        target=_fork_inherited_store,
+        args=(parent, str(path), child_request, send, crash),
+    )
+    process.start()
+    send.close()
+    assert receive.poll(10.0)
+    assert receive.recv() == (True, False)
+    process.join(10.0)
+    assert process.exitcode == (17 if crash else 0)
+
+    if crash:
+        assert parent.recover_abandoned_operations() == 1
+        expected = "indeterminate"
+    else:
+        expected = "succeeded"
+    assert parent.operation_status(child_request, session_id="session-a")["state"] == expected
+    assert parent.operation_status(parent_request, session_id="session-a")["state"] == "pending"
+    assert parent._heartbeat_thread is not None  # noqa: SLF001
+    assert parent._heartbeat_thread.is_alive()  # noqa: SLF001
+    parent.close()
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires POSIX fork")
+def test_uninitialized_inherited_store_rejects_without_filesystem_mutation(
+    tmp_path: Path,
+) -> None:
+    context = multiprocessing.get_context("fork")
+    path = tmp_path / "absent" / "control" / "reconciliation-v4.sqlite3"
+    inherited = ControlReconciliationStore(path, instance_id="fork-parent")
+    receive, send = context.Pipe(duplex=False)
+    process = context.Process(
+        target=_fork_reject_inherited_only,
+        args=(inherited, "14141414-1414-4414-8414-141414141414", send),
+    )
+    process.start()
+    send.close()
+    assert receive.poll(10.0)
+    assert receive.recv() == "rejected"
+    process.join(10.0)
+    assert process.exitcode == 0
+    assert not path.parent.parent.exists()
 
 
 def test_hardlinked_database_and_ancestor_symlink_are_rejected_without_alias_mutation(
@@ -805,7 +1022,7 @@ def test_operation_journal_marks_only_abandoned_pending_work_indeterminate(
         lease_timeout_seconds=10.0,
         heartbeat_interval_seconds=1.0,
         clock=clock,
-        process_start_reader=lambda _pid: None,
+        process_start_reader=lambda _pid: ProcessIdentityEvidence("dead"),
     )
     assert restarted.recover_abandoned_operations() == 1
     pending = restarted.operation_status(pending_id, session_id="session-a")
