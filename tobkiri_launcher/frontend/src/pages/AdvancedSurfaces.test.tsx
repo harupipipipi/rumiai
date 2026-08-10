@@ -60,3 +60,11 @@ test('Graph and Profile Wiring state the unavailable v4 operation and provide th
   assert.match(wiring, /v4 operation is not provided/);
   assert.match(graph + wiring, /Profile projection|Profile ceremony/);
 });
+
+test('Profile Advanced route presents the authoritative catalog source with Tobkiri naming', () => {
+  assert.deepEqual(LAUNCHER_ADVANCED_VIEWS.profile.sources, ['profile', 'profiles']);
+  const html = renderToStaticMarkup(<MemoryRouter><Profile /></MemoryRouter>);
+  assert.match(html, /Advanced Profile catalog/);
+  assert.match(html, /Broker-backed Protocol v4 catalog/);
+  assert.doesNotMatch(html, /Rumi AI|Rumi Viewer|Tokbiri|Tobikiri/);
+});

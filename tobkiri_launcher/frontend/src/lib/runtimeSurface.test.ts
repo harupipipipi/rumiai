@@ -16,6 +16,8 @@ import {
   extractExactFlowDescriptors,
   extractExactOperationDescriptors,
   extractExactPlanBindings,
+  extractExactProfileCatalog,
+  extractExactProfileCatalogSelectablePackIds,
   extractExactProfileSelectablePackIds,
   extractExactRouteDescriptors,
   extractFiniteArtifactEntries,
@@ -129,9 +131,12 @@ function envelope<T>(surface: RuntimeSurfaceEnvelope<T>['surface'], data: T): Ru
   };
 }
 
-test('frozen runtime surface targets cover only the six canonical projections', () => {
-  assert.deepEqual(CANONICAL_RUNTIME_SURFACES, ['profile', 'settings', 'packs', 'contracts', 'operations', 'principals']);
+test('frozen runtime surface targets cover only the seven canonical projections', () => {
+  assert.deepEqual(CANONICAL_RUNTIME_SURFACES, ['profile', 'profiles', 'settings', 'packs', 'contracts', 'operations', 'principals']);
   assert.equal(RUNTIME_SURFACE_TARGETS.profile?.logical_target, '/api/runtime-surface/profile');
+  assert.equal(RUNTIME_SURFACE_TARGETS.profiles?.logical_target, '/api/runtime-surface/profiles');
+  assert.equal(RUNTIME_SURFACE_TARGETS.profiles?.operation_id, 'profile.catalog.read');
+  assert.deepEqual(RUNTIME_SURFACE_TARGETS.profiles?.allowed_payload_keys, []);
   assert.equal(RUNTIME_SURFACE_TARGETS.settings?.read_guards, false);
   assert.equal(RUNTIME_SURFACE_TARGETS.operations?.logical_target, '/api/runtime-surface/topology/operations');
   assert.equal(RUNTIME_SURFACE_TARGETS.principals?.logical_target, '/api/runtime-surface/topology/principals');
@@ -198,7 +203,7 @@ test('runtime target and operation revisions fail closed on map or digest mismat
   );
 });
 
-test('generated Contract Map is pinned to the canonical raw artifact and includes every map binding plus ten runtime targets', () => {
+test('generated Contract Map is pinned to the canonical raw artifact and includes every map binding plus eleven runtime targets', () => {
   assert.equal(
     GENERATED_FRONTEND_CONTRACT_MAP.artifact_digest,
     PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST,
@@ -226,6 +231,82 @@ test('generated Contract Map is pinned to the canonical raw artifact and include
     () => validateGeneratedFrontendContractMap(stale),
     /stale|tampered/i,
   );
+});
+
+function profileCatalogData() {
+  const closure = [
+    {pack_id: 'base-pack', role: 'base', version: '1.0.0', artifact_digest: digest('1'), artifact_ref: `pack-v4://base-pack@${digest('1')}`},
+    {pack_id: 'shell-pack', role: 'shell', version: '1.0.0', artifact_digest: digest('2'), artifact_ref: `pack-v4://shell-pack@${digest('2')}`},
+    {pack_id: 'application-pack', role: 'application', version: '1.0.0', artifact_digest: digest('3'), artifact_ref: `pack-v4://application-pack@${digest('3')}`},
+    {pack_id: 'provider-pack', role: 'provider', version: '1.0.0', artifact_digest: digest('4'), artifact_ref: `pack-v4://provider-pack@${digest('4')}`},
+  ];
+  const entry = (profileId: string, active: boolean) => ({
+    profile_id: profileId,
+    display_name: active ? 'Defaults' : 'Alternate',
+    active,
+    lifecycle_state: active ? 'active' as const : 'available' as const,
+    available: true,
+    diagnostics: [],
+    definition: {
+      digest: active ? digest('5') : digest('6'),
+      ref: `profile-v4://${profileId}/${active ? digest('5') : digest('6')}`,
+      catalog_revision: null,
+      source_path: `ecosystem/defaultspack/v4/${profileId}.profile.v4.json`,
+      provenance: {source_kind: 'repository'},
+    },
+    bindings: {
+      base: {pack_id: 'base-pack', definition_revision: null, definition_digest: null, artifact_digest: digest('1')},
+      shell: {provider_id: 'shell.provider', pack_id: 'shell-pack', definition_revision: null, definition_digest: null, artifact_digest: digest('2')},
+      application: {pack_id: 'application-pack', artifact_digest: digest('3'), artifact_ref: `pack-v4://application-pack@${digest('3')}`},
+    },
+    pack_closure: closure,
+    records: {
+      profile_revision: active ? digest('a') : null,
+      profile_lock_digest: active ? digest('d') : null,
+      plan_digest: active ? digest('b') : null,
+    },
+    authority_snapshot: {
+      state: active ? 'active' as const : 'captured_on_resolve' as const,
+      digest: active ? digest('e') : null,
+      ref: active ? `authority-snapshot-v4://${profileId}/${digest('e')}` : null,
+      definition_references: [],
+    },
+    candidate: {state: 'not_staged', candidate_id: null, candidate_digest: null, expires_at: null},
+  });
+  return {
+    catalog_api_version: 'io.tobkiri.profile-catalog-presentation.v4' as const,
+    catalog_digest: digest('c'),
+    bundle_lock_digest: digest('8'),
+    catalog_ref: `profile-catalog-v4://bundle/${digest('c')}`,
+    active_profile_id: 'defaults',
+    count: 2,
+    profiles: [entry('defaults', true), entry('alternate', false)],
+  };
+}
+
+test('Profile catalog projection is exact, exposes the active marker, and derives only named provider Packs', () => {
+  const accepted = validateRuntimeSurfaceEnvelope('profiles', envelope('profiles', profileCatalogData()));
+  const projection = extractExactProfileCatalog(accepted.data);
+  assert.ok(projection);
+  assert.equal(projection.active_profile_id, 'defaults');
+  assert.deepEqual(projection.profiles.map((entry) => entry.profile_id), ['defaults', 'alternate']);
+  assert.deepEqual(extractExactProfileCatalogSelectablePackIds(projection.profiles[0]), ['provider-pack']);
+  assert.deepEqual(extractExactProfileCatalogSelectablePackIds({...projection.profiles[0], pack_closure: []}), []);
+});
+
+test('Profile catalog tamper, unknown active marker, and extra fields fail closed', () => {
+  const fixture = profileCatalogData();
+  const tamperedDigest = structuredClone(fixture);
+  tamperedDigest.profiles[0].definition.digest = digest('f');
+  assert.equal(extractExactProfileCatalog(tamperedDigest), null);
+
+  const unknownActive = structuredClone(fixture);
+  unknownActive.active_profile_id = 'unknown-profile';
+  assert.equal(extractExactProfileCatalog(unknownActive), null);
+
+  const extraField = structuredClone(fixture);
+  (extraField.profiles[0] as Record<string, unknown>).untrusted_pack_ids = ['injected-pack'];
+  assert.equal(extractExactProfileCatalog(extraField), null);
 });
 
 test('real v4 read fixture accepts evidence refs and full Profile records only in profile data', () => {
@@ -269,6 +350,27 @@ test('canonical read transport sends only target-selected guard keys', async () 
   });
   assert.deepEqual(calls[1].input, {});
   assert.equal(Object.prototype.hasOwnProperty.call(calls[0].input as object, 'surface'), false);
+});
+
+test('Profile catalog transport uses the exact Broker route and never sends client guard or Pack payload keys', async () => {
+  const calls: Array<{target: unknown; input: unknown}> = [];
+  const client = createRuntimeSurfaceClient(
+    {profiles: RUNTIME_SURFACE_TARGETS.profiles},
+    {
+      read: async <T>(target, input): Promise<T> => {
+        calls.push({target, input});
+        return envelope('profiles', profileCatalogData()) as unknown as T;
+      },
+    },
+  );
+
+  await client.read('profiles', {
+    expected_profile_revision: digest('x'),
+    expected_plan_digest: digest('y'),
+  });
+
+  assert.equal((calls[0].target as {logical_target: string}).logical_target, '/api/runtime-surface/profiles');
+  assert.deepEqual(calls[0].input, {});
 });
 
 test('settings accepts only the runtime Profile scope and never treats user settings as runtime authority', () => {

@@ -25,6 +25,14 @@ const RUNTIME_TARGET_SPECS = [
   },
   {
     method: "GET",
+    path: "/api/runtime-surface/profiles",
+    contribution_id: "defaults.runtime-surface.profile-catalog",
+    contract_id: "tobkiri.host.control-presentation.v4",
+    operation_id: "profile.catalog.read",
+    allowed_payload_keys: [],
+  },
+  {
+    method: "GET",
     path: "/api/runtime-surface/settings",
     contribution_id: "defaults.runtime-surface.settings",
     contract_id: "tobkiri.host.control-presentation.v4",

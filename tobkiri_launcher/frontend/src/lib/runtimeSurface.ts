@@ -16,6 +16,7 @@ export const RUNTIME_SURFACE_API_VERSION =
 
 export const CANONICAL_RUNTIME_SURFACES = [
   'profile',
+  'profiles',
   'settings',
   'packs',
   'contracts',
@@ -75,6 +76,92 @@ export interface RuntimeSurfaceEnvelope<T> {
   plan_digest: string;
   records: RuntimeSurfaceRecords;
   data: T;
+}
+
+export interface RuntimeProfileCatalogBaseBinding {
+  pack_id: string;
+  definition_revision: string | null;
+  definition_digest: string | null;
+  artifact_digest: string | null;
+}
+
+export interface RuntimeProfileCatalogShellBinding {
+  provider_id: string;
+  pack_id: string | null;
+  definition_revision: string | null;
+  definition_digest: string | null;
+  artifact_digest: string | null;
+}
+
+export interface RuntimeProfileCatalogApplicationBinding {
+  pack_id: string;
+  artifact_digest: string | null;
+  artifact_ref: string | null;
+}
+
+export interface RuntimeProfileCatalogDefinition {
+  digest: string;
+  ref: string;
+  catalog_revision: string | null;
+  source_path: string;
+  provenance: Record<string, unknown>;
+}
+
+export interface RuntimeProfileCatalogPackClosureEntry {
+  pack_id: string;
+  role: string;
+  version: string;
+  artifact_digest: string;
+  artifact_ref: string;
+}
+
+export interface RuntimeProfileCatalogRecords {
+  profile_revision: string | null;
+  profile_lock_digest: string | null;
+  plan_digest: string | null;
+}
+
+export interface RuntimeProfileCatalogAuthoritySnapshot {
+  state: 'active' | 'captured_on_resolve';
+  digest: string | null;
+  ref: string | null;
+  definition_references: string[];
+}
+
+export interface RuntimeProfileCatalogCandidate {
+  state: 'not_staged' | string;
+  candidate_id: string | null;
+  candidate_digest: string | null;
+  expires_at: string | null;
+}
+
+export interface RuntimeProfileCatalogEntry {
+  profile_id: string;
+  display_name: string;
+  active: boolean;
+  lifecycle_state: 'active' | 'available';
+  available: boolean;
+  diagnostics: Array<{code: string; subject: string}>;
+  definition: RuntimeProfileCatalogDefinition;
+  bindings: {
+    base: RuntimeProfileCatalogBaseBinding;
+    shell: RuntimeProfileCatalogShellBinding;
+    application: RuntimeProfileCatalogApplicationBinding | null;
+  };
+  pack_closure: RuntimeProfileCatalogPackClosureEntry[];
+  records: RuntimeProfileCatalogRecords;
+  authority_snapshot: RuntimeProfileCatalogAuthoritySnapshot;
+  candidate: RuntimeProfileCatalogCandidate;
+}
+
+export interface RuntimeProfileCatalogProjection {
+  catalog_api_version: 'io.tobkiri.profile-catalog-presentation.v4';
+  catalog_digest: string;
+  bundle_lock_digest: string;
+  catalog_ref: string;
+  active_profile_id: string;
+  count: number;
+  profiles: RuntimeProfileCatalogEntry[];
 }
 
 export interface RuntimeSurfaceTarget {
@@ -231,6 +318,7 @@ function generatedRuntimeTarget(
 
 export const RUNTIME_SURFACE_TARGETS: Partial<Record<RuntimeSurfaceId, RuntimeSurfaceTarget>> = {
   profile: generatedRuntimeTarget('GET', '/api/runtime-surface/profile', true),
+  profiles: generatedRuntimeTarget('GET', '/api/runtime-surface/profiles', false),
   settings: generatedRuntimeTarget('GET', '/api/runtime-surface/settings', false),
   packs: generatedRuntimeTarget('GET', '/api/runtime-surface/topology/packs', true),
   contracts: generatedRuntimeTarget('GET', '/api/runtime-surface/topology/contracts', true),
@@ -628,6 +716,24 @@ export function validateRuntimeSurfaceEnvelope<T>(
       throw new RuntimeSurfaceError('INVALID', runtimeSurfaceErrorMessage('INVALID'));
     }
   }
+  if (expectedSurface === 'profiles') {
+    const profileCatalog = extractExactProfileCatalog(value.data);
+    const activeEntry = profileCatalog?.profiles.find((entry) => entry.active) ?? null;
+    if (
+      !profileCatalog
+      || profileCatalog.active_profile_id !== profileId
+      || (profileCatalog.profiles.length > 0 && (
+        !activeEntry
+        || activeEntry.profile_id !== profileId
+        || activeEntry.records.profile_revision !== profileRevision
+        || activeEntry.records.profile_lock_digest !== acceptedRecords.profile_lock.digest
+        || activeEntry.records.plan_digest !== planDigest
+        || activeEntry.authority_snapshot.digest !== acceptedRecords.authority_snapshot.digest
+      ))
+    ) {
+      throw new RuntimeSurfaceError('INVALID', runtimeSurfaceErrorMessage('INVALID'));
+    }
+  }
   if (expectedSurface === 'settings') {
     const runtimeSettings = extractRuntimeProfileSettings(value.data);
     if (
@@ -708,6 +814,369 @@ export function extractRuntimeProfileSettings(value: unknown): RuntimeProfileSet
     lock_digest: settings.lock_digest,
     security_epoch: settings.security_epoch,
   };
+}
+
+function exactObject(value: unknown, keys: string[]): value is Record<string, unknown> {
+  return isRecord(value)
+    && Object.keys(value).length === keys.length
+    && keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+
+function nullableDigest(value: unknown): string | null {
+  return value === null ? null : isSha256Digest(value) ? value : null;
+}
+
+function canonicalReference(value: unknown): value is string {
+  return validString(value)
+    && !/^(?:file|https?):/i.test(value)
+    && !value.startsWith('/')
+    && !/^[A-Za-z]:[\\/]/.test(value)
+    && !value.includes('\\')
+    && !value.includes('\0')
+    && !value.includes('..')
+    && /^[a-z][a-z0-9+.-]*:\/\/[^\s]+$/i.test(value);
+}
+
+function relativeSourcePath(value: unknown): value is string {
+  return validString(value)
+    && !value.startsWith('/')
+    && !/^[A-Za-z]:[\\/]/.test(value)
+    && !value.includes('\\')
+    && !value.includes('\0')
+    && !value.split('/').some((part) => part === '.' || part === '..');
+}
+
+function nullableDateTime(value: unknown): string | null {
+  return value === null ? null : isDateTime(value) ? value : null;
+}
+
+function profileCatalogBinding(value: unknown): RuntimeProfileCatalogBaseBinding | null {
+  if (!exactObject(value, ['pack_id', 'definition_revision', 'definition_digest', 'artifact_digest'])) {
+    return null;
+  }
+  const definitionRevision = nullableDigest(value.definition_revision);
+  const definitionDigest = nullableDigest(value.definition_digest);
+  const artifactDigest = nullableDigest(value.artifact_digest);
+  if (
+    !validString(value.pack_id)
+    || (value.definition_revision !== null && definitionRevision === null)
+    || (value.definition_digest !== null && definitionDigest === null)
+    || (value.artifact_digest !== null && artifactDigest === null)
+  ) {
+    return null;
+  }
+  return {
+    pack_id: value.pack_id,
+    definition_revision: definitionRevision,
+    definition_digest: definitionDigest,
+    artifact_digest: artifactDigest,
+  };
+}
+
+function profileCatalogShellBinding(value: unknown): RuntimeProfileCatalogShellBinding | null {
+  if (!exactObject(value, ['provider_id', 'pack_id', 'definition_revision', 'definition_digest', 'artifact_digest'])) {
+    return null;
+  }
+  const definitionRevision = nullableDigest(value.definition_revision);
+  const definitionDigest = nullableDigest(value.definition_digest);
+  const artifactDigest = nullableDigest(value.artifact_digest);
+  if (
+    !validString(value.provider_id)
+    || (value.pack_id !== null && !validString(value.pack_id))
+    || (value.definition_revision !== null && definitionRevision === null)
+    || (value.definition_digest !== null && definitionDigest === null)
+    || (value.artifact_digest !== null && artifactDigest === null)
+  ) {
+    return null;
+  }
+  return {
+    provider_id: value.provider_id,
+    pack_id: value.pack_id as string | null,
+    definition_revision: definitionRevision,
+    definition_digest: definitionDigest,
+    artifact_digest: artifactDigest,
+  };
+}
+
+function profileCatalogApplicationBinding(value: unknown): RuntimeProfileCatalogApplicationBinding | null {
+  if (!exactObject(value, ['pack_id', 'artifact_digest', 'artifact_ref'])) return null;
+  const artifactDigest = nullableDigest(value.artifact_digest);
+  if (
+    !validString(value.pack_id)
+    || (value.artifact_digest !== null && artifactDigest === null)
+    || (value.artifact_ref !== null && !canonicalReference(value.artifact_ref))
+  ) {
+    return null;
+  }
+  return {
+    pack_id: value.pack_id,
+    artifact_digest: artifactDigest,
+    artifact_ref: value.artifact_ref as string | null,
+  };
+}
+
+function parseProfileCatalogEntry(value: unknown): RuntimeProfileCatalogEntry | null {
+  if (!exactObject(value, [
+    'profile_id',
+    'display_name',
+    'active',
+    'lifecycle_state',
+    'available',
+    'diagnostics',
+    'definition',
+    'bindings',
+    'pack_closure',
+    'records',
+    'authority_snapshot',
+    'candidate',
+  ])) {
+    return null;
+  }
+  if (
+    !validString(value.profile_id)
+    || !validString(value.display_name)
+    || typeof value.active !== 'boolean'
+    || (value.lifecycle_state !== 'active' && value.lifecycle_state !== 'available')
+    || typeof value.available !== 'boolean'
+    || !Array.isArray(value.diagnostics)
+    || !exactObject(value.definition, ['digest', 'ref', 'catalog_revision', 'source_path', 'provenance'])
+    || !exactObject(value.bindings, ['base', 'shell', 'application'])
+    || !Array.isArray(value.pack_closure)
+    || !exactObject(value.records, ['profile_revision', 'profile_lock_digest', 'plan_digest'])
+    || !exactObject(value.authority_snapshot, ['state', 'digest', 'ref', 'definition_references'])
+    || !exactObject(value.candidate, ['state', 'candidate_id', 'candidate_digest', 'expires_at'])
+  ) {
+    return null;
+  }
+  const diagnostics: Array<{code: string; subject: string}> = [];
+  for (const item of value.diagnostics) {
+    if (!exactObject(item, ['code', 'subject']) || !validString(item.code) || !validString(item.subject)) {
+      return null;
+    }
+    diagnostics.push({code: item.code, subject: item.subject});
+  }
+  const catalogRevision = nullableDigest(value.definition.catalog_revision);
+  if (
+    !isSha256Digest(value.definition.digest)
+    || !canonicalReference(value.definition.ref)
+    || value.definition.ref !== `profile-v4://${value.profile_id}/${value.definition.digest}`
+    || (value.definition.catalog_revision !== null && catalogRevision === null)
+    || !relativeSourcePath(value.definition.source_path)
+    || !isRecord(value.definition.provenance)
+  ) {
+    return null;
+  }
+  const base = profileCatalogBinding(value.bindings.base);
+  const shell = profileCatalogShellBinding(value.bindings.shell);
+  const application = value.bindings.application === null
+    ? null
+    : profileCatalogApplicationBinding(value.bindings.application);
+  if (!base || !shell || (value.bindings.application !== null && !application)) return null;
+
+  const profileRevision = nullableDigest(value.records.profile_revision);
+  const profileLockDigest = nullableDigest(value.records.profile_lock_digest);
+  const planDigest = nullableDigest(value.records.plan_digest);
+  if (
+    (value.records.profile_revision !== null && profileRevision === null)
+    || (value.records.profile_lock_digest !== null && profileLockDigest === null)
+    || (value.records.plan_digest !== null && planDigest === null)
+  ) {
+    return null;
+  }
+
+  const closure: RuntimeProfileCatalogPackClosureEntry[] = [];
+  const closureIds = new Set<string>();
+  for (const item of value.pack_closure) {
+    if (
+      !exactObject(item, ['pack_id', 'role', 'version', 'artifact_digest', 'artifact_ref'])
+      || !validString(item.pack_id)
+      || closureIds.has(item.pack_id)
+      || !validString(item.role)
+      || !validString(item.version)
+      || !isSha256Digest(item.artifact_digest)
+      || !canonicalReference(item.artifact_ref)
+      || item.artifact_ref !== `pack-v4://${item.pack_id}@${item.artifact_digest}`
+    ) {
+      return null;
+    }
+    closureIds.add(item.pack_id);
+    closure.push({
+      pack_id: item.pack_id,
+      role: item.role,
+      version: item.version,
+      artifact_digest: item.artifact_digest,
+      artifact_ref: item.artifact_ref,
+    });
+  }
+
+  const authoritySnapshot = value.authority_snapshot;
+  const authorityDigest = nullableDigest(authoritySnapshot.digest);
+  if (
+    (authoritySnapshot.state !== 'active' && authoritySnapshot.state !== 'captured_on_resolve')
+    || (authoritySnapshot.digest !== null && authorityDigest === null)
+    || (authoritySnapshot.ref !== null && !canonicalReference(authoritySnapshot.ref))
+    || !Array.isArray(authoritySnapshot.definition_references)
+    || !isStringArray(authoritySnapshot.definition_references)
+  ) {
+    return null;
+  }
+
+  const closureById = new Map(closure.map((item) => [item.pack_id, item]));
+  for (const packId of [base.pack_id, shell.pack_id, application?.pack_id]) {
+    if (!packId) continue;
+    const closureEntry = closureById.get(packId);
+    const bindingDigest = packId === base.pack_id
+      ? base.artifact_digest
+      : packId === shell.pack_id
+        ? shell.artifact_digest
+        : application?.artifact_digest ?? null;
+    if (bindingDigest !== null && closureEntry && bindingDigest !== closureEntry.artifact_digest) {
+      return null;
+    }
+  }
+  if (application && application.artifact_ref !== null && application.artifact_digest !== null
+    && application.artifact_ref !== `pack-v4://${application.pack_id}@${application.artifact_digest}`) {
+    return null;
+  }
+  if (application && ((application.artifact_ref === null) !== (application.artifact_digest === null))) {
+    return null;
+  }
+  if (authoritySnapshot.digest !== null && authoritySnapshot.ref !== null
+    && authoritySnapshot.ref !== `authority-snapshot-v4://${value.profile_id}/${authoritySnapshot.digest}`) {
+    return null;
+  }
+
+  const candidateId = value.candidate.candidate_id;
+  const candidateDigest = nullableDigest(value.candidate.candidate_digest);
+  const expiresAt = nullableDateTime(value.candidate.expires_at);
+  if (
+    !validString(value.candidate.state)
+    || (candidateId !== null && !validString(candidateId))
+    || (value.candidate.candidate_digest !== null && candidateDigest === null)
+    || (value.candidate.expires_at !== null && expiresAt === null)
+  ) {
+    return null;
+  }
+  if (value.available !== (diagnostics.length === 0)) return null;
+  if (value.active !== (value.lifecycle_state === 'active')) return null;
+  if (value.active && (
+    value.records.profile_revision === null
+    || value.records.profile_lock_digest === null
+    || value.records.plan_digest === null
+    || authoritySnapshot.state !== 'active'
+    || authoritySnapshot.digest === null
+    || authoritySnapshot.ref === null
+  )) {
+    return null;
+  }
+  if (!value.active && (
+    value.records.profile_revision !== null
+    || value.records.profile_lock_digest !== null
+    || value.records.plan_digest !== null
+    || authoritySnapshot.state !== 'captured_on_resolve'
+    || authoritySnapshot.digest !== null
+    || authoritySnapshot.ref !== null
+  )) {
+    return null;
+  }
+  return {
+    profile_id: value.profile_id,
+    display_name: value.display_name,
+    active: value.active,
+    lifecycle_state: value.lifecycle_state,
+    available: value.available,
+    diagnostics,
+    definition: {
+      digest: value.definition.digest,
+      ref: value.definition.ref,
+      catalog_revision: catalogRevision,
+      source_path: value.definition.source_path,
+      provenance: value.definition.provenance,
+    },
+    bindings: {base, shell, application},
+    pack_closure: closure,
+    records: {
+      profile_revision: profileRevision,
+      profile_lock_digest: profileLockDigest,
+      plan_digest: planDigest,
+    },
+    authority_snapshot: {
+      state: authoritySnapshot.state,
+      digest: authorityDigest,
+      ref: authoritySnapshot.ref as string | null,
+      definition_references: [...authoritySnapshot.definition_references],
+    },
+    candidate: {
+      state: value.candidate.state,
+      candidate_id: candidateId as string | null,
+      candidate_digest: candidateDigest,
+      expires_at: expiresAt,
+    },
+  };
+}
+
+export function extractExactProfileCatalog(value: unknown): RuntimeProfileCatalogProjection | null {
+  if (!exactObject(value, [
+    'catalog_api_version',
+    'catalog_digest',
+    'bundle_lock_digest',
+    'catalog_ref',
+    'active_profile_id',
+    'count',
+    'profiles',
+  ])) {
+    return null;
+  }
+  if (
+    value.catalog_api_version !== 'io.tobkiri.profile-catalog-presentation.v4'
+    || !isSha256Digest(value.catalog_digest)
+    || !isSha256Digest(value.bundle_lock_digest)
+    || !canonicalReference(value.catalog_ref)
+    || value.catalog_ref !== `profile-catalog-v4://bundle/${value.catalog_digest}`
+    || !validString(value.active_profile_id)
+    || typeof value.count !== 'number'
+    || !Number.isSafeInteger(value.count)
+    || value.count < 0
+    || !Array.isArray(value.profiles)
+    || value.count !== value.profiles.length
+  ) {
+    return null;
+  }
+  const profiles: RuntimeProfileCatalogEntry[] = [];
+  const profileIds = new Set<string>();
+  let activeCount = 0;
+  for (const item of value.profiles) {
+    const entry = parseProfileCatalogEntry(item);
+    if (!entry || profileIds.has(entry.profile_id)) return null;
+    profileIds.add(entry.profile_id);
+    if (entry.active) activeCount += 1;
+    profiles.push(entry);
+  }
+  if (profiles.length > 0 && (activeCount !== 1 || !profiles.some((item) => (
+    item.active && item.profile_id === value.active_profile_id
+  )))) {
+    return null;
+  }
+  if (profiles.length === 0 && activeCount !== 0) return null;
+  return {
+    catalog_api_version: value.catalog_api_version,
+    catalog_digest: value.catalog_digest,
+    bundle_lock_digest: value.bundle_lock_digest,
+    catalog_ref: value.catalog_ref,
+    active_profile_id: value.active_profile_id,
+    count: value.count,
+    profiles,
+  };
+}
+
+/** Derive the exact requested Pack ids from one verified Profile definition. */
+export function extractExactProfileCatalogSelectablePackIds(value: unknown): string[] | null {
+  const entry = parseProfileCatalogEntry(value);
+  if (!entry || !entry.available) return null;
+  const excludedRoles = new Set(['base', 'shell', 'application', 'dependency']);
+  return entry.pack_closure
+    .filter((item) => !excludedRoles.has(item.role))
+    .map((item) => item.pack_id);
 }
 
 /**

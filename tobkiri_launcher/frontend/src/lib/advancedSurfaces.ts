@@ -27,8 +27,8 @@ export const LAUNCHER_ADVANCED_VIEWS: Record<LauncherAdvancedViewId, LauncherAdv
     id: 'profile',
     label: 'Profile',
     support: 'rebuilt',
-    sources: ['profile'],
-    summary: 'Launcher-local preferences with a separate canonical runtime snapshot status.',
+    sources: ['profile', 'profiles'],
+    summary: 'Launcher-local preferences with an authoritative Profile catalog and canonical runtime snapshot status.',
     actions: 'local',
   },
   settings: {

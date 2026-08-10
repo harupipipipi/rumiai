@@ -28,6 +28,9 @@ export interface ProfileResolveInput {
   expected_profile_revision: string;
   expected_plan_digest: string;
   desired_pack_ids: string[];
+  profile_definition_digest?: string;
+  profile_catalog_digest?: string;
+  bundle_lock_digest?: string;
 }
 
 export interface ProfileReviewInput {
@@ -45,6 +48,12 @@ export interface ProfileActivateInput {
   approval_digest: string;
 }
 
+export interface ProfileCatalogBinding {
+  profile_definition_digest: string;
+  profile_catalog_digest: string;
+  bundle_lock_digest: string;
+}
+
 export interface ProfileResolveResult {
   state: 'resolved';
   candidate_id: string;
@@ -55,6 +64,7 @@ export interface ProfileResolveResult {
     profile_lock: unknown;
     resolved_plan: unknown;
     predecessor: unknown;
+    catalog_binding?: ProfileCatalogBinding;
   };
   next_action: 'review';
   write_set: unknown[];
@@ -195,8 +205,22 @@ function exactMutationPayload(step: ProfileCeremonyStep, value: unknown): Record
   if (!isRecord(value)) {
     throw new RuntimeSurfaceError('INVALID', `Profile ${step} request is not an object.`);
   }
+  const hasCatalogBinding = step === 'resolve'
+    && ['profile_definition_digest', 'profile_catalog_digest', 'bundle_lock_digest'].some(
+      (key) => Object.prototype.hasOwnProperty.call(value, key),
+    );
   const expectedKeys = step === 'resolve'
-    ? ['profile_id', 'expected_profile_revision', 'expected_plan_digest', 'desired_pack_ids']
+    ? hasCatalogBinding
+      ? [
+        'profile_id',
+        'expected_profile_revision',
+        'expected_plan_digest',
+        'desired_pack_ids',
+        'profile_definition_digest',
+        'profile_catalog_digest',
+        'bundle_lock_digest',
+      ]
+      : ['profile_id', 'expected_profile_revision', 'expected_plan_digest', 'desired_pack_ids']
     : step === 'activate'
       ? ['approval_id', 'approval_digest']
       : ['candidate_id', 'candidate_digest'];
@@ -205,12 +229,18 @@ function exactMutationPayload(step: ProfileCeremonyStep, value: unknown): Record
     throw new RuntimeSurfaceError('INVALID', `Profile ${step} request contains an unknown field.`);
   }
   if (step === 'resolve') {
-    if (value.profile_id !== 'defaults'
+    if (!validRequestString(value.profile_id)
       || !isSha256(value.expected_profile_revision)
       || !isSha256(value.expected_plan_digest)
       || !Array.isArray(value.desired_pack_ids)
       || value.desired_pack_ids.length === 0
-      || value.desired_pack_ids.some((item) => !validRequestString(item))) {
+      || value.desired_pack_ids.some((item) => !validRequestString(item))
+      || (hasCatalogBinding && (
+        !isSha256(value.profile_definition_digest)
+        || !isSha256(value.profile_catalog_digest)
+        || !isSha256(value.bundle_lock_digest)
+      ))
+      || (!hasCatalogBinding && value.profile_id !== 'defaults')) {
       throw new RuntimeSurfaceError('INVALID', 'Profile resolve request is invalid.');
     }
   } else if (step === 'activate') {
@@ -249,8 +279,30 @@ function validateResolve(value: unknown): ProfileResolveResult {
     throw new RuntimeSurfaceError('INVALID', 'Profile resolve returned an invalid ceremony state.');
   }
   const reviewKeys = ['profile', 'profile_lock', 'resolved_plan', 'predecessor'];
-  if (reviewKeys.some((key) => !Object.prototype.hasOwnProperty.call(result.review, key))) {
+  const allowedReviewKeys = [...reviewKeys, 'catalog_binding'];
+  if (
+    reviewKeys.some((key) => !Object.prototype.hasOwnProperty.call(result.review, key))
+    || Object.keys(result.review).some((key) => !allowedReviewKeys.includes(key))
+  ) {
     throw new RuntimeSurfaceError('INVALID', 'Profile resolve did not publish the exact candidate review records.');
+  }
+  let catalogBinding: ProfileCatalogBinding | undefined;
+  if (Object.prototype.hasOwnProperty.call(result.review, 'catalog_binding')) {
+    const candidate = result.review.catalog_binding;
+    if (
+      !isRecord(candidate)
+      || Object.keys(candidate).length !== 3
+      || !isSha256(candidate.profile_definition_digest)
+      || !isSha256(candidate.profile_catalog_digest)
+      || !isSha256(candidate.bundle_lock_digest)
+    ) {
+      throw new RuntimeSurfaceError('INVALID', 'Profile resolve returned an invalid catalog binding.');
+    }
+    catalogBinding = {
+      profile_definition_digest: candidate.profile_definition_digest,
+      profile_catalog_digest: candidate.profile_catalog_digest,
+      bundle_lock_digest: candidate.bundle_lock_digest,
+    };
   }
   return {
     state: 'resolved',
@@ -262,6 +314,7 @@ function validateResolve(value: unknown): ProfileResolveResult {
       profile_lock: result.review.profile_lock,
       resolved_plan: result.review.resolved_plan,
       predecessor: result.review.predecessor,
+      ...(catalogBinding ? {catalog_binding: catalogBinding} : {}),
     },
     next_action: 'review',
     write_set: requiredWriteSet(result.write_set),

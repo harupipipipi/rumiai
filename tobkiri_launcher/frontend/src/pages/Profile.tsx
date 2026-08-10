@@ -2,6 +2,7 @@ import {FormEvent, useEffect, useState} from 'react';
 import {Check, UserRound} from 'lucide-react';
 
 import {AdvancedSurfaceFrame} from '@/src/components/advanced/AdvancedSurfaceFrame';
+import {ProfileCatalogSelector} from '@/src/components/advanced/ProfileCatalogSelector';
 import {ProfileCeremonyPanel} from '@/src/components/advanced/ProfileCeremonyPanel';
 import {RuntimeEvidenceCard} from '@/src/components/advanced/RuntimeEvidenceCard';
 import {Avatar} from '@/src/components/ui/Avatar';
@@ -11,6 +12,7 @@ import {Card, CardContent, CardDescription, CardHeader, CardTitle} from '@/src/c
 import {Input} from '@/src/components/ui/Input';
 import {useRuntimeSurface} from '@/src/hooks/useRuntimeSurface';
 import {LAUNCHER_ADVANCED_VIEWS} from '@/src/lib/advancedSurfaces';
+import type {RuntimeProfileCatalogProjection} from '@/src/lib/runtimeSurface';
 import {AVATAR_OPTIONS, useAppStore} from '@/src/store';
 
 export function Profile() {
@@ -20,7 +22,9 @@ export function Profile() {
   const packs = useAppStore((state) => state.packs);
   const packsLoading = useAppStore((state) => state.packsLoading);
   const loadPacks = useAppStore((state) => state.loadPacks);
+  const loadFrontendCatalog = useAppStore((state) => state.loadFrontendCatalog);
   const surface = useRuntimeSurface<unknown>('profile');
+  const catalogSurface = useRuntimeSurface<RuntimeProfileCatalogProjection>('profiles');
   const descriptor = LAUNCHER_ADVANCED_VIEWS.profile;
   const [username, setUsername] = useState(profile.username);
   const [job, setJob] = useState(profile.job);
@@ -38,11 +42,20 @@ export function Profile() {
     addToast('Launcher profile saved locally.', 'success');
   };
 
+  const refreshAdvanced = async () => {
+    await Promise.all([
+      surface.refresh(true),
+      catalogSurface.refresh(true),
+      loadPacks(),
+      loadFrontendCatalog(),
+    ]);
+  };
+
   return (
     <AdvancedSurfaceFrame
       descriptor={descriptor}
       state={{status: surface.status, stale: surface.stale, error: surface.error}}
-      onRetry={() => void surface.refresh()}
+      onRetry={() => void refreshAdvanced()}
     >
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)]">
         <Card>
@@ -108,12 +121,25 @@ export function Profile() {
               <RuntimeEvidenceCard envelope={surface.data} title="Accepted Profile snapshot" />
             ) : (
               <p className="rounded-lg border border-dashed border-border px-4 py-4 text-sm leading-6 text-text-muted">
-                No canonical Profile snapshot is available in the current frontend Contract Map. Local profile editing remains available; no runtime mutation is attempted.
+                No canonical Profile snapshot is available from the Broker-backed Protocol v4 surface. Local profile editing remains available; no runtime mutation is attempted.
               </p>
             )}
           </CardContent>
         </Card>
       </div>
+      <ProfileCatalogSelector
+        profileSurface={surface}
+        catalogSurface={catalogSurface}
+        packs={packs}
+        packsLoading={packsLoading}
+        loadPacks={loadPacks}
+        onActivated={async () => {
+          await Promise.all([
+            catalogSurface.refresh(true),
+            loadFrontendCatalog(),
+          ]);
+        }}
+      />
       <ProfileCeremonyPanel
         surface={surface}
         packs={packs}

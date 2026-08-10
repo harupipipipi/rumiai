@@ -13,6 +13,29 @@ test("the checked-in generated map is deterministic and current", async () => {
   const result = await checkGeneratedFrontendContractMap();
   assert.equal(result.rawDigest, "sha256:b46fde48be7d67dc2ab6527d0e80058c2c83e2bbe904191db7e411b70bef6f2c");
   assert.equal(result.runtimeMap.routes.length, 22);
+  const profileCatalog = result.runtimeMap.routes.find(
+    (route) => route.method === "GET" && route.path === "/api/runtime-surface/profiles",
+  );
+  assert.deepEqual(profileCatalog?.targets, [{
+    contribution_id: "defaults.runtime-surface.profile-catalog",
+    contract_id: "tobkiri.host.control-presentation.v4",
+    operation_id: "profile.catalog.read",
+    provider_id: "tobkiri.host.control-presentation",
+    function_id: "tobkiri.host.control-presentation",
+    allowed_payload_keys: [],
+  }]);
+  const resolve = result.runtimeMap.routes.find(
+    (route) => route.method === "POST" && route.path === "/api/runtime-surface/profile-change/resolve",
+  );
+  assert.deepEqual(resolve?.targets[0]?.allowed_payload_keys, [
+    "profile_id",
+    "expected_profile_revision",
+    "expected_plan_digest",
+    "desired_pack_ids",
+    "profile_definition_digest",
+    "profile_catalog_digest",
+    "bundle_lock_digest",
+  ]);
 });
 
 test("a stale or tampered canonical artifact fails closed before generation", async () => {

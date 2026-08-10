@@ -119,7 +119,7 @@ test('Profile ceremony sends exact staged payloads and requires the authoritativ
     },
   ], calls));
 
-  await client.resolve({
+  const result = await client.resolve({
     profile_id: 'defaults',
     expected_profile_revision: digest('a'),
     expected_plan_digest: digest('b'),
@@ -147,6 +147,86 @@ test('Profile ceremony sends exact staged payloads and requires the authoritativ
     approval_id: 'approval-one',
     approval_digest: approvalDigest,
   });
+});
+
+test('named Profile resolve binds exact definition, catalog, and bundle-lock digests', async () => {
+  const calls: Array<{target: string; payload: Record<string, unknown>}> = [];
+  const definitionDigest = digest('6');
+  const catalogDigest = digest('7');
+  const bundleDigest = digest('8');
+  const client = createProfileCeremonyClient(undefined, queuedTransport([{
+    runtime_surface_api_version: RUNTIME_SURFACE_API_VERSION,
+    state: 'resolved',
+    candidate_id: 'candidate-named',
+    candidate_digest: digest('9'),
+    expires_in: 60,
+    review: {
+      profile: {profile_id: 'alternate'},
+      profile_lock: {},
+      resolved_plan: {},
+      predecessor: {},
+      catalog_binding: {
+        profile_definition_digest: definitionDigest,
+        profile_catalog_digest: catalogDigest,
+        bundle_lock_digest: bundleDigest,
+      },
+    },
+    next_action: 'review',
+    write_set: [],
+  }], calls));
+
+  const result = await client.resolve({
+    profile_id: 'alternate',
+    expected_profile_revision: digest('a'),
+    expected_plan_digest: digest('b'),
+    desired_pack_ids: ['provider-pack'],
+    profile_definition_digest: definitionDigest,
+    profile_catalog_digest: catalogDigest,
+    bundle_lock_digest: bundleDigest,
+  });
+
+  assert.deepEqual(Object.keys(calls[0].payload).sort(), [
+    'bundle_lock_digest',
+    'desired_pack_ids',
+    'expected_plan_digest',
+    'expected_profile_revision',
+    'profile_catalog_digest',
+    'profile_definition_digest',
+    'profile_id',
+  ]);
+  assert.deepEqual(calls[0].payload, {
+    profile_id: 'alternate',
+    expected_profile_revision: digest('a'),
+    expected_plan_digest: digest('b'),
+    desired_pack_ids: ['provider-pack'],
+    profile_definition_digest: definitionDigest,
+    profile_catalog_digest: catalogDigest,
+    bundle_lock_digest: bundleDigest,
+  });
+  assert.equal(result.review.catalog_binding?.profile_catalog_digest, catalogDigest);
+});
+
+test('named Profile selection rejects partial catalog bindings and legacy non-default payloads', () => {
+  const client = createProfileCeremonyClient(undefined, queuedTransport([], []));
+  assert.throws(
+    () => client.resolve({
+      profile_id: 'alternate',
+      expected_profile_revision: digest('a'),
+      expected_plan_digest: digest('b'),
+      desired_pack_ids: ['provider-pack'],
+      profile_definition_digest: digest('6'),
+    } as never),
+    (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'INVALID',
+  );
+  assert.throws(
+    () => client.resolve({
+      profile_id: 'alternate',
+      expected_profile_revision: digest('a'),
+      expected_plan_digest: digest('b'),
+      desired_pack_ids: ['provider-pack'],
+    }),
+    (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'INVALID',
+  );
 });
 
 test('Profile ceremony maps stale, digest mismatch, timeout, and denial errors fail-closed', async () => {

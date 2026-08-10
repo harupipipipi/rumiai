@@ -7,9 +7,12 @@ import {Card, CardContent, CardDescription, CardHeader, CardTitle} from '@/src/c
 import {broadcastRuntimeSurfaceRefresh, type RuntimeSurfaceState} from '@/src/hooks/useRuntimeSurface';
 import {
   classifyRuntimeSurfaceError,
+  extractExactProfileCatalogSelectablePackIds,
   extractExactProfileSelectablePackIds,
   runtimeSurfaceErrorMessage,
   RuntimeSurfaceError,
+  type RuntimeProfileCatalogEntry,
+  type RuntimeProfileCatalogProjection,
   type RuntimeSurfaceErrorCode,
 } from '@/src/lib/runtimeSurface';
 import {
@@ -43,6 +46,9 @@ export function ProfileCeremonyPanel({
   loadPacks,
   client = defaultProfileCeremonyClient,
   onActivated,
+  authoritativeSelection,
+  catalogSurface,
+  onBusyChange,
 }: {
   surface: RuntimeSurfaceState<unknown>;
   packs: Pack[];
@@ -50,6 +56,13 @@ export function ProfileCeremonyPanel({
   loadPacks: () => Promise<void>;
   client?: ProfileCeremonyClient;
   onActivated?: (result: ProfileActivateResult) => Promise<void>;
+  authoritativeSelection?: {
+    entry: RuntimeProfileCatalogEntry;
+    catalogDigest: string;
+    bundleLockDigest: string;
+  };
+  catalogSurface?: RuntimeSurfaceState<RuntimeProfileCatalogProjection>;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const [selectedPackIds, setSelectedPackIds] = useState<string[]>([]);
   const [ceremonyState, setCeremonyState] = useState<CeremonyState>('idle');
@@ -59,6 +72,16 @@ export function ProfileCeremonyPanel({
   const [ceremonySnapshot, setCeremonySnapshot] = useState<string | null>(null);
   const [failure, setFailure] = useState<{code: RuntimeSurfaceErrorCode; message: string} | null>(null);
   const initialized = useRef(false);
+  const requestVersion = useRef(0);
+  const busyRef = useRef(false);
+
+  const isCatalogMode = Boolean(authoritativeSelection);
+  const authoritativePackIds = useMemo(
+    () => authoritativeSelection
+      ? extractExactProfileCatalogSelectablePackIds(authoritativeSelection.entry)
+      : null,
+    [authoritativeSelection],
+  );
 
   const closureIds = useMemo(
     () => surface.data ? extractExactProfileSelectablePackIds(surface.data.data) : null,
@@ -82,8 +105,60 @@ export function ProfileCeremonyPanel({
   const profilePackIdsAvailable = closureIds !== null;
   const missingClosureIds = (closureIds ?? []).filter((id) => !packs.some((pack) => pack.id === id));
 
+  const catalogProjection = catalogSurface?.data?.data ?? null;
+  const catalogEntry = authoritativeSelection?.entry;
+  const catalogBindingStable = Boolean(
+    isCatalogMode
+    && catalogSurface
+    && catalogSurface.status === 'ready'
+    && !catalogSurface.stale
+    && catalogSurface.data
+    && catalogProjection
+    && catalogProjection.catalog_digest === authoritativeSelection?.catalogDigest
+    && catalogProjection.bundle_lock_digest === authoritativeSelection?.bundleLockDigest
+    && catalogProjection.profiles.some((entry) => (
+      entry.profile_id === catalogEntry?.profile_id
+      && entry.definition.digest === catalogEntry?.definition.digest
+    )),
+  );
+  const catalogPackRows = (authoritativePackIds ?? []).map((id) => packs.find((pack) => pack.id === id) ?? null);
+  const catalogMissingPackIds = catalogPackRows.flatMap((pack, index) => pack ? [] : [authoritativePackIds?.[index] ?? '']);
+  const catalogIncompatiblePackIds = catalogPackRows.flatMap((pack, index) => {
+    if (!pack) return [];
+    const closureEntry = catalogEntry?.pack_closure.find((item) => item.pack_id === pack.id);
+    if (
+      !closureEntry
+      || pack.artifactDigest !== closureEntry.artifact_digest
+      || !pack.installed
+      || !pack.approved
+      || !pack.enabled
+    ) return [authoritativePackIds?.[index] ?? pack.id];
+    return [];
+  });
+
+  useEffect(() => {
+    if (!isCatalogMode) return;
+    requestVersion.current += 1;
+    busyRef.current = false;
+    setCeremonyState('idle');
+    setCandidate(null);
+    setReviewed(null);
+    setApproval(null);
+    setCeremonySnapshot(null);
+    setFailure(null);
+  }, [isCatalogMode, catalogEntry?.profile_id, catalogEntry?.definition.digest, authoritativeSelection?.catalogDigest, authoritativeSelection?.bundleLockDigest]);
+
+  useEffect(() => {
+    const busy = ['resolving', 'reviewing', 'approving', 'activating'].includes(ceremonyState);
+    onBusyChange?.(busy);
+    return () => {
+      onBusyChange?.(false);
+    };
+  }, [ceremonyState, onBusyChange]);
+
   useEffect(() => {
     if (initialized.current) return;
+    if (isCatalogMode) return;
     const initial = closureIds && closureIds.length > 0
       ? closureIds.filter((id) => selectablePacks.some((pack) => pack.id === id))
       : selectablePacks.filter((pack) => pack.required || pack.enabled).map((pack) => pack.id);
@@ -91,21 +166,76 @@ export function ProfileCeremonyPanel({
       initialized.current = true;
       setSelectedPackIds(initial);
     }
-  }, [closureIds, selectablePacks]);
+  }, [closureIds, selectablePacks, isCatalogMode]);
 
   const currentSnapshot = snapshotForProfileCeremony(surface.data);
   const ceremonyIsBusy = ['resolving', 'reviewing', 'approving', 'activating'].includes(ceremonyState);
+  const desiredPackIds = isCatalogMode ? (authoritativePackIds ?? []) : selectedPackIds;
+  const currentBindingKey = [
+    currentSnapshot ? snapshotKey(currentSnapshot) : 'no-runtime-snapshot',
+    isCatalogMode ? catalogEntry?.profile_id ?? 'no-profile-selection' : 'defaults-pack-set',
+    isCatalogMode ? catalogEntry?.definition.digest ?? 'no-profile-definition' : '',
+    isCatalogMode ? authoritativeSelection?.catalogDigest ?? 'no-profile-catalog' : '',
+    isCatalogMode ? authoritativeSelection?.bundleLockDigest ?? 'no-bundle-lock' : '',
+  ].join(':');
+  const currentBindingRef = useRef(currentBindingKey);
+  currentBindingRef.current = currentBindingKey;
+  const previousBindingKey = useRef(currentBindingKey);
+
+  useEffect(() => {
+    if (previousBindingKey.current === currentBindingKey) return;
+    previousBindingKey.current = currentBindingKey;
+    requestVersion.current += 1;
+    busyRef.current = false;
+    setCeremonyState('idle');
+    setCandidate(null);
+    setReviewed(null);
+    setApproval(null);
+    setCeremonySnapshot(null);
+    setFailure(null);
+  }, [currentBindingKey]);
+
+  const catalogSelectionAvailable = Boolean(
+    catalogEntry
+    && catalogEntry.available
+    && authoritativePackIds
+    && authoritativePackIds.length > 0
+    && catalogBindingStable
+    && catalogMissingPackIds.length === 0
+    && catalogIncompatiblePackIds.length === 0,
+  );
   const isRuntimeReady = surface.status === 'ready'
     && !surface.stale
     && currentSnapshot !== null
-    && profilePackIdsAvailable
-    && packCatalogBound
-    && missingClosureIds.length === 0;
+    && (isCatalogMode
+      ? catalogSelectionAvailable
+      : profilePackIdsAvailable && packCatalogBound && missingClosureIds.length === 0);
   const snapshotChanged = Boolean(
-    ceremonySnapshot && currentSnapshot && ceremonySnapshot !== snapshotKey(currentSnapshot),
+    ceremonySnapshot && ceremonySnapshot !== currentBindingKey,
   );
 
+  const beginStep = (nextState: Extract<CeremonyState, 'resolving' | 'reviewing' | 'approving' | 'activating'>) => {
+    if (busyRef.current) return null;
+    busyRef.current = true;
+    const request = requestVersion.current + 1;
+    requestVersion.current = request;
+    const bindingKey = currentBindingRef.current;
+    setFailure(null);
+    setCeremonyState(nextState);
+    return {request, bindingKey};
+  };
+
+  const requestIsCurrent = (request: number, bindingKey: string): boolean => (
+    requestVersion.current === request && currentBindingRef.current === bindingKey
+  );
+
+  const finishStep = (request: number): void => {
+    if (requestVersion.current === request) busyRef.current = false;
+  };
+
   const resetCeremony = () => {
+    requestVersion.current += 1;
+    busyRef.current = false;
     setCeremonyState('idle');
     setCandidate(null);
     setReviewed(null);
@@ -115,7 +245,7 @@ export function ProfileCeremonyPanel({
   };
 
   const selectPack = (pack: Pack) => {
-    if (!pack.installed || !pack.approved || pack.required || ceremonyIsBusy) return;
+    if (isCatalogMode || !pack.installed || !pack.approved || pack.required || ceremonyIsBusy) return;
     if (ceremonyState !== 'idle') resetCeremony();
     setSelectedPackIds((current) => {
       const next = current.includes(pack.id)
@@ -136,78 +266,135 @@ export function ProfileCeremonyPanel({
     if (!isRuntimeReady || snapshotChanged || !currentSnapshot) {
       throw new RuntimeSurfaceError('DIGEST_MISMATCH', runtimeSurfaceErrorMessage('DIGEST_MISMATCH'));
     }
+    if (isCatalogMode && (!catalogEntry || !catalogBindingStable)) {
+      throw new RuntimeSurfaceError(
+        'DIGEST_MISMATCH',
+        'The selected Profile definition or catalog lock changed. Refresh the authoritative catalog before continuing.',
+      );
+    }
     return currentSnapshot;
   };
 
   const resolve = async () => {
+    const operation = beginStep('resolving');
+    if (!operation) return;
     try {
       const snapshot = requireStableSnapshot();
       if (
-        selectedPackIds.length === 0
-        || new Set(selectedPackIds).size !== selectedPackIds.length
-        || selectedPackIds.some((id) => !selectablePackIds.has(id))
+        desiredPackIds.length === 0
+        || new Set(desiredPackIds).size !== desiredPackIds.length
+        || (!isCatalogMode && desiredPackIds.some((id) => !selectablePackIds.has(id)))
       ) {
-        throw new RuntimeSurfaceError('INVALID', 'Select at least one approved Pack before resolving a candidate.');
+        throw new RuntimeSurfaceError(
+          'INVALID',
+          isCatalogMode
+            ? 'The selected authoritative Profile has no exact selectable Pack closure.'
+            : 'Select at least one approved Pack before resolving a candidate.',
+        );
       }
-      setFailure(null);
-      setCeremonyState('resolving');
-      const result = await client.resolve({
+      const input = {
         profile_id: snapshot.profile_id,
         expected_profile_revision: snapshot.profile_revision,
         expected_plan_digest: snapshot.plan_digest,
-        desired_pack_ids: [...selectedPackIds],
-      });
+        desired_pack_ids: [...desiredPackIds],
+        ...(isCatalogMode && authoritativeSelection
+          ? {
+            profile_id: authoritativeSelection.entry.profile_id,
+            profile_definition_digest: authoritativeSelection.entry.definition.digest,
+            profile_catalog_digest: authoritativeSelection.catalogDigest,
+            bundle_lock_digest: authoritativeSelection.bundleLockDigest,
+          }
+          : {}),
+      };
+      const result = await client.resolve(input);
+      if (!requestIsCurrent(operation.request, operation.bindingKey)) return;
+      if (isCatalogMode) {
+        const binding = result.review.catalog_binding;
+        if (
+          !binding
+          || typeof binding !== 'object'
+          || Array.isArray(binding)
+          || binding.profile_definition_digest !== authoritativeSelection?.entry.definition.digest
+          || binding.profile_catalog_digest !== authoritativeSelection?.catalogDigest
+          || binding.bundle_lock_digest !== authoritativeSelection?.bundleLockDigest
+        ) {
+          throw new RuntimeSurfaceError(
+            'DIGEST_MISMATCH',
+            'The resolved candidate is not bound to the selected Profile definition and catalog lock.',
+          );
+        }
+        if (result.review.profile && typeof result.review.profile === 'object' && !Array.isArray(result.review.profile)) {
+          const resolvedProfileId = (result.review.profile as Record<string, unknown>).profile_id;
+          if (resolvedProfileId !== authoritativeSelection?.entry.profile_id) {
+            throw new RuntimeSurfaceError('DIGEST_MISMATCH', 'The resolved candidate names a different Profile.');
+          }
+        }
+      }
       setCandidate(result);
       setReviewed(null);
       setApproval(null);
-      setCeremonySnapshot(snapshotKey(snapshot));
+      setCeremonySnapshot(operation.bindingKey);
       setCeremonyState('resolved');
     } catch (error) {
-      failClosed(error);
+      if (requestIsCurrent(operation.request, operation.bindingKey)) failClosed(error);
+    } finally {
+      finishStep(operation.request);
     }
   };
 
   const review = async () => {
+    const operation = beginStep('reviewing');
+    if (!operation) return;
     try {
       requireStableSnapshot();
       if (!candidate) throw new RuntimeSurfaceError('INVALID', 'No resolved candidate is available.');
-      setFailure(null);
-      setCeremonyState('reviewing');
       const result = await client.review({candidate_id: candidate.candidate_id, candidate_digest: candidate.candidate_digest});
+      if (!requestIsCurrent(operation.request, operation.bindingKey)) return;
       setReviewed(result);
       setCeremonyState('reviewed');
     } catch (error) {
-      failClosed(error);
+      if (requestIsCurrent(operation.request, operation.bindingKey)) failClosed(error);
+    } finally {
+      finishStep(operation.request);
     }
   };
 
   const approve = async () => {
+    const operation = beginStep('approving');
+    if (!operation) return;
     try {
       requireStableSnapshot();
       if (!reviewed) throw new RuntimeSurfaceError('INVALID', 'Review must complete before approval.');
-      setFailure(null);
-      setCeremonyState('approving');
       const result = await client.approve({candidate_id: reviewed.candidate_id, candidate_digest: reviewed.candidate_digest});
+      if (!requestIsCurrent(operation.request, operation.bindingKey)) return;
       setApproval(result);
       setCeremonyState('approved');
     } catch (error) {
-      failClosed(error);
+      if (requestIsCurrent(operation.request, operation.bindingKey)) failClosed(error);
+    } finally {
+      finishStep(operation.request);
     }
   };
 
   const activate = async () => {
+    const operation = beginStep('activating');
+    if (!operation) return;
     try {
       requireStableSnapshot();
       if (!approval) throw new RuntimeSurfaceError('INVALID', 'Kernel approval is required before activation.');
-      setFailure(null);
-      setCeremonyState('activating');
       const result = await client.activate({approval_id: approval.approval_id, approval_digest: approval.approval_digest});
+      if (!requestIsCurrent(operation.request, operation.bindingKey)) return;
+      if (isCatalogMode && result.profile_id !== authoritativeSelection?.entry.profile_id) {
+        throw new RuntimeSurfaceError('DIGEST_MISMATCH', 'Activation returned a different Profile than the selected catalog definition.');
+      }
       setCeremonyState('active');
       broadcastRuntimeSurfaceRefresh();
       await onActivated?.(result);
       await Promise.all([surface.refresh(true), loadPacks()]);
     } catch (error) {
-      failClosed(error);
+      if (requestIsCurrent(operation.request, operation.bindingKey)) failClosed(error);
+    } finally {
+      finishStep(operation.request);
     }
   };
 
@@ -227,7 +414,9 @@ export function ProfileCeremonyPanel({
           <CardTitle className="flex items-center gap-2"><LockKeyhole className="h-4 w-4" aria-hidden="true" />Runtime Profile change ceremony</CardTitle>
           <Badge variant={isRuntimeReady ? 'warning' : 'secondary'}>{isRuntimeReady ? 'digest-bound' : 'locked'}</Badge>
         </div>
-        <CardDescription>Select an approved Pack closure, then inspect the exact diff before each one-shot server-bound step. No client approval flag is accepted.</CardDescription>
+        <CardDescription>{isCatalogMode
+          ? 'The selected Profile is an authoritative definition. Inspect its exact closure and diff before each one-shot server-bound step. No client approval flag is accepted.'
+          : 'Edit the separate Defaults Pack set, then inspect the exact diff before each one-shot server-bound step. No client approval flag is accepted.'}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
         <div className="grid gap-2 sm:grid-cols-4" aria-label="Profile change steps">
@@ -246,68 +435,108 @@ export function ProfileCeremonyPanel({
           })}
         </div>
 
-        <div>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h3 className="text-sm font-semibold text-text-main">Desired Pack closure</h3>
-            <p className="mt-1 text-xs text-text-muted">Candidates merge the Profile document provider Pack ids with the canonical Pack control catalog. Only installed, approved, enabled, revision-bound entries are selectable; required entries stay selected.</p>
+        {isCatalogMode ? (
+          <div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-semibold text-text-main">Authoritative Pack closure</h3>
+                <p className="mt-1 text-xs text-text-muted">The selected Profile definition owns this exact closure. Pack rows are used only to report compatibility; they cannot add or remove Packs from a named Profile.</p>
+              </div>
+              <Badge variant="outline">{desiredPackIds.length} requested</Badge>
             </div>
-            <Badge variant="outline">{selectedPackIds.length} selected</Badge>
+            {catalogEntry ? (
+              <div className="mt-3 rounded-lg border border-border bg-bg-main p-4">
+                <dl className="grid gap-3 sm:grid-cols-2">
+                  <div><dt className="text-xs text-text-muted">Selected Profile</dt><dd className="mt-1 break-all font-mono text-xs text-text-main">{catalogEntry.profile_id}</dd></div>
+                  <div><dt className="text-xs text-text-muted">Definition digest</dt><dd className="mt-1 break-all font-mono text-xs text-text-main">{catalogEntry.definition.digest}</dd></div>
+                  <div><dt className="text-xs text-text-muted">Profile catalog digest</dt><dd className="mt-1 break-all font-mono text-xs text-text-main">{authoritativeSelection?.catalogDigest}</dd></div>
+                  <div><dt className="text-xs text-text-muted">Bundle lock digest</dt><dd className="mt-1 break-all font-mono text-xs text-text-main">{authoritativeSelection?.bundleLockDigest}</dd></div>
+                </dl>
+                {catalogMissingPackIds.length > 0 ? (
+                  <p className="mt-3 text-sm text-amber-700 dark:text-amber-300" role="alert">The current Pack catalog does not contain the exact requested entries: {catalogMissingPackIds.join(', ')}.</p>
+                ) : null}
+                {catalogIncompatiblePackIds.length > 0 ? (
+                  <p className="mt-3 text-sm text-amber-700 dark:text-amber-300" role="alert">One or more requested Packs are not installed, approved, enabled, or digest-matched. Refresh the Pack catalog or complete its separate lifecycle before continuing.</p>
+                ) : null}
+                {!catalogBindingStable ? (
+                  <p className="mt-3 text-sm text-amber-700 dark:text-amber-300" role="alert">The authoritative Profile catalog is loading, stale, or no longer matches this selection. Ceremony actions are locked until it refreshes.</p>
+                ) : null}
+                {!catalogEntry.available ? (
+                  <div className="mt-3 text-sm text-destructive" role="alert">
+                    <p>This Profile is unavailable in the verified catalog.</p>
+                    <ul className="mt-1 list-disc pl-5">{catalogEntry.diagnostics.map((diagnostic) => <li key={`${diagnostic.code}:${diagnostic.subject}`}>{diagnostic.code}: {diagnostic.subject}</li>)}</ul>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p className="mt-3 rounded-lg border border-dashed border-border px-4 py-4 text-sm text-text-muted">No authoritative Profile definition is selected.</p>
+            )}
           </div>
-          {packsLoading && packs.length === 0 ? (
-            <div className="mt-3 h-24 animate-pulse rounded-lg border border-border bg-bg-main" role="status">Loading approved Packs…</div>
-          ) : packs.length === 0 ? (
-            <p className="mt-3 rounded-lg border border-dashed border-border px-4 py-4 text-sm text-text-muted">No Pack control catalog entries are available.</p>
-          ) : (
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {packs.map((pack) => {
-                const eligible = selectablePackIds.has(pack.id) && packCatalogBound;
-                const checked = selectedPackIds.includes(pack.id);
-                const inSnapshot = profileBoundPacks.some((candidate) => candidate.id === pack.id);
-                const reason = !inSnapshot
-                  ? 'Profile revision or Plan digest is stale'
-                  : !pack.installed
-                    ? 'Install required'
-                    : !pack.approved
-                      ? 'Kernel Pack approval required'
-                      : !pack.enabled
-                        ? 'Enable the Pack before adding it to the closure'
-                        : !packCatalogBound
-                          ? 'Pack catalog is not bound to the accepted snapshot'
-                          : null;
-                return (
-                  <button
-                    key={pack.id}
-                    type="button"
-                    className="flex min-h-11 items-center gap-3 rounded-lg border border-border bg-bg-main px-3 py-2 text-left transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] disabled:pointer-events-none disabled:opacity-60"
-                    aria-pressed={checked}
-                    disabled={!eligible || pack.required || ceremonyIsBusy}
-                    onClick={() => selectPack(pack)}
-                  >
-                    <span className={checked ? 'flex h-5 w-5 shrink-0 items-center justify-center rounded border border-accent bg-accent text-accent-fg' : 'h-5 w-5 shrink-0 rounded border border-border'} aria-hidden="true">
-                      {checked ? <CheckCircle2 className="h-4 w-4" /> : null}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-text-main">{pack.name}</span>
-                      <span className="block truncate text-xs text-text-muted">{pack.id} · {pack.enabled ? 'enabled' : 'disabled'} · {pack.approved ? 'approved' : 'not approved'} · {pack.installed ? 'installed' : 'not installed'}</span>
-                    </span>
-                    {pack.required ? <Badge variant="secondary">Required</Badge> : null}
-                    {!pack.required && reason ? <span className="max-w-40 text-right text-[11px] text-text-muted">{reason}</span> : null}
-                  </button>
-                );
-              })}
+        ) : (
+          <div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-semibold text-text-main">Defaults Pack-set editor</h3>
+                <p className="mt-1 text-xs text-text-muted">This separate lifecycle edits the Defaults Pack set. Named Profile selection is always read-only from the authoritative catalog above.</p>
+              </div>
+              <Badge variant="outline">{selectedPackIds.length} selected</Badge>
             </div>
-          )}
-          {missingClosureIds.length > 0 ? (
-            <p className="mt-3 text-sm text-amber-700 dark:text-amber-300" role="alert">Active closure entries missing from the canonical Pack catalog: {missingClosureIds.join(', ')}. Refresh before changing the Profile.</p>
-          ) : null}
-          {surface.data && !packCatalogBound && packs.length > 0 ? (
-            <p className="mt-3 text-sm text-amber-700 dark:text-amber-300" role="alert">Pack lifecycle rows are not bound to the accepted Profile revision and Plan digest, or the control catalog revision is inconsistent. Candidate actions are locked until both views refresh.</p>
-          ) : null}
-          {surface.data && !profilePackIdsAvailable ? (
-            <p className="mt-3 text-sm text-amber-700 dark:text-amber-300" role="alert">The canonical Profile document did not publish a valid provider Pack set. Candidate selection is locked.</p>
-          ) : null}
-        </div>
+            {packsLoading && packs.length === 0 ? (
+              <div className="mt-3 h-24 animate-pulse rounded-lg border border-border bg-bg-main" role="status">Loading approved Packs…</div>
+            ) : packs.length === 0 ? (
+              <p className="mt-3 rounded-lg border border-dashed border-border px-4 py-4 text-sm text-text-muted">No Pack control catalog entries are available.</p>
+            ) : (
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {packs.map((pack) => {
+                  const eligible = selectablePackIds.has(pack.id) && packCatalogBound;
+                  const checked = selectedPackIds.includes(pack.id);
+                  const inSnapshot = profileBoundPacks.some((candidate) => candidate.id === pack.id);
+                  const reason = !inSnapshot
+                    ? 'Profile revision or Plan digest is stale'
+                    : !pack.installed
+                      ? 'Install required'
+                      : !pack.approved
+                        ? 'Kernel Pack approval required'
+                        : !pack.enabled
+                          ? 'Enable the Pack before adding it to the closure'
+                          : !packCatalogBound
+                            ? 'Pack catalog is not bound to the accepted snapshot'
+                            : null;
+                  return (
+                    <button
+                      key={pack.id}
+                      type="button"
+                      className="flex min-h-11 items-center gap-3 rounded-lg border border-border bg-bg-main px-3 py-2 text-left transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] disabled:pointer-events-none disabled:opacity-60"
+                      aria-pressed={checked}
+                      aria-label={`Toggle Defaults Pack ${pack.name}`}
+                      disabled={!eligible || pack.required || ceremonyIsBusy}
+                      onClick={() => selectPack(pack)}
+                    >
+                      <span className={checked ? 'flex h-5 w-5 shrink-0 items-center justify-center rounded border border-accent bg-accent text-accent-fg' : 'h-5 w-5 shrink-0 rounded border border-border'} aria-hidden="true">
+                        {checked ? <CheckCircle2 className="h-4 w-4" /> : null}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-text-main">{pack.name}</span>
+                        <span className="block truncate text-xs text-text-muted">{pack.id} · {pack.enabled ? 'enabled' : 'disabled'} · {pack.approved ? 'approved' : 'not approved'} · {pack.installed ? 'installed' : 'not installed'}</span>
+                      </span>
+                      {pack.required ? <Badge variant="secondary">Required</Badge> : null}
+                      {!pack.required && reason ? <span className="max-w-40 text-right text-[11px] text-text-muted">{reason}</span> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {missingClosureIds.length > 0 ? (
+              <p className="mt-3 text-sm text-amber-700 dark:text-amber-300" role="alert">Active closure entries missing from the canonical Pack catalog: {missingClosureIds.join(', ')}. Refresh before changing the Defaults Pack set.</p>
+            ) : null}
+            {surface.data && !packCatalogBound && packs.length > 0 ? (
+              <p className="mt-3 text-sm text-amber-700 dark:text-amber-300" role="alert">Pack lifecycle rows are not bound to the accepted Profile revision and Plan digest, or the control catalog revision is inconsistent. Candidate actions are locked until both views refresh.</p>
+            ) : null}
+            {surface.data && !profilePackIdsAvailable ? (
+              <p className="mt-3 text-sm text-amber-700 dark:text-amber-300" role="alert">The canonical Profile document did not publish a valid provider Pack set. Candidate selection is locked.</p>
+            ) : null}
+          </div>
+        )}
 
         {failure ? (
           <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm" role="alert">
@@ -346,7 +575,7 @@ export function ProfileCeremonyPanel({
           className="min-h-11 self-start"
           onClick={() => void action()}
           loading={ceremonyIsBusy}
-          disabled={!isRuntimeReady || snapshotChanged || selectedPackIds.length === 0 || ceremonyState === 'active'}
+          disabled={!isRuntimeReady || snapshotChanged || desiredPackIds.length === 0 || ceremonyState === 'active'}
         >
           {actionLabel}
         </Button>
