@@ -13,12 +13,22 @@ import tempfile
 import threading
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterator, Literal, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.errors import CanonicalizationError
+
+from .process_identity import (
+    ProcessIdentityEvidence,
+    process_start_identity as _process_start_identity,
+)
+from .secure_sqlite_path import (
+    canonical_platform_path,
+    SecurePathError,
+    secure_parent,
+    validate_owned_file_at,
+)
 
 
 def _current_boot_id() -> str | None:
@@ -47,59 +57,6 @@ def _current_boot_id() -> str | None:
     return None
 
 
-@dataclass(frozen=True)
-class ProcessIdentityEvidence:
-    """Explicit process-liveness evidence that never conflates unknown with dead."""
-
-    state: Literal["live", "dead", "unknown"]
-    identity: str = ""
-
-    def __post_init__(self) -> None:
-        if self.state == "live" and not self.identity:
-            raise ValueError("live process evidence requires an identity")
-        if self.state != "live" and self.identity:
-            raise ValueError("non-live process evidence cannot carry an identity")
-
-
-def _process_start_identity(process_id: int) -> ProcessIdentityEvidence:
-    """Return explicit live, dead, or unavailable PID-start evidence."""
-
-    if os.name == "nt" or process_id <= 0:
-        # ``/proc`` and ``ps`` are not Windows process-identity APIs.  Keep
-        # the evidence unknown rather than starting a POSIX compatibility
-        # subprocess from a server constructor or heartbeat path.
-        return ProcessIdentityEvidence("unknown")
-    try:
-        os.kill(process_id, 0)
-    except ProcessLookupError:
-        return ProcessIdentityEvidence("dead")
-    except (PermissionError, OSError):
-        # A denied or unsupported existence probe is not evidence of death.
-        pass
-
-    linux_stat = Path(f"/proc/{process_id}/stat")
-    try:
-        if linux_stat.exists():
-            fields = linux_stat.read_text(encoding="ascii").rsplit(")", 1)[1].split()
-            return ProcessIdentityEvidence("live", f"linux:{fields[19]}")
-        result = subprocess.run(
-            ["ps", "-o", "lstart=", "-p", str(process_id)],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=1.0,
-        )
-        if result.returncode != 0 or not result.stdout.strip():
-            return ProcessIdentityEvidence("unknown")
-        return ProcessIdentityEvidence(
-            "live", canonical_digest({"process_start": result.stdout.strip()})
-        )
-    except FileNotFoundError:
-        return ProcessIdentityEvidence("unknown")
-    except (IndexError, OSError, subprocess.SubprocessError):
-        return ProcessIdentityEvidence("unknown")
-
-
 class ControlReconciliationError(RuntimeError):
     """Raised when durable control state is missing, stale, or inconsistent."""
 
@@ -110,6 +67,10 @@ class ControlReconciliationConflictError(ControlReconciliationError):
 
 class ControlReconciliationUnavailableError(ControlReconciliationError):
     """Raised when durable reconciliation state is not safely available."""
+
+
+class _ControlReconciliationSnapshotChanged(ControlReconciliationUnavailableError):
+    """Internal signal that a concurrent writer invalidated a snapshot copy."""
 
 
 class ControlReconciliationStore:
@@ -136,7 +97,7 @@ class ControlReconciliationStore:
             raise ValueError("heartbeat interval must be positive and shorter than lease")
         if open_retry_seconds <= 0 or open_retry_seconds > 5.0:
             raise ValueError("open_retry_seconds must be positive and bounded")
-        self.path = Path(path)
+        self.path = canonical_platform_path(Path(path))
         self.instance_id = instance_id or f"store-{secrets.token_hex(16)}"
         self._process_id = os.getpid()
         self._process_token = secrets.token_hex(32)
@@ -181,22 +142,21 @@ class ControlReconciliationStore:
     def _secure_parent_descriptor(self) -> Iterator[int]:
         """Open every ancestor descriptor-relative without following symlinks."""
 
-        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open("/", flags)
         try:
-            for component in self.path.parent.absolute().parts[1:]:
-                next_descriptor = os.open(component, flags, dir_fd=descriptor)
-                os.close(descriptor)
-                descriptor = next_descriptor
-            yield descriptor
-        except FileNotFoundError as error:
-            raise ControlReconciliationUnavailableError("control journal is unavailable") from error
-        except OSError as error:
+            with secure_parent(self.path) as parent:
+                if parent.descriptor is None:
+                    raise SecurePathError("descriptor-relative directory access is unavailable")
+                yield parent.descriptor
+        except (OSError, SecurePathError) as error:
+            if isinstance(error, FileNotFoundError) or isinstance(
+                error.__cause__, FileNotFoundError
+            ):
+                raise ControlReconciliationUnavailableError(
+                    "control journal is unavailable"
+                ) from error
             raise ControlReconciliationUnavailableError(
                 "control journal ancestor is unsafe"
             ) from error
-        finally:
-            os.close(descriptor)
 
     @staticmethod
     def _validate_owned_file(
@@ -206,20 +166,17 @@ class ControlReconciliationStore:
         required: bool,
     ) -> os.stat_result | None:
         try:
-            metadata = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
-        except FileNotFoundError:
-            if required:
-                raise ControlReconciliationUnavailableError(
-                    "control journal is unavailable"
-                ) from None
-            return None
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_nlink != 1
-            or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
-        ):
-            raise ControlReconciliationUnavailableError("control journal file identity is unsafe")
-        return metadata
+            return validate_owned_file_at(
+                parent_descriptor,
+                name,
+                required=required,
+            )
+        except SecurePathError:
+            raise ControlReconciliationUnavailableError(
+                "control journal file identity is unsafe"
+            ) from None
+        except OSError as error:
+            raise ControlReconciliationUnavailableError("control journal is unavailable") from error
 
     def _secure_chmod_database(self) -> None:
         if os.name == "nt":
@@ -304,7 +261,7 @@ class ControlReconciliationStore:
         try:
             with tempfile.TemporaryDirectory(prefix="tobkiri-control-read-") as temporary:
                 snapshot = Path(temporary) / self.path.name
-                self._copy_immutable_snapshot(snapshot)
+                self._copy_stable_snapshot(snapshot)
                 connection = sqlite3.connect(
                     str(snapshot),
                     timeout=30.0,
@@ -326,6 +283,22 @@ class ControlReconciliationStore:
         finally:
             if connection is not None:
                 connection.close()
+
+    def _copy_stable_snapshot(self, snapshot: Path) -> None:
+        """Retry only concurrent snapshot changes within the bounded open deadline."""
+
+        deadline = self._monotonic_clock() + self._open_retry_seconds
+        while True:
+            snapshot.unlink(missing_ok=True)
+            Path(f"{snapshot}-wal").unlink(missing_ok=True)
+            try:
+                self._copy_immutable_snapshot(snapshot)
+                return
+            except _ControlReconciliationSnapshotChanged:
+                remaining = deadline - self._monotonic_clock()
+                if remaining <= 0:
+                    raise
+                self._retry_sleep(min(0.005, remaining))
 
     def _copy_immutable_snapshot(self, snapshot: Path) -> None:
         """Copy a stable database/WAL pair through no-follow file descriptors."""
@@ -367,7 +340,7 @@ class ControlReconciliationStore:
                             opened.st_uid,
                         )
                         if opened_fingerprint != fingerprint:
-                            raise ControlReconciliationUnavailableError(
+                            raise _ControlReconciliationSnapshotChanged(
                                 "control journal changed during immutable read"
                             )
                         target = snapshot if name == self.path.name else Path(f"{snapshot}-wal")
@@ -392,7 +365,7 @@ class ControlReconciliationStore:
                         metadata.st_uid,
                     )
                     if current != fingerprint:
-                        raise ControlReconciliationUnavailableError(
+                        raise _ControlReconciliationSnapshotChanged(
                             "control journal changed during immutable read"
                         )
         except ControlReconciliationError:

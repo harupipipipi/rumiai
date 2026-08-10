@@ -8,6 +8,7 @@ contain only opaque IDs and exact principal/domain digests needed for revocation
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import hmac
 import json
@@ -17,14 +18,23 @@ import sqlite3
 import stat
 import threading
 import time
+import weakref
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Iterator, TypeAlias
+from typing import Any, Concatenate, Iterator, ParamSpec, TypeAlias, TypeVar
 
 from cryptography.fernet import Fernet, InvalidToken
-from tobkiri_protocol.durability import publish_file_durable
+
+from ..process_identity import ProcessIdentityEvidence, process_start_identity
+from ..secure_sqlite_path import (
+    FileIdentity,
+    SecureParent,
+    SecurePathError,
+    canonical_platform_path,
+    secure_parent as open_secure_parent,
+)
 
 from .v4_models import (
     ApprovalRecord,
@@ -59,6 +69,22 @@ Record: TypeAlias = (
     | HostExtensionTrustRecord
 )
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _process_owned(
+    method: Callable[Concatenate[Any, _P], _R],
+) -> Callable[Concatenate[Any, _P], _R]:
+    """Fence every public store entry before validation or state access."""
+
+    @functools.wraps(method)
+    def guarded(store: Any, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+        store._assert_current_process()
+        return method(store, *args, **kwargs)
+
+    return guarded
+
 
 class AuthorityStore:
     """Host-owned authority database for ADR-014/015 state.
@@ -77,82 +103,259 @@ class AuthorityStore:
         key_path: str | Path | None = None,
         clock: Callable[[], float] = time.time,
         audit_fault: Callable[[], None] | None = None,
+        process_start_reader: Callable[[int], ProcessIdentityEvidence] | None = None,
     ) -> None:
-        self.path = Path(path)
-        parent_existed = self.path.parent.exists()
-        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.key_path = Path(key_path) if key_path is not None else self.path.with_suffix(".key")
-        if self.path.is_symlink() or self.key_path.is_symlink():
-            raise AuthorityStoreError("authority state paths cannot be symbolic links")
-        if os.name != "nt" and not parent_existed:
-            os.chmod(self.path.parent, 0o700)
+        self.path = canonical_platform_path(Path(path))
+        self.key_path = canonical_platform_path(
+            Path(key_path) if key_path is not None else self.path.with_suffix(".key")
+        )
+        self._owner_pid = os.getpid()
+        self._refresh_process_identity = process_start_reader is not None
+        self._process_start_reader = process_start_reader or process_start_identity
+        evidence = self._process_start_reader(self._owner_pid)
+        if evidence.state != "live":
+            raise AuthorityStoreError("authority process identity is unavailable")
+        self._owner_process_start = evidence.identity
         self._clock = clock
         self._audit_fault = audit_fault
         self._lock = threading.RLock()
         self._closed = False
+        self._fork_fenced = False
+        self._database_identity: FileIdentity | None = None
+        self._key_identity: FileIdentity | None = None
+        self._database_parent_identity: FileIdentity | None = None
+        self._key_parent_identity: FileIdentity | None = None
+        self._fernet_key = b""
+        self._mac_key = b""
+        self._fernet: Fernet | None = None
+        self._register_fork_fence()
+        self._prepare_paths()
         self._fernet_key = self._load_or_create_key()
         self._fernet = Fernet(self._fernet_key)
         self._mac_key = hashlib.sha256(self._fernet_key + b":lease-mac:v1").digest()
+        self._ensure_database_file()
         self._initialize()
         if os.name != "nt":
-            os.chmod(self.path, 0o600)
+            self._secure_chmod(self.path, self._database_identity)
+
+    def _register_fork_fence(self) -> None:
+        register = getattr(os, "register_at_fork", None)
+        if register is None:
+            return
+        store_reference = weakref.ref(self)
+
+        def fence_child() -> None:
+            store = store_reference()
+            if store is not None:
+                store._fork_fenced = True
+                store._closed = True
+                store._fernet_key = b""
+                store._mac_key = b""
+                store._fernet = None
+
+        register(after_in_child=fence_child)
+
+    def _assert_current_process(self) -> None:
+        if self._fork_fenced or os.getpid() != self._owner_pid:
+            raise AuthorityStoreError("authority store cannot be used after fork")
+        if not self._refresh_process_identity:
+            return
+        evidence = self._process_start_reader(self._owner_pid)
+        if evidence.state != "live" or evidence.identity != self._owner_process_start:
+            raise AuthorityStoreError("authority process identity is unavailable or changed")
+
+    def _prepare_paths(self) -> None:
+        """Create parents, then validate DB, key, and SQLite sidecars safely."""
+
+        try:
+            for target in (self.path, self.key_path):
+                parent_existed = target.parent.exists()
+                target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                if os.name != "nt" and not parent_existed:
+                    os.chmod(target.parent, 0o700)
+                with open_secure_parent(target) as parent:
+                    if hasattr(os, "getuid") and parent.identity.owner != os.getuid():
+                        raise SecurePathError("parent is not owned by the current user")
+                    identity = parent.validate_open(target.name, required=False)
+                    if target == self.path:
+                        self._database_parent_identity = parent.identity
+                        self._database_identity = identity
+                        for suffix in ("-wal", "-shm"):
+                            parent.validate_open(f"{target.name}{suffix}", required=False)
+                    else:
+                        self._key_parent_identity = parent.identity
+                        self._key_identity = identity
+        except (OSError, SecurePathError) as exc:
+            raise AuthorityStoreError("authority state path is unsafe") from exc
+
+    @contextmanager
+    def _secure_parent(self, path: Path) -> Iterator[SecureParent]:
+        expected = (
+            self._database_parent_identity if path == self.path else self._key_parent_identity
+        )
+        with open_secure_parent(path) as parent:
+            if expected is None or parent.identity != expected:
+                raise SecurePathError("authority parent identity changed")
+            yield parent
+
+    def _ensure_database_file(self) -> None:
+        if self._database_identity is not None:
+            return
+        try:
+            with self._secure_parent(self.path) as parent:
+                self._database_identity = parent.create_empty_file(self.path.name)
+        except (FileExistsError, OSError, SecurePathError) as exc:
+            if isinstance(exc, FileExistsError):
+                try:
+                    with self._secure_parent(self.path) as parent:
+                        self._database_identity = parent.validate_open(
+                            self.path.name,
+                            required=True,
+                        )
+                    return
+                except (OSError, SecurePathError) as validation_error:
+                    exc = validation_error
+            raise AuthorityStoreError("authority database path is unsafe") from exc
+
+    def _secure_chmod(self, path: Path, expected: FileIdentity | None) -> None:
+        try:
+            with self._secure_parent(path) as parent:
+                identity = parent.validate_open(path.name, required=True, expected=expected)
+                descriptor = parent.open_file(path.name, os.O_RDONLY)
+                try:
+                    if identity != FileIdentity.from_stat(os.fstat(descriptor)):
+                        raise SecurePathError("file changed before chmod")
+                    os.fchmod(descriptor, 0o600)
+                finally:
+                    os.close(descriptor)
+                parent.validate_open(path.name, required=True, expected=expected)
+        except (OSError, SecurePathError) as exc:
+            raise AuthorityStoreError("authority state path is unsafe") from exc
 
     def _load_or_create_key(self) -> bytes:
         try:
-            key = self.key_path.read_bytes().strip()
+            with self._secure_parent(self.key_path) as parent:
+                payload, identity = parent.read_bytes(
+                    self.key_path.name,
+                    expected=self._key_identity,
+                )
+            key = payload.strip()
             Fernet(key)
             if os.name != "nt":
-                mode = stat.S_IMODE(self.key_path.stat().st_mode)
+                with self._secure_parent(self.key_path) as parent:
+                    metadata = parent.stat_file(self.key_path.name, required=True)
+                assert metadata is not None
+                mode = stat.S_IMODE(metadata.st_mode)
                 if mode & 0o077:
                     raise AuthorityStoreError("authority encryption key permissions are too broad")
+            self._key_identity = identity
             return key
-        except FileNotFoundError:
+        except (FileNotFoundError, SecurePathError):
+            if self._key_identity is not None:
+                raise AuthorityStoreError("authority encryption key path is unsafe") from None
             pass
         except (OSError, ValueError) as exc:
             raise AuthorityStoreError("authority encryption key is invalid") from exc
 
-        if self.path.exists() and self.path.stat().st_size > 0:
-            raise AuthorityStoreError(
-                "authority encryption key is missing for an existing database"
-            )
+        if self._database_identity is not None:
+            try:
+                with self._secure_parent(self.path) as parent:
+                    metadata = parent.stat_file(self.path.name, required=True)
+                assert metadata is not None
+                if metadata.st_size > 0:
+                    raise AuthorityStoreError(
+                        "authority encryption key is missing for an existing database"
+                    )
+            except (OSError, SecurePathError) as exc:
+                raise AuthorityStoreError("authority database path is unsafe") from exc
 
         key = Fernet.generate_key()
-        self.key_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.key_path.with_name(f".{self.key_path.name}.{secrets.token_hex(8)}.tmp")
-        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        temporary_name = f".{self.key_path.name}.{secrets.token_hex(8)}.tmp"
         try:
-            with os.fdopen(descriptor, "wb") as handle:
-                handle.write(key + b"\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            try:
-                publish_file_durable(temporary, self.key_path)
-            except FileExistsError:
-                existing = self.key_path.read_bytes().strip()
-                Fernet(existing)
-                return existing
-            finally:
-                temporary.unlink(missing_ok=True)
-        except (OSError, ValueError):
-            temporary.unlink(missing_ok=True)
-            raise
+            with self._secure_parent(self.key_path) as parent:
+                descriptor = parent.open_file(
+                    temporary_name,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                )
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(key + b"\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                try:
+                    parent.assert_path_continuity()
+                    parent.publish_new_file(temporary_name, self.key_path.name)
+                except FileExistsError:
+                    payload, identity = parent.read_bytes(self.key_path.name)
+                    existing = payload.strip()
+                    Fernet(existing)
+                    self._key_identity = identity
+                    return existing
+                finally:
+                    parent.unlink_file(temporary_name, missing_ok=True)
+                payload, identity = parent.read_bytes(self.key_path.name)
+            if payload.strip() != key:
+                raise AuthorityStoreError("authority encryption key changed during creation")
+            self._key_identity = identity
+        except (OSError, SecurePathError, ValueError) as exc:
+            raise AuthorityStoreError("authority encryption key is invalid") from exc
         return key
 
+    def _validate_storage_files(self) -> None:
+        try:
+            with self._secure_parent(self.path) as parent:
+                parent.validate_open(
+                    self.path.name,
+                    required=True,
+                    expected=self._database_identity,
+                )
+                for suffix in ("-wal", "-shm"):
+                    parent.validate_open(f"{self.path.name}{suffix}", required=False)
+        except (OSError, SecurePathError) as exc:
+            raise AuthorityStoreError("authority database path is unsafe") from exc
+
+    def _assert_crypto_material(self) -> None:
+        self._assert_current_process()
+        try:
+            with self._secure_parent(self.key_path) as parent:
+                parent.validate_open(
+                    self.key_path.name,
+                    required=True,
+                    expected=self._key_identity,
+                )
+        except (OSError, SecurePathError) as exc:
+            raise AuthorityStoreError("authority encryption key path is unsafe") from exc
+        if self._fernet is None or not self._fernet_key or not self._mac_key:
+            raise AuthorityStoreError("authority cryptographic material is unavailable")
+
     def _connect(self) -> sqlite3.Connection:
+        self._assert_current_process()
         if self._closed:
             raise AuthorityStoreError("authority store is closed")
-        connection = sqlite3.connect(
-            str(self.path),
-            timeout=30.0,
-            isolation_level=None,
-            check_same_thread=False,
-        )
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA synchronous=FULL")
-        connection.execute("PRAGMA trusted_schema=OFF")
-        return connection
+        connection: sqlite3.Connection | None = None
+        try:
+            self._validate_storage_files()
+            connection = sqlite3.connect(
+                str(self.path),
+                timeout=30.0,
+                isolation_level=None,
+                check_same_thread=False,
+            )
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA synchronous=FULL")
+            connection.execute("PRAGMA trusted_schema=OFF")
+            self._validate_storage_files()
+            return connection
+        except AuthorityStoreError:
+            if connection is not None:
+                connection.close()
+            raise
+        except (OSError, sqlite3.Error) as exc:
+            if connection is not None:
+                connection.close()
+            raise AuthorityStoreError("authority database is unavailable") from exc
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -163,17 +366,23 @@ class AuthorityStore:
             with connection:
                 yield connection
         finally:
-            connection.close()
+            try:
+                self._validate_storage_files()
+            finally:
+                connection.close()
+            self._validate_storage_files()
 
     def close(self) -> None:
         """Idempotently prevent new work after all active transactions finish."""
 
+        self._assert_current_process()
         with self._lock:
             self._closed = True
 
     def __enter__(self) -> "AuthorityStore":
         """Return this open store for explicit scoped ownership."""
 
+        self._assert_current_process()
         with self._lock:
             if self._closed:
                 raise AuthorityStoreError("authority store is closed")
@@ -475,11 +684,17 @@ class AuthorityStore:
             )
 
     def _encrypt(self, payload: Mapping[str, Any]) -> bytes:
-        return self._fernet.encrypt(canonical_json(dict(payload)))
+        self._assert_crypto_material()
+        fernet = self._fernet
+        assert fernet is not None
+        return fernet.encrypt(canonical_json(dict(payload)))
 
     def _decrypt(self, payload: bytes) -> dict[str, Any]:
+        self._assert_crypto_material()
+        fernet = self._fernet
+        assert fernet is not None
         try:
-            value = json.loads(self._fernet.decrypt(payload).decode("utf-8"))
+            value = json.loads(fernet.decrypt(payload).decode("utf-8"))
         except (InvalidToken, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise AuthorityStoreError("authority record authentication failed") from exc
         if not isinstance(value, dict):
@@ -512,6 +727,7 @@ class AuthorityStore:
             return record.domain_id
         return record.trust_id
 
+    @_process_owned
     def put_record(self, record: Record, *, replace: bool = False) -> None:
         """Persist an encrypted record, rejecting accidental mutation by default."""
 
@@ -540,6 +756,7 @@ class AuthorityStore:
         except (sqlite3.Error, OSError) as exc:
             raise AuthorityStoreError("authority record commit failed") from exc
 
+    @_process_owned
     def put_records_atomically(self, records: Iterable[Record]) -> None:
         """Commit an approval transaction without leaving partial authority."""
 
@@ -594,30 +811,35 @@ class AuthorityStore:
         except sqlite3.Error as exc:
             raise AuthorityStoreError("authority transaction failed") from exc
 
+    @_process_owned
     def get_provider_authority(self, record_id: str) -> ProviderAuthorityRecord | None:
         """Load and authenticate a ProviderAuthorityRecord."""
 
         value = self._get_record("provider_authority", record_id)
         return ProviderAuthorityRecord.from_dict(value) if value else None
 
+    @_process_owned
     def get_approval(self, approval_id: str) -> ApprovalRecord | None:
         """Load and authenticate an ApprovalRecord."""
 
         value = self._get_record("approval", approval_id)
         return ApprovalRecord.from_dict(value) if value else None
 
+    @_process_owned
     def get_grant(self, grant_id: str) -> GrantRecord | None:
         """Load and authenticate a GrantRecord."""
 
         value = self._get_record("grant", grant_id)
         return GrantRecord.from_dict(value) if value else None
 
+    @_process_owned
     def get_domain(self, domain_id: str) -> ExecutionDomain | None:
         """Load and authenticate an ExecutionDomain."""
 
         value = self._get_record("execution_domain", domain_id)
         return ExecutionDomain.from_dict(value) if value else None
 
+    @_process_owned
     def get_host_extension_trust(self, trust_id: str) -> HostExtensionTrustRecord | None:
         """Load and authenticate a HostExtensionTrustRecord."""
 
@@ -641,11 +863,13 @@ class AuthorityStore:
             raise AuthorityStoreError("authority record digest mismatch")
         return value
 
+    @_process_owned
     def list_grants(self) -> list[GrantRecord]:
         """Return all authenticated Grants; callers must still filter exactly."""
 
         return [GrantRecord.from_dict(value) for value in self._list_records("grant")]
 
+    @_process_owned
     def list_provider_authorities(self) -> list[ProviderAuthorityRecord]:
         """Return all authenticated Provider authority records."""
 
@@ -654,6 +878,7 @@ class AuthorityStore:
             for value in self._list_records("provider_authority")
         ]
 
+    @_process_owned
     def list_domains(self) -> list[ExecutionDomain]:
         """Return all authenticated execution-domain records."""
 
@@ -680,6 +905,7 @@ class AuthorityStore:
         return output
 
     @property
+    @_process_owned
     def security_epoch(self) -> int:
         """Return the Host-owned monotonic SecurityEpoch."""
 
@@ -695,6 +921,7 @@ class AuthorityStore:
         return int(row["value"])
 
     @property
+    @_process_owned
     def security_epoch_record(self) -> SecurityEpoch:
         """Return the complete current SecurityEpoch metadata."""
 
@@ -717,6 +944,7 @@ class AuthorityStore:
         except (KeyError, TypeError, ValueError, AuthorityValidationError) as exc:
             raise AuthorityStoreError("security epoch metadata is invalid") from exc
 
+    @_process_owned
     def advance_security_epoch(self, reason: str) -> int:
         """Atomically advance SecurityEpoch and fence all old domains and Leases."""
 
@@ -777,6 +1005,7 @@ class AuthorityStore:
         except (sqlite3.Error, OSError) as exc:
             raise AuthorityStoreError("security epoch advance failed") from exc
 
+    @_process_owned
     def reserve_activation(
         self,
         *,
@@ -796,8 +1025,7 @@ class AuthorityStore:
                     "SELECT value FROM authority_meta WHERE key='security_epoch'"
                 ).fetchone()
                 token_row = connection.execute(
-                    "SELECT value FROM authority_meta"
-                    " WHERE key='activation_fencing_token'"
+                    "SELECT value FROM authority_meta WHERE key='activation_fencing_token'"
                 ).fetchone()
                 if epoch_row is None or int(epoch_row["value"]) != security_epoch:
                     raise AuthorityDenied(
@@ -833,8 +1061,7 @@ class AuthorityStore:
                     ),
                 )
                 connection.execute(
-                    "UPDATE authority_meta SET value=?"
-                    " WHERE key='activation_fencing_token'",
+                    "UPDATE authority_meta SET value=? WHERE key='activation_fencing_token'",
                     (str(fencing_token),),
                 )
                 self._append_audit(
@@ -861,6 +1088,7 @@ class AuthorityStore:
         except sqlite3.Error as exc:
             raise AuthorityStoreError("activation reservation failed") from exc
 
+    @_process_owned
     def transition_activation(
         self,
         reservation_id: str,
@@ -893,12 +1121,8 @@ class AuthorityStore:
                 epoch_row = connection.execute(
                     "SELECT value FROM authority_meta WHERE key='security_epoch'"
                 ).fetchone()
-                if (
-                    new_state not in {"aborted", "retired"}
-                    and (
-                        epoch_row is None
-                        or int(epoch_row["value"]) != row["security_epoch"]
-                    )
+                if new_state not in {"aborted", "retired"} and (
+                    epoch_row is None or int(epoch_row["value"]) != row["security_epoch"]
                 ):
                     raise AuthorityDenied(
                         "activation reservation has a stale SecurityEpoch",
@@ -960,6 +1184,7 @@ class AuthorityStore:
         except sqlite3.Error as exc:
             raise AuthorityStoreError("activation transition failed") from exc
 
+    @_process_owned
     def activation_reservation(self, reservation_id: str) -> Mapping[str, Any] | None:
         """Return one durable activation reservation for Host recovery."""
 
@@ -973,9 +1198,8 @@ class AuthorityStore:
             raise AuthorityStoreError("activation reservation read failed") from exc
         return dict(row) if row is not None else None
 
-    def incomplete_activation_reservations(
-        self, profile_id: str
-    ) -> tuple[Mapping[str, Any], ...]:
+    @_process_owned
+    def incomplete_activation_reservations(self, profile_id: str) -> tuple[Mapping[str, Any], ...]:
         """Return candidate reservations that must be recovered before activation."""
 
         try:
@@ -990,9 +1214,8 @@ class AuthorityStore:
             raise AuthorityStoreError("activation recovery inventory failed") from exc
         return tuple(dict(row) for row in rows)
 
-    def active_activation_reservation(
-        self, activation_id: str
-    ) -> Mapping[str, Any] | None:
+    @_process_owned
+    def active_activation_reservation(self, activation_id: str) -> Mapping[str, Any] | None:
         """Return the sole authoritative active reservation for restart capture."""
 
         try:
@@ -1008,6 +1231,7 @@ class AuthorityStore:
             raise AuthorityStoreError("multiple active authority reservations exist")
         return dict(rows[0]) if rows else None
 
+    @_process_owned
     def bind_authenticated_session(
         self,
         *,
@@ -1052,6 +1276,7 @@ class AuthorityStore:
         except sqlite3.Error as exc:
             raise AuthorityStoreError("session binding failed") from exc
 
+    @_process_owned
     def transition_domain(
         self,
         domain_id: str,
@@ -1149,6 +1374,7 @@ class AuthorityStore:
         except sqlite3.Error as exc:
             raise AuthorityStoreError("execution-domain transition failed") from exc
 
+    @_process_owned
     def resolve_authenticated_session(self, session_id: str) -> tuple[ExecutionDomain, str]:
         """Resolve Host-authenticated caller identity; never use payload identity."""
 
@@ -1178,6 +1404,7 @@ class AuthorityStore:
             raise AuthorityDenied("caller principal binding is invalid")
         return domain, principal_id
 
+    @_process_owned
     def revoke(
         self,
         *,
@@ -1368,6 +1595,7 @@ class AuthorityStore:
             raise AuthorityStoreError("revocation commit failed") from exc
         return revocation_id
 
+    @_process_owned
     def revoke_pack_approval(
         self,
         *,
@@ -1416,9 +1644,7 @@ class AuthorityStore:
                 grant_ids: list[str] = []
                 for row in rows:
                     value = self._decrypt(row["encrypted_payload"])
-                    if not hmac.compare_digest(
-                        str(row["record_digest"]), authority_digest(value)
-                    ):
+                    if not hmac.compare_digest(str(row["record_digest"]), authority_digest(value)):
                         raise AuthorityStoreError("authority record digest mismatch")
                     grant = GrantRecord.from_dict(value)
                     if (
@@ -1493,6 +1719,7 @@ class AuthorityStore:
             raise AuthorityStoreError("Pack approval revocation failed") from exc
         return revocation_id, tuple(grant_ids)
 
+    @_process_owned
     def is_revoked(self, target_kind: str, target_id: str) -> bool:
         """Return whether an exact target has an active Host revocation."""
 
@@ -1511,6 +1738,7 @@ class AuthorityStore:
         ).fetchone()
         return row is not None
 
+    @_process_owned
     def issue_lease_with_audit(
         self,
         *,
@@ -1696,6 +1924,7 @@ class AuthorityStore:
         return event_digest
 
     def _encode_lease_token(self, lease: InvocationLease) -> str:
+        self._assert_crypto_material()
         payload = canonical_json({"lease_id": lease.lease_id, "digest": lease.digest})
         signature = hmac.new(self._mac_key, payload, hashlib.sha256).digest()
         encoded_payload = base64.urlsafe_b64encode(payload).decode("ascii")
@@ -1703,6 +1932,7 @@ class AuthorityStore:
         return f"{encoded_payload}.{encoded_signature}"
 
     def _decode_lease_token(self, token: str) -> tuple[str, str]:
+        self._assert_crypto_material()
         try:
             encoded_payload, encoded_signature = token.split(".", 1)
             payload = base64.urlsafe_b64decode(encoded_payload.encode("ascii"))
@@ -1718,6 +1948,7 @@ class AuthorityStore:
         except (ValueError, KeyError, UnicodeError, json.JSONDecodeError) as exc:
             raise AuthorityDenied("InvocationLease token is malformed") from exc
 
+    @_process_owned
     def inspect_lease_token(self, token: str) -> tuple[InvocationLease, LeaseState]:
         """Authenticate a lease token and return its durable Host-side record.
 
@@ -1734,6 +1965,7 @@ class AuthorityStore:
             raise AuthorityDenied("InvocationLease digest does not match")
         return lease, state
 
+    @_process_owned
     def fence_request(self, request_id: str) -> list[str]:
         """Revoke every unused lease for one exact Host request."""
 
@@ -1777,6 +2009,7 @@ class AuthorityStore:
         except sqlite3.Error as exc:
             raise AuthorityStoreError("request fencing failed") from exc
 
+    @_process_owned
     def dispatch_lease(
         self,
         token: str,
@@ -1876,6 +2109,7 @@ class AuthorityStore:
         except sqlite3.Error as exc:
             raise AuthorityStoreError("InvocationLease dispatch failed") from exc
 
+    @_process_owned
     def expire_leases(self) -> list[str]:
         """Expire unused Leases and release their Grant-use reservations."""
 
@@ -1922,6 +2156,7 @@ class AuthorityStore:
             raise AuthorityStoreError("InvocationLease expiry failed") from exc
         return expired
 
+    @_process_owned
     def get_lease(self, lease_id: str) -> tuple[InvocationLease, LeaseState] | None:
         """Load and authenticate a Lease for Host-side delegation checks."""
 
@@ -1941,6 +2176,7 @@ class AuthorityStore:
             raise AuthorityStoreError("InvocationLease digest mismatch")
         return lease, LeaseState(str(row["state"]))
 
+    @_process_owned
     def finish_lease(
         self,
         lease_id: str,
@@ -2001,6 +2237,7 @@ class AuthorityStore:
         except sqlite3.Error as exc:
             raise AuthorityStoreError("InvocationLease finalization failed") from exc
 
+    @_process_owned
     def recover_incomplete_effects(self) -> list[str]:
         """Mark crash-surviving dispatched effects ambiguous, never retrying them."""
 
@@ -2053,6 +2290,7 @@ class AuthorityStore:
             raise AuthorityStoreError("effect recovery failed") from exc
         return recovered
 
+    @_process_owned
     def audit_events(self) -> list[dict[str, Any]]:
         """Read and verify the complete authoritative audit hash chain."""
 
@@ -2107,6 +2345,7 @@ class AuthorityStore:
             previous_digest = str(row["event_digest"])
         return output
 
+    @_process_owned
     def grant_usage(self, grant_id: str) -> tuple[int, int]:
         """Return ``(reserved, committed)`` use counters for tests/operations."""
 
