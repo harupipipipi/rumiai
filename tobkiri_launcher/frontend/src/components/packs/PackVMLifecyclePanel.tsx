@@ -150,7 +150,7 @@ export function PackVMLifecyclePanel() {
       await acceptOperation(nextOperation, operationId);
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
-      if (/operation_id is unknown|unknown operation|stale or tampered/i.test(message)) {
+      if (/operation_id is unknown|unknown.*operation|operation.*unknown|operation.*not found|not found|stale or tampered|session.*(?:mismatch|invalid)|different session/i.test(message)) {
         clearPackVMOperationId();
         setPlan(null);
         setConsent(null);

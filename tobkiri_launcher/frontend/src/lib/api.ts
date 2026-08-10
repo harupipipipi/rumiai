@@ -768,6 +768,50 @@ function dispatchPackControl<T>(
   });
 }
 
+function packControlString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`Tobkiri returned an invalid Pack approval ${field}.`);
+  }
+  return value;
+}
+
+function validatePackApprovalCandidate(value: unknown, packId: string): string {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Tobkiri returned an invalid Pack approval candidate.');
+  }
+  const candidate = value as Record<string, unknown>;
+  const candidateId = packControlString(candidate.candidate_id, 'candidate id');
+  if (candidate.pack_id !== packId) {
+    throw new Error('Tobkiri returned a Pack approval candidate for a different Pack.');
+  }
+  if (
+    typeof candidate.snapshot_digest !== 'string'
+    || !/^sha256:[0-9a-f]{64}$/.test(candidate.snapshot_digest)
+  ) {
+    throw new Error('Tobkiri returned a Pack approval candidate without an exact snapshot digest.');
+  }
+  return candidateId;
+}
+
+function validatePackApprovalResponse(value: unknown, packId: string): PackApprovalResponseData {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Tobkiri returned an invalid Pack approval response.');
+  }
+  const response = value as Record<string, unknown>;
+  if (
+    response.pack_id !== packId
+    || response.approved !== true
+    || response.approval_status !== 'approved'
+    || (response.enabled !== undefined && typeof response.enabled !== 'boolean')
+  ) {
+    throw new Error('Tobkiri did not confirm approval for the requested Pack.');
+  }
+  for (const field of ['profile_id', 'workspace_id', 'profile_revision', 'plan_digest', 'catalog_revision']) {
+    packControlString(response[field], field);
+  }
+  return response as unknown as PackApprovalResponseData;
+}
+
 export function fetchPacks(): Promise<PacksResponseData> {
   return dispatchPackControl<PacksResponseData>('catalog.read');
 }
@@ -777,11 +821,13 @@ export async function installPack(id: string): Promise<PackInstallResponseData> 
 }
 
 export async function approvePack(id: string): Promise<PackApprovalResponseData> {
-  const candidate = await dispatchPackControl<{candidate_id: string}>('approval.candidate', {pack_id: id});
-  return dispatchPackControl<PackApprovalResponseData>('approval.approve', {
+  const candidate = await dispatchPackControl<unknown>('approval.candidate', {pack_id: id});
+  const candidateId = validatePackApprovalCandidate(candidate, id);
+  const response = await dispatchPackControl<unknown>('approval.approve', {
     pack_id: id,
-    candidate_id: candidate.candidate_id,
+    candidate_id: candidateId,
   });
+  return validatePackApprovalResponse(response, id);
 }
 
 export function enablePack(id: string): Promise<PackToggleResponseData> {

@@ -9,7 +9,9 @@ import {
   normalizePackVMDoctor,
   normalizePackVMOperation,
   normalizePackVMPlan,
+  readPackVMOperationId,
   stopConfirmationForInstance,
+  writePackVMOperationId,
 } from './packvmLifecycle';
 import {preparePackVM} from './api';
 import type {ApiPackVMDoctor} from './apiTypes';
@@ -63,6 +65,7 @@ beforeEach(() => {
   Object.defineProperties(globalThis, {
     window: {value: dom.window, configurable: true},
     document: {value: dom.window.document, configurable: true},
+    localStorage: {value: dom.window.localStorage, configurable: true},
     sessionStorage: {value: dom.window.sessionStorage, configurable: true},
   });
   sessionStorage.setItem('rumi-panel-csrf', 'csrf-test');
@@ -139,6 +142,40 @@ test('PackVM consent normalization requires the typed one-shot evidence', () => 
     () => normalizePackVMConsent({...consent, image_source: '/Users/haru/image.img'}),
     /invalid PackVM image_source/,
   );
+});
+
+test('PackVM operation identity uses durable local storage and rehydrates in a fresh browsing context', () => {
+  writePackVMOperationId('11111111-1111-4111-8111-111111111111');
+  assert.equal(readPackVMOperationId(), '11111111-1111-4111-8111-111111111111');
+  assert.equal(localStorage.getItem('tobkiri-launcher-packvm-operation'), '11111111-1111-4111-8111-111111111111');
+
+  const restarted = new JSDOM('<!doctype html><html><body></body></html>', {
+    url: 'http://localhost/panel/',
+  });
+  const previousLocalStorage = globalThis.localStorage;
+  const previousSessionStorage = globalThis.sessionStorage;
+  Object.defineProperties(globalThis, {
+    localStorage: {value: restarted.window.localStorage, configurable: true},
+    sessionStorage: {value: restarted.window.sessionStorage, configurable: true},
+  });
+  try {
+    // A separate JSDOM context does not share storage; copy the persisted Launcher record
+    // to model the same-origin browsing context being recreated by Tauri.
+    localStorage.setItem('tobkiri-launcher-packvm-operation', '11111111-1111-4111-8111-111111111111');
+    assert.equal(readPackVMOperationId(), '11111111-1111-4111-8111-111111111111');
+  } finally {
+    Object.defineProperties(globalThis, {
+      localStorage: {value: previousLocalStorage, configurable: true},
+      sessionStorage: {value: previousSessionStorage, configurable: true},
+    });
+    restarted.window.close();
+  }
+});
+
+test('PackVM operation storage clears a tampered non-canonical identity', () => {
+  localStorage.setItem('tobkiri-launcher-packvm-operation', 'not-an-operation');
+  assert.equal(readPackVMOperationId(), null);
+  assert.equal(localStorage.getItem('tobkiri-launcher-packvm-operation'), null);
 });
 
 test('PackVM API prepare uses the exact lifecycle route and request ceremony', async () => {

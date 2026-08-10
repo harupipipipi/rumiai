@@ -9,6 +9,7 @@ import {
   type RuntimeSurfaceErrorCode,
   type RuntimeSurfaceId,
 } from '@/src/lib/runtimeSurface';
+import {registerRuntimeSurfaceRefresher} from '@/src/lib/runtimeSurfaceRefresh';
 
 export type {RuntimeSurfaceClient} from '@/src/lib/runtimeSurface';
 
@@ -108,6 +109,9 @@ export function useRuntimeSurface<T>(
     }
   }, [client, surface]);
 
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+
   useEffect(() => {
     void refresh();
     return () => {
@@ -122,6 +126,8 @@ export function useRuntimeSurface<T>(
     window.addEventListener(RUNTIME_SURFACE_REFRESH_EVENT, handleRefresh);
     return () => window.removeEventListener(RUNTIME_SURFACE_REFRESH_EVENT, handleRefresh);
   }, [refresh]);
+
+  useEffect(() => registerRuntimeSurfaceRefresher(() => refreshRef.current(true)), []);
 
   return {...state, refresh};
 }

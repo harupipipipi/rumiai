@@ -121,3 +121,138 @@ test('OperationInputForm disables invocation when Host readiness is not authorit
     Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
   }
 });
+
+test('OperationInputForm omits blank optional values and preserves JSON enum types', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  let received: Record<string, unknown> | null = null;
+  const typedOperation: RuntimeOperationDescriptor = {
+    ...operation(),
+    operation_id: 'typed.operation',
+    input_schema: {
+      type: 'object',
+      required: ['required_text'],
+      properties: {
+        required_text: {type: 'string', default: 'ready'},
+        optional_number: {type: 'number'},
+        optional_object: {type: 'object'},
+        optional_array: {type: 'array'},
+        numeric_mode: {enum: [7, 8]},
+        boolean_mode: {enum: [true, false]},
+        null_mode: {enum: [null, 'fallback']},
+      },
+    },
+  };
+  try {
+    await act(async () => {
+      root.render(
+        <OperationInputForm
+          operation={typedOperation}
+          busy={false}
+          onInvoke={async (payload) => { received = payload; }}
+        />,
+      );
+    });
+    const setSelect = (label: string, value: string) => {
+      const select = container.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`);
+      assert.ok(select);
+      select.value = value;
+      select.dispatchEvent(new dom.window.Event('change', {bubbles: true}));
+    };
+    await act(async () => {
+      setSelect('numeric_mode', '0');
+      setSelect('boolean_mode', '0');
+      setSelect('null_mode', '0');
+    });
+    const form = container.querySelector<HTMLFormElement>('form');
+    assert.ok(form);
+    await act(async () => {
+      form.dispatchEvent(new dom.window.Event('submit', {bubbles: true, cancelable: true}));
+    });
+    assert.deepEqual(received, {
+      required_text: 'ready',
+      numeric_mode: 7,
+      boolean_mode: true,
+      null_mode: null,
+    });
+    assert.equal(Object.prototype.hasOwnProperty.call(received ?? {}, 'optional_number'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(received ?? {}, 'optional_object'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(received ?? {}, 'optional_array'), false);
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
+test('OperationInputForm visibly rejects missing required values and malformed JSON', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  let invokes = 0;
+  const invalidOperation: RuntimeOperationDescriptor = {
+    ...operation(),
+    operation_id: 'invalid.operation',
+    input_schema: {
+      type: 'object',
+      required: ['required_text', 'settings'],
+      properties: {
+        required_text: {type: 'string', title: 'Required text'},
+        settings: {type: 'object'},
+      },
+    },
+  };
+  try {
+    await act(async () => {
+      root.render(
+        <OperationInputForm
+          operation={invalidOperation}
+          busy={false}
+          onInvoke={async () => { invokes += 1; }}
+        />,
+      );
+    });
+    const form = container.querySelector<HTMLFormElement>('form');
+    assert.ok(form);
+    await act(async () => {
+      form.dispatchEvent(new dom.window.Event('submit', {bubbles: true, cancelable: true}));
+    });
+    assert.match(container.querySelector('[role="alert"]')?.textContent ?? '', /required_text/);
+
+    const jsonOperation: RuntimeOperationDescriptor = {
+      ...invalidOperation,
+      input_schema: {
+        type: 'object',
+        required: ['required_text'],
+        properties: {
+          required_text: {type: 'string', default: 'ok', title: 'Required text'},
+          settings: {type: 'object', default: '{not-json'},
+        },
+      },
+    };
+    await act(async () => {
+      root.render(
+        <OperationInputForm
+          operation={jsonOperation}
+          busy={false}
+          onInvoke={async () => { invokes += 1; }}
+        />,
+      );
+    });
+    assert.ok(container.querySelector<HTMLTextAreaElement>('[aria-label="settings"]'));
+    const jsonForm = container.querySelector<HTMLFormElement>('form');
+    assert.ok(jsonForm);
+    await act(async () => {
+      jsonForm.dispatchEvent(new dom.window.Event('submit', {bubbles: true, cancelable: true}));
+    });
+    assert.match(container.querySelector('[role="alert"]')?.textContent ?? '', /valid JSON/);
+    assert.equal(invokes, 0);
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});

@@ -3,73 +3,74 @@
     "file": "assets/tobkiri-launcher-icon-A0Q09elZ.png",
     "src": "../assets/app-icon/tobkiri-launcher-icon.png"
   },
-  "_Card-CITYmlDY.js": {
-    "file": "assets/Card-CITYmlDY.js",
+  "_Card-WcSlNZlp.js": {
+    "file": "assets/Card-WcSlNZlp.js",
     "name": "Card",
     "dynamicImports": [
       "node_modules/@tauri-apps/api/core.js"
     ]
   },
-  "_InlineLoadError-D23c5SRW.js": {
-    "file": "assets/InlineLoadError-D23c5SRW.js",
+  "_InlineLoadError-BeRbhBXg.js": {
+    "file": "assets/InlineLoadError-BeRbhBXg.js",
     "name": "InlineLoadError",
     "imports": [
-      "_Card-CITYmlDY.js",
-      "_triangle-alert-DCQbmJCP.js"
+      "_Card-WcSlNZlp.js",
+      "_triangle-alert-DVbZGXCQ.js"
     ]
   },
-  "_Input-DHHmpUAo.js": {
-    "file": "assets/Input-DHHmpUAo.js",
+  "_Input-CZVzOF9N.js": {
+    "file": "assets/Input-CZVzOF9N.js",
     "name": "Input",
     "imports": [
-      "_Card-CITYmlDY.js"
+      "_Card-WcSlNZlp.js"
     ]
   },
-  "_OperationInputForm-eY5ftoqp.js": {
-    "file": "assets/OperationInputForm-eY5ftoqp.js",
-    "name": "OperationInputForm",
-    "imports": [
-      "_Card-CITYmlDY.js",
-      "_Input-DHHmpUAo.js"
-    ]
-  },
-  "_advancedSurfaces-DbibBaWi.js": {
-    "file": "assets/advancedSurfaces-DbibBaWi.js",
+  "_advancedSurfaces-CSpUnwRP.js": {
+    "file": "assets/advancedSurfaces-CSpUnwRP.js",
     "name": "advancedSurfaces",
     "imports": [
-      "_Card-CITYmlDY.js",
+      "_Card-WcSlNZlp.js",
       "index.html",
-      "_triangle-alert-DCQbmJCP.js"
+      "_triangle-alert-DVbZGXCQ.js"
     ]
   },
-  "_arrow-right-C2eVQrLR.js": {
-    "file": "assets/arrow-right-C2eVQrLR.js",
+  "_arrow-right-JOta021G.js": {
+    "file": "assets/arrow-right-JOta021G.js",
     "name": "arrow-right",
     "imports": [
-      "_Card-CITYmlDY.js"
+      "_Card-WcSlNZlp.js"
     ]
   },
-  "_check-BVRcSawc.js": {
-    "file": "assets/check-BVRcSawc.js",
+  "_check-CGDlf9QQ.js": {
+    "file": "assets/check-CGDlf9QQ.js",
     "name": "check",
     "imports": [
-      "_Card-CITYmlDY.js"
+      "_Card-WcSlNZlp.js"
     ]
   },
-  "_triangle-alert-DCQbmJCP.js": {
-    "file": "assets/triangle-alert-DCQbmJCP.js",
+  "_triangle-alert-DVbZGXCQ.js": {
+    "file": "assets/triangle-alert-DVbZGXCQ.js",
     "name": "triangle-alert",
     "imports": [
-      "_Card-CITYmlDY.js"
+      "_Card-WcSlNZlp.js"
+    ]
+  },
+  "_useRuntimeOperationInvocation-DCPKdLVY.js": {
+    "file": "assets/useRuntimeOperationInvocation-DCPKdLVY.js",
+    "name": "useRuntimeOperationInvocation",
+    "imports": [
+      "_Card-WcSlNZlp.js",
+      "_advancedSurfaces-CSpUnwRP.js",
+      "_Input-CZVzOF9N.js"
     ]
   },
   "index.html": {
-    "file": "assets/index-mL87_N1f.js",
+    "file": "assets/index-CKK9fuUp.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "imports": [
-      "_Card-CITYmlDY.js"
+      "_Card-WcSlNZlp.js"
     ],
     "dynamicImports": [
       "src/pages/Packs.tsx",
@@ -85,7 +86,7 @@
       "src/pages/NodeManager.tsx"
     ],
     "css": [
-      "assets/index-DNcTYtYd.css"
+      "assets/index-6FcwerVZ.css"
     ],
     "assets": [
       "assets/tobkiri-launcher-icon-A0Q09elZ.png"
@@ -98,133 +99,133 @@
     "isDynamicEntry": true
   },
   "src/pages/AiInput.tsx": {
-    "file": "assets/AiInput-Z9Ak5AoA.js",
+    "file": "assets/AiInput-CFtfyo8A.js",
     "name": "AiInput",
     "src": "src/pages/AiInput.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_Card-CITYmlDY.js",
+      "_Card-WcSlNZlp.js",
       "index.html",
-      "_advancedSurfaces-DbibBaWi.js",
-      "_OperationInputForm-eY5ftoqp.js"
+      "_advancedSurfaces-CSpUnwRP.js",
+      "_useRuntimeOperationInvocation-DCPKdLVY.js"
     ]
   },
   "src/pages/ApiMap.tsx": {
-    "file": "assets/ApiMap-DJNovmSk.js",
+    "file": "assets/ApiMap-2_U4yY4l.js",
     "name": "ApiMap",
     "src": "src/pages/ApiMap.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_Card-CITYmlDY.js",
+      "_Card-WcSlNZlp.js",
       "index.html",
-      "_advancedSurfaces-DbibBaWi.js"
+      "_advancedSurfaces-CSpUnwRP.js"
     ]
   },
   "src/pages/Flow.tsx": {
-    "file": "assets/Flow-7ptfroS9.js",
+    "file": "assets/Flow-rnsFlIb0.js",
     "name": "Flow",
     "src": "src/pages/Flow.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_Card-CITYmlDY.js",
+      "_Card-WcSlNZlp.js",
       "index.html",
-      "_advancedSurfaces-DbibBaWi.js",
-      "_OperationInputForm-eY5ftoqp.js"
+      "_advancedSurfaces-CSpUnwRP.js",
+      "_useRuntimeOperationInvocation-DCPKdLVY.js"
     ]
   },
   "src/pages/Graph.tsx": {
-    "file": "assets/Graph-CUjHsNV5.js",
+    "file": "assets/Graph-BMqL2XEb.js",
     "name": "Graph",
     "src": "src/pages/Graph.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_Card-CITYmlDY.js",
+      "_Card-WcSlNZlp.js",
       "index.html",
-      "_arrow-right-C2eVQrLR.js",
-      "_advancedSurfaces-DbibBaWi.js"
+      "_arrow-right-JOta021G.js",
+      "_advancedSurfaces-CSpUnwRP.js"
     ]
   },
   "src/pages/NodeManager.tsx": {
-    "file": "assets/NodeManager-BHt27Xj2.js",
+    "file": "assets/NodeManager-is_FSAdi.js",
     "name": "NodeManager",
     "src": "src/pages/NodeManager.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_Card-CITYmlDY.js",
+      "_Card-WcSlNZlp.js",
       "index.html",
-      "_advancedSurfaces-DbibBaWi.js"
+      "_advancedSurfaces-CSpUnwRP.js"
     ]
   },
   "src/pages/PackDetail.tsx": {
-    "file": "assets/PackDetail-C-83zrEq.js",
+    "file": "assets/PackDetail-Cde5HHkk.js",
     "name": "PackDetail",
     "src": "src/pages/PackDetail.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_Card-CITYmlDY.js",
+      "_Card-WcSlNZlp.js",
       "index.html",
-      "_InlineLoadError-D23c5SRW.js",
-      "_Input-DHHmpUAo.js"
+      "_InlineLoadError-BeRbhBXg.js",
+      "_Input-CZVzOF9N.js"
     ]
   },
   "src/pages/Packs.tsx": {
-    "file": "assets/Packs-BdlwGxEm.js",
+    "file": "assets/Packs-DwfbxELK.js",
     "name": "Packs",
     "src": "src/pages/Packs.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_Card-CITYmlDY.js",
+      "_Card-WcSlNZlp.js",
       "index.html",
-      "_triangle-alert-DCQbmJCP.js",
-      "_InlineLoadError-D23c5SRW.js",
-      "_Input-DHHmpUAo.js"
+      "_triangle-alert-DVbZGXCQ.js",
+      "_InlineLoadError-BeRbhBXg.js",
+      "_Input-CZVzOF9N.js"
     ]
   },
   "src/pages/Profile.tsx": {
-    "file": "assets/Profile-BFVD2pq4.js",
+    "file": "assets/Profile-DYGm0TcN.js",
     "name": "Profile",
     "src": "src/pages/Profile.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_Card-CITYmlDY.js",
+      "_Card-WcSlNZlp.js",
       "index.html",
-      "_arrow-right-C2eVQrLR.js",
-      "_check-BVRcSawc.js",
-      "_advancedSurfaces-DbibBaWi.js",
-      "_triangle-alert-DCQbmJCP.js",
-      "_Input-DHHmpUAo.js"
+      "_arrow-right-JOta021G.js",
+      "_check-CGDlf9QQ.js",
+      "_advancedSurfaces-CSpUnwRP.js",
+      "_triangle-alert-DVbZGXCQ.js",
+      "_Input-CZVzOF9N.js"
     ]
   },
   "src/pages/ProfileFiles.tsx": {
-    "file": "assets/ProfileFiles-qr1oQcJj.js",
+    "file": "assets/ProfileFiles-C_qzWuYP.js",
     "name": "ProfileFiles",
     "src": "src/pages/ProfileFiles.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_Card-CITYmlDY.js",
-      "_advancedSurfaces-DbibBaWi.js"
+      "_Card-WcSlNZlp.js",
+      "_advancedSurfaces-CSpUnwRP.js"
     ]
   },
   "src/pages/ProfileWiring.tsx": {
-    "file": "assets/ProfileWiring-LJl3ynhn.js",
+    "file": "assets/ProfileWiring-DVTqoX2r.js",
     "name": "ProfileWiring",
     "src": "src/pages/ProfileWiring.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_Card-CITYmlDY.js",
+      "_Card-WcSlNZlp.js",
       "index.html",
-      "_advancedSurfaces-DbibBaWi.js"
+      "_advancedSurfaces-CSpUnwRP.js"
     ]
   },
   "src/pages/Settings.tsx": {
-    "file": "assets/Settings-BkdTP77D.js",
+    "file": "assets/Settings-C1aHxfpE.js",
     "name": "Settings",
     "src": "src/pages/Settings.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_Card-CITYmlDY.js",
-      "_check-BVRcSawc.js",
-      "_advancedSurfaces-DbibBaWi.js"
+      "_Card-WcSlNZlp.js",
+      "_check-CGDlf9QQ.js",
+      "_advancedSurfaces-CSpUnwRP.js"
     ]
   }
 }

@@ -10,6 +10,7 @@ import { bootstrapPanelSession, hasPendingPanelBootstrapCode } from '@/src/lib/a
 import { applyAppearanceToRoot } from '@/src/lib/appearance';
 import { runtimeMonitorDelay } from '@/src/lib/runtimeHealth';
 import { panelRoutes } from '@/src/lib/routes';
+import { RouteAnnouncer } from '@/src/components/layout/RouteAnnouncer';
 import {fetchDefaultsSetupState} from '@/src/lib/defaultsSetup';
 import {
   LazyAiInput,
@@ -148,6 +149,7 @@ function DeferredRouteTree({ isSetupDone }: { isSetupDone: boolean }) {
 
   return (
     <>
+      <RouteAnnouncer pathname={deferredLocation.pathname} />
       <Routes location={deferredLocation}>
         <Route path={panelRoutes.setup} element={<Setup />} />
 

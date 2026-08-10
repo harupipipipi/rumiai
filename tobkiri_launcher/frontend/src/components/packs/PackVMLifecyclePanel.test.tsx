@@ -413,7 +413,7 @@ test('PackVM GUI presents diagnostic severity, owner, and contribution evidence'
 
 test('PackVM GUI resumes a persisted interrupted operation after restart', {concurrency: false}, async () => {
   const doctorControl = configureStore();
-  sessionStorage.setItem('tobkiri-launcher-packvm-operation', operationId);
+  localStorage.setItem('tobkiri-launcher-packvm-operation', operationId);
   let progressReads = 0;
   installFetch(async (route) => {
     if (route === `/api/v4/packvm/progress?operation_id=${operationId}`) {
@@ -433,4 +433,23 @@ test('PackVM GUI resumes a persisted interrupted operation after restart', {conc
   assert.match(surface.container.textContent ?? '', /Provisioned/);
   assert.match(surface.container.textContent ?? '', /Healthy and attested/);
   assert.equal(progressReads, 2);
+});
+
+test('PackVM GUI clears a tampered durable operation id after server validation rejects it', {concurrency: false}, async () => {
+  configureStore();
+  const tamperedId = '22222222-2222-4222-8222-222222222222';
+  localStorage.setItem('tobkiri-launcher-packvm-operation', tamperedId);
+  installFetch(async (route) => {
+    assert.equal(route, `/api/v4/packvm/progress?operation_id=${tamperedId}`);
+    return new Response(JSON.stringify({
+      success: false,
+      data: null,
+      error: 'packvm_operation_unknown',
+    }), {status: 404, headers: {'Content-Type': 'application/json'}});
+  });
+  assert.ok(surface);
+  await renderPanel(surface.root);
+  await settle();
+  assert.equal(localStorage.getItem('tobkiri-launcher-packvm-operation'), null);
+  assert.match(surface.container.textContent ?? '', /could not be resumed|packvm_operation_unknown/i);
 });

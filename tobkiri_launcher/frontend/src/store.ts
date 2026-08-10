@@ -25,6 +25,7 @@ import {
 } from './lib/appearance';
 import type {ColorMode, Theme} from './lib/appearance';
 import {AVATAR_OPTIONS, DEFAULT_AVATAR} from './lib/avatar';
+import {refreshMountedRuntimeSurfaces} from './lib/runtimeSurfaceRefresh';
 
 export type {ColorMode, Theme} from './lib/appearance';
 export {AVATAR_OPTIONS} from './lib/avatar';
@@ -177,8 +178,8 @@ interface AppState {
   packVmDoctor: ApiPackVMDoctor | null;
   packVmDoctorLoading: boolean;
   packVmError: string | null;
-  loadPacks: () => Promise<void>;
-  loadFrontendCatalog: () => Promise<void>;
+  loadPacks: (force?: boolean) => Promise<void>;
+  loadFrontendCatalog: (force?: boolean) => Promise<void>;
   refreshPackVMDoctor: () => Promise<ApiPackVMDoctor | null>;
   setPackVMDoctor: (doctor: ApiPackVMDoctor | null) => void;
   invokePackOperation: (
@@ -227,6 +228,37 @@ let packsLoadPromise: Promise<void> | null = null;
 let frontendCatalogLoadPromise: Promise<void> | null = null;
 let packVmDoctorLoadPromise: Promise<ApiPackVMDoctor | null> | null = null;
 const packMutationVersions = new Map<string, number>();
+let packMutationEpoch = 0;
+let packInvalidationRequested = 0;
+let packInvalidationPromise: Promise<void> | null = null;
+
+function beginPackMutation(id: string): number {
+  const version = (packMutationVersions.get(id) ?? 0) + 1;
+  packMutationVersions.set(id, version);
+  packMutationEpoch += 1;
+  return version;
+}
+
+async function invalidatePackMutationSurfaces(get: () => AppState): Promise<void> {
+  packInvalidationRequested += 1;
+  if (packInvalidationPromise) return packInvalidationPromise;
+
+  packInvalidationPromise = (async () => {
+    let handled = 0;
+    while (handled < packInvalidationRequested) {
+      const requested = packInvalidationRequested;
+      await Promise.all([
+        get().loadPacks(true),
+        get().loadFrontendCatalog(true),
+      ]);
+      await refreshMountedRuntimeSurfaces();
+      handled = requested;
+    }
+  })().finally(() => {
+    packInvalidationPromise = null;
+  });
+  return packInvalidationPromise;
+}
 
 export const useAppStore = create<AppState>((set, get) => ({
   theme: normalizeTheme(readLocalStorage(THEME_STORAGE_KEY)),
@@ -322,8 +354,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   packVmDoctorLoading: false,
   packVmError: null,
 
-  loadPacks: () => {
-    if (packsLoadPromise) return packsLoadPromise;
+  loadPacks: (force = false) => {
+    if (packsLoadPromise) {
+      if (!force) return packsLoadPromise;
+      const inFlight = packsLoadPromise;
+      return inFlight.then(() => get().loadPacks(true));
+    }
     const versionsAtStart = new Map(packMutationVersions);
     set({packsLoading: true, packsError: null});
     packsLoadPromise = (async () => {
@@ -338,15 +374,20 @@ export const useAppStore = create<AppState>((set, get) => ({
             before === after
             && !latestState.packTogglePending[pack.id]
             && !latestState.packApprovalPending[pack.id]
+            && !latestState.packInstallPending[pack.id]
           ) return pack;
           const current = currentById.get(pack.id);
           if (!current) return pack;
+          let reconciled = pack;
+          if (latestState.packInstallPending[pack.id]) {
+            reconciled = {...reconciled, installed: current.installed};
+          }
           if (
             latestState.packApprovalPending[pack.id]
             || (current.approvalStatus === 'revoked' && !current.approved)
           ) {
             return {
-              ...pack,
+              ...reconciled,
               enabled: current.enabled,
               approved: current.approved,
               approvalStatus: current.approvalStatus,
@@ -354,7 +395,10 @@ export const useAppStore = create<AppState>((set, get) => ({
               approvalIssues: current.approvalIssues,
             };
           }
-          return {...pack, enabled: current.enabled};
+          if (latestState.packTogglePending[pack.id]) {
+            return {...reconciled, enabled: current.enabled};
+          }
+          return reconciled;
         });
         set({packs, packsError: null});
       } catch (error) {
@@ -369,7 +413,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     return packsLoadPromise;
   },
 
-  loadFrontendCatalog: () => {
+  loadFrontendCatalog: (force = false) => {
     if (!get().packVmDoctor?.ready) {
       set({
         frontendCatalog: null,
@@ -377,7 +421,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
       return Promise.resolve();
     }
-    if (frontendCatalogLoadPromise) return frontendCatalogLoadPromise;
+    if (frontendCatalogLoadPromise) {
+      if (!force) return frontendCatalogLoadPromise;
+      const inFlight = frontendCatalogLoadPromise;
+      return inFlight.then(() => get().loadFrontendCatalog(true));
+    }
+    const mutationEpochAtStart = packMutationEpoch;
     set({
       frontendCatalogLoading: true,
       frontendCatalogError: null,
@@ -386,6 +435,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     frontendCatalogLoadPromise = (async () => {
       try {
         const catalog = await fetchFrontendCatalog();
+        if (mutationEpochAtStart !== packMutationEpoch) return;
         if (!get().packVmDoctor?.ready) {
           set({
             frontendCatalog: null,
@@ -523,7 +573,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         contractId: contribution.action_contract,
         payload,
       });
-      await Promise.all([get().loadPacks(), get().loadFrontendCatalog()]);
+      await invalidatePackMutationSurfaces(get);
       return result;
     } finally {
       set((current) => {
@@ -537,10 +587,31 @@ export const useAppStore = create<AppState>((set, get) => ({
   installPack: async (id) => {
     const state = get();
     if (state.packInstallPending[id]) return;
+    const version = beginPackMutation(id);
     set((current) => ({packInstallPending: {...current.packInstallPending, [id]: true}}));
     try {
-      await apiInstallPack(id);
-      await get().loadPacks();
+      const response = await apiInstallPack(id);
+      if (response.pack_id !== id || response.installed !== true) {
+        throw new Error('Tobkiri did not confirm Pack installation.');
+      }
+      if (packMutationVersions.get(id) === version) {
+        set((current) => ({
+          packs: current.packs.map((candidate) => (
+            candidate.id === id
+              ? {
+                ...candidate,
+                installed: true,
+                profileId: response.profile_id,
+                workspaceId: response.workspace_id,
+                profileRevision: response.profile_revision,
+                planDigest: response.plan_digest,
+                catalogRevision: response.catalog_revision,
+              }
+              : candidate
+          )),
+        }));
+      }
+      await invalidatePackMutationSurfaces(get);
       get().addToast('Pack installed.', 'success');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to install pack';
@@ -556,14 +627,55 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   approvePack: async (id) => {
+    const state = get();
+    if (state.packApprovalPending[id]) return;
+    const version = beginPackMutation(id);
+    set((current) => ({
+      packApprovalPending: {...current.packApprovalPending, [id]: true},
+    }));
     try {
-      await apiApprovePack(id);
-      await get().loadPacks();
+      const response = await apiApprovePack(id);
+      if (
+        response.pack_id !== id
+        || response.approved !== true
+        || response.approval_status !== 'approved'
+        || (response.enabled !== undefined && typeof response.enabled !== 'boolean')
+      ) {
+        throw new Error('Tobkiri did not confirm Pack approval.');
+      }
+      if (packMutationVersions.get(id) === version) {
+        set((current) => ({
+          packs: current.packs.map((candidate) => (
+            candidate.id === id
+              ? {
+                ...candidate,
+                ...(response.enabled === undefined ? {} : {enabled: response.enabled}),
+                approved: true,
+                approvalStatus: 'approved',
+                approvalReason: null,
+                approvalIssues: [],
+                profileId: response.profile_id,
+                workspaceId: response.workspace_id,
+                profileRevision: response.profile_revision,
+                planDigest: response.plan_digest,
+                catalogRevision: response.catalog_revision,
+              }
+              : candidate
+          )),
+        }));
+      }
+      await invalidatePackMutationSurfaces(get);
       get().addToast('Pack approved.', 'success');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to approve pack';
       get().addToast(message, 'error');
       throw error;
+    } finally {
+      set((current) => {
+        const pending = {...current.packApprovalPending};
+        delete pending[id];
+        return {packApprovalPending: pending};
+      });
     }
   },
 
@@ -579,8 +691,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       || state.packApprovalPending[id]
     ) return;
 
-    const version = (packMutationVersions.get(id) ?? 0) + 1;
-    packMutationVersions.set(id, version);
+    const version = beginPackMutation(id);
     set((current) => ({
       packApprovalPending: {...current.packApprovalPending, [id]: true},
     }));
@@ -615,7 +726,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           )),
         }));
       }
-      await Promise.all([get().loadPacks(), get().loadFrontendCatalog()]);
+      await invalidatePackMutationSurfaces(get);
       get().addToast('Pack approval revoked.', 'success');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to revoke Pack approval';
@@ -633,10 +744,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   togglePack: async (id) => {
     const state = get();
     const pack = state.packs.find((candidate) => candidate.id === id);
-    if (!pack || pack.required || state.packTogglePending[id]) return false;
+    if (!pack || !pack.installed || !pack.approved || pack.required || state.packTogglePending[id]) return false;
 
-    const version = (packMutationVersions.get(id) ?? 0) + 1;
-    packMutationVersions.set(id, version);
+    const version = beginPackMutation(id);
     set((current) => ({
       packTogglePending: {...current.packTogglePending, [id]: true},
     }));
@@ -666,7 +776,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           )),
         }));
       }
-      await Promise.all([get().loadPacks(), get().loadFrontendCatalog()]);
+      await invalidatePackMutationSurfaces(get);
       return true;
     } catch (error) {
       if (packMutationVersions.get(id) === version) {

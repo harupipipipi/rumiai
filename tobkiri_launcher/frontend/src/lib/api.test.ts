@@ -126,10 +126,20 @@ function installFetchMock(): void {
     }
     const route = decodeURIComponent(lastFetchUrl.replace('/api/contracts/defaultspack/', ''));
     const data = route === 'POST /api/pack-control/approval-candidate'
-      ? {candidate_id: 'candidate-one'}
+      ? {candidate_id: 'candidate-one', pack_id: 'pack-a', snapshot_digest: `sha256:${'a'.repeat(64)}`}
       : route === 'GET /api/pack-control/catalog'
         ? {packs: [], count: 0}
-        : {pack_id: 'pack-a', enabled: true, approved: true};
+        : {
+          pack_id: 'pack-a',
+          enabled: true,
+          approved: true,
+          approval_status: 'approved',
+          profile_id: 'profile-a',
+          workspace_id: 'workspace-a',
+          profile_revision: 'sha256:profile',
+          plan_digest: 'sha256:plan',
+          catalog_revision: 'catalog-a',
+        };
     return new Response(JSON.stringify({data, success: true}), {
       headers: {'Content-Type': 'application/json'},
     });
@@ -164,10 +174,20 @@ test('Home and Packs use only exact v4 frontend contract routes', async () => {
     const route = decodeURIComponent(lastFetchUrl.replace('/api/contracts/defaultspack/', ''));
     operations.push(route);
     const data = route === 'POST /api/pack-control/approval-candidate'
-      ? {candidate_id: 'candidate-one'}
+      ? {candidate_id: 'candidate-one', pack_id: 'pack-a', snapshot_digest: `sha256:${'a'.repeat(64)}`}
       : route === 'GET /api/pack-control/catalog'
         ? {packs: [], count: 0}
-        : {pack_id: 'pack-a', enabled: true, approved: true};
+        : {
+          pack_id: 'pack-a',
+          enabled: true,
+          approved: true,
+          approval_status: 'approved',
+          profile_id: 'profile-a',
+          workspace_id: 'workspace-a',
+          profile_revision: 'sha256:profile',
+          plan_digest: 'sha256:plan',
+          catalog_revision: 'catalog-a',
+        };
     return new Response(JSON.stringify({data, success: true}), {
       headers: {'Content-Type': 'application/json'},
     });
@@ -190,6 +210,28 @@ test('Home and Packs use only exact v4 frontend contract routes', async () => {
     'POST /api/pack-control/disable',
   ]);
   assert.equal(lastFetchInit?.method, 'POST');
+});
+
+test('Pack approval rejects a candidate or approval response for a different state', async () => {
+  const operations: string[] = [];
+  fetchHandler = async (input, init) => {
+    const route = decodeURIComponent(String(input).replace('/api/contracts/defaultspack/', ''));
+    operations.push(route);
+    if (route === 'POST /api/pack-control/approval-candidate') {
+      return new Response(JSON.stringify({
+        success: true,
+        data: {
+          candidate_id: 'candidate-one',
+          pack_id: 'pack-b',
+          snapshot_digest: `sha256:${'a'.repeat(64)}`,
+        },
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
+    throw new Error(`unexpected route ${route}`);
+  };
+
+  await assert.rejects(approvePack('pack-a'), /different Pack/);
+  assert.deepEqual(operations, ['POST /api/pack-control/approval-candidate']);
 });
 
 test('dynamic catalog and capability invocation use the exact canonical v4 routes', async () => {

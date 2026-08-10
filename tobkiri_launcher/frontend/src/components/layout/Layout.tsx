@@ -33,7 +33,7 @@ export function Layout() {
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header />
-        <main className="flex-1 flex flex-col relative overflow-hidden">
+        <main id="panel-main" tabIndex={-1} className="flex-1 flex flex-col relative overflow-hidden">
           {!runtimeReady && (
             <div
               role="alert"

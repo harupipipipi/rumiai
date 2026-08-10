@@ -5,24 +5,49 @@ import {Input} from '@/src/components/ui/Input';
 import {Badge} from '@/src/components/ui/Badge';
 import type {RuntimeJsonSchema, RuntimeOperationDescriptor} from '@/src/lib/runtimeSurface';
 
-type InputValue = string | number | boolean | null | Record<string, unknown> | unknown[];
+type InputValue = unknown;
 
-function initialValue(schema: RuntimeJsonSchema): InputValue {
+function initialValue(schema: RuntimeJsonSchema, required: boolean): InputValue {
   if (schema.default !== undefined) return schema.default as InputValue;
+  if (required && schema.enum && schema.enum.length > 0) return schema.enum[0];
   if (schema.type === 'boolean') return false;
   return '';
 }
 
 function displayValue(value: InputValue, schema: RuntimeJsonSchema): string {
   if (schema.type === 'object' || schema.type === 'array') {
+    if (value === undefined || value === null) return '';
     if (typeof value === 'string') return value;
-    return JSON.stringify(value ?? '', null, 2);
+    return JSON.stringify(value, null, 2) ?? '';
   }
   return String(value ?? '');
 }
 
-function isEmpty(value: InputValue | undefined): boolean {
-  return value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+function isMissing(value: InputValue | undefined, schema: RuntimeJsonSchema): boolean {
+  if (value === undefined || (typeof value === 'string' && value.trim() === '')) return true;
+  if (value !== null) return false;
+  return schema.type !== 'null' && !(schema.enum ?? []).some((option) => option === null);
+}
+
+function enumValueToken(value: InputValue, options: unknown[]): string {
+  const index = options.findIndex((option) => {
+    if (Object.is(option, value)) return true;
+    if (typeof option !== 'object' || option === null || typeof value !== 'object' || value === null) {
+      return false;
+    }
+    try {
+      return JSON.stringify(option) === JSON.stringify(value);
+    } catch {
+      return false;
+    }
+  });
+  return index < 0 ? '' : String(index);
+}
+
+function enumOptionLabel(value: unknown): string {
+  if (value === null) return 'null';
+  if (typeof value === 'object') return JSON.stringify(value) ?? '';
+  return String(value);
 }
 
 export function OperationInputForm({
@@ -38,11 +63,12 @@ export function OperationInputForm({
   const required = new Set(operation.input_schema?.required ?? []);
   const [values, setValues] = useState<Record<string, InputValue>>({});
   const [validationError, setValidationError] = useState<string | null>(null);
+  const schemaSignature = JSON.stringify(operation.input_schema ?? {});
 
   useEffect(() => {
-    setValues(Object.fromEntries(properties.map(([name, schema]) => [name, initialValue(schema)])));
+    setValues(Object.fromEntries(properties.map(([name, schema]) => [name, initialValue(schema, required.has(name))])));
     setValidationError(null);
-  }, [operation.operation_id]);
+  }, [operation.operation_id, schemaSignature]);
 
   const updateValue = (name: string, value: InputValue) => {
     setValues((current) => ({...current, [name]: value}));
@@ -52,7 +78,8 @@ export function OperationInputForm({
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     for (const name of required) {
-      if (isEmpty(values[name])) {
+      const schema = properties.find(([propertyName]) => propertyName === name)?.[1];
+      if (!schema || isMissing(values[name], schema)) {
         setValidationError(`Required input “${name}” is missing.`);
         return;
       }
@@ -61,24 +88,48 @@ export function OperationInputForm({
     const payload: Record<string, unknown> = {};
     for (const [name, schema] of properties) {
       const value = values[name];
+      if (isMissing(value, schema)) {
+        if (required.has(name)) {
+          setValidationError(`Required input “${name}” is missing.`);
+          return;
+        }
+        continue;
+      }
       if (schema.type === 'number' || schema.type === 'integer') {
-        const parsed = typeof value === 'number' ? value : Number(value);
+        const parsed = typeof value === 'number' ? value : Number(String(value).trim());
         if (!Number.isFinite(parsed)) {
           setValidationError(`Input “${name}” must be a number.`);
           return;
         }
-        payload[name] = parsed;
-      } else if (schema.type === 'object' || schema.type === 'array') {
-        if (typeof value !== 'string') {
-          payload[name] = value;
-          continue;
-        }
-        try {
-          payload[name] = JSON.parse(value) as unknown;
-        } catch {
-          setValidationError(`Input “${name}” must contain valid JSON.`);
+        if (schema.type === 'integer' && !Number.isInteger(parsed)) {
+          setValidationError(`Input “${name}” must be an integer.`);
           return;
         }
+        if (schema.enum && !schema.enum.some((option) => Object.is(option, parsed))) {
+          setValidationError(`Input “${name}” must be one of the declared values.`);
+          return;
+        }
+        payload[name] = parsed;
+      } else if (schema.type === 'object' || schema.type === 'array') {
+        let parsed: unknown;
+        if (typeof value !== 'string') {
+          parsed = value;
+        } else {
+          try {
+            parsed = JSON.parse(value) as unknown;
+          } catch {
+            setValidationError(`Input “${name}” must contain valid JSON.`);
+            return;
+          }
+        }
+        if (
+          (schema.type === 'object' && (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)))
+          || (schema.type === 'array' && !Array.isArray(parsed))
+        ) {
+          setValidationError(`Input “${name}” must contain a JSON ${schema.type}.`);
+          return;
+        }
+        payload[name] = parsed;
       } else {
         payload[name] = value;
       }
@@ -98,7 +149,7 @@ export function OperationInputForm({
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {properties.map(([name, schema]) => {
-            const value = values[name] ?? '';
+            const value = values[name];
             const label = schema.title || name;
             const helper = schema.description || (required.has(name) ? 'Required' : undefined);
             if (schema.enum && schema.enum.length > 0) {
@@ -107,12 +158,17 @@ export function OperationInputForm({
                   <span>{label}{required.has(name) ? <span className="ml-1 text-destructive">*</span> : null}</span>
                   <select
                     className="min-h-11 w-full rounded-lg border border-border bg-bg-main px-3 py-2 text-sm text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
-                    value={String(value)}
-                    onChange={(event) => updateValue(name, event.target.value)}
+                    value={enumValueToken(value, schema.enum)}
+                    onChange={(event) => {
+                      const index = Number(event.target.value);
+                      updateValue(name, Number.isInteger(index) && index >= 0 ? schema.enum?.[index] : undefined);
+                    }}
                     aria-label={label}
+                    disabled={busy}
                   >
-                    {schema.enum.map((option) => (
-                      <option key={String(option)} value={String(option)}>{String(option)}</option>
+                    {!required.has(name) ? <option value="">Select a value</option> : null}
+                    {schema.enum.map((option, index) => (
+                      <option key={`${name}-${index}`} value={String(index)}>{enumOptionLabel(option)}</option>
                     ))}
                   </select>
                   {helper ? <span className="text-xs font-normal text-text-muted">{helper}</span> : null}
@@ -127,6 +183,7 @@ export function OperationInputForm({
                     checked={Boolean(value)}
                     onChange={(event) => updateValue(name, event.target.checked)}
                     aria-label={label}
+                    disabled={busy}
                     className="h-4 w-4 accent-[var(--accent)]"
                   />
                   <span>{label}{required.has(name) ? <span className="ml-1 text-destructive">*</span> : null}</span>
@@ -143,6 +200,7 @@ export function OperationInputForm({
                     value={displayValue(value, schema)}
                     onChange={(event) => updateValue(name, event.target.value)}
                     aria-label={label}
+                    disabled={busy}
                   />
                   {helper ? <span className="text-xs font-normal text-text-muted">{helper}</span> : null}
                 </label>
@@ -158,13 +216,14 @@ export function OperationInputForm({
                 type={schema.type === 'number' || schema.type === 'integer' ? 'number' : 'text'}
                 value={displayValue(value, schema)}
                 onChange={(event) => updateValue(name, event.target.value)}
+                disabled={busy}
               />
             );
           })}
         </div>
       )}
       {validationError ? <p className="text-sm text-destructive" role="alert">{validationError}</p> : null}
-      <Button type="submit" className="min-h-11 self-start" loading={busy} disabled={!operation.invokable}>
+      <Button type="submit" className="min-h-11 self-start" loading={busy} disabled={busy || !operation.invokable}>
         Invoke declared operation
       </Button>
     </form>

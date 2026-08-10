@@ -192,3 +192,62 @@ test('Profile closure candidates show new catalog Packs and execute resolve thro
     Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
   }
 });
+
+test('Profile ceremony fails closed when a custom review client substitutes another candidate', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  const surface = surfaceState();
+  let approvalCalls = 0;
+  const client: ProfileCeremonyClient = {
+    resolve: async (): Promise<ProfileResolveResult> => ({
+      state: 'resolved',
+      candidate_id: 'candidate-a',
+      candidate_digest: digest('2'),
+      expires_in: 60,
+      review: {profile: {}, profile_lock: {}, resolved_plan: {}, predecessor: {}},
+      next_action: 'review',
+      write_set: [],
+    }),
+    review: async (): Promise<ProfileReviewResult> => ({
+      state: 'reviewed',
+      candidate_id: 'candidate-b',
+      candidate_digest: digest('3'),
+      next_action: 'approval',
+      write_set: [],
+    }),
+    approve: async (): Promise<ProfileApproveResult> => {
+      approvalCalls += 1;
+      throw new Error('approval must not run');
+    },
+    activate: async (): Promise<ProfileActivateResult> => {
+      throw new Error('activation must not run');
+    },
+  };
+
+  try {
+    await act(async () => {
+      root.render(
+        <ProfileCeremonyPanel
+          surface={surface.state}
+          packs={[pack('provider-pack'), pack('new-pack')]}
+          packsLoading={false}
+          loadPacks={async () => {}}
+          client={client}
+        />,
+      );
+    });
+    await act(async () => { buttonContaining(container, 'new-pack').click(); });
+    await act(async () => { buttonContaining(container, 'Resolve candidate').click(); });
+    await act(async () => { buttonContaining(container, 'Review exact candidate').click(); });
+
+    assert.match(container.textContent ?? '', /different candidate/);
+    assert.equal(approvalCalls, 0);
+    assert.doesNotMatch(container.textContent ?? '', /Request Kernel approval/);
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});

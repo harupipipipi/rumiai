@@ -284,18 +284,28 @@ export function stopConfirmationForInstance(instance: string): string {
   return `STOP ${instance}`;
 }
 
+/** Read only the opaque durable hint; PackVM progress remains server-authoritative. */
 export function readPackVMOperationId(): string | null {
   try {
-    const value = sessionStorage.getItem(PACKVM_OPERATION_STORAGE_KEY);
-    return value && isCanonicalPackVMOperationId(value) ? value : null;
+    const localValue = globalThis.localStorage?.getItem(PACKVM_OPERATION_STORAGE_KEY) ?? null;
+    if (localValue === null) return null;
+    if (!isCanonicalPackVMOperationId(localValue)) {
+      clearPackVMOperationId();
+      return null;
+    }
+    return localValue;
   } catch {
     return null;
   }
 }
 
 export function writePackVMOperationId(operationId: string): void {
+  if (!isCanonicalPackVMOperationId(operationId)) {
+    clearPackVMOperationId();
+    return;
+  }
   try {
-    sessionStorage.setItem(PACKVM_OPERATION_STORAGE_KEY, operationId);
+    globalThis.localStorage?.setItem(PACKVM_OPERATION_STORAGE_KEY, operationId);
   } catch {
     // A storage failure must not change the server-owned lifecycle state.
   }
@@ -303,7 +313,7 @@ export function writePackVMOperationId(operationId: string): void {
 
 export function clearPackVMOperationId(): void {
   try {
-    sessionStorage.removeItem(PACKVM_OPERATION_STORAGE_KEY);
+    globalThis.localStorage?.removeItem(PACKVM_OPERATION_STORAGE_KEY);
   } catch {
     // Ignore unavailable browser storage.
   }

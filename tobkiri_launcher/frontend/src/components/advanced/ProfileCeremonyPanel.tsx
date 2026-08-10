@@ -16,6 +16,7 @@ import {
   type RuntimeSurfaceErrorCode,
 } from '@/src/lib/runtimeSurface';
 import {
+  assertProfileCandidateMatches,
   defaultProfileCeremonyClient,
   snapshotForProfileCeremony,
   type ProfileActivateResult,
@@ -348,8 +349,10 @@ export function ProfileCeremonyPanel({
     try {
       requireStableSnapshot();
       if (!candidate) throw new RuntimeSurfaceError('INVALID', 'No resolved candidate is available.');
-      const result = await client.review({candidate_id: candidate.candidate_id, candidate_digest: candidate.candidate_digest});
+      const reviewInput = {candidate_id: candidate.candidate_id, candidate_digest: candidate.candidate_digest};
+      const result = await client.review(reviewInput);
       if (!requestIsCurrent(operation.request, operation.bindingKey)) return;
+      assertProfileCandidateMatches(reviewInput, result);
       setReviewed(result);
       setCeremonyState('reviewed');
     } catch (error) {
@@ -365,7 +368,9 @@ export function ProfileCeremonyPanel({
     try {
       requireStableSnapshot();
       if (!reviewed) throw new RuntimeSurfaceError('INVALID', 'Review must complete before approval.');
-      const result = await client.approve({candidate_id: reviewed.candidate_id, candidate_digest: reviewed.candidate_digest});
+      if (!candidate) throw new RuntimeSurfaceError('INVALID', 'No resolved candidate is available.');
+      assertProfileCandidateMatches(candidate, reviewed);
+      const result = await client.approve({candidate_id: candidate.candidate_id, candidate_digest: candidate.candidate_digest});
       if (!requestIsCurrent(operation.request, operation.bindingKey)) return;
       setApproval(result);
       setCeremonyState('approved');

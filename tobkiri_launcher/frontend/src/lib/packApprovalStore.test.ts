@@ -52,6 +52,15 @@ const revokedCatalogPack = {
   catalog_revision: 'catalog-after-revoke',
 };
 
+const approvedCatalogPack = {
+  ...revokedCatalogPack,
+  enabled: false,
+  approval_status: 'approved',
+  approval_reason: null,
+  approved: true,
+  approval_issues: [],
+};
+
 const healthyDoctor: ApiPackVMDoctor = {
   ready: true,
   backend_id: 'tobkiri.python-pack-v4',
@@ -236,4 +245,116 @@ test('required Profile Pack is rejected before a revoke request is sent', async 
   assert.deepEqual(routes, []);
   assert.deepEqual(useAppStore.getState().packApprovalPending, {});
   assert.equal(useAppStore.getState().packs[0].approved, true);
+});
+
+test('approval guards the entire candidate-to-approve chain against duplicate submits', async () => {
+  let releaseCandidate: (() => void) | undefined;
+  const candidateGate = new Promise<void>((resolve) => { releaseCandidate = resolve; });
+  const routes = installFetch(async (route) => {
+    if (route === 'POST /api/pack-control/approval-candidate') {
+      await candidateGate;
+      return new Response(JSON.stringify({
+        success: true,
+        data: {
+          candidate_id: 'candidate-one',
+          pack_id: samplePack.id,
+          snapshot_digest: `sha256:${'b'.repeat(64)}`,
+        },
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
+    if (route === 'POST /api/pack-control/approval-approve') {
+      return new Response(JSON.stringify({
+        success: true,
+        data: {...binding(), pack_id: samplePack.id, approved: true, enabled: false, approval_status: 'approved'},
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
+    if (route === 'GET /api/pack-control/catalog') {
+      return new Response(JSON.stringify({
+        success: true,
+        data: {...binding(), packs: [approvedCatalogPack], count: 1},
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
+    assert.equal(route, 'GET /api/ui/catalog');
+    return new Response(JSON.stringify({success: true, data: {dynamic_host: dynamicCatalog()}}), {
+      headers: {'Content-Type': 'application/json'},
+    });
+  });
+  const pendingPack: Pack = {
+    ...samplePack,
+    enabled: false,
+    approved: false,
+    approvalStatus: 'pending',
+    approvalReason: 'approval_required',
+    approvalIssues: ['approval_required'],
+  };
+  useAppStore.setState({
+    packs: [pendingPack],
+    packApprovalPending: {},
+    packVmDoctor: healthyDoctor,
+  });
+
+  const first = useAppStore.getState().approvePack(samplePack.id);
+  const second = useAppStore.getState().approvePack(samplePack.id);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(routes, ['POST /api/pack-control/approval-candidate']);
+  assert.deepEqual(useAppStore.getState().packApprovalPending, {[samplePack.id]: true});
+  releaseCandidate?.();
+  await Promise.all([first, second]);
+
+  assert.deepEqual(routes, [
+    'POST /api/pack-control/approval-candidate',
+    'POST /api/pack-control/approval-approve',
+    'GET /api/pack-control/catalog',
+    'GET /api/ui/catalog',
+  ]);
+  assert.deepEqual(useAppStore.getState().packApprovalPending, {});
+  assert.equal(useAppStore.getState().packs[0].approved, true);
+});
+
+test('approval candidate success followed by approval failure clears pending without false approval', async () => {
+  const routes = installFetch(async (route) => {
+    if (route === 'POST /api/pack-control/approval-candidate') {
+      return new Response(JSON.stringify({
+        success: true,
+        data: {
+          candidate_id: 'candidate-one',
+          pack_id: samplePack.id,
+          snapshot_digest: `sha256:${'b'.repeat(64)}`,
+        },
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
+    assert.equal(route, 'POST /api/pack-control/approval-approve');
+    return new Response(JSON.stringify({
+      success: true,
+      data: {...binding(), pack_id: samplePack.id, approved: true, enabled: false, approval_status: 'revoked'},
+    }), {headers: {'Content-Type': 'application/json'}});
+  });
+  const errors: string[] = [];
+  const pendingPack: Pack = {
+    ...samplePack,
+    enabled: false,
+    approved: false,
+    approvalStatus: 'pending',
+    approvalReason: 'approval_required',
+    approvalIssues: ['approval_required'],
+  };
+  useAppStore.setState({
+    packs: [pendingPack],
+    packApprovalPending: {},
+    addToast: (message, type) => {
+      if (type === 'error') errors.push(message);
+    },
+  });
+
+  await assert.rejects(
+    useAppStore.getState().approvePack(samplePack.id),
+    /did not confirm approval/,
+  );
+  assert.deepEqual(routes, [
+    'POST /api/pack-control/approval-candidate',
+    'POST /api/pack-control/approval-approve',
+  ]);
+  assert.deepEqual(useAppStore.getState().packApprovalPending, {});
+  assert.equal(useAppStore.getState().packs[0].approved, false);
+  assert.deepEqual(errors, ['Tobkiri did not confirm approval for the requested Pack.']);
 });

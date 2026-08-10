@@ -7,13 +7,10 @@ import {RuntimeEvidenceCard} from '@/src/components/advanced/RuntimeEvidenceCard
 import {Badge} from '@/src/components/ui/Badge';
 import {Card, CardContent, CardDescription, CardHeader, CardTitle} from '@/src/components/ui/Card';
 import {useRuntimeSurface} from '@/src/hooks/useRuntimeSurface';
+import {useRuntimeOperationInvocation} from '@/src/hooks/useRuntimeOperationInvocation';
 import {LAUNCHER_ADVANCED_VIEWS} from '@/src/lib/advancedSurfaces';
 import {
-  classifyRuntimeSurfaceError,
   extractExactOperationDescriptors,
-  invokeRuntimeOperation,
-  runtimeSurfaceErrorMessage,
-  type RuntimeSurfaceErrorCode,
 } from '@/src/lib/runtimeSurface';
 
 export function AiInput() {
@@ -22,8 +19,6 @@ export function AiInput() {
   const operations = surface.data ? extractExactOperationDescriptors(surface.data.data) : [];
   const invokableOperations = operations.filter((operation) => operation.invokable);
   const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null);
-  const [invocationState, setInvocationState] = useState<'idle' | 'running' | 'succeeded' | 'failed'>('idle');
-  const [invocationError, setInvocationError] = useState<{code: RuntimeSurfaceErrorCode; message: string} | null>(null);
 
   useEffect(() => {
     if (!selectedOperationId || !invokableOperations.some((operation) => operation.operation_id === selectedOperationId)) {
@@ -32,20 +27,7 @@ export function AiInput() {
   }, [selectedOperationId, invokableOperations.map((operation) => operation.operation_id).join('\u0000')]);
 
   const selectedOperation = invokableOperations.find((operation) => operation.operation_id === selectedOperationId) ?? null;
-
-  const handleInvoke = async (payload: Record<string, unknown>) => {
-    if (!surface.data || !selectedOperation) return;
-    setInvocationState('running');
-    setInvocationError(null);
-    try {
-      await invokeRuntimeOperation({envelope: surface.data, operation: selectedOperation, payload});
-      setInvocationState('succeeded');
-    } catch (error) {
-      const code = classifyRuntimeSurfaceError(error);
-      setInvocationState('failed');
-      setInvocationError({code, message: runtimeSurfaceErrorMessage(code)});
-    }
-  };
+  const invocation = useRuntimeOperationInvocation(surface.data, selectedOperation);
 
   return (
     <AdvancedSurfaceFrame
@@ -68,10 +50,10 @@ export function AiInput() {
                   type="button"
                   className="flex min-h-11 flex-col items-start gap-1 rounded-lg border border-border px-3 py-2 text-left transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
                   aria-pressed={operation.operation_id === selectedOperation.operation_id}
+                  disabled={invocation.busy}
                   onClick={() => {
+                    if (invocation.busy) return;
                     setSelectedOperationId(operation.operation_id);
-                    setInvocationState('idle');
-                    setInvocationError(null);
                   }}
                 >
                   <span className="text-sm font-medium text-text-main">{operation.label || operation.operation_id}</span>
@@ -89,14 +71,14 @@ export function AiInput() {
               <CardDescription>Input controls are generated from the declared operation schema. Invocation remains bound to the accepted Profile / Plan / catalog digests.</CardDescription>
             </CardHeader>
             <CardContent>
-              {invocationError ? (
+              {invocation.error ? (
                 <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-300/70 bg-amber-50/70 px-4 py-3 text-sm dark:border-amber-800/60 dark:bg-amber-950/20" role="alert">
                   <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
-                  <span>{invocationError.code}: {invocationError.message}</span>
+                  <span>{invocation.error.code}: {invocation.error.message}</span>
                 </div>
               ) : null}
-              {invocationState === 'succeeded' ? <p className="mb-4 text-sm text-emerald-700 dark:text-emerald-300" role="status">Operation accepted by the canonical Broker path.</p> : null}
-              <OperationInputForm operation={selectedOperation} busy={invocationState === 'running'} onInvoke={handleInvoke} />
+              {invocation.state === 'succeeded' ? <p className="mb-4 text-sm text-emerald-700 dark:text-emerald-300" role="status">Operation accepted by the canonical Broker path.</p> : null}
+              <OperationInputForm operation={selectedOperation} busy={invocation.busy} onInvoke={invocation.invoke} />
             </CardContent>
           </Card>
         </div>

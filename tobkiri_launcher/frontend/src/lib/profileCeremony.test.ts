@@ -149,6 +149,23 @@ test('Profile ceremony sends exact staged payloads and requires the authoritativ
   });
 });
 
+test('Profile review rejects a response substituted for the requested candidate', async () => {
+  const candidateDigest = digest('2');
+  const client = createProfileCeremonyClient(undefined, queuedTransport([{
+    runtime_surface_api_version: RUNTIME_SURFACE_API_VERSION,
+    state: 'reviewed',
+    candidate_id: 'candidate-b',
+    candidate_digest: digest('3'),
+    next_action: 'approval',
+    write_set: [],
+  }], []));
+
+  await assert.rejects(
+    client.review({candidate_id: 'candidate-a', candidate_digest: candidateDigest}),
+    (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'DIGEST_MISMATCH',
+  );
+});
+
 test('named Profile resolve binds exact definition, catalog, and bundle-lock digests', async () => {
   const calls: Array<{target: string; payload: Record<string, unknown>}> = [];
   const definitionDigest = digest('6');

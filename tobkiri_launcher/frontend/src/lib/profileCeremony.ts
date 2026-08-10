@@ -261,6 +261,23 @@ function isSha256(value: unknown): value is string {
   return typeof value === 'string' && /^sha256:[0-9a-f]{64}$/.test(value);
 }
 
+export function assertProfileCandidateMatches(
+  expected: Pick<ProfileReviewInput, 'candidate_id' | 'candidate_digest'>,
+  actual: unknown,
+): asserts actual is Pick<ProfileReviewResult, 'candidate_id' | 'candidate_digest'> {
+  if (!isRecord(actual)) {
+    throw new RuntimeSurfaceError('INVALID', 'Profile review returned no candidate identity.');
+  }
+  const candidateId = requiredString(actual.candidate_id, 'candidate_id');
+  const candidateDigest = requiredDigest(actual.candidate_digest, 'candidate_digest');
+  if (candidateId !== expected.candidate_id || candidateDigest !== expected.candidate_digest) {
+    throw new RuntimeSurfaceError(
+      'DIGEST_MISMATCH',
+      'Profile review returned a different candidate than the one displayed for approval.',
+    );
+  }
+}
+
 function targetFor(targets: ProfileCeremonyTargets, step: ProfileCeremonyStep): RuntimeSurfaceTarget {
   const target = targets[step];
   if (!target) {
@@ -321,15 +338,26 @@ function validateResolve(value: unknown): ProfileResolveResult {
   };
 }
 
-function validateReview(value: unknown): ProfileReviewResult {
+function validateReview(
+  value: unknown,
+  expectedCandidate?: Pick<ProfileReviewInput, 'candidate_id' | 'candidate_digest'>,
+): ProfileReviewResult {
   const result = responseRecord(value);
   if (result.state !== 'reviewed' || result.next_action !== 'approval') {
     throw new RuntimeSurfaceError('INVALID', 'Profile review returned an invalid ceremony state.');
   }
+  const candidateId = requiredString(result.candidate_id, 'candidate_id');
+  const candidateDigest = requiredDigest(result.candidate_digest, 'candidate_digest');
+  if (expectedCandidate) {
+    assertProfileCandidateMatches(expectedCandidate, {
+      candidate_id: candidateId,
+      candidate_digest: candidateDigest,
+    });
+  }
   return {
     state: 'reviewed',
-    candidate_id: requiredString(result.candidate_id, 'candidate_id'),
-    candidate_digest: requiredDigest(result.candidate_digest, 'candidate_digest'),
+    candidate_id: candidateId,
+    candidate_digest: candidateDigest,
     next_action: 'approval',
     write_set: requiredWriteSet(result.write_set),
     ...(isRecord(result.review) ? {review: result.review as ProfileResolveResult['review']} : {}),
@@ -431,7 +459,11 @@ export function createProfileCeremonyClient(
   };
   return {
     resolve: (input) => write('resolve', exactMutationPayload('resolve', input), validateResolve),
-    review: (input) => write('review', exactMutationPayload('review', input), validateReview),
+    review: (input) => {
+      const payload = exactMutationPayload('review', input);
+      return transport.write<unknown>(targetFor(targets, 'review'), payload)
+        .then((result) => validateReview(result, input));
+    },
     approve: (input) => write('approve', exactMutationPayload('approve', input), validateApprove),
     activate: (input) => write('activate', exactMutationPayload('activate', input), validateActivate),
   };

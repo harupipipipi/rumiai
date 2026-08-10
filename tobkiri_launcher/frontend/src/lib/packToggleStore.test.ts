@@ -174,6 +174,57 @@ test('disable waits for the typed response, refreshes state, and survives a late
   ].sort());
 });
 
+test('install confirms the exact Pack response and reconciles every affected surface', async () => {
+  const availablePack: Pack = {
+    ...samplePack,
+    installed: false,
+    enabled: false,
+    approved: false,
+    approvalStatus: 'available',
+    approvalReason: 'install_required',
+    approvalIssues: ['install_required'],
+  };
+  const routes = installFetch(async (route, init) => {
+    if (route === 'POST /api/pack-control/install') {
+      assert.deepEqual(JSON.parse(String(init?.body)), {pack_id: samplePack.id});
+      return new Response(JSON.stringify({
+        success: true,
+        data: {...binding(), pack_id: samplePack.id, installed: true},
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
+    if (route === 'GET /api/pack-control/catalog') {
+      return new Response(JSON.stringify({
+        success: true,
+        data: {...binding(), packs: [catalogPack(true)], count: 1},
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
+    assert.equal(route, 'GET /api/ui/catalog');
+    return new Response(JSON.stringify({success: true, data: {dynamic_host: dynamicCatalog()}}), {
+      headers: {'Content-Type': 'application/json'},
+    });
+  });
+  const successes: string[] = [];
+  useAppStore.setState({
+    packs: [availablePack],
+    packInstallPending: {},
+    packVmDoctor: healthyDoctor,
+    addToast: (message, type) => {
+      if (type === 'success') successes.push(message);
+    },
+  });
+
+  await useAppStore.getState().installPack(samplePack.id);
+
+  assert.deepEqual(routes, [
+    'POST /api/pack-control/install',
+    'GET /api/pack-control/catalog',
+    'GET /api/ui/catalog',
+  ]);
+  assert.equal(useAppStore.getState().packs[0].installed, true);
+  assert.deepEqual(useAppStore.getState().packInstallPending, {});
+  assert.deepEqual(successes, ['Pack installed.']);
+});
+
 test('disable denial leaves the Pack enabled, clears pending, and surfaces the server error', async () => {
   const routes = installFetch(async (route) => {
     assert.equal(route, 'POST /api/pack-control/disable');
