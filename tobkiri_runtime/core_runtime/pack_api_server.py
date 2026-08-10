@@ -9,6 +9,7 @@ import re
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -28,6 +29,7 @@ from .capability_bindings_v4 import (
     capture_capability_binding_snapshot,
 )
 from .control_reconciliation_v4 import (
+    ControlReconciliationCapacityError,
     ControlReconciliationConflictError,
     ControlReconciliationError,
     ControlReconciliationStore,
@@ -391,6 +393,16 @@ class _PackThreadingHTTPServer(ThreadingHTTPServer):
             }
 
 
+class _RequestReplayCapacityError(RuntimeError):
+    """Raised when replay state is full of still-live session identities."""
+
+
+@dataclass
+class _ReplaySession:
+    expires_at: float
+    request_ids: set[str]
+
+
 class _RequestReplayGuard:
     """Consume browser request identities once per authenticated server."""
 
@@ -399,21 +411,110 @@ class _RequestReplayGuard:
         r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     )
 
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._consumed: set[tuple[str, str]] = set()
+    DEFAULT_CAPACITY = 100_000
 
-    def consume(self, session_id: str, request_id: str) -> bool:
+    def __init__(
+        self,
+        *,
+        capacity: int = DEFAULT_CAPACITY,
+        clock: Callable[[], float] = time.monotonic,
+        max_session_ttl_seconds: float = PanelAuthManager.DEFAULT_SESSION_TTL_SECONDS,
+    ) -> None:
+        if capacity <= 0:
+            raise ValueError("replay capacity must be positive")
+        if max_session_ttl_seconds <= 0:
+            raise ValueError("maximum session TTL must be positive")
+        self._lock = threading.Lock()
+        self._capacity = capacity
+        self._clock = clock
+        self._max_session_ttl_seconds = max_session_ttl_seconds
+        self._sessions: OrderedDict[str, _ReplaySession] = OrderedDict()
+        self._size = 0
+
+    def consume(
+        self,
+        session_id: str,
+        request_id: str,
+        *,
+        session_ttl_seconds: float | None = None,
+    ) -> bool:
         """Return true only for a fresh canonical request identity."""
 
         if not session_id or self._REQUEST_ID.fullmatch(request_id) is None:
             return False
-        key = (session_id, request_id)
+        requested_ttl = (
+            self._max_session_ttl_seconds
+            if session_ttl_seconds is None
+            else float(session_ttl_seconds)
+        )
+        ttl = min(
+            self._max_session_ttl_seconds,
+            max(0.0, requested_ttl),
+        )
         with self._lock:
-            if key in self._consumed:
+            now = self._clock()
+            self._purge_expired_locked(now)
+            session = self._sessions.get(session_id)
+            if session is None:
+                session = _ReplaySession(expires_at=now + ttl, request_ids=set())
+                self._sessions[session_id] = session
+            else:
+                session.expires_at = now + ttl
+                self._sessions.move_to_end(session_id)
+            if request_id in session.request_ids:
                 return False
-            self._consumed.add(key)
+            if self._size >= self._capacity:
+                if not session.request_ids:
+                    del self._sessions[session_id]
+                raise _RequestReplayCapacityError("request replay capacity exhausted")
+            session.request_ids.add(request_id)
+            self._size += 1
         return True
+
+    def _purge_expired_locked(self, now: float) -> None:
+        while self._sessions:
+            session_id, session = next(iter(self._sessions.items()))
+            if session.expires_at > now:
+                break
+            self._size -= len(session.request_ids)
+            del self._sessions[session_id]
+        if self._size < self._capacity:
+            return
+        expired = [
+            session_id
+            for session_id, session in self._sessions.items()
+            if session.expires_at <= now
+        ]
+        for session_id in expired:
+            self._size -= len(self._sessions[session_id].request_ids)
+            del self._sessions[session_id]
+
+    def renew_session(self, session_id: str, *, session_ttl_seconds: float) -> None:
+        """Extend all identities when panel authentication slides a session."""
+
+        with self._lock:
+            now = self._clock()
+            self._purge_expired_locked(now)
+            session = self._sessions.get(session_id)
+            if session is None:
+                return
+            ttl = min(
+                self._max_session_ttl_seconds,
+                max(0.0, float(session_ttl_seconds)),
+            )
+            session.expires_at = now + ttl
+            self._sessions.move_to_end(session_id)
+
+    def snapshot(self) -> Mapping[str, int]:
+        """Return non-sensitive bounded-state counters for tests and diagnostics."""
+
+        with self._lock:
+            self._purge_expired_locked(self._clock())
+            return {
+                "capacity": self._capacity,
+                "entries": self._size,
+                "sessions": len(self._sessions),
+            }
 
     def valid(self, session_id: str, request_id: str) -> bool:
         """Return whether an identity is canonical without consuming it."""
@@ -533,6 +634,20 @@ class PackAPIHandler(
             message = " ".join(sanitized) if sanitized else format
         logger.info("API: %s", message)
 
+    def _check_auth(self, method: str, path: str) -> bool:
+        authenticated = AuthGateMixin._check_auth(self, method, path)
+        if not authenticated:
+            return False
+        panel_session = self._panel_session
+        session_id = panel_session.get("session_id") if panel_session else None
+        guard = self._contract_replay_guard
+        if isinstance(session_id, str) and guard is not None:
+            guard.renew_session(
+                session_id,
+                session_ttl_seconds=self._panel_session_ttl_seconds(panel_session),
+            )
+        return True
+
     @staticmethod
     def _redact_log_value(value: object) -> str:
         return re.sub(
@@ -628,6 +743,7 @@ class PackAPIHandler(
         panel_session = self._panel_session
         raw_session_id = panel_session.get("session_id") if panel_session else None
         session_id: str | None = raw_session_id if isinstance(raw_session_id, str) else None
+        session_ttl_seconds = self._panel_session_ttl_seconds(panel_session)
         request_id = self.headers.get("X-Tobkiri-Request-ID", "").strip().lower()
         replay_guard = self._contract_replay_guard
         if (
@@ -721,8 +837,41 @@ class PackAPIHandler(
         payload["_session_id"] = session_id
         operation_record: Mapping[str, Any] | None = None
         operation_journal = self._operation_journal
+        if operation_journal is not None:
+            try:
+                operation_journal.renew_session(
+                    session_id,
+                    expires_at=time.time() + session_ttl_seconds,
+                )
+            except ControlReconciliationCapacityError:
+                if method.upper() != "GET":
+                    self._send_reconciliation_capacity_error()
+                    return True
+            except (ControlReconciliationUnavailableError, ControlReconciliationError):
+                if method.upper() != "GET":
+                    self._send_response(
+                        APIResponse(
+                            False,
+                            data={
+                                "state": "contract_dispatch_denied",
+                                "code": "operation_reconciliation_unavailable",
+                            },
+                            error="Control operation reconciliation is unavailable",
+                        ),
+                        503,
+                    )
+                    return True
         if method.upper() == "GET":
-            if not replay_guard.consume(session_id, request_id):
+            try:
+                fresh_get = replay_guard.consume(
+                    session_id,
+                    request_id,
+                    session_ttl_seconds=session_ttl_seconds,
+                )
+            except _RequestReplayCapacityError:
+                self._send_replay_capacity_error()
+                return True
+            if not fresh_get:
                 self._send_response(
                     APIResponse(False, error="Canonical request identity is replayed"),
                     409,
@@ -744,7 +893,16 @@ class PackAPIHandler(
                     "payload": payload,
                 }
             )
-            fresh = replay_guard.consume(session_id, request_id)
+            replay_capacity_exhausted = False
+            try:
+                fresh = replay_guard.consume(
+                    session_id,
+                    request_id,
+                    session_ttl_seconds=session_ttl_seconds,
+                )
+            except _RequestReplayCapacityError:
+                fresh = False
+                replay_capacity_exhausted = True
             try:
                 if fresh:
                     operation_record, created = operation_journal.begin_operation(
@@ -753,6 +911,7 @@ class PackAPIHandler(
                         operation_id=target.operation_id,
                         contract_id=target.contract_id,
                         request_digest=request_digest,
+                        session_expires_at=time.time() + session_ttl_seconds,
                     )
                 else:
                     existing = operation_journal.lookup_operation(
@@ -763,12 +922,21 @@ class PackAPIHandler(
                         request_digest=request_digest,
                     )
                     if existing is None:
-                        self._send_response(
-                            APIResponse(False, error="Canonical request identity is replayed"),
-                            409,
-                        )
+                        if replay_capacity_exhausted:
+                            self._send_replay_capacity_error()
+                        else:
+                            self._send_response(
+                                APIResponse(
+                                    False,
+                                    error="Canonical request identity is replayed",
+                                ),
+                                409,
+                            )
                         return True
                     operation_record, created = existing, False
+            except ControlReconciliationCapacityError:
+                self._send_reconciliation_capacity_error()
+                return True
             except ControlReconciliationConflictError:
                 self._send_response(
                     APIResponse(
@@ -859,6 +1027,39 @@ class PackAPIHandler(
         return True
 
     @staticmethod
+    def _panel_session_ttl_seconds(session: Mapping[str, object] | None) -> float:
+        value = session.get("expires_in") if session else None
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+            return min(float(value), PanelAuthManager.DEFAULT_SESSION_TTL_SECONDS)
+        return float(PanelAuthManager.DEFAULT_SESSION_TTL_SECONDS)
+
+    def _send_replay_capacity_error(self) -> None:
+        self._send_response(
+            APIResponse(
+                False,
+                data={
+                    "state": "contract_dispatch_denied",
+                    "code": "request_replay_capacity_exhausted",
+                },
+                error="Request replay protection is temporarily unavailable",
+            ),
+            503,
+        )
+
+    def _send_reconciliation_capacity_error(self) -> None:
+        self._send_response(
+            APIResponse(
+                False,
+                data={
+                    "state": "contract_dispatch_denied",
+                    "code": "operation_reconciliation_capacity_exhausted",
+                },
+                error="Control operation reconciliation capacity is exhausted",
+            ),
+            503,
+        )
+
+    @staticmethod
     def _contract_result_status(result: Mapping[str, object]) -> int:
         """Map one public typed result to its semantic HTTP status."""
 
@@ -929,11 +1130,21 @@ class PackAPIHandler(
         if method == "POST":
             request_id = self.headers.get("X-Tobkiri-Request-ID", "").strip().lower()
             guard = self._contract_replay_guard
-            if (
-                packvm_session_id is None
-                or guard is None
-                or not guard.consume(packvm_session_id, request_id)
-            ):
+            try:
+                fresh_request = bool(
+                    packvm_session_id is not None
+                    and guard is not None
+                    and guard.consume(
+                        packvm_session_id,
+                        request_id,
+                        session_ttl_seconds=self._panel_session_ttl_seconds(panel_session),
+                    )
+                )
+            except _RequestReplayCapacityError:
+                self._discard_request_body()
+                self._send_replay_capacity_error()
+                return True
+            if not fresh_request:
                 self._discard_request_body()
                 self._send_response(
                     APIResponse(False, error="Canonical request identity is missing or replayed"),

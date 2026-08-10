@@ -71,7 +71,9 @@ def _process_prepare(path_value: str, results: object) -> None:
         store.prepare_for_operation()
         results.put("ok")  # type: ignore[attr-defined]
     except Exception as error:  # pragma: no cover - reported to parent
-        results.put(type(error).__name__)  # type: ignore[attr-defined]
+        results.put(  # type: ignore[attr-defined]
+            f"{type(error).__name__}: {error}; cause={error.__cause__!r}"
+        )
 
 
 def _fork_inherited_store(
@@ -210,7 +212,9 @@ def test_concurrent_first_operation_initialization_is_serialized(
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
     assert tables == {
+        "control_journal_audit",
         "control_operations",
+        "control_replay_sessions",
         "control_recovery_audit",
         "profile_ceremonies",
         "sqlite_sequence",

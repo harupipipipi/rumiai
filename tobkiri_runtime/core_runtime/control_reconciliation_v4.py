@@ -16,6 +16,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
+if os.name != "nt":
+    import fcntl
+
 from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.errors import CanonicalizationError
 from tobkiri_protocol.platform_paths import canonical_platform_path
@@ -70,6 +73,10 @@ class ControlReconciliationUnavailableError(ControlReconciliationError):
     """Raised when durable reconciliation state is not safely available."""
 
 
+class ControlReconciliationCapacityError(ControlReconciliationUnavailableError):
+    """Raised when bounded durable replay state cannot accept a new request."""
+
+
 class _ControlReconciliationSnapshotChanged(ControlReconciliationUnavailableError):
     """Internal signal that a concurrent writer invalidated a snapshot copy."""
 
@@ -90,6 +97,13 @@ class ControlReconciliationStore:
         open_retry_seconds: float = 0.5,
         boot_id: str | None = None,
         process_start_reader: Callable[[int], ProcessIdentityEvidence] | None = None,
+        max_operation_records: int = 100_000,
+        terminal_retention_seconds: float = 24 * 60 * 60,
+        default_session_ttl_seconds: float = 8 * 60 * 60,
+        compaction_batch_size: int = 1_000,
+        max_recovery_audit_records: int = 1_000,
+        max_database_bytes: int = 256 * 1024 * 1024,
+        max_operation_result_bytes: int = 1024 * 1024,
     ) -> None:
         if lease_timeout_seconds <= 0:
             raise ValueError("lease_timeout_seconds must be positive")
@@ -98,6 +112,16 @@ class ControlReconciliationStore:
             raise ValueError("heartbeat interval must be positive and shorter than lease")
         if open_retry_seconds <= 0 or open_retry_seconds > 5.0:
             raise ValueError("open_retry_seconds must be positive and bounded")
+        if max_operation_records <= 0:
+            raise ValueError("max_operation_records must be positive")
+        if terminal_retention_seconds < 0 or default_session_ttl_seconds <= 0:
+            raise ValueError("replay retention values are invalid")
+        if compaction_batch_size <= 0 or max_recovery_audit_records <= 0:
+            raise ValueError("journal compaction limits must be positive")
+        if max_database_bytes < 1024 * 1024:
+            raise ValueError("max_database_bytes must be at least one MiB")
+        if max_operation_result_bytes <= 0:
+            raise ValueError("max_operation_result_bytes must be positive")
         self.path = canonical_platform_path(Path(path))
         self.instance_id = instance_id or f"store-{secrets.token_hex(16)}"
         self._process_id = os.getpid()
@@ -110,6 +134,13 @@ class ControlReconciliationStore:
         self._open_retry_seconds = open_retry_seconds
         self._boot_id = boot_id or _current_boot_id() or ""
         self._process_start_reader = process_start_reader or _process_start_identity
+        self._max_operation_records = max_operation_records
+        self._terminal_retention_seconds = terminal_retention_seconds
+        self._default_session_ttl_seconds = default_session_ttl_seconds
+        self._compaction_batch_size = compaction_batch_size
+        self._max_recovery_audit_records = max_recovery_audit_records
+        self._max_database_bytes = max_database_bytes
+        self._max_operation_result_bytes = max_operation_result_bytes
         process_evidence = self._process_start_reader(self._process_id)
         self._process_start = process_evidence.identity if process_evidence.state == "live" else ""
         self._initialization_lock = threading.RLock()
@@ -119,6 +150,7 @@ class ControlReconciliationStore:
         self._heartbeat_thread: threading.Thread | None = None
         self._database_identity: FileIdentity | None = None
         self._parent_identity: FileIdentity | None = None
+        self._lock_identity: FileIdentity | None = None
 
     def _prepare_path(self) -> None:
         try:
@@ -220,6 +252,47 @@ class ControlReconciliationStore:
             finally:
                 os.close(descriptor)
 
+    @contextmanager
+    def _journal_file_lock(self) -> Iterator[None]:
+        """Serialize POSIX journal transactions using the pinned DB file."""
+
+        if os.name == "nt":
+            yield
+            return
+        try:
+            with self._secure_parent() as parent:
+                lock_name = f"{self.path.name}.lock"
+                lock_identity = parent.validate_open(
+                    lock_name,
+                    required=False,
+                    expected=self._lock_identity,
+                )
+                if lock_identity is None:
+                    try:
+                        lock_identity = parent.create_empty_file(lock_name)
+                    except FileExistsError:
+                        lock_identity = parent.validate_open(lock_name, required=True)
+                if self._lock_identity is None:
+                    self._lock_identity = lock_identity
+                descriptor = parent.open_file(lock_name, os.O_RDWR)
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX)
+                    parent.validate_open(
+                        lock_name,
+                        required=True,
+                        expected=self._lock_identity,
+                    )
+                    yield
+                finally:
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                    os.close(descriptor)
+        except ControlReconciliationError:
+            raise
+        except (OSError, SecurePathError) as error:
+            raise ControlReconciliationUnavailableError(
+                "control journal initialization lock is unavailable"
+            ) from error
+
     def _validate_storage_files(self) -> None:
         """Validate the pinned database and any current SQLite sidecars."""
 
@@ -261,6 +334,8 @@ class ControlReconciliationStore:
                 connection.execute("PRAGMA synchronous=FULL")
                 connection.execute("PRAGMA trusted_schema=OFF")
                 connection.execute("PRAGMA foreign_keys=ON")
+                if self._initialized:
+                    self._configure_capacity(connection)
                 self._validate_storage_files()
                 return connection
             except ControlReconciliationError:
@@ -283,6 +358,20 @@ class ControlReconciliationStore:
                     "control journal is unavailable"
                 ) from error
 
+    def _configure_capacity(self, connection: sqlite3.Connection) -> None:
+        """Apply byte limits only after first-open schema locking is established."""
+
+        page_size = int(connection.execute("PRAGMA page_size").fetchone()[0])
+        max_pages = max(1, self._max_database_bytes // page_size)
+        applied_max_pages = int(
+            connection.execute(f"PRAGMA max_page_count={max_pages}").fetchone()[0]
+        )
+        if applied_max_pages > max_pages:
+            raise ControlReconciliationCapacityError(
+                "control journal exceeds its configured byte capacity"
+            )
+        connection.execute(f"PRAGMA journal_size_limit={self._max_database_bytes}")
+
     def _assert_current_process(self) -> None:
         """Reject mutation through a store inherited from another process."""
 
@@ -291,9 +380,38 @@ class ControlReconciliationStore:
                 "control reconciliation store cannot be used after fork"
             )
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Yield one connection and normalize every journal I/O failure."""
+
         self._initialize()
-        return self._open_connection()
+        connection: sqlite3.Connection | None = None
+        try:
+            with self._journal_file_lock():
+                connection = self._open_connection()
+                try:
+                    with connection:
+                        yield connection
+                finally:
+                    connection.close()
+                    connection = None
+        except ControlReconciliationError:
+            raise
+        except sqlite3.OperationalError as error:
+            if "full" in str(error).lower():
+                raise ControlReconciliationCapacityError(
+                    "control operation journal byte capacity is exhausted"
+                ) from error
+            raise ControlReconciliationUnavailableError(
+                "control operation journal transaction failed"
+            ) from error
+        except (OSError, sqlite3.Error) as error:
+            raise ControlReconciliationUnavailableError(
+                "control operation journal transaction failed"
+            ) from error
+        finally:
+            if connection is not None:
+                connection.close()
 
     @contextmanager
     def _connect_existing(self) -> Iterator[sqlite3.Connection]:
@@ -445,9 +563,10 @@ class ControlReconciliationStore:
                 return
             self._prepare_path()
             try:
-                with self._open_connection() as connection:
-                    connection.executescript(
-                        """
+                with self._journal_file_lock():
+                    with self._open_connection() as connection:
+                        connection.executescript(
+                            """
                 BEGIN EXCLUSIVE;
                 CREATE TABLE IF NOT EXISTS profile_ceremonies (
                     candidate_id TEXT PRIMARY KEY,
@@ -495,6 +614,10 @@ class ControlReconciliationStore:
                 );
                 CREATE INDEX IF NOT EXISTS control_operation_state_idx
                     ON control_operations(state, updated_at);
+                CREATE TABLE IF NOT EXISTS control_replay_sessions (
+                    session_digest TEXT PRIMARY KEY,
+                    expires_at REAL NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS control_recovery_audit (
                     recovery_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     recovered_at REAL NOT NULL,
@@ -506,28 +629,56 @@ class ControlReconciliationStore:
                     recovered_count INTEGER NOT NULL,
                     reason TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS control_journal_audit (
+                    singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+                    compacted_operations INTEGER NOT NULL,
+                    compacted_succeeded INTEGER NOT NULL,
+                    compacted_failed INTEGER NOT NULL,
+                    compacted_indeterminate INTEGER NOT NULL,
+                    compacted_recovery_audits INTEGER NOT NULL,
+                    first_compacted_at REAL,
+                    last_compacted_at REAL
+                );
+                INSERT OR IGNORE INTO control_journal_audit(
+                    singleton_id, compacted_operations, compacted_succeeded,
+                    compacted_failed, compacted_indeterminate,
+                    compacted_recovery_audits
+                ) VALUES (1, 0, 0, 0, 0, 0);
                 """
-                    )
-                    columns = {
-                        str(row[1])
-                        for row in connection.execute("PRAGMA table_info(control_operations)")
-                    }
-                    migrations = {
-                        "owner_pid": "INTEGER NOT NULL DEFAULT 0",
-                        "owner_process_token": "TEXT NOT NULL DEFAULT ''",
-                        "owner_boot_id": "TEXT NOT NULL DEFAULT ''",
-                        "owner_process_start": "TEXT NOT NULL DEFAULT ''",
-                        "owner_proof_version": "INTEGER NOT NULL DEFAULT 0",
-                        "lease_expires_at": "REAL NOT NULL DEFAULT 0",
-                    }
-                    for column, declaration in migrations.items():
-                        if column not in columns:
-                            connection.execute(
-                                f"ALTER TABLE control_operations ADD COLUMN {column} {declaration}"
-                            )
-                    connection.commit()
-                self._secure_chmod_database()
-                self._prepare_path()
+                        )
+                        columns = {
+                            str(row[1])
+                            for row in connection.execute("PRAGMA table_info(control_operations)")
+                        }
+                        migrations = {
+                            "owner_pid": "INTEGER NOT NULL DEFAULT 0",
+                            "owner_process_token": "TEXT NOT NULL DEFAULT ''",
+                            "owner_boot_id": "TEXT NOT NULL DEFAULT ''",
+                            "owner_process_start": "TEXT NOT NULL DEFAULT ''",
+                            "owner_proof_version": "INTEGER NOT NULL DEFAULT 0",
+                            "lease_expires_at": "REAL NOT NULL DEFAULT 0",
+                        }
+                        for column, declaration in migrations.items():
+                            if column not in columns:
+                                connection.execute(
+                                    "ALTER TABLE control_operations ADD COLUMN "
+                                    f"{column} {declaration}"
+                                )
+                        connection.execute(
+                            """
+                        INSERT OR IGNORE INTO control_replay_sessions(
+                            session_digest, expires_at
+                        )
+                        SELECT session_digest, ? FROM control_operations
+                        GROUP BY session_digest
+                        """,
+                            (self._clock() + self._default_session_ttl_seconds,),
+                        )
+                        self._configure_capacity(connection)
+                        connection.commit()
+                    self._secure_chmod_database()
+                    self._prepare_path()
+                    connection.close()
             except (OSError, sqlite3.Error) as error:
                 raise ControlReconciliationUnavailableError(
                     "control journal initialization failed"
@@ -880,14 +1031,31 @@ class ControlReconciliationStore:
         operation_id: str,
         contract_id: str,
         request_digest: str,
+        session_expires_at: float | None = None,
     ) -> tuple[Mapping[str, Any], bool]:
         """Reserve an unsafe frontend request or return its prior outcome."""
 
         self.prepare_for_operation()
         now = self._clock()
+        requested_expiry = (
+            now + self._default_session_ttl_seconds
+            if session_expires_at is None
+            else float(session_expires_at)
+        )
+        replay_expires_at = max(now, requested_expiry)
         session_digest = self.session_digest(session_id)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                INSERT INTO control_replay_sessions(session_digest, expires_at)
+                VALUES (?, ?)
+                ON CONFLICT(session_digest) DO UPDATE SET
+                    expires_at=MAX(expires_at, excluded.expires_at)
+                """,
+                (session_digest, replay_expires_at),
+            )
+            self._compact_locked(connection, now=now)
             row = connection.execute(
                 "SELECT * FROM control_operations WHERE request_id = ?",
                 (request_id,),
@@ -903,35 +1071,192 @@ class ControlReconciliationStore:
                 )
                 connection.commit()
                 return self._operation_projection(record), False
+            operation_count = int(
+                connection.execute("SELECT COUNT(*) FROM control_operations").fetchone()[0]
+            )
+            if operation_count >= self._max_operation_records:
+                connection.rollback()
+                raise ControlReconciliationCapacityError(
+                    "control operation journal capacity is exhausted"
+                )
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO control_operations(
+                        request_id, session_digest, operation_id, contract_id,
+                        request_digest, state, owner_instance, owner_pid,
+                        owner_process_token, lease_expires_at, record_refs_json,
+                        owner_boot_id, owner_process_start, owner_proof_version,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, '[]', ?, ?, 1, ?, ?)
+                    """,
+                    (
+                        request_id,
+                        session_digest,
+                        operation_id,
+                        contract_id,
+                        request_digest,
+                        self.instance_id,
+                        self._process_id,
+                        self._process_token,
+                        now + self._lease_timeout_seconds,
+                        self._boot_id,
+                        self._process_start,
+                        now,
+                        now,
+                    ),
+                )
+            except sqlite3.OperationalError as error:
+                connection.rollback()
+                if "full" in str(error).lower():
+                    raise ControlReconciliationCapacityError(
+                        "control operation journal byte capacity is exhausted"
+                    ) from error
+                raise ControlReconciliationUnavailableError(
+                    "control operation journal write failed"
+                ) from error
+            connection.commit()
+        self._ensure_heartbeat()
+        return self.operation_status(request_id, session_id=session_id), True
+
+    def renew_session(self, session_id: str, *, expires_at: float) -> None:
+        """Extend replay retention for operations owned by an authenticated session."""
+
+        try:
+            if not self.path.exists():
+                return
+        except OSError as error:
+            raise ControlReconciliationUnavailableError(
+                "control journal path is unavailable"
+            ) from error
+        session_digest = self.session_digest(session_id)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 """
-                INSERT INTO control_operations(
-                    request_id, session_digest, operation_id, contract_id,
-                    request_digest, state, owner_instance, owner_pid,
-                    owner_process_token, lease_expires_at, record_refs_json,
-                    owner_boot_id, owner_process_start, owner_proof_version,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, '[]', ?, ?, 1, ?, ?)
+                UPDATE control_replay_sessions
+                SET expires_at=MAX(expires_at, ?)
+                WHERE session_digest=?
+                """,
+                (float(expires_at), session_digest),
+            )
+            self._compact_locked(connection, now=self._clock())
+            connection.commit()
+
+    def _compact_locked(self, connection: sqlite3.Connection, *, now: float) -> int:
+        """Delete only terminal records whose session and replay windows ended."""
+
+        cutoff = now - self._terminal_retention_seconds
+        rows = connection.execute(
+            """
+            SELECT operation.request_id, operation.state
+            FROM control_operations AS operation
+            JOIN control_replay_sessions AS session
+                ON session.session_digest=operation.session_digest
+            WHERE operation.state != 'pending' AND session.expires_at <= ?
+                AND operation.updated_at <= ?
+            ORDER BY operation.updated_at, operation.request_id LIMIT ?
+            """,
+            (now, cutoff, self._compaction_batch_size),
+        ).fetchall()
+        if rows:
+            connection.execute(
+                """
+                DELETE FROM control_operations WHERE request_id IN (
+                    SELECT operation.request_id
+                    FROM control_operations AS operation
+                    JOIN control_replay_sessions AS session
+                        ON session.session_digest=operation.session_digest
+                    WHERE operation.state != 'pending' AND session.expires_at <= ?
+                        AND operation.updated_at <= ?
+                    ORDER BY operation.updated_at, operation.request_id LIMIT ?
+                )
+                """,
+                (now, cutoff, self._compaction_batch_size),
+            )
+            counts = {
+                state: sum(1 for row in rows if str(row["state"]) == state)
+                for state in ("succeeded", "failed", "indeterminate")
+            }
+            connection.execute(
+                """
+                UPDATE control_journal_audit
+                SET compacted_operations=compacted_operations+?,
+                    compacted_succeeded=compacted_succeeded+?,
+                    compacted_failed=compacted_failed+?,
+                    compacted_indeterminate=compacted_indeterminate+?,
+                    first_compacted_at=COALESCE(first_compacted_at, ?),
+                    last_compacted_at=? WHERE singleton_id=1
                 """,
                 (
-                    request_id,
-                    session_digest,
-                    operation_id,
-                    contract_id,
-                    request_digest,
-                    self.instance_id,
-                    self._process_id,
-                    self._process_token,
-                    now + self._lease_timeout_seconds,
-                    self._boot_id,
-                    self._process_start,
+                    len(rows),
+                    counts["succeeded"],
+                    counts["failed"],
+                    counts["indeterminate"],
                     now,
                     now,
                 ),
             )
-            connection.commit()
-        self._ensure_heartbeat()
-        return self.operation_status(request_id, session_id=session_id), True
+            connection.execute(
+                """
+                DELETE FROM control_replay_sessions
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM control_operations
+                    WHERE control_operations.session_digest =
+                        control_replay_sessions.session_digest
+                )
+                """
+            )
+        self._compact_recovery_audit_locked(connection, now=now)
+        return len(rows)
+
+    def _compact_recovery_audit_locked(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        now: float,
+    ) -> None:
+        recovery_count = int(
+            connection.execute("SELECT COUNT(*) FROM control_recovery_audit").fetchone()[0]
+        )
+        excess = recovery_count - self._max_recovery_audit_records
+        if excess > 0:
+            connection.execute(
+                """
+                DELETE FROM control_recovery_audit WHERE recovery_id IN (
+                    SELECT recovery_id FROM control_recovery_audit
+                    ORDER BY recovery_id LIMIT ?
+                )
+                """,
+                (excess,),
+            )
+            connection.execute(
+                """
+                UPDATE control_journal_audit
+                SET compacted_recovery_audits=compacted_recovery_audits+?,
+                    first_compacted_at=COALESCE(first_compacted_at, ?),
+                    last_compacted_at=? WHERE singleton_id=1
+                """,
+                (excess, now, now),
+            )
+
+    def journal_snapshot(self) -> Mapping[str, int]:
+        """Return bounded, non-sensitive journal counters for diagnostics."""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(*) AS records,
+                       SUM(CASE WHEN state='pending' THEN 1 ELSE 0 END) AS pending
+                FROM control_operations
+                """
+            ).fetchone()
+            return {
+                "records": int(row["records"]),
+                "pending": int(row["pending"] or 0),
+                "capacity": self._max_operation_records,
+                "max_database_bytes": self._max_database_bytes,
+            }
 
     def finish_operation(
         self,
@@ -948,6 +1273,16 @@ class ControlReconciliationStore:
         if state not in {"succeeded", "failed", "indeterminate"}:
             raise ControlReconciliationConflictError("operation terminal state is invalid")
         result_value = dict(result) if result is not None else None
+        encoded_result = _json(result_value) if result_value is not None else None
+        if (
+            encoded_result is not None
+            and len(encoded_result.encode("utf-8")) > self._max_operation_result_bytes
+        ):
+            state = "indeterminate"
+            result_value = None
+            encoded_result = None
+            record_refs = []
+            safe_error_code = "RESULT_TOO_LARGE"
         result_digest = canonical_digest(result_value) if result_value is not None else None
         stop_heartbeat = False
         with self._connect() as connection:
@@ -982,7 +1317,7 @@ class ControlReconciliationStore:
                 """,
                 (
                     state,
-                    _json(result_value) if result_value is not None else None,
+                    encoded_result,
                     result_digest,
                     _json(record_refs or []),
                     safe_error_code,
@@ -1125,6 +1460,7 @@ class ControlReconciliationStore:
                         reason,
                     ),
                 )
+            self._compact_recovery_audit_locked(connection, now=now)
             connection.commit()
             return recovered
 
@@ -1342,6 +1678,7 @@ def _record_digest(value: object) -> str:
 
 __all__ = [
     "ControlReconciliationConflictError",
+    "ControlReconciliationCapacityError",
     "ControlReconciliationError",
     "ControlReconciliationStore",
     "ControlReconciliationUnavailableError",
