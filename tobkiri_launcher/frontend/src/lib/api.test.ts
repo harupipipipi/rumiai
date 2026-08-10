@@ -12,6 +12,7 @@ import {
   fetchDashboard,
   fetchFrontendContractOperation,
   fetchFrontendCatalog,
+  fetchRuntimeOperationStatus,
   fetchPacks,
   fetchPresentationState,
   installPack,
@@ -327,6 +328,28 @@ test('capability invocation keeps the supplied request identity in both body and
   const body = JSON.parse(String(lastFetchInit?.body)) as Record<string, unknown>;
   assert.equal(headers['X-Tobkiri-Request-ID'], requestId);
   assert.equal(body.request_id, requestId);
+});
+
+test('operation status uses the canonical GET target and a fresh authenticated request identity', async () => {
+  const requestId = '22222222-2222-4222-8222-222222222222';
+  fetchHandler = async (input, init) => {
+    lastFetchUrl = String(input);
+    lastFetchInit = init;
+    return new Response(JSON.stringify({success: true, data: {state: 'pending'}}), {
+      headers: {'Content-Type': 'application/json'},
+    });
+  };
+
+  const result = await fetchRuntimeOperationStatus(requestId);
+
+  assert.deepEqual(result, {state: 'pending'});
+  assert.equal(
+    decodeURIComponent(lastFetchUrl.replace('/api/contracts/defaultspack/', '')),
+    `GET /api/runtime-surface/operation-status?request_id=${requestId}`,
+  );
+  const headers = lastFetchInit?.headers as Record<string, string>;
+  assert.match(headers['X-Tobkiri-Request-ID'], /^[0-9a-f-]{36}$/i);
+  assert.notEqual(headers['X-Tobkiri-Request-ID'], requestId);
 });
 
 test('runtime operation invocation uses only its exact invocation contribution and catalog hash', async () => {

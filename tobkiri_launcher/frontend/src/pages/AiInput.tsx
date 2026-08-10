@@ -30,15 +30,17 @@ export function AiInput() {
   const invocation = useRuntimeOperationInvocation(
     surface.data,
     selectedOperation,
-    undefined,
-    () => surface.refresh(true),
   );
+  const refreshAiInput = async () => {
+    await surface.refresh();
+    await invocation.reconcileUnknown();
+  };
 
   return (
     <AdvancedSurfaceFrame
       descriptor={descriptor}
       state={{status: surface.status, stale: surface.stale, error: surface.error}}
-      onRetry={() => void surface.refresh()}
+      onRetry={() => void refreshAiInput()}
     >
       {surface.data ? <RuntimeEvidenceCard envelope={surface.data} title="Operation catalog provenance" /> : null}
       {surface.status === 'ready' && invokableOperations.length > 0 && selectedOperation ? (

@@ -1,7 +1,7 @@
 /* eslint-disable */
 // GENERATED FILE. Do not edit by hand.
 // Source: defaultspack/frontend_contract_map.v4.json
-// Raw source digest: sha256:b46fde48be7d67dc2ab6527d0e80058c2c83e2bbe904191db7e411b70bef6f2c
+// Raw source digest: sha256:dbcab518d649644dad62218147eac7d99c3c2b071250ef7bfcd9ba4c9a069d15
 import type {FrontendContractMethod} from './api';
 
 export interface GeneratedFrontendContractTarget {
@@ -28,13 +28,13 @@ export interface GeneratedFrontendContractMap {
   routes: GeneratedFrontendContractRoute[];
 }
 
-export const PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST = "sha256:b46fde48be7d67dc2ab6527d0e80058c2c83e2bbe904191db7e411b70bef6f2c" as const;
+export const PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST = "sha256:dbcab518d649644dad62218147eac7d99c3c2b071250ef7bfcd9ba4c9a069d15" as const;
 
 export const GENERATED_FRONTEND_CONTRACT_MAP: GeneratedFrontendContractMap = {
   "schema": "io.tobkiri.frontend-contract-map.v4",
   "pack_id": "defaultspack",
   "artifact_path": "defaultspack/frontend_contract_map.v4.json",
-  "artifact_digest": "sha256:b46fde48be7d67dc2ab6527d0e80058c2c83e2bbe904191db7e411b70bef6f2c",
+  "artifact_digest": "sha256:dbcab518d649644dad62218147eac7d99c3c2b071250ef7bfcd9ba4c9a069d15",
   "routes": [
     {
       "method": "GET",
@@ -214,6 +214,23 @@ export const GENERATED_FRONTEND_CONTRACT_MAP: GeneratedFrontendContractMap = {
           "provider_id": "tobkiri.host.control-presentation",
           "function_id": "tobkiri.host.control-presentation",
           "allowed_payload_keys": []
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/runtime-surface/operation-status",
+      "presentation": "broker_result",
+      "targets": [
+        {
+          "contribution_id": "defaults.runtime-surface.operation-status",
+          "contract_id": "tobkiri.host.control-presentation.v4",
+          "operation_id": "operation.status.read",
+          "provider_id": "tobkiri.host.control-presentation",
+          "function_id": "tobkiri.host.control-presentation",
+          "allowed_payload_keys": [
+            "request_id"
+          ]
         }
       ]
     },
@@ -650,6 +667,21 @@ const EXPECTED_ROUTES = {
         "provider_id": "tobkiri.host.control-presentation",
         "function_id": "tobkiri.host.control-presentation",
         "allowed_payload_keys": []
+      }
+    ]
+  },
+  "GET /api/runtime-surface/operation-status": {
+    "presentation": "broker_result",
+    "targets": [
+      {
+        "contribution_id": "defaults.runtime-surface.operation-status",
+        "contract_id": "tobkiri.host.control-presentation.v4",
+        "operation_id": "operation.status.read",
+        "provider_id": "tobkiri.host.control-presentation",
+        "function_id": "tobkiri.host.control-presentation",
+        "allowed_payload_keys": [
+          "request_id"
+        ]
       }
     ]
   },

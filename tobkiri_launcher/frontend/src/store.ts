@@ -26,6 +26,7 @@ import {
 import type {ColorMode, Theme} from './lib/appearance';
 import {AVATAR_OPTIONS, DEFAULT_AVATAR} from './lib/avatar';
 import {refreshMountedRuntimeSurfaces} from './lib/runtimeSurfaceRefresh';
+import {PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST} from './lib/generatedFrontendContractMap';
 import {
   beginMutation,
   completeMutation,
@@ -38,6 +39,11 @@ import {
   MutationResultUnknownError,
   type MutationJournalRecord,
 } from './lib/mutationJournal';
+import {
+  reconcileMutationStatus,
+  type OperationStatus,
+  type OperationStatusState,
+} from './lib/operationStatus';
 
 export type {ColorMode, Theme} from './lib/appearance';
 export {AVATAR_OPTIONS} from './lib/avatar';
@@ -293,6 +299,10 @@ function reconcilePackMutationJournal(
 ): Record<string, MutationJournalRecord> {
   const remaining = {...records};
   for (const record of Object.values(records)) {
+    // A projection match is evidence for the UI, not proof that this exact
+    // request was applied. Only the authenticated operation-status endpoint
+    // may release an unknown journal entry.
+    if (record.metadata.status_reconciled !== true) continue;
     const packId = record.metadata.pack_id;
     const pack = typeof packId === 'string' ? packs.find((item) => item.id === packId) : undefined;
     if (!pack || !matchingPackMutation(record, pack)) continue;
@@ -332,6 +342,167 @@ async function invalidatePackMutationSurfaces(get: () => AppState): Promise<void
     packInvalidationPromise = null;
   });
   return packInvalidationPromise;
+}
+
+const PACK_CONTROL_CONTRACT = 'tobkiri.host.pack-control.v4';
+const hydratedPackStatusRequests = new Map<string, Promise<void>>();
+
+async function reconcilePackMutationStatus(
+  record: MutationJournalRecord,
+  get: () => AppState,
+  operationId: string,
+  verifySuccess?: (status: OperationStatus) => boolean,
+  options: {
+    requestId?: string;
+    statusPhase?: string;
+    completeOnTerminal?: boolean;
+    contractId?: string;
+  } = {},
+): Promise<{state: OperationStatusState | 'stale'; status: OperationStatus; reconciled: boolean}> {
+  const expectedJournalOperation = options.statusPhase === 'approval'
+    ? 'approval.candidate'
+    : operationId;
+  if (
+    record.metadata.operation_id !== expectedJournalOperation
+    || record.metadata.contract_id !== (options.contractId ?? PACK_CONTROL_CONTRACT)
+    || record.metadata.contract_map_digest !== PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST
+  ) {
+    throw new Error('The journaled Pack operation binding changed.');
+  }
+  return reconcileMutationStatus({
+    record,
+    binding: {
+      requestId: options.requestId ?? record.requestId,
+      operationId,
+      contractId: options.contractId ?? PACK_CONTROL_CONTRACT,
+      mapArtifactDigest: PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST,
+    },
+    statusPhase: options.statusPhase,
+    refresh: () => invalidatePackMutationSurfaces(get),
+    verifySuccess,
+    completeOnTerminal: options.completeOnTerminal,
+  });
+}
+
+function packMutationSuccess(record: MutationJournalRecord, get: () => AppState): boolean {
+  const packId = record.metadata.pack_id;
+  const pack = typeof packId === 'string'
+    ? get().packs.find((candidate) => candidate.id === packId)
+    : undefined;
+  return Boolean(pack && matchingPackMutation(record, pack));
+}
+
+function clearPackUnknownState(
+  set: (update: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
+  record: MutationJournalRecord,
+): void {
+  set((current) => {
+    if (record.metadata.kind === 'pack.operation') {
+      const next = {...current.packOperationUnknown};
+      delete next[record.key];
+      return {packOperationUnknown: next};
+    }
+    const next = {...current.packMutationUnknown};
+    delete next[record.key];
+    return {packMutationUnknown: next};
+  });
+}
+
+function scheduleHydratedPackStatusReconciliation(
+  get: () => AppState,
+  set: (update: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
+): void {
+  const records = listMutationJournal().filter((record) => (
+    record.state !== 'pending'
+    && typeof record.metadata.kind === 'string'
+    && record.metadata.kind.startsWith('pack.')
+  ));
+  for (const record of records) {
+    if (hydratedPackStatusRequests.has(record.key)) continue;
+    const promise = (async () => {
+      try {
+        let reconciled: Awaited<ReturnType<typeof reconcilePackMutationStatus>>;
+        if (record.metadata.kind === 'pack.operation') {
+          const operationId = record.metadata.operation_id;
+          const contractId = record.metadata.contract_id;
+          if (typeof operationId !== 'string' || typeof contractId !== 'string') return;
+          reconciled = await reconcilePackMutationStatus(
+            record,
+            get,
+            operationId,
+            () => true,
+            {contractId},
+          );
+        } else if (record.metadata.kind === 'pack.approve') {
+          const approval = await reconcilePackApprovalStatus(record, get);
+          if (approval.state === 'succeeded' || approval.state === 'failed') {
+            clearPackUnknownState(set, record);
+          }
+          return;
+        } else {
+          const operationId = record.metadata.operation_id;
+          if (typeof operationId !== 'string') return;
+          reconciled = await reconcilePackMutationStatus(
+            record,
+            get,
+            operationId,
+            (status) => status.state === 'succeeded' && packMutationSuccess(record, get),
+          );
+        }
+        if (reconciled.state === 'succeeded' || reconciled.state === 'failed') {
+          clearPackUnknownState(set, record);
+        }
+      } catch {
+        // Keep the durable record blocked on unknown, stale, or tampered status.
+      }
+    })().finally(() => {
+      if (hydratedPackStatusRequests.get(record.key) === promise) {
+        hydratedPackStatusRequests.delete(record.key);
+      }
+    });
+    hydratedPackStatusRequests.set(record.key, promise);
+  }
+}
+
+async function reconcilePackApprovalStatus(
+  record: MutationJournalRecord,
+  get: () => AppState,
+): Promise<{state: OperationStatusState | 'stale'; status: OperationStatus; reconciled: boolean}> {
+  const candidate = await reconcilePackMutationStatus(
+    record,
+    get,
+    'approval.candidate',
+    undefined,
+    {
+      requestId: mutationRequestId(record, 'candidate'),
+      statusPhase: 'candidate',
+      completeOnTerminal: false,
+    },
+  );
+  if (candidate.state !== 'succeeded') {
+    if (candidate.state === 'failed') completeMutation(record.key, record.requestId);
+    return candidate;
+  }
+
+  const approval = await reconcilePackMutationStatus(
+    record,
+    get,
+    'approval.approve',
+    (status) => status.state === 'succeeded' && packMutationSuccess(record, get),
+    {
+      requestId: mutationRequestId(record, 'approval'),
+      statusPhase: 'approval',
+      completeOnTerminal: false,
+    },
+  );
+  if (
+    approval.state !== 'pending'
+    && approval.state !== 'indeterminate'
+    && approval.state !== 'stale'
+  ) {
+    completeMutation(record.key, record.requestId);
+  }
+  return approval;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -482,6 +653,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         };
         const reconciledPackUnknown = reconcilePackMutationJournal(packs, durablePackUnknown);
         set({packs, packsError: null, packMutationUnknown: reconciledPackUnknown});
+        scheduleHydratedPackStatusReconciliation(get, set);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to load packs';
         set({packsError: message});
@@ -654,6 +826,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       kind: 'pack.operation',
       pack_id: packId,
       operation_id: operationId,
+      contract_id: contribution.action_contract,
+      contract_map_digest: PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST,
     });
     set((current) => ({
       packOperationPending: {...current.packOperationPending, [operationKey]: true},
@@ -679,10 +853,37 @@ export const useAppStore = create<AppState>((set, get) => ({
         set((current) => ({
           packOperationUnknown: {...current.packOperationUnknown, [mutationKey]: unknown},
         }));
+        let reconciled: Awaited<ReturnType<typeof reconcilePackMutationStatus>> | null = null;
         try {
-          await invalidatePackMutationSurfaces(get);
+          reconciled = await reconcilePackMutationStatus(
+            unknown,
+            get,
+            operationId,
+            () => true,
+            {contractId: contribution.action_contract},
+          );
         } catch {
           // The unknown state remains journaled until an authoritative refresh succeeds.
+        }
+        if (reconciled?.state === 'succeeded') {
+          set((current) => {
+            const next = {...current.packOperationUnknown};
+            delete next[mutationKey];
+            return {packOperationUnknown: next};
+          });
+          get().addToast('Pack operation reconciled by the Host.', 'success');
+          return reconciled.status.result;
+        }
+        if (reconciled?.state === 'failed') {
+          set((current) => {
+            const next = {...current.packOperationUnknown};
+            delete next[mutationKey];
+            return {packOperationUnknown: next};
+          });
+          const code = reconciled.status.safe_error_code ?? 'OPERATION_FAILED';
+          const failure = new Error(`Pack operation was denied or failed (${code}).`);
+          get().addToast(failure.message, 'error');
+          throw failure;
         }
         get().addToast(MUTATION_UNKNOWN_MESSAGE, 'error');
         throw new MutationResultUnknownError(mutationKey, mutation.requestId);
@@ -706,6 +907,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       kind: 'pack.install',
       pack_id: id,
       expected_installed: true,
+      operation_id: 'pack.install',
+      contract_id: PACK_CONTROL_CONTRACT,
+      contract_map_digest: PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST,
     });
     const version = beginPackMutation(id);
     set((current) => ({packInstallPending: {...current.packInstallPending, [id]: true}}));
@@ -742,14 +946,36 @@ export const useAppStore = create<AppState>((set, get) => ({
         set((current) => ({
           packMutationUnknown: {...current.packMutationUnknown, [mutationKey]: unknown},
         }));
+        let reconciled: Awaited<ReturnType<typeof reconcilePackMutationStatus>> | null = null;
         try {
-          await invalidatePackMutationSurfaces(get);
+          reconciled = await reconcilePackMutationStatus(
+            unknown,
+            get,
+            'pack.install',
+            (status) => status.state === 'succeeded' && packMutationSuccess(unknown, get),
+          );
         } catch {
           // Keep the durable unknown result until a later authoritative refresh.
         }
-        if (!get().packMutationUnknown[mutationKey]) {
-          get().addToast('Pack installed after authoritative refresh.', 'success');
+        if (reconciled?.state === 'succeeded') {
+          set((current) => {
+            const next = {...current.packMutationUnknown};
+            delete next[mutationKey];
+            return {packMutationUnknown: next};
+          });
+          get().addToast('Pack installation reconciled by the Host.', 'success');
           return;
+        }
+        if (reconciled?.state === 'failed') {
+          set((current) => {
+            const next = {...current.packMutationUnknown};
+            delete next[mutationKey];
+            return {packMutationUnknown: next};
+          });
+          const code = reconciled.status.safe_error_code ?? 'PACK_INSTALL_FAILED';
+          const failure = new Error(`Pack installation was denied or failed (${code}).`);
+          get().addToast(failure.message, 'error');
+          throw failure;
         }
         get().addToast(MUTATION_UNKNOWN_MESSAGE, 'error');
         throw new MutationResultUnknownError(mutationKey, mutation.requestId);
@@ -779,6 +1005,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         kind: 'pack.approve',
         pack_id: id,
         expected_approved: true,
+        operation_id: 'approval.candidate',
+        contract_id: PACK_CONTROL_CONTRACT,
+        contract_map_digest: PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST,
       },
       {primary: candidateRequestId, candidate: candidateRequestId, approval: approvalRequestId},
     );
@@ -831,14 +1060,31 @@ export const useAppStore = create<AppState>((set, get) => ({
         set((current) => ({
           packMutationUnknown: {...current.packMutationUnknown, [mutationKey]: unknown},
         }));
+        let reconciled: Awaited<ReturnType<typeof reconcilePackApprovalStatus>> | null = null;
         try {
-          await invalidatePackMutationSurfaces(get);
+          reconciled = await reconcilePackApprovalStatus(unknown, get);
         } catch {
           // Keep the durable unknown result until a later authoritative refresh.
         }
-        if (!get().packMutationUnknown[mutationKey]) {
-          get().addToast('Pack approval confirmed after authoritative refresh.', 'success');
+        if (reconciled?.state === 'succeeded') {
+          set((current) => {
+            const next = {...current.packMutationUnknown};
+            delete next[mutationKey];
+            return {packMutationUnknown: next};
+          });
+          get().addToast('Pack approval reconciled by the Host.', 'success');
           return;
+        }
+        if (reconciled?.state === 'failed') {
+          set((current) => {
+            const next = {...current.packMutationUnknown};
+            delete next[mutationKey];
+            return {packMutationUnknown: next};
+          });
+          const code = reconciled.status.safe_error_code ?? 'PACK_APPROVAL_FAILED';
+          const failure = new Error(`Pack approval was denied or failed (${code}).`);
+          get().addToast(failure.message, 'error');
+          throw failure;
         }
         get().addToast(MUTATION_UNKNOWN_MESSAGE, 'error');
         throw new MutationResultUnknownError(mutationKey, mutation.requestId);
@@ -874,6 +1120,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       pack_id: id,
       expected_approved: false,
       expected_enabled: false,
+      operation_id: 'approval.revoke',
+      contract_id: PACK_CONTROL_CONTRACT,
+      contract_map_digest: PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST,
     });
     const version = beginPackMutation(id);
     set((current) => ({
@@ -921,14 +1170,36 @@ export const useAppStore = create<AppState>((set, get) => ({
         set((current) => ({
           packMutationUnknown: {...current.packMutationUnknown, [mutationKey]: unknown},
         }));
+        let reconciled: Awaited<ReturnType<typeof reconcilePackMutationStatus>> | null = null;
         try {
-          await invalidatePackMutationSurfaces(get);
+          reconciled = await reconcilePackMutationStatus(
+            unknown,
+            get,
+            'approval.revoke',
+            (status) => status.state === 'succeeded' && packMutationSuccess(unknown, get),
+          );
         } catch {
           // Keep the durable unknown result until a later authoritative refresh.
         }
-        if (!get().packMutationUnknown[mutationKey]) {
-          get().addToast('Pack approval revocation confirmed after authoritative refresh.', 'success');
+        if (reconciled?.state === 'succeeded') {
+          set((current) => {
+            const next = {...current.packMutationUnknown};
+            delete next[mutationKey];
+            return {packMutationUnknown: next};
+          });
+          get().addToast('Pack approval revocation reconciled by the Host.', 'success');
           return;
+        }
+        if (reconciled?.state === 'failed') {
+          set((current) => {
+            const next = {...current.packMutationUnknown};
+            delete next[mutationKey];
+            return {packMutationUnknown: next};
+          });
+          const code = reconciled.status.safe_error_code ?? 'PACK_REVOKE_FAILED';
+          const failure = new Error(`Pack approval revocation was denied or failed (${code}).`);
+          get().addToast(failure.message, 'error');
+          throw failure;
         }
         get().addToast(MUTATION_UNKNOWN_MESSAGE, 'error');
         throw new MutationResultUnknownError(mutationKey, mutation.requestId);
@@ -961,6 +1232,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       kind: 'pack.toggle',
       pack_id: id,
       expected_enabled: expectedEnabled,
+      operation_id: pack.enabled ? 'pack.disable' : 'pack.enable',
+      contract_id: PACK_CONTROL_CONTRACT,
+      contract_map_digest: PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST,
     });
     const version = beginPackMutation(id);
     set((current) => ({
@@ -1002,12 +1276,34 @@ export const useAppStore = create<AppState>((set, get) => ({
         set((current) => ({
           packMutationUnknown: {...current.packMutationUnknown, [mutationKey]: unknown},
         }));
+        let reconciled: Awaited<ReturnType<typeof reconcilePackMutationStatus>> | null = null;
         try {
-          await invalidatePackMutationSurfaces(get);
+          reconciled = await reconcilePackMutationStatus(
+            unknown,
+            get,
+            pack.enabled ? 'pack.disable' : 'pack.enable',
+            (status) => status.state === 'succeeded' && packMutationSuccess(unknown, get),
+          );
         } catch {
           // Keep the durable unknown result until a later authoritative refresh.
         }
-        if (!get().packMutationUnknown[mutationKey]) return true;
+        if (reconciled?.state === 'succeeded') {
+          set((current) => {
+            const next = {...current.packMutationUnknown};
+            delete next[mutationKey];
+            return {packMutationUnknown: next};
+          });
+          return true;
+        }
+        if (reconciled?.state === 'failed') {
+          set((current) => {
+            const next = {...current.packMutationUnknown};
+            delete next[mutationKey];
+            return {packMutationUnknown: next};
+          });
+          get().addToast(`Pack toggle was denied or failed (${reconciled.status.safe_error_code ?? 'PACK_TOGGLE_FAILED'}).`, 'error');
+          return false;
+        }
         get().addToast(MUTATION_UNKNOWN_MESSAGE, 'error');
         return false;
       }

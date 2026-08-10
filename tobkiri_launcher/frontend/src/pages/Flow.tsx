@@ -50,15 +50,17 @@ export function Flow() {
   const invocation = useRuntimeOperationInvocation(
     surface.data,
     selectedOperation,
-    undefined,
-    () => surface.refresh(true),
   );
+  const refreshFlow = async () => {
+    await surface.refresh();
+    await invocation.reconcileUnknown();
+  };
 
   return (
     <AdvancedSurfaceFrame
       descriptor={descriptor}
       state={{status: surface.status, stale: surface.stale, error: surface.error}}
-      onRetry={() => void surface.refresh()}
+      onRetry={() => void refreshFlow()}
     >
       {surface.data ? <RuntimeEvidenceCard envelope={surface.data} title="Flow catalog provenance" /> : null}
       {surface.status === 'ready' && hasDeclaredCompositions ? (

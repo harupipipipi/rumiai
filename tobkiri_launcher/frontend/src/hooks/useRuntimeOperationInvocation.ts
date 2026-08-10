@@ -18,6 +18,12 @@ import {
   MutationBlockedError,
   type MutationJournalRecord,
 } from '@/src/lib/mutationJournal';
+import {refreshMountedRuntimeSurfaces} from '@/src/lib/runtimeSurfaceRefresh';
+import {
+  reconcileMutationStatus,
+  type OperationStatus,
+} from '@/src/lib/operationStatus';
+import {PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST} from '@/src/lib/generatedFrontendContractMap';
 
 export type RuntimeInvocationState = 'idle' | 'running' | 'succeeded' | 'failed' | 'unknown';
 
@@ -75,24 +81,32 @@ export function useRuntimeOperationInvocation(
   envelope: RuntimeSurfaceEnvelope<unknown> | null,
   operation: RuntimeOperationDescriptor | null,
   invokeOperation: RuntimeOperationInvoker = invokeRuntimeOperation,
-  reconcileUnknown?: () => Promise<void>,
 ) {
   const [state, setState] = useState<RuntimeInvocationState>('idle');
   const [error, setError] = useState<RuntimeInvocationError | null>(null);
+  const identity = envelope && operation
+    ? runtimeOperationIdentity(envelope, operation)
+    : null;
   const nextToken = useRef(0);
   const active = useRef<ActiveInvocation | null>(null);
   const unknownMutationKey = useRef<string | null>(null);
   const binding = useRef<{envelope: RuntimeSurfaceEnvelope<unknown> | null; identity: string | null} | null>(null);
   const envelopeRef = useRef(envelope);
   const operationRef = useRef(operation);
+  const identityRef = useRef(identity);
   envelopeRef.current = envelope;
   operationRef.current = operation;
-
-  const identity = envelope && operation
-    ? runtimeOperationIdentity(envelope, operation)
-    : null;
+  identityRef.current = identity;
 
   useEffect(() => {
+    const currentUnknownKey = unknownMutationKey.current;
+    const currentIdentityPrefix = `runtime:invoke:${identity ?? ''}:`;
+    if (currentUnknownKey && !currentUnknownKey.startsWith(currentIdentityPrefix)) {
+      // A completed or still-unknown request from the previous selection is
+      // durable and can be recovered when that selection returns, but it must
+      // never remain the active pointer for the newly selected operation.
+      unknownMutationKey.current = null;
+    }
     const changed = binding.current !== null
       && (binding.current.envelope !== envelope || binding.current.identity !== identity);
     binding.current = {envelope, identity};
@@ -126,6 +140,85 @@ export function useRuntimeOperationInvocation(
     active.current = null;
   }, []);
 
+  const reconcileRecord = useCallback(async (
+    record: MutationJournalRecord,
+    expectedIdentity: string,
+    operationId: string,
+    contractId: string,
+    isCurrent: () => boolean,
+  ): Promise<Awaited<ReturnType<typeof reconcileMutationStatus>> | null> => {
+    let reconciled: Awaited<ReturnType<typeof reconcileMutationStatus>>;
+    try {
+      reconciled = await reconcileMutationStatus({
+        record,
+        binding: {
+          requestId: record.requestId,
+          operationId,
+          contractId,
+          mapArtifactDigest: PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST,
+        },
+        refresh: () => refreshMountedRuntimeSurfaces(),
+        verifySuccess: (_status: OperationStatus) => true,
+        isCurrent,
+      });
+    } catch {
+      // Unknown, tampered, cross-session, and stale status responses remain
+      // journaled and blocked until a later authenticated reconciliation.
+      return null;
+    }
+    if (reconciled.reconciled && unknownMutationKey.current === record.key) {
+      // Terminal cleanup is bound to this exact durable request, not to the
+      // currently selected operation. A newer selection must not inherit A's
+      // result, but it must also not remain blocked by A's completed journal.
+      unknownMutationKey.current = null;
+    }
+    if (!isCurrent() || identityRef.current !== expectedIdentity) return reconciled;
+    if (reconciled.state === 'succeeded') {
+      unknownMutationKey.current = null;
+      setState('succeeded');
+      setError(null);
+    } else if (reconciled.state === 'failed') {
+      unknownMutationKey.current = null;
+      setState('failed');
+      setError({
+        code: 'FAILED',
+        message: reconciled.status.safe_error_code
+          ? `The Host denied this operation (${reconciled.status.safe_error_code}).`
+          : runtimeSurfaceErrorMessage('FAILED'),
+      });
+    } else {
+      setState('unknown');
+      setError({code: 'TIMEOUT', message: MUTATION_UNKNOWN_MESSAGE});
+    }
+    return reconciled;
+  }, []);
+
+  const reconcileUnknown = useCallback(async () => {
+    if (!identity || !unknownMutationKey.current || !operation) return null;
+    const key = unknownMutationKey.current;
+    if (!key.startsWith(`runtime:invoke:${identity}:`)) return null;
+    const record = listMutationJournal().find((candidate) => (
+      candidate.key === key
+      && candidate.state === 'unknown'
+      && candidate.metadata.kind === 'runtime-operation-invocation'
+    ));
+    if (!record) return null;
+    const expectedIdentity = identity;
+    return reconcileRecord(
+      record,
+      expectedIdentity,
+      operation.operation_id,
+      operation.contract_id,
+      () => identityRef.current === expectedIdentity
+        && unknownMutationKey.current === record.key,
+    );
+  }, [identity, operation?.contract_id, operation?.operation_id, reconcileRecord]);
+
+  useEffect(() => {
+    if (!identity || !unknownMutationKey.current || !operation) return;
+    void reconcileUnknown();
+  }, [identity, operation?.contract_id, operation?.operation_id, reconcileUnknown]);
+
   const invoke = useCallback(async (payload: Record<string, unknown>): Promise<void> => {
     if (!envelope || !operation || active.current || state === 'unknown') return;
     const invocationToken = nextToken.current + 1;
@@ -142,6 +235,8 @@ export function useRuntimeOperationInvocation(
       mutation = beginMutation(mutationKey, {
         kind: 'runtime-operation-invocation',
         operation_id: operation.operation_id,
+        contract_id: operation.contract_id,
+        contract_map_digest: PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST,
       });
     } catch (cause) {
       active.current = null;
@@ -181,14 +276,19 @@ export function useRuntimeOperationInvocation(
     } catch (cause) {
       if (isMutationResultUnknown(cause)) {
         resultUnknown = true;
-        markMutationUnknown(mutationKey, mutation.requestId);
+        const unknown = markMutationUnknown(mutationKey, mutation.requestId);
         unknownMutationKey.current = mutationKey;
         setState('unknown');
         setError({code: 'TIMEOUT', message: MUTATION_UNKNOWN_MESSAGE});
-        try {
-          await reconcileUnknown?.();
-        } catch {
-          // A failed reconciliation keeps the durable unknown state blocked.
+        const reconciled = await reconcileRecord(
+          unknown,
+          invocationIdentity,
+          operation.operation_id,
+          operation.contract_id,
+          isCurrent,
+        );
+        if (reconciled?.reconciled) {
+          resultUnknown = false;
         }
       } else {
         completeMutation(mutationKey, mutation.requestId);
@@ -213,12 +313,13 @@ export function useRuntimeOperationInvocation(
         }
       }
     }
-  }, [envelope, operation, invokeOperation, reconcileUnknown, state]);
+  }, [envelope, operation, invokeOperation, reconcileRecord, state]);
 
   return {
     state,
     error,
     busy: state === 'running' || state === 'unknown',
     invoke,
+    reconcileUnknown,
   };
 }

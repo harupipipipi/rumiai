@@ -220,6 +220,76 @@ export function completeMutation(key: string, requestId?: string): void {
   memoryJournal.delete(key);
 }
 
+/**
+ * Pin the server's operation request digest to the durable journal record.
+ *
+ * The browser cannot mint or replace this digest. It is learned only from a
+ * session-bound status projection and any later change is treated as a stale
+ * or tampered operation record by the status reconciler.
+ */
+export function bindMutationStatusDigest(
+  key: string,
+  requestId: string,
+  requestDigest: string,
+  statusRequestId = requestId,
+  statusPhase = 'primary',
+): MutationJournalRecord {
+  if (!/^sha256:[0-9a-f]{64}$/.test(requestDigest)) {
+    throw new Error('The operation status request digest is invalid.');
+  }
+  if (!isUuid(statusRequestId)) {
+    throw new Error('The operation status request identity is invalid.');
+  }
+  const records = listMutationJournal();
+  const current = records.find((record) => record.key === key);
+  if (!current || current.requestId !== requestId) {
+    throw new Error('The mutation journal no longer matches the operation status.');
+  }
+  const storedDigests = current.metadata.status_request_digests;
+  if (storedDigests !== undefined && !isRecord(storedDigests)) {
+    throw new Error('The journaled operation status digest set is invalid.');
+  }
+  const storedRequestIds = current.metadata.status_request_ids;
+  if (storedRequestIds !== undefined && !isRecord(storedRequestIds)) {
+    throw new Error('The journaled operation status identity set is invalid.');
+  }
+  const existingRequestId = isRecord(storedRequestIds)
+    ? storedRequestIds[statusPhase]
+    : undefined;
+  if (existingRequestId !== undefined && existingRequestId !== statusRequestId) {
+    throw new Error('The operation status request identity changed.');
+  }
+  const existing = isRecord(storedDigests)
+    ? storedDigests[statusPhase]
+    : statusPhase === 'primary'
+      ? current.metadata.status_request_digest
+      : undefined;
+  if (existing !== undefined && existing !== requestDigest) {
+    throw new Error('The operation status request digest changed.');
+  }
+  if (
+    existing === requestDigest
+    && existingRequestId === statusRequestId
+  ) return current;
+  const next = {
+    ...current,
+    metadata: {
+      ...current.metadata,
+      ...(statusPhase === 'primary' ? {status_request_digest: requestDigest} : {}),
+      status_request_ids: {
+        ...(isRecord(storedRequestIds) ? storedRequestIds : {}),
+        [statusPhase]: statusRequestId,
+      },
+      status_request_digests: {
+        ...(isRecord(storedDigests) ? storedDigests : {}),
+        [statusPhase]: requestDigest,
+      },
+    },
+  };
+  persist(records.map((record) => record.key === key ? next : record));
+  return next;
+}
+
 export function isMutationResultUnknown(error: unknown): boolean {
   if (error instanceof MutationResultUnknownError) return true;
   if (!error || typeof error !== 'object') return false;

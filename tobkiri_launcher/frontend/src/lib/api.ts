@@ -280,6 +280,18 @@ export function fetchFrontendContractOperation<T>(
     : {}, requestPolicy);
 }
 
+/** Read one authenticated, server-owned mutation outcome by stable request ID. */
+export function fetchRuntimeOperationStatus(requestId: string): Promise<unknown> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+    throw new Error('The operation status request identity is invalid.');
+  }
+  return fetchFrontendContractOperation<unknown>(
+    'GET',
+    '/api/runtime-surface/operation-status',
+    {request_id: requestId},
+  );
+}
+
 export function hasPendingPanelBootstrapCode(href = window.location.href): boolean {
   return new URL(href).searchParams.has('code');
 }

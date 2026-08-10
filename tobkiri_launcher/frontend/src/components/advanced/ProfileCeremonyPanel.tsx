@@ -18,6 +18,10 @@ import {
 import {
   assertProfileCandidateMatches,
   defaultProfileCeremonyClient,
+  validateProfileActivateResult,
+  validateProfileApproveResult,
+  validateProfileResolveResult,
+  validateProfileReviewResult,
   snapshotForProfileCeremony,
   type ProfileActivateResult,
   type ProfileApproveResult,
@@ -25,6 +29,8 @@ import {
   type ProfileResolveResult,
   type ProfileReviewResult,
 } from '@/src/lib/profileCeremony';
+import {refreshMountedRuntimeSurfaces} from '@/src/lib/runtimeSurfaceRefresh';
+import {PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST} from '@/src/lib/generatedFrontendContractMap';
 import {
   beginMutation,
   completeMutation,
@@ -36,6 +42,7 @@ import {
   type MutationJournalRecord,
 } from '@/src/lib/mutationJournal';
 import type {Pack} from '@/src/store';
+import {reconcileMutationStatus} from '@/src/lib/operationStatus';
 
 type CeremonyState = 'idle' | 'resolving' | 'resolved' | 'reviewing' | 'reviewed' | 'approving' | 'approved' | 'activating' | 'active' | 'result_unknown' | 'error';
 
@@ -48,6 +55,16 @@ function recordDigest(record: unknown, keys: string[]): string {
 
 function snapshotKey(snapshot: {profile_id: string; profile_revision: string; plan_digest: string}): string {
   return `${snapshot.profile_id}:${snapshot.profile_revision}:${snapshot.plan_digest}`;
+}
+
+const PROFILE_CONTROL_CONTRACT = 'tobkiri.host.control-presentation.v4';
+
+function profileOperationId(step: unknown): string {
+  if (step === 'resolving') return 'profile.change.resolve';
+  if (step === 'reviewing') return 'profile.change.review';
+  if (step === 'approving') return 'profile.change.approve';
+  if (step === 'activating') return 'profile.change.activate';
+  throw new Error('Profile ceremony status step is invalid.');
 }
 
 export function ProfileCeremonyPanel({
@@ -262,14 +279,26 @@ export function ProfileCeremonyPanel({
   const beginStep = (nextState: Extract<CeremonyState, 'resolving' | 'reviewing' | 'approving' | 'activating'>) => {
     if (busyRef.current) return null;
     const mutationKey = mutationKeyForStep(nextState);
+    const mutationMetadata = {
+      kind: 'profile.ceremony',
+      binding_key: currentBindingKey,
+      step: nextState,
+      profile_id: currentSnapshot?.profile_id ?? '',
+      operation_id: profileOperationId(nextState),
+      contract_id: PROFILE_CONTROL_CONTRACT,
+      contract_map_digest: PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST,
+      ...(candidate ? {
+        candidate_id: candidate.candidate_id,
+        candidate_digest: candidate.candidate_digest,
+      } : {}),
+      ...(approval ? {
+        approval_id: approval.approval_id,
+        approval_digest: approval.approval_digest,
+      } : {}),
+    };
     let mutation: MutationJournalRecord;
     try {
-      mutation = beginMutation(mutationKey, {
-        kind: 'profile.ceremony',
-        binding_key: currentBindingKey,
-        step: nextState,
-        profile_id: currentSnapshot?.profile_id ?? '',
-      });
+      mutation = beginMutation(mutationKey, mutationMetadata);
     } catch (error) {
       if (error instanceof MutationBlockedError) {
         setUnknownMutation(error.record);
@@ -327,6 +356,61 @@ export function ProfileCeremonyPanel({
     setCeremonyState('error');
   };
 
+  const validateStatusResult = (
+    operation: {mutation: MutationJournalRecord},
+    status: {state: string; result: unknown},
+  ): ProfileResolveResult | ProfileReviewResult | ProfileApproveResult | ProfileActivateResult | null => {
+    if (status.state !== 'succeeded') return null;
+    const step = operation.mutation.metadata.step;
+    if (step === 'resolving') return validateProfileResolveResult(status.result);
+    if (step === 'reviewing') {
+      const metadata = operation.mutation.metadata;
+      const expectedCandidate = typeof metadata.candidate_id === 'string'
+        && typeof metadata.candidate_digest === 'string'
+        ? {candidate_id: metadata.candidate_id, candidate_digest: metadata.candidate_digest}
+        : candidate
+          ? {candidate_id: candidate.candidate_id, candidate_digest: candidate.candidate_digest}
+          : undefined;
+      return validateProfileReviewResult(status.result, expectedCandidate);
+    }
+    if (step === 'approving') return validateProfileApproveResult(status.result);
+    if (step === 'activating') {
+      const activation = validateProfileActivateResult(status.result);
+      if (isCatalogMode && activation.profile_id !== authoritativeSelection?.entry.profile_id) {
+        throw new RuntimeSurfaceError(
+          'DIGEST_MISMATCH',
+          'Reconciled activation returned a different Profile than the selected catalog definition.',
+        );
+      }
+      return activation;
+    }
+    throw new RuntimeSurfaceError('INVALID', 'Profile ceremony status step is invalid.');
+  };
+
+  const applyStatusResult = async (
+    operation: {request: number; bindingKey: string; mutation: MutationJournalRecord},
+    result: ProfileResolveResult | ProfileReviewResult | ProfileApproveResult | ProfileActivateResult,
+  ): Promise<void> => {
+    if (!requestIsCurrent(operation.request, operation.bindingKey)) return;
+    if (result.state === 'resolved') {
+      setCandidate(result);
+      setReviewed(null);
+      setApproval(null);
+      setCeremonySnapshot(operation.bindingKey);
+      setCeremonyState('resolved');
+    } else if (result.state === 'reviewed') {
+      setReviewed(result);
+      setCeremonyState('reviewed');
+    } else if (result.state === 'approved') {
+      setApproval(result);
+      setCeremonyState('approved');
+    } else {
+      setCeremonyState('active');
+      broadcastRuntimeSurfaceRefresh();
+      await onActivated?.(result);
+    }
+  };
+
   const handleMutationFailure = async (
     error: unknown,
     operation: {
@@ -343,15 +427,172 @@ export function ProfileCeremonyPanel({
         setFailure({code: 'TIMEOUT', message: MUTATION_UNKNOWN_MESSAGE});
         setCeremonyState('result_unknown');
       }
+      let reconciled: Awaited<ReturnType<typeof reconcileMutationStatus>> | null = null;
+      let reconciledResult: ProfileResolveResult | ProfileReviewResult | ProfileApproveResult | ProfileActivateResult | null = null;
       try {
-        await Promise.all([surface.refresh(true), loadPacks()]);
+        reconciled = await reconcileMutationStatus({
+          record: unknown,
+          binding: {
+            requestId: unknown.requestId,
+            operationId: profileOperationId(unknown.metadata.step),
+            contractId: PROFILE_CONTROL_CONTRACT,
+            mapArtifactDigest: PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST,
+          },
+          refresh: async () => {
+            await Promise.all([refreshMountedRuntimeSurfaces(), loadPacks()]);
+          },
+          verifySuccess: (status) => {
+            reconciledResult = validateStatusResult(operation, status);
+            return reconciledResult !== null;
+          },
+          isCurrent: () => requestIsCurrent(operation.request, operation.bindingKey),
+        });
       } catch {
         // Keep the durable unknown result until a later authoritative refresh.
+      }
+      if (
+        reconciled?.state === 'succeeded'
+        && reconciledResult
+        && requestIsCurrent(operation.request, operation.bindingKey)
+      ) {
+        setUnknownMutation(null);
+        await applyStatusResult(operation, reconciledResult);
+        setFailure(null);
+        return;
+      }
+      if (reconciled?.state === 'failed' && requestIsCurrent(operation.request, operation.bindingKey)) {
+        setUnknownMutation(null);
+        setFailure({
+          code: reconciled.status.safe_error_code === 'UNAPPROVED' ? 'APPROVAL_DENIED' : 'FAILED',
+          message: reconciled.status.safe_error_code
+            ? `The Host denied this Profile ceremony step (${reconciled.status.safe_error_code}).`
+            : runtimeSurfaceErrorMessage('FAILED'),
+        });
+        setCeremonyState('error');
+        return;
       }
       return;
     }
     completeMutation(operation.mutationKey, operation.mutation.requestId);
     if (requestIsCurrent(operation.request, operation.bindingKey)) failClosed(error);
+  };
+
+  // A fresh browsing context hydrates an unknown journal entry and immediately
+  // asks the authenticated Host for its terminal outcome. No local projection
+  // or persisted success flag can release this lock.
+  useEffect(() => {
+    if (!unknownMutation || ceremonyState !== 'result_unknown') return;
+    const operation = {
+      request: requestVersion.current,
+      bindingKey: currentBindingKey,
+      mutation: unknownMutation,
+      mutationKey: unknownMutation.key,
+    };
+    let cancelled = false;
+    let reconciledResult: ProfileResolveResult | ProfileReviewResult | ProfileApproveResult | ProfileActivateResult | null = null;
+    void (async () => {
+      try {
+        const reconciled = await reconcileMutationStatus({
+          record: unknownMutation,
+          binding: {
+            requestId: unknownMutation.requestId,
+            operationId: profileOperationId(unknownMutation.metadata.step),
+            contractId: PROFILE_CONTROL_CONTRACT,
+            mapArtifactDigest: PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST,
+          },
+          refresh: async () => {
+            await Promise.all([refreshMountedRuntimeSurfaces(), loadPacks()]);
+          },
+          verifySuccess: (status) => {
+            reconciledResult = validateStatusResult(operation, status);
+            return reconciledResult !== null;
+          },
+          isCurrent: () => !cancelled && requestIsCurrent(operation.request, operation.bindingKey),
+        });
+        if (cancelled || !requestIsCurrent(operation.request, operation.bindingKey)) return;
+        if (reconciled.state === 'succeeded' && reconciledResult) {
+          setUnknownMutation(null);
+          await applyStatusResult(operation, reconciledResult);
+          setFailure(null);
+        } else if (reconciled.state === 'failed') {
+          setUnknownMutation(null);
+          setFailure({
+            code: reconciled.status.safe_error_code === 'UNAPPROVED' ? 'APPROVAL_DENIED' : 'FAILED',
+            message: reconciled.status.safe_error_code
+              ? `The Host denied this Profile ceremony step (${reconciled.status.safe_error_code}).`
+              : runtimeSurfaceErrorMessage('FAILED'),
+          });
+          setCeremonyState('error');
+        }
+      } catch {
+        // Keep the durable unknown state and visible fail-closed UI.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [unknownMutation, ceremonyState, currentBindingKey, loadPacks]);
+
+  const refreshProfile = async () => {
+    const original = unknownMutation;
+    const operation = original
+      ? {
+        request: requestVersion.current,
+        bindingKey: currentBindingKey,
+        mutation: original,
+        mutationKey: original.key,
+      }
+      : null;
+    const reconcile = async (record: MutationJournalRecord) => {
+      if (!operation) return null;
+      let reconciledResult: ProfileResolveResult | ProfileReviewResult | ProfileApproveResult | ProfileActivateResult | null = null;
+      try {
+        const reconciled = await reconcileMutationStatus({
+          record,
+          binding: {
+            requestId: record.requestId,
+            operationId: profileOperationId(record.metadata.step),
+            contractId: PROFILE_CONTROL_CONTRACT,
+            mapArtifactDigest: PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST,
+          },
+          refresh: async () => {
+            await Promise.all([refreshMountedRuntimeSurfaces(), loadPacks()]);
+          },
+          verifySuccess: (status) => {
+            reconciledResult = validateStatusResult(operation, status);
+            return reconciledResult !== null;
+          },
+          isCurrent: () => requestIsCurrent(operation.request, operation.bindingKey),
+        });
+        if (reconciled.state === 'succeeded' && reconciledResult && requestIsCurrent(operation.request, operation.bindingKey)) {
+          setUnknownMutation(null);
+          await applyStatusResult(operation, reconciledResult);
+          setFailure(null);
+        } else if (reconciled.state === 'failed' && requestIsCurrent(operation.request, operation.bindingKey)) {
+          setUnknownMutation(null);
+          setFailure({
+            code: reconciled.status.safe_error_code === 'UNAPPROVED' ? 'APPROVAL_DENIED' : 'FAILED',
+            message: reconciled.status.safe_error_code
+              ? `The Host denied this Profile ceremony step (${reconciled.status.safe_error_code}).`
+              : runtimeSurfaceErrorMessage('FAILED'),
+          });
+          setCeremonyState('error');
+        }
+        return reconciled;
+      } catch {
+        return null;
+      }
+    };
+
+    if (!operation) {
+      await Promise.all([surface.refresh(true), loadPacks()]);
+      return;
+    }
+    const first = await reconcile(original);
+    if (first?.reconciled) return;
+    await Promise.all([surface.refresh(true), loadPacks()]);
+    const refreshed = listMutationJournal().find((record) => record.key === operation.mutationKey);
+    if (refreshed?.state === 'unknown') await reconcile(refreshed);
   };
 
   const requireStableSnapshot = () => {
@@ -655,7 +896,7 @@ export function ProfileCeremonyPanel({
             <Button
               type="button"
               variant="outline"
-              onClick={() => void Promise.all([surface.refresh(true), loadPacks()]).catch(() => undefined)}
+              onClick={() => void refreshProfile().catch(() => undefined)}
             >
               Refresh authoritative state
             </Button>

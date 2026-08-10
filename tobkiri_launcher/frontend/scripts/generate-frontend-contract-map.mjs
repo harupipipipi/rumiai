@@ -12,7 +12,7 @@ const MAP_PATH = resolve(
 const OUTPUT_PATH = resolve(FRONTEND_ROOT, "src/lib/generatedFrontendContractMap.ts");
 const MAP_ARTIFACT_PATH = "defaultspack/frontend_contract_map.v4.json";
 const PINNED_ARTIFACT_DIGEST =
-  "sha256:b46fde48be7d67dc2ab6527d0e80058c2c83e2bbe904191db7e411b70bef6f2c";
+  "sha256:dbcab518d649644dad62218147eac7d99c3c2b071250ef7bfcd9ba4c9a069d15";
 
 const RUNTIME_TARGET_SPECS = [
   {
@@ -30,6 +30,14 @@ const RUNTIME_TARGET_SPECS = [
     contract_id: "tobkiri.host.control-presentation.v4",
     operation_id: "profile.catalog.read",
     allowed_payload_keys: [],
+  },
+  {
+    method: "GET",
+    path: "/api/runtime-surface/operation-status",
+    contribution_id: "defaults.runtime-surface.operation-status",
+    contract_id: "tobkiri.host.control-presentation.v4",
+    operation_id: "operation.status.read",
+    allowed_payload_keys: ["request_id"],
   },
   {
     method: "GET",

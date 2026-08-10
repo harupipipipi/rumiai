@@ -294,7 +294,7 @@ function targetFor(targets: ProfileCeremonyTargets, step: ProfileCeremonyStep): 
   return target;
 }
 
-function validateResolve(value: unknown): ProfileResolveResult {
+export function validateProfileResolveResult(value: unknown): ProfileResolveResult {
   const result = responseRecord(value);
   if (result.state !== 'resolved' || !isRecord(result.review) || result.next_action !== 'review') {
     throw new RuntimeSurfaceError('INVALID', 'Profile resolve returned an invalid ceremony state.');
@@ -342,7 +342,7 @@ function validateResolve(value: unknown): ProfileResolveResult {
   };
 }
 
-function validateReview(
+export function validateProfileReviewResult(
   value: unknown,
   expectedCandidate?: Pick<ProfileReviewInput, 'candidate_id' | 'candidate_digest'>,
 ): ProfileReviewResult {
@@ -368,7 +368,7 @@ function validateReview(
   };
 }
 
-function validateApprove(value: unknown): ProfileApproveResult {
+export function validateProfileApproveResult(value: unknown): ProfileApproveResult {
   const result = responseRecord(value);
   if (result.state !== 'approved' || result.next_action !== 'activation') {
     throw new RuntimeSurfaceError('INVALID', 'Profile approval returned an invalid ceremony state.');
@@ -412,7 +412,7 @@ function validateApprove(value: unknown): ProfileApproveResult {
   };
 }
 
-function validateActivate(value: unknown): ProfileActivateResult {
+export function validateProfileActivateResult(value: unknown): ProfileActivateResult {
   const result = responseRecord(value);
   if (result.state !== 'active') {
     throw new RuntimeSurfaceError('INVALID', 'Profile activation returned an invalid ceremony state.');
@@ -462,14 +462,14 @@ export function createProfileCeremonyClient(
     return validate(result);
   };
   return {
-    resolve: (input, requestId) => write('resolve', exactMutationPayload('resolve', input), validateResolve, requestId),
+    resolve: (input, requestId) => write('resolve', exactMutationPayload('resolve', input), validateProfileResolveResult, requestId),
     review: (input, requestId) => {
       const payload = exactMutationPayload('review', input);
       return transport.write<unknown>(targetFor(targets, 'review'), payload, requestId)
-        .then((result) => validateReview(result, input));
+        .then((result) => validateProfileReviewResult(result, input));
     },
-    approve: (input, requestId) => write('approve', exactMutationPayload('approve', input), validateApprove, requestId),
-    activate: (input, requestId) => write('activate', exactMutationPayload('activate', input), validateActivate, requestId),
+    approve: (input, requestId) => write('approve', exactMutationPayload('approve', input), validateProfileApproveResult, requestId),
+    activate: (input, requestId) => write('activate', exactMutationPayload('activate', input), validateProfileActivateResult, requestId),
   };
 }
 

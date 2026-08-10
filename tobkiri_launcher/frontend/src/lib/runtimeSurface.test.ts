@@ -203,12 +203,12 @@ test('runtime target and operation revisions fail closed on map or digest mismat
   );
 });
 
-test('generated Contract Map is pinned to the canonical raw artifact and includes every map binding plus eleven runtime targets', () => {
+test('generated Contract Map is pinned to the canonical raw artifact and includes every map binding plus the operation status target', () => {
   assert.equal(
     GENERATED_FRONTEND_CONTRACT_MAP.artifact_digest,
     PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST,
   );
-  assert.equal(GENERATED_FRONTEND_CONTRACT_MAP.routes.length, 22);
+  assert.equal(GENERATED_FRONTEND_CONTRACT_MAP.routes.length, 23);
   assert.doesNotThrow(() => validateGeneratedFrontendContractMap(GENERATED_FRONTEND_CONTRACT_MAP));
 
   const tampered = structuredClone(GENERATED_FRONTEND_CONTRACT_MAP);

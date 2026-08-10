@@ -11,8 +11,8 @@ import {
 
 test("the checked-in generated map is deterministic and current", async () => {
   const result = await checkGeneratedFrontendContractMap();
-  assert.equal(result.rawDigest, "sha256:b46fde48be7d67dc2ab6527d0e80058c2c83e2bbe904191db7e411b70bef6f2c");
-  assert.equal(result.runtimeMap.routes.length, 22);
+  assert.equal(result.rawDigest, "sha256:dbcab518d649644dad62218147eac7d99c3c2b071250ef7bfcd9ba4c9a069d15");
+  assert.equal(result.runtimeMap.routes.length, 23);
   const profileCatalog = result.runtimeMap.routes.find(
     (route) => route.method === "GET" && route.path === "/api/runtime-surface/profiles",
   );
@@ -23,6 +23,17 @@ test("the checked-in generated map is deterministic and current", async () => {
     provider_id: "tobkiri.host.control-presentation",
     function_id: "tobkiri.host.control-presentation",
     allowed_payload_keys: [],
+  }]);
+  const operationStatus = result.runtimeMap.routes.find(
+    (route) => route.method === "GET" && route.path === "/api/runtime-surface/operation-status",
+  );
+  assert.deepEqual(operationStatus?.targets, [{
+    contribution_id: "defaults.runtime-surface.operation-status",
+    contract_id: "tobkiri.host.control-presentation.v4",
+    operation_id: "operation.status.read",
+    provider_id: "tobkiri.host.control-presentation",
+    function_id: "tobkiri.host.control-presentation",
+    allowed_payload_keys: ["request_id"],
   }]);
   const resolve = result.runtimeMap.routes.find(
     (route) => route.method === "POST" && route.path === "/api/runtime-surface/profile-change/resolve",
