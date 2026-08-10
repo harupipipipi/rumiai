@@ -270,7 +270,6 @@ test('store revoke action clears pending and surfaces a timeout without changing
   assert.deepEqual(routes.slice(1).map(normalizeOperationStatusRoute).sort(), [
     'GET /api/pack-control/catalog',
     'GET /api/runtime-surface/operation-status',
-    'GET /api/runtime-surface/operation-status',
   ].sort());
   const refreshedPack = useAppStore.getState().packs[0];
   assert.equal(refreshedPack.approved, samplePack.approved);

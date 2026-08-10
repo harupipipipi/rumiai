@@ -35,7 +35,10 @@ export interface OperationStatusBinding {
   requestDigest?: string;
 }
 
-export type OperationStatusFetcher = (requestId: string) => Promise<unknown>;
+export type OperationStatusFetcher = (
+  requestId: string,
+  signal?: AbortSignal,
+) => Promise<unknown>;
 
 export class OperationStatusValidationError extends Error {
   constructor(message: string) {
@@ -59,6 +62,7 @@ interface ReconcileMutationStatusOptions {
   isCurrent?: () => boolean;
   fetcher?: OperationStatusFetcher;
   completeOnTerminal?: boolean;
+  signal?: AbortSignal;
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -235,10 +239,41 @@ export async function validateOperationStatus(
 
 const statusRequests = new Map<string, Promise<OperationStatus>>();
 
+function cancellableStatusFetch(
+  fetcher: OperationStatusFetcher,
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  if (!signal) return fetcher(requestId);
+  if (signal.aborted) {
+    return Promise.reject(new OperationStatusValidationError('Operation status reconciliation was cancelled.'));
+  }
+  return new Promise((resolve, reject) => {
+    const finish = (callback: (value: unknown) => void, value: unknown): void => {
+      signal.removeEventListener('abort', abort);
+      callback(value);
+    };
+    const abort = (): void => {
+      finish(reject, new OperationStatusValidationError('Operation status reconciliation was cancelled.'));
+    };
+    signal.addEventListener('abort', abort, {once: true});
+    try {
+      const response = fetcher(requestId, signal);
+      response.then(
+        (value) => finish(resolve, value),
+        (error) => finish(reject, error),
+      );
+    } catch (error) {
+      finish(reject, error);
+    }
+  });
+}
+
 /** Fetch one status projection at a time for each exact request binding. */
 export function fetchOperationStatus(
   binding: OperationStatusBinding,
   fetcher: OperationStatusFetcher = fetchRuntimeOperationStatus,
+  signal?: AbortSignal,
 ): Promise<OperationStatus> {
   const key = [
     binding.requestId,
@@ -249,7 +284,7 @@ export function fetchOperationStatus(
   ].join('\u0000');
   const existing = statusRequests.get(key);
   if (existing) return existing;
-  const request = fetcher(binding.requestId)
+  const request = cancellableStatusFetch(fetcher, binding.requestId, signal)
     .then((value) => validateOperationStatus(value, binding))
     .finally(() => {
       if (statusRequests.get(key) === request) statusRequests.delete(key);
@@ -272,7 +307,11 @@ export async function reconcileMutationStatus({
   isCurrent = () => true,
   fetcher,
   completeOnTerminal = true,
+  signal,
 }: ReconcileMutationStatusOptions): Promise<ReconciledMutationStatus> {
+  if (signal?.aborted) {
+    throw new OperationStatusValidationError('Operation status reconciliation was cancelled.');
+  }
   if (record.state !== 'unknown') {
     throw new OperationStatusValidationError('Only an unknown mutation may be status-reconciled.');
   }
@@ -318,7 +357,11 @@ export async function reconcileMutationStatus({
       requestDigest: storedDigest ?? binding.requestDigest,
     },
     fetcher,
+    signal,
   );
+  if (signal?.aborted) {
+    throw new OperationStatusValidationError('Operation status reconciliation was cancelled.');
+  }
   bindMutationStatusDigest(
     record.key,
     record.requestId,
@@ -332,6 +375,9 @@ export async function reconcileMutationStatus({
   }
 
   await refresh();
+  if (signal?.aborted) {
+    throw new OperationStatusValidationError('Operation status reconciliation was cancelled.');
+  }
   if (status.state === 'succeeded' && verifySuccess && !verifySuccess(status)) {
     throw new OperationStatusValidationError('The authoritative projection did not reconcile the operation.');
   }

@@ -198,7 +198,10 @@ interface AppState {
   packVmDoctor: ApiPackVMDoctor | null;
   packVmDoctorLoading: boolean;
   packVmError: string | null;
-  loadPacks: (force?: boolean) => Promise<void>;
+  loadPacks: (
+    force?: boolean,
+    options?: {skipMutationReconciliation?: boolean},
+  ) => Promise<void>;
   loadFrontendCatalog: (force?: boolean) => Promise<void>;
   refreshPackVMDoctor: () => Promise<ApiPackVMDoctor | null>;
   setPackVMDoctor: (doctor: ApiPackVMDoctor | null) => void;
@@ -328,7 +331,11 @@ async function invalidatePackMutationSurfaces(get: () => AppState): Promise<void
     while (handled < packInvalidationRequested) {
       const requested = packInvalidationRequested;
       await Promise.all([
-        get().loadPacks(true),
+        // Operation-status reconciliation owns the current refresh. Do not
+        // start a second hydrated-journal reconciliation from that refresh;
+        // it would outlive the caller and could issue a later request against
+        // a replaced/closed UI context.
+        get().loadPacks(true, {skipMutationReconciliation: true}),
         get().loadFrontendCatalog(true),
       ]);
       const refreshedState = get();
@@ -345,7 +352,40 @@ async function invalidatePackMutationSurfaces(get: () => AppState): Promise<void
 }
 
 const PACK_CONTROL_CONTRACT = 'tobkiri.host.pack-control.v4';
-const hydratedPackStatusRequests = new Map<string, Promise<void>>();
+interface HydratedPackStatusTask {
+  controller: AbortController;
+  promise: Promise<void>;
+}
+
+const hydratedPackStatusRequests = new Map<string, HydratedPackStatusTask>();
+
+export interface PackMutationReconciliationHandle {
+  readonly promise: Promise<void>;
+  readonly cancel: () => void;
+}
+
+/** Wait for all store-owned restart reconciliation work to reach quiescence. */
+export async function waitForPackMutationReconciliation(): Promise<void> {
+  while (hydratedPackStatusRequests.size > 0) {
+    const tasks = [...hydratedPackStatusRequests.values()];
+    await Promise.all(tasks.map((task) => task.promise));
+  }
+}
+
+/** Return the coalesced lifecycle handle used by a page or session owner. */
+export function getPackMutationReconciliationHandle(): PackMutationReconciliationHandle {
+  return {
+    promise: waitForPackMutationReconciliation(),
+    cancel: cancelPackMutationReconciliation,
+  };
+}
+
+/** Cancel queued restart reconciliation without releasing its durable journal. */
+export function cancelPackMutationReconciliation(): void {
+  for (const task of hydratedPackStatusRequests.values()) {
+    task.controller.abort(new Error('Pack mutation reconciliation was cancelled.'));
+  }
+}
 
 async function reconcilePackMutationStatus(
   record: MutationJournalRecord,
@@ -357,6 +397,7 @@ async function reconcilePackMutationStatus(
     statusPhase?: string;
     completeOnTerminal?: boolean;
     contractId?: string;
+    signal?: AbortSignal;
   } = {},
 ): Promise<{state: OperationStatusState | 'stale'; status: OperationStatus; reconciled: boolean}> {
   const expectedJournalOperation = options.statusPhase === 'approval'
@@ -381,6 +422,7 @@ async function reconcilePackMutationStatus(
     refresh: () => invalidatePackMutationSurfaces(get),
     verifySuccess,
     completeOnTerminal: options.completeOnTerminal,
+    signal: options.signal,
   });
 }
 
@@ -419,7 +461,12 @@ function scheduleHydratedPackStatusReconciliation(
   ));
   for (const record of records) {
     if (hydratedPackStatusRequests.has(record.key)) continue;
-    const promise = (async () => {
+    const controller = new AbortController();
+    const task: HydratedPackStatusTask = {
+      controller,
+      promise: Promise.resolve(),
+    };
+    task.promise = (async () => {
       try {
         let reconciled: Awaited<ReturnType<typeof reconcilePackMutationStatus>>;
         if (record.metadata.kind === 'pack.operation') {
@@ -431,10 +478,10 @@ function scheduleHydratedPackStatusReconciliation(
             get,
             operationId,
             () => true,
-            {contractId},
+            {contractId, signal: controller.signal},
           );
         } else if (record.metadata.kind === 'pack.approve') {
-          const approval = await reconcilePackApprovalStatus(record, get);
+          const approval = await reconcilePackApprovalStatus(record, get, controller.signal);
           if (approval.state === 'succeeded' || approval.state === 'failed') {
             clearPackUnknownState(set, record);
           }
@@ -447,6 +494,7 @@ function scheduleHydratedPackStatusReconciliation(
             get,
             operationId,
             (status) => status.state === 'succeeded' && packMutationSuccess(record, get),
+            {signal: controller.signal},
           );
         }
         if (reconciled.state === 'succeeded' || reconciled.state === 'failed') {
@@ -456,17 +504,18 @@ function scheduleHydratedPackStatusReconciliation(
         // Keep the durable record blocked on unknown, stale, or tampered status.
       }
     })().finally(() => {
-      if (hydratedPackStatusRequests.get(record.key) === promise) {
+      if (hydratedPackStatusRequests.get(record.key) === task) {
         hydratedPackStatusRequests.delete(record.key);
       }
     });
-    hydratedPackStatusRequests.set(record.key, promise);
+    hydratedPackStatusRequests.set(record.key, task);
   }
 }
 
 async function reconcilePackApprovalStatus(
   record: MutationJournalRecord,
   get: () => AppState,
+  signal?: AbortSignal,
 ): Promise<{state: OperationStatusState | 'stale'; status: OperationStatus; reconciled: boolean}> {
   const candidate = await reconcilePackMutationStatus(
     record,
@@ -477,6 +526,7 @@ async function reconcilePackApprovalStatus(
       requestId: mutationRequestId(record, 'candidate'),
       statusPhase: 'candidate',
       completeOnTerminal: false,
+      signal,
     },
   );
   if (candidate.state !== 'succeeded') {
@@ -493,6 +543,7 @@ async function reconcilePackApprovalStatus(
       requestId: mutationRequestId(record, 'approval'),
       statusPhase: 'approval',
       completeOnTerminal: false,
+      signal,
     },
   );
   if (
@@ -521,6 +572,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   isSetupDone:
     (readLocalStorage(SETUP_STORAGE_KEY) ?? readLocalStorage(LEGACY_SETUP_STORAGE_KEY)) === 'true',
   setSetupDone: (done) => {
+    if (!done) cancelPackMutationReconciliation();
     writeLocalStorage(SETUP_STORAGE_KEY, String(done));
     set({isSetupDone: done});
   },
@@ -601,11 +653,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   packVmDoctorLoading: false,
   packVmError: null,
 
-  loadPacks: (force = false) => {
+  loadPacks: (force = false, options = {}) => {
     if (packsLoadPromise) {
       if (!force) return packsLoadPromise;
       const inFlight = packsLoadPromise;
-      return inFlight.then(() => get().loadPacks(true));
+      return inFlight.then(() => get().loadPacks(true, options));
     }
     const versionsAtStart = new Map(packMutationVersions);
     set({packsLoading: true, packsError: null});
@@ -653,7 +705,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         };
         const reconciledPackUnknown = reconcilePackMutationJournal(packs, durablePackUnknown);
         set({packs, packsError: null, packMutationUnknown: reconciledPackUnknown});
-        scheduleHydratedPackStatusReconciliation(get, set);
+        if (!options.skipMutationReconciliation) {
+          scheduleHydratedPackStatusReconciliation(get, set);
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to load packs';
         set({packsError: message});

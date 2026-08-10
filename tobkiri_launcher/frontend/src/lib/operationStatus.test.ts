@@ -240,3 +240,30 @@ test('double status reconciliation is keyed and makes one status request', async
   assert.equal(calls, 1);
   assert.deepEqual(results.map((item) => item.state), ['pending', 'pending']);
 });
+
+test('cancelled status reconciliation never refreshes or releases its durable journal', async () => {
+  const requestId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const record = unknownRecord(requestId);
+  const controller = new AbortController();
+  let release: (() => void) | undefined;
+  let refreshes = 0;
+  const response = new Promise<Record<string, unknown>>((resolve) => {
+    release = () => resolve(status(requestId, 'indeterminate'));
+  });
+  const pending = reconcileMutationStatus({
+    record,
+    binding: binding(requestId),
+    refresh: async () => { refreshes += 1; },
+    signal: controller.signal,
+    fetcher: async (_statusRequestId, signal) => {
+      assert.equal(signal, controller.signal);
+      return response;
+    },
+  });
+
+  controller.abort();
+  await assert.rejects(pending, /cancelled/);
+  release?.();
+  assert.equal(refreshes, 0);
+  assert.equal(listMutationJournal().some((item) => item.key === record.key), true);
+});

@@ -390,7 +390,6 @@ test('a lost capability response transitions to unknown and never sends a replac
   assert.deepEqual(routes.slice(1).map(normalizeOperationStatusRoute).sort(), [
     'GET /api/pack-control/catalog',
     'GET /api/runtime-surface/operation-status',
-    'GET /api/runtime-surface/operation-status',
     'GET /api/ui/catalog',
   ].sort());
   assert.deepEqual(useAppStore.getState().packOperationPending, {});

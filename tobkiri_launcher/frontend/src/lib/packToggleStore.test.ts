@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import {afterEach, beforeEach, test} from 'node:test';
 import {JSDOM} from 'jsdom';
 
-import {type Pack, useAppStore} from '@/src/store';
+import {
+  type Pack,
+  getPackMutationReconciliationHandle,
+  useAppStore,
+  waitForPackMutationReconciliation,
+} from '@/src/store';
 import type {ApiPackVMDoctor} from '@/src/lib/apiTypes';
 
 const samplePack: Pack = {
@@ -41,11 +46,40 @@ const healthyDoctor: ApiPackVMDoctor = {
 
 let dom: JSDOM | null = null;
 let previousState: ReturnType<typeof useAppStore.getState>;
-let originalFetch: typeof fetch;
+const GLOBAL_SURFACE_KEYS = [
+  'window',
+  'document',
+  'navigator',
+  'localStorage',
+  'sessionStorage',
+  'fetch',
+] as const;
+type GlobalSurfaceKey = (typeof GLOBAL_SURFACE_KEYS)[number];
+type GlobalSurfaceSnapshot = {
+  [key in GlobalSurfaceKey]: PropertyDescriptor | undefined;
+};
+let previousGlobals: GlobalSurfaceSnapshot;
+
+function captureGlobalSurface(): GlobalSurfaceSnapshot {
+  return Object.fromEntries(
+    GLOBAL_SURFACE_KEYS.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]),
+  ) as GlobalSurfaceSnapshot;
+}
+
+function restoreGlobalSurface(snapshot: GlobalSurfaceSnapshot): void {
+  for (const key of GLOBAL_SURFACE_KEYS) {
+    const descriptor = snapshot[key];
+    if (descriptor) {
+      Object.defineProperty(globalThis, key, descriptor);
+    } else {
+      Reflect.deleteProperty(globalThis, key);
+    }
+  }
+}
 
 beforeEach(() => {
   previousState = useAppStore.getState();
-  originalFetch = globalThis.fetch;
+  previousGlobals = captureGlobalSurface();
   dom = new JSDOM('<!doctype html><html><body></body></html>', {
     url: 'http://localhost/panel/',
   });
@@ -59,10 +93,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  globalThis.fetch = originalFetch;
-  useAppStore.setState(previousState, true);
-  dom?.window.close();
-  dom = null;
+  return getPackMutationReconciliationHandle().promise.finally(() => {
+    useAppStore.setState(previousState, true);
+    dom?.window.close();
+    dom = null;
+    restoreGlobalSurface(previousGlobals);
+  });
 });
 
 function binding() {
@@ -129,6 +165,10 @@ function operationStatusResponse(route: string, operationId: string): Response {
       updated_at: 2,
     },
   }), {headers: {'Content-Type': 'application/json'}});
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function normalizeOperationStatusRoute(route: string): string {
@@ -304,7 +344,6 @@ test('disable timeout leaves the Pack enabled and does not leave a stuck switch'
   assert.deepEqual(routes.slice(1).map(normalizeOperationStatusRoute).sort(), [
     'GET /api/pack-control/catalog',
     'GET /api/runtime-surface/operation-status',
-    'GET /api/runtime-surface/operation-status',
     'GET /api/ui/catalog',
   ].sort());
   assert.equal(errors.length, 2);
@@ -340,6 +379,51 @@ test('a stale catalog response cannot re-enable a Pack after a confirmed disable
   assert.equal(catalogReads, 1);
   assert.deepEqual(errors, []);
   assert.equal(routes[0], 'POST /api/pack-control/disable');
+});
+
+test('delayed restart reconciliation is quiescent before jsdom cleanup', async () => {
+  let statusReads = 0;
+  let catalogReads = 0;
+  installFetch(async (route) => {
+    if (route === 'POST /api/pack-control/disable') {
+      throw new Error('POST request timed out after 10000ms: /api/pack-control/disable');
+    }
+    if (route.startsWith('GET /api/runtime-surface/operation-status?')) {
+      statusReads += 1;
+      await delay(15);
+      return operationStatusResponse(route, 'pack.disable');
+    }
+    if (route === 'GET /api/pack-control/catalog') {
+      catalogReads += 1;
+      await delay(catalogReads === 1 ? 20 : 5);
+      return new Response(JSON.stringify({
+        success: true,
+        data: {...binding(), packs: [catalogPack(true)], count: 1},
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
+    assert.equal(route, 'GET /api/ui/catalog');
+    await delay(10);
+    return new Response(JSON.stringify({success: true, data: {dynamic_host: dynamicCatalog()}}), {
+      headers: {'Content-Type': 'application/json'},
+    });
+  });
+  const errors: string[] = [];
+  setStore(errors);
+
+  assert.equal(await useAppStore.getState().togglePack(samplePack.id), false);
+  await useAppStore.getState().loadPacks();
+  await waitForPackMutationReconciliation();
+  assert.ok(statusReads >= 2, 'expected direct and hydrated status reads');
+  assert.ok(catalogReads >= 2, 'expected direct and hydrated refresh reads');
+
+  const activeDom = dom;
+  assert.ok(activeDom);
+  activeDom.window.close();
+  dom = null;
+  await delay(0);
+  assert.deepEqual(errors, [
+    'The request result is unknown. Refresh the authoritative projection before trying again; no new request will be sent automatically.',
+  ]);
 });
 
 test('disable ignores a response for the wrong Pack or requested state', async () => {

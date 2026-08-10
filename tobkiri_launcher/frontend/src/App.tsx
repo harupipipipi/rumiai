@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useLayoutEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router';
-import { useAppStore } from '@/src/store';
+import { cancelPackMutationReconciliation, useAppStore } from '@/src/store';
 import { Layout } from '@/src/components/layout/Layout';
 import { Setup } from '@/src/pages/Setup';
 import { Dashboard } from '@/src/pages/Dashboard';
@@ -37,6 +37,10 @@ export default function App() {
   useLayoutEffect(() => {
     applyAppearanceToRoot(document.documentElement, { theme, colorMode });
   }, [theme, colorMode]);
+
+  useEffect(() => () => {
+    cancelPackMutationReconciliation();
+  }, []);
 
   useEffect(() => {
     if (!hasPendingPanelBootstrapCode()) {
