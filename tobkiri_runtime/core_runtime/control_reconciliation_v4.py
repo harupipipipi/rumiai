@@ -18,13 +18,13 @@ from typing import Any, Callable, Iterator, Mapping
 
 from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.errors import CanonicalizationError
+from tobkiri_protocol.platform_paths import canonical_platform_path
 
 from .process_identity import (
     ProcessIdentityEvidence,
     process_start_identity as _process_start_identity,
 )
 from .secure_sqlite_path import (
-    canonical_platform_path,
     FileIdentity,
     SecureParent,
     SecurePathError,

@@ -26,13 +26,13 @@ from pathlib import Path
 from typing import Any, Concatenate, Iterator, ParamSpec, TypeAlias, TypeVar
 
 from cryptography.fernet import Fernet, InvalidToken
+from tobkiri_protocol.platform_paths import canonical_platform_path
 
 from ..process_identity import ProcessIdentityEvidence, process_start_identity
 from ..secure_sqlite_path import (
     FileIdentity,
     SecureParent,
     SecurePathError,
-    canonical_platform_path,
     secure_parent as open_secure_parent,
 )
 

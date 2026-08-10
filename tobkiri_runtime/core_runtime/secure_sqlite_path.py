@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import os
 import stat
-import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
 from tobkiri_protocol.durability import publish_file_durable
+from tobkiri_protocol.platform_paths import (
+    canonical_platform_path as canonical_platform_path,
+)
 
 
 class SecurePathError(RuntimeError):
@@ -133,31 +135,6 @@ def _validate_windows_open(path: Path, *, directory: bool) -> FileIdentity:
     if before_identity != opened_identity or opened_identity != after_identity:
         raise SecurePathError("path identity changed while opening")
     return opened_identity
-
-
-def canonical_platform_path(path: Path) -> Path:
-    """Normalize only OS-owned compatibility aliases before path pinning.
-
-    macOS exposes its protected temporary trees through root-owned ``/var`` and
-    ``/tmp`` compatibility symlinks.  Resolving only those fixed aliases keeps
-    standard-library temporary paths usable; all caller-controlled symlink
-    ancestors remain visible to the no-follow walk and are rejected.
-    """
-
-    absolute = path.absolute()
-    if sys.platform != "darwin":
-        return absolute
-    aliases = ((Path("/var"), Path("/private/var")), (Path("/tmp"), Path("/private/tmp")))
-    for alias, canonical in aliases:
-        if absolute != alias and alias not in absolute.parents:
-            continue
-        try:
-            if alias.resolve(strict=True) != canonical:
-                return absolute
-        except OSError:
-            return absolute
-        return canonical / absolute.relative_to(alias)
-    return absolute
 
 
 @dataclass(frozen=True)

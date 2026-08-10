@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import subprocess
+import sys
+import tempfile
 
 import pytest
 
@@ -40,9 +43,7 @@ def test_hardlinked_entries_are_rejected(tmp_path: Path, entry: str) -> None:
     os.link(outside, target)
 
     action = (
-        (lambda: store.open_lock(entry))
-        if entry == "lock"
-        else (lambda: store.read_bytes(entry))
+        (lambda: store.open_lock(entry)) if entry == "lock" else (lambda: store.read_bytes(entry))
     )
     with pytest.raises(SecurePersistenceError, match="identity is unsafe"):
         action()
@@ -117,3 +118,97 @@ def test_destination_replacement_before_commit_preserves_current_entry(
     assert target.read_bytes() == b"attacker"
     assert (store.root / "old.displaced").read_bytes() == b"old"
     assert not list(store.root.glob(".active.json.*.tmp"))
+
+
+def test_nested_symlink_directory_is_rejected_without_touching_victim(
+    tmp_path: Path,
+) -> None:
+    store = SecureDirectory(tmp_path / "root")
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "active.json").write_bytes(b"outside")
+    try:
+        (store.root / "activations").symlink_to(victim, target_is_directory=True)
+    except OSError:
+        if os.name == "nt":
+            pytest.skip("directory symlink creation unavailable")
+        raise
+
+    with pytest.raises(SecurePersistenceError, match="unsafe|symlink|reparse"):
+        store.write_bytes_atomic("activations/active.json", b"attacker")
+
+    assert (victim / "active.json").read_bytes() == b"outside"
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Darwin-only alias contract")
+def test_darwin_temporary_directory_unresolved_path_supports_all_operations() -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        unresolved = Path(temporary)
+        store = SecureDirectory(unresolved / "state")
+        store.write_bytes_atomic("nested/state.json", b"state")
+        assert store.exists("nested/state.json")
+        assert store.read_bytes("nested/state.json") == b"state"
+        lock = store.open_lock("locks/state.lock")
+        try:
+            store.validate_open_file("locks/state.lock", lock)
+        finally:
+            os.close(lock)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows junction contract")
+def test_windows_nested_junction_is_rejected_without_touching_victim(
+    tmp_path: Path,
+) -> None:
+    store = SecureDirectory(tmp_path / "root")
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "active.json").write_bytes(b"outside")
+    junction = store.root / "activations"
+    result = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(junction), str(victim)],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"junction creation unavailable: {result.stderr.strip()}")
+
+    with pytest.raises(SecurePersistenceError, match="reparse"):
+        store.write_bytes_atomic("activations/active.json", b"attacker")
+
+    assert (victim / "active.json").read_bytes() == b"outside"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows handle race contract")
+def test_windows_nested_directory_handle_blocks_replacement_race(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = SecureDirectory(tmp_path / "root")
+    nested = store.root / "activations"
+    nested.mkdir()
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    displaced = store.root / "displaced"
+    real_open = persistence._windows_open_directory
+    replacement_blocked = False
+
+    def racing_open(path: Path) -> tuple[object, tuple[int, int]]:
+        nonlocal replacement_blocked
+        opened = real_open(path)
+        if path == nested and not replacement_blocked:
+            try:
+                nested.rename(displaced)
+            except OSError:
+                replacement_blocked = True
+            else:
+                persistence._windows_close_handle(opened[0])
+                pytest.fail("pinned nested directory was replaceable")
+        return opened
+
+    monkeypatch.setattr(persistence, "_windows_open_directory", racing_open)
+    store.write_bytes_atomic("activations/active.json", b"inside")
+
+    assert replacement_blocked
+    assert (nested / "active.json").read_bytes() == b"inside"
+    assert not (victim / "active.json").exists()

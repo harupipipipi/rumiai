@@ -5,11 +5,13 @@ from __future__ import annotations
 import os
 import secrets
 import stat
+import ctypes
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 from .durability import replace_file_durable
+from .platform_paths import canonical_platform_path
 
 
 class SecurePersistenceError(OSError):
@@ -19,6 +21,187 @@ class SecurePersistenceError(OSError):
 _Identity = tuple[int, int]
 _Fingerprint = tuple[int, int, int, int, int, int]
 _ReadFingerprint = tuple[int, int, int, int, int, int, int, int]
+_WindowsFileId = tuple[int, int]
+
+_FILE_ATTRIBUTE_DIRECTORY = 0x00000010
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
+_FILE_READ_ATTRIBUTES = 0x00000080
+_GENERIC_READ = 0x80000000
+_GENERIC_WRITE = 0x40000000
+_FILE_SHARE_READ = 0x00000001
+_FILE_SHARE_WRITE = 0x00000002
+_CREATE_NEW = 1
+_OPEN_EXISTING = 3
+_OPEN_ALWAYS = 4
+_FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+
+
+class _ByHandleFileInformation(ctypes.Structure):
+    """Portable declaration of Win32 BY_HANDLE_FILE_INFORMATION."""
+
+    _fields_ = [
+        ("file_attributes", ctypes.c_uint32),
+        ("creation_time_low", ctypes.c_uint32),
+        ("creation_time_high", ctypes.c_uint32),
+        ("last_access_time_low", ctypes.c_uint32),
+        ("last_access_time_high", ctypes.c_uint32),
+        ("last_write_time_low", ctypes.c_uint32),
+        ("last_write_time_high", ctypes.c_uint32),
+        ("volume_serial_number", ctypes.c_uint32),
+        ("file_size_high", ctypes.c_uint32),
+        ("file_size_low", ctypes.c_uint32),
+        ("number_of_links", ctypes.c_uint32),
+        ("file_index_high", ctypes.c_uint32),
+        ("file_index_low", ctypes.c_uint32),
+    ]
+
+
+def _windows_kernel32() -> Any:
+    """Return the configured Win32 file API."""
+
+    win_dll: Any = getattr(ctypes, "WinDLL")
+    kernel32 = win_dll("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = (
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    )
+    kernel32.CreateFileW.restype = ctypes.c_void_p
+    kernel32.GetFileInformationByHandle.argtypes = (
+        ctypes.c_void_p,
+        ctypes.POINTER(_ByHandleFileInformation),
+    )
+    kernel32.GetFileInformationByHandle.restype = ctypes.c_int
+    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+    kernel32.CloseHandle.restype = ctypes.c_int
+    return kernel32
+
+
+def _windows_error(operation: str) -> OSError:
+    code = int(getattr(ctypes, "get_last_error", lambda: 0)())
+    win_error = getattr(ctypes, "WinError", None)
+    if win_error is not None:
+        return win_error(code)
+    return OSError(code, f"{operation} failed with Windows error {code}")
+
+
+def _windows_open_directory(path: Path) -> tuple[Any, _WindowsFileId]:
+    """Open a directory itself, reject reparses, and return its stable File ID."""
+
+    kernel32 = _windows_kernel32()
+    handle = kernel32.CreateFileW(
+        str(path),
+        _FILE_READ_ATTRIBUTES,
+        _FILE_SHARE_READ | _FILE_SHARE_WRITE,
+        None,
+        _OPEN_EXISTING,
+        _FILE_FLAG_BACKUP_SEMANTICS | _FILE_FLAG_OPEN_REPARSE_POINT,
+        None,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if handle in {None, invalid_handle}:
+        raise _windows_error("CreateFileW")
+    information = _ByHandleFileInformation()
+    if not kernel32.GetFileInformationByHandle(handle, ctypes.byref(information)):
+        kernel32.CloseHandle(handle)
+        raise _windows_error("GetFileInformationByHandle")
+    if not information.file_attributes & _FILE_ATTRIBUTE_DIRECTORY:
+        kernel32.CloseHandle(handle)
+        raise SecurePersistenceError("persistence child is not a directory")
+    if information.file_attributes & _FILE_ATTRIBUTE_REPARSE_POINT:
+        kernel32.CloseHandle(handle)
+        raise SecurePersistenceError("persistence directory is reparse-pointed")
+    file_id = (
+        int(information.volume_serial_number),
+        (int(information.file_index_high) << 32) | int(information.file_index_low),
+    )
+    return handle, file_id
+
+
+def _windows_close_handle(handle: Any) -> None:
+    if not _windows_kernel32().CloseHandle(handle):
+        raise _windows_error("CloseHandle")
+
+
+def _windows_open_file_descriptor(
+    path: Path,
+    flags: int,
+    *,
+    disposition: int = _OPEN_EXISTING,
+) -> tuple[int, _WindowsFileId]:
+    """Open a non-reparse regular file without delete sharing."""
+
+    desired_access = 0
+    if flags & os.O_RDWR:
+        desired_access = _GENERIC_READ | _GENERIC_WRITE
+    elif flags & os.O_WRONLY:
+        desired_access = _GENERIC_WRITE
+    else:
+        desired_access = _GENERIC_READ
+    kernel32 = _windows_kernel32()
+    handle = kernel32.CreateFileW(
+        str(path),
+        desired_access,
+        _FILE_SHARE_READ | _FILE_SHARE_WRITE,
+        None,
+        disposition,
+        _FILE_FLAG_OPEN_REPARSE_POINT,
+        None,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if handle in {None, invalid_handle}:
+        raise _windows_error("CreateFileW")
+    information = _ByHandleFileInformation()
+    if not kernel32.GetFileInformationByHandle(handle, ctypes.byref(information)):
+        kernel32.CloseHandle(handle)
+        raise _windows_error("GetFileInformationByHandle")
+    if (
+        information.file_attributes & _FILE_ATTRIBUTE_DIRECTORY
+        or information.file_attributes & _FILE_ATTRIBUTE_REPARSE_POINT
+        or information.number_of_links != 1
+    ):
+        kernel32.CloseHandle(handle)
+        raise SecurePersistenceError("persistence entry identity is unsafe")
+    file_id = (
+        int(information.volume_serial_number),
+        (int(information.file_index_high) << 32) | int(information.file_index_low),
+    )
+    try:
+        import msvcrt
+
+        open_osfhandle: Any = getattr(msvcrt, "open_osfhandle")
+        descriptor = open_osfhandle(
+            int(handle),
+            flags | getattr(os, "O_BINARY", 0),
+        )
+    except Exception:
+        kernel32.CloseHandle(handle)
+        raise
+    return descriptor, file_id
+
+
+def _windows_descriptor_file_id(descriptor: int) -> _WindowsFileId:
+    """Read the Win32 File ID backing one CRT descriptor."""
+
+    import msvcrt
+
+    get_osfhandle: Any = getattr(msvcrt, "get_osfhandle")
+    handle = get_osfhandle(descriptor)
+    information = _ByHandleFileInformation()
+    if not _windows_kernel32().GetFileInformationByHandle(
+        handle,
+        ctypes.byref(information),
+    ):
+        raise _windows_error("GetFileInformationByHandle")
+    return (
+        int(information.volume_serial_number),
+        (int(information.file_index_high) << 32) | int(information.file_index_low),
+    )
 
 
 def _identity(metadata: os.stat_result) -> _Identity:
@@ -67,7 +250,7 @@ class SecureDirectory:
     """
 
     def __init__(self, root: Path, *, create: bool = True) -> None:
-        requested = Path(root)
+        requested = canonical_platform_path(Path(root))
         if not requested.is_absolute():
             requested = requested.absolute()
         self.root = requested
@@ -85,9 +268,7 @@ class SecureDirectory:
 
     def _capture_chain(self, *, create: bool) -> tuple[tuple[Path, _Identity], ...]:
         if os.name == "nt":
-            if create:
-                self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-            captured = self._capture_windows_chain()
+            captured = self._capture_windows_chain(create=create)
             if not captured or captured[-1][0] != self.root:
                 raise SecurePersistenceError("persistence root is unavailable")
             if not _owned_directory(self.root.lstat()):
@@ -127,34 +308,96 @@ class SecureDirectory:
             for descriptor in reversed(descriptors):
                 os.close(descriptor)
 
-    def _capture_windows_chain(self) -> tuple[tuple[Path, _Identity], ...]:
+    def _capture_windows_chain(
+        self,
+        *,
+        create: bool,
+    ) -> tuple[tuple[Path, _Identity], ...]:
         current = Path(self.root.anchor)
         paths = [current]
         for component in self.root.parts[1:]:
             current = current / component
             paths.append(current)
         captured: list[tuple[Path, _Identity]] = []
-        for path in paths:
-            metadata = path.lstat()
-            if not stat.S_ISDIR(metadata.st_mode) or path.is_symlink():
-                raise SecurePersistenceError("persistence ancestor is unsafe")
-            captured.append((path, _identity(metadata)))
-        return tuple(captured)
+        handles: list[Any] = []
+        try:
+            for index, path in enumerate(paths):
+                try:
+                    handle, file_id = _windows_open_directory(path)
+                except FileNotFoundError:
+                    if not create or index == 0:
+                        raise
+                    path.mkdir(mode=0o700)
+                    handle, file_id = _windows_open_directory(path)
+                handles.append(handle)
+                captured.append((path, file_id))
+            return tuple(captured)
+        except OSError as error:
+            if isinstance(error, SecurePersistenceError):
+                raise
+            raise SecurePersistenceError("persistence ancestor is unsafe") from error
+        finally:
+            for handle in reversed(handles):
+                _windows_close_handle(handle)
 
     def _validate_windows_chain(self) -> None:
         for path, expected in self._chain:
             try:
-                metadata = path.lstat()
+                handle, current = _windows_open_directory(path)
             except OSError as error:
-                raise SecurePersistenceError(
-                    "persistence ancestor identity changed"
-                ) from error
-            if (
-                path.is_symlink()
-                or not stat.S_ISDIR(metadata.st_mode)
-                or _identity(metadata) != expected
-            ):
-                raise SecurePersistenceError("persistence ancestor identity changed")
+                raise SecurePersistenceError("persistence ancestor identity changed") from error
+            try:
+                if current != expected:
+                    raise SecurePersistenceError("persistence ancestor identity changed")
+            finally:
+                _windows_close_handle(handle)
+
+    @contextmanager
+    def _windows_parent(
+        self,
+        relative: str | Path,
+        *,
+        create: bool,
+    ) -> Iterator[tuple[Path, str]]:
+        """Pin every Windows directory component until an operation completes."""
+
+        parts = self._parts(relative)
+        handles: list[Any] = []
+        pinned: list[tuple[Path, _WindowsFileId]] = []
+        try:
+            for path, expected in self._chain:
+                handle, current = _windows_open_directory(path)
+                handles.append(handle)
+                pinned.append((path, current))
+                if current != expected:
+                    raise SecurePersistenceError("persistence ancestor identity changed")
+            parent = self.root
+            for component in parts[:-1]:
+                parent /= component
+                try:
+                    handle, current = _windows_open_directory(parent)
+                except FileNotFoundError:
+                    if not create:
+                        raise
+                    parent.mkdir(mode=0o700)
+                    handle, current = _windows_open_directory(parent)
+                handles.append(handle)
+                pinned.append((parent, current))
+            yield parent, parts[-1]
+            for path, expected in pinned:
+                check_handle, current = _windows_open_directory(path)
+                try:
+                    if current != expected:
+                        raise SecurePersistenceError("persistence directory identity changed")
+                finally:
+                    _windows_close_handle(check_handle)
+        except OSError as error:
+            if isinstance(error, SecurePersistenceError):
+                raise
+            raise SecurePersistenceError("persistence directory is unsafe") from error
+        finally:
+            for handle in reversed(handles):
+                _windows_close_handle(handle)
 
     @contextmanager
     def _root_descriptor(self) -> Iterator[int]:
@@ -175,9 +418,7 @@ class SecureDirectory:
                     )
                 descriptors.append(descriptor)
                 if _identity(os.fstat(descriptor)) != expected:
-                    raise SecurePersistenceError(
-                        "persistence ancestor identity changed"
-                    )
+                    raise SecurePersistenceError("persistence ancestor identity changed")
             yield descriptors[-1]
         except OSError as error:
             if isinstance(error, SecurePersistenceError):
@@ -209,9 +450,7 @@ class SecureDirectory:
                     metadata = os.fstat(descriptor)
                     if not _owned_directory(metadata):
                         os.close(descriptor)
-                        raise SecurePersistenceError(
-                            "persistence child directory is unsafe"
-                        )
+                        raise SecurePersistenceError("persistence child directory is unsafe")
                     descriptors.append(descriptor)
                     current = descriptor
                 yield current, parts[-1]
@@ -220,9 +459,7 @@ class SecureDirectory:
                     os.close(descriptor)
 
     @staticmethod
-    def _stat_entry(
-        parent_descriptor: int, name: str, *, required: bool
-    ) -> os.stat_result | None:
+    def _stat_entry(parent_descriptor: int, name: str, *, required: bool) -> os.stat_result | None:
         try:
             metadata = os.stat(
                 name,
@@ -239,20 +476,45 @@ class SecureDirectory:
             raise SecurePersistenceError("persistence entry identity is unsafe")
         return metadata
 
+    @staticmethod
+    def _windows_stat_entry(
+        parent: Path,
+        name: str,
+        *,
+        required: bool,
+    ) -> tuple[_Fingerprint, _WindowsFileId] | None:
+        """Inspect one Windows child through a no-reparse native handle."""
+
+        try:
+            descriptor, file_id = _windows_open_file_descriptor(
+                parent / name,
+                os.O_RDONLY,
+            )
+        except FileNotFoundError:
+            if required:
+                raise
+            return None
+        try:
+            metadata = os.fstat(descriptor)
+            if not _owned_regular(metadata):
+                raise SecurePersistenceError("persistence entry identity is unsafe")
+            return _fingerprint(metadata), file_id
+        finally:
+            os.close(descriptor)
+
     def exists(self, relative: str | Path) -> bool:
         """Return whether one safe regular entry exists."""
 
         if os.name == "nt":
-            self._validate_windows_chain()
-            path = self.root.joinpath(*self._parts(relative))
-            try:
-                metadata = path.lstat()
-            except FileNotFoundError:
-                return False
-            if path.is_symlink() or not _owned_regular(metadata):
-                raise SecurePersistenceError("persistence entry identity is unsafe")
-            self._validate_windows_chain()
-            return True
+            with self._windows_parent(relative, create=False) as (parent, name):
+                return (
+                    self._windows_stat_entry(
+                        parent,
+                        name,
+                        required=False,
+                    )
+                    is not None
+                )
         with self._parent_descriptor(relative, create=False) as (parent, name):
             return self._stat_entry(parent, name, required=False) is not None
 
@@ -271,9 +533,9 @@ class SecureDirectory:
             )
             try:
                 opened = os.fstat(descriptor)
-                if not _owned_regular(opened) or _read_fingerprint(
-                    opened
-                ) != _read_fingerprint(before):
+                if not _owned_regular(opened) or _read_fingerprint(opened) != _read_fingerprint(
+                    before
+                ):
                     raise SecurePersistenceError("persistence entry changed before read")
                 chunks: list[bytes] = []
                 while True:
@@ -284,45 +546,42 @@ class SecureDirectory:
                 after_open = os.fstat(descriptor)
                 after_name = self._stat_entry(parent, name, required=True)
                 assert after_name is not None
-                if (
-                    _read_fingerprint(after_open) != _read_fingerprint(opened)
-                    or _read_fingerprint(after_name) != _read_fingerprint(opened)
-                ):
+                if _read_fingerprint(after_open) != _read_fingerprint(opened) or _read_fingerprint(
+                    after_name
+                ) != _read_fingerprint(opened):
                     raise SecurePersistenceError("persistence entry changed during read")
                 return b"".join(chunks)
             finally:
                 os.close(descriptor)
 
     def _read_bytes_windows(self, relative: str | Path) -> bytes:
-        self._validate_windows_chain()
-        path = self.root.joinpath(*self._parts(relative))
-        before = path.lstat()
-        if path.is_symlink() or not _owned_regular(before):
-            raise SecurePersistenceError("persistence entry identity is unsafe")
-        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
-        descriptor = os.open(path, flags)
-        try:
-            opened = os.fstat(descriptor)
-            if not _owned_regular(opened) or _read_fingerprint(
-                opened
-            ) != _read_fingerprint(before):
-                raise SecurePersistenceError("persistence entry changed before read")
-            chunks: list[bytes] = []
-            while True:
-                chunk = os.read(descriptor, 1024 * 1024)
-                if not chunk:
-                    break
-                chunks.append(chunk)
-            after = path.lstat()
-            self._validate_windows_chain()
-            if (
-                _read_fingerprint(os.fstat(descriptor)) != _read_fingerprint(opened)
-                or _read_fingerprint(after) != _read_fingerprint(opened)
-            ):
-                raise SecurePersistenceError("persistence entry changed during read")
-            return b"".join(chunks)
-        finally:
-            os.close(descriptor)
+        with self._windows_parent(relative, create=False) as (parent, name):
+            descriptor, opened_id = _windows_open_file_descriptor(
+                parent / name,
+                os.O_RDONLY,
+            )
+            try:
+                opened = os.fstat(descriptor)
+                if not _owned_regular(opened):
+                    raise SecurePersistenceError("persistence entry identity is unsafe")
+                chunks: list[bytes] = []
+                while True:
+                    chunk = os.read(descriptor, 1024 * 1024)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                if (
+                    _read_fingerprint(os.fstat(descriptor)) != _read_fingerprint(opened)
+                    or _windows_descriptor_file_id(descriptor) != opened_id
+                ):
+                    raise SecurePersistenceError("persistence entry changed during read")
+                named = self._windows_stat_entry(parent, name, required=True)
+                assert named is not None
+                if named[1] != opened_id:
+                    raise SecurePersistenceError("persistence entry changed during read")
+                return b"".join(chunks)
+            finally:
+                os.close(descriptor)
 
     @staticmethod
     def _write_all(descriptor: int, data: bytes) -> None:
@@ -391,74 +650,73 @@ class SecureDirectory:
                         pass
 
     def _write_bytes_windows(self, relative: str | Path, data: bytes) -> None:
-        self._validate_windows_chain()
-        parts = self._parts(relative)
-        parent = self.root.joinpath(*parts[:-1])
-        parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self._validate_windows_chain()
-        destination = parent / parts[-1]
-        before: _Fingerprint | None = None
-        try:
-            metadata = destination.lstat()
-            if destination.is_symlink() or not _owned_regular(metadata):
-                raise SecurePersistenceError("persistence entry identity is unsafe")
-            before = _fingerprint(metadata)
-        except FileNotFoundError:
-            pass
-        temporary = parent / f".{destination.name}.{os.getpid()}.{secrets.token_hex(16)}.tmp"
-        try:
-            descriptor = os.open(
-                temporary,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
-                0o600,
-            )
+        with self._windows_parent(relative, create=True) as (parent, name):
+            destination = parent / name
+            before = self._windows_stat_entry(parent, name, required=False)
+            temporary = parent / (f".{name}.{os.getpid()}.{secrets.token_hex(16)}.tmp")
             try:
-                self._write_all(descriptor, data)
-                os.fsync(descriptor)
-                temporary_fingerprint = _fingerprint(os.fstat(descriptor))
+                descriptor, temporary_id = _windows_open_file_descriptor(
+                    temporary,
+                    os.O_WRONLY,
+                    disposition=_CREATE_NEW,
+                )
+                try:
+                    self._write_all(descriptor, data)
+                    os.fsync(descriptor)
+                    temporary_fingerprint = _fingerprint(os.fstat(descriptor))
+                    if _windows_descriptor_file_id(descriptor) != temporary_id:
+                        raise SecurePersistenceError("persistence temporary changed")
+                finally:
+                    os.close(descriptor)
+                temporary_named = self._windows_stat_entry(
+                    parent,
+                    temporary.name,
+                    required=True,
+                )
+                assert temporary_named is not None
+                if (
+                    temporary_named[0] != temporary_fingerprint
+                    or temporary_named[1] != temporary_id
+                ):
+                    raise SecurePersistenceError("persistence temporary changed")
+                current = self._windows_stat_entry(parent, name, required=False)
+                if current != before:
+                    raise SecurePersistenceError(
+                        "persistence destination changed before publication"
+                    )
+                replace_file_durable(temporary, destination)
+                after = self._windows_stat_entry(parent, name, required=True)
+                assert after is not None
+                if after[0] != temporary_fingerprint or after[1] != temporary_id:
+                    raise SecurePersistenceError(
+                        "persistence destination changed during publication"
+                    )
             finally:
-                os.close(descriptor)
-            current: _Fingerprint | None = None
-            try:
-                current_metadata = destination.lstat()
-                if destination.is_symlink() or not _owned_regular(current_metadata):
-                    raise SecurePersistenceError("persistence entry identity is unsafe")
-                current = _fingerprint(current_metadata)
-            except FileNotFoundError:
-                pass
-            if current != before:
-                raise SecurePersistenceError(
-                    "persistence destination changed before publication"
-                )
-            replace_file_durable(temporary, destination)
-            after = destination.lstat()
-            self._validate_windows_chain()
-            if _fingerprint(after) != temporary_fingerprint:
-                raise SecurePersistenceError(
-                    "persistence destination changed during publication"
-                )
-        finally:
-            try:
-                temporary.unlink()
-            except FileNotFoundError:
-                pass
+                try:
+                    temporary.unlink()
+                except FileNotFoundError:
+                    pass
 
     def unlink(self, relative: str | Path, *, missing_ok: bool = False) -> None:
         """Remove one safe entry and durably flush the containing directory."""
 
         if os.name == "nt":
-            self._validate_windows_chain()
-            path = self.root.joinpath(*self._parts(relative))
-            try:
-                before = path.lstat()
-            except FileNotFoundError:
-                if missing_ok:
+            with self._windows_parent(relative, create=False) as (parent, name):
+                windows_before = self._windows_stat_entry(
+                    parent,
+                    name,
+                    required=not missing_ok,
+                )
+                if windows_before is None:
                     return
-                raise
-            if path.is_symlink() or not _owned_regular(before):
-                raise SecurePersistenceError("persistence entry identity is unsafe")
-            path.unlink()
-            self._validate_windows_chain()
+                windows_current = self._windows_stat_entry(
+                    parent,
+                    name,
+                    required=True,
+                )
+                if windows_current != windows_before:
+                    raise SecurePersistenceError("persistence entry changed before unlink")
+                (parent / name).unlink()
             return
         try:
             with self._parent_descriptor(relative, create=False) as (parent, name):
@@ -479,15 +737,36 @@ class SecureDirectory:
         """Open or create one owned single-link lock file below the pinned tree."""
 
         if os.name == "nt":
-            self._validate_windows_chain()
-            path = self.root.joinpath(*self._parts(relative))
-            descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
-            try:
-                self.validate_open_file(relative, descriptor)
-                return descriptor
-            except Exception:
-                os.close(descriptor)
-                raise
+            with self._windows_parent(relative, create=True) as (parent, name):
+                windows_before = self._windows_stat_entry(
+                    parent,
+                    name,
+                    required=False,
+                )
+                descriptor, opened_id = _windows_open_file_descriptor(
+                    parent / name,
+                    os.O_RDWR,
+                    disposition=_OPEN_ALWAYS,
+                )
+                try:
+                    opened = os.fstat(descriptor)
+                    windows_after = self._windows_stat_entry(
+                        parent,
+                        name,
+                        required=True,
+                    )
+                    assert windows_after is not None
+                    if (
+                        not _owned_regular(opened)
+                        or windows_after[1] != opened_id
+                        or windows_before is not None
+                        and windows_before[1] != opened_id
+                    ):
+                        raise SecurePersistenceError("persistence lock identity is unsafe")
+                    return descriptor
+                except Exception:
+                    os.close(descriptor)
+                    raise
         with self._parent_descriptor(relative, create=True) as (parent, name):
             before = self._stat_entry(parent, name, required=False)
             flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
@@ -496,9 +775,7 @@ class SecureDirectory:
             try:
                 descriptor = os.open(name, flags, 0o600, dir_fd=parent)
             except FileExistsError as error:
-                raise SecurePersistenceError(
-                    "persistence lock changed before open"
-                ) from error
+                raise SecurePersistenceError("persistence lock changed before open") from error
             try:
                 opened = os.fstat(descriptor)
                 after = self._stat_entry(parent, name, required=True)
@@ -523,12 +800,13 @@ class SecureDirectory:
         if not _owned_regular(opened):
             raise SecurePersistenceError("persistence open file identity is unsafe")
         if os.name == "nt":
-            self._validate_windows_chain()
-            path = self.root.joinpath(*self._parts(relative))
-            named = path.lstat()
-            if path.is_symlink() or _fingerprint(named) != _fingerprint(opened):
-                raise SecurePersistenceError("persistence open file identity changed")
-            self._validate_windows_chain()
+            with self._windows_parent(relative, create=False) as (parent, name):
+                named = self._windows_stat_entry(parent, name, required=True)
+                assert named is not None
+                if named[0] != _fingerprint(opened) or named[1] != _windows_descriptor_file_id(
+                    descriptor
+                ):
+                    raise SecurePersistenceError("persistence open file identity changed")
             return
         with self._parent_descriptor(relative, create=False) as (parent, name):
             posix_named = self._stat_entry(parent, name, required=True)
