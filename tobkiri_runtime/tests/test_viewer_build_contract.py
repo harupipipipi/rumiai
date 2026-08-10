@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,12 @@ SHELL_RUNTIME = TAURI_ROOT / "src" / "shell_runtime.rs"
 LAUNCHER_RUNTIME = TAURI_ROOT / "src" / "lib.rs"
 RESOURCE_PREPARER = ROOT / ".github" / "scripts" / "prepare_tauri_resources.py"
 PACK_SHELL_SEALER = ROOT / ".github" / "scripts" / "seal_pack_shell.py"
+UPDATER = TAURI_ROOT / "src" / "updater.rs"
+RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+BUILD_AND_SIGN = ROOT / "scripts" / "build-and-sign.sh"
+MACOS_CONFIG = TAURI_ROOT / "tauri.macos.conf.json"
+MACOS_DEV_CONFIG = TAURI_ROOT / "tauri.macos.dev.conf.json"
+MACOS_RELEASE_VERIFIER = ROOT / "tobkiri_launcher" / "scripts" / "verify_macos_release.sh"
 MACOS_DMG_PACKAGER = ROOT / "tobkiri_launcher" / "scripts" / "package_macos_dmg.sh"
 TEST_WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
 DEV_REQUIREMENTS = ROOT / "tobkiri_runtime" / "requirements-dev.txt"
@@ -128,7 +135,7 @@ def test_macos_installer_uses_finder_free_verified_dmg_packager():
         ROOT / ".github" / "workflows" / "desktop-installers.yml"
     ).read_text(encoding="utf-8")
     desktop_macos = desktop_workflow[
-        desktop_workflow.index("Build signed macOS application") : desktop_workflow.index(
+        desktop_workflow.index("Build local macOS application (ad-hoc)") : desktop_workflow.index(
             "Build desktop installer\n        if: runner.os == 'Windows'"
         )
     ]
@@ -169,6 +176,12 @@ def test_debug_pack_shell_is_built_and_sealed_before_launcher_rust_checks():
             "Seal debug Pack Shell for viewer Rust checks",
             "Run rumi viewer tests",
         ),
+        (
+            RELEASE_WORKFLOW,
+            "Build debug Pack Shell for release Rust tests",
+            "Seal debug Pack Shell for release Rust tests",
+            "Run Rust release smoke tests",
+        ),
     )
     for workflow, build_name, seal_name, test_name in expectations:
         contents = workflow.read_text(encoding="utf-8")
@@ -180,6 +193,113 @@ def test_debug_pack_shell_is_built_and_sealed_before_launcher_rust_checks():
         assert "cargo build --locked --manifest-path pack-shell/Cargo.toml" in relevant
         assert "python .github/scripts/seal_pack_shell.py" in relevant
         assert "--profile debug" in relevant
+
+
+def test_release_pack_shell_rebuilds_from_empty_or_cached_targets_and_seals_both_profiles():
+    contents = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    clean_at = contents.index("Clean cached Pack Shell outputs before verified build")
+    debug_build_at = contents.index("Build debug Pack Shell for release Rust tests")
+    debug_seal_at = contents.index("Seal debug Pack Shell for release Rust tests")
+    rust_test_at = contents.index("Run Rust release smoke tests")
+    release_build_at = contents.index("Build release Pack Shell for verified Tauri Shell artifact")
+    release_seal_at = contents.index("Seal release Pack Shell for verified Tauri Shell artifact")
+    shell_build_at = contents.index("Build verified Tauri Shell artifact")
+
+    assert clean_at < debug_build_at < debug_seal_at < rust_test_at
+    assert rust_test_at < release_build_at < release_seal_at < shell_build_at
+    assert "cargo clean --manifest-path pack-shell/Cargo.toml --target" in contents
+    assert "cargo build --locked --manifest-path pack-shell/Cargo.toml" in contents
+    assert "cargo build --release --locked --manifest-path pack-shell/Cargo.toml" in contents
+    assert "--profile debug" in contents
+    assert "--profile release" in contents
+    assert "cache-hit" not in contents
+
+    sealer = PACK_SHELL_SEALER.read_text(encoding="utf-8")
+    preparer = RESOURCE_PREPARER.read_text(encoding="utf-8")
+    assert "seal_pack_shell_binary" in sealer
+    assert "pack_shell_digest_path" in preparer
+    assert "hashlib.sha256(payload)" in preparer
+    assert "sha256" in preparer
+
+
+def test_updater_origin_matches_the_release_workflow_and_rejects_legacy_repository():
+    updater = UPDATER.read_text(encoding="utf-8")
+    workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    repository = re.search(
+        r"TOBKIRI_RELEASE_REPOSITORY:\s*([^\s]+)", workflow
+    )
+    assert repository is not None
+    assert repository.group(1) == "harupipipipi/tobkiri"
+    assert 'RELEASE_REPOSITORY: &str = "harupipipipi/tobkiri"' in updater
+    assert "https://api.github.com/repos/harupipipipi/tobkiri/releases/latest" in updater
+    runtime_source = updater.split("#[cfg(test)]", 1)[0]
+    assert "rumiai" not in runtime_source.lower()
+    assert "repository=\"$(printf '%s' \"$GITHUB_REPOSITORY\" | tr '[:upper:]' '[:lower:]')\"" in workflow
+    assert "expected=\"$(printf '%s' \"$TOBKIRI_RELEASE_REPOSITORY\" | tr '[:upper:]' '[:lower:]')\"" in workflow
+
+
+def test_build_and_sign_rebuilds_canonical_defaultspack_before_staging():
+    helper = BUILD_AND_SIGN.read_text(encoding="utf-8")
+    build_at = helper.index("npm run build")
+    check_at = helper.index("npm run check:shell-bundle")
+    stage_at = helper.index("prepare_viewer_runtime.py")
+    assert build_at < check_at < stage_at
+    assert "DEFAULTSPACK_WEBAPP_ROOT" in helper
+
+
+def test_release_platform_signing_is_fail_closed_and_ad_hoc_is_dev_only():
+    workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    verifier = MACOS_RELEASE_VERIFIER.read_text(encoding="utf-8")
+    mac_config = _read_json(MACOS_CONFIG)
+    dev_config = _read_json(MACOS_DEV_CONFIG)
+
+    for required in (
+        "APPLE_CERTIFICATE_BASE64",
+        "APPLE_CERTIFICATE_PASSWORD",
+        "APPLE_SIGNING_IDENTITY",
+        "APPLE_ID",
+        "APPLE_APP_SPECIFIC_PASSWORD",
+        "APPLE_TEAM_ID",
+        "WINDOWS_CERTIFICATE_BASE64",
+        "WINDOWS_CERTIFICATE_PASSWORD",
+        "signtool.exe",
+        "signtool.FullName sign",
+        "signtool.FullName verify",
+        "xcrun notarytool store-credentials",
+        "xcrun notarytool submit",
+        "xcrun stapler staple",
+        "xcrun stapler validate",
+    ):
+        assert required in workflow
+
+    for required in (
+        "Developer ID Application: ",
+        "codesign --verify --deep --strict",
+        "codesign --display --verbose=4",
+        "Authority=-",
+    ):
+        assert required in verifier
+
+    assert "spctl --assess --type open" in workflow
+
+    assert mac_config["bundle"]["targets"] == ["dmg"]
+    assert "signingIdentity" not in mac_config["bundle"].get("macOS", {})
+    assert dev_config["bundle"]["macOS"]["signingIdentity"] == "-"
+    assert "tauri.macos.dev.conf.json" not in workflow
+    desktop_workflow = (
+        ROOT / ".github" / "workflows" / "desktop-installers.yml"
+    ).read_text(encoding="utf-8")
+    assert "--config src-tauri/tauri.macos.dev.conf.json" in desktop_workflow
+    assert "--allow-ad-hoc-local" in desktop_workflow
+    assert "--allow-ad-hoc-local" not in workflow
+
+    verify_at = workflow.index("Verify Developer ID signed macOS application")
+    dmg_at = workflow.index("Build macOS DMG installer")
+    notarize_at = workflow.index("Notarize and staple macOS release DMG")
+    windows_sign_at = workflow.index("Sign and verify Windows installer")
+    upload_at = workflow.index("Upload release artifacts")
+    assert verify_at < dmg_at < notarize_at < upload_at
+    assert windows_sign_at < upload_at
 
 
 def test_pack_shell_profile_is_a_single_safe_path_component():

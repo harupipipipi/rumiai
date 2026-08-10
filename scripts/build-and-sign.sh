@@ -3,6 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LAUNCHER_ROOT="$REPO_ROOT/tobkiri_launcher"
+DEFAULTSPACK_WEBAPP_ROOT="$REPO_ROOT/tobkiri_runtime/ecosystem/defaultspack/webapp"
 
 target=""
 has_target=0
@@ -126,6 +127,13 @@ umask 077
 python3 -c 'import secrets,sys; open(sys.argv[1], "wb").write(secrets.token_bytes(32))' "$signing_key"
 
 echo "=== Preparing verified runtime tools ($target) ==="
+echo "=== Building canonical Defaultspack webapp ($target) ==="
+(
+  cd "$DEFAULTSPACK_WEBAPP_ROOT"
+  npm run build
+  npm run check:shell-bundle
+)
+
 python3 "$LAUNCHER_ROOT/scripts/prepare_viewer_runtime.py" \
   --mode release \
   --repo-root "$REPO_ROOT" \

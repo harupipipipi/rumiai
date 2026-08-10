@@ -9,6 +9,26 @@ local/macOS entrypoint performs the Shell build and sealing automatically:
 ../scripts/build-and-sign.sh --bundles app
 ```
 
+The helper builds the canonical Defaultspack frontend from
+`tobkiri_runtime/ecosystem/defaultspack/webapp` and runs its strict
+`check:shell-bundle` source/bundle drift check before staging or sealing
+resources. It therefore requires the webapp's locked Node dependencies to be
+installed (`npm ci` in that directory) before invocation.
+
+Ad-hoc macOS signing is available only for explicit local development:
+
+```bash
+cargo tauri dev --config src-tauri/tauri.macos.dev.conf.json
+```
+
+Live release CI requires these repository secrets: macOS
+`APPLE_CERTIFICATE_BASE64`, `APPLE_CERTIFICATE_PASSWORD`,
+`APPLE_SIGNING_IDENTITY` (a Developer ID Application identity), `APPLE_ID`,
+`APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`; Windows requires
+`WINDOWS_CERTIFICATE_BASE64` and `WINDOWS_CERTIFICATE_PASSWORD`. Missing or
+invalid signing, notarization, or verification inputs stop the release before
+artifact upload.
+
 The lower-level release steps are:
 
 1. Build the Shell with `src-tauri/tauri.shell.conf.json`.

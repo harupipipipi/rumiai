@@ -11,13 +11,16 @@ set -Eeuo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-Usage: package_macos_dmg.sh --app-bundle PATH --target TARGET --output-dir PATH
+Usage: package_macos_dmg.sh --app-bundle PATH --target TARGET --output-dir PATH \
+  [--signing-identity "Developer ID Application: ..." | --allow-ad-hoc-local]
 EOF
 }
 
 app_bundle=''
 target=''
 output_dir=''
+signing_identity=''
+allow_ad_hoc_local=0
 
 while (($# > 0)); do
   case "$1" in
@@ -35,6 +38,17 @@ while (($# > 0)); do
       (($# >= 2)) || { usage; exit 2; }
       output_dir=$2
       shift 2
+      ;;
+    --signing-identity)
+      (($# >= 2)) || { usage; exit 2; }
+      ((allow_ad_hoc_local == 0)) || { usage; exit 2; }
+      signing_identity=$2
+      shift 2
+      ;;
+    --allow-ad-hoc-local)
+      [[ -z "$signing_identity" ]] || { usage; exit 2; }
+      allow_ad_hoc_local=1
+      shift
       ;;
     -h|--help)
       usage >&1
@@ -78,6 +92,14 @@ command -v codesign >/dev/null 2>&1 || {
   printf 'codesign is required to verify the signed app bundle\n' >&2
   exit 1
 }
+if [[ -n "$signing_identity" && "$signing_identity" != "Developer ID Application: "* ]]; then
+  printf 'release macOS signing identity must be Developer ID Application, not ad-hoc\n' >&2
+  exit 1
+fi
+if [[ -z "$signing_identity" && "$allow_ad_hoc_local" -ne 1 ]]; then
+  printf 'a Developer ID signing identity is required; use --allow-ad-hoc-local only for local/dev builds\n' >&2
+  exit 1
+fi
 command -v ditto >/dev/null 2>&1 || {
   printf 'ditto is required to stage the app bundle\n' >&2
   exit 1
@@ -119,6 +141,13 @@ trap cleanup EXIT
 
 printf 'Verifying signed app bundle: %s\n' "$app_bundle"
 codesign --verify --deep --strict --verbose=2 "$app_bundle"
+if [[ -n "$signing_identity" ]]; then
+  signing_details="$(codesign --display --verbose=4 "$app_bundle" 2>&1)"
+  if ! grep -Fqx "Authority=$signing_identity" <<<"$signing_details"; then
+    printf 'macOS app is not signed by the requested Developer ID identity\n' >&2
+    exit 1
+  fi
+fi
 
 printf 'Staging signed app bundle for DMG: %s\n' "$app_name"
 ditto "$app_bundle" "$staging_dir/$app_name"

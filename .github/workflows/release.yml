@@ -12,6 +12,9 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  TOBKIRI_RELEASE_REPOSITORY: harupipipipi/tobkiri
+
 jobs:
   build:
     strategy:
@@ -48,6 +51,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Verify release repository binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          repository="$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          expected="$(printf '%s' "$TOBKIRI_RELEASE_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          test "$repository" = "$expected"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -103,6 +114,44 @@ jobs:
             pack-shell -> target
             tobkiri_launcher/src-tauri -> target
 
+      - name: Clean cached Pack Shell outputs before verified build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo clean --manifest-path pack-shell/Cargo.toml --target "${{ matrix.target }}"
+
+      - name: Require macOS release signing and notarization configuration
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          for variable in \
+            APPLE_CERTIFICATE \
+            APPLE_CERTIFICATE_PASSWORD \
+            APPLE_SIGNING_IDENTITY \
+            APPLE_ID \
+            APPLE_PASSWORD \
+            APPLE_TEAM_ID; do
+            if [[ -z "${!variable:-}" ]]; then
+              echo "Required macOS release setting is missing: ${variable}" >&2
+              exit 1
+            fi
+          done
+          case "$APPLE_SIGNING_IDENTITY" in
+            "Developer ID Application: "*) ;;
+            *)
+              echo "APPLE_SIGNING_IDENTITY must name a Developer ID Application identity" >&2
+              exit 1
+              ;;
+          esac
+
       - name: Install Tauri CLI
         shell: bash
         run: |
@@ -141,12 +190,40 @@ jobs:
         working-directory: tobkiri_runtime/ecosystem/defaultspack/webapp
         run: npm run build
 
+      - name: Verify defaultspack frontend source and bundle sync
+        working-directory: tobkiri_runtime/ecosystem/defaultspack/webapp
+        run: npm run check:shell-bundle
+
+      - name: Build debug Pack Shell for release Rust tests
+        run: cargo build --locked --manifest-path pack-shell/Cargo.toml --target "${{ matrix.target }}"
+
+      - name: Seal debug Pack Shell for release Rust tests
+        run: >-
+          python .github/scripts/seal_pack_shell.py
+          --repo-root .
+          --target ${{ matrix.target }}
+          --profile debug
+
       - name: Run Rust release smoke tests
         working-directory: tobkiri_launcher/src-tauri
         run: cargo test --locked
 
+      - name: Build release Pack Shell for verified Tauri Shell artifact
+        run: cargo build --release --locked --manifest-path pack-shell/Cargo.toml --target "${{ matrix.target }}"
+
+      - name: Seal release Pack Shell for verified Tauri Shell artifact
+        run: >-
+          python .github/scripts/seal_pack_shell.py
+          --repo-root .
+          --target ${{ matrix.target }}
+          --profile release
+
       - name: Build verified Tauri Shell artifact
         working-directory: tobkiri_launcher
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.shell.conf.json --bundles ${{ matrix.shell_bundles }} --ci
 
       - name: Stage verified macOS Tauri Shell artifact
@@ -220,7 +297,23 @@ jobs:
         working-directory: tobkiri_launcher
         env:
           TOBKIRI_PRESENTATION_RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: cargo tauri build --target ${{ matrix.target }} --bundles app --ci
+
+      - name: Verify Developer ID signed macOS application
+        if: runner.os == 'macOS'
+        working-directory: tobkiri_launcher
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          bash scripts/verify_macos_release.sh \
+            --app-bundle "src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app" \
+            --signing-identity "$APPLE_SIGNING_IDENTITY"
 
       - name: Build macOS DMG installer
         if: runner.os == 'macOS'
@@ -228,13 +321,47 @@ jobs:
         shell: bash
         env:
           TOBKIRI_PRESENTATION_RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           set -o pipefail
           bash scripts/package_macos_dmg.sh \
             --app-bundle "src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app" \
             --target '${{ matrix.target }}' \
+            --signing-identity "$APPLE_SIGNING_IDENTITY" \
             --output-dir "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" \
             2>&1 | tee "$RUNNER_TEMP/tobkiri-macos-dmg-${{ matrix.target }}.log"
+
+      - name: Notarize and staple macOS release DMG
+        if: runner.os == 'macOS'
+        working-directory: tobkiri_launcher
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          NOTARY_PROFILE_NAME: tobkiri-release
+          NOTARY_KEYCHAIN: ${{ runner.temp }}/tobkiri-notary.keychain-db
+        run: |
+          set -euo pipefail
+          dmg="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -n "$dmg"
+          test -s "$dmg"
+          rm -f "$NOTARY_KEYCHAIN"
+          xcrun notarytool store-credentials "$NOTARY_PROFILE_NAME" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --keychain "$NOTARY_KEYCHAIN"
+          xcrun notarytool history \
+            --keychain-profile "$NOTARY_PROFILE_NAME" \
+            --keychain "$NOTARY_KEYCHAIN" >/dev/null
+          xcrun notarytool submit "$dmg" \
+            --keychain-profile "$NOTARY_PROFILE_NAME" \
+            --keychain "$NOTARY_KEYCHAIN" \
+            --wait
+          xcrun stapler staple -v "$dmg"
+          xcrun stapler validate -v "$dmg"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg"
 
       - name: Build with cargo tauri
         if: runner.os != 'macOS'
@@ -242,6 +369,52 @@ jobs:
         env:
           TOBKIRI_PRESENTATION_RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
         run: cargo tauri build --target ${{ matrix.target }} --ci
+
+      - name: Sign and verify Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: tobkiri_launcher
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: https://timestamp.digicert.com
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) {
+            throw 'WINDOWS_CERTIFICATE_BASE64 is required for release installers'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            throw 'WINDOWS_CERTIFICATE_PASSWORD is required for release installers'
+          }
+
+          $signtool = Get-ChildItem -Path @(
+            "$env:ProgramFiles\Windows Kits\10\bin\*\x64\signtool.exe",
+            "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe"
+          ) -File -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if ($null -eq $signtool) { throw 'signtool.exe is required for release installers' }
+
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'tobkiri-release-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes(
+              $certificatePath,
+              [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64)
+            )
+            $securePassword = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+            Get-PfxData -FilePath $certificatePath -Password $securePassword | Out-Null
+
+            $installers = @(Get-ChildItem -LiteralPath "src-tauri/target/${{ matrix.target }}/release/bundle/nsis" -Filter '*.exe' -File)
+            if ($installers.Count -eq 0) { throw 'No Windows NSIS installer was produced' }
+            foreach ($installer in $installers) {
+              & $signtool.FullName sign /fd SHA256 /f $certificatePath /p $env:WINDOWS_CERTIFICATE_PASSWORD /tr $env:WINDOWS_TIMESTAMP_URL /td SHA256 /d 'Tobkiri Launcher' $installer.FullName
+              if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for $($installer.Name)" }
+              & $signtool.FullName verify /pa /all /tw /v $installer.FullName
+              if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for $($installer.Name)" }
+            }
+          } finally {
+            Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Capture macOS installer diagnostics
         if: failure() && runner.os == 'macOS'
@@ -279,6 +452,7 @@ jobs:
 
       - name: Upload release artifacts
         uses: softprops/action-gh-release@v2
+        if: success()
         with:
           files: |
             tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg

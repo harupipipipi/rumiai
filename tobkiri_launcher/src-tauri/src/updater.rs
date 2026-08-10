@@ -26,8 +26,12 @@ struct GitHubRelease {
     html_url: String,
 }
 
+/// The only repository from which Launcher release updates may be read.
+pub const RELEASE_REPOSITORY: &str = "harupipipipi/tobkiri";
+
 /// The GitHub API endpoint for the latest release.
-const RELEASES_API: &str = "https://api.github.com/repos/harupipipipi/rumiai/releases/latest";
+const RELEASES_API: &str =
+    "https://api.github.com/repos/harupipipipi/tobkiri/releases/latest";
 
 /// HTTP request timeout in seconds.
 const TIMEOUT_SECS: u64 = 10;
@@ -135,5 +139,15 @@ mod tests {
         let current = parse_version("1.0.0").unwrap();
         let latest = parse_version("1.0.0").unwrap();
         assert!(latest <= current);
+    }
+
+    #[test]
+    fn release_origin_is_bound_to_the_tobkiri_repository() {
+        assert_eq!(RELEASE_REPOSITORY, "harupipipipi/tobkiri");
+        assert_eq!(
+            RELEASES_API,
+            "https://api.github.com/repos/harupipipipi/tobkiri/releases/latest"
+        );
+        assert!(!RELEASES_API.contains("rumiai"));
     }
 }

@@ -280,12 +280,12 @@ jobs:
             --repository-root $env:GITHUB_WORKSPACE `
             --output-dir $env:RELEASE_ROOT
 
-      - name: Build signed macOS application
+      - name: Build local macOS application (ad-hoc)
         if: runner.os == 'macOS'
         working-directory: tobkiri_launcher
         env:
           TOBKIRI_PRESENTATION_RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
-        run: cargo tauri build --target ${{ matrix.target }} --bundles app --ci ${{ matrix.signing_args }}
+        run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.macos.dev.conf.json --bundles app --ci ${{ matrix.signing_args }}
 
       - name: Build macOS DMG installer
         if: runner.os == 'macOS'
@@ -298,6 +298,7 @@ jobs:
           bash scripts/package_macos_dmg.sh \
             --app-bundle "src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app" \
             --target '${{ matrix.target }}' \
+            --allow-ad-hoc-local \
             --output-dir "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" \
             2>&1 | tee "$RUNNER_TEMP/tobkiri-macos-dmg-${{ matrix.target }}.log"
 
