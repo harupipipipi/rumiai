@@ -6,9 +6,15 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
+import shutil
 import sys
+import tempfile
 from typing import Any
+
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -23,6 +29,7 @@ from tobkiri_protocol.provenance import (  # noqa: E402
     normative_generated_provenance,
 )
 from tobkiri_protocol.validation import validate_document  # noqa: E402
+from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog  # noqa: E402
 
 
 BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
@@ -217,9 +224,7 @@ def _tauri_role_pack(spec: dict[str, str], source_commit: str) -> dict[str, Any]
                 "platform": "all",
             }
         ]
-        artifact_digest = canonical_digest(
-            {"pack_id": pack_id, "availability": "build_required"}
-        )
+        artifact_digest = canonical_digest({"pack_id": pack_id, "availability": "build_required"})
     else:
         implementation_digest = canonical_digest(
             {"pack_id": pack_id, "contract": contract_digest, "operation": operation_id}
@@ -275,9 +280,7 @@ def _tauri_role_pack(spec: dict[str, str], source_commit: str) -> dict[str, Any]
             "sunset_at": "2026-08-05",
         },
     }
-    document["provenance"] = _generated_provenance(
-        document, source_path, source_commit
-    )
+    document["provenance"] = _generated_provenance(document, source_path, source_commit)
     normalized = _normalize_pack(document)
     if pack_id.startswith("dev.tauri."):
         normalized["requirements"].update(
@@ -298,15 +301,11 @@ def _tauri_role_pack(spec: dict[str, str], source_commit: str) -> dict[str, Any]
     return normalized
 
 
-def _unavailable_shell_pack(
-    document: dict[str, Any], source_commit: str
-) -> dict[str, Any]:
+def _unavailable_shell_pack(document: dict[str, Any], source_commit: str) -> dict[str, Any]:
     """Remove fabricated launch bytes from a source-only Shell Pack."""
 
     pack_id = str(document["pack"]["id"])
-    unavailable_digest = canonical_digest(
-        {"pack_id": pack_id, "availability": "build_required"}
-    )
+    unavailable_digest = canonical_digest({"pack_id": pack_id, "availability": "build_required"})
     document["pack"]["artifact_digest"] = unavailable_digest
     document["artifacts"] = []
     for function in document["functions"]:
@@ -318,15 +317,11 @@ def _unavailable_shell_pack(
             }
         )
     source_path = f"ecosystem/defaultspack/v4/packs/{pack_id}.pack.v4.json"
-    document["provenance"] = _generated_provenance(
-        document, source_path, source_commit
-    )
+    document["provenance"] = _generated_provenance(document, source_path, source_commit)
     return _normalize_pack(document)
 
 
-def _declarative_base_pack(
-    document: dict[str, Any], source_commit: str
-) -> dict[str, Any]:
+def _declarative_base_pack(document: dict[str, Any], source_commit: str) -> dict[str, Any]:
     pack_id = str(document["pack"]["id"])
     document["pack"]["artifact_digest"] = canonical_digest(
         {"pack_id": pack_id, "declarative_definition": True}
@@ -384,9 +379,7 @@ def _normalize_shell(document: dict[str, Any]) -> dict[str, Any]:
         kind = presentation["kind"]
         technology = presentation["technology"]
         capabilities = list(presentation["capabilities"])
-        contribution_contracts = list(
-            presentation["consumes_contribution_contracts"]
-        )
+        contribution_contracts = list(presentation["consumes_contribution_contracts"])
     else:
         family = "terminal"
         kind = "terminal_stdio"
@@ -545,18 +538,14 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
             template = edge["requested_scope_template"]
             if template and "dimensions" not in template:
                 template = {
-                    "dimensions": {
-                        str(key): [str(value)] for key, value in template.items()
-                    }
+                    "dimensions": {str(key): [str(value)] for key, value in template.items()}
                 }
             elif template:
                 template = {
-                    key: value
-                    for key, value in template.items()
-                    if key != "semantics_digest"
+                    key: value for key, value in template.items() if key != "semantics_digest"
                 }
-            contract_digest = next(
-                contract["revision_digest"]
+            contract_digests = [
+                str(contract["revision_digest"])
                 for raw in rendered.values()
                 for pack in [json.loads(raw)]
                 if isinstance(pack, dict)
@@ -565,12 +554,18 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
                 for contract in pack.get("contracts", [])
                 if contract.get("contract_id") == edge["contract_id"]
                 and edge["operation_id"] in contract.get("operations", [])
-            )
+            ]
+            if len(contract_digests) != 1:
+                raise ValueError(
+                    "Profile edge must resolve to exactly one canonical Provider: "
+                    f"{edge['caller_function_id']} -> {edge['target_provider_id']} / "
+                    f"{edge['contract_id']} / {edge['operation_id']}"
+                )
             edge["requested_scope_template"] = normalize_requested_scope_template(
                 template,
                 contract_id=edge["contract_id"],
                 operation_id=edge["operation_id"],
-                semantics_digest=contract_digest,
+                semantics_digest=contract_digests[0],
             )
         rendered[profile_path] = _pretty(validate_document(profile, "profile"))
     rendered[base_path] = _pretty(base)
@@ -603,6 +598,174 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
     return rendered
 
 
+def _validate_catalog(catalog: BundledCatalog) -> None:
+    """Reject incompatible or ambiguous generated composition inputs."""
+
+    for pack_id, manifest in catalog.packs.items():
+        for dependency_id, version_range in manifest["requirements"]["pack_dependencies"].items():
+            dependency = catalog.packs.get(dependency_id)
+            if dependency is None:
+                raise ValueError(f"Pack dependency is missing: {pack_id} -> {dependency_id}")
+            try:
+                compatible = Version(dependency["pack"]["version"]) in SpecifierSet(
+                    version_range.replace(" ", ",")
+                )
+            except (InvalidSpecifier, InvalidVersion) as error:
+                raise ValueError(
+                    f"Pack dependency constraint is invalid: {pack_id} -> {dependency_id}"
+                ) from error
+            if not compatible:
+                raise ValueError(f"Pack dependency is incompatible: {pack_id} -> {dependency_id}")
+
+    for profile_id, profile in catalog.profiles.items():
+        base_id = str(profile["base"]["pack_id"])
+        base = catalog.bases.get(base_id)
+        base_manifest = catalog.packs.get(base_id)
+        if base is None or base_manifest is None or base_manifest["pack"]["kind"] != "base":
+            raise ValueError(f"Profile Base is missing or invalid: {profile_id} -> {base_id}")
+        if base["artifact_digest"] != base_manifest["pack"]["artifact_digest"]:
+            raise ValueError(f"Profile Base artifact is stale: {profile_id} -> {base_id}")
+        for dependency in base["dependencies"]:
+            dependency_manifest = catalog.packs.get(str(dependency["pack_id"]))
+            if (
+                dependency_manifest is None
+                or dependency["artifact_digest"] != (dependency_manifest["pack"]["artifact_digest"])
+            ):
+                raise ValueError(
+                    f"Profile Base dependency is stale: {profile_id} -> {dependency['pack_id']}"
+                )
+
+        shell_request = profile.get("shell")
+        if not isinstance(shell_request, dict):
+            raise ValueError(f"Defaults Profile requires an exact Shell: {profile_id}")
+        provider_id = str(shell_request["provider_id"])
+        shell = catalog.shells.get(provider_id)
+        if (
+            shell is None
+            or shell_request["pack_id"] != shell["pack_id"]
+            or shell_request["contract_id"] != shell["contract_id"]
+        ):
+            raise ValueError(f"Profile Shell binding is stale: {profile_id} -> {provider_id}")
+        shell_manifest = catalog.packs.get(str(shell["pack_id"]))
+        if shell_manifest is None or shell_manifest["pack"]["kind"] != "shell":
+            raise ValueError(f"Profile Shell Pack is invalid: {profile_id} -> {provider_id}")
+        targets = [
+            target
+            for target in shell["launch"]["build_targets"]
+            if target["platform"] == shell_request["platform"]
+            and target["architecture"] == shell_request["architecture"]
+        ]
+        if len(targets) != 1:
+            raise ValueError(f"Profile Shell target is unavailable: {profile_id}")
+        requirements = base["shell_requirements"]
+        if (
+            profile["mode"] != requirements["mode"]
+            or shell["presentation"]["family"] not in requirements["presentation_families"]
+            or not set(requirements["required_capabilities"]).issubset(
+                set(shell["presentation"]["capabilities"])
+            )
+        ):
+            raise ValueError(f"Profile Shell is incompatible with Base: {profile_id}")
+
+        pack_rows = list(profile["packs"])
+        pack_ids = [str(row["pack_id"]) for row in pack_rows]
+        if len(pack_ids) != len(set(pack_ids)):
+            raise ValueError(f"Profile contains duplicate Packs: {profile_id}")
+        applications = [row for row in pack_rows if row.get("role") == "application"]
+        if len(applications) != 1:
+            raise ValueError(f"Profile Application binding is ambiguous: {profile_id}")
+        for row in pack_rows:
+            row_manifest = catalog.packs.get(str(row["pack_id"]))
+            if row_manifest is None:
+                raise ValueError(f"Profile Pack is missing: {profile_id} -> {row['pack_id']}")
+            if row["artifact_digest"] not in {
+                None,
+                row_manifest["pack"]["artifact_digest"],
+            }:
+                raise ValueError(
+                    f"Profile Pack artifact is stale: {profile_id} -> {row['pack_id']}"
+                )
+        application_id = str(applications[0]["pack_id"])
+        if catalog.packs[application_id]["pack"]["kind"] != "application":
+            raise ValueError(f"Profile Application Pack is invalid: {profile_id}")
+        if any(pack_id.startswith("dev.tauri.") for pack_id in pack_ids):
+            raise ValueError("Development Realm Tauri toolchain cannot enter production Profile")
+
+        edge_keys = [
+            (
+                str(edge["caller_function_id"]),
+                str(edge["target_provider_id"]),
+                str(edge["contract_id"]),
+                str(edge["operation_id"]),
+            )
+            for edge in profile["requested_edges"]
+        ]
+        if len(edge_keys) != len(set(edge_keys)):
+            raise ValueError(f"Profile contains duplicate requested edges: {profile_id}")
+
+
+def _publish(
+    rendered: dict[Path, bytes],
+    *,
+    fault: Any | None = None,
+) -> None:
+    """Validate and publish the complete bundle as one rollback-safe transaction."""
+
+    if BUNDLE.is_symlink() or not BUNDLE.is_dir():
+        raise ValueError("defaultspack v4 bundle root must be a real directory")
+    expected_paths = {path.relative_to(BUNDLE) for path in rendered}
+    if Path("bundle.lock.json") not in expected_paths:
+        raise ValueError("rendered defaultspack bundle has no lock")
+    for relative in expected_paths:
+        if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+            raise ValueError(f"rendered path escapes the bundle: {relative}")
+        current = BUNDLE
+        for part in relative.parts:
+            current /= part
+            if current.exists() and current.is_symlink():
+                raise ValueError(f"rendered path contains a symlink: {relative}")
+
+    stage = Path(tempfile.mkdtemp(prefix=".defaultspack-v4-stage-", dir=BUNDLE.parent))
+    backup = Path(tempfile.mkdtemp(prefix=".defaultspack-v4-backup-", dir=BUNDLE.parent))
+    backup.rmdir()
+    moved_original = False
+    try:
+        for path, raw in sorted(rendered.items(), key=lambda item: item[0].as_posix()):
+            target = stage / path.relative_to(BUNDLE)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(raw)
+        _validate_catalog(BundledCatalog.load(stage))
+        if fault is not None:
+            fault("before_publish")
+        os.replace(BUNDLE, backup)
+        moved_original = True
+        if fault is not None:
+            fault("after_backup")
+        os.replace(stage, BUNDLE)
+        if fault is not None:
+            fault("after_publish")
+        shutil.rmtree(backup)
+        moved_original = False
+    except BaseException:
+        if moved_original and backup.exists():
+            if BUNDLE.exists():
+                failed = BUNDLE.parent / f".{BUNDLE.name}.failed-{os.getpid()}"
+                if failed.exists():
+                    shutil.rmtree(failed)
+                os.replace(BUNDLE, failed)
+                os.replace(backup, BUNDLE)
+                shutil.rmtree(failed)
+            elif backup.exists():
+                os.replace(backup, BUNDLE)
+        moved_original = False
+        raise
+    finally:
+        if stage.exists():
+            shutil.rmtree(stage)
+        if backup.exists() and not moved_original:
+            shutil.rmtree(backup)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
@@ -618,8 +781,7 @@ def main() -> int:
                 print(path.relative_to(ROOT))
             return 1
         return 0
-    for path, raw in rendered.items():
-        path.write_bytes(raw)
+    _publish(rendered)
     return 0
 
 

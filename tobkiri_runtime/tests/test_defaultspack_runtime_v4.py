@@ -373,6 +373,86 @@ def test_lock_plan_and_activation_bind_the_complete_canonical_definition(
     assert activation["closure_digest"] == resolved.plan["closure_digest"]
 
 
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        (
+            lambda profile: profile["base"].update(artifact_digest="sha256:" + "0" * 64),
+            "Base artifact pin",
+        ),
+        (
+            lambda profile: profile["base"].update(definition_revision="sha256:" + "0" * 64),
+            "Base definition pin",
+        ),
+        (
+            lambda profile: profile["shell"].update(pack_id="shell.cli.default"),
+            "Shell Pack binding",
+        ),
+        (
+            lambda profile: profile["shell"].update(contract_id="conversation.turn.v1"),
+            "Shell Contract binding",
+        ),
+        (
+            lambda profile: profile["packs"][0].update(artifact_digest="sha256:" + "0" * 64),
+            "Pack artifact pin",
+        ),
+        (
+            lambda profile: profile.update(profile_authority_snapshot_digest="sha256:" + "0" * 64),
+            "must not contain resolved Authority state",
+        ),
+    ),
+)
+def test_named_profile_source_exact_pins_fail_closed(
+    mutation,
+    message: str,
+) -> None:
+    """A named Profile candidate may narrow null pins, never rewrite exact ones."""
+
+    catalog = _catalog()
+    profile = copy.deepcopy(catalog.profiles["defaults"])
+    mutation(profile)
+    tampered = replace(catalog, profiles={"defaults": profile})
+
+    with pytest.raises(ProfileResolutionDenied, match=message):
+        _resolve(tampered)
+
+
+def test_base_shell_compatibility_and_exact_dependency_pins_fail_closed() -> None:
+    catalog = _catalog()
+    base = copy.deepcopy(catalog.bases["defaults-basepack"])
+    base["shell_requirements"]["presentation_families"] = ["terminal"]
+    incompatible = replace(
+        catalog,
+        bases={**catalog.bases, "defaults-basepack": base},
+    )
+    with pytest.raises(ProfileResolutionDenied, match="presentation family"):
+        _resolve(incompatible)
+
+    base = copy.deepcopy(catalog.bases["defaults-basepack"])
+    base["dependencies"] = [
+        {
+            "pack_id": "rumi_host_authority_bridge_pack",
+            "artifact_digest": "sha256:" + "0" * 64,
+        }
+    ]
+    stale_dependency = replace(
+        catalog,
+        bases={**catalog.bases, "defaults-basepack": base},
+    )
+    with pytest.raises(ProfileResolutionDenied, match="Base dependency artifact"):
+        _resolve(stale_dependency)
+
+
+def test_duplicate_requested_edge_is_not_silently_reauthorized() -> None:
+    catalog = _catalog()
+    profile = copy.deepcopy(catalog.profiles["defaults"])
+    profile["requested_edges"].append(copy.deepcopy(profile["requested_edges"][0]))
+    duplicate = replace(catalog, profiles={"defaults": profile})
+
+    with pytest.raises(ProfileResolutionDenied, match="duplicate requested edge"):
+        _resolve(duplicate)
+
+
 def test_self_consistent_plan_tamper_cannot_change_authority_binding(
     tmp_path: Path,
 ) -> None:
@@ -493,6 +573,27 @@ def test_bundle_rejects_manifest_hash_drift_and_unlisted_artifacts(tmp_path: Pat
             authority_bindings=AUTHORITY_BINDINGS,
             security_epoch=7,
         )
+
+
+def test_bundle_rejects_self_consistent_lock_with_stale_definition_revision(
+    tmp_path: Path,
+) -> None:
+    copied = tmp_path / "v4"
+    shutil.copytree(BUNDLE_ROOT, copied)
+    base_path = copied / "defaults-basepack.base.v1.json"
+    base = json.loads(base_path.read_text(encoding="utf-8"))
+    base["definition_revision"] = "sha256:" + "0" * 64
+    base_path.write_text(json.dumps(base, indent=2) + "\n", encoding="utf-8")
+    lock_path = copied / "bundle.lock.json"
+    lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    entry = next(
+        item for item in lock["entries"] if item["path"] == "defaults-basepack.base.v1.json"
+    )
+    entry["digest"] = "sha256:" + hashlib.sha256(base_path.read_bytes()).hexdigest()
+    lock_path.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
+
+    with pytest.raises(BundleIntegrityError, match="definition revision"):
+        BundledCatalog.load(copied)
 
 
 def test_bundle_rejects_symlinked_locked_artifact(tmp_path: Path) -> None:

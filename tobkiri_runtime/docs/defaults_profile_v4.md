@@ -96,6 +96,16 @@ approval, enablement, and disablement remain the separate Defaults Pack-set
 transaction; those operations derive a new immutable Profile closure on the
 server and never trust client `approved` or `enabled` fields.
 
+An unresolved named definition may leave artifact, definition, catalog, and
+Authority capture fields `null`. Any non-null field is an exact pin rather than
+a hint: the Resolver rejects stale Base, Shell, Application, Pack, executable,
+catalog, mode, presentation-family, Contract, or dependency bindings instead
+of rewriting them. Source definitions cannot contain resolved Authority state,
+and duplicate Pack or requested-edge identities are rejected before review.
+Optional Pack IDs and dependency traversal use canonical ordering, so the same
+approved set always produces the same Profile, closure, Plan, and Authority
+review material.
+
 User Settings are a separate Launcher-local projection. Profile activation can
 change only runtime Profile settings and cannot mutate User Settings.
 
@@ -112,6 +122,13 @@ Generation must be deterministic across consecutive runs. The complete-v4,
 architecture, integrity, boundary, and checked-in evidence generators remain
 the release authority; runtime Registry or installed-Pack discovery is never a
 Profile source.
+
+The source generator renders into a private sibling directory, validates the
+complete locked catalog (including dependency versions, Base/Shell
+compatibility, exact target platform/architecture, Application kind, and
+duplicate identities), and publishes it as a rollback-safe directory
+transaction. A validation or publication failure restores the prior bundle;
+symlinked or traversal-capable destinations are rejected before any write.
 
 Normative provenance v2 is derived from a canonical payload that excludes its
 own provenance field. Its trust root is `content_root_digest`, which binds the

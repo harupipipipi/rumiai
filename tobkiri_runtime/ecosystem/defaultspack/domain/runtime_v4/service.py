@@ -99,6 +99,17 @@ def _require_digest(value: object, field: str) -> str:
     return value
 
 
+def _require_optional_pin(
+    requested: object,
+    actual: str,
+    field: str,
+) -> None:
+    """Reject a stale exact source pin while permitting unresolved ``null``."""
+
+    if requested is not None and requested != actual:
+        raise ProfileResolutionDenied(f"{field} is stale or mismatched")
+
+
 def _write_atomic(path: Path, payload: Mapping[str, Any]) -> None:
     data = canonical_json(dict(payload)) + b"\n"
     write_bytes_atomic(path, data)
@@ -185,6 +196,14 @@ class BundledCatalog:
                 document = validate_document(raw, kind)
             except SchemaValidationError as exc:
                 raise BundleIntegrityError(f"invalid {kind} document {relative}: {exc}") from exc
+            if kind in {"base", "shell"}:
+                expected_revision = canonical_digest(
+                    {key: value for key, value in document.items() if key != "definition_revision"}
+                )
+                if document["definition_revision"] != expected_revision:
+                    raise BundleIntegrityError(
+                        f"{kind} definition revision is stale or tampered: {relative}"
+                    )
             parent_field, identity_field = identity_fields[kind]
             identity_source = document.get(parent_field) if parent_field else document
             identity = (
@@ -442,6 +461,14 @@ def resolve_default_profile(
         raise ProfileResolutionDenied(f"profile is not in the bundled inventory: {profile_id}")
     if source["state"] != "needs_resolution":
         raise ProfileResolutionDenied("bundled Profile must begin in needs_resolution state")
+    if (
+        source["profile_authority_snapshot_digest"] is not None
+        or source["authority_references"]
+        or any(edge.get("authority_reference") is not None for edge in source["requested_edges"])
+    ):
+        raise ProfileResolutionDenied(
+            "bundled Profile source must not contain resolved Authority state"
+        )
     profile_definition_digest = canonical_digest(source)
     bundle_digest = _bundle_digest(catalog)
 
@@ -454,6 +481,37 @@ def resolve_default_profile(
         raise ProfileResolutionDenied(f"selected Base manifest is not kind=base: {base_id}")
     if base_definition["artifact_digest"] != base_manifest["pack"]["artifact_digest"]:
         raise ProfileResolutionDenied("Base definition does not pin its exact artifact")
+    _require_optional_pin(
+        source["base"]["artifact_digest"],
+        str(base_manifest["pack"]["artifact_digest"]),
+        "Profile Base artifact pin",
+    )
+    _require_optional_pin(
+        source["base"]["definition_revision"],
+        str(base_definition["definition_revision"]),
+        "Profile Base definition pin",
+    )
+    if source["base"].get("resolution") not in {
+        None,
+        "verified_exact_artifact_required",
+    }:
+        raise ProfileResolutionDenied("bundled Profile Base resolution state is invalid")
+
+    base_dependency_ids: list[str] = []
+    for dependency in base_definition["dependencies"]:
+        dependency_id = str(dependency["pack_id"])
+        if dependency_id in base_dependency_ids:
+            raise ProfileResolutionDenied(
+                f"Base definition contains a duplicate dependency: {dependency_id}"
+            )
+        dependency_manifest = catalog.packs.get(dependency_id)
+        if dependency_manifest is None:
+            raise ProfileResolutionDenied(f"Base dependency is unavailable: {dependency_id}")
+        if dependency["artifact_digest"] != dependency_manifest["pack"]["artifact_digest"]:
+            raise ProfileResolutionDenied(
+                f"Base dependency artifact is stale or mismatched: {dependency_id}"
+            )
+        base_dependency_ids.append(dependency_id)
 
     shell_request = source.get("shell")
     if not isinstance(shell_request, dict):
@@ -466,6 +524,10 @@ def resolve_default_profile(
         raise ProfileResolutionDenied(
             f"Shell artifact is unavailable for this source/build: {provider_id}"
         )
+    if shell_request["pack_id"] != shell_definition["pack_id"]:
+        raise ProfileResolutionDenied("Profile Shell Pack binding is stale or mismatched")
+    if shell_request["contract_id"] != shell_definition["contract_id"]:
+        raise ProfileResolutionDenied("Profile Shell Contract binding is stale or mismatched")
     variants = [
         variant
         for variant in shell_definition["launch"]["variants"]
@@ -483,14 +545,56 @@ def resolve_default_profile(
     shell_manifest = catalog.packs.get(shell_pack_id)
     if shell_manifest is None or shell_manifest["pack"]["kind"] != "shell":
         raise ProfileResolutionDenied(f"Shell Pack is missing or invalid: {shell_pack_id}")
+    shell_contracts = [
+        contract
+        for contract in shell_manifest["contracts"]
+        if contract["contract_id"] == shell_definition["contract_id"]
+    ]
+    shell_functions = [
+        function
+        for function in shell_manifest["functions"]
+        if function["id"] == provider_id
+        and any(
+            function["contract_revision_digest"] == contract["revision_digest"]
+            and set(function["operations"]).issubset(set(contract["operations"]))
+            for contract in shell_contracts
+        )
+    ]
+    if len(shell_contracts) != 1 or len(shell_functions) != 1:
+        raise ProfileResolutionDenied("Shell Provider does not implement the exact Shell Contract")
     if shell_definition["artifact_digest"] != selected_variant["artifact_digest"]:
         raise ProfileResolutionDenied("Shell definition does not pin its exact artifact")
-    if not set(base_definition["shell_requirements"]["required_capabilities"]).issubset(
+    _require_optional_pin(
+        shell_request["artifact_digest"],
+        str(selected_variant["artifact_digest"]),
+        "Profile Shell artifact pin",
+    )
+    _require_optional_pin(
+        shell_request["executable_artifact_digest"],
+        str(selected_variant["entrypoint_digest"]),
+        "Profile Shell executable pin",
+    )
+    _require_optional_pin(
+        shell_request["definition_revision"],
+        str(shell_definition["definition_revision"]),
+        "Profile Shell definition pin",
+    )
+    shell_requirements = base_definition["shell_requirements"]
+    if source["mode"] != shell_requirements["mode"]:
+        raise ProfileResolutionDenied("Profile mode does not match the Base definition")
+    if (
+        shell_definition["presentation"]["family"]
+        not in shell_requirements["presentation_families"]
+    ):
+        raise ProfileResolutionDenied("Shell presentation family is incompatible with Base")
+    if not set(shell_requirements["required_capabilities"]).issubset(
         set(shell_definition["presentation"]["capabilities"])
     ):
         raise ProfileResolutionDenied("Shell does not satisfy Base capabilities")
 
     requested_pack_ids = [item["pack_id"] for item in source["packs"]]
+    if len(requested_pack_ids) != len(set(requested_pack_ids)):
+        raise ProfileResolutionDenied("Profile composition contains a duplicate Pack")
     requested_pack_roles = {
         item["pack_id"]: item.get("role", "provider") for item in source["packs"]
     }
@@ -505,6 +609,17 @@ def resolve_default_profile(
     if application_manifest is None or application_manifest["pack"]["kind"] != "application":
         raise ProfileResolutionDenied(
             "canonical defaults Application must be a Pack v4 application"
+        )
+    for request in source["packs"]:
+        manifest = catalog.packs.get(str(request["pack_id"]))
+        if manifest is None:
+            raise ProfileResolutionDenied(
+                f"Pack is not in the exact inventory: {request['pack_id']}"
+            )
+        _require_optional_pin(
+            request["artifact_digest"],
+            str(manifest["pack"]["artifact_digest"]),
+            f"Profile Pack artifact pin for {request['pack_id']}",
         )
     application_artifacts = application_manifest["artifacts"]
     expected_application = (
@@ -532,14 +647,27 @@ def resolve_default_profile(
         raise ProfileResolutionDenied(
             "Application Pack does not pin the selected packaged artifact"
         )
-    selected_ids = [base_id, shell_pack_id, *requested_pack_ids, *additional_pack_ids]
+    if len(additional_pack_ids) != len(set(additional_pack_ids)):
+        raise ProfileResolutionDenied("additional Pack selection contains a duplicate")
+    canonical_additional_ids = tuple(sorted(additional_pack_ids))
+    selected_ids = [base_id, shell_pack_id, *requested_pack_ids]
+    selected_ids.extend(
+        dependency_id
+        for dependency_id in sorted(base_dependency_ids)
+        if dependency_id not in selected_ids
+    )
+    selected_ids.extend(
+        pack_id for pack_id in canonical_additional_ids if pack_id not in selected_ids
+    )
     pending = list(selected_ids)
     while pending:
         current_id = pending.pop(0)
         current = catalog.packs.get(current_id)
         if current is None:
             raise ProfileResolutionDenied(f"Pack is not in the exact inventory: {current_id}")
-        for dependency_id, version_range in current["requirements"]["pack_dependencies"].items():
+        for dependency_id, version_range in sorted(
+            current["requirements"]["pack_dependencies"].items()
+        ):
             dependency = catalog.packs.get(dependency_id)
             if dependency is None:
                 raise ProfileResolutionDenied(
@@ -593,8 +721,11 @@ def resolve_default_profile(
         function["id"] for manifest in selected for function in manifest["functions"]
     }
     available_function_ids.update(function["id"] for function in shell_manifest["functions"])
-    dynamic_edges = dynamic_profile_edges(catalog, profile_id, additional_pack_ids)
+    dynamic_edges = dynamic_profile_edges(catalog, profile_id, canonical_additional_ids)
     all_source_edges = (*source["requested_edges"], *dynamic_edges)
+    edge_keys = [_edge_key(edge) for edge in all_source_edges]
+    if len(edge_keys) != len(set(edge_keys)):
+        raise ProfileResolutionDenied("Profile contains a duplicate requested edge")
     for edge in all_source_edges:
         caller_function_id = edge["caller_function_id"]
         if caller_function_id not in available_function_ids:
@@ -688,9 +819,15 @@ def resolve_default_profile(
     profile["requested_edges"] = resolved_edges
     profile["authority_references"] = references
     profile["profile_authority_snapshot_digest"] = snapshot_digest
-    profile["catalog_revision"] = canonical_digest(
+    catalog_revision = canonical_digest(
         {manifest["pack"]["id"]: manifest["integrity"]["source_identity"] for manifest in selected}
     )
+    _require_optional_pin(
+        source["catalog_revision"],
+        catalog_revision,
+        "Profile catalog revision pin",
+    )
+    profile["catalog_revision"] = catalog_revision
     profile = validate_document(profile, "profile")
     profile_revision = canonical_digest(profile)
     effective_set = [
