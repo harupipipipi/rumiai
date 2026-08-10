@@ -549,6 +549,12 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
                         str(key): [str(value)] for key, value in template.items()
                     }
                 }
+            elif template:
+                template = {
+                    key: value
+                    for key, value in template.items()
+                    if key != "semantics_digest"
+                }
             contract_digest = next(
                 contract["revision_digest"]
                 for raw in rendered.values()

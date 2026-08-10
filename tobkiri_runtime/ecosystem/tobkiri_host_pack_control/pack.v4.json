@@ -32,6 +32,7 @@
         "profile.change.resolve",
         "profile.change.review",
         "profile.catalog.read",
+        "operation.status.read",
         "profile.read",
         "settings.read",
         "topology.contracts.read",
@@ -39,12 +40,12 @@
         "topology.packs.read",
         "topology.principals.read"
       ],
-      "revision_digest": "sha256:be03402ddb411fdd8dc2368ab6f232f74e6a1bea5ffedcd201f63a0c62ee3a8f"
+      "revision_digest": "sha256:83cbce7734a5026885e1c4012d4cf3e37ac7882d8dc8cb03bcb903257ddc8b02"
     }
   ],
   "functions": [
     {
-      "contract_revision_digest": "sha256:be03402ddb411fdd8dc2368ab6f232f74e6a1bea5ffedcd201f63a0c62ee3a8f",
+      "contract_revision_digest": "sha256:83cbce7734a5026885e1c4012d4cf3e37ac7882d8dc8cb03bcb903257ddc8b02",
       "id": "tobkiri.host.control-presentation",
       "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7",
       "isolation": "dedicated_process",
@@ -54,6 +55,7 @@
         "profile.change.resolve",
         "profile.change.review",
         "profile.catalog.read",
+        "operation.status.read",
         "profile.read",
         "settings.read",
         "topology.contracts.read",
@@ -86,8 +88,8 @@
   ],
   "integrity": {
     "artifact_set_digest": "sha256:801e1f763a046fc003e5665f201b337a272b56febcffb65be4ed9011a8d3bdd3",
-    "contract_catalog_digest": "sha256:357826bf8b7b2fcd99557a67b9351b6c1c380897f1ab6befa728d9b9172e0139",
-    "source_identity": "sha256:8bfbd161aa90506f54e07cc8962de8b9f1771d85478feaba9ff5fbf81cff0802"
+    "contract_catalog_digest": "sha256:a05d93023c77632932ae4b85eaf8ce189e3c9e3abbd4a658016b97c820456c8b",
+    "source_identity": "sha256:2d568d178c7f9f6b790fc6224e3311f21e88c94cb3d44b7a06cb5b132f1a76fa"
   },
   "migration": {
     "compatibility": "none",
@@ -199,6 +201,17 @@
       "operation_id": "dashboard.read",
       "owner": "tobkiri_host_pack_control",
       "provider_id": "tobkiri.host.pack-control",
+      "source_kind": "canonical_v4_contract"
+    },
+    {
+      "contract_reference": "tobkiri.host.control-presentation.v4",
+      "effect_ceiling": [
+        "capability:control.presentation",
+        "host:brokered-execution"
+      ],
+      "operation_id": "operation.status.read",
+      "owner": "tobkiri_host_pack_control",
+      "provider_id": "tobkiri.host.control-presentation",
       "source_kind": "canonical_v4_contract"
     },
     {
@@ -460,7 +473,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:8bfbd161aa90506f54e07cc8962de8b9f1771d85478feaba9ff5fbf81cff0802",
+        "digest": "sha256:2d568d178c7f9f6b790fc6224e3311f21e88c94cb3d44b7a06cb5b132f1a76fa",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -471,7 +484,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:8bfbd161aa90506f54e07cc8962de8b9f1771d85478feaba9ff5fbf81cff0802",
+    "source_digest": "sha256:2d568d178c7f9f6b790fc6224e3311f21e88c94cb3d44b7a06cb5b132f1a76fa",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/tobkiri_host_pack_control"
   },
@@ -484,6 +497,7 @@
         "profile.change.resolve",
         "profile.change.review",
         "profile.catalog.read",
+        "operation.status.read",
         "profile.read",
         "settings.read",
         "topology.contracts.read",

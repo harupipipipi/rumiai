@@ -22,6 +22,7 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
     ActiveDefaultProfile,
     BundledCatalog,
     ProfileResolutionDenied,
+    ResolvedDefaultProfile,
 )
 from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.validation import validate_document
@@ -96,6 +97,7 @@ class _ProfileCandidate:
     session_id: str
     expected_profile_revision: str
     expected_plan_digest: str
+    expected_activation_id: str
     profile_definition_digest: str
     profile_catalog_digest: str
     bundle_lock_digest: str
@@ -121,8 +123,9 @@ class RuntimeProfileChangeService:
         self,
         *,
         ttl_seconds: float = 120.0,
-        clock: Callable[[], float] = time.monotonic,
+        clock: Callable[[], float] = time.time,
         surface_service: "RuntimeSurfaceService | None" = None,
+        store_path: Path | None = None,
     ) -> None:
         if ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be positive")
@@ -130,9 +133,13 @@ class RuntimeProfileChangeService:
         self._clock = clock
         self._surface_service = surface_service
         self._lock = threading.RLock()
-        self._resolved: dict[str, _ProfileCandidate] = {}
-        self._reviewed: dict[str, _ProfileCandidate] = {}
-        self._approved: dict[str, _ProfileApproval] = {}
+        if store_path is None:
+            from .bootstrap.profile_capture import runtime_user_data_root
+
+            store_path = runtime_user_data_root() / "control" / "reconciliation-v4.sqlite3"
+        from .control_reconciliation_v4 import ControlReconciliationStore
+
+        self._store = ControlReconciliationStore(store_path)
 
     def resolve(self, body: Mapping[str, object], *, session_id: str) -> dict[str, object]:
         """Resolve a candidate closure without writing runtime state."""
@@ -224,6 +231,7 @@ class RuntimeProfileChangeService:
             raise _map_change_error(error) from error
         current_data = cast(Mapping[str, Any], current["data"])
         review = {
+            "candidate_generation": "profile-change-generation:" + secrets.token_hex(16),
             "profile": dict(resolved.profile),
             "profile_lock": dict(resolved.lock),
             "resolved_plan": dict(resolved.plan),
@@ -238,13 +246,23 @@ class RuntimeProfileChangeService:
                 "bundle_lock_digest": bundle_digest,
             },
         }
-        candidate_id = secrets.token_urlsafe(32)
+        candidate_id = (
+            "candidate.profile-change."
+            + canonical_digest(
+                {
+                    "candidate_digest": canonical_digest(review),
+                    "session_id": session_id,
+                    "nonce": str(time.time_ns()),
+                }
+            ).removeprefix("sha256:")[:48]
+        )
         candidate_digest = canonical_digest(review)
         candidate = _ProfileCandidate(
             candidate_id=candidate_id,
             session_id=session_id,
             expected_profile_revision=revision,
             expected_plan_digest=plan_digest,
+            expected_activation_id=str(current_data["activation_record"]["activation_id"]),
             profile_definition_digest=definition_digest,
             profile_catalog_digest=catalog_digest,
             bundle_lock_digest=bundle_digest,
@@ -252,14 +270,22 @@ class RuntimeProfileChangeService:
             candidate_digest=candidate_digest,
             expires_at=self._clock() + self._ttl_seconds,
         )
-        with self._lock:
-            self._prune()
-            self._resolved[candidate_id] = candidate
+        try:
+            persisted = self._store.save_candidate(
+                candidate_id=candidate_id,
+                candidate_digest=candidate_digest,
+                session_id=session_id,
+                review=review,
+                expires_at=candidate.expires_at,
+            )
+        except Exception as error:
+            raise _map_reconciliation_error(error) from error
+        candidate = self._candidate_from_record(persisted)
         return {
             "runtime_surface_api_version": RUNTIME_SURFACE_API_VERSION,
             "state": "resolved",
-            "candidate_id": candidate_id,
-            "candidate_digest": candidate_digest,
+            "candidate_id": candidate.candidate_id,
+            "candidate_digest": candidate.candidate_digest,
             "expires_in": int(self._ttl_seconds),
             "review": review,
             "next_action": "review",
@@ -270,15 +296,17 @@ class RuntimeProfileChangeService:
         """Acknowledge the exact resolved candidate for later approval."""
 
         with self._lock:
-            candidate = self._validated_candidate(
-                self._resolved,
-                body,
-                session_id=session_id,
-                id_key="candidate_id",
-                digest_key="candidate_digest",
-            )
-            self._resolved.pop(candidate.candidate_id)
-            self._reviewed[candidate.candidate_id] = candidate
+            candidate_id, digest = self._candidate_request(body)
+            try:
+                record = self._store.transition_reviewed(
+                    candidate_id,
+                    digest,
+                    session_id=session_id,
+                )
+            except Exception as error:
+                raise _map_reconciliation_error(error) from error
+            candidate = self._candidate_from_record(record)
+            self._require_unexpired(candidate)
         return {
             "runtime_surface_api_version": RUNTIME_SURFACE_API_VERSION,
             "state": "reviewed",
@@ -292,41 +320,60 @@ class RuntimeProfileChangeService:
         """Create a one-shot server approval from a reviewed candidate."""
 
         with self._lock:
-            candidate = self._validated_candidate(
-                self._reviewed,
-                body,
-                session_id=session_id,
-                id_key="candidate_id",
-                digest_key="candidate_digest",
-            )
+            candidate_id, digest = self._candidate_request(body)
+            try:
+                prepared = self._store.prepare_approval(
+                    candidate_id,
+                    digest,
+                    session_id=session_id,
+                )
+            except Exception as error:
+                raise _map_reconciliation_error(error) from error
+            candidate = self._candidate_from_record(prepared)
+            self._require_unexpired(candidate)
             authority_record = _commit_authority_profile_approval(
                 candidate,
                 session_id=session_id,
+                approval_id=str(prepared["approval_id"]),
+                decided_at=float(prepared["approval_decided_at"]),
             )
             approval_id = str(authority_record.approval_id)
             approval_digest = str(authority_record.digest)
+            try:
+                approved_record = self._store.mark_approved(
+                    candidate.candidate_id,
+                    candidate.candidate_digest,
+                    session_id=session_id,
+                    approval_digest=approval_digest,
+                    authority_record=authority_record.to_dict(),
+                )
+            except Exception as error:
+                raise _map_reconciliation_error(error) from error
             approval = _ProfileApproval(
                 approval_id=approval_id,
                 session_id=session_id,
                 candidate=candidate,
                 approval_digest=approval_digest,
                 authority_record_id=str(authority_record.approval_id),
-                expires_at=self._clock() + self._ttl_seconds,
+                expires_at=float(approved_record["expires_at"]),
             )
-            self._reviewed.pop(candidate.candidate_id)
-            self._approved[approval_id] = approval
+        return self._approval_projection(approval, authority_record)
+
+    def _approval_projection(
+        self, approval: _ProfileApproval, authority_record: Any
+    ) -> dict[str, object]:
         return {
             "runtime_surface_api_version": RUNTIME_SURFACE_API_VERSION,
             "state": "approved",
-            "approval_id": approval_id,
-            "approval_digest": approval_digest,
+            "approval_id": approval.approval_id,
+            "approval_digest": approval.approval_digest,
             "authority_approval": {
                 "approval_id": authority_record.approval_id,
                 "approval_digest": authority_record.digest,
                 "decision": authority_record.decision,
                 "security_epoch": authority_record.security_epoch,
             },
-            "expires_in": int(self._ttl_seconds),
+            "expires_in": max(0, int(approval.expires_at - self._clock())),
             "next_action": "activation",
             "write_set": [],
         }
@@ -342,21 +389,26 @@ class RuntimeProfileChangeService:
         approval_id = _required_string(body.get("approval_id"))
         approval_digest = _required_string(body.get("approval_digest"))
         with self._lock:
-            self._prune()
-            approval = self._approved.get(approval_id)
-            if approval is None:
-                raise RuntimeSurfaceError(
-                    RuntimeSurfaceErrorCode.UNAPPROVED,
-                    "Profile activation approval is missing or already used",
+            try:
+                record = self._store.require_approval(
+                    approval_id,
+                    approval_digest,
+                    session_id=session_id,
                 )
-            if approval.session_id != session_id or not hmac.compare_digest(
-                approval.approval_digest, approval_digest
-            ):
-                raise RuntimeSurfaceError(
-                    RuntimeSurfaceErrorCode.UNAPPROVED,
-                    "Profile activation approval does not match",
-                )
-            candidate = approval.candidate
+            except Exception as error:
+                raise _map_reconciliation_error(error, approval=True) from error
+            if record["state"] == "activated":
+                return self._activation_projection(cast(Mapping[str, Any], record["activation"]))
+            candidate = self._candidate_from_record(record)
+            approval = _ProfileApproval(
+                approval_id=approval_id,
+                session_id=session_id,
+                candidate=candidate,
+                approval_digest=approval_digest,
+                authority_record_id=approval_id,
+                expires_at=float(record["expires_at"]),
+            )
+            self._require_unexpired(candidate)
             self._surface().require_catalog_binding(
                 profile_id=str(candidate.resolved.profile["profile_id"]),
                 expected_definition_digest=candidate.profile_definition_digest,
@@ -373,12 +425,34 @@ class RuntimeProfileChangeService:
 
                 activation = activate_resolved_profile_pack_set(
                     candidate.resolved,
+                    activation_id=(
+                        f"activation:{candidate.resolved.profile['profile_id']}-profile-change-"
+                        + canonical_digest(
+                            {
+                                "approval_id": approval_id,
+                                "candidate_digest": candidate.candidate_digest,
+                            }
+                        ).removeprefix("sha256:")[:24]
+                    ),
                     expected_profile_revision=candidate.expected_profile_revision,
                     expected_plan_digest=candidate.expected_plan_digest,
+                    expected_activation_id=candidate.expected_activation_id,
                 )
             except Exception as error:
                 raise _map_change_error(error) from error
-            self._approved.pop(approval_id)
+            try:
+                self._store.mark_activated(
+                    approval_id,
+                    approval_digest,
+                    session_id=session_id,
+                    activation=activation,
+                )
+            except Exception as error:
+                raise _map_reconciliation_error(error, approval=True) from error
+        return self._activation_projection(activation)
+
+    @staticmethod
+    def _activation_projection(activation: Mapping[str, Any]) -> dict[str, object]:
         return {
             "runtime_surface_api_version": RUNTIME_SURFACE_API_VERSION,
             "state": "active",
@@ -394,44 +468,44 @@ class RuntimeProfileChangeService:
             self._surface_service = RuntimeSurfaceService()
         return self._surface_service
 
-    def _validated_candidate(
-        self,
-        collection: dict[str, _ProfileCandidate],
-        body: Mapping[str, object],
-        *,
-        session_id: str,
-        id_key: str,
-        digest_key: str,
-    ) -> _ProfileCandidate:
-        if set(body) != {id_key, digest_key}:
+    @staticmethod
+    def _candidate_request(body: Mapping[str, object]) -> tuple[str, str]:
+        if set(body) != {"candidate_id", "candidate_digest"}:
             raise RuntimeSurfaceError(
                 RuntimeSurfaceErrorCode.INVALID_REQUEST,
                 "Profile ceremony request shape is invalid",
             )
-        candidate_id = _required_string(body.get(id_key))
-        digest = _required_string(body.get(digest_key))
-        self._prune()
-        candidate = collection.get(candidate_id)
-        if candidate is None:
+        return (
+            _required_string(body.get("candidate_id")),
+            _required_string(body.get("candidate_digest")),
+        )
+
+    def _candidate_from_record(self, record: Mapping[str, Any]) -> _ProfileCandidate:
+        review = cast(Mapping[str, Any], record["review"])
+        profile = cast(Mapping[str, Any], review["profile"])
+        lock = cast(Mapping[str, Any], review["profile_lock"])
+        plan = cast(Mapping[str, Any], review["resolved_plan"])
+        predecessor = cast(Mapping[str, Any], review["predecessor"])
+        return _ProfileCandidate(
+            candidate_id=str(record["candidate_id"]),
+            session_id=str(record["session_digest"]),
+            expected_profile_revision=str(record["expected_profile_revision"]),
+            expected_plan_digest=str(record["expected_plan_digest"]),
+            expected_activation_id=str(predecessor["activation_id"]),
+            profile_definition_digest=str(record["profile_definition_digest"]),
+            profile_catalog_digest=str(record["profile_catalog_digest"]),
+            bundle_lock_digest=str(record["bundle_lock_digest"]),
+            resolved=ResolvedDefaultProfile(profile=profile, lock=lock, plan=plan),
+            candidate_digest=str(record["candidate_digest"]),
+            expires_at=float(record["expires_at"]),
+        )
+
+    def _require_unexpired(self, candidate: _ProfileCandidate) -> None:
+        if candidate.expires_at <= self._clock():
             raise RuntimeSurfaceError(
                 RuntimeSurfaceErrorCode.TIMEOUT,
-                "Profile ceremony candidate expired or was already used",
+                "Profile ceremony candidate expired",
             )
-        if candidate.session_id != session_id or not hmac.compare_digest(
-            candidate.candidate_digest, digest
-        ):
-            raise RuntimeSurfaceError(
-                RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
-                "Profile ceremony candidate does not match",
-            )
-        return candidate
-
-    def _prune(self) -> None:
-        now = self._clock()
-        for collection in (self._resolved, self._reviewed, self._approved):
-            expired = [key for key, value in collection.items() if value.expires_at <= now]
-            for key in expired:
-                collection.pop(key, None)
 
 
 class RuntimeSurfaceService:
@@ -1612,6 +1686,8 @@ def _commit_authority_profile_approval(
     candidate: _ProfileCandidate,
     *,
     session_id: str,
+    approval_id: str,
+    decided_at: float,
 ) -> Any:
     """Commit immutable approval provenance and its Authority audit event."""
 
@@ -1642,14 +1718,13 @@ def _commit_authority_profile_approval(
             "Profile candidate principal is invalid",
         )
     principal = FunctionPrincipal.from_dict(approval_binding["function_principal"])
-    authority_approval_id = "approval.profile-change." + secrets.token_urlsafe(24)
     actor_suffix = authority_digest({"session_id": session_id}).removeprefix("sha256:")[:24]
     record = ApprovalRecord(
-        approval_id=authority_approval_id,
+        approval_id=approval_id,
         snapshot_digest=candidate.candidate_digest,
         actor_id=f"launcher.panel.{actor_suffix}",
         decision="approved",
-        decided_at=time.time(),
+        decided_at=decided_at,
         caller=principal,
         target=principal,
         profile_id=str(candidate.resolved.profile["profile_id"]),
@@ -1663,8 +1738,16 @@ def _commit_authority_profile_approval(
                     RuntimeSurfaceErrorCode.STALE_REVISION,
                     "Profile approval SecurityEpoch is stale",
                 )
-            authority.put_records_atomically([record])
             committed = authority.get_approval(record.approval_id)
+            if committed is None:
+                try:
+                    authority.put_records_atomically([record])
+                except Exception:
+                    committed = authority.get_approval(record.approval_id)
+                    if committed is None:
+                        raise
+                else:
+                    committed = authority.get_approval(record.approval_id)
     except RuntimeSurfaceError:
         raise
     except Exception as error:
@@ -1735,6 +1818,36 @@ def _map_change_error(error: Exception) -> RuntimeSurfaceError:
     return RuntimeSurfaceError(
         RuntimeSurfaceErrorCode.API_FAILURE,
         "Profile change could not be completed",
+    )
+
+
+def _map_reconciliation_error(error: Exception, *, approval: bool = False) -> RuntimeSurfaceError:
+    """Map durable reconciliation failures without leaking persisted state."""
+
+    message = str(error).lower()
+    if "expired" in message:
+        return RuntimeSurfaceError(
+            RuntimeSurfaceErrorCode.TIMEOUT,
+            "Profile ceremony candidate expired",
+        )
+    if approval or "approval" in message:
+        return RuntimeSurfaceError(
+            RuntimeSurfaceErrorCode.UNAPPROVED,
+            "Profile activation approval is unavailable",
+        )
+    if "binding" in message or "another session" in message or "changed" in message:
+        return RuntimeSurfaceError(
+            RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
+            "Profile ceremony durable binding does not match",
+        )
+    if "unknown" in message:
+        return RuntimeSurfaceError(
+            RuntimeSurfaceErrorCode.TIMEOUT,
+            "Profile ceremony candidate is unavailable",
+        )
+    return RuntimeSurfaceError(
+        RuntimeSurfaceErrorCode.API_FAILURE,
+        "Profile ceremony reconciliation failed",
     )
 
 

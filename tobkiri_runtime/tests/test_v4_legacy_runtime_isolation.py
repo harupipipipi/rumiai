@@ -49,7 +49,9 @@ def test_v4_container_rejects_removed_execution_authorities() -> None:
 
 def test_v4_profile_rejects_missing_authority_binding() -> None:
     """A v4 profile cannot resolve without its Host-captured authority edge."""
-    catalog = BundledCatalog.load(DEFAULTSPACK_ROOT / "v4")
+    from tests.conformance_support.packaged_profile import packaged_profile_bundle_root
+
+    catalog = BundledCatalog.load(packaged_profile_bundle_root())
     approved = {str(manifest["pack"]["artifact_digest"]) for manifest in catalog.packs.values()}
     with pytest.raises(ProfileResolutionDenied, match="Authority Kernel reference is missing"):
         resolve_default_profile(

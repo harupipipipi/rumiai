@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 import json
+import multiprocessing
 from pathlib import Path
 import time
 
@@ -33,6 +34,31 @@ RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 BUNDLE_ROOT = RUNTIME_ROOT / "ecosystem" / "defaultspack" / "v4"
 
 
+def _approve_profile_process(
+    candidate_id: str,
+    candidate_digest: str,
+    session_id: str,
+    results: multiprocessing.queues.Queue,
+) -> None:
+    try:
+        approved = RuntimeProfileChangeService().approve(
+            {
+                "candidate_id": candidate_id,
+                "candidate_digest": candidate_digest,
+            },
+            session_id=session_id,
+        )
+        results.put(
+            (
+                "approved",
+                approved["approval_id"],
+                approved["approval_digest"],
+            )
+        )
+    except Exception as error:  # pragma: no cover - reported to parent assertion
+        results.put(("error", type(error).__name__, str(error)))
+
+
 def _bundle_root() -> Path:
     from tests.conformance_support.packaged_profile import packaged_profile_bundle_root
 
@@ -48,9 +74,7 @@ def active_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def _service(active_runtime, **kwargs) -> RuntimeSurfaceService:
     return RuntimeSurfaceService(
         snapshot_loader=lambda: active_runtime,
-        catalog_loader=lambda: BundledCatalog.load(
-            _bundle_root()
-        ),
+        catalog_loader=lambda: BundledCatalog.load(_bundle_root()),
         **kwargs,
     )
 
@@ -222,8 +246,8 @@ def test_contract_routes_are_exact_digest_pinned_broker_bindings(active_runtime)
         if item["path"] == "defaultspack/frontend_contract_map.v4.json"
     )
 
-    # The map has 22 logical routes and 30 exact route-to-target bindings.
-    assert len(routes) == 30
+    # The map has 23 logical routes and 31 exact route-to-target bindings.
+    assert len(routes) == 31
     assert all(
         set(route)
         >= {
@@ -489,14 +513,19 @@ def test_profile_ceremony_is_ordered_digest_bound_and_one_shot(
     real_commit = runtime_surface._commit_authority_profile_approval
     approval_attempts = [0]
 
-    def commit_with_temporary_denial(candidate, *, session_id):
+    def commit_with_temporary_denial(candidate, *, session_id, approval_id, decided_at):
         approval_attempts[0] += 1
         if approval_attempts[0] == 1:
             raise RuntimeSurfaceError(
                 RuntimeSurfaceErrorCode.UNAPPROVED,
                 "temporary Authority denial",
             )
-        return real_commit(candidate, session_id=session_id)
+        return real_commit(
+            candidate,
+            session_id=session_id,
+            approval_id=approval_id,
+            decided_at=decided_at,
+        )
 
     monkeypatch.setattr(
         runtime_surface,
@@ -531,15 +560,14 @@ def test_profile_ceremony_is_ordered_digest_bound_and_one_shot(
 
     assert result["state"] == "active"
     assert activated == [active_runtime.resolved]
-    with pytest.raises(RuntimeSurfaceError) as replay:
-        ceremony.activate(
-            {
-                "approval_id": approved["approval_id"],
-                "approval_digest": approved["approval_digest"],
-            },
-            session_id="session-a",
-        )
-    assert replay.value.code is RuntimeSurfaceErrorCode.UNAPPROVED
+    replay = ceremony.activate(
+        {
+            "approval_id": approved["approval_id"],
+            "approval_digest": approved["approval_digest"],
+        },
+        session_id="session-a",
+    )
+    assert replay == result
 
 
 def test_profile_activation_rejects_wrong_credentials_without_consuming_approval(
@@ -705,7 +733,56 @@ def test_profile_ceremony_rejects_cross_session_and_expired_review(
     assert expired.value.code is RuntimeSurfaceErrorCode.TIMEOUT
 
 
-def test_profile_activation_concurrent_double_use_has_one_winner(
+def test_profile_activation_rejects_expired_durable_approval(
+    active_runtime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = [0.0]
+    monkeypatch.setattr(
+        "core_runtime.pack_control_v4.resolve_profile_pack_set",
+        lambda _pack_ids: active_runtime.resolved,
+    )
+    ceremony = RuntimeProfileChangeService(
+        ttl_seconds=1,
+        clock=lambda: now[0],
+        surface_service=_service(active_runtime),
+    )
+    resolved = ceremony.resolve(
+        {
+            "profile_id": "defaults",
+            "expected_profile_revision": active_runtime.resolved.plan["profile_revision"],
+            "expected_plan_digest": active_runtime.resolved.plan["plan_digest"],
+            "desired_pack_ids": ["defaultspack"],
+        },
+        session_id="session-expiry",
+    )
+    reviewed = ceremony.review(
+        {
+            "candidate_id": resolved["candidate_id"],
+            "candidate_digest": resolved["candidate_digest"],
+        },
+        session_id="session-expiry",
+    )
+    approved = ceremony.approve(
+        {
+            "candidate_id": reviewed["candidate_id"],
+            "candidate_digest": reviewed["candidate_digest"],
+        },
+        session_id="session-expiry",
+    )
+    now[0] = 2.0
+
+    with pytest.raises(RuntimeSurfaceError) as expired:
+        ceremony.activate(
+            {
+                "approval_id": approved["approval_id"],
+                "approval_digest": approved["approval_digest"],
+            },
+            session_id="session-expiry",
+        )
+    assert expired.value.code is RuntimeSurfaceErrorCode.TIMEOUT
+
+
+def test_profile_activation_concurrent_retry_returns_one_durable_result(
     active_runtime, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
@@ -754,4 +831,190 @@ def test_profile_activation_concurrent_double_use_has_one_winner(
     with ThreadPoolExecutor(max_workers=2) as executor:
         outcomes = sorted(executor.map(lambda _index: activate_once(), range(2)))
 
-    assert outcomes == ["UNAPPROVED", "active"]
+    assert outcomes == ["active", "active"]
+
+
+def test_profile_ceremony_continues_across_restart_at_every_stage(
+    active_runtime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "core_runtime.pack_control_v4.resolve_profile_pack_set",
+        lambda _pack_ids: active_runtime.resolved,
+    )
+    activations: list[object] = []
+
+    def activate(resolved, **_bindings):
+        activations.append(resolved)
+        return active_runtime.activation
+
+    monkeypatch.setattr(
+        "core_runtime.pack_control_v4.activate_resolved_profile_pack_set",
+        activate,
+    )
+    surface = _service(active_runtime)
+    first = RuntimeProfileChangeService(surface_service=surface)
+    resolved = first.resolve(
+        {
+            "profile_id": "defaults",
+            "expected_profile_revision": active_runtime.resolved.plan["profile_revision"],
+            "expected_plan_digest": active_runtime.resolved.plan["plan_digest"],
+            "desired_pack_ids": ["defaultspack"],
+        },
+        session_id="session-restart",
+    )
+    reviewed = RuntimeProfileChangeService(surface_service=surface).review(
+        {
+            "candidate_id": resolved["candidate_id"],
+            "candidate_digest": resolved["candidate_digest"],
+        },
+        session_id="session-restart",
+    )
+    approved = RuntimeProfileChangeService(surface_service=surface).approve(
+        {
+            "candidate_id": reviewed["candidate_id"],
+            "candidate_digest": reviewed["candidate_digest"],
+        },
+        session_id="session-restart",
+    )
+    activated = RuntimeProfileChangeService(surface_service=surface).activate(
+        {
+            "approval_id": approved["approval_id"],
+            "approval_digest": approved["approval_digest"],
+        },
+        session_id="session-restart",
+    )
+    replay = RuntimeProfileChangeService(surface_service=surface).activate(
+        {
+            "approval_id": approved["approval_id"],
+            "approval_digest": approved["approval_digest"],
+        },
+        session_id="session-restart",
+    )
+
+    assert activated == replay
+    assert activations == [active_runtime.resolved]
+
+
+def test_profile_approval_response_loss_retries_exact_authority_receipt(
+    active_runtime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "core_runtime.pack_control_v4.resolve_profile_pack_set",
+        lambda _pack_ids: active_runtime.resolved,
+    )
+    surface = _service(active_runtime)
+    ceremony = RuntimeProfileChangeService(surface_service=surface)
+    resolved = ceremony.resolve(
+        {
+            "profile_id": "defaults",
+            "expected_profile_revision": active_runtime.resolved.plan["profile_revision"],
+            "expected_plan_digest": active_runtime.resolved.plan["plan_digest"],
+            "desired_pack_ids": ["defaultspack"],
+        },
+        session_id="session-response-loss",
+    )
+    reviewed = ceremony.review(
+        {
+            "candidate_id": resolved["candidate_id"],
+            "candidate_digest": resolved["candidate_digest"],
+        },
+        session_id="session-response-loss",
+    )
+    real_mark_approved = ceremony._store.mark_approved
+    lost = [False]
+
+    def lose_first_receipt(*args, **kwargs):
+        if not lost[0]:
+            lost[0] = True
+            raise OSError("simulated response persistence loss")
+        return real_mark_approved(*args, **kwargs)
+
+    monkeypatch.setattr(ceremony._store, "mark_approved", lose_first_receipt)
+    request = {
+        "candidate_id": reviewed["candidate_id"],
+        "candidate_digest": reviewed["candidate_digest"],
+    }
+    with pytest.raises(RuntimeSurfaceError) as failed_response:
+        ceremony.approve(request, session_id="session-response-loss")
+    assert failed_response.value.code is RuntimeSurfaceErrorCode.API_FAILURE
+
+    retried = RuntimeProfileChangeService(surface_service=surface).approve(
+        request,
+        session_id="session-response-loss",
+    )
+    authority_path = runtime_user_data_root() / "authority" / "v4.sqlite3"
+    with AuthorityStore(authority_path) as authority:
+        record = authority.get_approval(retried["approval_id"])
+        commits = [
+            event
+            for event in authority.audit_events()
+            if event["event_type"] == "authority_records_committed"
+            and any(
+                item.get("record_id") == retried["approval_id"]
+                for item in event["payload"].get("records", [])
+            )
+        ]
+    assert record is not None
+    assert record.digest == retried["approval_digest"]
+    assert len(commits) == 1
+
+
+def test_profile_approval_is_idempotent_across_processes(
+    active_runtime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "core_runtime.pack_control_v4.resolve_profile_pack_set",
+        lambda _pack_ids: active_runtime.resolved,
+    )
+    ceremony = RuntimeProfileChangeService(surface_service=_service(active_runtime))
+    resolved = ceremony.resolve(
+        {
+            "profile_id": "defaults",
+            "expected_profile_revision": active_runtime.resolved.plan["profile_revision"],
+            "expected_plan_digest": active_runtime.resolved.plan["plan_digest"],
+            "desired_pack_ids": ["defaultspack"],
+        },
+        session_id="session-process-approval",
+    )
+    reviewed = ceremony.review(
+        {
+            "candidate_id": resolved["candidate_id"],
+            "candidate_digest": resolved["candidate_digest"],
+        },
+        session_id="session-process-approval",
+    )
+
+    context = multiprocessing.get_context("spawn")
+    results = context.Queue()
+    processes = [
+        context.Process(
+            target=_approve_profile_process,
+            args=(
+                str(reviewed["candidate_id"]),
+                str(reviewed["candidate_digest"]),
+                "session-process-approval",
+                results,
+            ),
+        )
+        for _index in range(2)
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=20)
+        assert process.exitcode == 0
+    outcomes = [results.get(timeout=2), results.get(timeout=2)]
+
+    assert {item[0] for item in outcomes} == {"approved"}
+    assert len({item[1:] for item in outcomes}) == 1
+    approval_id = outcomes[0][1]
+    with AuthorityStore(runtime_user_data_root() / "authority" / "v4.sqlite3") as authority:
+        commits = [
+            event
+            for event in authority.audit_events()
+            if event["event_type"] == "authority_records_committed"
+            and any(
+                item.get("record_id") == approval_id for item in event["payload"].get("records", [])
+            )
+        ]
+    assert len(commits) == 1

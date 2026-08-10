@@ -151,6 +151,12 @@
     },
     {
       "method": "GET",
+      "path": "/api/runtime-surface/operation-status",
+      "presentation": "broker_result",
+      "targets": [{"contribution_id": "defaults.runtime-surface.operation-status", "contract_id": "tobkiri.host.control-presentation.v4", "operation_id": "operation.status.read", "provider_id": "tobkiri.host.control-presentation", "function_id": "tobkiri.host.control-presentation", "allowed_payload_keys": ["request_id"]}]
+    },
+    {
+      "method": "GET",
       "path": "/api/runtime-surface/settings",
       "presentation": "broker_result",
       "targets": [{"contribution_id": "defaults.runtime-surface.settings", "contract_id": "tobkiri.host.control-presentation.v4", "operation_id": "settings.read", "provider_id": "tobkiri.host.control-presentation", "function_id": "tobkiri.host.control-presentation", "allowed_payload_keys": []}]

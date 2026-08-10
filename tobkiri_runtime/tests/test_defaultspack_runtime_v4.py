@@ -156,6 +156,44 @@ def _activation_process(
         authority.close()
 
 
+def _cas_activation_process(
+    state_root: str,
+    workspace_root: str,
+    authority_path: str,
+    activation_id: str,
+    expected_revision: str,
+    expected_plan_digest: str,
+    expected_activation_id: str,
+    barrier: multiprocessing.synchronize.Barrier,
+    results: multiprocessing.queues.Queue,
+) -> None:
+    authority = _authority(Path(authority_path))
+    try:
+        if barrier.wait(timeout=15) < 0:  # pragma: no cover - defensive API guard
+            raise RuntimeError("activation barrier failed")
+        activation = ActivationStore(
+            Path(state_root),
+            Path(workspace_root),
+            profile_id="defaults",
+            authority=authority,
+        ).activate(
+            _resolve(),
+            activation_id=activation_id,
+            created_at="2026-08-10T00:01:00Z",
+            expected_predecessor_profile_revision=expected_revision,
+            expected_predecessor_plan_digest=expected_plan_digest,
+            expected_predecessor_activation_id=expected_activation_id,
+        )
+        results.put(("active", activation["activation_id"]))
+    except ProfileResolutionDenied as error:
+        state = "STALE_REVISION" if "predecessor is stale" in str(error) else "error"
+        results.put((state, str(error)))
+    except Exception as error:  # pragma: no cover - reported to the parent assertion
+        results.put(("error", f"{type(error).__name__}: {error}"))
+    finally:
+        authority.close()
+
+
 def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
     catalog = _catalog()
     resolved = _resolve(catalog)
@@ -255,6 +293,7 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
         "tobkiri.host.control-presentation",
         "tobkiri.host.control-presentation",
         "tobkiri.host.control-presentation",
+        "tobkiri.host.control-presentation",
         "tobkiri.host.pack-control",
         "tobkiri.host.pack-control",
         "rumi_file_inspect_pack.file-inspect.service",
@@ -267,9 +306,9 @@ def test_lock_plan_and_activation_bind_the_complete_canonical_definition(
 ) -> None:
     catalog = _catalog()
     resolved = _resolve(catalog)
-    expected_bundle_digest = "sha256:" + hashlib.sha256(
-        (catalog.root / "bundle.lock.json").read_bytes()
-    ).hexdigest()
+    expected_bundle_digest = (
+        "sha256:" + hashlib.sha256((catalog.root / "bundle.lock.json").read_bytes()).hexdigest()
+    )
     application = catalog.packs["runtime.tauri.application.default"]
 
     assert resolved.lock["profile_definition_digest"] == canonical_digest(
@@ -279,9 +318,7 @@ def test_lock_plan_and_activation_bind_the_complete_canonical_definition(
     assert resolved.lock["application"] == {
         "pack_id": "runtime.tauri.application.default",
         "artifact_digest": application["pack"]["artifact_digest"],
-        "executable_artifact_digest": resolved.profile["shell"][
-            "executable_artifact_digest"
-        ],
+        "executable_artifact_digest": resolved.profile["shell"]["executable_artifact_digest"],
         "definition_digest": canonical_digest(application),
     }
     for field in (
@@ -296,18 +333,12 @@ def test_lock_plan_and_activation_bind_the_complete_canonical_definition(
         "provenance_digest",
     ):
         assert resolved.plan[field] == resolved.lock[field]
-    assert resolved.plan["closure_digest"] == canonical_digest(
-        resolved.plan["effective_set"]
-    )
+    assert resolved.plan["closure_digest"] == canonical_digest(resolved.plan["effective_set"])
     assert resolved.plan["requested_edges_digest"] == canonical_digest(
         resolved.profile["requested_edges"]
     )
-    assert resolved.plan["provenance_digest"] == canonical_digest(
-        resolved.profile["provenance"]
-    )
-    edge_by_key = {
-        _edge_key(edge): edge for edge in resolved.profile["requested_edges"]
-    }
+    assert resolved.plan["provenance_digest"] == canonical_digest(resolved.profile["provenance"])
+    edge_by_key = {_edge_key(edge): edge for edge in resolved.profile["requested_edges"]}
     assert len(resolved.plan["bindings"]) == len(edge_by_key)
     for binding in resolved.plan["bindings"]:
         key = "|".join(
@@ -673,6 +704,102 @@ def test_independent_process_activations_never_publish_retired_pointer(
     (state_root / "active.json").write_text(json.dumps(first_pointer), encoding="utf-8")
     with pytest.raises(ProfileResolutionDenied, match="authority, fence, or SecurityEpoch"):
         restarted.load_active_snapshot()
+    restarted_authority.close()
+
+
+def test_cross_process_predecessor_cas_precedes_authority_reservation(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state"
+    authority_path = tmp_path / "authority.sqlite3"
+    authority = _authority(authority_path)
+    resolved = _resolve()
+    predecessor = ActivationStore(
+        state_root,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+    ).activate(
+        resolved,
+        activation_id="activation:defaults-cas-predecessor",
+        created_at="2026-08-10T00:00:00Z",
+    )
+    authority.close()
+
+    context = multiprocessing.get_context("spawn")
+    barrier = context.Barrier(2)
+    results = context.Queue()
+    contenders = [
+        "activation:defaults-cas-first",
+        "activation:defaults-cas-second",
+    ]
+    processes = [
+        context.Process(
+            target=_cas_activation_process,
+            args=(
+                str(state_root),
+                str(workspace),
+                str(authority_path),
+                activation_id,
+                str(resolved.plan["profile_revision"]),
+                str(resolved.plan["plan_digest"]),
+                str(predecessor["activation_id"]),
+                barrier,
+                results,
+            ),
+        )
+        for activation_id in contenders
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=20)
+        assert process.exitcode == 0
+
+    outcomes = [results.get(timeout=2), results.get(timeout=2)]
+    assert sorted(item[0] for item in outcomes) == ["STALE_REVISION", "active"]
+    winner = next(item[1] for item in outcomes if item[0] == "active")
+
+    restarted_authority = _authority(authority_path)
+    contender_events = [
+        event
+        for event in restarted_authority.audit_events()
+        if event["event_type"] == "activation"
+        and event["payload"].get("activation_id") in contenders
+    ]
+    assert sum(event["event_state"] == "prepared" for event in contender_events) == 1
+    assert sum(event["event_state"] == "active" for event in contender_events) == 1
+    restarted_store = ActivationStore(
+        state_root,
+        workspace,
+        profile_id="defaults",
+        authority=restarted_authority,
+    )
+    active = restarted_store.load_active_snapshot()
+    assert active.activation["activation_id"] == winner
+    replay = restarted_store.activate(
+        resolved,
+        activation_id=str(winner),
+        created_at="2026-08-10T00:02:00Z",
+        expected_predecessor_profile_revision=str(resolved.plan["profile_revision"]),
+        expected_predecessor_plan_digest=str(resolved.plan["plan_digest"]),
+        expected_predecessor_activation_id=str(predecessor["activation_id"]),
+    )
+    assert replay == active.activation
+    assert (
+        len(
+            [
+                event
+                for event in restarted_authority.audit_events()
+                if event["event_type"] == "activation"
+                and event["event_state"] == "prepared"
+                and event["payload"].get("activation_id") in contenders
+            ]
+        )
+        == 1
+    )
     restarted_authority.close()
 
 

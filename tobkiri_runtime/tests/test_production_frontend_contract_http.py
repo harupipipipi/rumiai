@@ -601,8 +601,172 @@ def test_profile_ceremony_uses_four_canonical_broker_operations(
         },
     )
     assert status == 200, replayed
-    assert replayed["data"]["state"] == "error"
-    assert replayed["data"]["code"] == "UNAPPROVED"
+    assert replayed["data"] == activated["data"]
+
+
+def test_mutation_status_reconciles_lost_response_and_exact_approval_retry(
+    production_server,
+) -> None:
+    server, _session, authority = production_server
+    cookie, csrf, origin = _authenticate(server)
+    headers = {
+        "Cookie": cookie,
+        "Origin": origin,
+        "X-Rumi-CSRF": csrf,
+    }
+    status, profile, _ = _request(
+        server,
+        "GET",
+        _contract("GET", "/api/runtime-surface/profile"),
+        headers={"Cookie": cookie, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+    )
+    assert status == 200, profile
+    envelope = profile["data"]
+    desired = [
+        item["pack_id"]
+        for item in envelope["data"]["profile_document"]["packs"]
+        if item.get("role") != "application"
+    ]
+
+    def post(target: str, body: Mapping[str, object], request_id: str):
+        return _request(
+            server,
+            "POST",
+            _contract("POST", target),
+            body=body,
+            headers={**headers, "X-Tobkiri-Request-ID": request_id},
+        )
+
+    status, resolved, _ = post(
+        "/api/runtime-surface/profile-change/resolve",
+        {
+            "profile_id": "defaults",
+            "expected_profile_revision": envelope["profile_revision"],
+            "expected_plan_digest": envelope["plan_digest"],
+            "desired_pack_ids": desired,
+        },
+        str(uuid.uuid4()),
+    )
+    assert status == 200, resolved
+    status, reviewed, _ = post(
+        "/api/runtime-surface/profile-change/review",
+        {
+            "candidate_id": resolved["data"]["candidate_id"],
+            "candidate_digest": resolved["data"]["candidate_digest"],
+        },
+        str(uuid.uuid4()),
+    )
+    assert status == 200, reviewed
+    approve_body = {
+        "candidate_id": reviewed["data"]["candidate_id"],
+        "candidate_digest": reviewed["data"]["candidate_digest"],
+    }
+    request_id = str(uuid.uuid4())
+    lost_response = http.client.HTTPConnection(
+        "127.0.0.1",
+        server.port,
+        timeout=FRONTEND_MUTATION_TIMEOUT_SECONDS,
+    )
+    lost_response.request(
+        "POST",
+        _contract("POST", "/api/runtime-surface/profile-change/approve"),
+        body=json.dumps(approve_body).encode("utf-8"),
+        headers={
+            **headers,
+            "Content-Type": "application/json",
+            "X-Tobkiri-Request-ID": request_id,
+        },
+    )
+    lost_response.close()
+
+    status_path = _contract("GET", "/api/runtime-surface/operation-status")
+    deadline = time.monotonic() + FRONTEND_MUTATION_TIMEOUT_SECONDS
+    while True:
+        status, reconciled, _ = _request(
+            server,
+            "GET",
+            f"{status_path}?request_id={request_id}",
+            headers={"Cookie": cookie, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+        )
+        if status == 200 and reconciled["data"]["state"] == "succeeded":
+            break
+        assert time.monotonic() < deadline, reconciled
+        time.sleep(0.02)
+    assert status == 200, reconciled
+    assert reconciled["data"]["state"] == "succeeded"
+    assert reconciled["data"]["request_id"] == request_id
+    assert reconciled["data"]["result_digest"].startswith("sha256:")
+    approved = {"data": reconciled["data"]["result"]}
+    assert reconciled["data"]["record_refs"] == [
+        {
+            "kind": "approval",
+            "id": approved["data"]["approval_id"],
+            "digest": approved["data"]["approval_digest"],
+        }
+    ]
+
+    server.stop()
+    server.start()
+    status, after_restart, _ = _request(
+        server,
+        "GET",
+        f"{status_path}?request_id={request_id}",
+        headers={"Cookie": cookie, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+    )
+    assert status == 200, after_restart
+    assert after_restart["data"] == reconciled["data"]
+
+    other_cookie, _other_csrf, _other_origin = _authenticate(server)
+    status, cross_session, _ = _request(
+        server,
+        "GET",
+        f"{status_path}?request_id={request_id}",
+        headers={
+            "Cookie": other_cookie,
+            "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+        },
+    )
+    assert status == 409, cross_session
+
+    status, same_request, _ = post(
+        "/api/runtime-surface/profile-change/approve",
+        approve_body,
+        request_id,
+    )
+    assert status == 200, same_request
+    assert same_request["data"] == approved["data"]
+    status, different_request, _ = post(
+        "/api/runtime-surface/profile-change/approve",
+        approve_body,
+        str(uuid.uuid4()),
+    )
+    assert status == 200, different_request
+    assert different_request["data"]["approval_id"] == approved["data"]["approval_id"]
+    assert different_request["data"]["approval_digest"] == approved["data"]["approval_digest"]
+    assert different_request["data"]["authority_approval"] == approved["data"]["authority_approval"]
+
+    commits = [
+        event
+        for event in authority.audit_events()
+        if event["event_type"] == "authority_records_committed"
+        and any(
+            item.get("record_id") == approved["data"]["approval_id"]
+            for item in event["payload"].get("records", [])
+        )
+    ]
+    assert len(commits) == 1
+
+    for unknown_id in (
+        "00000000-0000-4000-8000-000000000000",
+        request_id + "-tampered",
+    ):
+        status, rejected, _ = _request(
+            server,
+            "GET",
+            f"{status_path}?request_id={unknown_id}",
+            headers={"Cookie": cookie, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+        )
+        assert status == 409, rejected
 
 
 def test_contract_replay_unknown_and_stale_capture_fail_closed(

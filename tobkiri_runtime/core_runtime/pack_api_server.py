@@ -27,6 +27,10 @@ from .capability_bindings_v4 import (
     CapabilityBindingSnapshot,
     capture_capability_binding_snapshot,
 )
+from .control_reconciliation_v4 import (
+    ControlReconciliationError,
+    ControlReconciliationStore,
+)
 from .frontend_contract_routes import (
     ContractRouteError,
     FrontendContractBinding,
@@ -45,6 +49,24 @@ logger = logging.getLogger(__name__)
 
 THREAD_JOIN_TIMEOUT_SECONDS = 5
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _result_record_refs(result: Mapping[str, Any]) -> list[Mapping[str, str]]:
+    """Return stable non-secret record references from one mutation result."""
+
+    references: list[Mapping[str, str]] = []
+    for key, value in sorted(result.items()):
+        if not key.endswith("_id") or not isinstance(value, str) or not value:
+            continue
+        digest_key = key.removesuffix("_id") + "_digest"
+        digest = result.get(digest_key)
+        reference: dict[str, str] = {"kind": key.removesuffix("_id"), "id": value}
+        if isinstance(digest, str) and digest.startswith("sha256:"):
+            reference["digest"] = digest
+        references.append(reference)
+    return references
+
+
 _RETIRED_API_ROOTS = frozenset(
     {
         "auth",
@@ -208,6 +230,11 @@ class _RequestReplayGuard:
             self._consumed.add(key)
         return True
 
+    def valid(self, session_id: str, request_id: str) -> bool:
+        """Return whether an identity is canonical without consuming it."""
+
+        return bool(session_id and self._REQUEST_ID.fullmatch(request_id))
+
 
 class PackAPIHandler(
     ResponseWriterMixin,
@@ -228,6 +255,7 @@ class PackAPIHandler(
     _dispatch_session: DispatchSession | None = None
     _contract_routes: Mapping[tuple[str, str], FrontendContractBinding] = {}
     _contract_replay_guard: _RequestReplayGuard | None = None
+    _operation_journal: ControlReconciliationStore | None = None
     _runtime_refresh: Callable[[DispatchSession | None], None] | None = None
     _packvm_lifecycle: PackVMLifecyclePort | None = None
     _workspace_binding_resolver: WorkspaceBindingResolver | None = None
@@ -247,6 +275,7 @@ class PackAPIHandler(
         app_lifecycle_manager: LifecyclePort | None,
         contract_routes: Mapping[tuple[str, str], FrontendContractBinding] | None = None,
         replay_guard: _RequestReplayGuard | None = None,
+        operation_journal: ControlReconciliationStore | None = None,
         web_mounts: tuple[WebMountEntry, ...] | None = None,
         runtime_refresh: Callable[[DispatchSession | None], None] | None = None,
         workspace_binding_resolver: WorkspaceBindingResolver | None = None,
@@ -259,6 +288,7 @@ class PackAPIHandler(
         bound_lifecycle = app_lifecycle_manager
         bound_contract_routes = dict(contract_routes or {})
         bound_replay_guard = replay_guard
+        bound_operation_journal = operation_journal
         bound_web_mounts = web_mounts
         bound_runtime_refresh = runtime_refresh
         bound_workspace_binding_resolver = workspace_binding_resolver
@@ -270,6 +300,7 @@ class PackAPIHandler(
             app_lifecycle_manager = bound_lifecycle
             _contract_routes = bound_contract_routes
             _contract_replay_guard = bound_replay_guard
+            _operation_journal = bound_operation_journal
             _packvm_lifecycle = bound_packvm_lifecycle
             _instance_web_mounts = bound_web_mounts
             _runtime_refresh = (
@@ -417,7 +448,7 @@ class PackAPIHandler(
         if (
             not isinstance(session_id, str)
             or replay_guard is None
-            or not replay_guard.consume(session_id, request_id)
+            or not replay_guard.valid(session_id, request_id)
         ):
             self._discard_request_body()
             self._send_response(
@@ -425,9 +456,9 @@ class PackAPIHandler(
                     False,
                     data={
                         "state": "contract_dispatch_denied",
-                        "code": "invalid_or_replayed_request",
+                        "code": "invalid_request_identity",
                     },
-                    error="Canonical request identity is missing or replayed",
+                    error="Canonical request identity is missing or invalid",
                 ),
                 409,
             )
@@ -502,6 +533,78 @@ class PackAPIHandler(
             )
             return True
         payload["_session_id"] = session_id
+        operation_record: Mapping[str, Any] | None = None
+        operation_journal = self._operation_journal
+        if method.upper() == "GET":
+            if not replay_guard.consume(session_id, request_id):
+                self._send_response(
+                    APIResponse(False, error="Canonical request identity is replayed"),
+                    409,
+                )
+                return True
+        else:
+            if operation_journal is None:
+                self._send_response(
+                    APIResponse(False, error="Control operation journal is unavailable"),
+                    503,
+                )
+                return True
+            request_digest = canonical_digest(
+                {
+                    "method": resolved.method,
+                    "path": resolved.path,
+                    "contract_id": target.contract_id,
+                    "operation_id": target.operation_id,
+                    "payload": payload,
+                }
+            )
+            fresh = replay_guard.consume(session_id, request_id)
+            try:
+                operation_record, created = operation_journal.begin_operation(
+                    request_id=request_id,
+                    session_id=session_id,
+                    operation_id=target.operation_id,
+                    contract_id=target.contract_id,
+                    request_digest=request_digest,
+                )
+            except ControlReconciliationError as error:
+                self._send_response(
+                    APIResponse(
+                        False,
+                        data={
+                            "state": "contract_dispatch_denied",
+                            "code": "operation_reconciliation_mismatch",
+                        },
+                        error=str(error),
+                    ),
+                    409,
+                )
+                return True
+            if not fresh and created:
+                operation_journal.finish_operation(
+                    request_id,
+                    session_id=session_id,
+                    state="failed",
+                    result=None,
+                    safe_error_code="REPLAY_GUARD_MISMATCH",
+                )
+                self._send_response(
+                    APIResponse(False, error="Canonical request identity is replayed"),
+                    409,
+                )
+                return True
+            if not created:
+                state = str(operation_record["state"])
+                prior_result = operation_record.get("result")
+                if state == "succeeded" and isinstance(prior_result, Mapping):
+                    presented = self._present_contract_result(route_binding, prior_result)
+                    self._send_response(APIResponse(True, data=presented))
+                else:
+                    self._send_response(
+                        APIResponse(state == "pending", data=dict(operation_record)),
+                        200 if state == "pending" else 409,
+                    )
+                return True
         try:
             session.assert_current()
             result = session.invoke(
@@ -509,6 +612,19 @@ class PackAPIHandler(
                 target.operation_id,
                 payload,
             )
+            if operation_journal is not None and operation_record is not None:
+                operation_journal.finish_operation(
+                    request_id,
+                    session_id=session_id,
+                    state=("failed" if result.get("state") == "error" else "succeeded"),
+                    result=result,
+                    record_refs=_result_record_refs(result),
+                    safe_error_code=(
+                        str(result.get("code") or "OPERATION_FAILED")
+                        if result.get("state") == "error"
+                        else None
+                    ),
+                )
             self._refresh_after_operation(target.operation_id, result)
         except (
             HostCoreError,
@@ -517,6 +633,17 @@ class PackAPIHandler(
             RuntimeError,
             ValueError,
         ) as error:
+            if operation_journal is not None and operation_record is not None:
+                try:
+                    operation_journal.finish_operation(
+                        request_id,
+                        session_id=session_id,
+                        state="failed",
+                        result=None,
+                        safe_error_code=str(getattr(error, "code", "invalid_dispatch")),
+                    )
+                except ControlReconciliationError:
+                    pass
             self._send_response(
                 APIResponse(
                     False,
@@ -602,9 +729,7 @@ class PackAPIHandler(
                 operation_values = parse_qs(urlparse(self.path).query).get("operation_id", [])
                 if len(operation_values) != 1:
                     raise ValueError("PackVM progress requires one operation_id")
-                result = lifecycle.progress(
-                    operation_values[0], session_id=packvm_session_id
-                )
+                result = lifecycle.progress(operation_values[0], session_id=packvm_session_id)
             elif operation == "cancel":
                 result = lifecycle.cancel(payload, session_id=packvm_session_id)
             elif operation == "stop":
@@ -1307,6 +1432,13 @@ class PackAPIServer:
             packvm_lifecycle = PackVMLifecycleV4()
         self._packvm_lifecycle = packvm_lifecycle
         self._replay_guard = _RequestReplayGuard()
+        from .bootstrap.profile_capture import runtime_user_data_root
+
+        self._operation_journal = ControlReconciliationStore(
+            runtime_user_data_root() / "control" / "reconciliation-v4.sqlite3",
+            instance_id=str(uuid.uuid4()),
+        )
+        self._operation_journal.recover_abandoned_operations()
         self.server: _PackThreadingHTTPServer | None = None
         self.thread: threading.Thread | None = None
         self.handler_class: type[PackAPIHandler] | None = None
@@ -1325,6 +1457,7 @@ class PackAPIServer:
                 app_lifecycle_manager=self.app_lifecycle_manager,
                 contract_routes=self._contract_routes,
                 replay_guard=self._replay_guard,
+                operation_journal=self._operation_journal,
                 web_mounts=self._web_mounts,
                 runtime_refresh=self._refresh_runtime_capture,
                 workspace_binding_resolver=self._workspace_binding_resolver,
@@ -1446,6 +1579,7 @@ class PackAPIServer:
                 app_lifecycle_manager=self.app_lifecycle_manager,
                 contract_routes=routes,
                 replay_guard=self._replay_guard,
+                operation_journal=self._operation_journal,
                 web_mounts=self._web_mounts,
                 runtime_refresh=self._refresh_runtime_capture,
                 workspace_binding_resolver=self._workspace_binding_resolver,

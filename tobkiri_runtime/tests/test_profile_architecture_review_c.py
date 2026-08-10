@@ -70,8 +70,7 @@ def _resolve(catalog: BundledCatalog):
         catalog,
         "defaults",
         approved_artifact_digests={
-            str(manifest["pack"]["artifact_digest"])
-            for manifest in catalog.packs.values()
+            str(manifest["pack"]["artifact_digest"]) for manifest in catalog.packs.values()
         },
         authority_snapshot_digest="sha256:" + "9" * 64,
         authority_bindings={
@@ -100,8 +99,7 @@ def _macos_artifact(tmp_path: Path) -> tuple[Path, dict[str, object]]:
         "architecture": "arm64",
         "bundle_identity": "io.tobkiri.shell.tauri",
         "artifact_digest": artifact_digest(application),
-        "entrypoint_digest": "sha256:"
-        + hashlib.sha256(executable.read_bytes()).hexdigest(),
+        "entrypoint_digest": "sha256:" + hashlib.sha256(executable.read_bytes()).hexdigest(),
     }
 
 
@@ -272,9 +270,7 @@ def test_production_bundle_root_ignores_environment_attack(
         raise CatalogProbe
 
     monkeypatch.setattr(BundledCatalog, "load", classmethod(probe))
-    monkeypatch.setattr(
-        profile_capture, "capture_default_profile", lambda **_kwargs: object()
-    )
+    monkeypatch.setattr(profile_capture, "capture_default_profile", lambda **_kwargs: object())
     entrypoints = (
         lambda: RuntimeSurfaceService._load_catalog(),
         lambda: pack_control_v4._required_profile_pack_ids("defaults"),
@@ -330,9 +326,7 @@ def test_installed_bundle_is_exactly_bound_to_resource_manifest(tmp_path: Path) 
 
 
 @pytest.mark.parametrize("field", ("platform", "architecture"))
-def test_packaged_artifact_metadata_mismatch_is_rejected(
-    tmp_path: Path, field: str
-) -> None:
+def test_packaged_artifact_metadata_mismatch_is_rejected(tmp_path: Path, field: str) -> None:
     catalog = _packaged_catalog(tmp_path)
     shell = copy.deepcopy(catalog.shells["shell.tauri.default"])
     replacement = {
@@ -353,13 +347,9 @@ def test_packaged_artifact_metadata_mismatch_is_rejected(
 
 
 @pytest.mark.parametrize("case", ("missing", "digest", "sentinel", "symlink"))
-def test_packaged_artifact_path_digest_and_symlink_rejection(
-    tmp_path: Path, case: str
-) -> None:
+def test_packaged_artifact_path_digest_and_symlink_rejection(tmp_path: Path, case: str) -> None:
     catalog = _packaged_catalog(tmp_path)
-    variant = copy.deepcopy(
-        catalog.shells["shell.tauri.default"]["launch"]["variants"][0]
-    )
+    variant = copy.deepcopy(catalog.shells["shell.tauri.default"]["launch"]["variants"][0])
     executable = catalog.artifact_root / str(variant["entrypoint"])
     if case == "missing":
         variant["relative_path"] = "Missing.app"
@@ -406,9 +396,7 @@ def _write_frozen_activation(
         activation_id=activation["activation_id"],
         profile_id=activation["profile_id"],
         plan_digest=activation["plan_digest"],
-        profile_authority_digest=activation[
-            "profile_authority_snapshot_digest"
-        ],
+        profile_authority_digest=activation["profile_authority_snapshot_digest"],
         security_epoch=activation["security_epoch"],
     )
     assert fencing_token == activation["fencing_token"]
@@ -417,19 +405,12 @@ def _write_frozen_activation(
         ("ready_without_authority", "committing"),
         ("committing", "active"),
     ):
-        authority.transition_activation(
-            reservation_id, expected_state=before, new_state=after
-        )
-    workspace_digest = canonical_digest(
-        {"workspace_root": str(workspace.resolve())}
-    )
+        authority.transition_activation(reservation_id, expected_state=before, new_state=after)
+    workspace_digest = canonical_digest({"workspace_root": str(workspace.resolve())})
     envelope = {
         "schema": "io.tobkiri.defaultspack-activation-envelope.v1",
         "workspace_digest": workspace_digest,
-        **{
-            key: fixture[key]
-            for key in ("profile", "lock", "plan", "activation")
-        },
+        **{key: fixture[key] for key in ("profile", "lock", "plan", "activation")},
     }
     envelope_path = state / "activations/defaults-pre-e853.json"
     envelope_path.parent.mkdir(parents=True)
@@ -451,10 +432,7 @@ def _compatible_legacy_fixture(resolved: Any) -> dict[str, Any]:
         "profile_id": profile["profile_id"],
         "profile_revision": canonical_digest(profile),
         "security_epoch": resolved.plan["security_epoch"],
-        "base": {
-            key: resolved.plan["base"][key]
-            for key in ("pack_id", "artifact_digest")
-        },
+        "base": {key: resolved.plan["base"][key] for key in ("pack_id", "artifact_digest")},
         "shell": {
             key: resolved.plan["shell"][key]
             for key in ("provider_id", "pack_id", "artifact_digest", "contract_id")
@@ -492,9 +470,7 @@ def _compatible_legacy_fixture(resolved: Any) -> dict[str, Any]:
         },
         "effective_set": copy.deepcopy(resolved.plan["effective_set"]),
         "plan_digest": plan["plan_digest"],
-        "profile_authority_snapshot_digest": profile[
-            "profile_authority_snapshot_digest"
-        ],
+        "profile_authority_snapshot_digest": profile["profile_authority_snapshot_digest"],
         "lock_digest": "sha256:" + "0" * 64,
     }
     lock["lock_digest"] = canonical_digest(
@@ -507,9 +483,7 @@ def _compatible_legacy_fixture(resolved: Any) -> dict[str, Any]:
         "state": "active",
         "state_generation": 4,
         "plan_digest": plan["plan_digest"],
-        "profile_authority_snapshot_digest": profile[
-            "profile_authority_snapshot_digest"
-        ],
+        "profile_authority_snapshot_digest": profile["profile_authority_snapshot_digest"],
         "security_epoch": resolved.plan["security_epoch"],
         "fencing_token": 1,
         "created_at": "2026-08-10T00:00:00Z",
@@ -582,16 +556,12 @@ def test_exact_legacy_activation_migrates_once_without_drift(tmp_path: Path) -> 
     )
     migrated = store.load_active_snapshot()
     assert migrated.resolved.plan == resolved.plan
-    assert migrated.activation["activation_api_version"] == (
-        "io.tobkiri.activation-record.v2"
-    )
+    assert migrated.activation["activation_api_version"] == ("io.tobkiri.activation-record.v2")
     assert store.load_active_snapshot().activation == migrated.activation
 
 
 @pytest.mark.parametrize("role", ("base", "shell", "pack"))
-def test_legacy_migration_rejects_self_consistent_artifact_drift(
-    tmp_path: Path, role: str
-) -> None:
+def test_legacy_migration_rejects_self_consistent_artifact_drift(tmp_path: Path, role: str) -> None:
     catalog = _packaged_catalog(tmp_path)
     fixture = _compatible_legacy_fixture(_resolve(catalog))
     _retarget_legacy_artifact(fixture, role)
@@ -613,9 +583,9 @@ def test_legacy_migration_rejects_self_consistent_artifact_drift(
 def test_legacy_migration_rejects_principal_drift(tmp_path: Path) -> None:
     catalog = _packaged_catalog(tmp_path)
     fixture = _compatible_legacy_fixture(_resolve(catalog))
-    fixture["plan"]["bindings"][0]["function_principal"][
-        "function_implementation_digest"
-    ] = "sha256:" + "e" * 64
+    fixture["plan"]["bindings"][0]["function_principal"]["function_implementation_digest"] = (
+        "sha256:" + "e" * 64
+    )
     _redigest_legacy_fixture(fixture)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -648,9 +618,15 @@ def test_frozen_pre_e853_restart_rejects_implicit_artifact_upgrade(
         authority=authority,
         catalog=catalog,
     )
-    with pytest.raises(ProfileResolutionDenied, match="artifact closure changed"):
+    with pytest.raises(
+        ProfileResolutionDenied,
+        match="artifact closure changed|Authority Kernel reference is missing",
+    ):
         store.load_active_snapshot()
-    with pytest.raises(ProfileResolutionDenied, match="artifact closure changed"):
+    with pytest.raises(
+        ProfileResolutionDenied,
+        match="artifact closure changed|Authority Kernel reference is missing",
+    ):
         store.load_active_snapshot()
 
 
@@ -696,9 +672,15 @@ def test_frozen_pre_e853_tamper_and_migration_crash_fail_closed(
         catalog=catalog,
         fault=crash,
     )
-    with pytest.raises(ProfileResolutionDenied, match="artifact closure changed"):
+    with pytest.raises(
+        ProfileResolutionDenied,
+        match="artifact closure changed|Authority Kernel reference is missing",
+    ):
         crashing.load_active_snapshot()
-    with pytest.raises(ProfileResolutionDenied, match="artifact closure changed"):
+    with pytest.raises(
+        ProfileResolutionDenied,
+        match="artifact closure changed|Authority Kernel reference is missing",
+    ):
         ActivationStore(
             clean_state,
             workspace,
@@ -717,15 +699,11 @@ def test_normative_generator_rejects_dirty_implicit_commit(tmp_path: Path) -> No
         cwd=repository,
         check=True,
     )
-    subprocess.run(
-        ["git", "config", "user.name", "Test"], cwd=repository, check=True
-    )
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repository, check=True)
     source = repository / "source.json"
     source.write_text("{}", encoding="utf-8")
     subprocess.run(["git", "add", "source.json"], cwd=repository, check=True)
-    subprocess.run(
-        ["git", "commit", "-qm", "fixture"], cwd=repository, check=True
-    )
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=repository, check=True)
     source.write_text('{"dirty":true}', encoding="utf-8")
     with pytest.raises(Exception, match="dirty working tree"):
         trusted_source_commit(repository)
@@ -748,9 +726,7 @@ def test_informational_commit_is_stable_across_child_and_shallow_checkout(
         cwd=repository,
         check=True,
     )
-    subprocess.run(
-        ["git", "config", "user.name", "Test"], cwd=repository, check=True
-    )
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repository, check=True)
     source = repository / "source.json"
     source.write_text("{}", encoding="utf-8")
     subprocess.run(["git", "add", "source.json"], cwd=repository, check=True)

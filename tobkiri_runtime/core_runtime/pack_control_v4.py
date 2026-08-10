@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import tempfile
 import threading
@@ -35,6 +36,7 @@ CONTROL_PRESENTATION_OPERATIONS = frozenset(
         "profile.change.resolve",
         "profile.change.review",
         "profile.catalog.read",
+        "operation.status.read",
         "profile.read",
         "settings.read",
         "topology.contracts.read",
@@ -239,6 +241,27 @@ class CapturedPackControlSession:
             if operation_id == "profile.catalog.read":
                 _require_empty(arguments)
                 return self._runtime_surface.read_profile_catalog()
+            if operation_id == "operation.status.read":
+                request_id = _required(
+                    arguments.pop("request_id", None),
+                    "operation request identity",
+                )
+                _require_empty(arguments)
+                from .bootstrap.profile_capture import runtime_user_data_root
+                from .control_reconciliation_v4 import (
+                    ControlReconciliationError,
+                    ControlReconciliationStore,
+                )
+
+                try:
+                    return ControlReconciliationStore(
+                        runtime_user_data_root() / "control" / "reconciliation-v4.sqlite3"
+                    ).operation_status(
+                        request_id,
+                        session_id=_panel_session_root(session_id),
+                    )
+                except ControlReconciliationError as error:
+                    raise PackControlDenied("operation status is unavailable") from error
             if operation_id == "settings.read":
                 _require_empty(arguments)
                 return self._runtime_surface.read_settings()
@@ -254,7 +277,7 @@ class CapturedPackControlSession:
                 )
             action = operation_id.removeprefix("profile.change.")
             handler = getattr(self._profile_changes, action)
-            result = handler(arguments, session_id=session_id)
+            result = handler(arguments, session_id=_panel_session_root(session_id))
             if action == "activate":
                 self._recapture()
                 result = {
@@ -998,8 +1021,10 @@ def resolve_profile_pack_set(
 def activate_resolved_profile_pack_set(
     resolved: Any,
     *,
+    activation_id: str,
     expected_profile_revision: str,
     expected_plan_digest: str,
+    expected_activation_id: str,
 ) -> Mapping[str, Any]:
     """Activate one reviewed candidate if its captured predecessor is current."""
 
@@ -1025,17 +1050,14 @@ def activate_resolved_profile_pack_set(
             authority=authority,
             catalog=BundledCatalog.load(_bundle_root()),
         )
-        activation_id = (
-            f"activation:{profile_id}-"
-            + resolved.plan["plan_digest"].removeprefix("sha256:")[:16]
-            + "-"
-            + secrets.token_hex(8)
-        )
         created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         activation = store.activate(
             resolved,
             activation_id=activation_id,
             created_at=created_at,
+            expected_predecessor_profile_revision=expected_profile_revision,
+            expected_predecessor_plan_digest=expected_plan_digest,
+            expected_predecessor_activation_id=expected_activation_id,
         )
     return activation
 
@@ -1050,14 +1072,35 @@ def _activate_pack_set(state: Mapping[str, Any], pack_ids: list[str]) -> None:
         raise PackControlDenied("active v4 Profile binding is unavailable")
     activate_resolved_profile_pack_set(
         resolved,
+        activation_id=(
+            "activation:defaults-"
+            + resolved.plan["plan_digest"].removeprefix("sha256:")[:16]
+            + "-"
+            + secrets.token_hex(8)
+        ),
         expected_profile_revision="sha256:" + _digest(profile),
         expected_plan_digest=str(plan.get("plan_digest") or ""),
+        expected_activation_id=str(state.get("activation", {}).get("activation_id") or ""),
     )
 
 
 def _control_state_path(profile_id: str) -> Path:
     _safe_identity(profile_id, "Profile ID")
     return _user_data_root() / "pack_control" / f"{profile_id}.v4.json"
+
+
+def _panel_session_root(authority_session_id: str) -> str:
+    """Recover the authenticated panel binding from a Host-derived session ID."""
+
+    parts = authority_session_id.split(".")
+    if (
+        len(parts) != 3
+        or re.fullmatch(r"[0-9a-f]{64}", parts[0]) is None
+        or re.fullmatch(r"[0-9a-f]{24}", parts[1]) is None
+        or re.fullmatch(r"[1-9][0-9]*", parts[2]) is None
+    ):
+        raise PackControlDenied("authenticated panel session binding is invalid")
+    return parts[0]
 
 
 def _read_control_state(profile_id: str) -> dict[str, Any]:

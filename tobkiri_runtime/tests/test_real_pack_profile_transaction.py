@@ -552,8 +552,9 @@ def test_real_pack_profile_transaction_survives_process_restart_and_revocation(
         second_ceremony_disk = _disk_profile_state(user_data)
         assert second_activation["activation_id"] == second_ceremony_disk["activation_id"]
         assert second_ceremony_disk["activation_id"] != first_ceremony_disk["activation_id"]
-        assert second_ceremony_disk["effective_pack_set"] == (
-            first_ceremony_disk["effective_pack_set"]
+        assert (
+            second_ceremony_disk["effective_pack_set"]
+            == (first_ceremony_disk["effective_pack_set"])
         )
         assert approval_path.read_bytes() == stable_pack_approval
         status, replay = _contract_request(
@@ -564,8 +565,9 @@ def test_real_pack_profile_transaction_survives_process_restart_and_revocation(
             body=first_activation_request,
         )
         assert status == 200, replay
-        assert replay["data"]["state"] == "error"
-        assert replay["data"]["code"] == "UNAPPROVED"
+        assert replay["data"]["state"] == "active"
+        assert replay["data"]["activation_id"] == first_activation["activation_id"]
+        assert replay["data"]["activation_id"] != second_activation["activation_id"]
         assert second_activation_request != first_activation_request
         enabled_disk = second_ceremony_disk
         enabled_snapshots = _activation_snapshots(user_data)
