@@ -114,12 +114,16 @@ export interface ProfileCeremonyErrorData {
 }
 
 export interface ProfileCeremonyTransport {
-  write<T>(target: RuntimeSurfaceTarget, payload: Record<string, unknown>): Promise<T>;
+  write<T>(
+    target: RuntimeSurfaceTarget,
+    payload: Record<string, unknown>,
+    requestId?: string,
+  ): Promise<T>;
 }
 
 const canonicalTransport: ProfileCeremonyTransport = {
-  write: <T>(target: RuntimeSurfaceTarget, payload: Record<string, unknown>) => (
-    fetchFrontendContractOperation<T>(target.method, target.logical_target, payload)
+  write: <T>(target: RuntimeSurfaceTarget, payload: Record<string, unknown>, requestId?: string) => (
+    fetchFrontendContractOperation<T>(target.method, target.logical_target, payload, {requestId})
   ),
 };
 
@@ -443,29 +447,29 @@ function validateActivate(value: unknown): ProfileActivateResult {
 }
 
 export interface ProfileCeremonyClient {
-  resolve(input: ProfileResolveInput): Promise<ProfileResolveResult>;
-  review(input: ProfileReviewInput): Promise<ProfileReviewResult>;
-  approve(input: ProfileApproveInput): Promise<ProfileApproveResult>;
-  activate(input: ProfileActivateInput): Promise<ProfileActivateResult>;
+  resolve(input: ProfileResolveInput, requestId?: string): Promise<ProfileResolveResult>;
+  review(input: ProfileReviewInput, requestId?: string): Promise<ProfileReviewResult>;
+  approve(input: ProfileApproveInput, requestId?: string): Promise<ProfileApproveResult>;
+  activate(input: ProfileActivateInput, requestId?: string): Promise<ProfileActivateResult>;
 }
 
 export function createProfileCeremonyClient(
   targets: ProfileCeremonyTargets = RUNTIME_PROFILE_CEREMONY_TARGETS,
   transport: ProfileCeremonyTransport = canonicalTransport,
 ): ProfileCeremonyClient {
-  const write = async <T>(step: ProfileCeremonyStep, payload: Record<string, unknown>, validate: (value: unknown) => T): Promise<T> => {
-    const result = await transport.write<unknown>(targetFor(targets, step), payload);
+  const write = async <T>(step: ProfileCeremonyStep, payload: Record<string, unknown>, validate: (value: unknown) => T, requestId?: string): Promise<T> => {
+    const result = await transport.write<unknown>(targetFor(targets, step), payload, requestId);
     return validate(result);
   };
   return {
-    resolve: (input) => write('resolve', exactMutationPayload('resolve', input), validateResolve),
-    review: (input) => {
+    resolve: (input, requestId) => write('resolve', exactMutationPayload('resolve', input), validateResolve, requestId),
+    review: (input, requestId) => {
       const payload = exactMutationPayload('review', input);
-      return transport.write<unknown>(targetFor(targets, 'review'), payload)
+      return transport.write<unknown>(targetFor(targets, 'review'), payload, requestId)
         .then((result) => validateReview(result, input));
     },
-    approve: (input) => write('approve', exactMutationPayload('approve', input), validateApprove),
-    activate: (input) => write('activate', exactMutationPayload('activate', input), validateActivate),
+    approve: (input, requestId) => write('approve', exactMutationPayload('approve', input), validateApprove, requestId),
+    activate: (input, requestId) => write('activate', exactMutationPayload('activate', input), validateActivate, requestId),
   };
 }
 

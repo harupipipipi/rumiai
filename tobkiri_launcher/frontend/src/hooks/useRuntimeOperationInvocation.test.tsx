@@ -166,3 +166,38 @@ test('runtime invocation clears a completed result when the selected operation c
     });
   }
 });
+
+test('runtime invocation treats a lost response as unknown and rejects a replacement submit', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  let calls = 0;
+  const timeoutOperation = operation(`operation-timeout-${Date.now()}`);
+  const invoker: RuntimeOperationInvoker = async () => {
+    calls += 1;
+    throw new Error('POST request timed out after 10000ms');
+  };
+
+  try {
+    await act(async () => {
+      root.render(<Probe currentOperation={timeoutOperation} invoker={invoker} />);
+    });
+    const invokeButton = container.querySelector<HTMLButtonElement>('button');
+    assert.ok(invokeButton);
+    await act(async () => { invokeButton.click(); await Promise.resolve(); });
+    assert.equal(calls, 1);
+    assert.equal(container.querySelector('[data-state="state"]')?.textContent, 'unknown');
+    assert.equal(invokeButton.disabled, true);
+
+    await act(async () => { invokeButton.click(); await Promise.resolve(); });
+    assert.equal(calls, 1);
+    assert.equal(container.querySelector('[data-state="state"]')?.textContent, 'unknown');
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperties(globalThis, {
+      window: {value: previousWindow, configurable: true},
+      document: {value: previousDocument, configurable: true},
+    });
+  }
+});

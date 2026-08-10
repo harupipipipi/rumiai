@@ -246,16 +246,34 @@ test('disable denial leaves the Pack enabled, clears pending, and surfaces the s
 
 test('disable timeout leaves the Pack enabled and does not leave a stuck switch', async () => {
   const routes = installFetch(async (route) => {
-    assert.equal(route, 'POST /api/pack-control/disable');
-    throw new Error('POST request timed out after 10000ms: /api/pack-control/disable');
+    if (route === 'POST /api/pack-control/disable') {
+      throw new Error('POST request timed out after 10000ms: /api/pack-control/disable');
+    }
+    if (route === 'GET /api/pack-control/catalog') {
+      return new Response(JSON.stringify({
+        success: true,
+        data: {...binding(), packs: [catalogPack(true)], count: 1},
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
+    assert.equal(route, 'GET /api/ui/catalog');
+    return new Response(JSON.stringify({success: true, data: {dynamic_host: dynamicCatalog()}}), {
+      headers: {'Content-Type': 'application/json'},
+    });
   });
   const errors: string[] = [];
   setStore(errors);
 
   assert.equal(await useAppStore.getState().togglePack(samplePack.id), false);
+  assert.equal(await useAppStore.getState().togglePack(samplePack.id), false);
   assert.equal(useAppStore.getState().packs[0].enabled, true);
   assert.deepEqual(useAppStore.getState().packTogglePending, {});
-  assert.deepEqual(errors, ['POST request timed out after 10000ms: /api/pack-control/disable']);
+  assert.equal(Object.keys(useAppStore.getState().packMutationUnknown).length, 1);
+  assert.deepEqual(routes, [
+    'POST /api/pack-control/disable',
+    'GET /api/pack-control/catalog',
+    'GET /api/ui/catalog',
+  ]);
+  assert.equal(errors.length, 2);
 });
 
 test('a stale catalog response cannot re-enable a Pack after a confirmed disable', async () => {

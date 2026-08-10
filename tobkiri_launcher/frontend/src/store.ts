@@ -26,6 +26,18 @@ import {
 import type {ColorMode, Theme} from './lib/appearance';
 import {AVATAR_OPTIONS, DEFAULT_AVATAR} from './lib/avatar';
 import {refreshMountedRuntimeSurfaces} from './lib/runtimeSurfaceRefresh';
+import {
+  beginMutation,
+  completeMutation,
+  isMutationResultUnknown,
+  listMutationJournal,
+  markMutationUnknown,
+  mutationRequestId,
+  MUTATION_UNKNOWN_MESSAGE,
+  MutationBlockedError,
+  MutationResultUnknownError,
+  type MutationJournalRecord,
+} from './lib/mutationJournal';
 
 export type {ColorMode, Theme} from './lib/appearance';
 export {AVATAR_OPTIONS} from './lib/avatar';
@@ -175,6 +187,8 @@ interface AppState {
   frontendCatalogLoading: boolean;
   frontendCatalogError: string | null;
   packOperationPending: Record<string, boolean>;
+  packMutationUnknown: Record<string, MutationJournalRecord>;
+  packOperationUnknown: Record<string, MutationJournalRecord>;
   packVmDoctor: ApiPackVMDoctor | null;
   packVmDoctorLoading: boolean;
   packVmError: string | null;
@@ -232,6 +246,62 @@ let packMutationEpoch = 0;
 let packInvalidationRequested = 0;
 let packInvalidationPromise: Promise<void> | null = null;
 
+function journalRecordsForKind(kind: string | null): Record<string, MutationJournalRecord> {
+  return Object.fromEntries(
+    listMutationJournal()
+      .filter((record) => record.state !== 'pending'
+        && (kind === null
+          ? typeof record.metadata.kind === 'string'
+            && record.metadata.kind.startsWith('pack.')
+            && record.metadata.kind !== 'pack.operation'
+          : record.metadata.kind === kind))
+      .map((record) => [record.key, record]),
+  );
+}
+
+function packRecordMetadata(record: MutationJournalRecord): Record<string, unknown> {
+  return record.metadata;
+}
+
+function matchingPackMutation(record: MutationJournalRecord, pack: Pack): boolean {
+  const metadata = packRecordMetadata(record);
+  if (metadata.pack_id !== pack.id) return false;
+  switch (metadata.kind) {
+    case 'pack.install':
+      return metadata.expected_installed === true && pack.installed === true;
+    case 'pack.approve':
+      return metadata.expected_approved === true
+        && pack.approved === true
+        && pack.approvalStatus === 'approved';
+    case 'pack.revoke':
+      return metadata.expected_approved === false
+        && metadata.expected_enabled === false
+        && pack.approved === false
+        && pack.enabled === false
+        && pack.approvalStatus === 'revoked';
+    case 'pack.toggle':
+      return typeof metadata.expected_enabled === 'boolean'
+        && pack.enabled === metadata.expected_enabled;
+    default:
+      return false;
+  }
+}
+
+function reconcilePackMutationJournal(
+  packs: Pack[],
+  records: Record<string, MutationJournalRecord>,
+): Record<string, MutationJournalRecord> {
+  const remaining = {...records};
+  for (const record of Object.values(records)) {
+    const packId = record.metadata.pack_id;
+    const pack = typeof packId === 'string' ? packs.find((item) => item.id === packId) : undefined;
+    if (!pack || !matchingPackMutation(record, pack)) continue;
+    completeMutation(record.key, record.requestId);
+    delete remaining[record.key];
+  }
+  return remaining;
+}
+
 function beginPackMutation(id: string): number {
   const version = (packMutationVersions.get(id) ?? 0) + 1;
   packMutationVersions.set(id, version);
@@ -251,6 +321,10 @@ async function invalidatePackMutationSurfaces(get: () => AppState): Promise<void
         get().loadPacks(true),
         get().loadFrontendCatalog(true),
       ]);
+      const refreshedState = get();
+      if (refreshedState.packsError || refreshedState.frontendCatalogError) {
+        throw new Error('Authoritative Pack projections could not be reconciled.');
+      }
       await refreshMountedRuntimeSurfaces();
       handled = requested;
     }
@@ -350,6 +424,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   frontendCatalogLoading: false,
   frontendCatalogError: null,
   packOperationPending: {},
+  packMutationUnknown: journalRecordsForKind(null),
+  packOperationUnknown: journalRecordsForKind('pack.operation'),
   packVmDoctor: null,
   packVmDoctorLoading: false,
   packVmError: null,
@@ -400,7 +476,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           }
           return reconciled;
         });
-        set({packs, packsError: null});
+        const durablePackUnknown = {
+          ...journalRecordsForKind(null),
+          ...get().packMutationUnknown,
+        };
+        const reconciledPackUnknown = reconcilePackMutationJournal(packs, durablePackUnknown);
+        set({packs, packsError: null, packMutationUnknown: reconciledPackUnknown});
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to load packs';
         set({packsError: message});
@@ -535,6 +616,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (state.packOperationPending[operationKey]) {
       throw new Error('Tobkiri operation is already in progress.');
     }
+    const durableOperationUnknown = {
+      ...journalRecordsForKind('pack.operation'),
+      ...state.packOperationUnknown,
+    };
+    const unknownOperation = Object.values(durableOperationUnknown).find((record) => (
+      record.metadata.pack_id === packId && record.metadata.operation_id === operationId
+    ));
+    if (unknownOperation) throw new MutationBlockedError(unknownOperation);
     const operation = (pack.operations ?? []).find(
       (candidate) => candidate.operationId === operationId,
     );
@@ -560,9 +649,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       throw new Error('Tobkiri has not verified this Pack operation for invocation.');
     }
 
+    const mutationKey = `pack:operation:${packId}:${operationId}:${JSON.stringify(payload)}`;
+    const mutation = beginMutation(mutationKey, {
+      kind: 'pack.operation',
+      pack_id: packId,
+      operation_id: operationId,
+    });
     set((current) => ({
       packOperationPending: {...current.packOperationPending, [operationKey]: true},
     }));
+    let responseAccepted = false;
     try {
       const result = await invokeFrontendCapability({
         profileId: catalog.profile_id,
@@ -572,9 +668,27 @@ export const useAppStore = create<AppState>((set, get) => ({
         ownerPackId: contribution.owner_pack_id,
         contractId: contribution.action_contract,
         payload,
-      });
+      }, {requestId: mutation.requestId});
+      responseAccepted = true;
       await invalidatePackMutationSurfaces(get);
+      completeMutation(mutationKey, mutation.requestId);
       return result;
+    } catch (error) {
+      if (responseAccepted || isMutationResultUnknown(error)) {
+        const unknown = markMutationUnknown(mutationKey, mutation.requestId);
+        set((current) => ({
+          packOperationUnknown: {...current.packOperationUnknown, [mutationKey]: unknown},
+        }));
+        try {
+          await invalidatePackMutationSurfaces(get);
+        } catch {
+          // The unknown state remains journaled until an authoritative refresh succeeds.
+        }
+        get().addToast(MUTATION_UNKNOWN_MESSAGE, 'error');
+        throw new MutationResultUnknownError(mutationKey, mutation.requestId);
+      }
+      completeMutation(mutationKey, mutation.requestId);
+      throw error;
     } finally {
       set((current) => {
         const pending = {...current.packOperationPending};
@@ -587,13 +701,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   installPack: async (id) => {
     const state = get();
     if (state.packInstallPending[id]) return;
+    const mutationKey = `pack:install:${id}`;
+    const mutation = beginMutation(mutationKey, {
+      kind: 'pack.install',
+      pack_id: id,
+      expected_installed: true,
+    });
     const version = beginPackMutation(id);
     set((current) => ({packInstallPending: {...current.packInstallPending, [id]: true}}));
+    let responseAccepted = false;
     try {
       const response = await apiInstallPack(id);
       if (response.pack_id !== id || response.installed !== true) {
         throw new Error('Tobkiri did not confirm Pack installation.');
       }
+      responseAccepted = true;
       if (packMutationVersions.get(id) === version) {
         set((current) => ({
           packs: current.packs.map((candidate) => (
@@ -612,8 +734,27 @@ export const useAppStore = create<AppState>((set, get) => ({
         }));
       }
       await invalidatePackMutationSurfaces(get);
+      completeMutation(mutationKey, mutation.requestId);
       get().addToast('Pack installed.', 'success');
     } catch (error) {
+      if (responseAccepted || isMutationResultUnknown(error)) {
+        const unknown = markMutationUnknown(mutationKey, mutation.requestId);
+        set((current) => ({
+          packMutationUnknown: {...current.packMutationUnknown, [mutationKey]: unknown},
+        }));
+        try {
+          await invalidatePackMutationSurfaces(get);
+        } catch {
+          // Keep the durable unknown result until a later authoritative refresh.
+        }
+        if (!get().packMutationUnknown[mutationKey]) {
+          get().addToast('Pack installed after authoritative refresh.', 'success');
+          return;
+        }
+        get().addToast(MUTATION_UNKNOWN_MESSAGE, 'error');
+        throw new MutationResultUnknownError(mutationKey, mutation.requestId);
+      }
+      completeMutation(mutationKey, mutation.requestId);
       const message = error instanceof Error ? error.message : 'Failed to install pack';
       get().addToast(message, 'error');
       throw error;
@@ -629,12 +770,28 @@ export const useAppStore = create<AppState>((set, get) => ({
   approvePack: async (id) => {
     const state = get();
     if (state.packApprovalPending[id]) return;
+    const mutationKey = `pack:approve:${id}`;
+    const candidateRequestId = crypto.randomUUID();
+    const approvalRequestId = crypto.randomUUID();
+    const mutation = beginMutation(
+      mutationKey,
+      {
+        kind: 'pack.approve',
+        pack_id: id,
+        expected_approved: true,
+      },
+      {primary: candidateRequestId, candidate: candidateRequestId, approval: approvalRequestId},
+    );
     const version = beginPackMutation(id);
     set((current) => ({
       packApprovalPending: {...current.packApprovalPending, [id]: true},
     }));
+    let responseAccepted = false;
     try {
-      const response = await apiApprovePack(id);
+      const response = await apiApprovePack(id, {
+        candidateRequestId: mutationRequestId(mutation, 'candidate'),
+        approvalRequestId: mutationRequestId(mutation, 'approval'),
+      });
       if (
         response.pack_id !== id
         || response.approved !== true
@@ -643,6 +800,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       ) {
         throw new Error('Tobkiri did not confirm Pack approval.');
       }
+      responseAccepted = true;
       if (packMutationVersions.get(id) === version) {
         set((current) => ({
           packs: current.packs.map((candidate) => (
@@ -665,8 +823,27 @@ export const useAppStore = create<AppState>((set, get) => ({
         }));
       }
       await invalidatePackMutationSurfaces(get);
+      completeMutation(mutationKey, mutation.requestId);
       get().addToast('Pack approved.', 'success');
     } catch (error) {
+      if (responseAccepted || isMutationResultUnknown(error)) {
+        const unknown = markMutationUnknown(mutationKey, mutation.requestId);
+        set((current) => ({
+          packMutationUnknown: {...current.packMutationUnknown, [mutationKey]: unknown},
+        }));
+        try {
+          await invalidatePackMutationSurfaces(get);
+        } catch {
+          // Keep the durable unknown result until a later authoritative refresh.
+        }
+        if (!get().packMutationUnknown[mutationKey]) {
+          get().addToast('Pack approval confirmed after authoritative refresh.', 'success');
+          return;
+        }
+        get().addToast(MUTATION_UNKNOWN_MESSAGE, 'error');
+        throw new MutationResultUnknownError(mutationKey, mutation.requestId);
+      }
+      completeMutation(mutationKey, mutation.requestId);
       const message = error instanceof Error ? error.message : 'Failed to approve pack';
       get().addToast(message, 'error');
       throw error;
@@ -691,12 +868,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       || state.packApprovalPending[id]
     ) return;
 
+    const mutationKey = `pack:revoke:${id}`;
+    const mutation = beginMutation(mutationKey, {
+      kind: 'pack.revoke',
+      pack_id: id,
+      expected_approved: false,
+      expected_enabled: false,
+    });
     const version = beginPackMutation(id);
     set((current) => ({
       packApprovalPending: {...current.packApprovalPending, [id]: true},
     }));
+    let responseAccepted = false;
     try {
-      const response = await apiRevokePackApproval(id);
+      const response = await apiRevokePackApproval(id, {requestId: mutation.requestId});
       if (
         response.pack_id !== id
         || response.approved
@@ -705,6 +890,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       ) {
         throw new Error('Tobkiri did not confirm Pack approval revocation.');
       }
+      responseAccepted = true;
       if (packMutationVersions.get(id) === version) {
         set((current) => ({
           packs: current.packs.map((candidate) => (
@@ -727,8 +913,27 @@ export const useAppStore = create<AppState>((set, get) => ({
         }));
       }
       await invalidatePackMutationSurfaces(get);
+      completeMutation(mutationKey, mutation.requestId);
       get().addToast('Pack approval revoked.', 'success');
     } catch (error) {
+      if (responseAccepted || isMutationResultUnknown(error)) {
+        const unknown = markMutationUnknown(mutationKey, mutation.requestId);
+        set((current) => ({
+          packMutationUnknown: {...current.packMutationUnknown, [mutationKey]: unknown},
+        }));
+        try {
+          await invalidatePackMutationSurfaces(get);
+        } catch {
+          // Keep the durable unknown result until a later authoritative refresh.
+        }
+        if (!get().packMutationUnknown[mutationKey]) {
+          get().addToast('Pack approval revocation confirmed after authoritative refresh.', 'success');
+          return;
+        }
+        get().addToast(MUTATION_UNKNOWN_MESSAGE, 'error');
+        throw new MutationResultUnknownError(mutationKey, mutation.requestId);
+      }
+      completeMutation(mutationKey, mutation.requestId);
       const message = error instanceof Error ? error.message : 'Failed to revoke Pack approval';
       get().addToast(message, 'error');
       throw error;
@@ -746,19 +951,31 @@ export const useAppStore = create<AppState>((set, get) => ({
     const pack = state.packs.find((candidate) => candidate.id === id);
     if (!pack || !pack.installed || !pack.approved || pack.required || state.packTogglePending[id]) return false;
 
+    const expectedEnabled = !pack.enabled;
+    const mutationKey = `pack:toggle:${id}:${expectedEnabled ? 'enable' : 'disable'}`;
+    if (state.packMutationUnknown[mutationKey]) {
+      get().addToast(MUTATION_UNKNOWN_MESSAGE, 'error');
+      return false;
+    }
+    const mutation = beginMutation(mutationKey, {
+      kind: 'pack.toggle',
+      pack_id: id,
+      expected_enabled: expectedEnabled,
+    });
     const version = beginPackMutation(id);
     set((current) => ({
       packTogglePending: {...current.packTogglePending, [id]: true},
     }));
+    let responseAccepted = false;
 
     try {
-      const expectedEnabled = !pack.enabled;
       const response = pack.enabled
-        ? await apiDisablePack(id)
-        : await apiEnablePack(id);
+        ? await apiDisablePack(id, {requestId: mutation.requestId})
+        : await apiEnablePack(id, {requestId: mutation.requestId});
       if (response.pack_id !== id || response.enabled !== expectedEnabled) {
         throw new Error('Tobkiri did not confirm the requested Pack state.');
       }
+      responseAccepted = true;
       if (packMutationVersions.get(id) === version) {
         set((current) => ({
           packs: current.packs.map((candidate) => (
@@ -777,8 +994,24 @@ export const useAppStore = create<AppState>((set, get) => ({
         }));
       }
       await invalidatePackMutationSurfaces(get);
+      completeMutation(mutationKey, mutation.requestId);
       return true;
     } catch (error) {
+      if (responseAccepted || isMutationResultUnknown(error)) {
+        const unknown = markMutationUnknown(mutationKey, mutation.requestId);
+        set((current) => ({
+          packMutationUnknown: {...current.packMutationUnknown, [mutationKey]: unknown},
+        }));
+        try {
+          await invalidatePackMutationSurfaces(get);
+        } catch {
+          // Keep the durable unknown result until a later authoritative refresh.
+        }
+        if (!get().packMutationUnknown[mutationKey]) return true;
+        get().addToast(MUTATION_UNKNOWN_MESSAGE, 'error');
+        return false;
+      }
+      completeMutation(mutationKey, mutation.requestId);
       if (packMutationVersions.get(id) === version) {
         set((current) => ({
           packs: current.packs.map((candidate) => (

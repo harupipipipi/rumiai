@@ -303,6 +303,32 @@ test('dynamic catalog and capability invocation use the exact canonical v4 route
   assert.doesNotMatch(lastFetchUrl, /api\/v4\/dispatch/);
 });
 
+test('capability invocation keeps the supplied request identity in both body and replay-protection header', async () => {
+  const requestId = '11111111-1111-4111-8111-111111111111';
+  fetchHandler = async (input, init) => {
+    lastFetchUrl = String(input);
+    lastFetchInit = init;
+    return new Response(JSON.stringify({success: true, data: {accepted: true}}), {
+      headers: {'Content-Type': 'application/json'},
+    });
+  };
+
+  await invokeFrontendCapability({
+    profileId: 'profile-a',
+    planHash: 'sha256:plan-a',
+    catalogHash: 'sha256:catalog-a',
+    contributionId: 'contribution-a',
+    ownerPackId: 'pack-a',
+    contractId: 'contract-a',
+    payload: {},
+  }, {requestId});
+
+  const headers = lastFetchInit?.headers as Record<string, string>;
+  const body = JSON.parse(String(lastFetchInit?.body)) as Record<string, unknown>;
+  assert.equal(headers['X-Tobkiri-Request-ID'], requestId);
+  assert.equal(body.request_id, requestId);
+});
+
 test('runtime operation invocation uses only its exact invocation contribution and catalog hash', async () => {
   let body: Record<string, unknown> | undefined;
   fetchHandler = async (input, init) => {

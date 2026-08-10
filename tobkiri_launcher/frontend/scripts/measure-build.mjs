@@ -6,12 +6,26 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const FRONTEND_ROOT = resolve(SCRIPT_DIR, '..');
 const DEFAULT_DIST_DIR = resolve(FRONTEND_ROOT, 'dist');
-const ROUTE_SOURCES = [
+const STATIC_ROUTE_SOURCES = [
   'src/pages/Setup.tsx',
   'src/pages/Dashboard.tsx',
-  'src/pages/Packs.tsx',
-  'src/pages/PackDetail.tsx',
 ];
+
+/**
+ * Keep build metrics mechanically aligned with the lazy route registry. The
+ * registry is TypeScript and is intentionally parsed here rather than
+ * maintaining a second hand-written list that can drift from the app shell.
+ */
+async function lazyRouteSources() {
+  const source = await readFile(resolve(FRONTEND_ROOT, 'src/lib/routeModules.ts'), 'utf8');
+  const block = /export const routeModuleSources:[^{]+\{([\s\S]*?)\n\};/.exec(source)?.[1];
+  if (!block) throw new Error('routeModuleSources registry is missing');
+  const sources = [...block.matchAll(/:\s*'([^']+)'/g)].map((match) => match[1]);
+  if (sources.length === 0 || new Set(sources).size !== sources.length) {
+    throw new Error('routeModuleSources registry is empty or duplicated');
+  }
+  return sources;
+}
 
 async function fileMetric(distDir, relativePath) {
   const path = resolve(distDir, relativePath);
@@ -62,7 +76,8 @@ export async function measureBuild({distDir = DEFAULT_DIST_DIR, baselinePath} = 
   const allJavaScript = await Promise.all(allJs.map((file) => fileMetric(distDir, file)));
 
   const routes = {};
-  for (const source of ROUTE_SOURCES) {
+  const routeSources = [...STATIC_ROUTE_SOURCES, ...(await lazyRouteSources())];
+  for (const source of routeSources) {
     const key = manifestKey(manifest, source);
     if (!key) {
       routes[source] = {present: false};
@@ -103,7 +118,11 @@ export async function measureBuild({distDir = DEFAULT_DIST_DIR, baselinePath} = 
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const baselineArg = process.argv.find((argument) => argument.startsWith('--baseline='));
-  measureBuild({baselinePath: baselineArg?.slice('--baseline='.length)}).catch((error) => {
+  const distArg = process.argv.find((argument) => argument.startsWith('--dist='));
+  measureBuild({
+    distDir: distArg?.slice('--dist='.length) || DEFAULT_DIST_DIR,
+    baselinePath: baselineArg?.slice('--baseline='.length),
+  }).catch((error) => {
     console.error(error);
     process.exitCode = 1;
   });

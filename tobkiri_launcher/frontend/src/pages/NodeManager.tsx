@@ -27,6 +27,7 @@ export function NodeManager() {
   const pendingInstall = useAppStore((state) => state.packInstallPending);
   const pendingApproval = useAppStore((state) => state.packApprovalPending);
   const pendingToggle = useAppStore((state) => state.packTogglePending);
+  const packMutationUnknown = useAppStore((state) => state.packMutationUnknown);
 
   useEffect(() => {
     void loadPacks();
@@ -70,6 +71,7 @@ export function NodeManager() {
               const activeJoinRequired = pack.installed && pack.approved;
               const activeJoinValid = !activeJoinRequired || Boolean(activeRow);
               const canAct = canUseLifecycle && (!activeJoinRequired || activeJoinValid);
+              const mutationResultUnknown = Object.values(packMutationUnknown).some((record) => record.metadata.pack_id === pack.id);
               const shownName = activeRow?.display_name ?? pack.name;
               const shownDigest = activeRow?.artifact_digest ?? pack.artifactDigest;
               const joinWarning = activeJoinRequired && !activeRow
@@ -90,17 +92,18 @@ export function NodeManager() {
                     <p className="mt-1 break-all font-mono text-xs text-text-muted">{pack.id} · v{pack.version}</p>
                     <p className="mt-1 break-all font-mono text-[11px] text-text-muted">{shownDigest}</p>
                     {joinWarning ? <p className="mt-2 flex items-start gap-1 text-xs text-amber-700 dark:text-amber-300"><ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{joinWarning}</p> : null}
+                    {mutationResultUnknown ? <p className="mt-2 text-xs text-amber-700 dark:text-amber-300" role="alert">A mutation result is unknown. Refresh the authoritative catalog before trying again.</p> : null}
                     {activeRow ? <p className="mt-2 text-xs text-text-muted">{activeRow.invokable_operations.length} exact invokable operation binding(s) in the active snapshot.</p> : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                     {!pack.installed ? (
-                      <Button type="button" size="sm" onClick={() => void installPack(pack.id)} disabled={!canAct || Boolean(pendingInstall[pack.id])} loading={Boolean(pendingInstall[pack.id])}>Install</Button>
+                      <Button type="button" size="sm" onClick={() => void installPack(pack.id)} disabled={!canAct || Boolean(pendingInstall[pack.id]) || mutationResultUnknown} loading={Boolean(pendingInstall[pack.id])}>Install</Button>
                     ) : !pack.approved ? (
-                      <Button type="button" size="sm" onClick={() => void approvePack(pack.id)} disabled={!canAct || Boolean(pendingApproval[pack.id])} loading={Boolean(pendingApproval[pack.id])}>Approve</Button>
+                      <Button type="button" size="sm" onClick={() => void approvePack(pack.id)} disabled={!canAct || Boolean(pendingApproval[pack.id]) || mutationResultUnknown} loading={Boolean(pendingApproval[pack.id])}>Approve</Button>
                     ) : (
                       <>
-                        <Button type="button" size="sm" variant="outline" onClick={() => void togglePack(pack.id)} disabled={!canAct || pack.required || Boolean(pendingToggle[pack.id])} loading={Boolean(pendingToggle[pack.id])}>{pack.enabled ? 'Disable' : 'Enable'}</Button>
-                        <Button type="button" size="sm" variant="destructive" onClick={() => void revokePackApproval(pack.id)} disabled={!canAct || pack.required || pack.type === 'core' || Boolean(pendingApproval[pack.id])} loading={Boolean(pendingApproval[pack.id])}>Revoke</Button>
+                        <Button type="button" size="sm" variant="outline" onClick={() => void togglePack(pack.id)} disabled={!canAct || pack.required || Boolean(pendingToggle[pack.id]) || mutationResultUnknown} loading={Boolean(pendingToggle[pack.id])}>{pack.enabled ? 'Disable' : 'Enable'}</Button>
+                        <Button type="button" size="sm" variant="destructive" onClick={() => void revokePackApproval(pack.id)} disabled={!canAct || pack.required || pack.type === 'core' || Boolean(pendingApproval[pack.id]) || mutationResultUnknown} loading={Boolean(pendingApproval[pack.id])}>Revoke</Button>
                       </>
                     )}
                     {pack.approved ? <ShieldCheck className="h-4 w-4 text-emerald-600" aria-label="Pack approved" /> : null}

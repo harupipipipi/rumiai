@@ -254,6 +254,7 @@ export function fetchFrontendContractOperation<T>(
   method: FrontendContractMethod,
   target: string,
   payload?: Record<string, unknown>,
+  requestPolicy: Pick<ApiRequestPolicy, 'requestId' | 'timeoutMs'> = {},
 ): Promise<T> {
   assertLogicalContractTarget(method, target);
   const route = generatedRouteFor(
@@ -276,7 +277,7 @@ export function fetchFrontendContractOperation<T>(
   const path = frontendContractPath(method, target);
   return apiFetch<T>(query ? `${path}${query}` : path, method === 'POST'
     ? {method, body: JSON.stringify(payload ?? {})}
-    : {});
+    : {}, requestPolicy);
 }
 
 export function hasPendingPanelBootstrapCode(href = window.location.href): boolean {
@@ -485,6 +486,8 @@ async function ensurePanelSessionForRequest(
 export interface ApiRequestPolicy {
   mode?: 'foreground' | 'prefetch';
   timeoutMs?: number;
+  /** Stable identity for one logical unsafe request. */
+  requestId?: string;
 }
 
 export async function apiFetch<T>(
@@ -509,7 +512,7 @@ export async function apiFetch<T>(
       ...(options.headers as Record<string, string> | undefined),
     };
     if (isFrontendContractPath(path) || (isPackVMLifecyclePath(path) && isUnsafeMethod(method))) {
-      headers['X-Tobkiri-Request-ID'] = crypto.randomUUID();
+      headers['X-Tobkiri-Request-ID'] = requestPolicy.requestId ?? crypto.randomUUID();
     }
     if (isUnsafeMethod(method)) {
       const csrfToken = getStoredPanelCsrfToken();
@@ -727,11 +730,13 @@ export function cleanupPackVM(
 
 export function invokeFrontendCapability(
   request: FrontendCapabilityInvocation,
+  requestOptions: Pick<ApiRequestPolicy, 'requestId' | 'timeoutMs'> = {},
 ): Promise<unknown> {
+  const requestId = requestOptions.requestId ?? crypto.randomUUID();
   return apiFetch<unknown>(frontendContractPath('POST', '/api/ui/capability/invoke'), {
     method: 'POST',
     body: JSON.stringify({
-      request_id: crypto.randomUUID(),
+      request_id: requestId,
       expires_at: Date.now() / 1000 + 30,
       profile_id: request.profileId,
       plan_hash: request.planHash,
@@ -741,12 +746,13 @@ export function invokeFrontendCapability(
       contract_id: request.contractId,
       payload: request.payload,
     }),
-  });
+  }, {...requestOptions, requestId});
 }
 
 function dispatchPackControl<T>(
   operationId: string,
   payload: Record<string, unknown> = {},
+  requestOptions: Pick<ApiRequestPolicy, 'requestId' | 'timeoutMs'> = {},
 ): Promise<T> {
   const targets: Record<string, string> = {
     'approval.approve': '/api/pack-control/approval-approve',
@@ -765,7 +771,7 @@ function dispatchPackControl<T>(
   return apiFetch<T>(frontendContractPath('POST', target), {
     method: 'POST',
     body: JSON.stringify(payload),
-  });
+  }, requestOptions);
 }
 
 function packControlString(value: unknown, field: string): string {
@@ -816,30 +822,55 @@ export function fetchPacks(): Promise<PacksResponseData> {
   return dispatchPackControl<PacksResponseData>('catalog.read');
 }
 
-export async function installPack(id: string): Promise<PackInstallResponseData> {
-  return dispatchPackControl('pack.install', {pack_id: id});
+export async function installPack(
+  id: string,
+  requestOptions: Pick<ApiRequestPolicy, 'requestId' | 'timeoutMs'> = {},
+): Promise<PackInstallResponseData> {
+  return dispatchPackControl('pack.install', {pack_id: id}, requestOptions);
 }
 
-export async function approvePack(id: string): Promise<PackApprovalResponseData> {
-  const candidate = await dispatchPackControl<unknown>('approval.candidate', {pack_id: id});
+export interface PackApprovalRequestIds {
+  candidateRequestId?: string;
+  approvalRequestId?: string;
+  timeoutMs?: number;
+}
+
+export async function approvePack(
+  id: string,
+  requestIds: PackApprovalRequestIds = {},
+): Promise<PackApprovalResponseData> {
+  const candidate = await dispatchPackControl<unknown>(
+    'approval.candidate',
+    {pack_id: id},
+    {requestId: requestIds.candidateRequestId, timeoutMs: requestIds.timeoutMs},
+  );
   const candidateId = validatePackApprovalCandidate(candidate, id);
   const response = await dispatchPackControl<unknown>('approval.approve', {
     pack_id: id,
     candidate_id: candidateId,
-  });
+  }, {requestId: requestIds.approvalRequestId, timeoutMs: requestIds.timeoutMs});
   return validatePackApprovalResponse(response, id);
 }
 
-export function enablePack(id: string): Promise<PackToggleResponseData> {
-  return dispatchPackControl<PackToggleResponseData>('pack.enable', {pack_id: id});
+export function enablePack(
+  id: string,
+  requestOptions: Pick<ApiRequestPolicy, 'requestId' | 'timeoutMs'> = {},
+): Promise<PackToggleResponseData> {
+  return dispatchPackControl<PackToggleResponseData>('pack.enable', {pack_id: id}, requestOptions);
 }
 
-export function disablePack(id: string): Promise<PackToggleResponseData> {
-  return dispatchPackControl<PackToggleResponseData>('pack.disable', {pack_id: id});
+export function disablePack(
+  id: string,
+  requestOptions: Pick<ApiRequestPolicy, 'requestId' | 'timeoutMs'> = {},
+): Promise<PackToggleResponseData> {
+  return dispatchPackControl<PackToggleResponseData>('pack.disable', {pack_id: id}, requestOptions);
 }
 
-export function revokePackApproval(id: string): Promise<PackApprovalResponseData> {
-  return dispatchPackControl<PackApprovalResponseData>('approval.revoke', {pack_id: id});
+export function revokePackApproval(
+  id: string,
+  requestOptions: Pick<ApiRequestPolicy, 'requestId' | 'timeoutMs'> = {},
+): Promise<PackApprovalResponseData> {
+  return dispatchPackControl<PackApprovalResponseData>('approval.revoke', {pack_id: id}, requestOptions);
 }
 
 export function restartKernel(): Promise<KernelRestartResponseData> {

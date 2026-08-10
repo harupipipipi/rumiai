@@ -25,6 +25,21 @@ test('measureBuild separates initial JavaScript, CSS, and lazy route chunks', as
     assert.equal(report.initial_javascript.files.some((item) => item.file === 'assets/main.js'), true);
     assert.deepEqual(report.initial_css.files.map((item) => item.file), ['assets/main.css']);
     assert.equal(report.routes['src/pages/Packs.tsx'].present, true);
+    assert.deepEqual(Object.keys(report.routes), [
+      'src/pages/Setup.tsx',
+      'src/pages/Dashboard.tsx',
+      'src/pages/Packs.tsx',
+      'src/pages/PackDetail.tsx',
+      'src/pages/Profile.tsx',
+      'src/pages/Settings.tsx',
+      'src/pages/ProfileWiring.tsx',
+      'src/pages/ProfileFiles.tsx',
+      'src/pages/Flow.tsx',
+      'src/pages/Graph.tsx',
+      'src/pages/AiInput.tsx',
+      'src/pages/ApiMap.tsx',
+      'src/pages/NodeManager.tsx',
+    ]);
     const firstReport = await readFile(outputPath, 'utf8');
     assert.equal(JSON.parse(firstReport).entry, 'src/main.tsx');
     assert.equal('generated_at' in report, false);

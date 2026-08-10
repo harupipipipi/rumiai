@@ -24,6 +24,8 @@ export function PackDetail() {
   const packTogglePending = useAppStore(state => state.packTogglePending);
   const packInstallPending = useAppStore(state => state.packInstallPending);
   const packApprovalPending = useAppStore(state => state.packApprovalPending);
+  const packMutationUnknown = useAppStore(state => state.packMutationUnknown);
+  const packOperationUnknown = useAppStore(state => state.packOperationUnknown);
   const frontendCatalog = useAppStore(state => state.frontendCatalog);
   const frontendCatalogLoading = useAppStore(state => state.frontendCatalogLoading);
   const frontendCatalogError = useAppStore(state => state.frontendCatalogError);
@@ -42,6 +44,12 @@ export function PackDetail() {
   const [approving, setApproving] = useState(false);
 
   const pack = packs.find(p => p.id === id);
+  const mutationResultUnknown = Boolean(
+    pack && (
+      Object.values(packMutationUnknown).some((record) => record.metadata.pack_id === pack.id)
+      || Object.values(packOperationUnknown).some((record) => record.metadata.pack_id === pack.id)
+    ),
+  );
 
   useEffect(() => {
     if (packs.length === 0) void loadPacks();
@@ -189,6 +197,7 @@ export function PackDetail() {
                 size="sm"
                 onClick={() => void handleInstall()}
                 loading={installing || Boolean(packInstallPending[pack.id])}
+                disabled={mutationResultUnknown}
               >
                 Install
               </Button>
@@ -199,7 +208,7 @@ export function PackDetail() {
                     Tobkiri approval revoked. Approve again before enabling this Pack.
                   </span>
                 ) : null}
-                <Button size="sm" onClick={() => void handleApprove()} loading={approving}>
+                <Button size="sm" onClick={() => void handleApprove()} loading={approving} disabled={mutationResultUnknown}>
                   Approve
                 </Button>
               </div>
@@ -214,7 +223,7 @@ export function PackDetail() {
                   onClick={handleRevoke}
                   loading={Boolean(packApprovalPending[pack.id])}
                   aria-busy={Boolean(packApprovalPending[pack.id])}
-                  disabled={pack.type === 'core' || Boolean(packApprovalPending[pack.id])}
+                  disabled={pack.type === 'core' || Boolean(packApprovalPending[pack.id]) || mutationResultUnknown}
                   aria-label={`Revoke approval for ${pack.name}`}
                   title={pack.type === 'core' ? 'Core Packs cannot have approval revoked.' : undefined}
                 >
@@ -227,6 +236,7 @@ export function PackDetail() {
                     pack.type === 'core'
                     || Boolean(packTogglePending[pack.id])
                     || Boolean(packApprovalPending[pack.id])
+                    || mutationResultUnknown
                   }
                   onCheckedChange={() => { void handleToggle(); }}
                   aria-label={`Toggle ${pack.name}`}
@@ -237,6 +247,12 @@ export function PackDetail() {
             )}
           </div>
         </div>
+        {mutationResultUnknown ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300/70 bg-amber-50/70 px-4 py-3 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200" role="alert">
+            <span>The result of a Pack mutation is unknown. Refresh the authoritative catalog before trying again.</span>
+            <Button type="button" variant="outline" size="sm" onClick={() => void loadPacks(true)}>Refresh catalog</Button>
+          </div>
+        ) : null}
 
         <Card>
           <CardHeader>
@@ -399,7 +415,11 @@ export function PackDetail() {
             contributionVerified={Boolean(contributionForOperation(operation.operationId, operation.contractId))
               && !backendUnavailableForOperation(operation.operationId)
               && !frontendCatalog?.quarantined_pack_ids.includes(pack.id)}
-            pending={Boolean(packOperationPending[`${pack.id}:${operation.operationId}`])}
+            pending={Boolean(packOperationPending[`${pack.id}:${operation.operationId}`])
+              || Object.values(packOperationUnknown).some((record) => (
+                record.metadata.pack_id === pack.id
+                && record.metadata.operation_id === operation.operationId
+              ))}
             onInvoke={(payload) => invokePackOperation(pack.id, operation.operationId, payload)}
           />
         ) : null)}

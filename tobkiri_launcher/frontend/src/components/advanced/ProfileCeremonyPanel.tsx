@@ -25,9 +25,19 @@ import {
   type ProfileResolveResult,
   type ProfileReviewResult,
 } from '@/src/lib/profileCeremony';
+import {
+  beginMutation,
+  completeMutation,
+  isMutationResultUnknown,
+  markMutationUnknown,
+  listMutationJournal,
+  MUTATION_UNKNOWN_MESSAGE,
+  MutationBlockedError,
+  type MutationJournalRecord,
+} from '@/src/lib/mutationJournal';
 import type {Pack} from '@/src/store';
 
-type CeremonyState = 'idle' | 'resolving' | 'resolved' | 'reviewing' | 'reviewed' | 'approving' | 'approved' | 'activating' | 'active' | 'error';
+type CeremonyState = 'idle' | 'resolving' | 'resolved' | 'reviewing' | 'reviewed' | 'approving' | 'approved' | 'activating' | 'active' | 'result_unknown' | 'error';
 
 function recordDigest(record: unknown, keys: string[]): string {
   if (!record || typeof record !== 'object' || Array.isArray(record)) return 'not published';
@@ -72,6 +82,7 @@ export function ProfileCeremonyPanel({
   const [approval, setApproval] = useState<ProfileApproveResult | null>(null);
   const [ceremonySnapshot, setCeremonySnapshot] = useState<string | null>(null);
   const [failure, setFailure] = useState<{code: RuntimeSurfaceErrorCode; message: string} | null>(null);
+  const [unknownMutation, setUnknownMutation] = useState<MutationJournalRecord | null>(null);
   const initialized = useRef(false);
   const requestVersion = useRef(0);
   const busyRef = useRef(false);
@@ -147,6 +158,7 @@ export function ProfileCeremonyPanel({
     setApproval(null);
     setCeremonySnapshot(null);
     setFailure(null);
+    setUnknownMutation(null);
   }, [isCatalogMode, catalogEntry?.profile_id, catalogEntry?.definition.digest, authoritativeSelection?.catalogDigest, authoritativeSelection?.bundleLockDigest]);
 
   useEffect(() => {
@@ -184,6 +196,19 @@ export function ProfileCeremonyPanel({
   const previousBindingKey = useRef(currentBindingKey);
 
   useEffect(() => {
+    if (unknownMutation) return;
+    const hydrated = listMutationJournal().find((record) => (
+      record.state === 'unknown'
+      && record.metadata.kind === 'profile.ceremony'
+      && record.metadata.binding_key === currentBindingKey
+    ));
+    if (!hydrated) return;
+    setUnknownMutation(hydrated);
+    setFailure({code: 'TIMEOUT', message: MUTATION_UNKNOWN_MESSAGE});
+    setCeremonyState('result_unknown');
+  }, [currentBindingKey, unknownMutation]);
+
+  useEffect(() => {
     if (previousBindingKey.current === currentBindingKey) return;
     previousBindingKey.current = currentBindingKey;
     requestVersion.current += 1;
@@ -194,6 +219,7 @@ export function ProfileCeremonyPanel({
     setApproval(null);
     setCeremonySnapshot(null);
     setFailure(null);
+    setUnknownMutation(null);
   }, [currentBindingKey]);
 
   const catalogSelectionAvailable = Boolean(
@@ -215,15 +241,52 @@ export function ProfileCeremonyPanel({
     ceremonySnapshot && ceremonySnapshot !== currentBindingKey,
   );
 
+  const mutationKeyForStep = (
+    nextState: Extract<CeremonyState, 'resolving' | 'reviewing' | 'approving' | 'activating'>,
+  ): string => {
+    const step = nextState === 'resolving'
+      ? 'resolve'
+      : nextState === 'reviewing'
+        ? 'review'
+        : nextState === 'approving'
+          ? 'approve'
+          : 'activate';
+    const identity = step === 'resolve'
+      ? desiredPackIds.join(',')
+      : step === 'activate'
+        ? `${approval?.approval_id ?? ''}:${approval?.approval_digest ?? ''}`
+        : `${candidate?.candidate_id ?? ''}:${candidate?.candidate_digest ?? ''}`;
+    return `profile:${step}:${currentBindingKey}:${identity}`;
+  };
+
   const beginStep = (nextState: Extract<CeremonyState, 'resolving' | 'reviewing' | 'approving' | 'activating'>) => {
     if (busyRef.current) return null;
+    const mutationKey = mutationKeyForStep(nextState);
+    let mutation: MutationJournalRecord;
+    try {
+      mutation = beginMutation(mutationKey, {
+        kind: 'profile.ceremony',
+        binding_key: currentBindingKey,
+        step: nextState,
+        profile_id: currentSnapshot?.profile_id ?? '',
+      });
+    } catch (error) {
+      if (error instanceof MutationBlockedError) {
+        setUnknownMutation(error.record);
+        setFailure({code: 'TIMEOUT', message: MUTATION_UNKNOWN_MESSAGE});
+        setCeremonyState('result_unknown');
+        return null;
+      }
+      throw error;
+    }
     busyRef.current = true;
     const request = requestVersion.current + 1;
     requestVersion.current = request;
     const bindingKey = currentBindingRef.current;
     setFailure(null);
     setCeremonyState(nextState);
-    return {request, bindingKey};
+    setUnknownMutation(null);
+    return {request, bindingKey, mutation, mutationKey};
   };
 
   const requestIsCurrent = (request: number, bindingKey: string): boolean => (
@@ -243,6 +306,7 @@ export function ProfileCeremonyPanel({
     setApproval(null);
     setCeremonySnapshot(null);
     setFailure(null);
+    setUnknownMutation(null);
   };
 
   const selectPack = (pack: Pack) => {
@@ -261,6 +325,33 @@ export function ProfileCeremonyPanel({
     const message = error instanceof Error ? error.message : runtimeSurfaceErrorMessage(code);
     setFailure({code, message});
     setCeremonyState('error');
+  };
+
+  const handleMutationFailure = async (
+    error: unknown,
+    operation: {
+      request: number;
+      bindingKey: string;
+      mutation: MutationJournalRecord;
+      mutationKey: string;
+    },
+  ): Promise<void> => {
+    if (isMutationResultUnknown(error)) {
+      const unknown = markMutationUnknown(operation.mutationKey, operation.mutation.requestId);
+      if (requestIsCurrent(operation.request, operation.bindingKey)) {
+        setUnknownMutation(unknown);
+        setFailure({code: 'TIMEOUT', message: MUTATION_UNKNOWN_MESSAGE});
+        setCeremonyState('result_unknown');
+      }
+      try {
+        await Promise.all([surface.refresh(true), loadPacks()]);
+      } catch {
+        // Keep the durable unknown result until a later authoritative refresh.
+      }
+      return;
+    }
+    completeMutation(operation.mutationKey, operation.mutation.requestId);
+    if (requestIsCurrent(operation.request, operation.bindingKey)) failClosed(error);
   };
 
   const requireStableSnapshot = () => {
@@ -307,8 +398,7 @@ export function ProfileCeremonyPanel({
           }
           : {}),
       };
-      const result = await client.resolve(input);
-      if (!requestIsCurrent(operation.request, operation.bindingKey)) return;
+      const result = await client.resolve(input, operation.mutation.requestId);
       if (isCatalogMode) {
         const binding = result.review.catalog_binding;
         if (
@@ -331,13 +421,15 @@ export function ProfileCeremonyPanel({
           }
         }
       }
+      completeMutation(operation.mutationKey, operation.mutation.requestId);
+      if (!requestIsCurrent(operation.request, operation.bindingKey)) return;
       setCandidate(result);
       setReviewed(null);
       setApproval(null);
       setCeremonySnapshot(operation.bindingKey);
       setCeremonyState('resolved');
     } catch (error) {
-      if (requestIsCurrent(operation.request, operation.bindingKey)) failClosed(error);
+      await handleMutationFailure(error, operation);
     } finally {
       finishStep(operation.request);
     }
@@ -350,13 +442,14 @@ export function ProfileCeremonyPanel({
       requireStableSnapshot();
       if (!candidate) throw new RuntimeSurfaceError('INVALID', 'No resolved candidate is available.');
       const reviewInput = {candidate_id: candidate.candidate_id, candidate_digest: candidate.candidate_digest};
-      const result = await client.review(reviewInput);
-      if (!requestIsCurrent(operation.request, operation.bindingKey)) return;
+      const result = await client.review(reviewInput, operation.mutation.requestId);
       assertProfileCandidateMatches(reviewInput, result);
+      completeMutation(operation.mutationKey, operation.mutation.requestId);
+      if (!requestIsCurrent(operation.request, operation.bindingKey)) return;
       setReviewed(result);
       setCeremonyState('reviewed');
     } catch (error) {
-      if (requestIsCurrent(operation.request, operation.bindingKey)) failClosed(error);
+      await handleMutationFailure(error, operation);
     } finally {
       finishStep(operation.request);
     }
@@ -370,12 +463,13 @@ export function ProfileCeremonyPanel({
       if (!reviewed) throw new RuntimeSurfaceError('INVALID', 'Review must complete before approval.');
       if (!candidate) throw new RuntimeSurfaceError('INVALID', 'No resolved candidate is available.');
       assertProfileCandidateMatches(candidate, reviewed);
-      const result = await client.approve({candidate_id: candidate.candidate_id, candidate_digest: candidate.candidate_digest});
+      const result = await client.approve({candidate_id: candidate.candidate_id, candidate_digest: candidate.candidate_digest}, operation.mutation.requestId);
+      completeMutation(operation.mutationKey, operation.mutation.requestId);
       if (!requestIsCurrent(operation.request, operation.bindingKey)) return;
       setApproval(result);
       setCeremonyState('approved');
     } catch (error) {
-      if (requestIsCurrent(operation.request, operation.bindingKey)) failClosed(error);
+      await handleMutationFailure(error, operation);
     } finally {
       finishStep(operation.request);
     }
@@ -387,17 +481,18 @@ export function ProfileCeremonyPanel({
     try {
       requireStableSnapshot();
       if (!approval) throw new RuntimeSurfaceError('INVALID', 'Kernel approval is required before activation.');
-      const result = await client.activate({approval_id: approval.approval_id, approval_digest: approval.approval_digest});
-      if (!requestIsCurrent(operation.request, operation.bindingKey)) return;
+      const result = await client.activate({approval_id: approval.approval_id, approval_digest: approval.approval_digest}, operation.mutation.requestId);
       if (isCatalogMode && result.profile_id !== authoritativeSelection?.entry.profile_id) {
         throw new RuntimeSurfaceError('DIGEST_MISMATCH', 'Activation returned a different Profile than the selected catalog definition.');
       }
+      completeMutation(operation.mutationKey, operation.mutation.requestId);
+      if (!requestIsCurrent(operation.request, operation.bindingKey)) return;
       setCeremonyState('active');
       broadcastRuntimeSurfaceRefresh();
       await onActivated?.(result);
       await Promise.all([surface.refresh(true), loadPacks()]);
     } catch (error) {
-      if (requestIsCurrent(operation.request, operation.bindingKey)) failClosed(error);
+      await handleMutationFailure(error, operation);
     } finally {
       finishStep(operation.request);
     }
@@ -550,6 +645,23 @@ export function ProfileCeremonyPanel({
           </div>
         ) : null}
 
+        {ceremonyState === 'result_unknown' && unknownMutation ? (
+          <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-amber-300/70 bg-amber-50/70 px-4 py-3 text-sm dark:border-amber-800/60 dark:bg-amber-950/20" role="alert">
+            <div>
+              <p className="font-medium text-text-main">Profile ceremony result is unknown</p>
+              <p className="mt-1 text-text-muted">{MUTATION_UNKNOWN_MESSAGE}</p>
+              <p className="mt-1 break-all font-mono text-[11px] text-text-muted">Request identity: {unknownMutation.requestId}</p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void Promise.all([surface.refresh(true), loadPacks()]).catch(() => undefined)}
+            >
+              Refresh authoritative state
+            </Button>
+          </div>
+        ) : null}
+
         {candidate ? (
           <div className="rounded-lg border border-border bg-bg-main p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -580,7 +692,7 @@ export function ProfileCeremonyPanel({
           className="min-h-11 self-start"
           onClick={() => void action()}
           loading={ceremonyIsBusy}
-          disabled={!isRuntimeReady || snapshotChanged || desiredPackIds.length === 0 || ceremonyState === 'active'}
+          disabled={!isRuntimeReady || snapshotChanged || desiredPackIds.length === 0 || ceremonyState === 'active' || ceremonyState === 'result_unknown'}
         >
           {actionLabel}
         </Button>

@@ -73,3 +73,49 @@ test('Header avatar is an actionable Profile/Settings entry with focus, Escape, 
     Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
   }
 });
+
+test('mobile navigation exposes a named menu, moves focus, and closes on Escape or selection', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createSurface();
+  try {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={['/']}>
+          <Header />
+        </MemoryRouter>,
+      );
+    });
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Open navigation"]');
+    assert.ok(trigger);
+    assert.equal(trigger.getAttribute('aria-haspopup'), 'menu');
+    assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+
+    await act(async () => { trigger.click(); await nextTick(); });
+    const menu = dom.window.document.querySelector<HTMLElement>('[role="menu"][aria-label="Mobile navigation"]');
+    assert.ok(menu);
+    assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+    assert.equal(trigger.getAttribute('aria-controls'), menu.id);
+    const firstItem = menu.querySelector<HTMLElement>('[role="menuitem"]');
+    assert.ok(firstItem);
+    assert.equal(dom.window.document.activeElement, firstItem);
+
+    await act(async () => {
+      dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', {key: 'Escape'}));
+      await nextTick();
+    });
+    assert.equal(dom.window.document.querySelector('[role="menu"][aria-label="Mobile navigation"]'), null);
+    assert.equal(dom.window.document.activeElement, trigger);
+
+    await act(async () => { trigger.click(); await nextTick(); });
+    const packsLink = dom.window.document.querySelector<HTMLAnchorElement>('[role="menuitem"][href="/packs"]');
+    assert.ok(packsLink);
+    await act(async () => { packsLink.click(); await nextTick(); });
+    assert.equal(dom.window.document.querySelector('[role="menu"][aria-label="Mobile navigation"]'), null);
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});

@@ -206,8 +206,14 @@ test('store revoke action fails closed without optimistic state or refresh on ty
 
 test('store revoke action clears pending and surfaces a timeout without changing approval state', async () => {
   const routes = installFetch(async (route) => {
-    assert.equal(route, 'POST /api/pack-control/approval-revoke');
-    throw new Error('POST request timed out after 10000ms: /api/pack-control/approval-revoke');
+    if (route === 'POST /api/pack-control/approval-revoke') {
+      throw new Error('POST request timed out after 10000ms: /api/pack-control/approval-revoke');
+    }
+    assert.equal(route, 'GET /api/pack-control/catalog');
+    return new Response(JSON.stringify({
+      success: true,
+      data: {...binding(), packs: [approvedCatalogPack], count: 1},
+    }), {headers: {'Content-Type': 'application/json'}});
   });
   const errors: string[] = [];
   useAppStore.setState({
@@ -220,15 +226,23 @@ test('store revoke action clears pending and surfaces a timeout without changing
 
   await assert.rejects(
     useAppStore.getState().revokePackApproval(samplePack.id),
-    /POST request timed out after 10000ms/,
+    /result is unknown/,
   );
 
-  assert.deepEqual(routes, ['POST /api/pack-control/approval-revoke']);
+  await assert.rejects(
+    useAppStore.getState().revokePackApproval(samplePack.id),
+    /result is unknown/,
+  );
+
+  assert.deepEqual(routes, [
+    'POST /api/pack-control/approval-revoke',
+    'GET /api/pack-control/catalog',
+  ]);
   assert.deepEqual(useAppStore.getState().packs, [samplePack]);
   assert.deepEqual(useAppStore.getState().packApprovalPending, {});
-  assert.deepEqual(errors, [
-    'POST request timed out after 10000ms: /api/pack-control/approval-revoke',
-  ]);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /result is unknown/);
+  assert.equal(Object.keys(useAppStore.getState().packMutationUnknown).length, 1);
 });
 
 test('required Profile Pack is rejected before a revoke request is sent', async () => {

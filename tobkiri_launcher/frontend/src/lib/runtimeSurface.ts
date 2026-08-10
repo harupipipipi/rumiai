@@ -1650,6 +1650,7 @@ export interface RuntimeOperationInvocation {
   envelope: RuntimeSurfaceEnvelope<unknown>;
   operation: RuntimeOperationDescriptor;
   payload: Record<string, unknown>;
+  requestId?: string;
 }
 
 /**
@@ -1661,6 +1662,7 @@ export function invokeRuntimeOperation({
   envelope,
   operation,
   payload,
+  requestId,
 }: RuntimeOperationInvocation): Promise<unknown> {
   if (!isRecord(payload)) {
     return Promise.reject(new RuntimeSurfaceError(
@@ -1780,7 +1782,7 @@ export function invokeRuntimeOperation({
     ownerPackId: operation.invocation_owner_pack_id,
     contractId: operation.contract_id,
     payload,
-  });
+  }, {requestId});
 }
 
 export function classifyRuntimeSurfaceError(error: unknown): RuntimeSurfaceErrorCode {

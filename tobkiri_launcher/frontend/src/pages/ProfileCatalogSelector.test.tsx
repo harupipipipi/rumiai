@@ -470,12 +470,14 @@ test('selector keyboard semantics remain labelled and focusable in a compact vie
   }
 });
 
-test('component surfaces API/session failure and ceremony timeout without opening a later step', async () => {
+test('component surfaces an unknown ceremony timeout and prevents a replacement step', async () => {
   const previousWindow = globalThis.window;
   const previousDocument = globalThis.document;
   const {dom, container, root} = createDom();
   const timeoutClient = ceremonyClient([]);
+  let resolveCalls = 0;
   timeoutClient.resolve = async () => {
+    resolveCalls += 1;
     throw new RuntimeSurfaceError('TIMEOUT', 'HTTP request timed out while resolving the Profile.');
   };
   try {
@@ -495,7 +497,10 @@ test('component surfaces API/session failure and ceremony timeout without openin
     await act(async () => { buttonByLabel(container, 'Select Profile Alternate Profile (alternate)').click(); });
     await act(async () => { buttonContaining(container, 'Resolve candidate').click(); });
     assert.match(container.textContent ?? '', /Profile ceremony stopped fail-closed/);
-    assert.match(container.textContent ?? '', /TIMEOUT: HTTP request timed out/);
+    assert.match(container.textContent ?? '', /Profile ceremony result is unknown/);
+    assert.match(container.textContent ?? '', /no new request will be sent automatically/);
+    await act(async () => { buttonContaining(container, 'Resolve candidate').click(); });
+    assert.equal(resolveCalls, 1);
     assert.equal([...container.querySelectorAll('button')].some((button) => button.textContent?.includes('Review exact candidate')), false);
   } finally {
     act(() => root.unmount());

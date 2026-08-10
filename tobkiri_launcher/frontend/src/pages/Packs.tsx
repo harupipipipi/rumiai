@@ -64,6 +64,7 @@ export function Packs() {
   const packInstallPending = useAppStore(state => state.packInstallPending);
   const packTogglePending = useAppStore(state => state.packTogglePending);
   const packApprovalPending = useAppStore(state => state.packApprovalPending);
+  const packMutationUnknown = useAppStore(state => state.packMutationUnknown);
   const loadPacks = useAppStore(state => state.loadPacks);
   const installPack = useAppStore(state => state.installPack);
   const approvePack = useAppStore(state => state.approvePack);
@@ -166,10 +167,13 @@ export function Packs() {
         ) : (
           <div className="grid gap-3">
             {filteredPacks.map(pack => (
-              <Card
-                key={pack.id}
-                className="transition-all hover:shadow-[var(--shadow-md)] focus-within:shadow-[var(--shadow-md)]"
-              >
+              <Card key={pack.id} className="transition-all hover:shadow-[var(--shadow-md)] focus-within:shadow-[var(--shadow-md)]">
+                {Object.values(packMutationUnknown).some((record) => record.metadata.pack_id === pack.id) ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-300/60 bg-amber-50/60 px-5 py-3 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200" role="alert">
+                    <span>The result of a Pack mutation is unknown. Refresh the authoritative catalog before trying again.</span>
+                    <Button type="button" size="sm" variant="outline" onClick={() => void loadPacks(true)}>Refresh catalog</Button>
+                  </div>
+                ) : null}
                 <div className="flex items-center justify-between">
                   <Link
                     to={panelRoutes.packDetail(pack.id)}
@@ -211,7 +215,7 @@ export function Packs() {
                         size="sm"
                         onClick={() => void handleInstall(pack.id)}
                         loading={installingPackId === pack.id || Boolean(packInstallPending[pack.id])}
-                        disabled={installingPackId !== null}
+                        disabled={installingPackId !== null || Object.values(packMutationUnknown).some((record) => record.metadata.pack_id === pack.id)}
                       >
                         Install
                       </Button>
@@ -220,7 +224,7 @@ export function Packs() {
                         size="sm"
                         onClick={() => void handleApprove(pack.id)}
                         loading={approvingPackId === pack.id}
-                        disabled={approvingPackId !== null}
+                        disabled={approvingPackId !== null || Object.values(packMutationUnknown).some((record) => record.metadata.pack_id === pack.id)}
                       >
                         Approve
                       </Button>
@@ -236,7 +240,7 @@ export function Packs() {
                           onClick={() => handleRevoke(pack)}
                           loading={Boolean(packApprovalPending[pack.id])}
                           aria-busy={Boolean(packApprovalPending[pack.id])}
-                          disabled={pack.type === 'core' || Boolean(packApprovalPending[pack.id])}
+                          disabled={pack.type === 'core' || Boolean(packApprovalPending[pack.id]) || Object.values(packMutationUnknown).some((record) => record.metadata.pack_id === pack.id)}
                           aria-label={`Revoke approval for ${pack.name}`}
                           title={pack.type === 'core' ? 'Core Packs cannot have approval revoked.' : undefined}
                         >
@@ -248,6 +252,7 @@ export function Packs() {
                             pack.type === 'core'
                             || Boolean(packTogglePending[pack.id])
                             || Boolean(packApprovalPending[pack.id])
+                            || Object.values(packMutationUnknown).some((record) => record.metadata.pack_id === pack.id)
                           }
                           aria-busy={Boolean(packTogglePending[pack.id])}
                           onCheckedChange={() => { void handleToggle(pack); }}

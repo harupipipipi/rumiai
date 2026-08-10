@@ -12,7 +12,20 @@ import {LAUNCHER_ADVANCED_VIEWS} from '@/src/lib/advancedSurfaces';
 import {
   extractExactFlowDescriptors,
   extractExactOperationDescriptors,
+  type RuntimeFlowDescriptor,
+  type RuntimeOperationDescriptor,
 } from '@/src/lib/runtimeSurface';
+
+export function exactFlowInvokableOperations(
+  flows: RuntimeFlowDescriptor[] | null,
+  operations: RuntimeOperationDescriptor[],
+): RuntimeOperationDescriptor[] {
+  if (!flows || flows.length === 0) return [];
+  const declaredOperationIds = new Set(flows.flatMap((flow) => flow.operation_ids));
+  return operations.filter((operation) => (
+    operation.invokable && declaredOperationIds.has(operation.operation_id)
+  ));
+}
 
 export function Flow() {
   const surface = useRuntimeSurface<unknown>('operations');
@@ -20,13 +33,11 @@ export function Flow() {
   const flows = surface.data ? extractExactFlowDescriptors(surface.data.data) : null;
   const operations = surface.data ? extractExactOperationDescriptors(surface.data.data) : [];
   const operationIds = new Set(operations.map((operation) => operation.operation_id));
-  const declaredOperationIds = useMemo(
-    () => new Set((flows ?? []).flatMap((flow) => flow.operation_ids)),
-    [flows],
+  const hasDeclaredCompositions = Boolean(flows && flows.length > 0);
+  const invokableOperations = useMemo(
+    () => exactFlowInvokableOperations(flows, operations),
+    [flows, operations],
   );
-  const invokableOperations = operations.filter((operation) => (
-    operation.invokable && (flows === null || flows.length === 0 || declaredOperationIds.has(operation.operation_id))
-  ));
   const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,7 +47,12 @@ export function Flow() {
   }, [selectedOperationId, invokableOperations.map((operation) => operation.operation_id).join('\u0000')]);
 
   const selectedOperation = invokableOperations.find((operation) => operation.operation_id === selectedOperationId) ?? null;
-  const invocation = useRuntimeOperationInvocation(surface.data, selectedOperation);
+  const invocation = useRuntimeOperationInvocation(
+    surface.data,
+    selectedOperation,
+    undefined,
+    () => surface.refresh(true),
+  );
 
   return (
     <AdvancedSurfaceFrame
@@ -45,7 +61,7 @@ export function Flow() {
       onRetry={() => void surface.refresh()}
     >
       {surface.data ? <RuntimeEvidenceCard envelope={surface.data} title="Flow catalog provenance" /> : null}
-      {surface.status === 'ready' && operations.length > 0 ? (
+      {surface.status === 'ready' && hasDeclaredCompositions ? (
         <div className="grid gap-5">
           {flows && flows.length > 0 ? (
             <Card>
@@ -71,9 +87,7 @@ export function Flow() {
                 ))}
               </CardContent>
             </Card>
-          ) : (
-            <div className="rounded-xl border border-dashed border-border bg-bg-card px-4 py-4 text-sm leading-6 text-text-muted">No Flow sequence record is published in the current v4 operations surface. The controls below expose exact operation bindings only; no sequence is synthesized.</div>
-          )}
+          ) : null}
           {selectedOperation ? (
             <Card>
               <CardHeader>
@@ -104,6 +118,11 @@ export function Flow() {
                     {invocation.error.code}: {invocation.error.message}
                   </div>
                 ) : null}
+                {invocation.state === 'unknown' ? (
+                  <div className="mb-4 rounded-lg border border-amber-300/70 bg-amber-50/70 px-3 py-3 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200" role="alert">
+                    The Flow operation result is unknown. Refresh the authoritative operations surface before trying again; no replacement request will be sent.
+                  </div>
+                ) : null}
                 {invocation.state === 'succeeded' ? <p className="mb-4 text-sm text-emerald-700 dark:text-emerald-300" role="status">Flow operation accepted by the canonical Broker path.</p> : null}
                 <OperationInputForm operation={selectedOperation} busy={invocation.busy} onInvoke={invocation.invoke} />
               </CardContent>
@@ -119,8 +138,8 @@ export function Flow() {
       ) : (
         <EmptySurfacePanel
           icon={<PlayCircle className="h-6 w-6" />}
-          title="No exact Flow operation binding is available"
-          message="Flow sequence and run parity require a Pack-declared composition. Until then, this surface does not reclassify Pack labels or inventory rows into a Flow."
+          title="No Pack-declared Flow composition is available"
+          message="Flow is read-only until the accepted operations surface publishes at least one declared composition. Pack inventory and invokable operations are not promoted into a wildcard Flow."
         />
       )}
     </AdvancedSurfaceFrame>

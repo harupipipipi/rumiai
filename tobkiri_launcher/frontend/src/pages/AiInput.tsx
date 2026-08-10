@@ -27,7 +27,12 @@ export function AiInput() {
   }, [selectedOperationId, invokableOperations.map((operation) => operation.operation_id).join('\u0000')]);
 
   const selectedOperation = invokableOperations.find((operation) => operation.operation_id === selectedOperationId) ?? null;
-  const invocation = useRuntimeOperationInvocation(surface.data, selectedOperation);
+  const invocation = useRuntimeOperationInvocation(
+    surface.data,
+    selectedOperation,
+    undefined,
+    () => surface.refresh(true),
+  );
 
   return (
     <AdvancedSurfaceFrame
@@ -75,6 +80,11 @@ export function AiInput() {
                 <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-300/70 bg-amber-50/70 px-4 py-3 text-sm dark:border-amber-800/60 dark:bg-amber-950/20" role="alert">
                   <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
                   <span>{invocation.error.code}: {invocation.error.message}</span>
+                </div>
+              ) : null}
+              {invocation.state === 'unknown' ? (
+                <div className="mb-4 rounded-lg border border-amber-300/70 bg-amber-50/70 px-4 py-3 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200" role="alert">
+                  The AI Input operation result is unknown. Refresh the authoritative operations surface before trying again; no replacement request will be sent.
                 </div>
               ) : null}
               {invocation.state === 'succeeded' ? <p className="mb-4 text-sm text-emerald-700 dark:text-emerald-300" role="status">Operation accepted by the canonical Broker path.</p> : null}

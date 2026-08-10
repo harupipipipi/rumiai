@@ -239,6 +239,339 @@
       ],
       "raw_bytes": 460144,
       "gzip_bytes": 135479
+    },
+    "src/pages/Profile.tsx": {
+      "present": true,
+      "files": [
+        {
+          "file": "assets/Profile-CVm3WuCx.js",
+          "raw_bytes": 41577,
+          "gzip_bytes": 10275
+        },
+        {
+          "file": "assets/Card-WcSlNZlp.js",
+          "raw_bytes": 98247,
+          "gzip_bytes": 26411
+        },
+        {
+          "file": "assets/index-R1cNYXXk.js",
+          "raw_bytes": 326374,
+          "gzip_bytes": 99011
+        },
+        {
+          "file": "assets/arrow-right-JOta021G.js",
+          "raw_bytes": 153,
+          "gzip_bytes": 153
+        },
+        {
+          "file": "assets/check-CGDlf9QQ.js",
+          "raw_bytes": 112,
+          "gzip_bytes": 129
+        },
+        {
+          "file": "assets/advancedSurfaces-BooBW1_3.js",
+          "raw_bytes": 37318,
+          "gzip_bytes": 9933
+        },
+        {
+          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "raw_bytes": 521,
+          "gzip_bytes": 313
+        },
+        {
+          "file": "assets/Input-CZVzOF9N.js",
+          "raw_bytes": 1280,
+          "gzip_bytes": 651
+        }
+      ],
+      "raw_bytes": 505582,
+      "gzip_bytes": 146876
+    },
+    "src/pages/Settings.tsx": {
+      "present": true,
+      "files": [
+        {
+          "file": "assets/Settings-C4HgQVkU.js",
+          "raw_bytes": 6339,
+          "gzip_bytes": 2002
+        },
+        {
+          "file": "assets/Card-WcSlNZlp.js",
+          "raw_bytes": 98247,
+          "gzip_bytes": 26411
+        },
+        {
+          "file": "assets/check-CGDlf9QQ.js",
+          "raw_bytes": 112,
+          "gzip_bytes": 129
+        },
+        {
+          "file": "assets/advancedSurfaces-BooBW1_3.js",
+          "raw_bytes": 37318,
+          "gzip_bytes": 9933
+        },
+        {
+          "file": "assets/index-R1cNYXXk.js",
+          "raw_bytes": 326374,
+          "gzip_bytes": 99011
+        },
+        {
+          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "raw_bytes": 521,
+          "gzip_bytes": 313
+        }
+      ],
+      "raw_bytes": 468911,
+      "gzip_bytes": 137799
+    },
+    "src/pages/ProfileWiring.tsx": {
+      "present": true,
+      "files": [
+        {
+          "file": "assets/ProfileWiring-BUa54XpR.js",
+          "raw_bytes": 3043,
+          "gzip_bytes": 1316
+        },
+        {
+          "file": "assets/Card-WcSlNZlp.js",
+          "raw_bytes": 98247,
+          "gzip_bytes": 26411
+        },
+        {
+          "file": "assets/index-R1cNYXXk.js",
+          "raw_bytes": 326374,
+          "gzip_bytes": 99011
+        },
+        {
+          "file": "assets/advancedSurfaces-BooBW1_3.js",
+          "raw_bytes": 37318,
+          "gzip_bytes": 9933
+        },
+        {
+          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "raw_bytes": 521,
+          "gzip_bytes": 313
+        }
+      ],
+      "raw_bytes": 465503,
+      "gzip_bytes": 136984
+    },
+    "src/pages/ProfileFiles.tsx": {
+      "present": true,
+      "files": [
+        {
+          "file": "assets/ProfileFiles-2rzxXrdS.js",
+          "raw_bytes": 2355,
+          "gzip_bytes": 1141
+        },
+        {
+          "file": "assets/Card-WcSlNZlp.js",
+          "raw_bytes": 98247,
+          "gzip_bytes": 26411
+        },
+        {
+          "file": "assets/advancedSurfaces-BooBW1_3.js",
+          "raw_bytes": 37318,
+          "gzip_bytes": 9933
+        },
+        {
+          "file": "assets/index-R1cNYXXk.js",
+          "raw_bytes": 326374,
+          "gzip_bytes": 99011
+        },
+        {
+          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "raw_bytes": 521,
+          "gzip_bytes": 313
+        }
+      ],
+      "raw_bytes": 464815,
+      "gzip_bytes": 136809
+    },
+    "src/pages/Flow.tsx": {
+      "present": true,
+      "files": [
+        {
+          "file": "assets/Flow-D65K26yA.js",
+          "raw_bytes": 4577,
+          "gzip_bytes": 1896
+        },
+        {
+          "file": "assets/Card-WcSlNZlp.js",
+          "raw_bytes": 98247,
+          "gzip_bytes": 26411
+        },
+        {
+          "file": "assets/index-R1cNYXXk.js",
+          "raw_bytes": 326374,
+          "gzip_bytes": 99011
+        },
+        {
+          "file": "assets/advancedSurfaces-BooBW1_3.js",
+          "raw_bytes": 37318,
+          "gzip_bytes": 9933
+        },
+        {
+          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "raw_bytes": 521,
+          "gzip_bytes": 313
+        },
+        {
+          "file": "assets/useRuntimeOperationInvocation-CEO3clH-.js",
+          "raw_bytes": 6770,
+          "gzip_bytes": 2436
+        },
+        {
+          "file": "assets/Input-CZVzOF9N.js",
+          "raw_bytes": 1280,
+          "gzip_bytes": 651
+        }
+      ],
+      "raw_bytes": 475087,
+      "gzip_bytes": 140651
+    },
+    "src/pages/Graph.tsx": {
+      "present": true,
+      "files": [
+        {
+          "file": "assets/Graph-DmynG_Or.js",
+          "raw_bytes": 2371,
+          "gzip_bytes": 1043
+        },
+        {
+          "file": "assets/Card-WcSlNZlp.js",
+          "raw_bytes": 98247,
+          "gzip_bytes": 26411
+        },
+        {
+          "file": "assets/index-R1cNYXXk.js",
+          "raw_bytes": 326374,
+          "gzip_bytes": 99011
+        },
+        {
+          "file": "assets/arrow-right-JOta021G.js",
+          "raw_bytes": 153,
+          "gzip_bytes": 153
+        },
+        {
+          "file": "assets/advancedSurfaces-BooBW1_3.js",
+          "raw_bytes": 37318,
+          "gzip_bytes": 9933
+        },
+        {
+          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "raw_bytes": 521,
+          "gzip_bytes": 313
+        }
+      ],
+      "raw_bytes": 464984,
+      "gzip_bytes": 136864
+    },
+    "src/pages/AiInput.tsx": {
+      "present": true,
+      "files": [
+        {
+          "file": "assets/AiInput-C3Xm209L.js",
+          "raw_bytes": 3289,
+          "gzip_bytes": 1473
+        },
+        {
+          "file": "assets/Card-WcSlNZlp.js",
+          "raw_bytes": 98247,
+          "gzip_bytes": 26411
+        },
+        {
+          "file": "assets/index-R1cNYXXk.js",
+          "raw_bytes": 326374,
+          "gzip_bytes": 99011
+        },
+        {
+          "file": "assets/advancedSurfaces-BooBW1_3.js",
+          "raw_bytes": 37318,
+          "gzip_bytes": 9933
+        },
+        {
+          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "raw_bytes": 521,
+          "gzip_bytes": 313
+        },
+        {
+          "file": "assets/useRuntimeOperationInvocation-CEO3clH-.js",
+          "raw_bytes": 6770,
+          "gzip_bytes": 2436
+        },
+        {
+          "file": "assets/Input-CZVzOF9N.js",
+          "raw_bytes": 1280,
+          "gzip_bytes": 651
+        }
+      ],
+      "raw_bytes": 473799,
+      "gzip_bytes": 140228
+    },
+    "src/pages/ApiMap.tsx": {
+      "present": true,
+      "files": [
+        {
+          "file": "assets/ApiMap-BfoPTJVS.js",
+          "raw_bytes": 3967,
+          "gzip_bytes": 1300
+        },
+        {
+          "file": "assets/Card-WcSlNZlp.js",
+          "raw_bytes": 98247,
+          "gzip_bytes": 26411
+        },
+        {
+          "file": "assets/index-R1cNYXXk.js",
+          "raw_bytes": 326374,
+          "gzip_bytes": 99011
+        },
+        {
+          "file": "assets/advancedSurfaces-BooBW1_3.js",
+          "raw_bytes": 37318,
+          "gzip_bytes": 9933
+        },
+        {
+          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "raw_bytes": 521,
+          "gzip_bytes": 313
+        }
+      ],
+      "raw_bytes": 466427,
+      "gzip_bytes": 136968
+    },
+    "src/pages/NodeManager.tsx": {
+      "present": true,
+      "files": [
+        {
+          "file": "assets/NodeManager-C-xRxEvh.js",
+          "raw_bytes": 5045,
+          "gzip_bytes": 2025
+        },
+        {
+          "file": "assets/Card-WcSlNZlp.js",
+          "raw_bytes": 98247,
+          "gzip_bytes": 26411
+        },
+        {
+          "file": "assets/index-R1cNYXXk.js",
+          "raw_bytes": 326374,
+          "gzip_bytes": 99011
+        },
+        {
+          "file": "assets/advancedSurfaces-BooBW1_3.js",
+          "raw_bytes": 37318,
+          "gzip_bytes": 9933
+        },
+        {
+          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "raw_bytes": 521,
+          "gzip_bytes": 313
+        }
+      ],
+      "raw_bytes": 467505,
+      "gzip_bytes": 137693
     }
   }
 }
