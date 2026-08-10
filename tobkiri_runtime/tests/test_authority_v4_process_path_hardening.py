@@ -10,9 +10,32 @@ import sqlite3
 
 import pytest
 
+import core_runtime.process_identity as process_identity
 import core_runtime.secure_sqlite_path as secure_paths
 from core_runtime.authority.v4_store import AuthorityStore, AuthorityStoreError
 from core_runtime.process_identity import ProcessIdentityEvidence
+
+
+class _FakeWindowsProcessAPI:
+    def __init__(self, creation_time: int | None = 0x123456789ABCDEF0) -> None:
+        self.creation_time = creation_time
+        self.opened: list[int] = []
+        self.closed: list[int] = []
+        self.open_failure = False
+        self.close_failure = False
+
+    def open_process(self, process_id: int) -> int | None:
+        self.opened.append(process_id)
+        return None if self.open_failure else 73
+
+    def process_creation_time(self, handle: int) -> int | None:
+        assert handle == 73
+        return self.creation_time
+
+    def close_handle(self, handle: int) -> None:
+        self.closed.append(handle)
+        if self.close_failure:
+            raise OSError("simulated CloseHandle failure")
 
 
 def _exercise_inherited_store(
@@ -90,6 +113,99 @@ def test_process_identity_unavailable_fails_closed_without_marking_dead(
             tmp_path / "unavailable.sqlite3",
             process_start_reader=lambda _pid: ProcessIdentityEvidence("unknown"),
         )
+
+
+def test_windows_current_process_identity_uses_stable_filetime_and_closes_handle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _FakeWindowsProcessAPI()
+    monkeypatch.setattr(process_identity, "_is_windows", lambda: True)
+    monkeypatch.setattr(process_identity, "_load_windows_process_api", lambda: adapter)
+    monkeypatch.setattr(
+        process_identity.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("Windows identity launched a subprocess"),
+    )
+
+    first = process_identity.process_start_identity(os.getpid())
+    second = process_identity.process_start_identity(os.getpid())
+
+    assert (
+        first
+        == second
+        == ProcessIdentityEvidence(
+            "live",
+            f"windows:{os.getpid()}:123456789abcdef0",
+        )
+    )
+    assert adapter.opened == [os.getpid(), os.getpid()]
+    assert adapter.closed == [73, 73]
+    assert process_identity.process_start_identity(os.getpid() + 1).state == "unknown"
+
+
+@pytest.mark.parametrize("failure", ["unavailable", "open", "times", "close"])
+def test_windows_process_identity_api_failures_are_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    adapter = _FakeWindowsProcessAPI()
+    if failure == "open":
+        adapter.open_failure = True
+    elif failure == "times":
+        adapter.creation_time = None
+    elif failure == "close":
+        adapter.close_failure = True
+    monkeypatch.setattr(process_identity, "_is_windows", lambda: True)
+    monkeypatch.setattr(
+        process_identity,
+        "_load_windows_process_api",
+        lambda: None if failure == "unavailable" else adapter,
+    )
+
+    assert process_identity.process_start_identity(os.getpid()).state == "unknown"
+    if failure in {"times", "close"}:
+        assert adapter.closed == [73]
+
+
+def test_windows_creation_mismatch_rejects_inherited_store_and_new_store_succeeds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _FakeWindowsProcessAPI(creation_time=100)
+    monkeypatch.setattr(process_identity, "_is_windows", lambda: True)
+    monkeypatch.setattr(process_identity, "_load_windows_process_api", lambda: adapter)
+    path = tmp_path / "windows-authority.sqlite3"
+    store = AuthorityStore(path)
+    assert store.security_epoch == 1
+
+    adapter.creation_time = 101
+    operations = (
+        lambda: store.security_epoch,
+        lambda: store.advance_security_epoch("pid-reuse"),
+        lambda: store.get_lease("missing"),
+        store.audit_events,
+    )
+    for operation in operations:
+        with pytest.raises(AuthorityStoreError, match="identity"):
+            operation()
+
+    fresh = AuthorityStore(path)
+    assert fresh.security_epoch == 1
+    fresh.close()
+    adapter.creation_time = 100
+    assert store.security_epoch == 1
+    store.close()
+
+
+def test_windows_authority_construction_fails_when_creation_identity_is_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(process_identity, "_is_windows", lambda: True)
+    monkeypatch.setattr(process_identity, "_load_windows_process_api", lambda: None)
+
+    with pytest.raises(AuthorityStoreError, match="identity is unavailable"):
+        AuthorityStore(tmp_path / "unavailable-windows.sqlite3")
 
 
 @pytest.mark.parametrize("target", ["database", "key", "-wal", "-shm"])

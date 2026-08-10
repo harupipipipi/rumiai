@@ -110,7 +110,6 @@ class AuthorityStore:
             Path(key_path) if key_path is not None else self.path.with_suffix(".key")
         )
         self._owner_pid = os.getpid()
-        self._refresh_process_identity = process_start_reader is not None
         self._process_start_reader = process_start_reader or process_start_identity
         evidence = self._process_start_reader(self._owner_pid)
         if evidence.state != "live":
@@ -158,8 +157,6 @@ class AuthorityStore:
     def _assert_current_process(self) -> None:
         if self._fork_fenced or os.getpid() != self._owner_pid:
             raise AuthorityStoreError("authority store cannot be used after fork")
-        if not self._refresh_process_identity:
-            return
         evidence = self._process_start_reader(self._owner_pid)
         if evidence.state != "live" or evidence.identity != self._owner_process_start:
             raise AuthorityStoreError("authority process identity is unavailable or changed")

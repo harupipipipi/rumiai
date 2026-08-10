@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import os
 import subprocess
+from functools import lru_cache
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 from tobkiri_protocol.canonical import canonical_digest
 
@@ -25,13 +26,140 @@ class ProcessIdentityEvidence:
             raise ValueError("non-live process evidence cannot carry an identity")
 
 
+class WindowsProcessAPI(Protocol):
+    """Minimal WinAPI adapter used to obtain a process creation FILETIME."""
+
+    def open_process(self, process_id: int) -> int | None:
+        """Open a query-only process handle, or return ``None`` on failure."""
+
+    def process_creation_time(self, handle: int) -> int | None:
+        """Return the stable creation FILETIME ticks for an opened process."""
+
+    def close_handle(self, handle: int) -> None:
+        """Close an opened process handle or raise on failure."""
+
+
+class _Kernel32ProcessAPI:
+    """ctypes-backed Windows process creation-time adapter."""
+
+    _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+    def __init__(self) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        class FileTime(ctypes.Structure):
+            _fields_ = [
+                ("low", wintypes.DWORD),
+                ("high", wintypes.DWORD),
+            ]
+
+        win_dll = getattr(ctypes, "WinDLL", None)
+        if win_dll is None:
+            raise OSError("WinDLL is unavailable")
+        kernel32 = win_dll("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.GetProcessTimes.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(FileTime),
+            ctypes.POINTER(FileTime),
+            ctypes.POINTER(FileTime),
+            ctypes.POINTER(FileTime),
+        ]
+        kernel32.GetProcessTimes.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        self._ctypes = ctypes
+        self._kernel32 = kernel32
+        self._file_time = FileTime
+
+    def open_process(self, process_id: int) -> int | None:
+        """Open a process with the least privilege needed for creation time."""
+
+        handle = self._kernel32.OpenProcess(
+            self._PROCESS_QUERY_LIMITED_INFORMATION,
+            False,
+            process_id,
+        )
+        return int(handle) if handle else None
+
+    def process_creation_time(self, handle: int) -> int | None:
+        """Read one process creation FILETIME without using a wall clock."""
+
+        creation = self._file_time()
+        exit_time = self._file_time()
+        kernel_time = self._file_time()
+        user_time = self._file_time()
+        if not self._kernel32.GetProcessTimes(
+            handle,
+            self._ctypes.byref(creation),
+            self._ctypes.byref(exit_time),
+            self._ctypes.byref(kernel_time),
+            self._ctypes.byref(user_time),
+        ):
+            return None
+        return (int(creation.high) << 32) | int(creation.low)
+
+    def close_handle(self, handle: int) -> None:
+        """Close a process handle and surface close failures fail-closed."""
+
+        if not self._kernel32.CloseHandle(handle):
+            raise OSError("CloseHandle failed")
+
+
+@lru_cache(maxsize=1)
+def _load_windows_process_api() -> WindowsProcessAPI | None:
+    try:
+        return _Kernel32ProcessAPI()
+    except (AttributeError, ImportError, OSError):
+        return None
+
+
+def _windows_current_process_identity(process_id: int) -> ProcessIdentityEvidence:
+    """Return current-process PID plus creation FILETIME, closing every handle."""
+
+    if process_id != os.getpid():
+        # This primitive intentionally does not turn arbitrary Windows PID
+        # query failures into death evidence for reconciliation.
+        return ProcessIdentityEvidence("unknown")
+    api = _load_windows_process_api()
+    if api is None:
+        return ProcessIdentityEvidence("unknown")
+    handle: int | None = None
+    evidence = ProcessIdentityEvidence("unknown")
+    try:
+        handle = api.open_process(process_id)
+        if handle is None:
+            return evidence
+        creation_time = api.process_creation_time(handle)
+        if creation_time is not None:
+            evidence = ProcessIdentityEvidence(
+                "live",
+                f"windows:{process_id}:{creation_time:016x}",
+            )
+    except (OSError, TypeError, ValueError):
+        evidence = ProcessIdentityEvidence("unknown")
+    finally:
+        if handle is not None:
+            try:
+                api.close_handle(handle)
+            except (OSError, TypeError, ValueError):
+                evidence = ProcessIdentityEvidence("unknown")
+    return evidence
+
+
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
 def process_start_identity(process_id: int) -> ProcessIdentityEvidence:
     """Return explicit live, dead, or unavailable PID-start evidence."""
 
-    if os.name == "nt" or process_id <= 0:
-        # POSIX process probes are not Windows lifecycle evidence.  Unknown
-        # stays fail-closed without launching a compatibility subprocess.
+    if process_id <= 0:
         return ProcessIdentityEvidence("unknown")
+    if _is_windows():
+        return _windows_current_process_identity(process_id)
     try:
         os.kill(process_id, 0)
     except ProcessLookupError:
