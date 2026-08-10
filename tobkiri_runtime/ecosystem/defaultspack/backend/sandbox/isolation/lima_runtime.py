@@ -51,6 +51,11 @@ LIMA_STATE_VERSION = 1
 LIMA_CONFIG_POLICY_VERSION = 4
 LIMA_STATE_ENV = "RUMI_SANDBOX_LIMA_STATE"
 MAX_LIMA_STATE_BYTES = 64 * 1024
+PACKVM_LIMA_SCRUB_CHUNK_BYTES = 64 * 1024
+PACKVM_LIMA_SCRUB_MAX_FILE_BYTES = 128 * 1024 * 1024
+PACKVM_LIMA_SCRUB_MAX_TOTAL_BYTES = 256 * 1024 * 1024
+PACKVM_LIMA_SCRUB_DEADLINE_SECONDS = 30.0
+_PACKVM_LIMA_BULK_PAYLOAD_NAMES = frozenset({"basedisk", "diffdisk", "disk"})
 LIMA_GUEST_WORKSPACE_ROOT = "/var/lib/rumi/workspaces"
 LIMA_GUEST_PACK_DATA_ROOT = "/var/lib/rumi/pack-data"
 PACKVM_BACKEND_ID = "tobkiri.python-pack-v4"
@@ -1930,12 +1935,30 @@ class PackVMLimaProvisioner:
             raise ValueError("PackVM Lima handoff metadata directory is unsafe")
         descriptor, device, inode, chain = _open_pinned_owned_directory(instance_directory)
         visited = 0
+        scanned_bytes = 0
+        deadline = time.monotonic() + PACKVM_LIMA_SCRUB_DEADLINE_SECONDS
+        patterns = tuple(
+            sorted(
+                {value.encode() for value in sensitive_values if value},
+                key=len,
+                reverse=True,
+            )
+        )
+
+        def require_budget(count: int) -> None:
+            nonlocal scanned_bytes
+            scanned_bytes += count
+            if scanned_bytes > PACKVM_LIMA_SCRUB_MAX_TOTAL_BYTES:
+                raise ValueError("PackVM Lima handoff metadata scan exceeded its byte bound")
+            if time.monotonic() >= deadline:
+                raise ValueError("PackVM Lima handoff metadata scan timed out")
 
         def scrub_directory(directory_descriptor: int, *, depth: int) -> None:
             nonlocal visited
             if depth > 16:
                 raise ValueError("PackVM Lima handoff metadata is too deeply nested")
             for name in os.listdir(directory_descriptor):
+                require_budget(0)
                 visited += 1
                 if visited > 16_384:
                     raise ValueError("PackVM Lima handoff metadata is too large")
@@ -1946,10 +1969,7 @@ class PackVMLimaProvisioner:
                 except FileNotFoundError:
                     continue
                 if stat.S_ISLNK(metadata.st_mode):
-                    target = os.readlink(name, dir_fd=directory_descriptor)
-                    if any(value in target for value in sensitive_values):
-                        raise ValueError("PackVM Lima handoff token persisted in a link")
-                    continue
+                    raise ValueError("PackVM Lima handoff metadata link is unsafe")
                 if stat.S_ISDIR(metadata.st_mode):
                     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
                     if hasattr(os, "O_NOFOLLOW"):
@@ -1977,8 +1997,15 @@ class PackVMLimaProvisioner:
                     continue
                 if not stat.S_ISREG(metadata.st_mode):
                     continue
-                if metadata.st_size > MAX_LIMA_STATE_BYTES:
+                if depth == 0 and name in _PACKVM_LIMA_BULK_PAYLOAD_NAMES:
+                    if (
+                        metadata.st_nlink != 1
+                        or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+                    ):
+                        raise ValueError("PackVM Lima bulk payload is unsafe")
                     continue
+                if metadata.st_size > PACKVM_LIMA_SCRUB_MAX_FILE_BYTES:
+                    raise ValueError("PackVM Lima handoff metadata file exceeds its scan bound")
                 file_descriptor = os.open(
                     name,
                     os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
@@ -1992,26 +2019,29 @@ class PackVMLimaProvisioner:
                         or (hasattr(os, "getuid") and opened.st_uid != os.getuid())
                     ):
                         raise ValueError("PackVM Lima handoff metadata is unsafe")
-                    payload = os.read(file_descriptor, MAX_LIMA_STATE_BYTES + 1)
+                    replacements = tuple(
+                        (
+                            pattern,
+                            (
+                                str(_PACKVM_IMAGES[self._machine]["url"]).encode()
+                                if depth == 0
+                                and name == "lima.yaml"
+                                and hmac.compare_digest(pattern, endpoint.encode())
+                                else b"<packvm-handoff-redacted>"
+                            ),
+                        )
+                        for pattern in patterns
+                    )
+                    self._stream_redact_lima_metadata_file(
+                        directory_descriptor=directory_descriptor,
+                        name=name,
+                        descriptor=file_descriptor,
+                        expected=opened,
+                        replacements=replacements,
+                        require_budget=require_budget,
+                    )
                 finally:
                     os.close(file_descriptor)
-                replacement = payload
-                if depth == 0 and name == "lima.yaml":
-                    count = replacement.count(endpoint.encode())
-                    if count > 1:
-                        raise ValueError("PackVM Lima config contains repeated handoff URLs")
-                    replacement = replacement.replace(
-                        endpoint.encode(),
-                        str(_PACKVM_IMAGES[self._machine]["url"]).encode(),
-                    )
-                for sensitive in sensitive_values:
-                    replacement = replacement.replace(
-                        sensitive.encode(), b"<packvm-handoff-redacted>"
-                    )
-                if replacement != payload:
-                    self._replace_lima_metadata_file(
-                        directory_descriptor, name, replacement, metadata
-                    )
 
         try:
             scrub_directory(descriptor, depth=0)
@@ -2023,13 +2053,47 @@ class PackVMLimaProvisioner:
             os.close(descriptor)
 
     @staticmethod
-    def _replace_lima_metadata_file(
+    def _stream_redact_lima_metadata_file(
+        *,
         directory_descriptor: int,
         name: str,
-        payload: bytes,
+        descriptor: int,
         expected: os.stat_result,
+        replacements: Sequence[tuple[bytes, bytes]],
+        require_budget: Callable[[int], None],
     ) -> None:
-        """Atomically replace one exact private Lima metadata file."""
+        """Stream-scan and atomically redact one pinned private Lima file."""
+
+        max_pattern = max((len(pattern) for pattern, _value in replacements), default=1)
+        carry = b""
+        matched = False
+        binary = False
+        offset = 0
+        while offset < expected.st_size:
+            chunk = os.pread(
+                descriptor,
+                min(PACKVM_LIMA_SCRUB_CHUNK_BYTES, expected.st_size - offset),
+                offset,
+            )
+            if not chunk:
+                raise ValueError("PackVM Lima handoff metadata was truncated")
+            require_budget(len(chunk))
+            binary = binary or b"\x00" in chunk
+            window = carry + chunk
+            if any(pattern in window for pattern, _value in replacements):
+                matched = True
+            carry = window[-(max_pattern - 1) :] if max_pattern > 1 else b""
+            offset += len(chunk)
+        if os.pread(descriptor, 1, offset):
+            raise ValueError("PackVM Lima handoff metadata exceeded its attested size")
+        after_scan = os.fstat(descriptor)
+        stable_fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+        if any(getattr(after_scan, field) != getattr(expected, field) for field in stable_fields):
+            raise ValueError("PackVM Lima handoff metadata changed during scan")
+        if not matched:
+            return
+        if binary:
+            raise ValueError("PackVM Lima binary metadata contains a handoff token")
 
         current = os.stat(name, dir_fd=directory_descriptor, follow_symlinks=False)
         if (current.st_dev, current.st_ino) != (expected.st_dev, expected.st_ino):
@@ -2040,13 +2104,70 @@ class PackVMLimaProvisioner:
             flags |= os.O_NOFOLLOW
         temporary_descriptor = os.open(temporary, flags, 0o600, dir_fd=directory_descriptor)
         try:
-            written = 0
-            while written < len(payload):
-                count = os.write(temporary_descriptor, payload[written:])
-                if count <= 0:
-                    raise ValueError("PackVM Lima handoff metadata write was incomplete")
-                written += count
+            os.fchmod(temporary_descriptor, stat.S_IMODE(expected.st_mode))
+            buffer = b""
+            offset = 0
+            while offset < expected.st_size:
+                chunk = os.pread(
+                    descriptor,
+                    min(PACKVM_LIMA_SCRUB_CHUNK_BYTES, expected.st_size - offset),
+                    offset,
+                )
+                if not chunk:
+                    raise ValueError("PackVM Lima handoff metadata was truncated")
+                require_budget(len(chunk))
+                buffer += chunk
+                offset += len(chunk)
+                safe_limit = max(0, len(buffer) - max_pattern + 1)
+                output = bytearray()
+                cursor = 0
+                while cursor < safe_limit:
+                    matches = (
+                        (position, -len(pattern), pattern, value)
+                        for pattern, value in replacements
+                        if (position := buffer.find(pattern, cursor)) >= 0
+                        and position < safe_limit
+                    )
+                    match = min(matches, default=None)
+                    if match is None:
+                        output.extend(buffer[cursor:safe_limit])
+                        cursor = safe_limit
+                        continue
+                    position, _negative_length, pattern, value = match
+                    output.extend(buffer[cursor:position])
+                    output.extend(value)
+                    cursor = position + len(pattern)
+                PackVMLimaProvisioner._write_all(temporary_descriptor, bytes(output))
+                buffer = buffer[cursor:]
+            cursor = 0
+            output = bytearray()
+            while cursor < len(buffer):
+                matches = (
+                    (position, -len(pattern), pattern, value)
+                    for pattern, value in replacements
+                    if (position := buffer.find(pattern, cursor)) >= 0
+                )
+                match = min(matches, default=None)
+                if match is None:
+                    output.extend(buffer[cursor:])
+                    break
+                position, _negative_length, pattern, value = match
+                output.extend(buffer[cursor:position])
+                output.extend(value)
+                cursor = position + len(pattern)
+            PackVMLimaProvisioner._write_all(temporary_descriptor, bytes(output))
+            require_budget(0)
+            after_rewrite = os.fstat(descriptor)
+            if any(
+                getattr(after_rewrite, field) != getattr(expected, field)
+                for field in stable_fields
+            ):
+                raise ValueError("PackVM Lima handoff metadata changed during redaction")
+            current = os.stat(name, dir_fd=directory_descriptor, follow_symlinks=False)
+            if (current.st_dev, current.st_ino) != (expected.st_dev, expected.st_ino):
+                raise ValueError("PackVM Lima handoff metadata identity changed")
             os.fsync(temporary_descriptor)
+            require_budget(0)
             os.replace(
                 temporary,
                 name,
@@ -2060,6 +2181,17 @@ class PackVMLimaProvisioner:
                 os.unlink(temporary, dir_fd=directory_descriptor)
             except FileNotFoundError:
                 pass
+
+    @staticmethod
+    def _write_all(descriptor: int, payload: bytes) -> None:
+        """Write all bytes to one already pinned descriptor."""
+
+        written = 0
+        while written < len(payload):
+            count = os.write(descriptor, payload[written:])
+            if count <= 0:
+                raise ValueError("PackVM Lima handoff metadata write was incomplete")
+            written += count
 
     def _image_authority(
         self, *, plan_digest: str, session_digest: str, operation_id: str

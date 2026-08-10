@@ -11,12 +11,15 @@ import socket
 import stat
 import threading
 import time
+from collections import deque
 from typing import Callable
 
 
 _MAX_HEADER_BYTES = 16 * 1024
 _MAX_PENDING_CONNECTIONS = 64
 _HEADER_TIMEOUT_SECONDS = 0.5
+_ACCEPT_QUOTA = 8
+_HEADER_READ_QUOTA = 16
 
 
 class PackVMImageHandoffError(RuntimeError):
@@ -158,6 +161,8 @@ class PackVMLoopbackImageHandoff:
             return
         selector = selectors.DefaultSelector()
         pending: dict[socket.socket, tuple[bytearray, float]] = {}
+        ready_clients: deque[socket.socket] = deque()
+        queued_clients: set[socket.socket] = set()
         try:
             selector.register(listener, selectors.EVENT_READ)
             while not self._stop.is_set():
@@ -169,13 +174,26 @@ class PackVMLoopbackImageHandoff:
                     self._record_error(TimeoutError("PackVM image handoff timed out"))
                     return
                 timeout = min(0.1, self._deadline - now)
+                listener_ready = False
                 for key, _events in selector.select(timeout):
                     if key.fileobj is listener:
-                        self._accept_ready(selector, pending)
+                        listener_ready = True
                     else:
                         client = key.fileobj
-                        if isinstance(client, socket.socket):
-                            self._read_header(selector, pending, client)
+                        if (
+                            isinstance(client, socket.socket)
+                            and client in pending
+                            and client not in queued_clients
+                        ):
+                            ready_clients.append(client)
+                            queued_clients.add(client)
+                for _ in range(min(_HEADER_READ_QUOTA, len(ready_clients))):
+                    client = ready_clients.popleft()
+                    queued_clients.discard(client)
+                    if client in pending:
+                        self._read_header(selector, pending, client)
+                if listener_ready:
+                    self._accept_ready(selector, pending)
                 now = time.monotonic()
                 for client, (_buffer, deadline) in tuple(pending.items()):
                     if now >= deadline:
@@ -200,7 +218,9 @@ class PackVMLoopbackImageHandoff:
         listener = self._listener
         if listener is None:
             return
-        while True:
+        for _ in range(_ACCEPT_QUOTA):
+            if len(pending) >= _MAX_PENDING_CONNECTIONS:
+                return
             try:
                 client, address = listener.accept()
             except BlockingIOError:
@@ -211,9 +231,6 @@ class PackVMLoopbackImageHandoff:
             # Apply a kernel socket timeout immediately.  The selector deadline
             # below is authoritative and also bounds partial-header trickles.
             client.settimeout(_HEADER_TIMEOUT_SECONDS)
-            while len(pending) >= _MAX_PENDING_CONNECTIONS:
-                oldest = next(iter(pending))
-                self._drop_pending(selector, pending, oldest)
             pending[client] = (bytearray(), time.monotonic() + _HEADER_TIMEOUT_SECONDS)
             with self._lock:
                 self._clients.add(client)
@@ -302,6 +319,8 @@ class PackVMLoopbackImageHandoff:
                 "Connection: close\r\n\r\n"
             ).encode("ascii")
             client.sendall(response)
+            if time.monotonic() >= self._deadline:
+                raise TimeoutError("PackVM local image handoff timed out")
             hasher = hashlib.sha256()
             offset = 0
             while offset < self._size:
@@ -317,6 +336,8 @@ class PackVMLoopbackImageHandoff:
                     raise TimeoutError("PackVM local image handoff timed out")
                 client.settimeout(min(self._inactivity_timeout, remaining))
                 client.sendall(chunk)
+                if time.monotonic() >= self._deadline:
+                    raise TimeoutError("PackVM local image handoff timed out")
                 hasher.update(chunk)
                 offset += len(chunk)
             if os.pread(self._descriptor, 1, offset):
@@ -324,6 +345,8 @@ class PackVMLoopbackImageHandoff:
             actual = "sha256:" + hasher.hexdigest()
             if not hmac.compare_digest(actual, self._digest):
                 raise ValueError("PackVM local image handoff digest changed")
+            if time.monotonic() >= self._deadline:
+                raise TimeoutError("PackVM local image handoff timed out")
             with self._lock:
                 self._consumed = True
             self._finished.set()

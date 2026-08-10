@@ -88,6 +88,8 @@ class FakeLima:
         self.persist_start_config = False
         self.include_handoff_in_stderr = False
         self.last_start_location = ""
+        self.start_log_payload: bytes | None = None
+        self.remove_files_on_delete = False
         self.before_start: Callable[[bytes, tuple[int, ...]], None] | None = None
 
     def __call__(self, command, input_text, _timeout, inherited_fds=()):
@@ -111,7 +113,11 @@ class FakeLima:
                 log_directory = self.instance_dir / "logs"
                 log_directory.mkdir(mode=0o700, exist_ok=True)
                 log_path = log_directory / "download.log"
-                log_path.write_text(f"source={location}\n", encoding="utf-8")
+                log_path.write_bytes(
+                    self.start_log_payload
+                    if self.start_log_payload is not None
+                    else f"source={location}\n".encode()
+                )
                 log_path.chmod(0o600)
             with urllib.request.urlopen(location, timeout=5) as response:
                 consumed_image = response.read()
@@ -146,6 +152,9 @@ class FakeLima:
                 return SimpleNamespace(returncode=31, stdout="", stderr="delete blocked")
             self.exists = False
             self.running = False
+            if self.remove_files_on_delete and self.instance_dir.exists():
+                shutil.rmtree(self.instance_dir)
+                self.instance_dir.mkdir(mode=0o700)
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         if args[:3] == ("list", PACKVM_LIMA_INSTANCE, "--format"):
             payload = {
@@ -2070,6 +2079,100 @@ def test_handoff_token_is_scrubbed_after_success_and_failure(provisioner) -> Non
         for candidate in path.rglob("*"):
             if candidate.is_file() and candidate.stat().st_size < 1024 * 1024:
                 assert token.encode() not in candidate.read_bytes()
+
+
+def test_handoff_scrub_streams_large_and_boundary_spanning_tokens(provisioner) -> None:
+    from ecosystem.defaultspack.backend.sandbox.isolation import lima_runtime
+
+    manager, fake, _command = provisioner
+    endpoint = "http://127.0.0.1:32123/packvm-image/" + "a" * 64
+    token = "a" * 64
+    logs = fake.instance_dir / "logs"
+    logs.mkdir(mode=0o700, exist_ok=True)
+    below = logs / "below.log"
+    above = logs / "above.log"
+    boundary = logs / "boundary.log"
+    binary = logs / "unrelated.bin"
+    below.write_bytes(b"x" * 1024 + endpoint.encode())
+    above.write_bytes(b"x" * 65_637 + endpoint.encode())
+    boundary.write_bytes(
+        b"x" * (lima_runtime.PACKVM_LIMA_SCRUB_CHUNK_BYTES - 7) + endpoint.encode()
+    )
+    binary_payload = b"\x00" + os.urandom(70_000)
+    binary.write_bytes(binary_payload)
+    above.chmod(0o640)
+    binary_identity = (binary.stat().st_dev, binary.stat().st_ino)
+
+    manager._scrub_lima_handoff_artifacts(endpoint, (endpoint, token))
+
+    for path in (below, above, boundary):
+        payload = path.read_bytes()
+        assert endpoint.encode() not in payload
+        assert token.encode() not in payload
+        assert b"<packvm-handoff-redacted>" in payload
+    assert stat.S_IMODE(above.stat().st_mode) == 0o640
+    assert binary.read_bytes() == binary_payload
+    assert (binary.stat().st_dev, binary.stat().st_ino) == binary_identity
+
+
+@pytest.mark.parametrize("unsafe_kind", ["hardlink", "symlink"])
+def test_handoff_scrub_rejects_unprovable_links(
+    provisioner, tmp_path: Path, unsafe_kind: str
+) -> None:
+    manager, fake, _command = provisioner
+    endpoint = "http://127.0.0.1:32123/packvm-image/" + "b" * 64
+    target = tmp_path / "outside.log"
+    target.write_text(endpoint, encoding="utf-8")
+    candidate = fake.instance_dir / "unsafe.log"
+    if unsafe_kind == "hardlink":
+        os.link(target, candidate)
+    else:
+        candidate.symlink_to(target)
+
+    with pytest.raises(ValueError, match="unsafe"):
+        manager._scrub_lima_handoff_artifacts(endpoint, (endpoint, "b" * 64))
+    assert target.read_text(encoding="utf-8") == endpoint
+
+
+def test_handoff_scrub_total_byte_bound_fails_without_mutation(
+    provisioner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ecosystem.defaultspack.backend.sandbox.isolation import lima_runtime
+
+    manager, fake, _command = provisioner
+    endpoint = "http://127.0.0.1:32123/packvm-image/" + "c" * 64
+    log = fake.instance_dir / "bounded.log"
+    payload = b"unrelated-log-data" * 128
+    log.write_bytes(payload)
+    identity = (log.stat().st_dev, log.stat().st_ino)
+    monkeypatch.setattr(lima_runtime, "PACKVM_LIMA_SCRUB_MAX_TOTAL_BYTES", 512)
+
+    with pytest.raises(ValueError, match="byte bound"):
+        manager._scrub_lima_handoff_artifacts(endpoint, (endpoint, "c" * 64))
+
+    assert log.read_bytes() == payload
+    assert (log.stat().st_dev, log.stat().st_ino) == identity
+    assert not list(fake.instance_dir.glob(".packvm-scrub-*"))
+
+
+def test_unredactable_lima_log_fails_and_cleans_created_instance(provisioner) -> None:
+    manager, fake, _command = provisioner
+    fake.persist_start_config = True
+    fake.remove_files_on_delete = True
+    fake.start_log_payload = b"\x00token="
+
+    def add_endpoint(config: bytes, _fds: tuple[int, ...]) -> None:
+        location = str(yaml.safe_load(config)["images"][0]["location"])
+        fake.start_log_payload = b"\x00token=" + location.encode()
+
+    fake.before_start = add_endpoint
+    with pytest.raises(ValueError, match="binary metadata"):
+        manager.provision(_request(manager.prepare()))
+
+    assert fake.exists is False
+    assert not manager.state_path.exists()
+    assert not manager.recovery_path.exists()
+    assert list(fake.instance_dir.iterdir()) == []
 
 
 def test_cancellation_after_final_seal_prevents_start(

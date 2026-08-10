@@ -58,7 +58,8 @@ def test_invalid_request_does_not_consume_capability(tmp_path: Path, attack: str
             descriptor, size_bytes=len(content), digest=_digest(content)
         ) as handoff:
             if attack == "token":
-                request = urllib.request.Request(handoff.url[:-1] + "0")
+                changed = "0" if handoff.url[-1] != "0" else "1"
+                request = urllib.request.Request(handoff.url[:-1] + changed)
             elif attack == "range":
                 request = urllib.request.Request(handoff.url, headers={"Range": "bytes=0-3"})
             else:
@@ -121,6 +122,78 @@ def test_stalled_and_junk_connections_cannot_deny_legitimate_get(
     finally:
         for client in junk:
             client.close()
+        os.close(descriptor)
+
+
+def test_continuous_junk_accepts_cannot_starve_legitimate_get(tmp_path: Path) -> None:
+    content = b"verified image bytes"
+    descriptor = _descriptor(tmp_path, content)
+    stop = threading.Event()
+    workers: list[threading.Thread] = []
+
+    def flood(port: int) -> None:
+        while not stop.is_set():
+            try:
+                client = socket.create_connection(("127.0.0.1", port), timeout=0.1)
+                client.sendall(b"GET /junk HTTP/1.1\r\nHost: junk\r\n\r\n")
+                client.close()
+            except OSError:
+                pass
+
+    try:
+        with PackVMLoopbackImageHandoff(
+            descriptor,
+            size_bytes=len(content),
+            digest=_digest(content),
+            overall_timeout_seconds=4,
+        ) as handoff:
+            parsed = urllib.parse.urlsplit(handoff.url)
+            assert parsed.port is not None
+            workers = [threading.Thread(target=flood, args=(parsed.port,)) for _ in range(4)]
+            for worker in workers:
+                worker.start()
+            time.sleep(0.05)
+            assert urllib.request.urlopen(handoff.url, timeout=3).read() == content
+            handoff.require_consumed()
+    finally:
+        stop.set()
+        for worker in workers:
+            worker.join(timeout=1)
+        os.close(descriptor)
+
+
+def test_late_final_send_never_marks_handoff_consumed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ecosystem.defaultspack.backend.sandbox.isolation import packvm_image_handoff
+
+    content = b"verified image bytes"
+    descriptor = _descriptor(tmp_path, content)
+    clock = [0.0]
+
+    class LateFinalSocket:
+        sends = 0
+
+        def settimeout(self, _timeout: float) -> None:
+            pass
+
+        def sendall(self, _payload: bytes) -> None:
+            self.sends += 1
+            if self.sends == 2:
+                clock[0] = 2.0
+
+    monkeypatch.setattr(packvm_image_handoff.time, "monotonic", lambda: clock[0])
+    handoff = PackVMLoopbackImageHandoff(
+        descriptor, size_bytes=len(content), digest=_digest(content)
+    )
+    try:
+        handoff._deadline = 1.0
+        handoff._stream(LateFinalSocket())  # type: ignore[arg-type]
+        with pytest.raises(PackVMImageHandoffError):
+            handoff.require_consumed()
+        assert handoff._consumed is False
+    finally:
+        os.close(handoff._descriptor)
         os.close(descriptor)
 
 
