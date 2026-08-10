@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -724,6 +725,24 @@ mod tests {
 
         let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
+        let source_revision = Command::new("git")
+            .args(["rev-parse", "--verify", "HEAD^{commit}"])
+            .current_dir(&repository)
+            .output()
+            .expect("source checkout revision should be readable");
+        assert!(
+            source_revision.status.success(),
+            "source checkout revision lookup failed"
+        );
+        let source_revision = String::from_utf8(source_revision.stdout)
+            .expect("source checkout revision should be UTF-8")
+            .trim()
+            .to_owned();
+        assert_eq!(
+            source_revision.len(),
+            40,
+            "source revision must be full SHA"
+        );
         let status = std::process::Command::new(python)
             .arg(
                 repository
@@ -750,7 +769,7 @@ mod tests {
             .arg("--bundle-identity")
             .arg("io.tobkiri.shell.tauri")
             .arg("--source-commit")
-            .arg("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .arg(source_revision)
             .current_dir(repository)
             .status()
             .unwrap();

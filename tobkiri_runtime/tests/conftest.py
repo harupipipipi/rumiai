@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import subprocess
 import sys
 import types
 from dataclasses import dataclass, field
@@ -576,13 +577,20 @@ def _verified_packaged_profile_bundle(tmp_path_factory):
     )
 
     source_bundle = _PROJECT_ROOT / "ecosystem" / "defaultspack" / "v4"
-    profile = json.loads(
-        (source_bundle / "defaults.profile.v4.json").read_text(encoding="utf-8")
+    revision = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+        cwd=_PROJECT_PARENT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert len(revision) == 40 and all(
+        character in "0123456789abcdef" for character in revision
     )
     bundle = build_packaged_profile_bundle(
         source_bundle,
         tmp_path_factory.mktemp("verified-packaged-profile"),
-        source_commit=str(profile["provenance"]["repository_commit"]),
+        source_commit=revision,
     )
     from core_runtime.bootstrap import profile_capture, runtime
 

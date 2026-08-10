@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import binascii
 import hashlib
 import json
 import os
@@ -20,10 +21,14 @@ import re
 import shutil
 import stat
 import subprocess
+import tempfile
 from pathlib import Path
+from pathlib import PureWindowsPath
 from typing import Any, Mapping, Sequence
 
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 try:
     from tobkiri_launcher.scripts.artifact_integrity import artifact_digest_and_size
@@ -106,6 +111,7 @@ def _write_json(path: Path, value: Any) -> None:
         json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    path.chmod(0o600)
 
 
 def _load_object(path: Path, schema: str, label: str) -> dict[str, Any]:
@@ -150,6 +156,23 @@ def _git_output(repository_root: Path, *args: str) -> str:
     return value
 
 
+def _git_status(repository_root: Path) -> str:
+    """Return Git porcelain status, allowing a clean empty result."""
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=repository_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise RuntimeError(
+            f"unable to inspect current release source {repository_root}: {error}"
+        ) from error
+    return result.stdout.strip()
+
+
 def source_identity_for_repository(repository_root: Path) -> str:
     """Return the stable source identity used by v4 release records."""
     remote = _git_output(repository_root, "config", "--get", "remote.origin.url")
@@ -178,6 +201,12 @@ def _validate_current_source(
     if repository_root is None:
         return
     root = repository_root.expanduser().absolute()
+    dirty = _git_status(root)
+    if dirty:
+        raise RuntimeError(
+            "release packaging refuses a dirty source checkout; source revision "
+            "must not describe uncommitted tracked, staged, submodule, or generated input"
+        )
     expected_revision = source_revision_for_repository(root)
     expected_identity = source_identity_for_repository(root)
     if build_output.get("source_revision") != expected_revision:
@@ -250,11 +279,120 @@ def _reject_symlinks(path: Path) -> None:
 
 def _reject_symlink_components(path: Path) -> None:
     """Reject symlinked parent components before resolving an input path."""
-    current = Path(path.anchor) if path.is_absolute() else Path()
-    for part in path.parts[1:] if path.is_absolute() else path.parts:
+    path = path.expanduser().absolute()
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
         current /= part
         if current.is_symlink() and current not in {Path("/var"), Path("/tmp")}:
             raise RuntimeError(f"release artifact is missing or symlinked: {current}")
+
+
+def _normalize_relative_path(value: str, field: str) -> str:
+    """Normalize one package-relative path before it is used for I/O."""
+    if not isinstance(value, str) or not value or "\\" in value or "\x00" in value:
+        raise RuntimeError(f"{field} is unsafe: {value!r}")
+    if value.startswith("~") or Path(value).is_absolute() or PureWindowsPath(value).is_absolute():
+        raise RuntimeError(f"{field} is unsafe: {value!r}")
+    raw_parts = value.split("/")
+    if any(part == ".." for part in raw_parts):
+        raise RuntimeError(f"{field} is unsafe: {value!r}")
+    parts = [part for part in raw_parts if part not in {"", "."}]
+    if not parts:
+        raise RuntimeError(f"{field} is unsafe: {value!r}")
+    return "/".join(parts)
+
+
+def _path_identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
+    """Return the stable identity fields used for source snapshot checks."""
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_size,
+        value.st_mtime_ns,
+    )
+
+
+def _snapshot_file(source: Path, destination: Path) -> None:
+    """Copy one source file from an open descriptor into the transaction."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(os.fspath(source), flags)
+    except OSError as error:
+        raise RuntimeError(f"release artifact could not be snapshotted: {source}") from error
+    try:
+        with os.fdopen(descriptor, "rb") as handle:
+            before = os.fstat(handle.fileno())
+            if not stat.S_ISREG(before.st_mode):
+                raise RuntimeError(f"release artifact is not a regular file: {source}")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with destination.open("wb") as output:
+                size = 0
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    output.write(chunk)
+                    size += len(chunk)
+            after = os.fstat(handle.fileno())
+    except OSError as error:
+        raise RuntimeError(f"release artifact could not be snapshotted: {source}") from error
+    if _path_identity(before) != _path_identity(after) or size != after.st_size:
+        raise RuntimeError(f"release artifact changed while it was snapshotted: {source}")
+    destination.chmod(stat.S_IMODE(after.st_mode))
+
+
+def _stream_file_digest(path: Path) -> str:
+    """Hash one regular file in bounded chunks with an identity check."""
+    before = path.stat(follow_symlinks=False)
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError(f"release file is not regular: {path}")
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+            size += len(chunk)
+    after = path.stat(follow_symlinks=False)
+    if _path_identity(before) != _path_identity(after) or size != after.st_size:
+        raise RuntimeError(f"release file changed while it was hashed: {path}")
+    return "sha256:" + digest.hexdigest()
+
+
+def _snapshot_tree(source: Path, destination: Path) -> None:
+    """Recursively snapshot a symlink-free source tree without reopening it."""
+    before = source.stat(follow_symlinks=False)
+    if source.is_symlink() or not stat.S_ISDIR(before.st_mode):
+        raise RuntimeError(f"release artifact tree is not a real directory: {source}")
+    destination.mkdir(parents=True, exist_ok=False)
+    destination.chmod(stat.S_IMODE(before.st_mode))
+    try:
+        children = sorted(source.iterdir(), key=lambda item: item.name)
+    except OSError as error:
+        raise RuntimeError(f"release artifact could not be snapshotted: {source}") from error
+    for child in children:
+        if child.is_symlink():
+            raise RuntimeError(f"release artifact may not contain a symlink: {child}")
+        target = destination / child.name
+        if child.is_dir():
+            _snapshot_tree(child, target)
+        elif child.is_file():
+            _snapshot_file(child, target)
+        else:
+            raise RuntimeError(f"unsupported release artifact entry: {child}")
+    after = source.stat(follow_symlinks=False)
+    if _path_identity(before) != _path_identity(after):
+        raise RuntimeError(f"release artifact changed while it was snapshotted: {source}")
+
+
+def _snapshot_artifact(source: Path, destination: Path) -> Path:
+    """Take the only source snapshot used by release validation and sealing."""
+    if source.is_symlink() or not source.exists():
+        raise RuntimeError(f"release artifact is missing or symlinked: {source}")
+    if source.is_dir():
+        _snapshot_tree(source, destination)
+    elif source.is_file():
+        _snapshot_file(source, destination)
+    else:
+        raise RuntimeError(f"unsupported release artifact: {source}")
+    return destination
 
 
 def _find_variant(
@@ -277,6 +415,9 @@ def _validate_bundle_identity(artifact: Path, expected: str | None) -> None:
     if not isinstance(expected, str) or not expected.strip():
         raise RuntimeError("macOS .app artifact has no declared bundle identity")
     plist_path = artifact / "Contents" / "Info.plist"
+    _reject_symlink_components(plist_path)
+    if plist_path.is_symlink():
+        raise RuntimeError("macOS artifact Info.plist may not be a symlink")
     if not plist_path.is_file():
         raise RuntimeError(f"macOS artifact is missing Info.plist: {artifact}")
     try:
@@ -311,9 +452,8 @@ def _validate_macos_signature(artifact: Path, platform: str) -> None:
 
 
 def _validate_entrypoint(artifact: Path, entrypoint: str) -> Path:
-    entry = Path(entrypoint)
-    if not entrypoint or entry.is_absolute() or ".." in entry.parts:
-        raise RuntimeError(f"artifact entrypoint is unsafe: {entrypoint}")
+    normalized = _normalize_relative_path(entrypoint, "artifact entrypoint")
+    entry = Path(normalized)
     if artifact.is_dir():
         candidate = (
             artifact / Path(*entry.parts[1:])
@@ -324,6 +464,9 @@ def _validate_entrypoint(artifact: Path, entrypoint: str) -> Path:
         candidate = artifact
     if not candidate.is_file():
         raise RuntimeError(f"declared artifact entrypoint is missing: {candidate}")
+    _reject_symlink_components(candidate)
+    if candidate.is_symlink() or not candidate.resolve().is_relative_to(artifact.resolve()):
+        raise RuntimeError("declared artifact entrypoint escapes its artifact")
     if not (candidate.stat().st_mode & stat.S_IXUSR):
         raise RuntimeError(
             f"declared artifact entrypoint is not executable: {candidate}"
@@ -353,9 +496,12 @@ def _copy_tree(source: Path, destination: Path) -> None:
 
 
 def _copy_artifact(source: Path, destination_dir: Path, entrypoint: str) -> Path:
+    """Copy a snapshotted artifact using a normalized entrypoint root."""
+    normalized = _normalize_relative_path(entrypoint, "artifact entrypoint")
+    _validate_entrypoint(source, normalized)
     destination_dir.mkdir(parents=True, exist_ok=False)
     destination = destination_dir / (
-        Path(entrypoint).parts[0] if source.is_dir() else Path(entrypoint).name
+        Path(normalized).parts[0] if source.is_dir() else Path(normalized).name
     )
     if source.is_dir():
         _copy_tree(source, destination)
@@ -363,6 +509,244 @@ def _copy_artifact(source: Path, destination_dir: Path, entrypoint: str) -> Path
         _copy_file(source, destination)
     _reject_symlinks(destination)
     return destination
+
+
+def _read_bounded_header(path: Path) -> tuple[bytes, bytes | None]:
+    """Read only the bounded header needed for architecture validation."""
+    before = path.stat(follow_symlinks=False)
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError("entrypoint is not a regular file")
+    with path.open("rb") as handle:
+        prefix = handle.read(64)
+        pe_header: bytes | None = None
+        if prefix[:2] == b"MZ":
+            if len(prefix) >= 64:
+                pe_offset = int.from_bytes(prefix[60:64], "little")
+                if pe_offset < 64 or pe_offset > before.st_size - 24:
+                    raise RuntimeError("PE entrypoint header is out of bounds")
+                handle.seek(pe_offset)
+                pe_header = handle.read(24)
+                if len(pe_header) < 24 or pe_header[:4] != b"PE\0\0":
+                    raise RuntimeError("PE entrypoint signature is invalid or truncated")
+    after = path.stat(follow_symlinks=False)
+    if _path_identity(before) != _path_identity(after):
+        raise RuntimeError("entrypoint changed while its header was verified")
+    return prefix, pe_header
+
+
+def _validate_binary_architecture(entrypoint: Path, architecture: str) -> None:
+    """Validate recognized ELF, Mach-O, and PE headers with safe bounds."""
+    payload, pe_header = _read_bounded_header(entrypoint)
+    actual: str | None = None
+    if payload[:4] in {b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf"}:
+        if len(payload) < 8:
+            raise RuntimeError("Mach-O entrypoint header is truncated")
+        machine = int.from_bytes(
+            payload[4:8],
+            "little" if payload[:4] == b"\xcf\xfa\xed\xfe" else "big",
+        )
+        actual = {0x01000007: "x86_64", 0x0100000C: "arm64"}.get(machine)
+        if actual is None:
+            raise RuntimeError("Mach-O entrypoint has an unsupported machine")
+    elif payload[:4] == b"\x7fELF":
+        if len(payload) < 20:
+            raise RuntimeError("ELF entrypoint header is truncated")
+        machine = int.from_bytes(
+            payload[18:20], "little" if payload[5:6] == b"\x01" else "big"
+        )
+        actual = {62: "x86_64", 183: "arm64"}.get(machine)
+        if actual is None:
+            raise RuntimeError("ELF entrypoint has an unsupported machine")
+    elif payload[:2] == b"MZ":
+        # A short MZ-stub is retained for the repository's format-agnostic
+        # fixtures. Once e_lfanew is present, however, it is a PE claim and
+        # every boundary is checked before the COFF machine is read.
+        if pe_header is None:
+            return
+        machine = int.from_bytes(pe_header[4:6], "little")
+        actual = {0x8664: "x86_64", 0xAA64: "arm64"}.get(machine)
+        if actual is None:
+            raise RuntimeError("PE entrypoint has an unsupported machine")
+    if actual is not None and actual != architecture:
+        raise RuntimeError(
+            f"entrypoint architecture does not match release target: "
+            f"expected {architecture}, got {actual}"
+        )
+
+
+def _new_staging_directory(parent: Path, prefix: str) -> Path:
+    """Create owner-only staging on the output filesystem."""
+    parent.mkdir(parents=True, exist_ok=True)
+    _reject_symlink_components(parent)
+    staging = Path(tempfile.mkdtemp(prefix=prefix, dir=parent))
+    staging.chmod(0o700)
+    return staging
+
+
+def _remove_tree(path: Path) -> None:
+    """Remove only a transaction-owned path during cleanup."""
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    else:
+        shutil.rmtree(path)
+
+
+def _publish_directory(staging: Path, output: Path) -> None:
+    """Replace an output directory with rollback if either rename fails."""
+    parent = output.parent
+    backup: Path | None = None
+    existing = output.exists() or output.is_symlink()
+    if existing:
+        if output.is_symlink() or not output.is_dir():
+            raise RuntimeError(f"release artifact output must be a directory: {output}")
+        backup = Path(tempfile.mkdtemp(prefix=f".{output.name}.rollback-", dir=parent))
+        _remove_tree(backup)
+        moved_existing = False
+        published = False
+        try:
+            os.replace(output, backup)
+            moved_existing = True
+            os.replace(staging, output)
+            published = True
+        except Exception:
+            if published and (output.exists() or output.is_symlink()):
+                _remove_tree(output)
+            if moved_existing and backup.exists():
+                os.replace(backup, output)
+            raise
+    else:
+        published = False
+        try:
+            os.replace(staging, output)
+            published = True
+        except Exception:
+            if published and (output.exists() or output.is_symlink()):
+                _remove_tree(output)
+            raise
+    if backup is not None and (backup.exists() or backup.is_symlink()):
+        _remove_tree(backup)
+
+
+def _verify_staged_release(
+    root: Path,
+    *,
+    artifact_id: str,
+    platform: str,
+    architecture: str,
+    source_identity: str,
+    source_revision: str,
+    signing_key: Ed25519PrivateKey,
+) -> dict[str, Any]:
+    """Re-read every staged binding and verify it before publication."""
+    catalog_path = root / "presentation_catalog.json"
+    index_path = root / INDEX_PATH
+    lock_path = root / LOCK_PATH
+    release_path = root / RELEASE_PATH
+    catalog = _load_object(catalog_path, CATALOG_SCHEMA, "staged presentation catalog")
+    index = _load_object(index_path, ARTIFACT_INDEX_SCHEMA, "staged artifact index")
+    lock = _load_object(lock_path, PROFILE_LOCK_SCHEMA, "staged profile lock")
+    release = _load_object(release_path, RELEASE_SCHEMA, "staged release manifest")
+
+    shell, variant = _find_variant(catalog, artifact_id)
+    expected_path = index.get("path")
+    if not isinstance(expected_path, str):
+        raise RuntimeError("staged artifact index path is not text")
+    normalized_path = _normalize_relative_path(expected_path, "staged artifact path")
+    if not normalized_path.startswith("bundled/presentation-artifacts/"):
+        raise RuntimeError("staged artifact path is outside presentation-artifacts")
+    artifact = root / Path(*normalized_path.split("/"))
+    _reject_symlink_components(artifact)
+    if artifact.is_symlink() or not artifact.exists():
+        raise RuntimeError("staged artifact path is missing or symlinked")
+
+    digest, size = artifact_digest_and_size(artifact)
+    if digest != index.get("sha256") or size != index.get("size"):
+        raise RuntimeError("staged artifact digest or size does not match its index")
+    entrypoint_value = variant.get("entrypoint")
+    if not isinstance(entrypoint_value, str):
+        raise RuntimeError("staged artifact entrypoint is missing")
+    entrypoint = _validate_entrypoint(artifact, entrypoint_value)
+    entrypoint_digest = _stream_file_digest(entrypoint)
+    if entrypoint_digest != index.get("entrypoint_sha256"):
+        raise RuntimeError("staged artifact entrypoint digest does not match its index")
+    _validate_binary_architecture(entrypoint, architecture)
+    _validate_bundle_identity(artifact, variant.get("bundle_identifier"))
+    _validate_macos_signature(artifact, platform)
+
+    exact_fields = {
+        "artifact_id": artifact_id,
+        "platform": platform,
+        "architecture": architecture,
+        "source_identity": source_identity,
+        "source_revision": source_revision,
+    }
+    for field, expected in exact_fields.items():
+        if index.get(field) != expected or lock.get(field) != expected:
+            raise RuntimeError(f"staged release field mismatch: {field}")
+        if field != "artifact_id" and variant.get(field) != expected:
+            raise RuntimeError(f"staged catalog field mismatch: {field}")
+    for field in ("path", "sha256", "entrypoint_sha256", "size"):
+        if variant.get(field) != index.get(field):
+            raise RuntimeError(f"staged catalog/index mismatch: {field}")
+    if shell.get("provider_id") != catalog.get("default_selection", {}).get(
+        "shell_provider_id"
+    ):
+        raise RuntimeError("staged artifact does not match the default Profile Shell")
+    if lock.get("artifact_sha256") != digest or lock.get("entrypoint_sha256") != entrypoint_digest:
+        raise RuntimeError("staged profile lock artifact binding mismatch")
+    lock_body = {key: value for key, value in lock.items() if key != "lock_revision"}
+    if json_digest(lock_body) != lock.get("lock_revision"):
+        raise RuntimeError("staged profile lock revision mismatch")
+    index_digest = json_digest(index)
+    if lock.get("artifact_index_sha256") != index_digest:
+        raise RuntimeError("staged profile lock index binding mismatch")
+    catalog_without_binding = {
+        key: value for key, value in catalog.items() if key != "release_binding"
+    }
+    catalog_revision = json_digest(catalog_without_binding)
+    binding = catalog.get("release_binding")
+    if not isinstance(binding, Mapping):
+        raise RuntimeError("staged catalog has no release binding")
+    if binding.get("catalog_revision") != catalog_revision:
+        raise RuntimeError("staged catalog revision mismatch")
+    if binding.get("artifact_index_sha256") != index_digest:
+        raise RuntimeError("staged catalog index binding mismatch")
+    if binding.get("profile_lock_sha256") != json_digest(lock):
+        raise RuntimeError("staged catalog profile lock binding mismatch")
+
+    if release.get("catalog_path") != "bundled/presentation_catalog.json":
+        raise RuntimeError("staged release catalog path is not canonical")
+    if release.get("artifact_index_path") != INDEX_PATH.as_posix():
+        raise RuntimeError("staged release artifact index path is not canonical")
+    if release.get("profile_lock_path") != LOCK_PATH.as_posix():
+        raise RuntimeError("staged release profile lock path is not canonical")
+    expected_release = {
+        "catalog_sha256": file_digest(catalog_path),
+        "artifact_index_sha256": file_digest(index_path),
+        "profile_lock_sha256": file_digest(lock_path),
+        **exact_fields,
+    }
+    for field, expected in expected_release.items():
+        if release.get(field) != expected:
+            raise RuntimeError(f"staged release manifest mismatch: {field}")
+    try:
+        public_key = base64.b64decode(release["public_key"], validate=True)
+        signature = base64.b64decode(release["signature"], validate=True)
+        Ed25519PublicKey.from_public_bytes(public_key).verify(
+            signature, _signature_message(release)
+        )
+    except (KeyError, TypeError, ValueError, binascii.Error, InvalidSignature) as error:
+        raise RuntimeError("staged release signature verification failed") from error
+    expected_public_key = signing_key.public_key().public_bytes_raw()
+    if public_key != expected_public_key:
+        raise RuntimeError("staged release public key does not match signing key")
+    return {
+        "catalog_sha256": expected_release["catalog_sha256"],
+        "artifact_index_sha256": expected_release["artifact_index_sha256"],
+        "profile_lock_sha256": expected_release["profile_lock_sha256"],
+    }
 
 
 def _signature_message(release: Mapping[str, Any]) -> bytes:
@@ -399,7 +783,7 @@ def package_artifact(
     output_dir: Path,
     repository_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Verify and bind one exact build output into a signed Shell v4 release."""
+    """Verify and atomically bind one exact build output into a Shell v4 release."""
     if not signing_key_id.strip():
         raise RuntimeError("signing key id is required")
     catalog_path = catalog_path.expanduser().absolute()
@@ -418,6 +802,8 @@ def package_artifact(
     source_identity = _required_text(build_output, "source_identity")
     source_revision = _required_text(build_output, "source_revision")
     artifact_value = _required_text(build_output, "artifact_path")
+    if GIT_REVISION_RE.fullmatch(source_revision) is None:
+        raise RuntimeError("source_revision must be a full 40-character Git commit SHA")
     if build_output.get("build_profile") != "release":
         raise RuntimeError("build-output manifest must identify a release build")
     if (platform, architecture) not in VALID_TARGETS:
@@ -453,7 +839,7 @@ def package_artifact(
     if variant.get("development_command") not in (None, ""):
         raise RuntimeError(f"development command is forbidden for {artifact_id}")
 
-    if artifact_value.startswith("~"):
+    if artifact_value.startswith("~") or "\\" in artifact_value or "\x00" in artifact_value:
         raise RuntimeError(f"release artifact path is unsafe: {artifact_value}")
     declared_path = Path(artifact_value)
     if declared_path.is_absolute():
@@ -462,122 +848,153 @@ def package_artifact(
         if ".." in declared_path.parts:
             raise RuntimeError(f"release artifact path escapes its manifest: {artifact_value}")
         source_input = manifest_path.parent / declared_path
+    source_input = source_input.expanduser().absolute()
     _reject_symlink_components(source_input)
     if source_input.is_symlink():
         raise RuntimeError(f"release artifact is missing or symlinked: {source_input}")
-    source = source_input.resolve()
+    try:
+        source = source_input.resolve(strict=True)
+    except OSError as error:
+        raise RuntimeError(f"release artifact is missing or symlinked: {source_input}") from error
     if not source.exists():
         raise RuntimeError(f"release artifact is missing or symlinked: {source_input}")
-    _reject_symlinks(source)
-    entrypoint = str(variant.get("entrypoint") or "")
-    _validate_entrypoint(source, entrypoint)
-    if platform == "macos" and source.suffix != ".app":
-        raise RuntimeError("macOS Shell release artifact must be an .app bundle")
-    _validate_bundle_identity(source, variant.get("bundle_identifier"))
-    _validate_macos_signature(source, platform)
 
     output = output_dir.expanduser().absolute()
+    _reject_symlink_components(output.parent)
     if output.is_symlink():
         raise RuntimeError(f"release artifact output may not be a symlink: {output}")
-    if output.exists():
-        raise RuntimeError(f"release artifact output already exists: {output}")
-    output.mkdir(parents=True)
-    staged = _copy_artifact(source, output / ARTIFACT_ROOT / artifact_id, entrypoint)
-    digest, size = artifact_digest_and_size(staged)
-    entrypoint_digest = "sha256:" + hashlib.sha256(
-        _validate_entrypoint(staged, entrypoint).read_bytes()
-    ).hexdigest()
-    relative = staged.relative_to(output).as_posix()
-    variant.update(
-        path=relative,
-        sha256=digest,
-        entrypoint_sha256=entrypoint_digest,
-        size=size,
-        source_identity=source_identity,
-        source_revision=source_revision,
+    staging: Path | None = _new_staging_directory(
+        output.parent, ".tobkiri-presentation-stage-"
     )
+    try:
+        assert staging is not None
+        snapshot_parent = staging / "source-snapshot"
+        snapshot = snapshot_parent / source.name
+        _snapshot_artifact(source, snapshot)
 
-    index = {
-        "schema": ARTIFACT_INDEX_SCHEMA,
-        "artifact_id": artifact_id,
-        "path": relative,
-        "sha256": digest,
-        "entrypoint_sha256": entrypoint_digest,
-        "size": size,
-        "platform": platform,
-        "architecture": architecture,
-        "source_identity": source_identity,
-        "source_revision": source_revision,
-    }
-    index_digest = json_digest(index)
-    catalog_revision = json_digest(catalog)
-    lock_body = {
-        "schema": PROFILE_LOCK_SCHEMA,
-        "catalog_revision": catalog_revision,
-        "artifact_index_sha256": index_digest,
-        "artifact_id": artifact_id,
-        "artifact_sha256": digest,
-        "entrypoint_sha256": entrypoint_digest,
-        "platform": platform,
-        "architecture": architecture,
-        "source_identity": source_identity,
-        "source_revision": source_revision,
-    }
-    lock = {**lock_body, "lock_revision": json_digest(lock_body)}
-    catalog["release_binding"] = {
-        "schema": RELEASE_SCHEMA,
-        "artifact_index_path": INDEX_PATH.as_posix(),
-        "artifact_index_sha256": index_digest,
-        "profile_lock_path": LOCK_PATH.as_posix(),
-        "profile_lock_sha256": json_digest(lock),
-        "catalog_revision": catalog_revision,
-        "artifact_id": artifact_id,
-        "source_identity": source_identity,
-        "source_revision": source_revision,
-        "platform": platform,
-        "architecture": architecture,
-    }
+        entrypoint = _normalize_relative_path(
+            str(variant.get("entrypoint") or ""), "artifact entrypoint"
+        )
+        if platform == "macos" and snapshot.suffix != ".app":
+            raise RuntimeError("macOS Shell release artifact must be an .app bundle")
 
-    catalog_output = output / "presentation_catalog.json"
-    _write_json(output / INDEX_PATH, index)
-    _write_json(output / LOCK_PATH, lock)
-    _write_json(catalog_output, catalog)
-    release = {
-        "schema": RELEASE_SCHEMA,
-        "catalog_path": "bundled/presentation_catalog.json",
-        "catalog_sha256": file_digest(catalog_output),
-        "artifact_index_path": INDEX_PATH.as_posix(),
-        "artifact_index_sha256": file_digest(output / INDEX_PATH),
-        "profile_lock_path": LOCK_PATH.as_posix(),
-        "profile_lock_sha256": file_digest(output / LOCK_PATH),
-        "artifact_id": artifact_id,
-        "platform": platform,
-        "architecture": architecture,
-        "source_identity": source_identity,
-        "source_revision": source_revision,
-        "key_id": signing_key_id,
-    }
-    signing_key = _load_signing_key(signing_key_path.expanduser())
-    public_key = signing_key.public_key().public_bytes_raw()
-    release["public_key"] = base64.b64encode(public_key).decode("ascii")
-    release["signature"] = base64.b64encode(
-        signing_key.sign(_signature_message(release))
-    ).decode("ascii")
-    _write_json(output / RELEASE_PATH, release)
+        staged = _copy_artifact(
+            snapshot,
+            staging / ARTIFACT_ROOT / artifact_id,
+            entrypoint,
+        )
+        _validate_entrypoint(staged, entrypoint)
+        _validate_bundle_identity(staged, variant.get("bundle_identifier"))
+        _validate_macos_signature(staged, platform)
+        entrypoint_path = _validate_entrypoint(staged, entrypoint)
+        _validate_binary_architecture(entrypoint_path, architecture)
+        digest, size = artifact_digest_and_size(staged)
+        entrypoint_digest = _stream_file_digest(entrypoint_path)
+        relative = staged.relative_to(staging).as_posix()
+        variant.update(
+            path=relative,
+            sha256=digest,
+            entrypoint_sha256=entrypoint_digest,
+            size=size,
+            source_identity=source_identity,
+            source_revision=source_revision,
+        )
 
-    return {
-        "artifact_id": artifact_id,
-        "path": relative,
-        "sha256": digest,
-        "entrypoint_sha256": entrypoint_digest,
-        "size": size,
-        "platform": platform,
-        "architecture": architecture,
-        "source_identity": source_identity,
-        "source_revision": source_revision,
-        "catalog_sha256": release["catalog_sha256"],
-        "output_dir": os.fspath(output),
-    }
+        index = {
+            "schema": ARTIFACT_INDEX_SCHEMA,
+            "artifact_id": artifact_id,
+            "path": relative,
+            "sha256": digest,
+            "entrypoint_sha256": entrypoint_digest,
+            "size": size,
+            "platform": platform,
+            "architecture": architecture,
+            "source_identity": source_identity,
+            "source_revision": source_revision,
+        }
+        index_digest = json_digest(index)
+        catalog_revision = json_digest(catalog)
+        lock_body = {
+            "schema": PROFILE_LOCK_SCHEMA,
+            "catalog_revision": catalog_revision,
+            "artifact_index_sha256": index_digest,
+            "artifact_id": artifact_id,
+            "artifact_sha256": digest,
+            "entrypoint_sha256": entrypoint_digest,
+            "platform": platform,
+            "architecture": architecture,
+            "source_identity": source_identity,
+            "source_revision": source_revision,
+        }
+        lock = {**lock_body, "lock_revision": json_digest(lock_body)}
+        catalog["release_binding"] = {
+            "schema": RELEASE_SCHEMA,
+            "artifact_index_path": INDEX_PATH.as_posix(),
+            "artifact_index_sha256": index_digest,
+            "profile_lock_path": LOCK_PATH.as_posix(),
+            "profile_lock_sha256": json_digest(lock),
+            "catalog_revision": catalog_revision,
+            "artifact_id": artifact_id,
+            "source_identity": source_identity,
+            "source_revision": source_revision,
+            "platform": platform,
+            "architecture": architecture,
+        }
+
+        catalog_output = staging / "presentation_catalog.json"
+        _write_json(staging / INDEX_PATH, index)
+        _write_json(staging / LOCK_PATH, lock)
+        _write_json(catalog_output, catalog)
+        signing_key = _load_signing_key(signing_key_path.expanduser())
+        release = {
+            "schema": RELEASE_SCHEMA,
+            "catalog_path": "bundled/presentation_catalog.json",
+            "catalog_sha256": file_digest(catalog_output),
+            "artifact_index_path": INDEX_PATH.as_posix(),
+            "artifact_index_sha256": file_digest(staging / INDEX_PATH),
+            "profile_lock_path": LOCK_PATH.as_posix(),
+            "profile_lock_sha256": file_digest(staging / LOCK_PATH),
+            "artifact_id": artifact_id,
+            "platform": platform,
+            "architecture": architecture,
+            "source_identity": source_identity,
+            "source_revision": source_revision,
+            "key_id": signing_key_id,
+        }
+        public_key = signing_key.public_key().public_bytes_raw()
+        release["public_key"] = base64.b64encode(public_key).decode("ascii")
+        release["signature"] = base64.b64encode(
+            signing_key.sign(_signature_message(release))
+        ).decode("ascii")
+        _write_json(staging / RELEASE_PATH, release)
+        _verify_staged_release(
+            staging,
+            artifact_id=artifact_id,
+            platform=platform,
+            architecture=architecture,
+            source_identity=source_identity,
+            source_revision=source_revision,
+            signing_key=signing_key,
+        )
+        report = {
+            "artifact_id": artifact_id,
+            "path": relative,
+            "sha256": digest,
+            "entrypoint_sha256": entrypoint_digest,
+            "size": size,
+            "platform": platform,
+            "architecture": architecture,
+            "source_identity": source_identity,
+            "source_revision": source_revision,
+            "catalog_sha256": release["catalog_sha256"],
+            "output_dir": os.fspath(output),
+        }
+        _publish_directory(staging, output)
+        staging = None
+        return report
+    finally:
+        if staging is not None and (staging.exists() or staging.is_symlink()):
+            _remove_tree(staging)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -1034,6 +1034,8 @@ fn stage_presentation_release_at(
     if bundle_root.is_dir() {
         let generator = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../tobkiri_runtime/scripts/generate_packaged_defaultspack_v4_bundle.py");
+        let repository_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let source_revision = current_source_revision(&repository_root)?;
         let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
         let status = Command::new(python)
             .arg(generator)
@@ -1053,6 +1055,8 @@ fn stage_presentation_release_at(
             .arg(&verified.architecture)
             .arg("--bundle-identity")
             .arg(&verified.bundle_identity)
+            .arg("--source-commit")
+            .arg(source_revision)
             .status()
             .map_err(|error| {
                 invalid_release(format!("failed to run packaged Profile generator: {error}"))
@@ -1064,6 +1068,46 @@ fn stage_presentation_release_at(
         }
     }
     Ok(Some(catalog))
+}
+
+fn current_source_revision(repository_root: &Path) -> io::Result<String> {
+    let revision = Command::new("git")
+        .args(["rev-parse", "--verify", "HEAD^{commit}"])
+        .current_dir(repository_root)
+        .output()
+        .map_err(|error| invalid_release(format!("failed to read source revision: {error}")))?;
+    if !revision.status.success() {
+        return Err(invalid_release("source checkout has no verifiable commit"));
+    }
+    let value = String::from_utf8(revision.stdout)
+        .map_err(|error| invalid_release(format!("source revision is not UTF-8: {error}")))?
+        .trim()
+        .to_owned();
+    if value.len() != 40
+        || !value
+            .chars()
+            .all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character))
+    {
+        return Err(invalid_release(
+            "production source revision must be a full lowercase commit SHA",
+        ));
+    }
+    let dirty = Command::new("git")
+        .args(["status", "--porcelain=v1", "--untracked-files=all"])
+        .current_dir(repository_root)
+        .output()
+        .map_err(|error| invalid_release(format!("failed to inspect source status: {error}")))?;
+    if !dirty.status.success() {
+        return Err(invalid_release(
+            "source checkout status could not be verified",
+        ));
+    }
+    if !dirty.stdout.is_empty() {
+        return Err(invalid_release(
+            "production source revision cannot describe a dirty checkout",
+        ));
+    }
+    Ok(value)
 }
 
 fn verify_staged_catalog(source_catalog: &Path, staged_catalog: &Path) -> io::Result<()> {

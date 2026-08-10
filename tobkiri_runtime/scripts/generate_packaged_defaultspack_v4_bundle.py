@@ -6,9 +6,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
+import stat
+import subprocess
 import sys
-from pathlib import Path
+import tempfile
+from pathlib import Path, PureWindowsPath
+from typing import Any, Mapping, TypedDict
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -35,8 +40,192 @@ from tobkiri_protocol.provenance import informational_source_commit  # noqa: E40
 from tobkiri_protocol.validation import validate_document  # noqa: E402
 
 
+class _PublishRecord(TypedDict):
+    """One directory rename and its rollback state."""
+
+    destination: Path
+    backup: Path | None
+    moved: bool
+    published: bool
+
+
+def _normalize_relative_path(value: str, field: str) -> str:
+    """Normalize a package-relative path before it is used for I/O."""
+    if not isinstance(value, str) or not value or "\\" in value or "\x00" in value:
+        raise ValueError(f"{field} is unsafe: {value!r}")
+    if value.startswith("~") or Path(value).is_absolute() or PureWindowsPath(value).is_absolute():
+        raise ValueError(f"{field} is unsafe: {value!r}")
+    raw_parts = value.split("/")
+    if any(part == ".." for part in raw_parts):
+        raise ValueError(f"{field} is unsafe: {value!r}")
+    parts = [part for part in raw_parts if part not in {"", "."}]
+    if not parts:
+        raise ValueError(f"{field} is unsafe: {value!r}")
+    return "/".join(parts)
+
+
+def _reject_symlink_components(path: Path) -> None:
+    """Reject symlinked path components before resolving a release path."""
+    absolute = path.expanduser().absolute()
+    current = Path(absolute.anchor)
+    for part in absolute.parts[1:]:
+        current /= part
+        if current.is_symlink() and current not in {Path("/var"), Path("/tmp")}:
+            raise ValueError(f"release path contains a symlink: {current}")
+
+
+def _reject_symlinks(path: Path) -> None:
+    """Reject symlinks and unsupported entries in a staged input tree."""
+    if path.is_symlink():
+        raise ValueError(f"release tree contains a symlink: {path}")
+    if path.is_file():
+        return
+    if not path.is_dir():
+        raise ValueError(f"release tree entry is unavailable: {path}")
+    for child in sorted(path.iterdir(), key=lambda item: item.name):
+        _reject_symlinks(child)
+
+
+def _path_identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
+    """Return the stable identity fields used by source snapshots."""
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_size,
+        value.st_mtime_ns,
+    )
+
+
+def _snapshot_file(source: Path, destination: Path) -> None:
+    """Snapshot one regular file from a no-follow descriptor."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(os.fspath(source), flags)
+    except OSError as error:
+        raise ValueError(f"release file could not be snapshotted: {source}") from error
+    try:
+        with os.fdopen(descriptor, "rb") as handle:
+            before = os.fstat(handle.fileno())
+            if not stat.S_ISREG(before.st_mode):
+                raise ValueError(f"release file is not regular: {source}")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with destination.open("wb") as output:
+                size = 0
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    output.write(chunk)
+                    size += len(chunk)
+            after = os.fstat(handle.fileno())
+    except OSError as error:
+        raise ValueError(f"release file could not be snapshotted: {source}") from error
+    if _path_identity(before) != _path_identity(after) or size != after.st_size:
+        raise ValueError(f"release file changed while snapshotted: {source}")
+    destination.chmod(stat.S_IMODE(after.st_mode))
+
+
+def _stream_file_digest(path: Path) -> str:
+    """Hash one regular staged file in bounded chunks."""
+    before = path.stat(follow_symlinks=False)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"staged file is not regular: {path}")
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+            size += len(chunk)
+    after = path.stat(follow_symlinks=False)
+    if _path_identity(before) != _path_identity(after) or size != after.st_size:
+        raise ValueError(f"staged file changed while hashed: {path}")
+    return "sha256:" + digest.hexdigest()
+
+
+def _snapshot_tree(source: Path, destination: Path) -> None:
+    """Snapshot a complete symlink-free tree with identity checks."""
+    before = source.stat(follow_symlinks=False)
+    if source.is_symlink() or not stat.S_ISDIR(before.st_mode):
+        raise ValueError(f"release tree is not a real directory: {source}")
+    destination.mkdir(parents=True, exist_ok=False)
+    destination.chmod(stat.S_IMODE(before.st_mode))
+    for child in sorted(source.iterdir(), key=lambda item: item.name):
+        if child.is_symlink():
+            raise ValueError(f"release tree contains a symlink: {child}")
+        target = destination / child.name
+        if child.is_dir():
+            _snapshot_tree(child, target)
+        elif child.is_file():
+            _snapshot_file(child, target)
+        else:
+            raise ValueError(f"unsupported release tree entry: {child}")
+    after = source.stat(follow_symlinks=False)
+    if _path_identity(before) != _path_identity(after):
+        raise ValueError(f"release tree changed while snapshotted: {source}")
+
+
+def _snapshot_artifact(source: Path, destination: Path) -> Path:
+    """Take the sole source artifact snapshot used by packaging."""
+    if source.is_symlink() or not source.exists():
+        raise ValueError("verified release artifact is unavailable or symlinked")
+    if source.is_dir():
+        _snapshot_tree(source, destination)
+    elif source.is_file():
+        _snapshot_file(source, destination)
+    else:
+        raise ValueError(f"unsupported release artifact: {source}")
+    return destination
+
+
+def _copy_tree(source: Path, destination: Path) -> None:
+    """Copy a previously snapshotted tree without following links."""
+    destination.mkdir(parents=True, exist_ok=False)
+    destination.chmod(stat.S_IMODE(source.stat().st_mode))
+    for child in sorted(source.iterdir(), key=lambda item: item.name):
+        target = destination / child.name
+        if child.is_symlink():
+            raise ValueError(f"staged release tree contains a symlink: {child}")
+        if child.is_dir():
+            _copy_tree(child, target)
+        elif child.is_file():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(child, target)
+            target.chmod(stat.S_IMODE(child.stat().st_mode))
+        else:
+            raise ValueError(f"unsupported staged release entry: {child}")
+
+
+def _copy_snapshot(source: Path, destination: Path) -> None:
+    """Copy one source snapshot into its final staged artifact path."""
+    if source.is_dir():
+        _copy_tree(source, destination)
+    elif source.is_file():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+        destination.chmod(stat.S_IMODE(source.stat().st_mode))
+    else:
+        raise ValueError(f"staged release snapshot is unavailable: {source}")
+
+
+def _safe_join(root: Path, relative: str, field: str) -> Path:
+    """Join one normalized path only when it remains under its root."""
+    normalized = _normalize_relative_path(relative, field)
+    root = root.expanduser().absolute()
+    _reject_symlink_components(root)
+    if root.is_symlink():
+        raise ValueError(f"{field} root may not be a symlink: {root}")
+    candidate = root.joinpath(*normalized.split("/"))
+    _reject_symlink_components(candidate.parent)
+    if candidate.is_symlink():
+        raise ValueError(f"{field} contains a symlink: {candidate}")
+    try:
+        candidate.resolve(strict=False).relative_to(root.resolve(strict=False))
+    except ValueError as error:
+        raise ValueError(f"{field} escapes its root: {relative}") from error
+    return candidate
+
+
 def _entrypoint_path(artifact_root: Path, entrypoint: str) -> Path:
-    path = artifact_root / entrypoint
+    """Return a normalized regular entrypoint inside the artifact root."""
+    path = _safe_join(artifact_root, entrypoint, "packaged entrypoint")
     try:
         path.resolve(strict=True).relative_to(artifact_root.resolve(strict=True))
     except (OSError, ValueError) as exc:
@@ -44,6 +233,470 @@ def _entrypoint_path(artifact_root: Path, entrypoint: str) -> Path:
     if path.is_symlink() or not path.is_file():
         raise ValueError("packaged entrypoint must be a regular file")
     return path
+
+
+def _read_bounded_header(path: Path) -> tuple[bytes, bytes | None]:
+    """Read only the bounded header needed for architecture validation."""
+    before = path.stat(follow_symlinks=False)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("entrypoint is not a regular file")
+    with path.open("rb") as handle:
+        prefix = handle.read(64)
+        pe_header: bytes | None = None
+        if prefix[:2] == b"MZ" and len(prefix) >= 64:
+            pe_offset = int.from_bytes(prefix[60:64], "little")
+            if pe_offset < 64 or pe_offset > before.st_size - 24:
+                raise ValueError("PE entrypoint header is out of bounds")
+            handle.seek(pe_offset)
+            pe_header = handle.read(24)
+            if len(pe_header) < 24 or pe_header[:4] != b"PE\0\0":
+                raise ValueError("PE entrypoint signature is invalid or truncated")
+    after = path.stat(follow_symlinks=False)
+    if _path_identity(before) != _path_identity(after):
+        raise ValueError("entrypoint changed while its header was verified")
+    return prefix, pe_header
+
+
+def _validate_binary_architecture(entrypoint: Path, architecture: str) -> None:
+    """Validate recognized binary headers without accepting malformed PE data."""
+    payload, pe_header = _read_bounded_header(entrypoint)
+    actual: str | None = None
+    if payload[:4] in {b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf"}:
+        if len(payload) < 8:
+            raise ValueError("Mach-O entrypoint header is truncated")
+        machine = int.from_bytes(
+            payload[4:8],
+            "little" if payload[:4] == b"\xcf\xfa\xed\xfe" else "big",
+        )
+        actual = {0x01000007: "x86_64", 0x0100000C: "arm64"}.get(machine)
+    elif payload[:4] == b"\x7fELF":
+        if len(payload) < 20:
+            raise ValueError("ELF entrypoint header is truncated")
+        machine = int.from_bytes(
+            payload[18:20], "little" if payload[5:6] == b"\x01" else "big"
+        )
+        actual = {62: "x86_64", 183: "arm64"}.get(machine)
+    elif payload[:2] == b"MZ":
+        if pe_header is None:
+            raise ValueError("PE entrypoint header is truncated")
+        actual = {0x8664: "x86_64", 0xAA64: "arm64"}.get(
+            int.from_bytes(pe_header[4:6], "little")
+        )
+    if actual is not None and actual != architecture:
+        raise ValueError(
+            f"entrypoint architecture does not match target: expected {architecture}, got {actual}"
+        )
+
+
+def _new_transaction(bundle_root: Path, artifact_root: Path) -> Path:
+    """Create same-filesystem owner-only staging for both output roots."""
+    if bundle_root == artifact_root:
+        raise ValueError("bundle and artifact roots must be distinct")
+    if bundle_root.is_relative_to(artifact_root) or artifact_root.is_relative_to(bundle_root):
+        raise ValueError("bundle and artifact roots must not overlap")
+    _reject_symlink_components(bundle_root)
+    _reject_symlink_components(artifact_root)
+    artifact_root.parent.mkdir(parents=True, exist_ok=True)
+    if bundle_root.is_symlink() or not bundle_root.is_dir():
+        raise ValueError("packaged bundle root must be a real directory")
+    if artifact_root.is_symlink() or (
+        artifact_root.exists() and not artifact_root.is_dir()
+    ):
+        raise ValueError("packaged artifact root must be a directory")
+    if bundle_root.stat().st_dev != artifact_root.parent.stat().st_dev:
+        raise ValueError("bundle and artifact outputs must share one filesystem")
+    transaction = Path(
+        tempfile.mkdtemp(prefix=".tobkiri-defaultspack-transaction-", dir=bundle_root.parent)
+    )
+    transaction.chmod(0o700)
+    return transaction
+
+
+def _remove_owned(path: Path) -> None:
+    """Remove only a transaction or rollback path owned by this operation."""
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    else:
+        shutil.rmtree(path)
+
+
+def _publish_directories(
+    staged_bundle: Path,
+    bundle_root: Path,
+    staged_artifacts: Path,
+    artifact_root: Path,
+) -> None:
+    """Publish both roots with rollback if any rename fails."""
+    records: list[_PublishRecord] = []
+    try:
+        for staged, destination in (
+            (staged_bundle, bundle_root),
+            (staged_artifacts, artifact_root),
+        ):
+            moved = False
+            backup: Path | None = None
+            if destination.exists() or destination.is_symlink():
+                if destination.is_symlink() or not destination.is_dir():
+                    raise ValueError(f"publish destination must be a directory: {destination}")
+                backup = Path(
+                    tempfile.mkdtemp(
+                        prefix=f".{destination.name}.rollback-", dir=destination.parent
+                    )
+                )
+                _remove_owned(backup)
+                os.replace(destination, backup)
+                moved = True
+            record: _PublishRecord = {
+                "destination": destination,
+                "backup": backup,
+                "moved": moved,
+                "published": False,
+            }
+            records.append(record)
+            os.replace(staged, destination)
+            record["published"] = True
+    except Exception:
+        for record in reversed(records):
+            destination = record["destination"]
+            if record["published"] and (
+                destination.exists() or destination.is_symlink()
+            ):
+                _remove_owned(destination)
+            backup = record["backup"]
+            if record["moved"] and backup is not None and backup.exists():
+                os.replace(backup, destination)
+        raise
+    finally:
+        for record in records:
+            backup = record["backup"]
+            if backup is not None and (backup.exists() or backup.is_symlink()):
+                _remove_owned(backup)
+
+
+def _read_json(path: Path, label: str) -> dict[str, Any]:
+    """Read one staged JSON object without following a symlink."""
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"{label} must be a regular file: {path}")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"{label} is invalid: {path}") from error
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be an object: {path}")
+    return value
+
+
+def _write_json(path: Path, value: Mapping[str, Any]) -> None:
+    """Write deterministic owner-readable JSON only into staging."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_pretty(dict(value)))
+    path.chmod(0o600)
+
+
+def _source_commit(explicit: str | None) -> str:
+    """Reject explicit clean-commit claims from a dirty checkout."""
+    if explicit is not None:
+        if (
+            len(explicit) != 40
+            or len(set(explicit)) <= 1
+            or any(character not in "0123456789abcdef" for character in explicit)
+        ):
+            raise ValueError(
+                "packaged Profile source revision must be a full lowercase checkout SHA"
+            )
+        result = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=ROOT.parent,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise ValueError("unable to inspect source checkout status")
+        if result.stdout.strip():
+            raise ValueError(
+                "packaged Profile generation refuses a dirty checkout when a "
+                "clean source revision is requested"
+            )
+    return informational_source_commit(ROOT.parent, explicit)
+
+
+def _validate_staged_bundle(
+    bundle_root: Path,
+    artifact_root: Path,
+    relative_path: str,
+    entrypoint: str,
+    platform: str,
+    architecture: str,
+    bundle_identity: str,
+    digest: str,
+    entrypoint_digest: str,
+) -> None:
+    """Verify every staged Pack/Profile/Shell/lock byte before publication."""
+    shell_path = bundle_root / "shell.tauri.default.shell.v1.json"
+    profile_path = bundle_root / "defaults.profile.v4.json"
+    lock_path = bundle_root / "bundle.lock.json"
+    shell = validate_document(_read_json(shell_path, "Shell"), "shell")
+    profile = validate_document(_read_json(profile_path, "Profile"), "profile")
+    lock = _read_json(lock_path, "bundle lock")
+    if lock.get("schema") != "io.tobkiri.defaultspack-bundle-lock.v1":
+        raise ValueError("bundle lock schema is invalid")
+    entries = lock.get("entries")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("bundle lock has no entries")
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            raise ValueError("bundle lock contains a malformed entry")
+        path_value = entry.get("path")
+        kind = entry.get("kind")
+        if not isinstance(path_value, str) or not isinstance(kind, str):
+            raise ValueError("bundle lock entry path/kind is invalid")
+        normalized = _normalize_relative_path(path_value, "bundle lock path")
+        if normalized in seen or normalized != path_value:
+            raise ValueError("bundle lock paths must be unique canonical relatives")
+        seen.add(normalized)
+        path = _safe_join(bundle_root, normalized, "bundle lock path")
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"bundle lock entry is missing or symlinked: {path}")
+        actual = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual != entry.get("digest"):
+            raise ValueError(f"bundle lock digest mismatch: {normalized}")
+        document = _read_json(path, f"bundle {kind}")
+        if kind in {"pack", "base", "shell", "profile"}:
+            validate_document(document, kind)
+        else:
+            raise ValueError(f"bundle lock kind is unsupported: {kind}")
+
+    selected = _safe_join(artifact_root, relative_path, "packaged artifact path")
+    selected_resolved = selected.resolve(strict=True)
+    entry = _entrypoint_path(artifact_root, entrypoint)
+    try:
+        entry.resolve(strict=True).relative_to(selected_resolved)
+    except (OSError, ValueError) as error:
+        raise ValueError("packaged entrypoint is outside the selected artifact") from error
+    variant = {
+        "platform": platform,
+        "architecture": architecture,
+        "artifact_digest": digest,
+        "entrypoint_digest": entrypoint_digest,
+        "relative_path": relative_path,
+        "entrypoint": entrypoint,
+        "bundle_identity": bundle_identity,
+    }
+    _validate_binary_architecture(entry, architecture)
+    verify_platform_artifact(artifact_root, variant)
+    variants = shell.get("launch", {}).get("variants")
+    if not isinstance(variants, list) or len(variants) != 1 or variants[0] != variant:
+        raise ValueError("staged Shell variant does not match the selected artifact")
+    if profile.get("shell", {}).get("platform") != platform or profile.get("shell", {}).get(
+        "architecture"
+    ) != architecture:
+        raise ValueError("staged Profile target does not match the selected artifact")
+    if profile.get("shell", {}).get("artifact_digest") != digest:
+        raise ValueError("staged Profile artifact digest does not match the Shell")
+    if profile.get("shell", {}).get("executable_artifact_digest") != entrypoint_digest:
+        raise ValueError("staged Profile entrypoint digest does not match the Shell")
+
+
+def _package_transaction(
+    *,
+    source_artifact: Path | None,
+    bundle_root: Path,
+    artifact_root: Path,
+    relative_path: str,
+    entrypoint: str,
+    platform: str,
+    architecture: str,
+    bundle_identity: str,
+    source_commit: str | None,
+) -> None:
+    """Build both output roots fully in one same-filesystem transaction."""
+    relative_path = _normalize_relative_path(relative_path, "packaged artifact path")
+    entrypoint = _normalize_relative_path(entrypoint, "packaged entrypoint")
+    commit = _source_commit(source_commit)
+    bundle_root = bundle_root.expanduser().absolute()
+    artifact_root = artifact_root.expanduser().absolute()
+    transaction: Path | None = _new_transaction(bundle_root, artifact_root)
+    try:
+        assert transaction is not None
+        staged_bundle = transaction / "bundle"
+        staged_artifacts = transaction / "artifacts"
+        _snapshot_tree(bundle_root, staged_bundle)
+        if artifact_root.exists():
+            _snapshot_tree(artifact_root, staged_artifacts)
+        else:
+            staged_artifacts.mkdir(parents=True, exist_ok=False)
+
+        if source_artifact is not None:
+            source_input = source_artifact.expanduser().absolute()
+            _reject_symlink_components(source_input)
+            if source_input.is_symlink():
+                raise ValueError("verified release artifact is unavailable or symlinked")
+            source = source_input.resolve(strict=True)
+            source_snapshot = transaction / "source-snapshot" / source.name
+            _snapshot_artifact(source, source_snapshot)
+            destination = _safe_join(staged_artifacts, relative_path, "packaged artifact path")
+            if destination.exists() or destination.is_symlink():
+                raise ValueError("packaged Profile artifact destination already exists")
+            _copy_snapshot(source_snapshot, destination)
+
+        selected = _safe_join(staged_artifacts, relative_path, "packaged artifact path")
+        digest = artifact_digest(selected)
+        entrypoint_path = _entrypoint_path(staged_artifacts, entrypoint)
+        try:
+            entrypoint_path.resolve(strict=True).relative_to(selected.resolve(strict=True))
+        except (OSError, ValueError) as error:
+            raise ValueError("packaged entrypoint is outside the selected artifact") from error
+        entrypoint_digest = _stream_file_digest(entrypoint_path)
+        variant = {
+            "platform": platform,
+            "architecture": architecture,
+            "artifact_digest": digest,
+            "entrypoint_digest": entrypoint_digest,
+            "relative_path": relative_path,
+            "entrypoint": entrypoint,
+            "bundle_identity": bundle_identity,
+        }
+        _validate_binary_architecture(entrypoint_path, architecture)
+        verify_platform_artifact(staged_artifacts, variant)
+
+        shell_path = staged_bundle / "shell.tauri.default.shell.v1.json"
+        shell = _read_json(shell_path, "Shell")
+        matching_targets = [
+            target
+            for target in shell.get("launch", {}).get("build_targets", [])
+            if isinstance(target, Mapping)
+            and target.get("platform") == platform
+            and target.get("architecture") == architecture
+            and _normalize_relative_path(str(target.get("artifact_ref", "")), "Shell artifact ref")
+            == relative_path
+            and _normalize_relative_path(str(target.get("entrypoint", "")), "Shell entrypoint")
+            == entrypoint
+            and target.get("bundle_identity") == bundle_identity
+        ]
+        if len(matching_targets) != 1:
+            raise ValueError("packaged artifact does not match one declared Shell build target")
+        shell.update(
+            shell_api_version="io.tobkiri.shell.v5",
+            availability="verified",
+            artifact_digest=digest,
+        )
+        shell["launch"] = {
+            "prebuilt_only": True,
+            "build_targets": shell["launch"]["build_targets"],
+            "variants": [variant],
+        }
+        shell["provenance"] = _generated_provenance(
+            shell,
+            "ecosystem/defaultspack/v4/shell.tauri.default.shell.v1.json",
+            commit,
+            generator_path=Path(__file__),
+        )
+        shell["definition_revision"] = canonical_digest(
+            {key: value for key, value in shell.items() if key != "definition_revision"}
+        )
+        shell = validate_document(shell, "shell")
+        _write_json(shell_path, shell)
+
+        for pack_name in (
+            "shell.tauri.default.pack.v4.json",
+            "runtime.tauri.application.default.pack.v4.json",
+        ):
+            pack_path = staged_bundle / "packs" / pack_name
+            pack = _read_json(pack_path, f"Pack {pack_name}")
+            pack["pack"]["artifact_digest"] = canonical_digest(
+                {
+                    "pack_id": pack["pack"]["id"],
+                    "packaged_artifact_digest": digest,
+                }
+            )
+            retained_artifacts = [
+                item
+                for item in pack.get("artifacts", ())
+                if item.get("kind") != "executable"
+            ]
+            if pack_name == "runtime.tauri.application.default.pack.v4.json":
+                retained_artifacts = [
+                    {**item, "platform": "host"} for item in retained_artifacts
+                ]
+            pack["artifacts"] = [
+                {
+                    "path": relative_path,
+                    "digest": digest,
+                    "entrypoint_digest": entrypoint_digest,
+                    "kind": "executable",
+                    "platform": f"{platform}-{architecture}",
+                    "entrypoint": entrypoint,
+                    "argv": [],
+                },
+                *retained_artifacts,
+            ]
+            pack["pack"]["artifact_digest"] = canonical_digest(pack["artifacts"])
+            for function in pack["functions"]:
+                function["implementation_digest"] = entrypoint_digest
+            pack["provenance"] = _generated_provenance(
+                pack,
+                f"ecosystem/defaultspack/v4/packs/{pack_name}",
+                commit,
+                generator_path=Path(__file__),
+            )
+            _write_json(staged_bundle / "packs" / pack_name, _normalize_pack(pack))
+
+        profile_path = staged_bundle / "defaults.profile.v4.json"
+        profile = _read_json(profile_path, "Profile")
+        if not isinstance(profile.get("shell"), dict):
+            raise ValueError("packaged Profile has no Shell definition")
+        profile["shell"].update(
+            platform=platform,
+            architecture=architecture,
+            artifact_digest=digest,
+            executable_artifact_digest=entrypoint_digest,
+            definition_revision=shell["definition_revision"],
+        )
+        profile["provenance"] = _generated_provenance(
+            profile,
+            "ecosystem/defaultspack/v4/defaults.profile.v4.json",
+            commit,
+            generator_path=Path(__file__),
+        )
+        _write_json(profile_path, validate_document(profile, "profile"))
+
+        lock_path = staged_bundle / "bundle.lock.json"
+        lock = _read_json(lock_path, "bundle lock")
+        if not isinstance(lock.get("entries"), list):
+            raise ValueError("bundle lock has no entries")
+        for entry in lock["entries"]:
+            if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+                raise ValueError("bundle lock contains a malformed entry")
+            entry["path"] = _normalize_relative_path(entry["path"], "bundle lock path")
+            path = _safe_join(staged_bundle, entry["path"], "bundle lock path")
+            if path.is_symlink() or not path.is_file():
+                raise ValueError(f"bundle lock entry is unavailable: {path}")
+            entry["digest"] = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        _write_json(lock_path, lock)
+        _validate_staged_bundle(
+            staged_bundle,
+            staged_artifacts,
+            relative_path,
+            entrypoint,
+            platform,
+            architecture,
+            bundle_identity,
+            digest,
+            entrypoint_digest,
+        )
+        _publish_directories(
+            staged_bundle,
+            bundle_root,
+            staged_artifacts,
+            artifact_root,
+        )
+    finally:
+        if transaction is not None and (transaction.exists() or transaction.is_symlink()):
+            _remove_owned(transaction)
 
 
 def stage_packaged_bundle(
@@ -58,23 +711,9 @@ def stage_packaged_bundle(
     bundle_identity: str,
     source_commit: str | None = None,
 ) -> None:
-    """Own release-artifact materialization and packaged Profile generation."""
-
-    source = source_artifact.resolve(strict=True)
-    if source_artifact.is_symlink() or not (source.is_file() or source.is_dir()):
-        raise ValueError("verified release artifact is unavailable or symlinked")
-    # Validate the entire source before copying. Besides computing the canonical
-    # tree shape this rejects symlinks and unsupported entries recursively.
-    artifact_digest(source)
-    destination = artifact_root / relative_path
-    if destination.exists() or destination.is_symlink():
-        raise ValueError("packaged Profile artifact destination already exists")
-    artifact_root.mkdir(parents=True, exist_ok=True)
-    if source.is_dir():
-        shutil.copytree(source, destination, symlinks=False)
-    else:
-        shutil.copy2(source, destination)
-    package_bundle(
+    """Snapshot, verify, and atomically publish a packaged Profile bundle."""
+    _package_transaction(
+        source_artifact=source_artifact,
         bundle_root=bundle_root,
         artifact_root=artifact_root,
         relative_path=relative_path,
@@ -97,123 +736,18 @@ def package_bundle(
     bundle_identity: str,
     source_commit: str | None = None,
 ) -> None:
-    """Select exact staged bytes and atomically rewrite their locked definitions."""
-
-    commit = informational_source_commit(ROOT.parent, source_commit)
-    bundle_root = bundle_root.resolve(strict=True)
-    artifact_root = artifact_root.resolve(strict=True)
-    selected_path = artifact_root / relative_path
-    digest = artifact_digest(selected_path)
-    entrypoint_digest = "sha256:" + hashlib.sha256(
-        _entrypoint_path(artifact_root, entrypoint).read_bytes()
-    ).hexdigest()
-    variant = {
-        "platform": platform,
-        "architecture": architecture,
-        "artifact_digest": digest,
-        "entrypoint_digest": entrypoint_digest,
-        "relative_path": relative_path,
-        "entrypoint": entrypoint,
-        "bundle_identity": bundle_identity,
-    }
-    verify_platform_artifact(artifact_root, variant)
-
-    shell_path = bundle_root / "shell.tauri.default.shell.v1.json"
-    shell = json.loads(shell_path.read_text(encoding="utf-8"))
-    matching_targets = [
-        target
-        for target in shell["launch"]["build_targets"]
-        if target["platform"] == platform
-        and target["architecture"] == architecture
-        and target["artifact_ref"] == relative_path
-        and target["entrypoint"] == entrypoint
-        and target["bundle_identity"] == bundle_identity
-    ]
-    if len(matching_targets) != 1:
-        raise ValueError("packaged artifact does not match one declared Shell build target")
-    shell.update(
-        shell_api_version="io.tobkiri.shell.v5",
-        availability="verified",
-        artifact_digest=digest,
+    """Verify existing staged artifact bytes and atomically rewrite the bundle."""
+    _package_transaction(
+        source_artifact=None,
+        bundle_root=bundle_root,
+        artifact_root=artifact_root,
+        relative_path=relative_path,
+        entrypoint=entrypoint,
+        platform=platform,
+        architecture=architecture,
+        bundle_identity=bundle_identity,
+        source_commit=source_commit,
     )
-    shell["launch"] = {
-        "prebuilt_only": True,
-        "build_targets": shell["launch"]["build_targets"],
-        "variants": [variant],
-    }
-    shell["provenance"] = _generated_provenance(
-        shell,
-        "ecosystem/defaultspack/v4/shell.tauri.default.shell.v1.json",
-        commit,
-        generator_path=Path(__file__),
-    )
-    shell["definition_revision"] = canonical_digest(
-        {key: value for key, value in shell.items() if key != "definition_revision"}
-    )
-    shell = validate_document(shell, "shell")
-
-    for pack_name in (
-        "shell.tauri.default.pack.v4.json",
-        "runtime.tauri.application.default.pack.v4.json",
-    ):
-        pack_path = bundle_root / "packs" / pack_name
-        pack = json.loads(pack_path.read_text(encoding="utf-8"))
-        # The Pack identity and the executable bytes are distinct evidence.
-        # Keeping their digests distinct also prevents two logical Packs that
-        # share one application bundle from aliasing in the host catalog.
-        pack["pack"]["artifact_digest"] = canonical_digest(
-            {
-                "pack_id": pack["pack"]["id"],
-                "packaged_artifact_digest": digest,
-            }
-        )
-        retained_artifacts = [
-            item for item in pack.get("artifacts", ()) if item.get("kind") != "executable"
-        ]
-        if pack_name == "runtime.tauri.application.default.pack.v4.json":
-            retained_artifacts = [
-                {**item, "platform": "host"} for item in retained_artifacts
-            ]
-        pack["artifacts"] = [
-            {
-                "path": relative_path,
-                "digest": digest,
-                "entrypoint_digest": entrypoint_digest,
-                "kind": "executable",
-                "platform": f"{platform}-{architecture}",
-                "entrypoint": entrypoint,
-                "argv": [],
-            },
-            *retained_artifacts,
-        ]
-        pack["pack"]["artifact_digest"] = canonical_digest(pack["artifacts"])
-        for function in pack["functions"]:
-            function["implementation_digest"] = entrypoint_digest
-        source_path = f"ecosystem/defaultspack/v4/packs/{pack_name}"
-        pack["provenance"] = _generated_provenance(
-            pack, source_path, commit, generator_path=Path(__file__)
-        )
-        pack = _normalize_pack(pack)
-        pack_path.write_bytes(_pretty(pack))
-
-    profile_path = bundle_root / "defaults.profile.v4.json"
-    profile = json.loads(profile_path.read_text(encoding="utf-8"))
-    profile["shell"].update(platform=platform, architecture=architecture)
-    profile["provenance"] = _generated_provenance(
-        profile,
-        "ecosystem/defaultspack/v4/defaults.profile.v4.json",
-        commit,
-        generator_path=Path(__file__),
-    )
-    shell_path.write_bytes(_pretty(shell))
-    profile_path.write_bytes(_pretty(validate_document(profile, "profile")))
-
-    lock_path = bundle_root / "bundle.lock.json"
-    lock = json.loads(lock_path.read_text(encoding="utf-8"))
-    for entry in lock["entries"]:
-        path = bundle_root / entry["path"]
-        entry["digest"] = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
-    lock_path.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
 
 
 def main() -> int:

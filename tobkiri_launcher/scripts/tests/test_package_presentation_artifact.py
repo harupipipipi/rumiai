@@ -173,7 +173,7 @@ def test_package_rejects_empty_source_identity_and_bad_key() -> None:
         with pytest.raises(RuntimeError, match="source_revision"):
             package_artifact(catalog, manifest, key, "key", root / "source-output")
 
-        build["source_revision"] = "revision"
+        build["source_revision"] = "a" * 40
         manifest.write_text(json.dumps(build))
         key.write_bytes(b"short")
         with pytest.raises(RuntimeError, match="32 raw seed bytes"):
@@ -284,3 +284,123 @@ def test_package_rejects_source_revision_from_another_checkout() -> None:
                 root / "stale-output",
                 repository_root,
             )
+
+
+def _file_bytes(root: Path) -> dict[str, bytes]:
+    """Return a deterministic byte snapshot for transaction assertions."""
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and not path.is_symlink()
+    }
+
+
+def _linux_source(path: Path, payload: bytes = b"old-source") -> Path:
+    """Create a small recognized x86_64 ELF fixture."""
+    path.write_bytes(
+        b"\x7fELF\x02\x01\x01\x00"
+        + b"\x00" * 10
+        + b">\x00"
+        + payload
+    )
+    path.chmod(0o755)
+    return path
+
+
+def test_package_normalizes_entrypoint_and_rolls_back_write_fault(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with TemporaryDirectory(prefix="tobkiri-presentation-atomic-escape-") as temp:
+        root = Path(temp)
+        catalog, manifest, key = _fixture(root)
+        unsafe = json.loads(catalog.read_text())
+        unsafe["shell_providers"][0]["artifact_variants"][0]["entrypoint"] = (
+            "../true"
+        )
+        catalog.write_text(json.dumps(unsafe))
+        outside = root / "outside"
+        outside.write_bytes(b"sentinel")
+        with pytest.raises(RuntimeError, match="entrypoint is unsafe"):
+            package_artifact(catalog, manifest, key, "key", root / "escape-output")
+        assert outside.read_bytes() == b"sentinel"
+        assert not (root / "escape-output").exists()
+
+        catalog.write_text(json.dumps(_catalog()))
+        original = MODULE._write_json
+        calls = 0
+
+        def fail_on_second(path: Path, value: object) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("injected pack write fault")
+            original(path, value)
+
+        output = root / "existing-output"
+        output.mkdir()
+        (output / "sentinel").write_bytes(b"keep-existing-bytes")
+        before = _file_bytes(output)
+        monkeypatch.setattr(MODULE, "_write_json", fail_on_second)
+        with pytest.raises(OSError, match="injected pack write fault"):
+            package_artifact(catalog, manifest, key, "key", output)
+        assert _file_bytes(output) == before
+        assert not list(root.glob(".tobkiri-presentation-stage-*"))
+
+
+def test_package_uses_one_source_snapshot_and_revalidates_staged_signature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with TemporaryDirectory(prefix="tobkiri-presentation-snapshot-") as temp:
+        root = Path(temp)
+        source = _linux_source(root / "source-shell")
+        catalog, manifest, key = _fixture(root, artifact_path=os.fspath(source))
+        original_snapshot = MODULE._snapshot_artifact
+
+        def replace_after_snapshot(source_path: Path, destination: Path) -> Path:
+            result = original_snapshot(source_path, destination)
+            _linux_source(source_path, b"replaced-after-snapshot")
+            return result
+
+        monkeypatch.setattr(MODULE, "_snapshot_artifact", replace_after_snapshot)
+        report = package_artifact(catalog, manifest, key, "key", root / "release")
+        staged = root / "release" / str(report["path"])
+        assert staged.read_bytes() == source.read_bytes().replace(
+            b"replaced-after-snapshot", b"old-source"
+        )
+
+        calls: list[Path] = []
+        monkeypatch.setattr(
+            MODULE,
+            "_validate_macos_signature",
+            lambda artifact, platform: calls.append(artifact),
+        )
+        second = root / "release-second"
+        package_artifact(catalog, manifest, key, "key", second)
+        assert len(calls) == 2
+        assert all("source-snapshot" not in path.parts for path in calls)
+        assert all(path.is_relative_to(second.parent) for path in calls)
+
+
+def test_package_two_passes_are_byte_identical() -> None:
+    with TemporaryDirectory(prefix="tobkiri-presentation-deterministic-") as temp:
+        root = Path(temp)
+        catalog, manifest, key = _fixture(root)
+        first = root / "release-one"
+        second = root / "release-two"
+        package_artifact(catalog, manifest, key, "key", first)
+        package_artifact(catalog, manifest, key, "key", second)
+        assert _file_bytes(first) == _file_bytes(second)
+
+
+def test_package_rejects_absolute_entrypoint_before_creating_output() -> None:
+    with TemporaryDirectory(prefix="tobkiri-presentation-absolute-") as temp:
+        root = Path(temp)
+        catalog, manifest, key = _fixture(root)
+        value = json.loads(catalog.read_text())
+        value["shell_providers"][0]["artifact_variants"][0]["entrypoint"] = os.fspath(
+            Path("/tmp/outside-shell")
+        )
+        catalog.write_text(json.dumps(value))
+        with pytest.raises(RuntimeError, match="entrypoint is unsafe"):
+            package_artifact(catalog, manifest, key, "key", root / "release")
+        assert not (root / "release").exists()
