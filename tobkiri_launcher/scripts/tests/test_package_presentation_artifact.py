@@ -4,8 +4,10 @@ import base64
 import importlib.util
 import json
 import os
+import plistlib
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -82,6 +84,123 @@ def _package(root: Path) -> dict[str, object]:
     catalog, manifest, key = _fixture(root)
     return package_artifact(
         catalog, manifest, key, "test-release-key", root / "release"
+    )
+
+
+def _macos_fixture(root: Path) -> tuple[Path, Path, Path, Path]:
+    """Create the smallest real macOS application fixture accepted by codesign."""
+    app = root / "Tobkiri.app"
+    executable = app / "Contents" / "MacOS" / "tobkiri-shell"
+    executable.parent.mkdir(parents=True)
+    shutil.copyfile("/usr/bin/true", executable)
+    executable.chmod(0o755)
+    resources = app / "Contents" / "Resources"
+    resources.mkdir()
+    (resources / "presentation.json").write_text("sealed fixture\n", encoding="utf-8")
+    with (app / "Contents" / "Info.plist").open("wb") as handle:
+        plistlib.dump(
+            {
+                "CFBundleExecutable": "tobkiri-shell",
+                "CFBundleIdentifier": "io.tobkiri.shell.tauri",
+                "CFBundlePackageType": "APPL",
+            },
+            handle,
+        )
+    catalog = _catalog("Tobkiri.app/Contents/MacOS/tobkiri-shell")
+    variant = catalog["shell_providers"][0]["artifact_variants"][0]
+    variant.update(
+        artifact_id="shell.cli.default.macos-arm64",
+        platform="macos",
+        architecture="arm64",
+        bundle_identifier="io.tobkiri.shell.tauri",
+    )
+    catalog_path = root / "presentation_catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    manifest = root / "shell_build_output.v4.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": "io.tobkiri.shell.build-output.v4",
+                "artifact_id": "shell.cli.default.macos-arm64",
+                "artifact_path": os.fspath(app),
+                "platform": "macos",
+                "architecture": "arm64",
+                "build_profile": "release",
+                "source_identity": "github:example/tobkiri",
+                "source_revision": "a974ec811bd189c413557a00b4b073bc5898bd41",
+            }
+        ),
+        encoding="utf-8",
+    )
+    key = root / "signing-key.raw"
+    key.write_bytes(bytes(range(32)))
+    return catalog_path, manifest, key, app
+
+
+def _codesign_app(app: Path) -> None:
+    subprocess.run(
+        ["/usr/bin/codesign", "--force", "--sign", "-", os.fspath(app)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires macOS codesign")
+def test_package_preserves_valid_macos_resource_envelope() -> None:
+    with TemporaryDirectory(prefix="tobkiri-presentation-macos-valid-") as temp:
+        root = Path(temp)
+        catalog, manifest, key, app = _macos_fixture(root)
+        _codesign_app(app)
+        report = package_artifact(
+            catalog, manifest, key, "key", root / "release"
+        )
+        staged = root / "release" / str(report["path"])
+        assert (staged / "Contents/_CodeSignature/CodeResources").is_file()
+        subprocess.run(
+            [
+                "/usr/bin/codesign",
+                "--verify",
+                "--deep",
+                "--strict",
+                os.fspath(staged),
+            ],
+            check=True,
+        )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires macOS codesign")
+@pytest.mark.parametrize("tamper", ["missing-code-resources", "resource-mismatch"])
+def test_package_rejects_invalid_macos_resource_envelope(tamper: str) -> None:
+    with TemporaryDirectory(prefix="tobkiri-presentation-macos-invalid-") as temp:
+        root = Path(temp)
+        catalog, manifest, key, app = _macos_fixture(root)
+        _codesign_app(app)
+        if tamper == "missing-code-resources":
+            (app / "Contents/_CodeSignature/CodeResources").unlink()
+        else:
+            (app / "Contents/Resources/presentation.json").write_text(
+                "tampered fixture\n", encoding="utf-8"
+            )
+        with pytest.raises(RuntimeError, match="signature verification failed"):
+            package_artifact(catalog, manifest, key, "key", root / "release")
+        assert not (root / "release").exists()
+
+
+def test_desktop_installer_signs_macos_shell_after_build_before_packaging() -> None:
+    workflow = (
+        Path(__file__).resolve().parents[3]
+        / ".github/workflows/desktop-installers.yml"
+    ).read_text(encoding="utf-8")
+    build = workflow.index("- name: Build verified Tauri Shell artifact")
+    sign = workflow.index("- name: Ad-hoc sign macOS Tauri Shell artifact")
+    stage = workflow.index("- name: Stage verified macOS Tauri Shell artifact")
+    assert build < sign < stage
+    signing_step = workflow[sign:stage]
+    assert "/usr/bin/codesign --force --sign - \"$artifact\"" in signing_step
+    assert (
+        "/usr/bin/codesign --verify --deep --strict --verbose=2 \"$artifact\""
+        in signing_step
     )
 
 

@@ -214,6 +214,16 @@ jobs:
         working-directory: tobkiri_launcher
         run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.shell.conf.json --bundles ${{ matrix.shell_bundles }} --ci
 
+      - name: Ad-hoc sign macOS Tauri Shell artifact
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="$(find "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -type d -name 'Tobkiri.app' -print -quit)"
+          test -n "$artifact"
+          /usr/bin/codesign --force --sign - "$artifact"
+          /usr/bin/codesign --verify --deep --strict --verbose=2 "$artifact"
+
       - name: Stage verified macOS Tauri Shell artifact
         if: runner.os == 'macOS'
         shell: bash
