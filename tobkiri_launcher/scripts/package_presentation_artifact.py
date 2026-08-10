@@ -72,11 +72,15 @@ GIT_REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
 WINDOWS_DRIVE_ABSOLUTE_RE = re.compile(r"^[A-Za-z]:\\")
 WINDOWS_RESERVED_NAMES = {
     "CON",
+    "CONIN$",
+    "CONOUT$",
     "PRN",
     "AUX",
     "NUL",
     *(f"COM{index}" for index in range(1, 10)),
     *(f"LPT{index}" for index in range(1, 10)),
+    *(f"COM{index}" for index in "¹²³"),
+    *(f"LPT{index}" for index in "¹²³"),
 }
 
 
