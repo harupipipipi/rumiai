@@ -115,6 +115,10 @@ class AuthorityStore:
         if evidence.state != "live":
             raise AuthorityStoreError("authority process identity is unavailable")
         self._owner_process_start = evidence.identity
+        self._refresh_process_identity = (
+            process_start_reader is not None
+            or self._owner_process_start.startswith("windows:")
+        )
         self._clock = clock
         self._audit_fault = audit_fault
         self._lock = threading.RLock()
@@ -157,6 +161,8 @@ class AuthorityStore:
     def _assert_current_process(self) -> None:
         if self._fork_fenced or os.getpid() != self._owner_pid:
             raise AuthorityStoreError("authority store cannot be used after fork")
+        if not self._refresh_process_identity:
+            return
         evidence = self._process_start_reader(self._owner_pid)
         if evidence.state != "live" or evidence.identity != self._owner_process_start:
             raise AuthorityStoreError("authority process identity is unavailable or changed")

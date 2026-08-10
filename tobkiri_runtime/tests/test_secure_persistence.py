@@ -17,6 +17,63 @@ from tobkiri_protocol.secure_persistence import (
 )
 
 
+def test_missing_leaf_is_preserved_for_exists_and_read(tmp_path: Path) -> None:
+    store = SecureDirectory(tmp_path / "root")
+
+    assert store.exists("approval.json") is False
+    with pytest.raises(FileNotFoundError):
+        store.read_bytes("approval.json")
+
+
+def test_missing_nested_parent_is_not_treated_as_a_missing_leaf(
+    tmp_path: Path,
+) -> None:
+    store = SecureDirectory(tmp_path / "root")
+
+    with pytest.raises(SecurePersistenceError, match="directory.*unsafe"):
+        store.exists("missing/approval.json")
+    with pytest.raises(SecurePersistenceError, match="directory.*unsafe"):
+        store.read_bytes("missing/approval.json")
+
+
+def test_write_and_lock_create_missing_leaf_and_nested_parent(tmp_path: Path) -> None:
+    store = SecureDirectory(tmp_path / "root")
+
+    store.write_bytes_atomic("state/active.json", b"state")
+    assert store.read_bytes("state/active.json") == b"state"
+    descriptor = store.open_lock("locks/active.lock")
+    try:
+        store.validate_open_file("locks/active.lock", descriptor)
+    finally:
+        os.close(descriptor)
+
+
+@pytest.mark.parametrize("operation", ["exists", "read", "lock", "write"])
+def test_all_operations_reject_replaced_captured_ancestor(
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    parent = tmp_path / "owner"
+    store = SecureDirectory(parent / "state")
+    store.write_bytes_atomic("entry", b"old")
+    displaced = tmp_path / "displaced"
+    parent.rename(displaced)
+    parent.mkdir()
+    (parent / "state").mkdir()
+
+    actions = {
+        "exists": lambda: store.exists("entry"),
+        "read": lambda: store.read_bytes("entry"),
+        "lock": lambda: store.open_lock("entry"),
+        "write": lambda: store.write_bytes_atomic("entry", b"new"),
+    }
+    with pytest.raises(SecurePersistenceError, match="ancestor identity changed"):
+        actions[operation]()
+
+    assert (displaced / "state" / "entry").read_bytes() == b"old"
+    assert not (parent / "state" / "entry").exists()
+
+
 def test_captured_ancestor_replacement_fails_closed(tmp_path: Path) -> None:
     parent = tmp_path / "owner"
     store = SecureDirectory(parent / "state")

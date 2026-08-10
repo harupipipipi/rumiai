@@ -365,36 +365,46 @@ class SecureDirectory:
         handles: list[Any] = []
         pinned: list[tuple[Path, _WindowsFileId]] = []
         try:
-            for path, expected in self._chain:
-                handle, current = _windows_open_directory(path)
-                handles.append(handle)
-                pinned.append((path, current))
-                if current != expected:
-                    raise SecurePersistenceError("persistence ancestor identity changed")
-            parent = self.root
-            for component in parts[:-1]:
-                parent /= component
-                try:
-                    handle, current = _windows_open_directory(parent)
-                except FileNotFoundError:
-                    if not create:
-                        raise
-                    parent.mkdir(mode=0o700)
-                    handle, current = _windows_open_directory(parent)
-                handles.append(handle)
-                pinned.append((parent, current))
-            yield parent, parts[-1]
-            for path, expected in pinned:
-                check_handle, current = _windows_open_directory(path)
-                try:
+            try:
+                for path, expected in self._chain:
+                    handle, current = _windows_open_directory(path)
+                    handles.append(handle)
+                    pinned.append((path, current))
                     if current != expected:
-                        raise SecurePersistenceError("persistence directory identity changed")
-                finally:
-                    _windows_close_handle(check_handle)
-        except OSError as error:
-            if isinstance(error, SecurePersistenceError):
-                raise
-            raise SecurePersistenceError("persistence directory is unsafe") from error
+                        raise SecurePersistenceError("persistence ancestor identity changed")
+                parent = self.root
+                for component in parts[:-1]:
+                    parent /= component
+                    try:
+                        handle, current = _windows_open_directory(parent)
+                    except FileNotFoundError:
+                        if not create:
+                            raise
+                        parent.mkdir(mode=0o700)
+                        handle, current = _windows_open_directory(parent)
+                    handles.append(handle)
+                    pinned.append((parent, current))
+            except OSError as error:
+                if isinstance(error, SecurePersistenceError):
+                    raise
+                raise SecurePersistenceError("persistence directory is unsafe") from error
+            try:
+                yield parent, parts[-1]
+            finally:
+                try:
+                    for path, expected in pinned:
+                        check_handle, current = _windows_open_directory(path)
+                        try:
+                            if current != expected:
+                                raise SecurePersistenceError(
+                                    "persistence directory identity changed"
+                                )
+                        finally:
+                            _windows_close_handle(check_handle)
+                except OSError as error:
+                    if isinstance(error, SecurePersistenceError):
+                        raise
+                    raise SecurePersistenceError("persistence directory is unsafe") from error
         finally:
             for handle in reversed(handles):
                 _windows_close_handle(handle)
@@ -407,23 +417,24 @@ class SecureDirectory:
         flags |= getattr(os, "O_NOFOLLOW", 0)
         descriptors: list[int] = []
         try:
-            for index, (path, expected) in enumerate(self._chain):
-                if index == 0:
-                    descriptor = os.open(path, flags)
-                else:
-                    descriptor = os.open(
-                        path.name,
-                        flags,
-                        dir_fd=descriptors[-1],
-                    )
-                descriptors.append(descriptor)
-                if _identity(os.fstat(descriptor)) != expected:
-                    raise SecurePersistenceError("persistence ancestor identity changed")
+            try:
+                for index, (path, expected) in enumerate(self._chain):
+                    if index == 0:
+                        descriptor = os.open(path, flags)
+                    else:
+                        descriptor = os.open(
+                            path.name,
+                            flags,
+                            dir_fd=descriptors[-1],
+                        )
+                    descriptors.append(descriptor)
+                    if _identity(os.fstat(descriptor)) != expected:
+                        raise SecurePersistenceError("persistence ancestor identity changed")
+            except OSError as error:
+                if isinstance(error, SecurePersistenceError):
+                    raise
+                raise SecurePersistenceError("persistence ancestor is unsafe") from error
             yield descriptors[-1]
-        except OSError as error:
-            if isinstance(error, SecurePersistenceError):
-                raise
-            raise SecurePersistenceError("persistence ancestor is unsafe") from error
         finally:
             for descriptor in reversed(descriptors):
                 os.close(descriptor)
@@ -439,20 +450,25 @@ class SecureDirectory:
             flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
             flags |= getattr(os, "O_NOFOLLOW", 0)
             try:
-                for component in parts[:-1]:
-                    try:
-                        descriptor = os.open(component, flags, dir_fd=current)
-                    except FileNotFoundError:
-                        if not create:
-                            raise
-                        os.mkdir(component, mode=0o700, dir_fd=current)
-                        descriptor = os.open(component, flags, dir_fd=current)
-                    metadata = os.fstat(descriptor)
-                    if not _owned_directory(metadata):
-                        os.close(descriptor)
-                        raise SecurePersistenceError("persistence child directory is unsafe")
-                    descriptors.append(descriptor)
-                    current = descriptor
+                try:
+                    for component in parts[:-1]:
+                        try:
+                            descriptor = os.open(component, flags, dir_fd=current)
+                        except FileNotFoundError:
+                            if not create:
+                                raise
+                            os.mkdir(component, mode=0o700, dir_fd=current)
+                            descriptor = os.open(component, flags, dir_fd=current)
+                        metadata = os.fstat(descriptor)
+                        if not _owned_directory(metadata):
+                            os.close(descriptor)
+                            raise SecurePersistenceError("persistence child directory is unsafe")
+                        descriptors.append(descriptor)
+                        current = descriptor
+                except OSError as error:
+                    if isinstance(error, SecurePersistenceError):
+                        raise
+                    raise SecurePersistenceError("persistence child directory is unsafe") from error
                 yield current, parts[-1]
             finally:
                 for descriptor in reversed(descriptors):
