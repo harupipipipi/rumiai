@@ -349,7 +349,11 @@ class RequestBroker:
                 )
             return payload
         except TimeoutError as exc:
-            backend.cancel(envelope.context.request_id)
+            cancellation_error: Exception | None = None
+            try:
+                backend.cancel(envelope.context.request_id)
+            except Exception as cancel_exc:
+                cancellation_error = cancel_exc
             ambiguous = binding.operation.effect_class is EffectClass.EXTERNAL_EFFECT
             self._record_audit_failure(audit_reservation, ambiguous=ambiguous)
             if ambiguous:
@@ -360,6 +364,10 @@ class RequestBroker:
                     idempotency_key=envelope.idempotency_key,
                     reconcile_operation=binding.operation.reconcile_operation,
                 )
+            if cancellation_error is not None:
+                raise ProviderExecutionError(
+                    "local execution timed out and authenticated cancellation failed"
+                ) from cancellation_error
             raise RequestTimedOutError("local execution exceeded deadline") from exc
         except AmbiguousEffectError:
             raise

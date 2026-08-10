@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import platform as host_platform
 import secrets
+import threading
 import time
 from typing import Any, Callable, Iterable, Mapping, Protocol
 
@@ -165,6 +166,8 @@ class ProductionIsolationBackend:
         self._domains: dict[str, PlatformAttestation] = {}
         self._reservations: dict[str, str] = {}
         self._leases: dict[str, IsolationLease] = {}
+        self._request_domains: dict[str, str] = {}
+        self._request_lock = threading.RLock()
         self.status = BackendStatus(
             backend_id=driver.backend_id,
             execution_kind=ExecutionKind.PACK_VM,
@@ -283,12 +286,31 @@ class ProductionIsolationBackend:
         if lease is None or lease.expires_monotonic <= self._clock():
             self.terminate(target)
             raise BackendUnavailableError("provider domain lease is unavailable or expired")
-        return self._driver.invoke(request)
+        request_id = getattr(getattr(request, "context", None), "request_id", None)
+        if not isinstance(request_id, str) or not request_id:
+            raise BackendUnavailableError("provider request identity is unavailable")
+        with self._request_lock:
+            if request_id in self._request_domains:
+                raise BackendUnavailableError("provider request identity is already active")
+            self._request_domains[request_id] = target
+        try:
+            return self._driver.invoke(request)
+        finally:
+            with self._request_lock:
+                if self._request_domains.get(request_id) == target:
+                    self._request_domains.pop(request_id, None)
 
     def cancel(self, request_id: str) -> None:
+        with self._request_lock:
+            if request_id not in self._request_domains:
+                raise BackendUnavailableError("cancel request does not own an active domain")
         self._driver.cancel(request_id)
 
     def terminate(self, domain_id: str) -> None:
+        with self._request_lock:
+            for request_id, target in tuple(self._request_domains.items()):
+                if target == domain_id:
+                    self._request_domains.pop(request_id, None)
         attestation = self._domains.pop(domain_id, None)
         if attestation is not None:
             self._reservations.pop(attestation.reservation_id, None)
@@ -443,6 +465,8 @@ class ManagedLimaPackVMDriver:
         self._provisioner = provisioner
         self._domains: dict[str, PlatformAttestation] = {}
         self._seen_launches: set[str] = set()
+        self._requests: dict[str, tuple[str, str, str]] = {}
+        self._request_lock = threading.RLock()
         doctor = provisioner.doctor()
         self.platform = str(doctor.platform)
         self.backend_digest = (
@@ -559,9 +583,21 @@ class ManagedLimaPackVMDriver:
         if attestation is None:
             raise BackendUnavailableError("managed Lima PackVM domain is unavailable")
         context = getattr(request, "context", None)
+        request_id = getattr(context, "request_id", None)
+        if not isinstance(request_id, str) or not request_id:
+            raise BackendUnavailableError("managed PackVM request identity is invalid")
+        cancel_token = secrets.token_hex(32)
+        with self._request_lock:
+            if request_id in self._requests:
+                raise BackendUnavailableError("managed PackVM request identity is already active")
+            self._requests[request_id] = (
+                domain,
+                attestation.guest_artifact_identity,
+                cancel_token,
+            )
         payload = {
             "operation": "invoke",
-            "request_id": getattr(context, "request_id", None),
+            "request_id": request_id,
             "target_domain": domain,
             "artifact_digest": attestation.artifact_digest,
             "materialization_digest": attestation.materialization_digest,
@@ -572,8 +608,18 @@ class ManagedLimaPackVMDriver:
             "payload": getattr(request, "payload", None),
             "request_digest": getattr(request, "request_digest", None),
             "deadline_monotonic": getattr(request, "deadline_monotonic", None),
+            "cancel_token": cancel_token,
         }
-        response = self._provisioner.invoke_guest(payload)
+        try:
+            response = self._provisioner.invoke_guest(payload)
+        finally:
+            with self._request_lock:
+                if self._requests.get(request_id) == (
+                    domain,
+                    attestation.guest_artifact_identity,
+                    cancel_token,
+                ):
+                    self._requests.pop(request_id, None)
         if response.get("ok") is not True:
             raise BackendUnavailableError(
                 f"managed PackVM supervisor rejected invocation: {response.get('error', 'unknown')}"
@@ -584,10 +630,43 @@ class ManagedLimaPackVMDriver:
         return ProviderOutcome(result)
 
     def cancel(self, request_id: str) -> None:
-        if request_id:
-            self._provisioner.invoke_guest({"operation": "cancel", "request_id": request_id})
+        with self._request_lock:
+            ownership = self._requests.get(request_id)
+        if ownership is None:
+            raise BackendUnavailableError("managed PackVM cancel request is not active")
+        domain, guest_artifact_identity, cancel_token = ownership
+        try:
+            response = self._provisioner.invoke_guest(
+                {
+                    "operation": "cancel",
+                    "request_id": request_id,
+                    "target_domain": domain,
+                    "guest_artifact_identity": guest_artifact_identity,
+                    "cancel_token": cancel_token,
+                }
+            )
+        except Exception as exc:
+            raise BackendUnavailableError("managed PackVM cancellation transport failed") from exc
+        expected = {
+            "ok": True,
+            "protocol": "io.tobkiri.packvm-supervisor.v1",
+            "operation": "cancel",
+            "request_id": request_id,
+            "target_domain": domain,
+            "state": "cancelled",
+        }
+        if (
+            set(response) != {*expected, "signals"}
+            or any(response.get(key) != value for key, value in expected.items())
+            or response.get("signals") not in ([], ["TERM"], ["TERM", "KILL"])
+        ):
+            raise BackendUnavailableError("managed PackVM cancellation ACK mismatch")
 
     def terminate(self, domain_id: str) -> None:
+        with self._request_lock:
+            for request_id, ownership in tuple(self._requests.items()):
+                if ownership[0] == domain_id:
+                    self._requests.pop(request_id, None)
         self._domains.pop(domain_id, None)
 
 

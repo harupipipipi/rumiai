@@ -6,6 +6,7 @@ import base64
 import hashlib
 from pathlib import Path
 import shutil
+import sys
 
 import pytest
 
@@ -156,9 +157,9 @@ def test_guest_stage_is_read_only_replay_safe_and_reverified(
     runtime.parent.chmod(0o700)
     runtime.chmod(0o600)
     runtime.write_text("tampered = True\n", encoding="utf-8")
-    runtime.chmod(0o400)
-    runtime.parent.chmod(0o500)
-    target.chmod(0o500)
+    runtime.chmod(0o444)
+    runtime.parent.chmod(0o555)
+    target.chmod(0o555)
     with pytest.raises(ValueError, match="digest changed"):
         packvm_guest_runner._verify_invocation_artifact(invoke)
     expected_runtime = next(
@@ -168,12 +169,12 @@ def test_guest_stage_is_read_only_replay_safe_and_reverified(
     runtime.parent.chmod(0o700)
     runtime.chmod(0o600)
     runtime.write_bytes(expected_runtime)
-    runtime.chmod(0o400)
+    runtime.chmod(0o444)
     extra = target / "unexpected.py"
     extra.write_text("pass\n", encoding="utf-8")
-    extra.chmod(0o400)
-    runtime.parent.chmod(0o500)
-    target.chmod(0o500)
+    extra.chmod(0o444)
+    runtime.parent.chmod(0o555)
+    target.chmod(0o555)
     with pytest.raises(ValueError, match="inventory changed"):
         packvm_guest_runner._verify_invocation_artifact(invoke)
 
@@ -288,7 +289,20 @@ def test_guest_supervisor_materializes_and_invokes_the_exact_python_abi(
     )
     guest_root = tmp_path / "guest-artifacts"
     monkeypatch.setattr(packvm_guest_runner, "ARTIFACT_ROOT", guest_root)
+    monkeypatch.setattr(packvm_guest_runner, "REQUEST_ROOT", tmp_path / "requests")
     monkeypatch.setattr(packvm_guest_runner.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        packvm_guest_runner,
+        "_sandbox_argv",
+        lambda _target, implementation: (
+            sys.executable,
+            "-I",
+            "-S",
+            str(Path(packvm_guest_runner.__file__).resolve()),
+            "--execute",
+            str(implementation),
+        ),
+    )
     staged = packvm_guest_runner._materialize(
         {
             "operation": "materialize",
@@ -323,6 +337,7 @@ def test_guest_supervisor_materializes_and_invokes_the_exact_python_abi(
             "payload": {"message": "inside guest"},
             "request_digest": "sha256:" + "2" * 64,
             "deadline_monotonic": 100.0,
+            "cancel_token": "c" * 64,
         }
     )
     assert result["ok"] is True

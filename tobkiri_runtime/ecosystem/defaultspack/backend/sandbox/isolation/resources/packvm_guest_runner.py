@@ -9,20 +9,24 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 import fcntl
 import hashlib
+import hmac
 import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import signal
 import shutil
 import stat
 import subprocess
 import sys
+import time
 
 
 PROTOCOL = "io.tobkiri.packvm-supervisor.v1"
 BUILD_ID = "tobkiri-packvm-runner-2"
 ARTIFACT_ROOT = Path("/var/lib/tobkiri-packvm/artifacts")
+REQUEST_ROOT = Path("/run/tobkiri-packvm/requests")
 MAX_REQUEST_BYTES = 700 * 1024 * 1024
 MAX_FILES = 10_000
 MAX_FILE_BYTES = 128 * 1024 * 1024
@@ -31,6 +35,9 @@ MAX_ARTIFACT_STORAGE_BYTES = 768 * 1024 * 1024
 MIN_GUEST_FREE_RESERVE_BYTES = 512 * 1024 * 1024
 MAX_ARTIFACT_METADATA_BYTES = 16 * 1024 * 1024
 MAX_RESULT_BYTES = 16 * 1024 * 1024
+CANCEL_GRACE_SECONDS = 0.25
+PACK_UID = 65534
+PACK_GID = 65534
 _DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
 _IDENTIFIER = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 
@@ -76,6 +83,8 @@ def main() -> int:
             }
         elif operation == "invoke":
             response = _invoke(request)
+        elif operation == "cancel":
+            response = _cancel(request)
         else:
             raise ValueError("unsupported operation")
     except (binascii.Error, OSError, ValueError, json.JSONDecodeError) as exc:
@@ -106,6 +115,7 @@ def _invoke(request: dict[str, object]) -> dict[str, object]:
         "payload",
         "request_digest",
         "deadline_monotonic",
+        "cancel_token",
     }
     if set(request) != required:
         raise ValueError("PackVM invocation fields are invalid")
@@ -117,6 +127,11 @@ def _invoke(request: dict[str, object]) -> dict[str, object]:
     _digest(request["request_digest"], "request_digest")
     if not isinstance(request["deadline_monotonic"], (int, float)):
         raise ValueError("PackVM invocation deadline is invalid")
+    cancel_token = str(request["cancel_token"] or "")
+    if len(cancel_token) != 64 or any(value not in "0123456789abcdef" for value in cancel_token):
+        raise ValueError("PackVM invocation cancel token is invalid")
+    if os.geteuid() != 0:
+        raise ValueError("PackVM invocation requires the root-owned supervisor")
     identity = _verify_invocation_artifact(request)
     artifact_digest = _digest(request["artifact_digest"], "artifact_digest")
     materialization_digest = _digest(request["materialization_digest"], "materialization_digest")
@@ -140,26 +155,28 @@ def _invoke(request: dict[str, object]) -> dict[str, object]:
     if len(encoded) > MAX_REQUEST_BYTES:
         raise ValueError("PackVM invocation payload exceeds size limit")
     process = subprocess.Popen(
-        (
-            sys.executable,
-            "-I",
-            "-S",
-            str(Path(__file__).resolve()),
-            "--execute",
-            str(implementation),
-        ),
+        _sandbox_argv(target, implementation),
         cwd=target,
         env={"PATH": "/usr/bin:/bin"},
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        start_new_session=True,
     )
     try:
-        stdout, stderr = process.communicate(encoded, timeout=60)
+        _register_request(request, process.pid, cancel_token)
+    except Exception:
+        _terminate_process_group(process.pid)
+        process.communicate()
+        raise
+    try:
+        stdout, stderr = process.communicate(encoded, timeout=60.0)
     except subprocess.TimeoutExpired as exc:
-        process.kill()
+        _terminate_process_group(process.pid)
         process.communicate()
         raise ValueError("PackVM invocation timed out") from exc
+    finally:
+        _unregister_request(str(request["request_id"]), process.pid)
     if process.returncode != 0:
         message = stderr.decode("utf-8", errors="replace")[:1000]
         raise ValueError(message or "PackVM implementation failed")
@@ -180,6 +197,8 @@ def _execute_staged_module(path: Path) -> int:
     """Private child mode for the explicit staged Python Pack ABI."""
 
     try:
+        if os.geteuid() == 0:
+            raise ValueError("PackVM implementation may not execute as root")
         request = json.loads(sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1))
         if not isinstance(request, dict) or set(request) != {
             "contract_id",
@@ -206,6 +225,202 @@ def _execute_staged_module(path: Path) -> int:
     except Exception as error:
         sys.stderr.write(f"{type(error).__name__}: {error}\n")
         return 1
+
+
+def _sandbox_argv(target: Path, implementation: Path) -> tuple[str, ...]:
+    """Build the mandatory default-deny guest sandbox command."""
+
+    bwrap = shutil.which("bwrap")
+    prlimit = shutil.which("prlimit")
+    if bwrap is None or prlimit is None:
+        raise ValueError("PackVM guest requires bubblewrap and prlimit")
+    runner = Path(__file__).resolve()
+    relative = implementation.relative_to(target).as_posix()
+    command = [
+        prlimit,
+        "--nproc=64",
+        "--as=536870912",
+        "--cpu=60",
+        "--fsize=16777216",
+        "--nofile=64",
+        "--",
+        bwrap,
+        "--die-with-parent",
+        "--new-session",
+        "--unshare-user",
+        "--unshare-pid",
+        "--unshare-ipc",
+        "--unshare-uts",
+        "--unshare-net",
+        "--uid",
+        str(PACK_UID),
+        "--gid",
+        str(PACK_GID),
+        "--cap-drop",
+        "ALL",
+    ]
+    for system_root in ("/usr", "/bin", "/lib", "/lib64", "/etc"):
+        if Path(system_root).exists():
+            command.extend(("--ro-bind", system_root, system_root))
+    command.extend(
+        (
+            "--ro-bind",
+            str(target),
+            "/pack",
+            "--ro-bind",
+            str(runner),
+            "/runner.py",
+            "--dev",
+            "/dev",
+            "--proc",
+            "/proc",
+            "--tmpfs",
+            "/tmp",
+            "--tmpfs",
+            "/home",
+            "--tmpfs",
+            "/run",
+            "--dir",
+            "/var",
+            "--clearenv",
+            "--setenv",
+            "PATH",
+            "/usr/bin:/bin",
+            "--setenv",
+            "HOME",
+            "/home/pack",
+            "--chdir",
+            "/pack",
+            "--",
+            sys.executable,
+            "-I",
+            "-S",
+            "/runner.py",
+            "--execute",
+            f"/pack/{relative}",
+        )
+    )
+    return tuple(command)
+
+
+def _request_path(request_id: str) -> Path:
+    return REQUEST_ROOT / hashlib.sha256(request_id.encode()).hexdigest()
+
+
+def _register_request(
+    request: dict[str, object],
+    process_group: int,
+    cancel_token: str,
+) -> None:
+    REQUEST_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(REQUEST_ROOT, 0o700)
+    record = {
+        "request_id": request["request_id"],
+        "target_domain": request["target_domain"],
+        "guest_artifact_identity": request["guest_artifact_identity"],
+        "cancel_token": cancel_token,
+        "process_group": process_group,
+    }
+    path = _request_path(str(request["request_id"]))
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    try:
+        os.write(descriptor, json.dumps(record, sort_keys=True).encode())
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _unregister_request(request_id: str, process_group: int) -> None:
+    path = _request_path(request_id)
+    try:
+        record = _read_request(path)
+        if record.get("process_group") == process_group:
+            path.unlink(missing_ok=True)
+    except (OSError, ValueError):
+        return
+
+
+def _read_request(path: Path) -> dict[str, object]:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0:
+            raise ValueError("PackVM request ownership record is unsafe")
+        raw = os.read(descriptor, 16 * 1024)
+    finally:
+        os.close(descriptor)
+    value = json.loads(raw)
+    if not isinstance(value, dict) or set(value) != {
+        "request_id",
+        "target_domain",
+        "guest_artifact_identity",
+        "cancel_token",
+        "process_group",
+    }:
+        raise ValueError("PackVM request ownership record is invalid")
+    return value
+
+
+def _cancel(request: dict[str, object]) -> dict[str, object]:
+    required = {
+        "operation",
+        "request_id",
+        "target_domain",
+        "guest_artifact_identity",
+        "cancel_token",
+    }
+    if set(request) != required or os.geteuid() != 0:
+        raise ValueError("PackVM cancellation fields are invalid")
+    request_id = str(request["request_id"] or "")
+    if not request_id:
+        raise ValueError("PackVM cancellation request_id is invalid")
+    record = _read_request(_request_path(request_id))
+    for field in ("request_id", "target_domain", "guest_artifact_identity"):
+        if not hmac.compare_digest(str(record.get(field) or ""), str(request[field] or "")):
+            raise ValueError(f"PackVM cancellation {field} mismatch")
+    if not hmac.compare_digest(
+        str(record.get("cancel_token") or ""), str(request["cancel_token"] or "")
+    ):
+        raise ValueError("PackVM cancellation authentication failed")
+    process_group = record.get("process_group")
+    if not isinstance(process_group, int) or process_group <= 1:
+        raise ValueError("PackVM cancellation process group is invalid")
+    signals = _terminate_process_group(process_group)
+    return {
+        "ok": True,
+        "protocol": PROTOCOL,
+        "operation": "cancel",
+        "request_id": request_id,
+        "target_domain": request["target_domain"],
+        "state": "cancelled",
+        "signals": signals,
+    }
+
+
+def _terminate_process_group(process_group: int) -> list[str]:
+    signals: list[str] = []
+    try:
+        os.killpg(process_group, signal.SIGTERM)
+        signals.append("TERM")
+    except ProcessLookupError:
+        return signals
+    deadline = time.monotonic() + CANCEL_GRACE_SECONDS
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(process_group, 0)
+        except ProcessLookupError:
+            return signals
+        time.sleep(0.01)
+    try:
+        os.killpg(process_group, signal.SIGKILL)
+        signals.append("KILL")
+    except ProcessLookupError:
+        pass
+    return signals
 
 
 def _materialize(request: dict[str, object]) -> dict[str, object]:
@@ -348,7 +563,7 @@ def _materialize_locked(request: dict[str, object]) -> dict[str, object]:
             descriptor = os.open(
                 destination,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-                0o500 if executable else 0o400,
+                0o555 if executable else 0o444,
             )
             try:
                 offset = 0
@@ -360,7 +575,7 @@ def _materialize_locked(request: dict[str, object]) -> dict[str, object]:
                 os.fsync(descriptor)
             finally:
                 os.close(descriptor)
-            os.chmod(destination, 0o500 if executable else 0o400)
+            os.chmod(destination, 0o555 if executable else 0o444)
             if _sha256(destination.read_bytes()) != digest:
                 raise ValueError("artifact changed while staging")
         manifest = {
@@ -387,14 +602,14 @@ def _materialize_locked(request: dict[str, object]) -> dict[str, object]:
             json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n",
             encoding="utf-8",
         )
-        os.chmod(manifest_path, 0o400)
+        os.chmod(manifest_path, 0o444)
         for current, directories, _names in os.walk(temporary, topdown=False):
             for directory in directories:
-                os.chmod(Path(current) / directory, 0o500)
+                os.chmod(Path(current) / directory, 0o555)
             if Path(current) != temporary:
-                os.chmod(current, 0o500)
+                os.chmod(current, 0o555)
         os.replace(temporary, target)
-        os.chmod(target, 0o500)
+        os.chmod(target, 0o555)
     finally:
         if temporary.exists():
             _make_tree_writable(temporary)
@@ -505,7 +720,7 @@ def _verify_staged_artifact(
     if (
         target.is_symlink()
         or not stat.S_ISDIR(metadata.st_mode)
-        or stat.S_IMODE(metadata.st_mode) != 0o500
+        or stat.S_IMODE(metadata.st_mode) != 0o555
     ):
         raise ValueError("staged artifact root is unsafe")
     manifest = _load_manifest(target)
@@ -532,7 +747,7 @@ def _verify_staged_artifact(
         current = Path(current_path)
         for directory in directories:
             path = current / directory
-            if path.is_symlink() or stat.S_IMODE(path.lstat().st_mode) != 0o500:
+            if path.is_symlink() or stat.S_IMODE(path.lstat().st_mode) != 0o555:
                 raise ValueError("staged artifact directory is unsafe")
             actual_directories.add(path.relative_to(target).as_posix())
         for filename in filenames:
@@ -550,7 +765,7 @@ def _verify_staged_artifact(
         candidate_metadata = candidate.lstat()
         if candidate.is_symlink() or not stat.S_ISREG(candidate_metadata.st_mode):
             raise ValueError("staged artifact contains an unsafe file")
-        expected_mode = 0o500 if item.get("executable") is True else 0o400
+        expected_mode = 0o555 if item.get("executable") is True else 0o444
         if stat.S_IMODE(candidate_metadata.st_mode) != expected_mode:
             raise ValueError("staged artifact file is not read-only")
         content = candidate.read_bytes()
@@ -573,7 +788,7 @@ def _load_manifest(target: Path) -> dict[str, object]:
     if (
         path.is_symlink()
         or not stat.S_ISREG(metadata.st_mode)
-        or stat.S_IMODE(metadata.st_mode) != 0o400
+        or stat.S_IMODE(metadata.st_mode) != 0o444
         or metadata.st_size > MAX_REQUEST_BYTES
     ):
         raise ValueError("staged artifact manifest is unsafe")

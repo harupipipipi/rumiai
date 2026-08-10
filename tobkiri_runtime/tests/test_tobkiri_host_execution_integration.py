@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import hashlib
+import os
+from pathlib import Path
+import signal
 import sqlite3
+import subprocess
+import sys
 from threading import Barrier, Lock, Thread
 import time
 from typing import Any, Mapping
@@ -32,6 +37,7 @@ from tobkiri_host.errors import (
     AuditUnavailableError,
     AuthorizationError,
     ProviderExecutionError,
+    RequestTimedOutError,
 )
 from tobkiri_host.materialization import (
     MaterializationCoordinator,
@@ -432,6 +438,77 @@ def test_external_timeout_is_fenced_persisted_and_never_auto_retried() -> None:
     assert fixture.backend.cancelled == ["request-1"]
     assert fixture.authority.fenced == ["request-1"]
     assert fixture.audit.failures == [("ambiguous_effect", True)]
+
+
+def test_local_timeout_kills_process_group_before_side_effect(tmp_path: Path) -> None:
+    events: list[str] = []
+
+    class ProcessBackend(FakeBackend):
+        process: subprocess.Popen[bytes] | None = None
+
+        def invoke(self, request: RequestEnvelope) -> ProviderOutcome:
+            self.invocations += 1
+            marker = tmp_path / "late-side-effect"
+            self.process = subprocess.Popen(
+                (
+                    sys.executable,
+                    "-c",
+                    "import pathlib,time;time.sleep(0.3);"
+                    f"pathlib.Path({str(marker)!r}).write_text('late')",
+                ),
+                start_new_session=True,
+            )
+            self.process.wait()
+            return ProviderOutcome({"delivered": True})
+
+        def cancel(self, request_id: str) -> None:
+            super().cancel(request_id)
+            assert self.process is not None
+            os.killpg(self.process.pid, signal.SIGTERM)
+            try:
+                self.process.wait(timeout=0.2)
+            except subprocess.TimeoutExpired:
+                os.killpg(self.process.pid, signal.SIGKILL)
+                self.process.wait(timeout=1)
+
+    backend = ProcessBackend(events)
+    fixture = make_broker(
+        effect=EffectClass.WRITE,
+        timeout_ms=30,
+        backend=backend,
+    )
+    try:
+        with pytest.raises(RequestTimedOutError):
+            fixture.broker.invoke(frame(30), context(), effect_scope={})
+    finally:
+        fixture.broker.close()
+    time.sleep(0.35)
+    assert backend.process is not None and backend.process.poll() is not None
+    assert not (tmp_path / "late-side-effect").exists()
+    assert fixture.audit.failures == [("provider_failed", False)]
+    assert fixture.authority.fenced == ["request-1"]
+
+
+def test_cancel_transport_failure_still_audits_and_fences() -> None:
+    events: list[str] = []
+
+    class CancelFailureBackend(FakeBackend):
+        def cancel(self, request_id: str) -> None:
+            del request_id
+            raise OSError("authenticated transport unavailable")
+
+    fixture = make_broker(
+        effect=EffectClass.WRITE,
+        timeout_ms=20,
+        backend=CancelFailureBackend(events, delay=0.1),
+    )
+    try:
+        with pytest.raises(ProviderExecutionError, match="cancellation failed"):
+            fixture.broker.invoke(frame(20), context(), effect_scope={})
+    finally:
+        fixture.broker.close()
+    assert fixture.audit.failures == [("provider_failed", False)]
+    assert fixture.authority.fenced == ["request-1"]
 
 
 def test_accepted_effect_result_is_ambiguous_until_reconciled() -> None:
