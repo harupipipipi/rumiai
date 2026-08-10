@@ -295,8 +295,8 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
     assert revoked_pack["enabled"] is False
     assert revoked_pack["approval_reason"] == "approval_revoked"
     enable_status, denied = post("/api/pack-control/enable", {"pack_id": target_pack})
-    assert enable_status == 403
-    assert denied["data"]["code"] == "UNAPPROVED"
+    assert enable_status == 409
+    assert denied["data"]["code"] == "STALE_REVISION"
 
     with AuthorityStore(authority_path) as current_authority:
         assert any(

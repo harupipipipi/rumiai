@@ -215,8 +215,7 @@ def _shell_artifact(
         for item in definition["launch"]["variants"]
         if item["platform"] == selected_shell["platform"]
         and item["architecture"] == selected_shell["architecture"]
-        and item["entrypoint_digest"]
-        == selected_shell["executable_artifact_digest"]
+        and item["entrypoint_digest"] == selected_shell["executable_artifact_digest"]
     ]
     if definition.get("availability") != "verified" or len(selected_variants) != 1:
         raise AuthorityDenied("captured Shell artifact variant is unavailable or ambiguous")
@@ -304,9 +303,7 @@ def _committed_operation_scope(
     if not isinstance(template, Mapping):
         raise AuthorityDenied("Profile requested scope is unavailable")
     scope = AuthorityScope.from_dict(template)
-    exact = _operation_scope(
-        str(edge["contract_id"]), str(edge["operation_id"]), target
-    )
+    exact = _operation_scope(str(edge["contract_id"]), str(edge["operation_id"]), target)
     if not scope.is_subset_of(exact):
         raise AuthorityDenied("Profile requested scope expands its exact operation edge")
     return scope
@@ -419,9 +416,7 @@ def _commit_pack_control_authority(
     # of its durable identity.  This preserves prior rows without replaying or
     # colliding with them when an unchanged Pack is activated again.
     approval = ApprovalRecord(
-        approval_id=(
-            f"approval.defaults.{authority_label}.{operation_suffix}.{record_identity}"
-        ),
+        approval_id=(f"approval.defaults.{authority_label}.{operation_suffix}.{record_identity}"),
         snapshot_digest=canonical_digest(
             {
                 "ceremony": "defaults.activate",
@@ -1010,6 +1005,8 @@ def capture_production_dispatch(
     captured_plan = dict(active.resolved.plan)
 
     def assert_current_capture() -> None:
+        from ..pack_control_v4 import PackControlDenied
+
         current = activation_store.load_active_snapshot()
         if (
             dict(current.activation) != captured_activation
@@ -1018,16 +1015,27 @@ def capture_production_dispatch(
             or dict(current.resolved.plan) != captured_plan
             or authority_store.security_epoch != int(captured_activation["security_epoch"])
         ):
-            raise AuthorityDenied("captured Defaults activation is stale")
+            raise AuthorityDenied(
+                "captured Defaults activation is stale",
+                code="stale_revision",
+            )
         if _pack_root_identities(pack_roots) != captured_pack_root_identities:
-            raise AuthorityDenied("captured Pack filesystem identity changed")
+            raise AuthorityDenied(
+                "captured Pack filesystem identity changed",
+                code="digest_mismatch",
+            )
         for pack_id, approval_revision in captured_dynamic_approvals.items():
             try:
                 current_approval = capture_valid_pack_approval(pack_id)
+            except PackControlDenied:
+                raise
             except Exception as error:
                 raise AuthorityDenied("captured optional Pack approval is unavailable") from error
             if current_approval.get("approval_revision") != approval_revision:
-                raise AuthorityDenied("captured optional Pack approval changed")
+                raise AuthorityDenied(
+                    "captured optional Pack approval changed",
+                    code="digest_mismatch",
+                )
 
     dispatch = runtime.dispatch_session(
         broker=broker,

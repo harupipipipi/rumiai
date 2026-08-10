@@ -74,10 +74,46 @@ class PackControlDenied(HostCoreError):
     code = "pack_control_denied"
 
 
+class PackControlInvalidRequest(PackControlDenied):
+    """A Pack control request is structurally invalid."""
+
+    code = "pack_control_invalid_request"
+
+
+class PackControlConflict(PackControlDenied):
+    """A Pack control request conflicts with committed lifecycle state."""
+
+    code = "pack_control_conflict"
+
+
+class PackControlStaleRevision(PackControlConflict):
+    """A Pack control request is bound to a stale captured revision."""
+
+    code = "pack_control_stale_revision"
+
+
+class PackControlDigestMismatch(PackControlConflict):
+    """A Pack control request does not match its captured digest binding."""
+
+    code = "pack_control_digest_mismatch"
+
+
 class PackControlUnapproved(PackControlDenied):
     """A Pack control request lacks Host-owned approval evidence."""
 
     code = "pack_control_unapproved"
+
+
+class PackControlUnavailable(PackControlDenied):
+    """The authoritative Pack control backend is unavailable."""
+
+    code = "pack_control_unavailable"
+
+
+class PackControlTimedOut(PackControlDenied):
+    """A Pack control request exceeded its bounded execution deadline."""
+
+    code = "pack_control_timeout"
 
 
 @dataclass(frozen=True)
@@ -197,9 +233,9 @@ class CapturedPackControlSession:
         if contract_id == CONTROL_PRESENTATION_CONTRACT:
             return self._invoke_control_presentation(operation_id, payload)
         if contract_id != PACK_CONTROL_CONTRACT:
-            raise PackControlDenied("contract is absent from the captured Host session")
+            raise PackControlUnapproved("contract is absent from the captured Host session")
         if operation_id not in PACK_CONTROL_OPERATIONS:
-            raise PackControlDenied("operation is absent from the captured Host session")
+            raise PackControlUnapproved("operation is absent from the captured Host session")
         arguments = dict(payload)
         session_id = _required(arguments.pop("_session_id", None), "session binding")
         self._reject_identity_override(arguments)
@@ -233,7 +269,7 @@ class CapturedPackControlSession:
 
                 request_kernel_restart()
                 return {"restart_requested": True, **self._binding_payload()}
-        raise PackControlDenied("qualified operation is unavailable")
+        raise PackControlUnapproved("qualified operation is unavailable")
 
     def _invoke_control_presentation(
         self,
@@ -243,7 +279,7 @@ class CapturedPackControlSession:
         """Serve declared Launcher surfaces only through the captured Broker."""
 
         if operation_id not in CONTROL_PRESENTATION_OPERATIONS:
-            raise PackControlDenied("control presentation operation is not declared")
+            raise PackControlUnapproved("control presentation operation is not declared")
         arguments = dict(payload)
         session_id = _required(arguments.pop("_session_id", None), "session binding")
         self._reject_identity_override(arguments)
@@ -270,8 +306,10 @@ class CapturedPackControlSession:
                 _require_empty(arguments)
                 from .bootstrap.profile_capture import runtime_user_data_root
                 from .control_reconciliation_v4 import (
+                    ControlReconciliationConflictError,
                     ControlReconciliationError,
                     ControlReconciliationStore,
+                    ControlReconciliationUnavailableError,
                 )
 
                 try:
@@ -281,8 +319,15 @@ class CapturedPackControlSession:
                         request_id,
                         session_id=_panel_session_root(session_id),
                     )
-                except ControlReconciliationError as error:
-                    raise PackControlDenied("operation status is unavailable") from error
+                except ControlReconciliationConflictError as error:
+                    raise PackControlConflict(
+                        "operation status conflicts with its session binding"
+                    ) from error
+                except (
+                    ControlReconciliationUnavailableError,
+                    ControlReconciliationError,
+                ) as error:
+                    raise PackControlUnavailable("operation status is unavailable") from error
             if operation_id == "settings.read":
                 _require_empty(arguments)
                 return self._runtime_surface.read_settings()
@@ -324,12 +369,14 @@ class CapturedPackControlSession:
         for key, value in expected.items():
             supplied = arguments.get(key)
             if supplied is not None and not hmac.compare_digest(str(supplied), value):
-                raise PackControlDenied(f"captured {key} does not match")
+                if key == "profile_revision":
+                    raise PackControlStaleRevision("captured profile_revision does not match")
+                raise PackControlDigestMismatch(f"captured {key} does not match")
 
     def _require_current_binding(self) -> None:
         current = _capture_binding()
         if current != self._binding:
-            raise PackControlDenied("captured Profile session is stale")
+            raise PackControlStaleRevision("captured Profile session is stale")
 
     def _recapture(self) -> None:
         self._binding = _capture_binding()
@@ -378,7 +425,7 @@ class CapturedPackControlSession:
         candidate_id = _required(arguments.get("candidate_id"), "approval candidate")
         candidate = self._candidates.pop(candidate_id, None)
         if candidate is None:
-            raise PackControlDenied("approval candidate is missing or already used")
+            raise PackControlConflict("approval candidate is missing or already used")
         if (
             candidate.expires_at <= time.time()
             or candidate.session_id != session_id
@@ -386,10 +433,10 @@ class CapturedPackControlSession:
             or candidate.profile_revision != self._binding.profile_revision
             or candidate.catalog_revision != self._binding.catalog_revision
         ):
-            raise PackControlDenied("approval candidate binding is invalid or stale")
+            raise PackControlStaleRevision("approval candidate binding is invalid or stale")
         current_digest = _pack_snapshot(pack_id, resolve_pack_root(pack_id))
         if not hmac.compare_digest(current_digest, candidate.snapshot_digest):
-            raise PackControlDenied("Pack contents changed after approval was requested")
+            raise PackControlDigestMismatch("Pack contents changed after approval was requested")
         _persist_approval(
             pack_id,
             current_digest,
@@ -407,14 +454,14 @@ class CapturedPackControlSession:
     def _revoke_approval(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         pack_id = _installed_pack(arguments, self._binding)
         if pack_id in _required_profile_pack_ids(self._binding.profile_id):
-            raise PackControlDenied("required Pack approval cannot be revoked")
+            raise PackControlUnapproved("required Pack approval cannot be revoked")
         record = load_pack_catalog()[pack_id]
         approval = _load_valid_approval(pack_id, record, self._binding)
         approval_revision = str(approval["approval_revision"])
         state, profile = _active_profile()
         active_pack_ids = [str(item) for item in profile.get("packs") or []]
         if pack_id == str(profile.get("base_pack") or ""):
-            raise PackControlDenied("the active Base Pack approval cannot be revoked")
+            raise PackControlUnapproved("the active Base Pack approval cannot be revoked")
         artifact_digest = _pack_manifest_artifact_digest(pack_id)
         from .authority.v4 import AuthorityStore
 
@@ -430,14 +477,16 @@ class CapturedPackControlSession:
                     reason=f"Pack approval revoked: {pack_id}",
                 )
         except Exception as error:
-            raise PackControlDenied("Pack approval revocation was not committed") from error
+            raise PackControlUnavailable("Pack approval revocation was not committed") from error
 
         if pack_id in active_pack_ids:
             active_pack_ids.remove(pack_id)
             try:
                 _activate_pack_set(state, active_pack_ids)
+            except PackControlDenied:
+                raise
             except Exception as error:
-                raise PackControlDenied(
+                raise PackControlUnavailable(
                     "Pack approval was fenced but Profile deactivation failed"
                 ) from error
         _persist_revoked_approval(
@@ -460,11 +509,11 @@ class CapturedPackControlSession:
     def _set_enabled(self, arguments: Mapping[str, Any], enabled: bool) -> dict[str, Any]:
         pack_id = _installed_pack(arguments, self._binding)
         if not enabled and pack_id in _required_profile_pack_ids(self._binding.profile_id):
-            raise PackControlDenied("required Pack cannot be disabled")
+            raise PackControlUnapproved("required Pack cannot be disabled")
         record = load_pack_catalog()[pack_id]
         approved, reason = _approval_status(pack_id, record, self._binding)
         if enabled and not approved:
-            raise PackControlUnapproved(reason or "Pack approval is required")
+            _raise_approval_failure(reason)
         state, profile = _active_profile()
         packs = [str(item) for item in profile.get("packs") or []]
         if enabled and pack_id in packs:
@@ -475,7 +524,7 @@ class CapturedPackControlSession:
             packs.append(pack_id)
         if not enabled and pack_id in packs:
             if pack_id == str(profile.get("base_pack") or ""):
-                raise PackControlDenied("the active Base Pack cannot be disabled")
+                raise PackControlUnapproved("the active Base Pack cannot be disabled")
             packs.remove(pack_id)
         _activate_pack_set(state, packs)
         self._recapture()
@@ -488,7 +537,7 @@ class CapturedPackControlSession:
             return catalog
         match = next((item for item in catalog["packs"] if item["pack_id"] == pack_id), None)
         if match is None:
-            raise PackControlDenied("Pack is absent from the canonical v4 catalog")
+            raise PackControlInvalidRequest("Pack is absent from the canonical v4 catalog")
         return match
 
     def _dashboard(self) -> dict[str, Any]:
@@ -557,7 +606,7 @@ class CapturedPackCatalogReader:
         """Read the catalog only while the committed snapshot remains current."""
 
         if _capture_binding() != self._binding:
-            raise PackControlDenied("captured Profile session is stale")
+            raise PackControlStaleRevision("captured Profile session is stale")
         return _catalog_payload(self._binding)
 
 
@@ -573,7 +622,7 @@ def capture_valid_pack_approval(pack_id: str) -> Mapping[str, Any]:
     binding = _capture_binding()
     record = load_pack_catalog().get(pack_id)
     if record is None:
-        raise PackControlDenied("Pack is absent from the canonical v4 catalog")
+        raise PackControlInvalidRequest("Pack is absent from the canonical v4 catalog")
     return _load_valid_approval(pack_id, record, binding)
 
 
@@ -668,14 +717,14 @@ def _required_profile_pack_ids(profile_id: str) -> frozenset[str]:
     catalog = BundledCatalog.load(_bundle_root())
     source = catalog.profiles.get(profile_id)
     if source is None:
-        raise PackControlDenied("bundled Defaults Profile is unavailable")
+        raise PackControlDigestMismatch("bundled Defaults Profile is unavailable")
     selected = [str(item["pack_id"]) for item in source["packs"]]
     pending = list(selected)
     while pending:
         current_id = pending.pop(0)
         manifest = catalog.packs.get(current_id)
         if manifest is None:
-            raise PackControlDenied("bundled Defaults dependency is unavailable")
+            raise PackControlDigestMismatch("bundled Defaults dependency is unavailable")
         for dependency_id in manifest["requirements"]["pack_dependencies"]:
             dependency = str(dependency_id)
             if dependency not in selected:
@@ -812,9 +861,9 @@ def _capture_binding() -> _Binding:
     catalog = load_pack_catalog()
     selected = tuple(str(item or "").strip() for item in profile.get("packs") or [])
     if not selected or len(selected) != len(set(selected)):
-        raise PackControlDenied("active v4 Profile effective set is empty or duplicated")
+        raise PackControlDigestMismatch("active v4 Profile effective set is empty or duplicated")
     if any(pack_id not in catalog for pack_id in selected):
-        raise PackControlDenied("active v4 Profile contains an unknown Pack")
+        raise PackControlDigestMismatch("active v4 Profile contains an unknown Pack")
     for pack_id in selected:
         resolve_pack_root(pack_id)
     return _Binding(
@@ -832,7 +881,9 @@ def _active_profile() -> tuple[dict[str, Any], dict[str, Any]]:
 
         active = capture_default_profile()
     except Exception as error:
-        raise PackControlDenied("active v4 Profile session is missing or invalid") from error
+        raise PackControlDigestMismatch(
+            "active v4 Profile session is missing or invalid"
+        ) from error
     resolved = active.resolved.profile
     installable_pack_ids = frozenset(load_pack_catalog())
     profile = {
@@ -897,7 +948,7 @@ def resolve_profile_pack_set(
     )
     if any(value is not None for value in authoritative_bindings):
         if not all(isinstance(value, str) and value for value in authoritative_bindings):
-            raise PackControlDenied("Profile catalog binding is incomplete")
+            raise PackControlDigestMismatch("Profile catalog binding is incomplete")
         try:
             require_profile_catalog_binding(
                 catalog,
@@ -907,9 +958,11 @@ def resolve_profile_pack_set(
                 expected_bundle_lock_digest=str(expected_bundle_lock_digest),
             )
         except ValueError as error:
-            raise PackControlDenied("Profile catalog binding is stale or invalid") from error
+            raise PackControlDigestMismatch(
+                "Profile catalog binding is stale or invalid"
+            ) from error
     elif profile_id != "defaults":
-        raise PackControlDenied("non-default Profile requires exact catalog bindings")
+        raise PackControlUnapproved("non-default Profile requires exact catalog bindings")
     bundled_pack_ids = frozenset(catalog.packs)
     external_packs = dict(catalog.packs)
     pending = [pack_id for pack_id in pack_ids if pack_id not in external_packs]
@@ -920,15 +973,15 @@ def resolve_profile_pack_set(
             continue
         record = load_pack_catalog().get(pack_id)
         if record is None:
-            raise PackControlDenied("Pack is absent from the canonical v4 catalog")
+            raise PackControlInvalidRequest("Pack is absent from the canonical v4 catalog")
         root = resolve_pack_root(pack_id)
         manifest_path = root / "pack.v4.json"
         if manifest_path.is_symlink() or not manifest_path.is_file():
-            raise PackControlDenied("Pack v4 manifest is unavailable")
+            raise PackControlDigestMismatch("Pack v4 manifest is unavailable")
         try:
             manifest = validate_document(manifest_path.read_bytes(), "pack")
         except Exception as error:
-            raise PackControlDenied("Pack v4 manifest is invalid") from error
+            raise PackControlDigestMismatch("Pack v4 manifest is invalid") from error
         external_normal = record.get("authority") == "host-signed-external-normal-v4"
         if manifest["pack"]["id"] != pack_id or (
             external_normal
@@ -937,7 +990,7 @@ def resolve_profile_pack_set(
                 or manifest["pack"]["artifact_digest"] != record.get("artifact_digest")
             )
         ):
-            raise PackControlDenied("Pack v4 manifest identity is inconsistent")
+            raise PackControlDigestMismatch("Pack v4 manifest identity is inconsistent")
         external_packs[pack_id] = manifest
         dependencies = set(manifest["requirements"]["pack_dependencies"])
         requested_closure.update(dependencies)
@@ -954,13 +1007,13 @@ def resolve_profile_pack_set(
     )
     source = catalog.profiles.get(profile_id)
     if source is None:
-        raise PackControlDenied("selected Profile is unavailable")
+        raise PackControlInvalidRequest("selected Profile is unavailable")
     if all(value is not None for value in authoritative_bindings):
         definition_pack_ids = {
             str(item["pack_id"]) for item in source["packs"] if item.get("role") != "application"
         }
         if set(pack_ids) != definition_pack_ids or len(pack_ids) != len(definition_pack_ids):
-            raise PackControlDenied(
+            raise PackControlDigestMismatch(
                 "selected Profile Pack set does not match its canonical definition"
             )
 
@@ -968,7 +1021,7 @@ def resolve_profile_pack_set(
     if len(requested) != len(pack_ids) or any(
         pack_id not in catalog.packs for pack_id in requested
     ):
-        raise PackControlDenied("requested Profile Pack set is invalid")
+        raise PackControlInvalidRequest("requested Profile Pack set is invalid")
 
     authority_path = user_data / "authority" / "v4.sqlite3"
     with AuthorityStore(authority_path) as authority:
@@ -999,7 +1052,7 @@ def resolve_profile_pack_set(
         if all(value is not None for value in authoritative_bindings):
             requested = tuple(dict.fromkeys((*requested, *sorted(mandatory))))
         if not mandatory.issubset(requested):
-            raise PackControlDenied("the bundled Defaults Profile Pack set is immutable")
+            raise PackControlUnapproved("the bundled Defaults Profile Pack set is immutable")
         additional_pack_ids = tuple(pack_id for pack_id in requested if pack_id not in mandatory)
         # Optional Pack operations are part of the immutable resolved Profile,
         # so mint the exact authority references before resolving the plan.
@@ -1016,7 +1069,7 @@ def resolve_profile_pack_set(
         for pack_id in external_selected:
             record = load_pack_catalog()[pack_id]
             if pack_id not in installed:
-                raise PackControlDenied("Pack must be installed before activation")
+                raise PackControlConflict("Pack must be installed before activation")
             _require_install_binding(
                 pack_id,
                 record,
@@ -1025,7 +1078,7 @@ def resolve_profile_pack_set(
             )
             approved, reason = _approval_status(pack_id, record, binding)
             if not approved:
-                raise PackControlUnapproved(reason or "Pack approval is required")
+                _raise_approval_failure(reason)
             approved_digests.add(str(catalog.packs[pack_id]["pack"]["artifact_digest"]))
         resolved = resolve_default_profile(
             catalog,
@@ -1059,7 +1112,7 @@ def activate_resolved_profile_pack_set(
     if not hmac.compare_digest(
         binding.profile_revision, expected_profile_revision
     ) or not hmac.compare_digest(binding.plan_digest, expected_plan_digest):
-        raise PackControlDenied("reviewed Profile predecessor is stale")
+        raise PackControlStaleRevision("reviewed Profile predecessor is stale")
     user_data = _user_data_root()
     profile_id = str(resolved.profile["profile_id"])
     workspace = user_data / "workspaces" / "defaults"
@@ -1090,7 +1143,7 @@ def _activate_pack_set(state: Mapping[str, Any], pack_ids: list[str]) -> None:
     profile = state.get("resolved_profile")
     plan = state.get("resolved_plan")
     if not isinstance(profile, Mapping) or not isinstance(plan, Mapping):
-        raise PackControlDenied("active v4 Profile binding is unavailable")
+        raise PackControlConflict("active v4 Profile binding is unavailable")
     activate_resolved_profile_pack_set(
         resolved,
         activation_id=(
@@ -1120,7 +1173,7 @@ def _persistence_store() -> SecureDirectory:
             try:
                 store = SecureDirectory(root, create=True)
             except (OSError, SecurePersistenceError) as error:
-                raise PackControlDenied("Pack control persistence is unavailable") from error
+                raise PackControlUnavailable("Pack control persistence is unavailable") from error
             _PERSISTENCE_STORES[root] = store
         return store
 
@@ -1129,16 +1182,14 @@ def _approval_store(profile_id: str) -> SecureDirectory:
     """Return the process-pinned approval root for one canonical Profile."""
 
     _safe_identity(profile_id, "Profile ID")
-    root = (
-        _user_data_root() / "pack_control" / "approvals" / profile_id
-    ).absolute()
+    root = (_user_data_root() / "pack_control" / "approvals" / profile_id).absolute()
     with _PERSISTENCE_STORES_LOCK:
         store = _PERSISTENCE_STORES.get(root)
         if store is None:
             try:
                 store = SecureDirectory(root, create=True)
-            except OSError as error:
-                raise PackControlDenied("Pack approval persistence is unavailable") from error
+            except (OSError, SecurePersistenceError) as error:
+                raise PackControlUnavailable("Pack approval persistence is unavailable") from error
             _PERSISTENCE_STORES[root] = store
         return store
 
@@ -1158,7 +1209,7 @@ def _panel_session_root(authority_session_id: str) -> str:
         or re.fullmatch(r"[0-9a-f]{24}", parts[1]) is None
         or re.fullmatch(r"[1-9][0-9]*", parts[2]) is None
     ):
-        raise PackControlDenied("authenticated panel session binding is invalid")
+        raise PackControlUnapproved("authenticated panel session binding is invalid")
     return parts[0]
 
 
@@ -1170,12 +1221,12 @@ def _read_control_state(profile_id: str) -> dict[str, Any]:
             return {}
         value = json.loads(store.read_bytes(relative))
     except (OSError, SecurePersistenceError, json.JSONDecodeError) as error:
-        raise PackControlDenied("Pack control state is unreadable") from error
+        raise PackControlUnavailable("Pack control state is unreadable") from error
     if not isinstance(value, Mapping) or not isinstance(value.get("installed"), Mapping):
-        raise PackControlDenied("Pack control state is invalid")
+        raise PackControlDigestMismatch("Pack control state is invalid")
     installed = dict(value["installed"])
     if any(pack_id not in load_pack_catalog() for pack_id in installed):
-        raise PackControlDenied("Pack control state contains an unknown Pack")
+        raise PackControlDigestMismatch("Pack control state contains an unknown Pack")
     return installed
 
 
@@ -1196,23 +1247,26 @@ def _atomic_json(
     *,
     store: SecureDirectory | None = None,
 ) -> None:
-    data = json.dumps(
-        dict(value),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8") + b"\n"
+    data = (
+        json.dumps(
+            dict(value),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        + b"\n"
+    )
     try:
         (store or _persistence_store()).write_bytes_atomic(path, data)
-    except OSError as error:
-        raise PackControlDenied("Pack control persistence is unavailable") from error
+    except (OSError, SecurePersistenceError) as error:
+        raise PackControlUnavailable("Pack control persistence is unavailable") from error
 
 
 def _pack(arguments: Mapping[str, Any]) -> tuple[str, Mapping[str, Any], Path]:
     pack_id = _required(arguments.get("pack_id"), "Pack ID")
     record = load_pack_catalog().get(pack_id)
     if record is None:
-        raise PackControlDenied("Pack is absent from the canonical v4 catalog")
+        raise PackControlInvalidRequest("Pack is absent from the canonical v4 catalog")
     root = resolve_pack_root(pack_id)
     return pack_id, record, root
 
@@ -1222,7 +1276,7 @@ def _installed_pack(arguments: Mapping[str, Any], binding: _Binding) -> str:
     active = set(_active_profile()[1].get("packs") or [])
     installed = _read_control_state(binding.profile_id)
     if pack_id not in active and pack_id not in installed:
-        raise PackControlDenied("Pack must be installed before this operation")
+        raise PackControlConflict("Pack must be installed before this operation")
     entry = installed.get(pack_id)
     if entry is not None:
         _require_install_binding(pack_id, record, entry, binding)
@@ -1240,8 +1294,10 @@ def _require_install_binding(
         root = resolve_pack_root(pack_id)
         content_digest = _pack_snapshot(pack_id, root)
         pack_artifact_digest = _pack_manifest_artifact_digest(pack_id)
+    except PackControlDenied:
+        raise
     except Exception as error:
-        raise PackControlDenied(
+        raise PackControlDigestMismatch(
             f"installed Pack binding is stale or tampered: {pack_id}"
         ) from error
     if (
@@ -1250,7 +1306,7 @@ def _require_install_binding(
         or entry.get("pack_artifact_digest") != pack_artifact_digest
         or entry.get("content_digest") != content_digest
     ):
-        raise PackControlDenied(f"installed Pack binding is stale or tampered: {pack_id}")
+        raise PackControlDigestMismatch(f"installed Pack binding is stale or tampered: {pack_id}")
 
 
 def _approval_path(profile_id: str, pack_id: str) -> Path:
@@ -1412,6 +1468,26 @@ def _approval_status(
     return True, None
 
 
+def _raise_approval_failure(reason: str | None) -> None:
+    """Raise the typed Pack control failure represented by approval status."""
+
+    normalized = reason or "approval_required"
+    if normalized == "approval_revoked":
+        raise PackControlConflict(normalized)
+    if normalized in {"approval_unreadable", "approval_authority_unavailable"}:
+        raise PackControlUnavailable(normalized)
+    if normalized in {
+        "approval_invalid",
+        "approval_signature_invalid",
+        "approval_binding_invalid",
+        "approval_revision_invalid",
+        "hash_mismatch",
+        "pack_integrity_invalid",
+    }:
+        raise PackControlDigestMismatch(normalized)
+    raise PackControlUnapproved(normalized)
+
+
 def _load_valid_approval(
     pack_id: str,
     record: Mapping[str, Any],
@@ -1421,23 +1497,23 @@ def _load_valid_approval(
     try:
         raw = _approval_store(binding.profile_id).read_bytes(relative)
     except (OSError, SecurePersistenceError) as error:
-        raise PackControlDenied("Pack approval is unreadable") from error
+        raise PackControlUnavailable("Pack approval is unreadable") from error
     approved, reason = _approval_status(pack_id, record, binding)
     if not approved:
-        raise PackControlDenied(reason or "Pack approval is unavailable")
+        _raise_approval_failure(reason)
     try:
         if not hmac.compare_digest(
             raw,
             _approval_store(binding.profile_id).read_bytes(relative),
         ):
-            raise PackControlDenied("Pack approval changed during revocation")
+            raise PackControlConflict("Pack approval changed during revocation")
         payload = json.loads(raw)
     except (OSError, SecurePersistenceError) as error:
-        raise PackControlDenied("Pack approval is unreadable") from error
+        raise PackControlUnavailable("Pack approval is unreadable") from error
     except json.JSONDecodeError as error:
-        raise PackControlDenied("Pack approval is invalid") from error
+        raise PackControlDigestMismatch("Pack approval is invalid") from error
     if not isinstance(payload, dict):
-        raise PackControlDenied("Pack approval is invalid")
+        raise PackControlDigestMismatch("Pack approval is invalid")
     return payload
 
 
@@ -1461,9 +1537,9 @@ def _pack_manifest_artifact_digest(pack_id: str) -> str:
     try:
         manifest = validate_document(manifest_path.read_bytes(), "pack")
     except Exception as error:
-        raise PackControlDenied("Pack v4 manifest is invalid") from error
+        raise PackControlDigestMismatch("Pack v4 manifest is invalid") from error
     if manifest["pack"]["id"] != pack_id:
-        raise PackControlDenied("Pack v4 manifest identity is inconsistent")
+        raise PackControlDigestMismatch("Pack v4 manifest identity is inconsistent")
     return str(manifest["pack"]["artifact_digest"])
 
 
@@ -1472,7 +1548,7 @@ def _pack_snapshot(pack_id: str, root: Path) -> str:
     if external_digest is not None:
         return external_digest
     if root.is_symlink() or not root.is_dir():
-        raise PackControlDenied("cataloged Pack root is missing or symlinked")
+        raise PackControlDigestMismatch("cataloged Pack root is missing or symlinked")
     resolved_root = root.resolve(strict=True)
     files: dict[str, str] = {}
     pending = [root]
@@ -1483,7 +1559,7 @@ def _pack_snapshot(pack_id: str, root: Path) -> str:
         for entry in entries:
             path = Path(entry.path)
             if entry.is_symlink():
-                raise PackControlDenied("cataloged Pack contains a symlink")
+                raise PackControlDigestMismatch("cataloged Pack contains a symlink")
             if entry.is_dir(follow_symlinks=False):
                 pending.append(path)
                 continue
@@ -1491,13 +1567,13 @@ def _pack_snapshot(pack_id: str, root: Path) -> str:
                 continue
             resolved = path.resolve(strict=True)
             if not resolved.is_relative_to(resolved_root):
-                raise PackControlDenied("cataloged Pack path escapes its boundary")
+                raise PackControlDigestMismatch("cataloged Pack path escapes its boundary")
             relative = path.relative_to(root).as_posix()
             if "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}:
                 continue
             files[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
     if not files:
-        raise PackControlDenied("cataloged Pack has no verifiable artifacts")
+        raise PackControlDigestMismatch("cataloged Pack has no verifiable artifacts")
     return "sha256:" + _digest({"pack_id": pack_id, "files": files})
 
 
@@ -1513,7 +1589,7 @@ def _canonical_bytes(value: Mapping[str, Any]) -> bytes:
 def _required(value: object, label: str) -> str:
     normalized = str(value or "").strip()
     if not normalized:
-        raise PackControlDenied(f"{label} is required")
+        raise PackControlInvalidRequest(f"{label} is required")
     return normalized
 
 
@@ -1522,13 +1598,13 @@ def _optional_string(value: object) -> str | None:
         return None
     normalized = str(value).strip() if isinstance(value, str) else ""
     if not normalized:
-        raise PackControlDenied("optional binding must be a non-empty string")
+        raise PackControlInvalidRequest("optional binding must be a non-empty string")
     return normalized
 
 
 def _require_empty(value: Mapping[str, Any]) -> dict[str, Any]:
     if value:
-        raise PackControlDenied("control presentation payload has unknown fields")
+        raise PackControlInvalidRequest("control presentation payload has unknown fields")
     return {}
 
 
@@ -1540,7 +1616,7 @@ def _safe_identity(value: object, label: str) -> str:
         or normalized in {".", ".."}
         or any(character not in allowed for character in normalized)
     ):
-        raise PackControlDenied(f"{label} is invalid")
+        raise PackControlInvalidRequest(f"{label} is invalid")
     return normalized
 
 
@@ -1567,7 +1643,14 @@ __all__ = [
     "PACK_CONTROL_OPERATIONS",
     "CONTROL_PRESENTATION_CONTRACT",
     "CONTROL_PRESENTATION_OPERATIONS",
+    "PackControlConflict",
     "PackControlDenied",
+    "PackControlDigestMismatch",
+    "PackControlInvalidRequest",
+    "PackControlStaleRevision",
+    "PackControlTimedOut",
+    "PackControlUnavailable",
+    "PackControlUnapproved",
     "capture_pack_catalog_reader",
     "capture_pack_control_session",
     "capture_pack_control_catalog",

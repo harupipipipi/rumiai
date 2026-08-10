@@ -152,13 +152,27 @@ class ControlReconciliationStore:
         self._parent_identity: FileIdentity | None = None
         self._lock_identity: FileIdentity | None = None
 
-    def _prepare_path(self) -> None:
+    def _prepare_parent_directory(self) -> None:
+        """Create and pin the journal parent before taking the journal lock."""
+
         try:
             if self.path.is_symlink():
                 raise ControlReconciliationUnavailableError(
                     "control journal path cannot be a symlink"
                 )
             self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            with self._secure_parent():
+                pass
+        except ControlReconciliationError:
+            raise
+        except OSError as error:
+            raise ControlReconciliationUnavailableError(
+                "control journal path is unavailable"
+            ) from error
+
+    def _prepare_path(self) -> None:
+        try:
+            self._prepare_parent_directory()
             with self._secure_parent() as parent:
                 database_identity = parent.validate_open(
                     self.path.name,
@@ -561,9 +575,12 @@ class ControlReconciliationStore:
         with self._initialization_lock:
             if self._initialized:
                 return
-            self._prepare_path()
+            self._prepare_parent_directory()
             try:
                 with self._journal_file_lock():
+                    # WAL/SHM validation must be serialized with connection
+                    # close, which can unlink those sidecars on POSIX.
+                    self._prepare_path()
                     with self._open_connection() as connection:
                         connection.executescript(
                             """

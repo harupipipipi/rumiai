@@ -27,7 +27,15 @@ from core_runtime.pack_api_server import (
     PackAPIServer,
     RuntimeHTTPConfig,
 )
+from core_runtime.pack_control_v4 import (
+    PackControlConflict,
+    PackControlDigestMismatch,
+    PackControlTimedOut,
+    PackControlUnavailable,
+    PackControlUnapproved,
+)
 from core_runtime.panel_auth import PanelAuthManager
+from tobkiri_host.errors import ProviderExecutionError
 from tobkiri_protocol.canonical import canonical_digest
 
 
@@ -155,6 +163,12 @@ def test_profile_activation_refresh_requires_durable_success_result() -> None:
         ("TIMEOUT", 504),
         ("API_FAILURE", 503),
         ("backend_unavailable", 503),
+        ("pack_control_conflict", 409),
+        ("pack_control_stale_revision", 409),
+        ("pack_control_digest_mismatch", 409),
+        ("pack_control_unapproved", 403),
+        ("pack_control_unavailable", 503),
+        ("pack_control_timeout", 504),
     ],
 )
 def test_runtime_surface_typed_errors_map_to_semantic_http_status(
@@ -182,14 +196,28 @@ def test_runtime_surface_typed_errors_map_to_semantic_http_status(
         ("API_FAILURE", 503),
     ],
 )
+@pytest.mark.parametrize(
+    "operation_id",
+    [
+        "profile.change.activate",
+        "approval.revoke",
+        "pack.enable",
+    ],
+)
 def test_typed_error_initial_lost_response_and_restart_replay_are_exact(
     tmp_path: Path,
     code: str,
     expected_status: int,
+    operation_id: str,
 ) -> None:
+    contract_id = (
+        "tobkiri.host.control-presentation.v4"
+        if operation_id.startswith("profile.change.")
+        else "tobkiri.host.pack-control.v4"
+    )
     binding = FrontendContractBinding(
         method="POST",
-        path="/api/runtime-surface/profile-change/activate",
+        path=f"/test/{operation_id}",
         presentation="identity",
         targets=(),
     )
@@ -212,8 +240,8 @@ def test_typed_error_initial_lost_response_and_restart_replay_are_exact(
     first.begin_operation(
         request_id=request_id,
         session_id=session_id,
-        operation_id="profile.change.activate",
-        contract_id="tobkiri.host.control-presentation.v4",
+        operation_id=operation_id,
+        contract_id=contract_id,
         request_digest=canonical_digest({"request": "exact"}),
     )
     first.finish_operation(
@@ -241,6 +269,53 @@ def test_typed_error_initial_lost_response_and_restart_replay_are_exact(
     for secret in ("sqlite", "/private", "digesterror", "sha256:", "token"):
         assert secret not in serialized
     assert replay["result"] == safe
+
+
+@pytest.mark.parametrize(
+    ("error_type", "expected_code", "expected_status", "retryable"),
+    [
+        (PackControlConflict, "STALE_REVISION", 409, False),
+        (PackControlDigestMismatch, "DIGEST_MISMATCH", 409, False),
+        (PackControlUnapproved, "UNAPPROVED", 403, False),
+        (PackControlUnavailable, "API_FAILURE", 503, True),
+        (PackControlTimedOut, "TIMEOUT", 504, True),
+    ],
+)
+def test_pack_control_exception_cause_chain_keeps_semantic_status_and_sanitizes(
+    error_type: type[Exception],
+    expected_code: str,
+    expected_status: int,
+    retryable: bool,
+) -> None:
+    """Typed outer failures win over unsafe implementation causes."""
+
+    from core_runtime.pack_api_server import _exception_error_code
+
+    cause = ValueError("sqlite /private/token.db sha256:secret")
+    error = error_type("provider-controlled private detail")
+    error.__cause__ = cause
+    safe = PackAPIHandler._safe_contract_result(
+        {"state": "error", "code": _exception_error_code(error), "message": str(error)}
+    )
+
+    assert safe["code"] == expected_code
+    assert PackAPIHandler._contract_result_status(safe) == expected_status
+    assert safe["retryable"] is retryable
+    serialized = json.dumps(safe).lower()
+    for secret in ("sqlite", "/private", "sha256:", "provider-controlled"):
+        assert secret not in serialized
+
+
+def test_provider_wrapper_preserves_inner_pack_control_conflict() -> None:
+    """A Broker wrapper must not erase the typed Pack control cause."""
+
+    from core_runtime.pack_api_server import _exception_error_code
+
+    conflict = PackControlConflict("approval_revoked")
+    wrapper = ProviderExecutionError("provider failed")
+    wrapper.__cause__ = conflict
+
+    assert _exception_error_code(wrapper) == "STALE_REVISION"
 
 
 @pytest.fixture

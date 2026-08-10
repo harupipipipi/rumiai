@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from pathlib import PurePosixPath
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol, cast
 from urllib.parse import parse_qs, urlparse
 
 from .api.api_response import APIResponse
@@ -47,6 +47,7 @@ from tobkiri_protocol.canonical import canonical_digest
 from .host_contract import host_contract_value
 from .panel_auth import PanelAuthManager, get_panel_auth_manager
 from .runtime_surface_v4 import RuntimeSurfaceError, RuntimeSurfaceErrorCode
+from .authority.v4_models import AuthorityDenied
 from tobkiri_host.errors import HostCoreError
 
 
@@ -78,7 +79,14 @@ _PUBLIC_ERROR_STATUS: Mapping[str, int] = {
 
 _ERROR_CODE_ALIASES: Mapping[str, str] = {
     "denied": RuntimeSurfaceErrorCode.UNAPPROVED.value,
+    "pack_control_denied": RuntimeSurfaceErrorCode.UNAPPROVED.value,
+    "pack_control_invalid_request": RuntimeSurfaceErrorCode.INVALID_REQUEST.value,
+    "pack_control_conflict": RuntimeSurfaceErrorCode.STALE_REVISION.value,
+    "pack_control_stale_revision": RuntimeSurfaceErrorCode.STALE_REVISION.value,
+    "pack_control_digest_mismatch": RuntimeSurfaceErrorCode.DIGEST_MISMATCH.value,
     "pack_control_unapproved": RuntimeSurfaceErrorCode.UNAPPROVED.value,
+    "pack_control_unavailable": RuntimeSurfaceErrorCode.API_FAILURE.value,
+    "pack_control_timeout": RuntimeSurfaceErrorCode.TIMEOUT.value,
     "timed_out": RuntimeSurfaceErrorCode.TIMEOUT.value,
     "backend_unavailable": RuntimeSurfaceErrorCode.API_FAILURE.value,
     "provider_failed": RuntimeSurfaceErrorCode.API_FAILURE.value,
@@ -132,10 +140,23 @@ def _exception_error_code(error: BaseException) -> str:
             return RuntimeSurfaceErrorCode.DIGEST_MISMATCH.value
         if isinstance(current, ControlReconciliationUnavailableError):
             return RuntimeSurfaceErrorCode.API_FAILURE.value
+        if isinstance(current, AuthorityDenied):
+            authority_codes = {
+                "authority_denied": RuntimeSurfaceErrorCode.UNAPPROVED.value,
+                "revoked": RuntimeSurfaceErrorCode.UNAPPROVED.value,
+                "stale_epoch": RuntimeSurfaceErrorCode.STALE_REVISION.value,
+                "stale_revision": RuntimeSurfaceErrorCode.STALE_REVISION.value,
+                "digest_mismatch": RuntimeSurfaceErrorCode.DIGEST_MISMATCH.value,
+                "backend_unavailable": RuntimeSurfaceErrorCode.API_FAILURE.value,
+                "timed_out": RuntimeSurfaceErrorCode.TIMEOUT.value,
+            }
+            return authority_codes.get(str(current.code), RuntimeSurfaceErrorCode.UNAPPROVED.value)
         if isinstance(current, HostCoreError):
             candidate = str(current.code)
             if candidate in _ERROR_CODE_ALIASES:
                 mapped = _ERROR_CODE_ALIASES[candidate]
+                if candidate.startswith("pack_control_"):
+                    return mapped
                 if mapped != RuntimeSurfaceErrorCode.API_FAILURE.value:
                     return mapped
                 host_code = mapped
@@ -224,6 +245,30 @@ class DispatchSession(Protocol):
     @property
     def plan_digest(self) -> str:
         """Return the exact captured ResolvedPlan digest."""
+
+
+def _load_production_capture_inputs() -> tuple[
+    Path, Path, Any, tuple[FrontendContractBinding, ...]
+]:
+    """Load canonical inputs for one production runtime capture."""
+
+    from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+
+    from .bootstrap.profile_capture import _bundle_root
+    from .frontend_contract_routes import load_frontend_contract_bindings
+
+    runtime_root = Path(__file__).resolve().parents[1]
+    bundle_root = _bundle_root()
+    catalog = BundledCatalog.load(bundle_root)
+    bindings = load_frontend_contract_bindings(
+        runtime_root
+        / "ecosystem"
+        / "defaultspack"
+        / "defaultspack"
+        / "frontend_contract_map.v4.json",
+        catalog.packs["runtime.tauri.application.default"],
+    )
+    return runtime_root, bundle_root, catalog, bindings
 
 
 class WorkspaceBindingResolver(Protocol):
@@ -1967,7 +2012,8 @@ class PackAPIServer:
                     or lifecycle_generation != self._lifecycle_generation
                 ):
                     return
-            refresh_method(session)
+            override_refresh = cast(Callable[[DispatchSession | None], None], refresh_method)
+            override_refresh(session)
 
         return refresh
 
@@ -2017,41 +2063,28 @@ class PackAPIServer:
         self,
         activated_session: DispatchSession | None = None,
         *,
-        lifecycle_generation: int | None = None,
+        lifecycle_generation: int,
     ) -> None:
         """Atomically publish a current Broker session and canonical route map."""
 
         with self._lifecycle_lock:
-            if lifecycle_generation is not None and (
+            if (
                 self._lifecycle_state != "running"
                 or lifecycle_generation != self._lifecycle_generation
             ):
                 return
 
-        from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
         from tobkiri_host.runtime import install_dispatch_session
 
         from .authority.v4 import AuthorityStore
         from .bootstrap.production_v4 import capture_production_dispatch
         from .bootstrap.profile_capture import (
-            _bundle_root,
             capture_default_profile,
             runtime_user_data_root,
         )
         from .di_container import get_container
-        from .frontend_contract_routes import load_frontend_contract_bindings
 
-        runtime_root = Path(__file__).resolve().parents[1]
-        bundle_root = _bundle_root()
-        catalog = BundledCatalog.load(bundle_root)
-        bindings = load_frontend_contract_bindings(
-            runtime_root
-            / "ecosystem"
-            / "defaultspack"
-            / "defaultspack"
-            / "frontend_contract_map.v4.json",
-            catalog.packs["runtime.tauri.application.default"],
-        )
+        runtime_root, bundle_root, _catalog, bindings = _load_production_capture_inputs()
         session = activated_session
         created_session = False
         if session is None:
@@ -2081,7 +2114,7 @@ class PackAPIServer:
             raise
 
         with self._lifecycle_lock:
-            if lifecycle_generation is not None and (
+            if (
                 self._lifecycle_state != "running"
                 or lifecycle_generation != self._lifecycle_generation
             ):

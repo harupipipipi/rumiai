@@ -2108,6 +2108,22 @@ def _map_change_error(error: Exception) -> RuntimeSurfaceError:
 
     if isinstance(error, RuntimeSurfaceError):
         return error
+    from .pack_control_v4 import PackControlDenied
+
+    if isinstance(error, PackControlDenied):
+        typed_codes = {
+            "pack_control_stale_revision": RuntimeSurfaceErrorCode.STALE_REVISION,
+            "pack_control_conflict": RuntimeSurfaceErrorCode.STALE_REVISION,
+            "pack_control_digest_mismatch": RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
+            "pack_control_unapproved": RuntimeSurfaceErrorCode.UNAPPROVED,
+            "pack_control_denied": RuntimeSurfaceErrorCode.UNAPPROVED,
+            "pack_control_invalid_request": RuntimeSurfaceErrorCode.INVALID_REQUEST,
+            "pack_control_timeout": RuntimeSurfaceErrorCode.TIMEOUT,
+            "pack_control_unavailable": RuntimeSurfaceErrorCode.API_FAILURE,
+        }
+        code = typed_codes.get(error.code)
+        if code is not None:
+            return RuntimeSurfaceError(code, "Profile change could not be completed")
     message = str(error).lower()
     if "stale" in message or "predecessor" in message:
         return RuntimeSurfaceError(
