@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+import fcntl
 import platform
 import re
 import secrets
@@ -12,9 +13,10 @@ import stat
 import subprocess
 import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 import yaml  # type: ignore[import-untyped]
 
@@ -170,6 +172,14 @@ class PackVMForeignInstanceError(RuntimeError):
 
 class PackVMOrphanReconciliationRequired(PackVMForeignInstanceError):
     """An orphan cannot be mutated without exact authenticated identity proof."""
+
+
+class PackVMMutationConflict(RuntimeError):
+    """Another process owns the fixed PackVM instance mutation boundary."""
+
+
+class PackVMResponseReconciliationRequired(PackVMForeignInstanceError):
+    """A guest response could not be bound to the exact current instance."""
 
 
 @dataclass(frozen=True)
@@ -667,10 +677,123 @@ class PackVMLimaProvisioner:
         return self._state_dir / "packvm-lima-recovery.json"
 
     @property
+    def mutation_claim_path(self) -> Path:
+        """Return the durable owner claim for the fixed Lima instance."""
+
+        return self._state_dir / "packvm-lima-mutation-claim.json"
+
+    @property
+    def mutation_lock_path(self) -> Path:
+        """Return the interprocess serialization lock for the fixed instance."""
+
+        return self._state_dir / "packvm-lima-mutation.lock"
+
+    @property
     def lima_home(self) -> Path:
         """Return the canonical dedicated Lima home used by this PackVM."""
 
         return self._lima_home
+
+    @contextmanager
+    def operation_gate(
+        self,
+        operation: str,
+        binding: Mapping[str, str | int],
+        *,
+        recover_claim: bool = False,
+        preserve_claim_on_error: bool = False,
+        retain_claim_on_success: bool = False,
+    ) -> Iterator[None]:
+        """Serialize one fixed-instance operation and persist its exact owner."""
+
+        self._ensure_private_managed_directories()
+        flags = os.O_CREAT | os.O_RDWR
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(self.mutation_lock_path, flags, 0o600)
+        succeeded = False
+        locked = False
+        claim = {
+            "version": 1,
+            "operation": operation,
+            "instance": self._instance,
+            "owner_pid": os.getpid(),
+            "binding": dict(binding),
+        }
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_mode & 0o077
+                or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+            ):
+                raise ValueError("PackVM mutation lock is unsafe")
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                locked = True
+            except BlockingIOError as exc:
+                raise PackVMMutationConflict(
+                    "PackVM fixed instance has another operation in progress"
+                ) from exc
+            existing = self._load_mutation_claim()
+            if existing is not None:
+                same_owner = _constant_mapping_equal(existing, claim)
+                stale_recovery = (
+                    recover_claim
+                    and _claim_binding_equal(existing, claim)
+                    and not _process_is_alive(existing.get("owner_pid"))
+                )
+                if not same_owner and not stale_recovery:
+                    raise PackVMMutationConflict(
+                        "PackVM fixed instance has an unresolved operation; "
+                        "reconciliation is required"
+                    )
+                if stale_recovery:
+                    _atomic_private_json(self.mutation_claim_path, claim)
+            else:
+                _atomic_private_json(self.mutation_claim_path, claim)
+            yield
+            succeeded = True
+        finally:
+            remove_after = (succeeded and not retain_claim_on_success) or (
+                not succeeded and not preserve_claim_on_error
+            )
+            if locked and remove_after:
+                self._remove_owned_mutation_claim(claim)
+            try:
+                if locked:
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
+
+    def _load_mutation_claim(self) -> dict[str, Any] | None:
+        try:
+            raw = _read_private_file(self.mutation_claim_path, MAX_LIMA_STATE_BYTES)
+        except FileNotFoundError:
+            return None
+        try:
+            claim = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise PackVMMutationConflict(
+                "PackVM mutation claim is invalid; reconciliation is required"
+            ) from exc
+        if (
+            not isinstance(claim, dict)
+            or claim.get("version") != 1
+            or claim.get("instance") != self._instance
+            or not isinstance(claim.get("owner_pid"), int)
+            or not isinstance(claim.get("operation"), str)
+            or not isinstance(claim.get("binding"), dict)
+        ):
+            raise PackVMMutationConflict(
+                "PackVM mutation claim is invalid; reconciliation is required"
+            )
+        return claim
+
+    def _remove_owned_mutation_claim(self, expected: Mapping[str, Any]) -> None:
+        current = self._load_mutation_claim()
+        if current is not None and _constant_mapping_equal(current, expected):
+            self.mutation_claim_path.unlink(missing_ok=True)
 
     def recovery_identity(self) -> dict[str, int | str]:
         """Return non-path Host identity fields for the dedicated Lima root."""
@@ -757,9 +880,32 @@ class PackVMLimaProvisioner:
             raise ValueError(
                 "PackVM image download requires explicit approval for the displayed source, size, and digest"
             )
+        binding = {
+            "session_digest": request.session_digest or _sha256(b"direct-local-lifecycle"),
+            "plan_digest": request.plan_digest,
+            "ceremony_nonce_digest": _sha256(request.ceremony_nonce.encode()),
+        }
+        with self.operation_gate(
+            "provision",
+            binding,
+            recover_claim=True,
+            preserve_claim_on_error=True,
+        ):
+            return self._provision_locked(request, plan)
+
+    def _provision_locked(
+        self,
+        request: PackVMProvisioningRequest,
+        plan: PackVMProvisioningPlan,
+    ) -> PackVMDoctor:
+        """Provision while holding the fixed-instance interprocess claim."""
+
+        limactl = plan.limactl
+        if limactl is None:
+            raise ValueError("limactl is unavailable; install approved Lima first")
         if self.state_path.exists():
             raise ValueError("PackVM is already provisioned; use doctor or explicit cleanup")
-        if self._instance_exists(plan.limactl):
+        if self._instance_exists(limactl):
             raise ValueError(
                 "unattested managed Lima instance already exists; explicit cleanup is required"
             )
@@ -787,20 +933,20 @@ class PackVMLimaProvisioner:
             os.chmod(config_path, 0o600)
             try:
                 self._checked_call(
-                    (plan.limactl, "start", "--name", self._instance, str(config_path)),
+                    (limactl, "start", "--name", self._instance, str(config_path)),
                     timeout=900,
                     stage="start",
                 )
             finally:
                 config_path.unlink(missing_ok=True)
-            self._install_guest_runner(plan.limactl)
-            machine_id = self._guest_machine_id(plan.limactl)
-            runner_digest = self._guest_runner_digest(plan.limactl)
+            self._install_guest_runner(limactl)
+            machine_id = self._guest_machine_id(limactl)
+            runner_digest = self._guest_runner_digest(limactl)
             if runner_digest != plan.guest_runner_digest:
                 raise ValueError("guest supervisor binary verification failed")
-            self._verify_guest_doctor(plan.limactl)
+            self._verify_guest_doctor(limactl)
             payload = lima_instance_payload(
-                plan.limactl,
+                limactl,
                 self._instance,
                 runner=self._runner,
                 environment=self._lima_process_environment(),
@@ -817,7 +963,7 @@ class PackVMLimaProvisioner:
                 **self._instance_directory_identity(),
                 "config_digest": plan.config_digest,
                 "image_digest": plan.image_digest,
-                "limactl_digest": _file_digest(Path(plan.limactl)),
+                "limactl_digest": _file_digest(Path(limactl)),
                 "guest_runner_digest": runner_digest,
                 "host_build_digest": plan.host_build_digest,
                 "ceremony_nonce_digest": _sha256(request.ceremony_nonce.encode()),
@@ -837,7 +983,9 @@ class PackVMLimaProvisioner:
             self._audit("provisioned", str(state["attestation_digest"]))
             return self.doctor()
         except Exception as error:
-            recovery_status = self._reconcile_failed_provision(plan.limactl, recovery)
+            recovery_status = self._reconcile_failed_provision(limactl, recovery)
+            if recovery_status != "orphaned":
+                self.mutation_claim_path.unlink(missing_ok=True)
             self._audit(
                 "provision_failed",
                 None,
@@ -929,6 +1077,16 @@ class PackVMLimaProvisioner:
     ) -> PackVMDoctor:
         """Recover success only for the exact session and plan now attested live."""
 
+        binding = _provision_claim_binding(expected_proof)
+        with self.operation_gate("provision", binding, recover_claim=True):
+            return self._recover_provision_operation_locked(expected_proof)
+
+    def _recover_provision_operation_locked(
+        self,
+        expected_proof: Mapping[str, Any],
+    ) -> PackVMDoctor:
+        """Recover a provision while holding its exact durable owner claim."""
+
         state = self._load_authenticated_state()
         proof_fields = {
             "backend_id",
@@ -964,13 +1122,15 @@ class PackVMLimaProvisioner:
     def stop(self, confirmation: str) -> None:
         """Stop only the authenticated instance after exact confirmation."""
         state = self._load_authenticated_state()
-        self._verify_attested_host_binding(state)
         expected = f"{PACKVM_STOP_PREFIX} {self._instance}"
         if not hmac.compare_digest(confirmation, expected):
             raise ValueError(f"PackVM stop requires exact confirmation: {expected}")
-        limactl = self._verify_exact_current_instance(state, require_guest=True)
-        self._checked_call((limactl, "stop", "--force", self._instance), timeout=60)
-        self._audit("stopped", None)
+        binding = {"attestation_digest": str(state.get("attestation_digest") or "")}
+        with self.operation_gate("stop", binding):
+            self._verify_attested_host_binding(state)
+            limactl = self._verify_exact_current_instance(state, require_guest=True)
+            self._checked_call((limactl, "stop", "--force", self._instance), timeout=60)
+            self._audit("stopped", None)
 
     def cleanup(self, confirmation: str) -> None:
         """Delete only the authenticated instance after an exact typed ceremony."""
@@ -979,17 +1139,20 @@ class PackVMLimaProvisioner:
         expected = f"{PACKVM_CLEANUP_PREFIX} {self._instance}"
         if not hmac.compare_digest(confirmation, expected):
             raise ValueError(f"PackVM cleanup requires exact confirmation: {expected}")
-        limactl = self._require_command()
-        if self._instance_exists(limactl):
-            limactl = self._verify_exact_current_instance(state, require_guest=False)
-            self._checked_call(
-                (limactl, "delete", "--force", self._instance),
-                timeout=120,
-                stage="cleanup_delete",
-            )
-        self._audit("deleted", str(state["attestation_digest"]))
-        self.state_path.unlink(missing_ok=True)
-        (self._state_dir / "packvm-lima-attestation.key").unlink(missing_ok=True)
+        binding = {"attestation_digest": str(state.get("attestation_digest") or "")}
+        with self.operation_gate("cleanup", binding):
+            self._verify_attested_host_binding(state)
+            limactl = self._require_command()
+            if self._instance_exists(limactl):
+                limactl = self._verify_exact_current_instance(state, require_guest=False)
+                self._checked_call(
+                    (limactl, "delete", "--force", self._instance),
+                    timeout=120,
+                    stage="cleanup_delete",
+                )
+            self._audit("deleted", str(state["attestation_digest"]))
+            self.state_path.unlink(missing_ok=True)
+            (self._state_dir / "packvm-lima-attestation.key").unlink(missing_ok=True)
 
     def cleanup_failed_provision(
         self,
@@ -1001,6 +1164,16 @@ class PackVMLimaProvisioner:
         expected = f"{PACKVM_CLEANUP_PREFIX} {self._instance}"
         if not hmac.compare_digest(confirmation, expected):
             raise ValueError(f"PackVM cleanup requires exact confirmation: {expected}")
+        binding = _provision_claim_binding(expected_proof)
+        with self.operation_gate("provision", binding, recover_claim=True):
+            return self._cleanup_failed_provision_locked(expected_proof)
+
+    def _cleanup_failed_provision_locked(
+        self,
+        expected_proof: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Clean one failed provision while holding its durable owner claim."""
+
         try:
             recovery = self._load_authenticated_recovery()
         except ValueError as error:
@@ -1023,6 +1196,7 @@ class PackVMLimaProvisioner:
             "instance",
             "session_digest",
             "plan_digest",
+            "ceremony_nonce_digest",
             "config_digest",
             "image_digest",
             "guest_runner_digest",
@@ -1063,62 +1237,145 @@ class PackVMLimaProvisioner:
 
     def invoke_guest(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
         """Invoke only through the authenticated guest supervisor channel."""
-        health = self.doctor()
-        if not health.ready:
-            raise ValueError(health.reason or "managed PackVM is unavailable")
-        encoded = json.dumps(request, sort_keys=True, separators=(",", ":"))
-        if len(encoded.encode()) > 1024 * 1024:
-            raise ValueError("PackVM supervisor request is too large")
-        result = self._checked_call(
-            (
-                self._require_command(),
-                "shell",
-                self._instance,
-                "--",
-                "sudo",
-                "timeout",
-                "--signal=TERM",
-                "--kill-after=1s",
-                "60s",
-                PACKVM_GUEST_RUNNER,
-            ),
-            input_text=encoded,
-            timeout=65,
-        )
-        response = json.loads(_decode(result.stdout))
-        if not isinstance(response, dict) or response.get("protocol") != PACKVM_PROTOCOL:
-            raise ValueError("PackVM supervisor returned an unauthenticated response")
-        return response
+        return self._sensitive_guest_call(request, artifact=False)
 
     def materialize_artifact(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
         """Stage one Host-captured artifact through the root-owned guest supervisor."""
 
         if request.get("operation") != "materialize":
             raise ValueError("PackVM artifact request operation is invalid")
-        health = self.doctor()
-        if not health.ready:
-            raise ValueError(health.reason or "managed PackVM is unavailable")
+        return self._sensitive_guest_call(request, artifact=True)
+
+    def _sensitive_guest_call(
+        self,
+        request: Mapping[str, Any],
+        *,
+        artifact: bool,
+    ) -> Mapping[str, Any]:
+        """Bind a sensitive shell transcript to the exact attested instance."""
+
         encoded = json.dumps(request, sort_keys=True, separators=(",", ":"))
-        encoded_size = len(encoded.encode())
-        if encoded_size > MAX_PACKVM_ARTIFACT_REQUEST_BYTES:
-            raise ValueError("PackVM artifact request is too large")
-        result = self._checked_call(
-            (
-                self._require_command(),
-                "shell",
-                self._instance,
-                "--",
-                "sudo",
-                PACKVM_GUEST_RUNNER,
-            ),
-            input_text=encoded,
-            timeout=180,
-            max_stdin_bytes=MAX_PACKVM_ARTIFACT_REQUEST_BYTES,
-        )
-        response = json.loads(_decode(result.stdout))
+        maximum = MAX_PACKVM_ARTIFACT_REQUEST_BYTES if artifact else 1024 * 1024
+        if len(encoded.encode()) > maximum:
+            label = "artifact" if artifact else "supervisor"
+            raise ValueError(f"PackVM {label} request is too large")
+        state = self._load_authenticated_state()
+        attestation = str(state.get("attestation_digest") or "")
+        binding = {
+            "attestation_digest": attestation,
+            "request_digest": _sha256(encoded.encode()),
+            "operation_nonce": secrets.token_hex(32),
+        }
+        with self.operation_gate("guest_shell", binding):
+            limactl = self._verify_exact_current_instance(state, require_guest=True)
+            command: tuple[str, ...]
+            if artifact:
+                command = (
+                    limactl,
+                    "shell",
+                    self._instance,
+                    "--",
+                    "sudo",
+                    PACKVM_GUEST_RUNNER,
+                )
+            else:
+                command = (
+                    limactl,
+                    "shell",
+                    self._instance,
+                    "--",
+                    "sudo",
+                    "timeout",
+                    "--signal=TERM",
+                    "--kill-after=1s",
+                    "60s",
+                    PACKVM_GUEST_RUNNER,
+                )
+            result = self._checked_call(
+                command,
+                input_text=encoded,
+                timeout=180 if artifact else 65,
+                max_stdin_bytes=maximum,
+            )
+            try:
+                response = json.loads(_decode(result.stdout))
+            except json.JSONDecodeError as exc:
+                raise PackVMResponseReconciliationRequired(
+                    "PackVM response is invalid; reconciliation is required"
+                ) from exc
+            self._verify_sensitive_response(request, response)
+            self._verify_exact_current_instance(state, require_guest=True)
+            response_digest = _canonical_digest(response)
+            challenge = _canonical_digest(
+                {
+                    **binding,
+                    "response_digest": response_digest,
+                }
+            )[7:]
+            self._verify_guest_transcript_challenge(limactl, challenge)
+            self._verify_exact_current_instance(state, require_guest=True)
+            return response
+
+    def _verify_sensitive_response(
+        self,
+        request: Mapping[str, Any],
+        response: object,
+    ) -> None:
+        """Reject responses missing the request's guest-owned identities."""
+
         if not isinstance(response, dict) or response.get("protocol") != PACKVM_PROTOCOL:
-            raise ValueError("PackVM supervisor returned an unauthenticated response")
-        return response
+            raise PackVMResponseReconciliationRequired(
+                "PackVM response identity is missing; reconciliation is required"
+            )
+        operation = request.get("operation")
+        fields: tuple[str, ...]
+        if operation == "materialize":
+            fields = ("artifact_digest", "materialization_digest")
+        elif operation == "invoke":
+            fields = ("guest_artifact_identity",)
+        else:
+            fields = ()
+        for field in fields:
+            expected = request.get(field)
+            actual = response.get(field)
+            if not isinstance(expected, str) or not isinstance(actual, str):
+                raise PackVMResponseReconciliationRequired(
+                    "PackVM response identity is missing; reconciliation is required"
+                )
+            if not hmac.compare_digest(expected, actual):
+                raise PackVMResponseReconciliationRequired(
+                    "PackVM response identity changed; reconciliation is required"
+                )
+
+    def _verify_guest_transcript_challenge(self, limactl: str, challenge: str) -> None:
+        """Prove the post-response guest still owns the exact transcript nonce."""
+
+        invoked = self._checked_call(
+            (limactl, "shell", self._instance, "--", PACKVM_GUEST_RUNNER),
+            input_text=json.dumps(
+                {
+                    "operation": "invoke",
+                    "contract_id": "io.tobkiri.packvm.attestation.v1",
+                    "operation_id": "challenge",
+                    "payload": {"challenge": challenge},
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            timeout=10,
+        )
+        response = json.loads(_decode(invoked.stdout))
+        expected = _sha256(challenge.encode())
+        if (
+            not isinstance(response, dict)
+            or response.get("ok") is not True
+            or response.get("protocol") != PACKVM_PROTOCOL
+            or not isinstance(response.get("payload"), dict)
+            or response["payload"].get("challenge_digest") != expected
+        ):
+            raise PackVMResponseReconciliationRequired(
+                "PackVM response transcript mismatch; reconciliation is required"
+            )
 
     def _plan_for_consumed_nonce(self, nonce: str) -> PackVMProvisioningPlan:
         # Rebuild immutable facts while preserving the already reviewed nonce.
@@ -1369,6 +1626,7 @@ class PackVMLimaProvisioner:
             "instance": self._instance,
             "session_digest": session_digest,
             "plan_digest": plan.plan_digest,
+            "ceremony_nonce_digest": _sha256(request.ceremony_nonce.encode()),
             "config_digest": plan.config_digest,
             "image_digest": plan.image_digest,
             "guest_runner_digest": plan.guest_runner_digest,
@@ -1964,6 +2222,51 @@ def _canonical_json(value: object) -> bytes:
 
 def _canonical_digest(value: object) -> str:
     return _sha256(_canonical_json(value))
+
+
+def _constant_mapping_equal(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    """Compare canonical claim documents without field-by-field timing variance."""
+
+    return hmac.compare_digest(_canonical_json(left), _canonical_json(right))
+
+
+def _claim_binding_equal(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    """Compare the operation and authorization binding while ignoring a dead PID."""
+
+    left_binding = {
+        key: left.get(key) for key in ("version", "operation", "instance", "binding")
+    }
+    right_binding = {
+        key: right.get(key) for key in ("version", "operation", "instance", "binding")
+    }
+    return _constant_mapping_equal(left_binding, right_binding)
+
+
+def _process_is_alive(value: object) -> bool:
+    """Return whether a positive local PID still denotes a live process."""
+
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return False
+    try:
+        os.kill(value, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _provision_claim_binding(proof: Mapping[str, Any]) -> dict[str, str]:
+    """Project the exact durable owner of one provision ceremony."""
+
+    fields = ("session_digest", "plan_digest", "ceremony_nonce_digest")
+    binding: dict[str, str] = {}
+    for field in fields:
+        value = proof.get(field)
+        if not isinstance(value, str):
+            raise ValueError("PackVM provision recovery proof is incomplete")
+        binding[field] = value
+    return binding
 
 
 def _read_private_file(path: Path, maximum: int) -> bytes:

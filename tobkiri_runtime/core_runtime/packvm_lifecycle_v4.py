@@ -59,9 +59,14 @@ class PackVMLifecycleV4:
         """Return pinned download and runtime facts without provisioning."""
 
         with self._lock:
-            plan = self._provisioner.prepare()
+            current_session_digest = _session_digest(session_id)
+            with self._provisioner.operation_gate(
+                "prepare",
+                {"session_digest": current_session_digest},
+            ):
+                plan = self._provisioner.prepare()
             self._plans.clear()
-            self._plans[plan.ceremony_nonce] = (plan, _session_digest(session_id))
+            self._plans[plan.ceremony_nonce] = (plan, current_session_digest)
             return asdict(plan)
 
     def consent(
@@ -107,18 +112,26 @@ class PackVMLifecycleV4:
                 raise ValueError(
                     "PackVM image download requires explicit consent for the displayed source, size, and digest"
                 )
-            consent_id = "packvm-consent." + secrets.token_hex(24)
-            self._consents.clear()
-            self._consents[consent_id] = (
-                PackVMProvisioningRequest(
-                    plan_digest=plan_digest,
-                    ceremony_nonce=ceremony_nonce,
-                    confirmation=confirmation,
-                    approve_image_download=approve_download,
-                    session_digest=current_session_digest,
-                ),
-                plan,
-            )
+            with self._provisioner.operation_gate(
+                "consent",
+                {
+                    "session_digest": current_session_digest,
+                    "plan_digest": plan_digest,
+                    "ceremony_nonce_digest": _digest_text(ceremony_nonce),
+                },
+            ):
+                consent_id = "packvm-consent." + secrets.token_hex(24)
+                self._consents.clear()
+                self._consents[consent_id] = (
+                    PackVMProvisioningRequest(
+                        plan_digest=plan_digest,
+                        ceremony_nonce=ceremony_nonce,
+                        confirmation=confirmation,
+                        approve_image_download=approve_download,
+                        session_digest=current_session_digest,
+                    ),
+                    plan,
+                )
             return {
                 "consent_id": consent_id,
                 "plan_digest": plan.plan_digest,

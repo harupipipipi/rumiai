@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import hmac
+import multiprocessing
 import os
 import platform
 import shutil
@@ -27,8 +28,10 @@ from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
     PACKVM_PINNED_IMAGE_VIRTUAL_SIZE_BYTES,
     PackVMLimaProvisioner,
     PackVMForeignInstanceError,
+    PackVMMutationConflict,
     PackVMProcessError,
     PackVMProvisioningRequest,
+    PackVMResponseReconciliationRequired,
 )
 from ecosystem.defaultspack.backend.sandbox.isolation.resources import (
     packvm_guest_runner,
@@ -56,6 +59,9 @@ class FakeLima:
         self.block_delete = False
         self.delete_started = threading.Event()
         self.delete_release = threading.Event()
+        self.response_identity_missing = False
+        self.challenge_digest_mismatch = False
+        self.challenge_calls = 0
 
     def __call__(self, command, input_text, _timeout):
         argv = tuple(str(item) for item in command)
@@ -140,15 +146,37 @@ class FakeLima:
             )
         if args[-1] == "/usr/local/libexec/tobkiri-packvm-supervisor":
             request = json.loads(input_text)
-            if request["operation"] == "invoke":
+            if (
+                request["operation"] == "invoke"
+                and request.get("operation_id") == "challenge"
+            ):
                 import hashlib
 
                 challenge = request["payload"]["challenge"]
+                self.challenge_calls += 1
                 payload = {
                     "challenge_digest": "sha256:" + hashlib.sha256(challenge.encode()).hexdigest()
                 }
+                if self.challenge_digest_mismatch and self.challenge_calls == 3:
+                    payload["challenge_digest"] = "sha256:" + "f" * 64
+                identities = {}
+            elif request["operation"] == "invoke":
+                payload = {"result": "ok"}
+                identities = {
+                    "guest_artifact_identity": request["guest_artifact_identity"]
+                }
+            elif request["operation"] == "materialize":
+                payload = None
+                identities = {
+                    "artifact_digest": request["artifact_digest"],
+                    "materialization_digest": request["materialization_digest"],
+                    "guest_artifact_identity": "sha256:" + "a" * 64,
+                }
             else:
                 payload = None
+                identities = {}
+            if self.response_identity_missing:
+                identities = {}
             return SimpleNamespace(
                 returncode=0,
                 stdout=json.dumps(
@@ -156,6 +184,7 @@ class FakeLima:
                         "ok": True,
                         "protocol": "io.tobkiri.packvm-supervisor.v1",
                         "build_id": "tobkiri-packvm-runner-1",
+                        **identities,
                         **({"payload": payload} if payload is not None else {}),
                     }
                 ),
@@ -205,6 +234,32 @@ def _request(plan, *, approve: bool = True) -> PackVMProvisioningRequest:
     )
 
 
+def _hold_packvm_process_claim(
+    command_path: str,
+    state_dir: str,
+    lima_home: str,
+    entered: object,
+    release: object,
+) -> None:
+    """Hold the fixed-instance claim from an independent process."""
+
+    manager = PackVMLimaProvisioner(
+        command_path=command_path,
+        runner=lambda *_args: None,
+        state_dir=Path(state_dir),
+        machine="arm64",
+        lima_home=Path(lima_home),
+    )
+    binding = {
+        "session_digest": "sha256:" + "1" * 64,
+        "plan_digest": "sha256:" + "2" * 64,
+        "ceremony_nonce_digest": "sha256:" + "3" * 64,
+    }
+    with manager.operation_gate("provision", binding):
+        entered.set()  # type: ignore[attr-defined]
+        release.wait(5)  # type: ignore[attr-defined]
+
+
 def _wait_operation(
     lifecycle: PackVMLifecycleV4,
     operation_id: str,
@@ -229,6 +284,149 @@ def _write_environment_probe(path: Path) -> None:
         encoding="utf-8",
     )
     path.chmod(0o700)
+
+
+def test_fixed_instance_claim_is_single_flight_across_processes(provisioner) -> None:
+    manager, _fake, command = provisioner
+    context = multiprocessing.get_context("fork")
+    entered = context.Event()
+    release = context.Event()
+    process = context.Process(
+        target=_hold_packvm_process_claim,
+        args=(
+            str(command),
+            str(manager.state_path.parent),
+            str(manager.lima_home),
+            entered,
+            release,
+        ),
+    )
+    process.start()
+    assert entered.wait(5)
+    try:
+        with pytest.raises(PackVMMutationConflict, match="in progress"):
+            with manager.operation_gate("prepare", {"session_digest": "sha256:" + "4" * 64}):
+                raise AssertionError("conflicting operation unexpectedly acquired the claim")
+    finally:
+        release.set()
+        process.join(5)
+    assert process.exitcode == 0
+
+
+def test_failed_competitor_never_reconciles_the_owner_instance(provisioner) -> None:
+    manager, fake, _command = provisioner
+    fake.exists = True
+    fake.running = True
+    owner = {
+        "session_digest": "sha256:" + "1" * 64,
+        "plan_digest": "sha256:" + "2" * 64,
+        "ceremony_nonce_digest": "sha256:" + "3" * 64,
+    }
+    competitor = {**owner, "ceremony_nonce_digest": "sha256:" + "4" * 64}
+    with manager.operation_gate("provision", owner):
+        before = tuple(fake.commands)
+        with pytest.raises(PackVMMutationConflict):
+            manager.cleanup_failed_provision(
+                f"DELETE {PACKVM_LIMA_INSTANCE}",
+                competitor,
+            )
+        assert tuple(fake.commands) == before
+        assert fake.exists is True
+        assert fake.running is True
+
+
+def test_restart_recovery_adopts_only_the_exact_dead_owner_claim(provisioner) -> None:
+    manager, _fake, _command = provisioner
+    binding = {
+        "session_digest": "sha256:" + "1" * 64,
+        "plan_digest": "sha256:" + "2" * 64,
+        "ceremony_nonce_digest": "sha256:" + "3" * 64,
+    }
+    manager.state_path.parent.mkdir(parents=True, exist_ok=True)
+    manager.mutation_claim_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "operation": "provision",
+                "instance": PACKVM_LIMA_INSTANCE,
+                "owner_pid": 99_999_999,
+                "binding": binding,
+            }
+        ),
+        encoding="utf-8",
+    )
+    manager.mutation_claim_path.chmod(0o600)
+
+    with manager.operation_gate("provision", binding, recover_claim=True):
+        claim = json.loads(manager.mutation_claim_path.read_text(encoding="utf-8"))
+        assert claim["owner_pid"] == os.getpid()
+    assert not manager.mutation_claim_path.exists()
+
+
+def test_sensitive_shell_rebinds_identity_after_response(
+    provisioner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, fake, _command = provisioner
+    assert manager.provision(_request(manager.prepare())).ready
+    original = manager._verify_exact_current_instance
+    calls = 0
+
+    def swap_after_sensitive_shell(state, *, require_guest):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            fake.machine_id = "f" * 32
+        return original(state, require_guest=require_guest)
+
+    monkeypatch.setattr(manager, "_verify_exact_current_instance", swap_after_sensitive_shell)
+    request = {
+        "operation": "invoke",
+        "guest_artifact_identity": "sha256:" + "b" * 64,
+    }
+    with pytest.raises(PackVMForeignInstanceError, match="reconciliation"):
+        manager.invoke_guest(request)
+
+
+def test_sensitive_response_requires_exact_artifact_identity(provisioner) -> None:
+    manager, fake, _command = provisioner
+    assert manager.provision(_request(manager.prepare())).ready
+    fake.response_identity_missing = True
+
+    with pytest.raises(PackVMResponseReconciliationRequired, match="identity is missing"):
+        manager.materialize_artifact(
+            {
+                "operation": "materialize",
+                "artifact_digest": "sha256:" + "a" * 64,
+                "materialization_digest": "sha256:" + "b" * 64,
+            }
+        )
+
+
+def test_sensitive_response_transcript_rejects_digest_or_nonce_replay(provisioner) -> None:
+    manager, fake, _command = provisioner
+    assert manager.provision(_request(manager.prepare())).ready
+    fake.challenge_digest_mismatch = True
+    fake.challenge_calls = 0
+
+    with pytest.raises(PackVMResponseReconciliationRequired, match="transcript mismatch"):
+        manager.invoke_guest(
+            {
+                "operation": "invoke",
+                "guest_artifact_identity": "sha256:" + "c" * 64,
+            }
+        )
+
+
+def test_transcript_binding_is_forward_compatible_with_new_guest_operations(
+    provisioner,
+) -> None:
+    manager, _fake, _command = provisioner
+    assert manager.provision(_request(manager.prepare())).ready
+
+    response = manager.invoke_guest({"operation": "cancel", "request_id": "request-1"})
+    assert response["ok"] is True
+    assert response["protocol"] == "io.tobkiri.packvm-supervisor.v1"
 
 
 def _resign_operations(manager: PackVMLimaProvisioner, payload: dict[str, object]) -> None:
