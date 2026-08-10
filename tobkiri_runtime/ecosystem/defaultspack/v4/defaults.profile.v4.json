@@ -398,6 +398,16 @@
     {
       "caller_function_id": "shell.tauri.pack-control",
       "contract_id": "tobkiri.host.control-presentation.v4",
+      "operation_id": "profile.catalog.read",
+      "requested_scope_template": {
+        "access": "read_only",
+        "resource_namespace": "profile.catalog"
+      },
+      "target_provider_id": "tobkiri.host.control-presentation"
+    },
+    {
+      "caller_function_id": "shell.tauri.pack-control",
+      "contract_id": "tobkiri.host.control-presentation.v4",
       "operation_id": "profile.read",
       "requested_scope_template": {
         "access": "read_only",

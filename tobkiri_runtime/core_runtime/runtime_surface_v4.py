@@ -96,6 +96,9 @@ class _ProfileCandidate:
     session_id: str
     expected_profile_revision: str
     expected_plan_digest: str
+    profile_definition_digest: str
+    profile_catalog_digest: str
+    bundle_lock_digest: str
     resolved: Any
     candidate_digest: str
     expires_at: float
@@ -134,16 +137,31 @@ class RuntimeProfileChangeService:
     def resolve(self, body: Mapping[str, object], *, session_id: str) -> dict[str, object]:
         """Resolve a candidate closure without writing runtime state."""
 
-        expected = {
+        legacy_expected = {
             "profile_id",
             "expected_profile_revision",
             "expected_plan_digest",
             "desired_pack_ids",
         }
-        if set(body) != expected or body.get("profile_id") != "defaults":
+        catalog_expected = legacy_expected | {
+            "profile_definition_digest",
+            "profile_catalog_digest",
+            "bundle_lock_digest",
+        }
+        if frozenset(body) not in {
+            frozenset(legacy_expected),
+            frozenset(catalog_expected),
+        }:
             raise RuntimeSurfaceError(
                 RuntimeSurfaceErrorCode.INVALID_REQUEST,
                 "Profile resolve request shape is invalid",
+            )
+        profile_id = _required_string(body.get("profile_id"))
+        authoritative_selection = set(body) == catalog_expected
+        if not authoritative_selection and profile_id != "defaults":
+            raise RuntimeSurfaceError(
+                RuntimeSurfaceErrorCode.INVALID_REQUEST,
+                "non-default Profile selection requires exact catalog bindings",
             )
         revision = _required_string(body.get("expected_profile_revision"))
         plan_digest = _required_string(body.get("expected_plan_digest"))
@@ -167,10 +185,41 @@ class RuntimeProfileChangeService:
             expected_profile_revision=revision,
             expected_plan_digest=plan_digest,
         )
+        if authoritative_selection:
+            definition_digest = _required_string(body.get("profile_definition_digest"))
+            catalog_digest = _required_string(body.get("profile_catalog_digest"))
+            bundle_digest = _required_string(body.get("bundle_lock_digest"))
+            try:
+                self._surface().require_catalog_binding(
+                    profile_id=profile_id,
+                    expected_definition_digest=definition_digest,
+                    expected_catalog_digest=catalog_digest,
+                    expected_bundle_lock_digest=bundle_digest,
+                )
+            except RuntimeSurfaceError:
+                raise
+        else:
+            catalog = self._surface().read_profile_catalog()
+            catalog_data = cast(Mapping[str, Any], catalog["data"])
+            entry = next(
+                item for item in catalog_data["profiles"] if item["profile_id"] == profile_id
+            )
+            definition_digest = str(entry["definition"]["digest"])
+            catalog_digest = str(catalog_data["catalog_digest"])
+            bundle_digest = str(catalog_data["bundle_lock_digest"])
         try:
             from .pack_control_v4 import resolve_profile_pack_set
 
-            resolved = resolve_profile_pack_set(pack_ids)
+            if authoritative_selection:
+                resolved = resolve_profile_pack_set(
+                    pack_ids,
+                    profile_id=profile_id,
+                    expected_profile_definition_digest=definition_digest,
+                    expected_profile_catalog_digest=catalog_digest,
+                    expected_bundle_lock_digest=bundle_digest,
+                )
+            else:
+                resolved = resolve_profile_pack_set(pack_ids)
         except Exception as error:
             raise _map_change_error(error) from error
         current_data = cast(Mapping[str, Any], current["data"])
@@ -183,6 +232,11 @@ class RuntimeProfileChangeService:
                 "plan_digest": plan_digest,
                 "activation_id": current_data["activation_record"]["activation_id"],
             },
+            "catalog_binding": {
+                "profile_definition_digest": definition_digest,
+                "profile_catalog_digest": catalog_digest,
+                "bundle_lock_digest": bundle_digest,
+            },
         }
         candidate_id = secrets.token_urlsafe(32)
         candidate_digest = canonical_digest(review)
@@ -191,6 +245,9 @@ class RuntimeProfileChangeService:
             session_id=session_id,
             expected_profile_revision=revision,
             expected_plan_digest=plan_digest,
+            profile_definition_digest=definition_digest,
+            profile_catalog_digest=catalog_digest,
+            bundle_lock_digest=bundle_digest,
             resolved=resolved,
             candidate_digest=candidate_digest,
             expires_at=self._clock() + self._ttl_seconds,
@@ -300,6 +357,12 @@ class RuntimeProfileChangeService:
                     "Profile activation approval does not match",
                 )
             candidate = approval.candidate
+            self._surface().require_catalog_binding(
+                profile_id=str(candidate.resolved.profile["profile_id"]),
+                expected_definition_digest=candidate.profile_definition_digest,
+                expected_catalog_digest=candidate.profile_catalog_digest,
+                expected_bundle_lock_digest=candidate.bundle_lock_digest,
+            )
             self._surface().read_profile(
                 expected_profile_revision=candidate.expected_profile_revision,
                 expected_plan_digest=candidate.expected_plan_digest,
@@ -434,6 +497,60 @@ class RuntimeSurfaceService:
             surface="profile",
             data=self._profile_projection(snapshot),
         )
+
+    def read_profile_catalog(self) -> dict[str, object]:
+        """Return all verified Profile definitions without changing selection."""
+
+        started = self._clock()
+        try:
+            active = self._snapshot_loader()
+            catalog = self._catalog_loader()
+            from .profile_catalog_v4 import project_profile_catalog
+
+            projection = project_profile_catalog(catalog, active)
+        except ProfileResolutionDenied as error:
+            raise _map_profile_error(error) from error
+        except (OSError, RuntimeError, ValueError) as error:
+            raise RuntimeSurfaceError(
+                RuntimeSurfaceErrorCode.API_FAILURE,
+                "canonical Profile catalog is unavailable",
+            ) from error
+        if self._clock() - started > self._read_timeout_seconds:
+            raise RuntimeSurfaceError(
+                RuntimeSurfaceErrorCode.TIMEOUT,
+                "canonical Profile catalog timed out",
+            )
+        snapshot = RuntimeSurfaceSnapshot(active=active, catalog=catalog)
+        return self._read_envelope(snapshot, surface="profiles", data=projection)
+
+    def require_catalog_binding(
+        self,
+        *,
+        profile_id: str,
+        expected_definition_digest: str,
+        expected_catalog_digest: str,
+        expected_bundle_lock_digest: str,
+    ) -> None:
+        """Verify one selection against the currently admitted catalog bytes."""
+
+        try:
+            from .profile_catalog_v4 import require_profile_catalog_binding
+
+            require_profile_catalog_binding(
+                self._catalog_loader(),
+                profile_id=profile_id,
+                expected_definition_digest=expected_definition_digest,
+                expected_catalog_digest=expected_catalog_digest,
+                expected_bundle_lock_digest=expected_bundle_lock_digest,
+            )
+        except ValueError as error:
+            message = str(error)
+            code = (
+                RuntimeSurfaceErrorCode.INVALID_REQUEST
+                if "absent" in message
+                else RuntimeSurfaceErrorCode.DIGEST_MISMATCH
+            )
+            raise RuntimeSurfaceError(code, message) from error
 
     def read_advanced(
         self,

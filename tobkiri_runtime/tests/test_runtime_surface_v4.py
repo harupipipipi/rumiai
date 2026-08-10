@@ -214,8 +214,8 @@ def test_contract_routes_are_exact_digest_pinned_broker_bindings(active_runtime)
         if item["path"] == "defaultspack/frontend_contract_map.v4.json"
     )
 
-    # The map has 21 logical routes and 29 exact route-to-target bindings.
-    assert len(routes) == 29
+    # The map has 22 logical routes and 30 exact route-to-target bindings.
+    assert len(routes) == 30
     assert all(
         set(route)
         >= {

@@ -58,9 +58,7 @@ CANONICAL_PACK_FILES = {
     "rumi_ai_tool_bridge_pack.pack.v4.json": (
         ROOT / "ecosystem" / "rumi_ai_tool_bridge_pack" / "pack.v4.json"
     ),
-    "rumi_ai_usage_pack.pack.v4.json": (
-        ROOT / "ecosystem" / "rumi_ai_usage_pack" / "pack.v4.json"
-    ),
+    "rumi_ai_usage_pack.pack.v4.json": (ROOT / "ecosystem" / "rumi_ai_usage_pack" / "pack.v4.json"),
     "rumi_provider_registry_pack.pack.v4.json": (
         ROOT / "ecosystem" / "rumi_provider_registry_pack" / "pack.v4.json"
     ),
@@ -108,7 +106,9 @@ def _requirements(kind: str, existing: Any) -> dict[str, Any]:
         "execution_boundary": (
             "declarative_only"
             if kind == "base"
-            else "host_brokered" if kind == "shell" else "sandbox"
+            else "host_brokered"
+            if kind == "shell"
+            else "sandbox"
         ),
         "approval_policy": "capability_gated" if capabilities else "none",
         "workspace_boundary": "host_brokered" if capabilities else "pack_local",
@@ -142,9 +142,7 @@ def _normalize_pack(document: dict[str, Any]) -> dict[str, Any]:
                     "effect_ceiling": [],
                 }
             )
-    document["requirements"] = _requirements(
-        document["pack"]["kind"], document.get("requirements")
-    )
+    document["requirements"] = _requirements(document["pack"]["kind"], document.get("requirements"))
     document["operation_catalog"] = operations
     document["provider_catalog"] = providers
     identity_source = {
@@ -402,39 +400,44 @@ def _render() -> dict[Path, bytes]:
 
     base_path = BUNDLE / "defaults-basepack.base.v1.json"
     shell_paths = sorted(BUNDLE.glob("*.shell.v1.json"))
-    profile_path = BUNDLE / "defaults.profile.v4.json"
+    profile_paths = sorted(BUNDLE.glob("*.profile.v4.json"))
+    if not profile_paths:
+        raise ValueError("defaultspack v4 bundle has no Profile definitions")
     base = _normalize_base(json.loads(base_path.read_text(encoding="utf-8")))
     shells = [
         (path, _normalize_shell(json.loads(path.read_text(encoding="utf-8"))))
         for path in shell_paths
     ]
-    profile = _normalize_profile(json.loads(profile_path.read_text(encoding="utf-8")))
-    for pack in profile["packs"]:
-        if pack["pack_id"] == "rumi-file-inspect":
-            pack["pack_id"] = "rumi_file_inspect_pack"
-    if not any(pack["pack_id"] == "runtime.tauri.application.default" for pack in profile["packs"]):
-        profile["packs"].append(
-            {
-                "pack_id": "runtime.tauri.application.default",
-                "artifact_digest": None,
-                "role": "application",
-            }
-        )
-    if any(pack["pack_id"].startswith("dev.tauri.") for pack in profile["packs"]):
-        raise ValueError("Development Realm Tauri toolchain cannot enter production Profile")
-    for edge in profile["requested_edges"]:
-        if edge["target_provider_id"] == "defaultspack.file.inspect":
-            edge.update(
+    for profile_path in profile_paths:
+        profile = _normalize_profile(json.loads(profile_path.read_text(encoding="utf-8")))
+        for pack in profile["packs"]:
+            if pack["pack_id"] == "rumi-file-inspect":
+                pack["pack_id"] = "rumi_file_inspect_pack"
+        if not any(
+            pack["pack_id"] == "runtime.tauri.application.default" for pack in profile["packs"]
+        ):
+            profile["packs"].append(
                 {
-                    "target_provider_id": ("rumi_file_inspect_pack.file-inspect.service"),
-                    "contract_id": "tobkiri.service.file.inspect.v1",
-                    "operation_id": "rumi_file_inspect_pack.file-inspect",
+                    "pack_id": "runtime.tauri.application.default",
+                    "artifact_digest": None,
+                    "role": "application",
                 }
             )
+        if any(pack["pack_id"].startswith("dev.tauri.") for pack in profile["packs"]):
+            raise ValueError("Development Realm Tauri toolchain cannot enter production Profile")
+        for edge in profile["requested_edges"]:
+            if edge["target_provider_id"] == "defaultspack.file.inspect":
+                edge.update(
+                    {
+                        "target_provider_id": ("rumi_file_inspect_pack.file-inspect.service"),
+                        "contract_id": "tobkiri.service.file.inspect.v1",
+                        "operation_id": "rumi_file_inspect_pack.file-inspect",
+                    }
+                )
+        rendered[profile_path] = _pretty(profile)
     rendered[base_path] = _pretty(base)
     for shell_path, shell in shells:
         rendered[shell_path] = _pretty(shell)
-    rendered[profile_path] = _pretty(profile)
 
     entries: list[dict[str, str]] = []
     kinds = {"packs": "pack", "base.v1": "base", "shell.v1": "shell", "profile.v4": "profile"}
@@ -442,7 +445,7 @@ def _render() -> dict[Path, bytes]:
         *sorted(path for path in rendered if path.parent == PACKS),
         base_path,
         *shell_paths,
-        profile_path,
+        *profile_paths,
     ]
     for path in paths:
         raw = rendered[path] if path in rendered else path.read_bytes()

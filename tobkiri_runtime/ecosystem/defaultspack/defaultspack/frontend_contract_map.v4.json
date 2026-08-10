@@ -145,6 +145,12 @@
     },
     {
       "method": "GET",
+      "path": "/api/runtime-surface/profiles",
+      "presentation": "broker_result",
+      "targets": [{"contribution_id": "defaults.runtime-surface.profile-catalog", "contract_id": "tobkiri.host.control-presentation.v4", "operation_id": "profile.catalog.read", "provider_id": "tobkiri.host.control-presentation", "function_id": "tobkiri.host.control-presentation", "allowed_payload_keys": []}]
+    },
+    {
+      "method": "GET",
       "path": "/api/runtime-surface/settings",
       "presentation": "broker_result",
       "targets": [{"contribution_id": "defaults.runtime-surface.settings", "contract_id": "tobkiri.host.control-presentation.v4", "operation_id": "settings.read", "provider_id": "tobkiri.host.control-presentation", "function_id": "tobkiri.host.control-presentation", "allowed_payload_keys": []}]
@@ -177,7 +183,7 @@
       "method": "POST",
       "path": "/api/runtime-surface/profile-change/resolve",
       "presentation": "broker_result",
-      "targets": [{"contribution_id": "defaults.runtime-surface.profile-change.resolve", "contract_id": "tobkiri.host.control-presentation.v4", "operation_id": "profile.change.resolve", "provider_id": "tobkiri.host.control-presentation", "function_id": "tobkiri.host.control-presentation", "allowed_payload_keys": ["profile_id", "expected_profile_revision", "expected_plan_digest", "desired_pack_ids"]}]
+      "targets": [{"contribution_id": "defaults.runtime-surface.profile-change.resolve", "contract_id": "tobkiri.host.control-presentation.v4", "operation_id": "profile.change.resolve", "provider_id": "tobkiri.host.control-presentation", "function_id": "tobkiri.host.control-presentation", "allowed_payload_keys": ["profile_id", "expected_profile_revision", "expected_plan_digest", "desired_pack_ids", "profile_definition_digest", "profile_catalog_digest", "bundle_lock_digest"]}]
     },
     {
       "method": "POST",

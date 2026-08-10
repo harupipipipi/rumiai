@@ -363,6 +363,85 @@ def test_runtime_surface_reads_use_the_canonical_broker_contract(
     assert any(event["event_state"] == "committed" for event in authority.audit_events())
 
 
+def test_authoritative_profile_catalog_selection_completes_real_http_ceremony(
+    production_server,
+) -> None:
+    server, _session, _authority = production_server
+    cookie, csrf, origin = _authenticate(server)
+    status, catalog_response, _ = _request(
+        server,
+        "GET",
+        _contract("GET", "/api/runtime-surface/profiles"),
+        headers={"Cookie": cookie, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+    )
+    assert status == 200, catalog_response
+    catalog = catalog_response["data"]["data"]
+    selected = next(item for item in catalog["profiles"] if item["active"])
+    status, profile_response, _ = _request(
+        server,
+        "GET",
+        _contract("GET", "/api/runtime-surface/profile"),
+        headers={"Cookie": cookie, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+    )
+    assert status == 200, profile_response
+    active = profile_response["data"]
+    desired = [
+        item["pack_id"]
+        for item in selected["pack_closure"]
+        if item["role"] not in {"base", "shell", "application", "dependency"}
+    ]
+    headers = {"Cookie": cookie, "Origin": origin, "X-Rumi-CSRF": csrf}
+
+    def post(path: str, body: Mapping[str, object]):
+        return _request(
+            server,
+            "POST",
+            _contract("POST", path),
+            body=body,
+            headers={**headers, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+        )
+
+    status, resolved, _ = post(
+        "/api/runtime-surface/profile-change/resolve",
+        {
+            "profile_id": selected["profile_id"],
+            "expected_profile_revision": active["profile_revision"],
+            "expected_plan_digest": active["plan_digest"],
+            "desired_pack_ids": desired,
+            "profile_definition_digest": selected["definition"]["digest"],
+            "profile_catalog_digest": catalog["catalog_digest"],
+            "bundle_lock_digest": catalog["bundle_lock_digest"],
+        },
+    )
+    assert status == 200, resolved
+    assert resolved["data"]["state"] == "resolved", resolved
+    status, reviewed, _ = post(
+        "/api/runtime-surface/profile-change/review",
+        {
+            "candidate_id": resolved["data"]["candidate_id"],
+            "candidate_digest": resolved["data"]["candidate_digest"],
+        },
+    )
+    assert status == 200, reviewed
+    status, approved, _ = post(
+        "/api/runtime-surface/profile-change/approve",
+        {
+            "candidate_id": reviewed["data"]["candidate_id"],
+            "candidate_digest": reviewed["data"]["candidate_digest"],
+        },
+    )
+    assert status == 200, approved
+    status, activated, _ = post(
+        "/api/runtime-surface/profile-change/activate",
+        {
+            "approval_id": approved["data"]["approval_id"],
+            "approval_digest": approved["data"]["approval_digest"],
+        },
+    )
+    assert status == 200, activated
+    assert activated["data"]["state"] == "active"
+
+
 def test_runtime_surface_operation_identity_invokes_exact_capability_binding(
     production_server,
 ) -> None:

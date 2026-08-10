@@ -9927,7 +9927,7 @@
         "version": "0.1.0"
       },
       {
-        "digest": "sha256:46c0164067b6b6a0e82a941946766e6126de8409748408d9e1b8a2fea33cdda3",
+        "digest": "sha256:a01db75a9edac5685648358578d9a7cbd684dd8473505d2f5a808960b767cf0c",
         "identity": "tobkiri_host_pack_control",
         "kind": "manifest",
         "legacy": true,
@@ -14781,7 +14781,7 @@
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:46c0164067b6b6a0e82a941946766e6126de8409748408d9e1b8a2fea33cdda3",
+        "evidence_digest": "sha256:a01db75a9edac5685648358578d9a7cbd684dd8473505d2f5a808960b767cf0c",
         "line": 5,
         "path": "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/ecosystem.json",
         "rule_id": "legacy_host_execution"
@@ -18204,7 +18204,7 @@
       },
       {
         "legacy": true,
-        "manifest_digest": "sha256:46c0164067b6b6a0e82a941946766e6126de8409748408d9e1b8a2fea33cdda3",
+        "manifest_digest": "sha256:a01db75a9edac5685648358578d9a7cbd684dd8473505d2f5a808960b767cf0c",
         "pack_id": "tobkiri_host_pack_control",
         "path": "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/ecosystem.json",
         "version": "1.0.0"
@@ -18383,8 +18383,8 @@
     ]
   },
   "repository": {
-    "commit": "59f709dd69624d7cb407d74388e11a3e19b03aff",
-    "tree_digest": "23a9a6922defc23d98baabb8015dfe6cad58a5960597505514eccb6efb307880"
+    "commit": "aa750b6b596a27f6ab2c68788a9243602b749678",
+    "tree_digest": "4be465a851765d7a7a8f8cfa3cd6416bc900f5dffe400d326686dc622c9a55fd"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
   "schema": "io.tobkiri.architecture.inventory.v1"

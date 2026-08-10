@@ -34,6 +34,7 @@ CONTROL_PRESENTATION_OPERATIONS = frozenset(
         "profile.change.approve",
         "profile.change.resolve",
         "profile.change.review",
+        "profile.catalog.read",
         "profile.read",
         "settings.read",
         "topology.contracts.read",
@@ -235,6 +236,9 @@ class CapturedPackControlSession:
                         arguments.pop("expected_plan_digest", None)
                     ),
                 ) | _require_empty(arguments)
+            if operation_id == "profile.catalog.read":
+                _require_empty(arguments)
+                return self._runtime_surface.read_profile_catalog()
             if operation_id == "settings.read":
                 _require_empty(arguments)
                 return self._runtime_surface.read_settings()
@@ -809,7 +813,14 @@ def _active_profile() -> tuple[dict[str, Any], dict[str, Any]]:
     }, profile
 
 
-def resolve_profile_pack_set(pack_ids: list[str]) -> Any:
+def resolve_profile_pack_set(
+    pack_ids: list[str],
+    *,
+    profile_id: str = "defaults",
+    expected_profile_definition_digest: str | None = None,
+    expected_profile_catalog_digest: str | None = None,
+    expected_bundle_lock_digest: str | None = None,
+) -> Any:
     """Resolve a candidate Pack closure without activating or persisting it.
 
     This is the resolve step used by the Launcher recovery ceremony.  Pack
@@ -822,7 +833,6 @@ def resolve_profile_pack_set(pack_ids: list[str]) -> Any:
         dynamic_profile_edges,
         resolve_default_profile,
     )
-
     from .authority.v4 import AuthorityStore
     from .bootstrap.profile_capture import (
         _authority_reference,
@@ -834,6 +844,28 @@ def resolve_profile_pack_set(pack_ids: list[str]) -> Any:
     user_data = _user_data_root()
     bundle_root = _bundle_root()
     catalog = BundledCatalog.load(bundle_root)
+    from .profile_catalog_v4 import require_profile_catalog_binding
+
+    authoritative_bindings = (
+        expected_profile_definition_digest,
+        expected_profile_catalog_digest,
+        expected_bundle_lock_digest,
+    )
+    if any(value is not None for value in authoritative_bindings):
+        if not all(isinstance(value, str) and value for value in authoritative_bindings):
+            raise PackControlDenied("Profile catalog binding is incomplete")
+        try:
+            require_profile_catalog_binding(
+                catalog,
+                profile_id=profile_id,
+                expected_definition_digest=str(expected_profile_definition_digest),
+                expected_catalog_digest=str(expected_profile_catalog_digest),
+                expected_bundle_lock_digest=str(expected_bundle_lock_digest),
+            )
+        except ValueError as error:
+            raise PackControlDenied("Profile catalog binding is stale or invalid") from error
+    elif profile_id != "defaults":
+        raise PackControlDenied("non-default Profile requires exact catalog bindings")
     bundled_pack_ids = frozenset(catalog.packs)
     external_packs = dict(catalog.packs)
     pending = [pack_id for pack_id in pack_ids if pack_id not in external_packs]
@@ -875,9 +907,17 @@ def resolve_profile_pack_set(pack_ids: list[str]) -> Any:
         shells=catalog.shells,
         profiles=catalog.profiles,
     )
-    source = catalog.profiles.get("defaults")
+    source = catalog.profiles.get(profile_id)
     if source is None:
-        raise PackControlDenied("bundled Defaults Profile is unavailable")
+        raise PackControlDenied("selected Profile is unavailable")
+    if all(value is not None for value in authoritative_bindings):
+        definition_pack_ids = {
+            str(item["pack_id"]) for item in source["packs"] if item.get("role") != "application"
+        }
+        if set(pack_ids) != definition_pack_ids or len(pack_ids) != len(definition_pack_ids):
+            raise PackControlDenied(
+                "selected Profile Pack set does not match its canonical definition"
+            )
 
     requested = tuple(dict.fromkeys(str(pack_id) for pack_id in pack_ids))
     if len(requested) != len(pack_ids) or any(
@@ -900,7 +940,7 @@ def resolve_profile_pack_set(pack_ids: list[str]) -> Any:
         }
         baseline = resolve_default_profile(
             catalog,
-            "defaults",
+            profile_id,
             approved_artifact_digests=verified_digests,
             authority_snapshot_digest=snapshot_digest,
             authority_bindings=bindings,
@@ -911,6 +951,8 @@ def resolve_profile_pack_set(pack_ids: list[str]) -> Any:
             for item in baseline.profile["packs"]
             if item.get("role") != "application"
         }
+        if all(value is not None for value in authoritative_bindings):
+            requested = tuple(dict.fromkeys((*requested, *sorted(mandatory))))
         if not mandatory.issubset(requested):
             raise PackControlDenied("the bundled Defaults Profile Pack set is immutable")
         additional_pack_ids = tuple(pack_id for pack_id in requested if pack_id not in mandatory)
@@ -918,7 +960,7 @@ def resolve_profile_pack_set(pack_ids: list[str]) -> Any:
         # so mint the exact authority references before resolving the plan.
         # The resolver derives only the selected Pack/dependency closure and
         # binds every operation to the selected Shell caller.
-        for edge in dynamic_profile_edges(catalog, "defaults", additional_pack_ids):
+        for edge in dynamic_profile_edges(catalog, profile_id, additional_pack_ids):
             bindings[_edge_key(edge)] = _authority_reference(edge, snapshot_digest)
         approved_digests = {str(item["artifact_digest"]) for item in baseline.lock["effective_set"]}
         installed = _read_control_state("defaults")
@@ -942,7 +984,7 @@ def resolve_profile_pack_set(pack_ids: list[str]) -> Any:
             approved_digests.add(str(catalog.packs[pack_id]["pack"]["artifact_digest"]))
         resolved = resolve_default_profile(
             catalog,
-            "defaults",
+            profile_id,
             approved_artifact_digests=approved_digests,
             authority_snapshot_digest=snapshot_digest,
             authority_bindings=bindings,
@@ -970,16 +1012,17 @@ def activate_resolved_profile_pack_set(
     ) or not hmac.compare_digest(binding.plan_digest, expected_plan_digest):
         raise PackControlDenied("reviewed Profile predecessor is stale")
     user_data = _user_data_root()
+    profile_id = str(resolved.profile["profile_id"])
     workspace = user_data / "workspaces" / "defaults"
     with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
         store = ActivationStore(
             workspace / "activation",
             workspace,
-            profile_id="defaults",
+            profile_id=profile_id,
             authority=authority,
         )
         activation_id = (
-            "activation:defaults-"
+            f"activation:{profile_id}-"
             + resolved.plan["plan_digest"].removeprefix("sha256:")[:16]
             + "-"
             + secrets.token_hex(8)

@@ -15359,6 +15359,11 @@
               "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
             },
             {
+              "entrypoint_id": "profile.catalog.read",
+              "id": "profile.catalog.read",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
               "entrypoint_id": "profile.read",
               "id": "profile.read",
               "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
@@ -15424,6 +15429,73 @@
                       "type": "string"
                     },
                     "data": {
+                      "properties": {
+                        "catalog_api_version": {
+                          "const": "io.tobkiri.profile-catalog-presentation.v4"
+                        },
+                        "catalog_digest": {
+                          "pattern": "^sha256:[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "bundle_lock_digest": {
+                          "pattern": "^sha256:[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "catalog_ref": {
+                          "pattern": "^profile-catalog-v4://",
+                          "type": "string"
+                        },
+                        "active_profile_id": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "count": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "profiles": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "profile_id": {"minLength": 1, "type": "string"},
+                              "display_name": {"minLength": 1, "type": "string"},
+                              "active": {"type": "boolean"},
+                              "lifecycle_state": {
+                                "enum": ["active", "available"]
+                              },
+                              "available": {"type": "boolean"},
+                              "diagnostics": {"type": "array"},
+                              "definition": {
+                                "additionalProperties": true,
+                                "required": ["digest", "ref", "provenance"],
+                                "type": "object"
+                              },
+                              "bindings": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "base": {"type": "object"},
+                                  "shell": {"type": "object"},
+                                  "application": {"type": ["object", "null"]}
+                                },
+                                "required": ["base", "shell", "application"],
+                                "type": "object"
+                              },
+                              "pack_closure": {"type": "array"},
+                              "records": {"type": "object"},
+                              "authority_snapshot": {"type": "object"},
+                              "candidate": {"type": "object"}
+                            },
+                            "required": [
+                              "profile_id", "display_name", "active",
+                              "lifecycle_state", "available", "diagnostics",
+                              "definition", "bindings", "pack_closure", "records",
+                              "authority_snapshot", "candidate"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        }
+                      },
                       "type": "object"
                     },
                     "plan_digest": {
@@ -15475,7 +15547,8 @@
                         "packs",
                         "contracts",
                         "operations",
-                        "principals"
+                        "principals",
+                        "profiles"
                       ]
                     }
                   },
@@ -15489,6 +15562,25 @@
                     "catalog_revision",
                     "records",
                     "data"
+                  ],
+                  "allOf": [
+                    {
+                      "if": {
+                        "properties": {"surface": {"const": "profiles"}},
+                        "required": ["surface"]
+                      },
+                      "then": {
+                        "properties": {
+                          "data": {
+                            "required": [
+                              "catalog_api_version", "catalog_digest",
+                              "bundle_lock_digest", "catalog_ref",
+                              "active_profile_id", "count", "profiles"
+                            ]
+                          }
+                        }
+                      }
+                    }
                   ],
                   "type": "object"
                 },

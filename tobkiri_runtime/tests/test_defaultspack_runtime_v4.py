@@ -195,6 +195,7 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
         "tobkiri.host.control-presentation",
         "tobkiri.host.control-presentation",
         "tobkiri.host.control-presentation",
+        "tobkiri.host.control-presentation",
         "tobkiri.host.pack-control",
         "tobkiri.host.pack-control",
         "rumi_file_inspect_pack.file-inspect.service",
