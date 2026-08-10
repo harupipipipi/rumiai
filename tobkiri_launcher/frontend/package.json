@@ -19,7 +19,7 @@
     "measure:build": "node scripts/measure-build.mjs",
     "pretest": "npm run generate:contract-map:check",
     "audit": "npm audit --audit-level=high",
-    "test": "node --import tsx --test src/components/layout/*.test.tsx src/components/ui/*.test.tsx src/lib/*.test.ts src/pages/*.test.tsx scripts/*.test.mjs",
+    "test": "node --import tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\" \"scripts/**/*.test.mjs\"",
     "tauri": "cd .. && npm exec --prefix frontend -- tauri"
   },
   "dependencies": {

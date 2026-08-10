@@ -3,7 +3,6 @@ import {Check, UserRound} from 'lucide-react';
 
 import {AdvancedSurfaceFrame} from '@/src/components/advanced/AdvancedSurfaceFrame';
 import {ProfileCatalogSelector} from '@/src/components/advanced/ProfileCatalogSelector';
-import {ProfileCeremonyPanel} from '@/src/components/advanced/ProfileCeremonyPanel';
 import {RuntimeEvidenceCard} from '@/src/components/advanced/RuntimeEvidenceCard';
 import {Avatar} from '@/src/components/ui/Avatar';
 import {Badge} from '@/src/components/ui/Badge';
@@ -139,12 +138,6 @@ export function Profile() {
             loadFrontendCatalog(),
           ]);
         }}
-      />
-      <ProfileCeremonyPanel
-        surface={surface}
-        packs={packs}
-        packsLoading={packsLoading}
-        loadPacks={loadPacks}
       />
     </AdvancedSurfaceFrame>
   );

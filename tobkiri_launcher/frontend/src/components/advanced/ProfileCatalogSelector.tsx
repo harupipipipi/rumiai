@@ -14,6 +14,8 @@ import {
 import type {ProfileActivateResult, ProfileCeremonyClient} from '@/src/lib/profileCeremony';
 import type {Pack} from '@/src/store';
 
+type CeremonyMode = 'catalog' | 'defaults';
+
 function published(value: string | null | undefined): string {
   return value ?? 'not published';
 }
@@ -154,6 +156,7 @@ export function ProfileCatalogSelector({
   onActivated?: (result: ProfileActivateResult) => Promise<void>;
 }) {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [ceremonyMode, setCeremonyMode] = useState<CeremonyMode>('catalog');
   const [ceremonyBusy, setCeremonyBusy] = useState(false);
   const previousPackFingerprint = useRef<string | null>(null);
 
@@ -207,6 +210,7 @@ export function ProfileCatalogSelector({
   }, [catalogSurface.refresh, packFingerprint, packsLoading]);
 
   const selectedEntry = catalogProjection?.profiles.find((entry) => entry.profile_id === selectedProfileId) ?? null;
+  const catalogCeremonyMode = ceremonyMode === 'catalog' && selectedEntry !== null;
   const handleActivated = useCallback(async (result: ProfileActivateResult) => {
     setSelectedProfileId(result.profile_id);
     await onActivated?.(result);
@@ -277,7 +281,10 @@ export function ProfileCatalogSelector({
                       aria-label={`Select Profile ${entry.display_name} (${entry.profile_id})${unavailableLabel}`}
                       aria-pressed={selected}
                       disabled={!entry.available || catalogSurface.stale || ceremonyBusy}
-                      onClick={() => setSelectedProfileId(entry.profile_id)}
+                      onClick={() => {
+                        setSelectedProfileId(entry.profile_id);
+                        setCeremonyMode('catalog');
+                      }}
                     >
                       <span className={selected ? 'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-accent bg-accent text-accent-fg' : 'h-5 w-5 shrink-0 rounded-full border border-border'} aria-hidden="true">
                         {selected ? <CheckCircle2 className="h-4 w-4" /> : null}
@@ -306,25 +313,49 @@ export function ProfileCatalogSelector({
               <CardTitle>Selected authoritative Profile</CardTitle>
               <CardDescription>Every displayed field below comes from the verified catalog projection and is bound into the resolve request. Pack refreshes can change compatibility, never the definition.</CardDescription>
             </CardHeader>
-            <CardContent><ProfileDefinitionDetails entry={selectedEntry} /></CardContent>
+            <CardContent>
+              <ProfileDefinitionDetails entry={selectedEntry} />
+              <div className="mt-5 flex flex-wrap items-center gap-2" role="group" aria-label="Choose Profile ceremony mode">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={catalogCeremonyMode ? 'default' : 'outline'}
+                  aria-pressed={catalogCeremonyMode}
+                  disabled={ceremonyBusy}
+                  onClick={() => setCeremonyMode('catalog')}
+                >
+                  Use selected Profile ceremony
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={catalogCeremonyMode ? 'outline' : 'default'}
+                  aria-pressed={!catalogCeremonyMode}
+                  disabled={ceremonyBusy}
+                  onClick={() => setCeremonyMode('defaults')}
+                >
+                  Edit Defaults Pack-set
+                </Button>
+              </div>
+            </CardContent>
           </Card>
-          <ProfileCeremonyPanel
-            surface={profileSurface}
-            packs={packs}
-            packsLoading={packsLoading}
-            loadPacks={loadPacks}
-            client={client}
-            onActivated={handleActivated}
-            onBusyChange={setCeremonyBusy}
-            authoritativeSelection={{
-              entry: selectedEntry,
-              catalogDigest: catalogProjection?.catalog_digest ?? '',
-              bundleLockDigest: catalogProjection?.bundle_lock_digest ?? '',
-            }}
-            catalogSurface={catalogSurface}
-          />
         </>
       ) : null}
+      <ProfileCeremonyPanel
+        surface={profileSurface}
+        packs={packs}
+        packsLoading={packsLoading}
+        loadPacks={loadPacks}
+        client={client}
+        onActivated={handleActivated}
+        onBusyChange={setCeremonyBusy}
+        authoritativeSelection={catalogCeremonyMode && catalogProjection ? {
+          entry: selectedEntry,
+          catalogDigest: catalogProjection.catalog_digest,
+          bundleLockDigest: catalogProjection.bundle_lock_digest,
+        } : undefined}
+        catalogSurface={catalogCeremonyMode ? catalogSurface : undefined}
+      />
     </>
   );
 }

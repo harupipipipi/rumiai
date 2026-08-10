@@ -14,6 +14,7 @@ import type {
 } from '@/src/lib/profileCeremony';
 import {
   RUNTIME_SURFACE_API_VERSION,
+  RuntimeSurfaceError,
   type RuntimeProfileCatalogEntry,
   type RuntimeProfileCatalogProjection,
   type RuntimeSurfaceEnvelope,
@@ -207,6 +208,10 @@ function buttonContaining(container: HTMLElement, text: string): HTMLButtonEleme
   return button as HTMLButtonElement;
 }
 
+function ceremonyOwnerCount(container: HTMLElement): number {
+  return container.querySelectorAll('[aria-label="Profile change steps"]').length;
+}
+
 function ceremonyClient(calls: Array<{step: string; payload: Record<string, unknown>}>, gate?: {promise: Promise<void>; release: () => void}): ProfileCeremonyClient {
   return {
     resolve: async (input): Promise<ProfileResolveResult> => {
@@ -352,6 +357,154 @@ test('stale catalogs lock selection and ceremony actions while retaining visible
   }
 });
 
+test('selector keeps one ceremony owner and preserves the separate Defaults editor across catalog states', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  try {
+    await act(async () => {
+      root.render(
+        <ProfileCatalogSelector
+          profileSurface={surfaceState()}
+          catalogSurface={catalogState(catalogEnvelope())}
+          packs={[pack('provider-pack')]}
+          packsLoading={false}
+          loadPacks={async () => undefined}
+        />,
+      );
+    });
+    await act(async () => undefined);
+    assert.equal(ceremonyOwnerCount(container), 1);
+
+    const defaultsMode = buttonContaining(container, 'Edit Defaults Pack-set');
+    await act(async () => { defaultsMode.click(); });
+    assert.equal(defaultsMode.getAttribute('aria-pressed'), 'true');
+    assert.equal(ceremonyOwnerCount(container), 1);
+    assert.ok(container.querySelector('button[aria-label^="Toggle Defaults Pack"]'));
+
+    await act(async () => { buttonContaining(container, 'Use selected Profile ceremony').click(); });
+    assert.equal(ceremonyOwnerCount(container), 1);
+    assert.equal(container.querySelectorAll('button[aria-label^="Toggle Defaults Pack"]').length, 0);
+
+    await act(async () => {
+      root.render(
+        <ProfileCatalogSelector
+          profileSurface={surfaceState()}
+          catalogSurface={catalogState(catalogEnvelope(), {data: null, status: 'loading'})}
+          packs={[pack('provider-pack')]}
+          packsLoading={false}
+          loadPacks={async () => undefined}
+        />,
+      );
+    });
+    assert.equal(ceremonyOwnerCount(container), 1);
+    assert.match(container.textContent ?? '', /Loading authoritative Profile definitions/);
+    assert.match(container.textContent ?? '', /Defaults Pack-set editor/);
+
+    await act(async () => {
+      root.render(
+        <ProfileCatalogSelector
+          profileSurface={surfaceState()}
+          catalogSurface={catalogState(catalogEnvelope(), {
+            data: null,
+            status: 'error',
+            error: {code: 'FAILED', message: 'HTTP API session mismatch'},
+          })}
+          packs={[pack('provider-pack')]}
+          packsLoading={false}
+          loadPacks={async () => undefined}
+        />,
+      );
+    });
+    assert.equal(ceremonyOwnerCount(container), 1);
+    assert.match(container.textContent ?? '', /HTTP API session mismatch/);
+    assert.ok(container.querySelector('[role="alert"]'));
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
+test('selector keyboard semantics remain labelled and focusable in a compact viewport', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  Object.defineProperty(dom.window, 'innerWidth', {value: 320, configurable: true});
+  try {
+    await act(async () => {
+      root.render(
+        <ProfileCatalogSelector
+          profileSurface={surfaceState()}
+          catalogSurface={catalogState(catalogEnvelope())}
+          packs={[pack('provider-pack')]}
+          packsLoading={false}
+          loadPacks={async () => undefined}
+        />,
+      );
+    });
+    await act(async () => undefined);
+    assert.equal(dom.window.innerWidth, 320);
+    const group = container.querySelector<HTMLElement>('[role="group"][aria-label="Select an authoritative Profile definition"]');
+    assert.ok(group);
+    const profileButtons = [...group.querySelectorAll<HTMLButtonElement>('button')];
+    assert.equal(profileButtons.length, 2);
+    for (const button of profileButtons) {
+      assert.ok(button.getAttribute('aria-label')?.startsWith('Select Profile'));
+      assert.ok(['true', 'false'].includes(button.getAttribute('aria-pressed') ?? ''));
+      assert.match(button.className, /min-h-11/);
+      assert.match(button.className, /focus-visible:ring/);
+    }
+    const alternate = buttonByLabel(container, 'Select Profile Alternate Profile (alternate)');
+    alternate.focus();
+    assert.equal(dom.window.document.activeElement, alternate);
+    alternate.dispatchEvent(new dom.window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+    await act(async () => { alternate.click(); });
+    assert.equal(alternate.getAttribute('aria-pressed'), 'true');
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
+test('component surfaces API/session failure and ceremony timeout without opening a later step', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  const timeoutClient = ceremonyClient([]);
+  timeoutClient.resolve = async () => {
+    throw new RuntimeSurfaceError('TIMEOUT', 'HTTP request timed out while resolving the Profile.');
+  };
+  try {
+    await act(async () => {
+      root.render(
+        <ProfileCatalogSelector
+          profileSurface={surfaceState()}
+          catalogSurface={catalogState(catalogEnvelope())}
+          packs={[pack('provider-pack')]}
+          packsLoading={false}
+          loadPacks={async () => undefined}
+          client={timeoutClient}
+        />,
+      );
+    });
+    await act(async () => undefined);
+    await act(async () => { buttonByLabel(container, 'Select Profile Alternate Profile (alternate)').click(); });
+    await act(async () => { buttonContaining(container, 'Resolve candidate').click(); });
+    assert.match(container.textContent ?? '', /Profile ceremony stopped fail-closed/);
+    assert.match(container.textContent ?? '', /TIMEOUT: HTTP request timed out/);
+    assert.equal([...container.querySelectorAll('button')].some((button) => button.textContent?.includes('Review exact candidate')), false);
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
 test('mismatched resolve binding fails closed before review or activation', async () => {
   const previousWindow = globalThis.window;
   const previousDocument = globalThis.document;
@@ -486,6 +639,49 @@ test('fresh selector mount rehydrates the active marker from the catalog project
     assert.equal(container.querySelectorAll('button[aria-label^="Select Profile"]').length, 0);
   } finally {
     act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
+test('restart-style remount rehydrates the active marker from the new authoritative catalog snapshot', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  let mountedRoot = root;
+  const renderCatalog = async (catalog: RuntimeSurfaceEnvelope<RuntimeProfileCatalogProjection>) => {
+    await act(async () => {
+      mountedRoot.render(
+        <ProfileCatalogSelector
+          profileSurface={surfaceState()}
+          catalogSurface={catalogState(catalog)}
+          packs={[pack('provider-pack')]}
+          packsLoading={false}
+          loadPacks={async () => undefined}
+        />,
+      );
+    });
+    await act(async () => undefined);
+  };
+  try {
+    await renderCatalog(catalogEnvelope());
+    await act(async () => { buttonByLabel(container, 'Select Profile Alternate Profile (alternate)').click(); });
+    assert.equal(buttonByLabel(container, 'Select Profile Alternate Profile (alternate)').getAttribute('aria-pressed'), 'true');
+
+    await act(async () => { mountedRoot.unmount(); });
+    mountedRoot = createRoot(container);
+    await renderCatalog(catalogEnvelope());
+    assert.equal(buttonByLabel(container, 'Select Profile Defaults Profile (defaults)').getAttribute('aria-pressed'), 'true');
+    assert.equal(buttonByLabel(container, 'Select Profile Alternate Profile (alternate)').getAttribute('aria-pressed'), 'false');
+
+    await act(async () => { mountedRoot.unmount(); });
+    mountedRoot = createRoot(container);
+    await renderCatalog(catalogEnvelope('alternate'));
+    assert.equal(buttonByLabel(container, 'Select Profile Alternate Profile (alternate)').getAttribute('aria-pressed'), 'true');
+    assert.match(container.textContent ?? '', /Active/);
+  } finally {
+    act(() => mountedRoot.unmount());
     dom.window.close();
     Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
     Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
