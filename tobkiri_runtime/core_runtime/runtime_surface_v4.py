@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import queue
 import secrets
 import threading
 import time
+from concurrent.futures import CancelledError, Future, TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Mapping, cast
+from typing import Any, Callable, Generic, Mapping, TypeVar, cast
 
 from ecosystem.defaultspack.domain.runtime_v4 import (
     ActiveDefaultProfile,
@@ -89,6 +91,160 @@ CatalogLoader = Callable[[], BundledCatalog]
 UserSettingsReader = Callable[[], Mapping[str, object]]
 PackVMReadinessReader = Callable[[], Mapping[str, object]]
 CapabilityBindingReader = Callable[[], Mapping[str, object]]
+
+
+_READ_WORKER_COUNT = 4
+_READ_QUEUE_CAPACITY = 16
+_READ_WORKER_NAME_PREFIX = "tobkiri-runtime-read"
+_ReadResult = TypeVar("_ReadResult")
+
+
+class _ReadDeadline:
+    """Cooperative cancellation boundary shared by one complete read job."""
+
+    def __init__(
+        self,
+        *,
+        deadline: float,
+        clock: Callable[[], float],
+        cancelled: threading.Event,
+        timeout_message: str,
+    ) -> None:
+        self.deadline = deadline
+        self._clock = clock
+        self._cancelled = cancelled
+        self._timeout_message = timeout_message
+
+    def checkpoint(self) -> None:
+        """Reject cancellation or expiry before publishing further work."""
+
+        if self._cancelled.is_set() or self._clock() >= self.deadline:
+            raise RuntimeSurfaceError(
+                RuntimeSurfaceErrorCode.TIMEOUT,
+                self._timeout_message,
+            )
+
+    def cancel(self) -> None:
+        """Prevent this read from publishing a result after its caller left."""
+
+        self._cancelled.set()
+
+
+@dataclass(eq=False)
+class _ReadJob(Generic[_ReadResult]):
+    owner: object
+    future: Future[_ReadResult]
+    deadline: _ReadDeadline
+    operation: Callable[[_ReadDeadline], _ReadResult]
+
+
+class _BoundedReadExecutor:
+    """Process-wide fixed workers with bounded admission and owner cancellation."""
+
+    def __init__(self, *, workers: int, queue_capacity: int) -> None:
+        self._workers = workers
+        self._capacity = workers + queue_capacity
+        self._admission = threading.BoundedSemaphore(self._capacity)
+        self._queue: queue.Queue[_ReadJob[Any]] = queue.Queue(maxsize=self._capacity)
+        self._lock = threading.Lock()
+        self._jobs_by_owner: dict[object, set[_ReadJob[Any]]] = {}
+        self._threads = tuple(
+            threading.Thread(
+                target=self._worker,
+                name=f"{_READ_WORKER_NAME_PREFIX}-{index}",
+                daemon=True,
+            )
+            for index in range(workers)
+        )
+        for thread in self._threads:
+            thread.start()
+
+    def submit(
+        self,
+        *,
+        owner: object,
+        deadline: _ReadDeadline,
+        operation: Callable[[_ReadDeadline], _ReadResult],
+    ) -> Future[_ReadResult] | None:
+        """Admit one job without allowing an unbounded pending queue."""
+
+        if not self._admission.acquire(blocking=False):
+            return None
+        future: Future[_ReadResult] = Future()
+        job = _ReadJob(
+            owner=owner,
+            future=future,
+            deadline=deadline,
+            operation=operation,
+        )
+        with self._lock:
+            self._jobs_by_owner.setdefault(owner, set()).add(job)
+        try:
+            self._queue.put_nowait(job)
+        except queue.Full:  # pragma: no cover - semaphore and queue move atomically enough
+            self._finish(job)
+            return None
+        return future
+
+    def cancel_owner(self, owner: object) -> None:
+        """Cancel all queued and active jobs owned by a closing service."""
+
+        with self._lock:
+            jobs = tuple(self._jobs_by_owner.get(owner, ()))
+        for job in jobs:
+            job.deadline.cancel()
+            job.future.cancel()
+
+    def stats(self) -> Mapping[str, int]:
+        """Return bounded executor metrics for lifecycle and regression tests."""
+
+        with self._lock:
+            admitted = sum(len(jobs) for jobs in self._jobs_by_owner.values())
+        return {
+            "workers": self._workers,
+            "live_workers": sum(thread.is_alive() for thread in self._threads),
+            "capacity": self._capacity,
+            "admitted": admitted,
+        }
+
+    def _worker(self) -> None:
+        while True:
+            job = self._queue.get()
+            try:
+                if job.future.cancelled():
+                    continue
+                job.deadline.checkpoint()
+                result = job.operation(job.deadline)
+                job.deadline.checkpoint()
+                if not job.future.cancelled():
+                    job.future.set_result(result)
+            except BaseException as error:
+                if not job.future.cancelled():
+                    job.future.set_exception(error)
+            finally:
+                self._finish(job)
+                self._queue.task_done()
+
+    def _finish(self, job: _ReadJob[Any]) -> None:
+        with self._lock:
+            jobs = self._jobs_by_owner.get(job.owner)
+            if jobs is not None:
+                jobs.discard(job)
+                if not jobs:
+                    self._jobs_by_owner.pop(job.owner, None)
+        self._admission.release()
+
+
+_READ_EXECUTOR = _BoundedReadExecutor(
+    workers=_READ_WORKER_COUNT,
+    queue_capacity=_READ_QUEUE_CAPACITY,
+)
+
+
+def _read_executor_stats() -> Mapping[str, int]:
+    """Expose non-secret bounded-worker counts to focused lifecycle tests."""
+
+    return _READ_EXECUTOR.stats()
 
 
 @dataclass(frozen=True)
@@ -533,6 +689,73 @@ class RuntimeSurfaceService:
         self._frontend_contract_bindings = frontend_contract_bindings
         self._read_timeout_seconds = read_timeout_seconds
         self._clock = clock
+        self._read_owner = object()
+        self._read_lifecycle_lock = threading.Lock()
+        self._closed = False
+
+    def close(self) -> None:
+        """Cancel owned reads without creating replacement worker threads."""
+
+        with self._read_lifecycle_lock:
+            if self._closed:
+                return
+            self._closed = True
+            owner = self._read_owner
+        _READ_EXECUTOR.cancel_owner(owner)
+
+    def cancel_pending_reads(self) -> None:
+        """Fence current reads while leaving this service reusable after restart."""
+
+        with self._read_lifecycle_lock:
+            if self._closed:
+                return
+            owner = self._read_owner
+            self._read_owner = object()
+        _READ_EXECUTOR.cancel_owner(owner)
+
+    def _run_read(
+        self,
+        timeout_message: str,
+        operation: Callable[[_ReadDeadline], _ReadResult],
+    ) -> _ReadResult:
+        """Run one complete projection under a single monotonic deadline."""
+
+        started = self._clock()
+        deadline = _ReadDeadline(
+            deadline=started + self._read_timeout_seconds,
+            clock=self._clock,
+            cancelled=threading.Event(),
+            timeout_message=timeout_message,
+        )
+        with self._read_lifecycle_lock:
+            if self._closed:
+                raise RuntimeSurfaceError(
+                    RuntimeSurfaceErrorCode.API_FAILURE,
+                    "canonical runtime read service is closed",
+                )
+            future = _READ_EXECUTOR.submit(
+                owner=self._read_owner,
+                deadline=deadline,
+                operation=operation,
+            )
+        if future is None:
+            deadline.cancel()
+            raise RuntimeSurfaceError(
+                RuntimeSurfaceErrorCode.TIMEOUT,
+                timeout_message,
+            )
+        try:
+            remaining = deadline.deadline - self._clock()
+            if remaining <= 0:
+                raise FutureTimeoutError
+            return future.result(timeout=remaining)
+        except (CancelledError, FutureTimeoutError) as error:
+            deadline.cancel()
+            future.cancel()
+            raise RuntimeSurfaceError(
+                RuntimeSurfaceErrorCode.TIMEOUT,
+                timeout_message,
+            ) from error
 
     def bind_capability_reader(self, reader: CapabilityBindingReader) -> None:
         """Install the one Host-captured PackAPI capability snapshot reader."""
@@ -561,40 +784,60 @@ class RuntimeSurfaceService:
     ) -> dict[str, object]:
         """Return the complete active Profile runtime projection."""
 
-        snapshot = self._snapshot()
+        return self._run_read(
+            "canonical runtime snapshot timed out",
+            lambda deadline: self._read_profile(
+                deadline,
+                expected_profile_revision=expected_profile_revision,
+                expected_plan_digest=expected_plan_digest,
+            ),
+        )
+
+    def _read_profile(
+        self,
+        deadline: _ReadDeadline,
+        *,
+        expected_profile_revision: str | None,
+        expected_plan_digest: str | None,
+    ) -> dict[str, object]:
+        snapshot = self._snapshot(deadline)
         self._check_expected_bindings(
             snapshot.active,
             expected_profile_revision=expected_profile_revision,
             expected_plan_digest=expected_plan_digest,
         )
-        return self._read_envelope(
-            snapshot,
-            surface="profile",
-            data=self._profile_projection(snapshot),
-        )
+        data = self._profile_projection(snapshot, deadline=deadline)
+        deadline.checkpoint()
+        return self._read_envelope(snapshot, surface="profile", data=data)
 
     def read_profile_catalog(self) -> dict[str, object]:
         """Return all verified Profile definitions without changing selection."""
 
-        started = self._clock()
+        return self._run_read(
+            "canonical Profile catalog timed out",
+            self._read_profile_catalog,
+        )
+
+    def _read_profile_catalog(self, deadline: _ReadDeadline) -> dict[str, object]:
         try:
+            deadline.checkpoint()
             active = self._snapshot_loader()
+            deadline.checkpoint()
             catalog = self._catalog_loader()
+            deadline.checkpoint()
             from .profile_catalog_v4 import project_profile_catalog
 
             projection = project_profile_catalog(catalog, active)
         except ProfileResolutionDenied as error:
             raise _map_profile_error(error) from error
+        except RuntimeSurfaceError:
+            raise
         except (OSError, RuntimeError, ValueError) as error:
             raise RuntimeSurfaceError(
                 RuntimeSurfaceErrorCode.API_FAILURE,
                 "canonical Profile catalog is unavailable",
             ) from error
-        if self._clock() - started > self._read_timeout_seconds:
-            raise RuntimeSurfaceError(
-                RuntimeSurfaceErrorCode.TIMEOUT,
-                "canonical Profile catalog timed out",
-            )
+        deadline.checkpoint()
         snapshot = RuntimeSurfaceSnapshot(active=active, catalog=catalog)
         return self._read_envelope(snapshot, surface="profiles", data=projection)
 
@@ -608,24 +851,31 @@ class RuntimeSurfaceService:
     ) -> None:
         """Verify one selection against the currently admitted catalog bytes."""
 
-        try:
-            from .profile_catalog_v4 import require_profile_catalog_binding
+        def verify(deadline: _ReadDeadline) -> None:
+            try:
+                from .profile_catalog_v4 import require_profile_catalog_binding
 
-            require_profile_catalog_binding(
-                self._catalog_loader(),
-                profile_id=profile_id,
-                expected_definition_digest=expected_definition_digest,
-                expected_catalog_digest=expected_catalog_digest,
-                expected_bundle_lock_digest=expected_bundle_lock_digest,
-            )
-        except ValueError as error:
-            message = str(error)
-            code = (
-                RuntimeSurfaceErrorCode.INVALID_REQUEST
-                if "absent" in message
-                else RuntimeSurfaceErrorCode.DIGEST_MISMATCH
-            )
-            raise RuntimeSurfaceError(code, message) from error
+                deadline.checkpoint()
+                catalog = self._catalog_loader()
+                deadline.checkpoint()
+                require_profile_catalog_binding(
+                    catalog,
+                    profile_id=profile_id,
+                    expected_definition_digest=expected_definition_digest,
+                    expected_catalog_digest=expected_catalog_digest,
+                    expected_bundle_lock_digest=expected_bundle_lock_digest,
+                )
+                deadline.checkpoint()
+            except ValueError as error:
+                message = str(error)
+                code = (
+                    RuntimeSurfaceErrorCode.INVALID_REQUEST
+                    if "absent" in message
+                    else RuntimeSurfaceErrorCode.DIGEST_MISMATCH
+                )
+                raise RuntimeSurfaceError(code, message) from error
+
+        self._run_read("canonical Profile catalog timed out", verify)
 
     def read_advanced(
         self,
@@ -643,7 +893,25 @@ class RuntimeSurfaceService:
                 RuntimeSurfaceErrorCode.INVALID_REQUEST,
                 "advanced view must be packs, contracts, operations, or principals",
             )
-        snapshot = self._snapshot()
+        return self._run_read(
+            f"canonical {normalized} projection timed out",
+            lambda deadline: self._read_advanced(
+                normalized,
+                deadline=deadline,
+                expected_profile_revision=expected_profile_revision,
+                expected_plan_digest=expected_plan_digest,
+            ),
+        )
+
+    def _read_advanced(
+        self,
+        normalized: str,
+        *,
+        deadline: _ReadDeadline,
+        expected_profile_revision: str | None,
+        expected_plan_digest: str | None,
+    ) -> dict[str, object]:
+        snapshot = self._snapshot(deadline)
         self._check_expected_bindings(
             snapshot.active,
             expected_profile_revision=expected_profile_revision,
@@ -651,28 +919,35 @@ class RuntimeSurfaceService:
         )
         advanced = self._advanced_projection(
             snapshot,
-            packvm_readiness=self._packvm_readiness(),
-            capability_binding=self._capability_binding(),
-            frontend_bindings=self._frontend_bindings(snapshot),
+            packvm_readiness=self._packvm_readiness(deadline),
+            capability_binding=self._capability_binding(deadline),
+            frontend_bindings=self._frontend_bindings(snapshot, deadline),
         )
+        deadline.checkpoint()
         data = {normalized: advanced[normalized]}
         if normalized == "contracts":
             data["routes"] = advanced["routes"]
-        return self._read_envelope(
-            snapshot,
-            surface=normalized,
-            data=data,
-        )
+        return self._read_envelope(snapshot, surface=normalized, data=data)
 
     def read_settings(self) -> dict[str, object]:
         """Return user preferences and immutable runtime settings separately."""
 
-        snapshot = self._snapshot()
+        return self._run_read(
+            "canonical runtime settings timed out",
+            self._read_settings,
+        )
+
+    def _read_settings(self, deadline: _ReadDeadline) -> dict[str, object]:
+        snapshot = self._snapshot(deadline)
         user_settings: dict[str, object] | None = None
         if self._user_settings_reader is not None:
             try:
+                deadline.checkpoint()
                 user_settings = dict(self._user_settings_reader())
+                deadline.checkpoint()
             except Exception as error:
+                if isinstance(error, RuntimeSurfaceError):
+                    raise
                 raise RuntimeSurfaceError(
                     RuntimeSurfaceErrorCode.API_FAILURE,
                     "Launcher-local settings adapter is unavailable",
@@ -753,24 +1028,24 @@ class RuntimeSurfaceService:
             "data": dict(data),
         }
 
-    def _snapshot(self) -> RuntimeSurfaceSnapshot:
-        started = self._clock()
+    def _snapshot(self, deadline: _ReadDeadline) -> RuntimeSurfaceSnapshot:
         try:
+            deadline.checkpoint()
             active = self._snapshot_loader()
+            deadline.checkpoint()
             catalog = self._catalog_loader()
+            deadline.checkpoint()
             catalog = _catalog_for_active_closure(catalog, active)
         except ProfileResolutionDenied as error:
             raise _map_profile_error(error) from error
+        except RuntimeSurfaceError:
+            raise
         except (OSError, RuntimeError, ValueError) as error:
             raise RuntimeSurfaceError(
                 RuntimeSurfaceErrorCode.API_FAILURE,
                 "canonical runtime snapshot is unavailable",
             ) from error
-        if self._clock() - started > self._read_timeout_seconds:
-            raise RuntimeSurfaceError(
-                RuntimeSurfaceErrorCode.TIMEOUT,
-                "canonical runtime snapshot timed out",
-            )
+        deadline.checkpoint()
         return RuntimeSurfaceSnapshot(active=active, catalog=catalog)
 
     @staticmethod
@@ -797,17 +1072,23 @@ class RuntimeSurfaceService:
                 "requested ResolvedPlan digest does not match",
             )
 
-    def _profile_projection(self, snapshot: RuntimeSurfaceSnapshot) -> dict[str, object]:
+    def _profile_projection(
+        self,
+        snapshot: RuntimeSurfaceSnapshot,
+        *,
+        deadline: _ReadDeadline,
+    ) -> dict[str, object]:
         active = snapshot.active
         profile = active.resolved.profile
         lock = active.resolved.lock
         plan = active.resolved.plan
         advanced = self._advanced_projection(
             snapshot,
-            packvm_readiness=self._packvm_readiness(),
-            capability_binding=self._capability_binding(),
-            frontend_bindings=self._frontend_bindings(snapshot),
+            packvm_readiness=self._packvm_readiness(deadline),
+            capability_binding=self._capability_binding(deadline),
+            frontend_bindings=self._frontend_bindings(snapshot, deadline),
         )
+        deadline.checkpoint()
         application = next(
             (dict(item) for item in profile["packs"] if item.get("role") == "application"),
             None,
@@ -1102,7 +1383,12 @@ class RuntimeSurfaceService:
             "routes": routes,
         }
 
-    def _frontend_bindings(self, snapshot: RuntimeSurfaceSnapshot) -> tuple[object, ...]:
+    def _frontend_bindings(
+        self,
+        snapshot: RuntimeSurfaceSnapshot,
+        deadline: _ReadDeadline,
+    ) -> tuple[object, ...]:
+        deadline.checkpoint()
         if self._frontend_contract_bindings is not None:
             return self._frontend_contract_bindings
         from .frontend_contract_routes import load_frontend_contract_bindings
@@ -1115,7 +1401,7 @@ class RuntimeSurfaceService:
                 "verified Application Pack is unavailable",
             )
         try:
-            return tuple(
+            bindings = tuple(
                 load_frontend_contract_bindings(
                     runtime_root
                     / "ecosystem"
@@ -1125,25 +1411,45 @@ class RuntimeSurfaceService:
                     application,
                 )
             )
+            deadline.checkpoint()
+            return bindings
+        except RuntimeSurfaceError:
+            raise
         except (OSError, RuntimeError, ValueError) as error:
             raise RuntimeSurfaceError(
                 RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
                 "verified Frontend Contract Map is unavailable",
             ) from error
 
-    def _packvm_readiness(self) -> Mapping[str, object] | None:
+    def _packvm_readiness(
+        self,
+        deadline: _ReadDeadline,
+    ) -> Mapping[str, object] | None:
+        deadline.checkpoint()
         if self._packvm_readiness_reader is None:
             return None
         try:
-            return dict(self._packvm_readiness_reader())
+            result = dict(self._packvm_readiness_reader())
+            deadline.checkpoint()
+            return result
+        except RuntimeSurfaceError:
+            raise
         except Exception:
             return None
 
-    def _capability_binding(self) -> Mapping[str, object] | None:
+    def _capability_binding(
+        self,
+        deadline: _ReadDeadline,
+    ) -> Mapping[str, object] | None:
+        deadline.checkpoint()
         if self._capability_binding_reader is None:
             return None
         try:
-            return dict(self._capability_binding_reader())
+            result = dict(self._capability_binding_reader())
+            deadline.checkpoint()
+            return result
+        except RuntimeSurfaceError:
+            raise
         except Exception:
             return None
 

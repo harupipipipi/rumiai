@@ -50,6 +50,7 @@ from tobkiri_host.errors import HostCoreError
 logger = logging.getLogger(__name__)
 
 THREAD_JOIN_TIMEOUT_SECONDS = 5
+MAX_CONCURRENT_REQUESTS = 32
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
@@ -210,9 +211,13 @@ class _PackThreadingHTTPServer(ThreadingHTTPServer):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._request_condition = threading.Condition()
         self._active_requests = 0
+        self._request_slots = threading.BoundedSemaphore(MAX_CONCURRENT_REQUESTS)
         super().__init__(*args, **kwargs)
 
     def process_request(self, request: Any, client_address: Any) -> None:
+        if not self._request_slots.acquire(blocking=False):
+            self._reject_overloaded_request(request)
+            return
         with self._request_condition:
             self._active_requests += 1
         try:
@@ -221,6 +226,7 @@ class _PackThreadingHTTPServer(ThreadingHTTPServer):
             with self._request_condition:
                 self._active_requests -= 1
                 self._request_condition.notify_all()
+            self._request_slots.release()
             raise
 
     def process_request_thread(self, request: Any, client_address: Any) -> None:
@@ -230,6 +236,24 @@ class _PackThreadingHTTPServer(ThreadingHTTPServer):
             with self._request_condition:
                 self._active_requests -= 1
                 self._request_condition.notify_all()
+            self._request_slots.release()
+
+    def _reject_overloaded_request(self, request: Any) -> None:
+        """Apply backpressure without allocating another handler thread."""
+
+        body = b'{"success":false,"error":"Pack API request capacity exhausted"}'
+        response = (
+            b"HTTP/1.1 503 Service Unavailable\r\n"
+            b"Content-Type: application/json; charset=utf-8\r\n"
+            b"Cache-Control: no-store\r\n"
+            b"Connection: close\r\n" + f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body
+        )
+        try:
+            request.sendall(response)
+        except OSError:
+            pass
+        finally:
+            self.shutdown_request(request)
 
     def request_shutdown(self) -> None:
         """Request ``serve_forever`` exit without waiting for its thread."""
@@ -725,8 +749,26 @@ class PackAPIHandler(
             )
             return True
         presented = self._present_contract_result(route_binding, result)
+        if self._contract_result_status(result) == 504:
+            self._send_response(
+                APIResponse(
+                    False,
+                    data=presented,
+                    error=str(result.get("message") or "Runtime projection timed out"),
+                ),
+                504,
+            )
+            return True
         self._send_response(APIResponse(True, data=presented))
         return True
+
+    @staticmethod
+    def _contract_result_status(result: Mapping[str, object]) -> int:
+        """Map a typed runtime timeout to its required HTTP gateway status."""
+
+        if result.get("state") == "error" and result.get("code") == "TIMEOUT":
+            return 504
+        return 200
 
     def _handle_packvm_lifecycle(self, method: str, path: str) -> bool:
         """Serve the finite authenticated v4 PackVM lifecycle contract."""
@@ -1670,6 +1712,14 @@ class PackAPIServer:
         with self._lifecycle_lock:
             server = self.server
             thread = self.thread
+            dispatch_session = self._dispatch_session
+            cancel_pending_reads = getattr(
+                dispatch_session,
+                "cancel_pending_reads",
+                None,
+            )
+            if callable(cancel_pending_reads):
+                cancel_pending_reads()
             if server is not None:
                 server.request_shutdown()
             if thread is not None:

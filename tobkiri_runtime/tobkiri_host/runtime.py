@@ -100,6 +100,7 @@ class ProductionRuntimeV4:
         current_capture_check: Callable[[], None] | None = None,
         owned_authority_store: AuthorityStore | None = None,
         close_callbacks: tuple[Callable[[], None], ...] = (),
+        stop_callbacks: tuple[Callable[[], None], ...] = (),
     ) -> "V4DispatchSession":
         """Bind request ports to identities from this captured composition."""
         return V4DispatchSession(
@@ -113,6 +114,7 @@ class ProductionRuntimeV4:
             current_capture_check=current_capture_check,
             owned_authority_store=owned_authority_store,
             close_callbacks=close_callbacks,
+            stop_callbacks=stop_callbacks,
         )
 
 
@@ -130,6 +132,13 @@ class V4DispatchSession:
     current_capture_check: Callable[[], None] | None = None
     owned_authority_store: AuthorityStore | None = None
     close_callbacks: tuple[Callable[[], None], ...] = ()
+    stop_callbacks: tuple[Callable[[], None], ...] = ()
+
+    def cancel_pending_reads(self) -> None:
+        """Fence server-owned reads at a reusable stop/restart boundary."""
+
+        for callback in self.stop_callbacks:
+            callback()
 
     def close(self) -> None:
         """Close the Broker, then its owned Authority database, idempotently."""

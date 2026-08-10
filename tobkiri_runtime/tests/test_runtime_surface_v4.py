@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import multiprocessing
 from pathlib import Path
+import threading
 import time
 
 import pytest
@@ -469,6 +470,121 @@ def test_read_timeout_is_a_typed_fail_closed_error(active_runtime) -> None:
         service.read_profile()
     assert error.value.code is RuntimeSurfaceErrorCode.TIMEOUT
     assert error.value.as_dict()["write_set"] == []
+
+
+def test_blocked_loader_times_out_and_late_snapshot_is_not_adopted(active_runtime) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    catalog_calls: list[str] = []
+
+    def blocked_snapshot():
+        entered.set()
+        release.wait()
+        return active_runtime
+
+    service = RuntimeSurfaceService(
+        snapshot_loader=blocked_snapshot,
+        catalog_loader=lambda: (
+            catalog_calls.append("catalog") or BundledCatalog.load(_bundle_root())
+        ),
+        read_timeout_seconds=0.1,
+    )
+    started = time.monotonic()
+    with pytest.raises(RuntimeSurfaceError) as error:
+        service.read_profile()
+    elapsed = time.monotonic() - started
+
+    assert entered.is_set()
+    assert elapsed < 0.75
+    assert error.value.code is RuntimeSurfaceErrorCode.TIMEOUT
+    release.set()
+    deadline = time.monotonic() + 1.0
+    while runtime_surface._read_executor_stats()["admitted"] and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert catalog_calls == []
+    service.close()
+
+
+def test_timeout_saturation_is_bounded_and_recovers(active_runtime) -> None:
+    release = threading.Event()
+    entered_lock = threading.Lock()
+    entered = 0
+    catalog = BundledCatalog.load(_bundle_root())
+
+    def blocked_snapshot():
+        nonlocal entered
+        with entered_lock:
+            entered += 1
+        release.wait()
+        return active_runtime
+
+    service = RuntimeSurfaceService(
+        snapshot_loader=blocked_snapshot,
+        catalog_loader=lambda: catalog,
+        read_timeout_seconds=1.0,
+    )
+    stats = runtime_surface._read_executor_stats()
+    requests = stats["capacity"] + 8
+
+    def read_once() -> RuntimeSurfaceErrorCode | None:
+        try:
+            service.read_profile()
+        except RuntimeSurfaceError as error:
+            return error.code
+        return None
+
+    with ThreadPoolExecutor(max_workers=requests) as executor:
+        results = list(executor.map(lambda _index: read_once(), range(requests)))
+
+    after_timeout = runtime_surface._read_executor_stats()
+    runtime_workers = [
+        thread
+        for thread in threading.enumerate()
+        if thread.name.startswith(runtime_surface._READ_WORKER_NAME_PREFIX)
+    ]
+    assert set(results) == {RuntimeSurfaceErrorCode.TIMEOUT}
+    assert after_timeout["workers"] == stats["workers"]
+    assert after_timeout["live_workers"] == stats["workers"]
+    assert len(runtime_workers) == stats["workers"]
+    assert entered <= stats["workers"]
+
+    release.set()
+    deadline = time.monotonic() + 2.0
+    while runtime_surface._read_executor_stats()["admitted"] and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert runtime_surface._read_executor_stats()["admitted"] == 0
+    assert service.read_settings()["state"] == "ready"
+    service.close()
+
+
+def test_read_fence_cancels_waiter_and_service_remains_restartable(active_runtime) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocked_snapshot():
+        entered.set()
+        release.wait()
+        return active_runtime
+
+    service = RuntimeSurfaceService(
+        snapshot_loader=blocked_snapshot,
+        catalog_loader=lambda: BundledCatalog.load(_bundle_root()),
+        read_timeout_seconds=2.0,
+    )
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        pending = executor.submit(service.read_profile)
+        assert entered.wait(1.0)
+        service.cancel_pending_reads()
+        with pytest.raises(RuntimeSurfaceError) as error:
+            pending.result(timeout=1.0)
+    assert error.value.code is RuntimeSurfaceErrorCode.TIMEOUT
+
+    release.set()
+    deadline = time.monotonic() + 1.0
+    while runtime_surface._read_executor_stats()["admitted"] and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert service.read_profile()["state"] == "ready"
+    service.close()
 
 
 def test_profile_ceremony_is_ordered_digest_bound_and_one_shot(

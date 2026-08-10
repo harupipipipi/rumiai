@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import http.client
 import json
+import threading
+import time
 import uuid
 from collections.abc import Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -17,6 +20,7 @@ from core_runtime.bootstrap.profile_capture import (
     prepare_default_profile_confirmation,
 )
 from core_runtime.pack_api_server import (
+    MAX_CONCURRENT_REQUESTS,
     PackAPIHandler,
     PackAPIServer,
     RuntimeHTTPConfig,
@@ -138,6 +142,22 @@ def test_profile_activation_refresh_requires_durable_success_result() -> None:
         {"state": "active", "activation_id": "activation.test"},
     )
     assert refreshes == [None]
+
+
+def test_runtime_surface_timeout_maps_to_http_504() -> None:
+    assert (
+        PackAPIHandler._contract_result_status(
+            {
+                "state": "error",
+                "code": "TIMEOUT",
+                "message": "canonical runtime snapshot timed out",
+            }
+        )
+        == 504
+    )
+    assert (
+        PackAPIHandler._contract_result_status({"state": "error", "code": "STALE_REVISION"}) == 200
+    )
 
 
 @pytest.fixture
@@ -471,6 +491,77 @@ def test_server_stop_reports_bounded_teardown_diagnostics(
 
     assert "teardown incomplete" in caplog.text
 
+
+def test_server_stop_and_restart_fence_pending_runtime_reads() -> None:
+    class CancelableDispatch(_Dispatch):
+        def __init__(self) -> None:
+            super().__init__()
+            self.read_fences = 0
+
+        def cancel_pending_reads(self) -> None:
+            self.read_fences += 1
+
+    dispatch = CancelableDispatch()
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+        dispatch_session=dispatch,
+    )
+
+    server.start()
+    server.stop()
+    server.start()
+    server.stop()
+
+    assert dispatch.read_fences == 2
+
+
+def test_request_threads_are_bounded_and_overflow_gets_backpressure() -> None:
+    entered = 0
+    entered_lock = threading.Lock()
+    release = threading.Event()
+
+    class BlockingLifecycle(_Lifecycle):
+        def get_health(self) -> dict[str, object]:
+            nonlocal entered
+            with entered_lock:
+                entered += 1
+            release.wait()
+            return super().get_health()
+
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+        app_lifecycle_manager=BlockingLifecycle(),
+    )
+    server.start()
+    request_count = MAX_CONCURRENT_REQUESTS + 8
+    try:
+        with ThreadPoolExecutor(max_workers=request_count) as executor:
+            pending = [
+                executor.submit(_request, server, "GET", "/health")
+                for _index in range(request_count)
+            ]
+            deadline = time.monotonic() + 5.0
+            while entered < MAX_CONCURRENT_REQUESTS and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert entered == MAX_CONCURRENT_REQUESTS
+            assert server.server is not None
+            assert server.server._active_requests == MAX_CONCURRENT_REQUESTS
+            overflow_deadline = time.monotonic() + 2.0
+            while (
+                not any(future.done() for future in pending)
+                and time.monotonic() < overflow_deadline
+            ):
+                time.sleep(0.01)
+            assert any(future.done() for future in pending)
+            release.set()
+            statuses = [future.result(timeout=5.0)[0] for future in pending]
+        assert statuses.count(503) >= 1
+        assert set(statuses) <= {200, 503}
+    finally:
+        release.set()
+        server.stop()
 
 def test_packvm_failure_before_authorization_does_not_initialize_journal(
     tmp_path: Path,

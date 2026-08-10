@@ -163,6 +163,16 @@ class CapturedPackControlSession:
 
         self._runtime_surface.bind_capability_reader(reader)
 
+    def cancel_pending_reads(self) -> None:
+        """Fence reads owned by a stopping HTTP server without closing capture."""
+
+        self._runtime_surface.cancel_pending_reads()
+
+    def close(self) -> None:
+        """Release the captured runtime read boundary idempotently."""
+
+        self._runtime_surface.close()
+
     def invoke(
         self,
         contract_id: str,

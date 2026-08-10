@@ -1039,7 +1039,13 @@ def capture_production_dispatch(
         authority_control=authority_control,
         current_capture_check=assert_current_capture,
         owned_authority_store=authority_store,
-        close_callbacks=tuple(close_callbacks),
+        close_callbacks=(
+            *close_callbacks,
+            *((control_session.close,) if control_session is not None else ()),
+        ),
+        stop_callbacks=(
+            (control_session.cancel_pending_reads,) if control_session is not None else ()
+        ),
     )
     if control_session is not None and frontend_contract_bindings:
         capability_bindings = tuple(
