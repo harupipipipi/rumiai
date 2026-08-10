@@ -44,6 +44,7 @@ from .frontend_contract_routes import (
 from tobkiri_protocol.canonical import canonical_digest
 from .host_contract import host_contract_value
 from .panel_auth import PanelAuthManager, get_panel_auth_manager
+from .runtime_surface_v4 import RuntimeSurfaceError, RuntimeSurfaceErrorCode
 from tobkiri_host.errors import HostCoreError
 
 
@@ -52,6 +53,96 @@ logger = logging.getLogger(__name__)
 THREAD_JOIN_TIMEOUT_SECONDS = 5
 MAX_CONCURRENT_REQUESTS = 32
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+_PUBLIC_ERROR_MESSAGES: Mapping[str, str] = {
+    RuntimeSurfaceErrorCode.INVALID_REQUEST.value: "The request is invalid",
+    RuntimeSurfaceErrorCode.PROFILE_NOT_ACTIVE.value: "The active Profile is unavailable",
+    RuntimeSurfaceErrorCode.STALE_REVISION.value: "The Profile revision is stale",
+    RuntimeSurfaceErrorCode.DIGEST_MISMATCH.value: "The request binding does not match",
+    RuntimeSurfaceErrorCode.UNAPPROVED.value: "Host approval is required",
+    RuntimeSurfaceErrorCode.TIMEOUT.value: "The runtime operation timed out",
+    RuntimeSurfaceErrorCode.API_FAILURE.value: "The runtime operation is unavailable",
+}
+
+_PUBLIC_ERROR_STATUS: Mapping[str, int] = {
+    RuntimeSurfaceErrorCode.INVALID_REQUEST.value: 400,
+    RuntimeSurfaceErrorCode.PROFILE_NOT_ACTIVE.value: 409,
+    RuntimeSurfaceErrorCode.STALE_REVISION.value: 409,
+    RuntimeSurfaceErrorCode.DIGEST_MISMATCH.value: 409,
+    RuntimeSurfaceErrorCode.UNAPPROVED.value: 403,
+    RuntimeSurfaceErrorCode.TIMEOUT.value: 504,
+    RuntimeSurfaceErrorCode.API_FAILURE.value: 503,
+}
+
+_ERROR_CODE_ALIASES: Mapping[str, str] = {
+    "denied": RuntimeSurfaceErrorCode.UNAPPROVED.value,
+    "pack_control_unapproved": RuntimeSurfaceErrorCode.UNAPPROVED.value,
+    "timed_out": RuntimeSurfaceErrorCode.TIMEOUT.value,
+    "backend_unavailable": RuntimeSurfaceErrorCode.API_FAILURE.value,
+    "provider_failed": RuntimeSurfaceErrorCode.API_FAILURE.value,
+    "audit_unavailable": RuntimeSurfaceErrorCode.API_FAILURE.value,
+    "busy": RuntimeSurfaceErrorCode.API_FAILURE.value,
+    "resource_exhausted": RuntimeSurfaceErrorCode.API_FAILURE.value,
+    "host_core_error": RuntimeSurfaceErrorCode.API_FAILURE.value,
+}
+
+
+def _public_error_code(value: object) -> str:
+    """Return one stable public code without reflecting provider-controlled text."""
+
+    if isinstance(value, RuntimeSurfaceErrorCode):
+        return value.value
+    candidate = str(value or "").strip()
+    if candidate in _PUBLIC_ERROR_STATUS:
+        return candidate
+    return _ERROR_CODE_ALIASES.get(candidate.lower(), RuntimeSurfaceErrorCode.API_FAILURE.value)
+
+
+def _public_error_result(code: object) -> dict[str, object]:
+    """Build the only error representation persisted or returned by PackAPI."""
+
+    public_code = _public_error_code(code)
+    return {
+        "runtime_surface_api_version": "io.tobkiri.launcher.runtime-surface.v4",
+        "state": "error",
+        "code": public_code,
+        "message": _PUBLIC_ERROR_MESSAGES[public_code],
+        "retryable": public_code
+        in {
+            RuntimeSurfaceErrorCode.TIMEOUT.value,
+            RuntimeSurfaceErrorCode.API_FAILURE.value,
+        },
+        "write_set": [],
+    }
+
+
+def _exception_error_code(error: BaseException) -> str:
+    """Classify an internal exception without exposing its text or class name."""
+
+    current: BaseException | None = error
+    seen: set[int] = set()
+    host_code: str | None = None
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, RuntimeSurfaceError):
+            return _public_error_code(current.code)
+        if isinstance(current, ControlReconciliationConflictError):
+            return RuntimeSurfaceErrorCode.DIGEST_MISMATCH.value
+        if isinstance(current, ControlReconciliationUnavailableError):
+            return RuntimeSurfaceErrorCode.API_FAILURE.value
+        if isinstance(current, HostCoreError):
+            candidate = str(current.code)
+            if candidate in _ERROR_CODE_ALIASES:
+                mapped = _ERROR_CODE_ALIASES[candidate]
+                if mapped != RuntimeSurfaceErrorCode.API_FAILURE.value:
+                    return mapped
+                host_code = mapped
+        if isinstance(current, (KeyError, ValueError)):
+            return RuntimeSurfaceErrorCode.INVALID_REQUEST.value
+        current = current.__cause__ or current.__context__
+    if host_code is not None:
+        return host_code
+    return RuntimeSurfaceErrorCode.API_FAILURE.value
 
 
 def _result_record_refs(result: Mapping[str, Any]) -> list[Mapping[str, str]]:
@@ -211,15 +302,18 @@ class _PackThreadingHTTPServer(ThreadingHTTPServer):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._request_condition = threading.Condition()
         self._active_requests = 0
+        self._accepting_requests = True
         self._request_slots = threading.BoundedSemaphore(MAX_CONCURRENT_REQUESTS)
         super().__init__(*args, **kwargs)
 
     def process_request(self, request: Any, client_address: Any) -> None:
-        if not self._request_slots.acquire(blocking=False):
+        with self._request_condition:
+            accepted = self._accepting_requests and self._request_slots.acquire(blocking=False)
+            if accepted:
+                self._active_requests += 1
+        if not accepted:
             self._reject_overloaded_request(request)
             return
-        with self._request_condition:
-            self._active_requests += 1
         try:
             super().process_request(request, client_address)
         except BaseException:
@@ -263,6 +357,18 @@ class _PackThreadingHTTPServer(ThreadingHTTPServer):
         # unbounded wait while retaining the standard serve-forever signal.
         setattr(self, "_BaseServer__shutdown_request", True)
 
+    def stop_accepting_requests(self) -> None:
+        """Fence new handlers before lifecycle teardown begins."""
+
+        with self._request_condition:
+            self._accepting_requests = False
+
+    def close_handler_slots(self) -> None:
+        """Permanently fence this server instance after all handlers drain."""
+
+        with self._request_condition:
+            self._accepting_requests = False
+
     def wait_for_request_drain(self, timeout: float) -> bool:
         """Wait a bounded interval for accepted handlers to finish."""
 
@@ -279,7 +385,10 @@ class _PackThreadingHTTPServer(ThreadingHTTPServer):
         """Return bounded, non-sensitive state for failed teardown diagnostics."""
 
         with self._request_condition:
-            return {"active_requests": self._active_requests}
+            return {
+                "active_requests": self._active_requests,
+                "accepting_requests": self._accepting_requests,
+            }
 
 
 class _RequestReplayGuard:
@@ -596,6 +705,7 @@ class PackAPIHandler(
         try:
             payload = self._normalize_dynamic_payload(target, payload, session)
         except (OSError, ValueError) as error:
+            logger.warning("Contract payload normalization failed", exc_info=error)
             self._send_response(
                 APIResponse(
                     False,
@@ -603,7 +713,7 @@ class PackAPIHandler(
                         "state": "contract_dispatch_denied",
                         "code": "invalid_contract_payload",
                     },
-                    error=str(error),
+                    error="Contract payload is invalid",
                 ),
                 400,
             )
@@ -688,9 +798,8 @@ class PackAPIHandler(
             if not created:
                 state = str(operation_record["state"])
                 prior_result = operation_record.get("result")
-                if state == "succeeded" and isinstance(prior_result, Mapping):
-                    presented = self._present_contract_result(route_binding, prior_result)
-                    self._send_response(APIResponse(True, data=presented))
+                if state in {"succeeded", "failed"} and isinstance(prior_result, Mapping):
+                    self._send_contract_outcome(route_binding, prior_result)
                 else:
                     self._send_response(
                         APIResponse(state == "pending", data=dict(operation_record)),
@@ -704,20 +813,21 @@ class PackAPIHandler(
                 target.operation_id,
                 payload,
             )
+            safe_result = self._safe_contract_result(result)
             if operation_journal is not None and operation_record is not None:
                 operation_journal.finish_operation(
                     request_id,
                     session_id=session_id,
-                    state=("failed" if result.get("state") == "error" else "succeeded"),
-                    result=result,
-                    record_refs=_result_record_refs(result),
+                    state=("failed" if safe_result.get("state") == "error" else "succeeded"),
+                    result=safe_result,
+                    record_refs=_result_record_refs(safe_result),
                     safe_error_code=(
-                        str(result.get("code") or "OPERATION_FAILED")
-                        if result.get("state") == "error"
+                        str(safe_result.get("code"))
+                        if safe_result.get("state") == "error"
                         else None
                     ),
                 )
-            self._refresh_after_operation(target.operation_id, result)
+            self._refresh_after_operation(target.operation_id, safe_result)
         except (
             HostCoreError,
             KeyError,
@@ -725,50 +835,66 @@ class PackAPIHandler(
             RuntimeError,
             ValueError,
         ) as error:
+            public_result = _public_error_result(_exception_error_code(error))
+            logger.warning(
+                "Contract dispatch failed for %s/%s",
+                target.contract_id,
+                target.operation_id,
+                exc_info=error,
+            )
             if operation_journal is not None and operation_record is not None:
                 try:
                     operation_journal.finish_operation(
                         request_id,
                         session_id=session_id,
                         state="failed",
-                        result=None,
-                        safe_error_code=str(getattr(error, "code", "invalid_dispatch")),
+                        result=public_result,
+                        safe_error_code=str(public_result["code"]),
                     )
                 except ControlReconciliationError:
                     pass
-            self._send_response(
-                APIResponse(
-                    False,
-                    data={
-                        "state": "contract_dispatch_denied",
-                        "code": str(getattr(error, "code", "invalid_dispatch")),
-                    },
-                    error=str(error),
-                ),
-                409,
-            )
+            self._send_contract_outcome(route_binding, public_result)
             return True
-        presented = self._present_contract_result(route_binding, result)
-        if self._contract_result_status(result) == 504:
-            self._send_response(
-                APIResponse(
-                    False,
-                    data=presented,
-                    error=str(result.get("message") or "Runtime projection timed out"),
-                ),
-                504,
-            )
-            return True
-        self._send_response(APIResponse(True, data=presented))
+        self._send_contract_outcome(route_binding, safe_result)
         return True
 
     @staticmethod
     def _contract_result_status(result: Mapping[str, object]) -> int:
-        """Map a typed runtime timeout to its required HTTP gateway status."""
+        """Map one public typed result to its semantic HTTP status."""
 
-        if result.get("state") == "error" and result.get("code") == "TIMEOUT":
-            return 504
+        if result.get("state") == "error":
+            return _PUBLIC_ERROR_STATUS[_public_error_code(result.get("code"))]
         return 200
+
+    @staticmethod
+    def _safe_contract_result(result: Mapping[str, object]) -> dict[str, object]:
+        """Remove all provider-controlled detail from typed failure results."""
+
+        if result.get("state") == "error":
+            return _public_error_result(result.get("code"))
+        return dict(result)
+
+    def _send_contract_outcome(
+        self,
+        binding: FrontendContractBinding,
+        result: Mapping[str, object],
+    ) -> None:
+        """Send initial and replayed terminal outcomes through one mapping."""
+
+        safe_result = self._safe_contract_result(result)
+        status = self._contract_result_status(safe_result)
+        presented = self._present_contract_result(binding, safe_result)
+        if status == 200:
+            self._send_response(APIResponse(True, data=presented), status)
+            return
+        self._send_response(
+            APIResponse(
+                False,
+                data=presented,
+                error=_PUBLIC_ERROR_MESSAGES[str(safe_result["code"])],
+            ),
+            status,
+        )
 
     def _handle_packvm_lifecycle(self, method: str, path: str) -> bool:
         """Serve the finite authenticated v4 PackVM lifecycle contract."""
@@ -858,13 +984,19 @@ class PackAPIHandler(
             ):
                 self._runtime_refresh(None)
         except (OSError, RuntimeError, ValueError) as error:
+            public_result = _public_error_result(_exception_error_code(error))
+            logger.warning(
+                "PackVM lifecycle operation failed: %s",
+                operation,
+                exc_info=error,
+            )
             self._send_response(
                 APIResponse(
                     False,
-                    data={"state": "packvm_lifecycle_denied", "operation": operation},
-                    error=str(error),
+                    data=public_result,
+                    error=_PUBLIC_ERROR_MESSAGES[str(public_result["code"])],
                 ),
-                409,
+                _PUBLIC_ERROR_STATUS[str(public_result["code"])],
             )
             return True
         self._send_response(APIResponse(True, data=dict(result)))
@@ -1552,27 +1684,46 @@ class PackAPIServer:
         self.thread: threading.Thread | None = None
         self.handler_class: type[PackAPIHandler] | None = None
         self._lifecycle_lock = threading.RLock()
+        self._lifecycle_generation = 0
+        self._lifecycle_state = "stopped"
+        self._stop_complete = threading.Event()
+        self._stop_complete.set()
+        self._stop_failed = False
 
     def start(self) -> None:
         """Start a fresh finite handler with no inherited route state."""
 
         with self._lifecycle_lock:
+            if self._lifecycle_state == "stopping":
+                raise RuntimeError("Pack v4 API server is stopping")
+            if self._lifecycle_state == "drain_failed":
+                raise RuntimeError("Pack v4 API server teardown is incomplete")
             if self.is_running():
                 return
-            self._validate_contract_runtime()
-            handler = PackAPIHandler.canonical_v4_server_handler(
-                panel_auth_manager=self._panel_auth_manager,
-                dispatch_session=self._dispatch_session,
-                app_lifecycle_manager=self.app_lifecycle_manager,
-                contract_routes=self._contract_routes,
-                replay_guard=self._replay_guard,
-                operation_journal=self._operation_journal,
-                web_mounts=self._web_mounts,
-                runtime_refresh=self._refresh_runtime_capture,
-                workspace_binding_resolver=self._workspace_binding_resolver,
-                packvm_lifecycle=self._packvm_lifecycle,
-            )
-            server = _PackThreadingHTTPServer((self.host, self.port), handler)
+            self._lifecycle_generation += 1
+            lifecycle_generation = self._lifecycle_generation
+            self._lifecycle_state = "starting"
+            self._stop_complete.clear()
+            self._stop_failed = False
+            try:
+                self._validate_contract_runtime()
+                handler = PackAPIHandler.canonical_v4_server_handler(
+                    panel_auth_manager=self._panel_auth_manager,
+                    dispatch_session=self._dispatch_session,
+                    app_lifecycle_manager=self.app_lifecycle_manager,
+                    contract_routes=self._contract_routes,
+                    replay_guard=self._replay_guard,
+                    operation_journal=self._operation_journal,
+                    web_mounts=self._web_mounts,
+                    runtime_refresh=self._runtime_refresh_callback(lifecycle_generation),
+                    workspace_binding_resolver=self._workspace_binding_resolver,
+                    packvm_lifecycle=self._packvm_lifecycle,
+                )
+                server = _PackThreadingHTTPServer((self.host, self.port), handler)
+            except Exception:
+                self._lifecycle_state = "stopped"
+                self._stop_complete.set()
+                raise
             actual_port = int(server.server_address[1])
             handler._runtime_port = actual_port
             thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -1580,8 +1731,34 @@ class PackAPIServer:
             self.handler_class = handler
             self.server = server
             self.thread = thread
+            self._lifecycle_state = "running"
             thread.start()
         logger.info("Pack v4 API server started on http://%s:%s", self.host, self.port)
+
+    def _runtime_refresh_callback(
+        self,
+        lifecycle_generation: int,
+    ) -> Callable[[DispatchSession | None], None]:
+        """Bind handler publication to the lifecycle generation that created it."""
+
+        refresh_method = self._refresh_runtime_capture
+
+        def refresh(session: DispatchSession | None = None) -> None:
+            if getattr(refresh_method, "__func__", None) is PackAPIServer._refresh_runtime_capture:
+                refresh_method(
+                    session,
+                    lifecycle_generation=lifecycle_generation,
+                )
+                return
+            with self._lifecycle_lock:
+                if (
+                    self._lifecycle_state != "running"
+                    or lifecycle_generation != self._lifecycle_generation
+                ):
+                    return
+            refresh_method(session)
+
+        return refresh
 
     def _validate_contract_runtime(self) -> None:
         """Verify the exact capture and route ownership before binding a socket."""
@@ -1625,8 +1802,20 @@ class PackAPIServer:
                 if not root.is_dir() or not (root / mount["index_file"]).is_file():
                     raise RuntimeError("frontend contract web mount is unavailable")
 
-    def _refresh_runtime_capture(self, activated_session: DispatchSession | None = None) -> None:
+    def _refresh_runtime_capture(
+        self,
+        activated_session: DispatchSession | None = None,
+        *,
+        lifecycle_generation: int | None = None,
+    ) -> None:
         """Atomically publish a current Broker session and canonical route map."""
+
+        with self._lifecycle_lock:
+            if lifecycle_generation is not None and (
+                self._lifecycle_state != "running"
+                or lifecycle_generation != self._lifecycle_generation
+            ):
+                return
 
         from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
         from tobkiri_host.runtime import install_dispatch_session
@@ -1681,7 +1870,17 @@ class PackAPIServer:
             raise
 
         with self._lifecycle_lock:
+            if lifecycle_generation is not None and (
+                self._lifecycle_state != "running"
+                or lifecycle_generation != self._lifecycle_generation
+            ):
+                if created_session and session is not None:
+                    close = getattr(session, "close", None)
+                    if callable(close):
+                        close()
+                return
             previous = self._dispatch_session
+            published_generation = self._lifecycle_generation
             handler = PackAPIHandler.canonical_v4_server_handler(
                 panel_auth_manager=self._panel_auth_manager,
                 dispatch_session=session,
@@ -1690,7 +1889,7 @@ class PackAPIServer:
                 replay_guard=self._replay_guard,
                 operation_journal=self._operation_journal,
                 web_mounts=self._web_mounts,
-                runtime_refresh=self._refresh_runtime_capture,
+                runtime_refresh=self._runtime_refresh_callback(published_generation),
                 workspace_binding_resolver=self._workspace_binding_resolver,
                 packvm_lifecycle=self._packvm_lifecycle,
             )
@@ -1710,40 +1909,76 @@ class PackAPIServer:
         """Stop the server and discard its captured handler bindings."""
 
         with self._lifecycle_lock:
-            server = self.server
-            thread = self.thread
-            dispatch_session = self._dispatch_session
-            cancel_pending_reads = getattr(
-                dispatch_session,
-                "cancel_pending_reads",
-                None,
-            )
-            if callable(cancel_pending_reads):
-                cancel_pending_reads()
-            if server is not None:
-                server.request_shutdown()
-            if thread is not None:
-                thread.join(timeout=THREAD_JOIN_TIMEOUT_SECONDS)
-                self.thread = None
-            serving_thread_alive = thread is not None and thread.is_alive()
-            drained = True
-            diagnostics: dict[str, object] = {
-                "serving_thread_alive": serving_thread_alive,
-            }
-            if server is not None:
-                drained = server.wait_for_request_drain(THREAD_JOIN_TIMEOUT_SECONDS)
-                diagnostics.update(server.teardown_snapshot())
-                server.server_close()
-                self.server = None
-            if drained:
-                self._operation_journal.close()
-            self.handler_class = None
-            if not drained or serving_thread_alive:
-                logger.error("Pack v4 API server teardown incomplete: %s", diagnostics)
-                raise RuntimeError(
-                    "Pack v4 API server teardown incomplete: "
-                    f"{diagnostics}"
+            if self._lifecycle_state == "stopped":
+                return
+            if self._lifecycle_state == "stopping":
+                stop_complete = self._stop_complete
+                owns_stop = False
+                server = None
+                thread = None
+            else:
+                self._lifecycle_state = "stopping"
+                self._lifecycle_generation += 1
+                self._stop_complete.clear()
+                self._stop_failed = False
+                stop_complete = self._stop_complete
+                owns_stop = True
+                server = self.server
+                thread = self.thread
+                if server is not None:
+                    server.stop_accepting_requests()
+                dispatch_session = self._dispatch_session
+                cancel_pending_reads = getattr(
+                    dispatch_session,
+                    "cancel_pending_reads",
+                    None,
                 )
+                if callable(cancel_pending_reads):
+                    cancel_pending_reads()
+
+        if not owns_stop:
+            if not stop_complete.wait(timeout=THREAD_JOIN_TIMEOUT_SECONDS):
+                raise RuntimeError("Pack v4 API server stop timed out")
+            if self._stop_failed:
+                raise RuntimeError("Pack v4 API server teardown incomplete")
+            return
+
+        deadline = time.monotonic() + THREAD_JOIN_TIMEOUT_SECONDS
+        if server is not None:
+            server.request_shutdown()
+        if thread is not None:
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        serving_thread_alive = thread is not None and thread.is_alive()
+        drained = True
+        diagnostics: dict[str, object] = {
+            "serving_thread_alive": serving_thread_alive,
+        }
+        if server is not None:
+            drained = server.wait_for_request_drain(max(0.0, deadline - time.monotonic()))
+            diagnostics.update(server.teardown_snapshot())
+
+        with self._lifecycle_lock:
+            if drained and not serving_thread_alive:
+                if server is not None:
+                    server.close_handler_slots()
+                    server.server_close()
+                self._operation_journal.close()
+                if self.server is server:
+                    self.server = None
+                if self.thread is thread:
+                    self.thread = None
+                self.handler_class = None
+                self._lifecycle_state = "stopped"
+                self._stop_failed = False
+                self._stop_complete.set()
+            else:
+                self._lifecycle_state = "drain_failed"
+                self._stop_failed = True
+                self._stop_complete.set()
+
+        if not drained or serving_thread_alive:
+            logger.error("Pack v4 API server teardown incomplete: %s", diagnostics)
+            raise RuntimeError(f"Pack v4 API server teardown incomplete: {diagnostics}")
         logger.info("Pack v4 API server stopped")
 
     def is_running(self) -> bool:

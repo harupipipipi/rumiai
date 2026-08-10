@@ -74,6 +74,12 @@ class PackControlDenied(HostCoreError):
     code = "pack_control_denied"
 
 
+class PackControlUnapproved(PackControlDenied):
+    """A Pack control request lacks Host-owned approval evidence."""
+
+    code = "pack_control_unapproved"
+
+
 @dataclass(frozen=True)
 class _Binding:
     profile_id: str
@@ -198,7 +204,7 @@ class CapturedPackControlSession:
         session_id = _required(arguments.pop("_session_id", None), "session binding")
         self._reject_identity_override(arguments)
         if "approved" in arguments:
-            raise PackControlDenied("client approval assertions are not trusted")
+            raise PackControlUnapproved("client approval assertions are not trusted")
         with self._lock:
             if operation_id == "profile.reload":
                 self._recapture()
@@ -242,7 +248,7 @@ class CapturedPackControlSession:
         session_id = _required(arguments.pop("_session_id", None), "session binding")
         self._reject_identity_override(arguments)
         if "approved" in arguments or "approval_token" in arguments:
-            raise PackControlDenied("client approval assertions are not trusted")
+            raise PackControlUnapproved("client approval assertions are not trusted")
         try:
             if operation_id == "profile.read":
                 return self._runtime_surface.read_profile(
@@ -458,7 +464,7 @@ class CapturedPackControlSession:
         record = load_pack_catalog()[pack_id]
         approved, reason = _approval_status(pack_id, record, self._binding)
         if enabled and not approved:
-            raise PackControlDenied(reason or "Pack approval is required")
+            raise PackControlUnapproved(reason or "Pack approval is required")
         state, profile = _active_profile()
         packs = [str(item) for item in profile.get("packs") or []]
         if enabled and pack_id in packs:
@@ -1019,7 +1025,7 @@ def resolve_profile_pack_set(
             )
             approved, reason = _approval_status(pack_id, record, binding)
             if not approved:
-                raise PackControlDenied(reason or "Pack approval is required")
+                raise PackControlUnapproved(reason or "Pack approval is required")
             approved_digests.add(str(catalog.packs[pack_id]["pack"]["artifact_digest"]))
         resolved = resolve_default_profile(
             catalog,

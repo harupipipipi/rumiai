@@ -19,6 +19,8 @@ from core_runtime.bootstrap.profile_capture import (
     capture_default_profile,
     prepare_default_profile_confirmation,
 )
+from core_runtime.control_reconciliation_v4 import ControlReconciliationStore
+from core_runtime.frontend_contract_routes import FrontendContractBinding
 from core_runtime.pack_api_server import (
     MAX_CONCURRENT_REQUESTS,
     PackAPIHandler,
@@ -144,20 +146,101 @@ def test_profile_activation_refresh_requires_durable_success_result() -> None:
     assert refreshes == [None]
 
 
-def test_runtime_surface_timeout_maps_to_http_504() -> None:
+@pytest.mark.parametrize(
+    ("code", "status"),
+    [
+        ("UNAPPROVED", 403),
+        ("STALE_REVISION", 409),
+        ("DIGEST_MISMATCH", 409),
+        ("TIMEOUT", 504),
+        ("API_FAILURE", 503),
+        ("backend_unavailable", 503),
+    ],
+)
+def test_runtime_surface_typed_errors_map_to_semantic_http_status(
+    code: str,
+    status: int,
+) -> None:
     assert (
         PackAPIHandler._contract_result_status(
             {
                 "state": "error",
-                "code": "TIMEOUT",
-                "message": "canonical runtime snapshot timed out",
+                "code": code,
             }
         )
-        == 504
+        == status
     )
-    assert (
-        PackAPIHandler._contract_result_status({"state": "error", "code": "STALE_REVISION"}) == 200
+
+
+@pytest.mark.parametrize(
+    ("code", "expected_status"),
+    [
+        ("UNAPPROVED", 403),
+        ("STALE_REVISION", 409),
+        ("DIGEST_MISMATCH", 409),
+        ("TIMEOUT", 504),
+        ("API_FAILURE", 503),
+    ],
+)
+def test_typed_error_initial_lost_response_and_restart_replay_are_exact(
+    tmp_path: Path,
+    code: str,
+    expected_status: int,
+) -> None:
+    binding = FrontendContractBinding(
+        method="POST",
+        path="/api/runtime-surface/profile-change/activate",
+        presentation="identity",
+        targets=(),
     )
+    request_id = "13131313-1313-4313-8313-131313131313"
+    session_id = "session-a"
+    handler = object.__new__(PackAPIHandler)
+    captured: list[tuple[int, str]] = []
+    handler._send_response = (  # type: ignore[method-assign]
+        lambda response, status=200: captured.append((status, response.to_json()))
+    )
+    unsafe = {
+        "state": "error",
+        "code": code,
+        "message": "sqlite /private/token.db DigestError token=secret",
+        "digest": "sha256:" + "a" * 64,
+    }
+    safe = handler._safe_contract_result(unsafe)
+    store_path = tmp_path / "reconciliation.sqlite3"
+    first = ControlReconciliationStore(store_path, instance_id="first")
+    first.begin_operation(
+        request_id=request_id,
+        session_id=session_id,
+        operation_id="profile.change.activate",
+        contract_id="tobkiri.host.control-presentation.v4",
+        request_digest=canonical_digest({"request": "exact"}),
+    )
+    first.finish_operation(
+        request_id,
+        session_id=session_id,
+        state="failed",
+        result=safe,
+        safe_error_code=code,
+    )
+    handler._send_contract_outcome(binding, safe)
+    initial = captured[-1]
+    handler._send_contract_outcome(binding, safe)
+    lost_response_retry = captured[-1]
+    first.close()
+
+    restarted = ControlReconciliationStore(store_path, instance_id="restarted")
+    restarted.prepare_for_operation()
+    replay = restarted.operation_status(request_id, session_id=session_id)
+    handler._send_contract_outcome(binding, replay["result"])
+    restart_replay = captured[-1]
+
+    assert initial == lost_response_retry == restart_replay
+    assert initial[0] == expected_status
+    serialized = initial[1].lower()
+    for secret in ("sqlite", "/private", "digesterror", "sha256:", "token"):
+        assert secret not in serialized
+    assert replay["result"] == safe
 
 
 @pytest.fixture
@@ -516,6 +599,64 @@ def test_server_stop_and_restart_fence_pending_runtime_reads() -> None:
     assert dispatch.read_fences == 2
 
 
+def test_server_stop_drain_runs_outside_lifecycle_lock() -> None:
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+    )
+    server.start()
+    raw_server = server.server
+    assert raw_server is not None
+    original_drain = raw_server.wait_for_request_drain
+    acquired: list[bool] = []
+
+    def observe_lock(timeout: float) -> bool:
+        lock_acquired = server._lifecycle_lock.acquire(blocking=False)
+        acquired.append(lock_acquired)
+        if lock_acquired:
+            server._lifecycle_lock.release()
+        return original_drain(timeout)
+
+    raw_server.wait_for_request_drain = observe_lock  # type: ignore[method-assign]
+    server.stop()
+
+    assert acquired == [True]
+
+
+def test_stopped_handler_generation_cannot_publish_runtime_capture() -> None:
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+    )
+    server.start()
+    handler = server.handler_class
+    assert handler is not None
+    refresh = handler._runtime_refresh
+    assert refresh is not None
+
+    server.stop()
+    refresh(object())  # type: ignore[arg-type]
+
+    assert server.handler_class is None
+    assert server.server is None
+
+
+def test_double_stop_and_restart_remain_bounded() -> None:
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+    )
+
+    started = time.monotonic()
+    server.start()
+    server.stop()
+    server.stop()
+    server.start()
+    server.stop()
+
+    assert time.monotonic() - started < 5.0
+
+
 def test_request_threads_are_bounded_and_overflow_gets_backpressure() -> None:
     entered = 0
     entered_lock = threading.Lock()
@@ -562,6 +703,7 @@ def test_request_threads_are_bounded_and_overflow_gets_backpressure() -> None:
     finally:
         release.set()
         server.stop()
+
 
 def test_packvm_failure_before_authorization_does_not_initialize_journal(
     tmp_path: Path,
