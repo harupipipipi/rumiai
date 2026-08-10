@@ -286,6 +286,70 @@ def test_package_rejects_source_revision_from_another_checkout() -> None:
             )
 
 
+def test_package_rejects_dirty_release_checkout() -> None:
+    with TemporaryDirectory(prefix="tobkiri-presentation-source-dirty-") as temp:
+        root = Path(temp)
+        repository_root = root / "source"
+        repository_root.mkdir()
+        subprocess.run(
+            ["git", "init", "--quiet"],
+            cwd=repository_root,
+            check=True,
+        )
+        marker = repository_root / "tracked.txt"
+        marker.write_text("clean\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=repository_root, check=True)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=Tobkiri Test",
+                "-c",
+                "user.email=test@invalid",
+                "commit",
+                "--quiet",
+                "-m",
+                "fixture",
+            ],
+            cwd=repository_root,
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/example/tobkiri.git",
+            ],
+            cwd=repository_root,
+            check=True,
+        )
+        fixture_root = root / "fixture"
+        fixture_root.mkdir()
+        catalog, manifest, key = _fixture(fixture_root)
+        build = json.loads(manifest.read_text())
+        build["source_identity"] = MODULE.source_identity_for_repository(
+            repository_root
+        )
+        build["source_revision"] = MODULE.source_revision_for_repository(
+            repository_root
+        )
+        manifest.write_text(json.dumps(build))
+
+        marker.write_text("dirty\n", encoding="utf-8")
+        with pytest.raises(RuntimeError, match="dirty source checkout"):
+            package_artifact(
+                catalog,
+                manifest,
+                key,
+                "key",
+                root / "dirty-output",
+                repository_root,
+            )
+        assert not (root / "dirty-output").exists()
+
+
 def _file_bytes(root: Path) -> dict[str, bytes]:
     """Return a deterministic byte snapshot for transaction assertions."""
     return {

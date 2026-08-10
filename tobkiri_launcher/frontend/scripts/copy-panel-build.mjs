@@ -11,6 +11,7 @@ const DEFAULT_PANEL_DIR = resolve(
   FRONTEND_ROOT,
   "../../tobkiri_runtime/core_runtime/core_pack/core_control_panel/web",
 );
+const BUILD_ONLY_FILES = new Set(["build-metrics.json"]);
 
 function compareNames(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -48,7 +49,10 @@ export async function copyPanelBuild({
 } = {}) {
   await rm(panelDir, { recursive: true, force: true });
   await mkdir(panelDir, { recursive: true });
-  const files = await listFiles(distDir);
+  const files = (await listFiles(distDir)).filter((sourcePath) => {
+    const relativePath = relative(distDir, sourcePath).split(sep).join("/");
+    return !BUILD_ONLY_FILES.has(relativePath);
+  });
   for (const sourcePath of files) {
     await copyCanonicalFile(sourcePath, distDir, panelDir);
   }
