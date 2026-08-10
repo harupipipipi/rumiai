@@ -231,6 +231,14 @@ class _PackThreadingHTTPServer(ThreadingHTTPServer):
                 self._active_requests -= 1
                 self._request_condition.notify_all()
 
+    def request_shutdown(self) -> None:
+        """Request ``serve_forever`` exit without waiting for its thread."""
+
+        # ``BaseServer.shutdown`` performs this assignment and then waits on
+        # its private event.  Stop owns the bounded join below, so avoid that
+        # unbounded wait while retaining the standard serve-forever signal.
+        setattr(self, "_BaseServer__shutdown_request", True)
+
     def wait_for_request_drain(self, timeout: float) -> bool:
         """Wait a bounded interval for accepted handlers to finish."""
 
@@ -242,6 +250,12 @@ class _PackThreadingHTTPServer(ThreadingHTTPServer):
                     return False
                 self._request_condition.wait(remaining)
         return True
+
+    def teardown_snapshot(self) -> dict[str, object]:
+        """Return bounded, non-sensitive state for failed teardown diagnostics."""
+
+        with self._request_condition:
+            return {"active_requests": self._active_requests}
 
 
 class _RequestReplayGuard:
@@ -1657,20 +1671,29 @@ class PackAPIServer:
             server = self.server
             thread = self.thread
             if server is not None:
-                server.shutdown()
+                server.request_shutdown()
             if thread is not None:
                 thread.join(timeout=THREAD_JOIN_TIMEOUT_SECONDS)
                 self.thread = None
+            serving_thread_alive = thread is not None and thread.is_alive()
             drained = True
+            diagnostics: dict[str, object] = {
+                "serving_thread_alive": serving_thread_alive,
+            }
             if server is not None:
                 drained = server.wait_for_request_drain(THREAD_JOIN_TIMEOUT_SECONDS)
+                diagnostics.update(server.teardown_snapshot())
                 server.server_close()
                 self.server = None
             if drained:
                 self._operation_journal.close()
             self.handler_class = None
-            if not drained:
-                raise RuntimeError("Pack v4 API requests did not drain during stop")
+            if not drained or serving_thread_alive:
+                logger.error("Pack v4 API server teardown incomplete: %s", diagnostics)
+                raise RuntimeError(
+                    "Pack v4 API server teardown incomplete: "
+                    f"{diagnostics}"
+                )
         logger.info("Pack v4 API server stopped")
 
     def is_running(self) -> bool:

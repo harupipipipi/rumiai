@@ -24,6 +24,11 @@ from tobkiri_protocol.errors import CanonicalizationError
 def _current_boot_id() -> str | None:
     """Return a stable local boot identity without creating filesystem state."""
 
+    if os.name == "nt":
+        # The fallback below is POSIX-specific.  In particular, do not launch
+        # shell utilities while constructing an otherwise lazy store on
+        # Windows; an unavailable process probe must remain unknown.
+        return None
     linux_boot_id = Path("/proc/sys/kernel/random/boot_id")
     try:
         if linux_boot_id.is_file():
@@ -59,7 +64,10 @@ class ProcessIdentityEvidence:
 def _process_start_identity(process_id: int) -> ProcessIdentityEvidence:
     """Return explicit live, dead, or unavailable PID-start evidence."""
 
-    if process_id <= 0:
+    if os.name == "nt" or process_id <= 0:
+        # ``/proc`` and ``ps`` are not Windows process-identity APIs.  Keep
+        # the evidence unknown rather than starting a POSIX compatibility
+        # subprocess from a server constructor or heartbeat path.
         return ProcessIdentityEvidence("unknown")
     try:
         os.kill(process_id, 0)

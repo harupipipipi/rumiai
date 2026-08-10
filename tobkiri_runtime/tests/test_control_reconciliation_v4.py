@@ -569,6 +569,23 @@ def test_process_probe_errors_are_unknown_not_dead(
     assert reconciliation._process_start_identity(424242).state == "unknown"
 
 
+def test_windows_process_identity_probes_do_not_spawn_posix_helpers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows store construction must not launch POSIX process utilities."""
+
+    monkeypatch.setattr(reconciliation.os, "name", "nt")
+
+    def unexpected_probe(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("POSIX process probe was launched on Windows")
+
+    monkeypatch.setattr(reconciliation.subprocess, "run", unexpected_probe)
+    monkeypatch.setattr(reconciliation.os, "kill", unexpected_probe)
+
+    assert reconciliation._current_boot_id() is None
+    assert reconciliation._process_start_identity(424242) == ProcessIdentityEvidence("unknown")
+
+
 def test_unavailable_identity_never_uses_wall_clock_lease_for_new_rows(
     tmp_path: Path,
 ) -> None:

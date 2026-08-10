@@ -447,6 +447,31 @@ def test_server_stop_closes_drained_journal_heartbeat_and_restart_reads_result(
     )
 
 
+def test_server_stop_reports_bounded_teardown_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failed drain reports finite serving/request state before raising."""
+
+    monkeypatch.setattr("core_runtime.pack_api_server.THREAD_JOIN_TIMEOUT_SECONDS", 0.01)
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+    )
+    server.start()
+    raw_server = server.server
+    assert raw_server is not None
+    monkeypatch.setattr(raw_server, "wait_for_request_drain", lambda _timeout: False)
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"serving_thread_alive.*True.*active_requests.*0",
+    ):
+        server.stop()
+
+    assert "teardown incomplete" in caplog.text
+
+
 def test_packvm_failure_before_authorization_does_not_initialize_journal(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
