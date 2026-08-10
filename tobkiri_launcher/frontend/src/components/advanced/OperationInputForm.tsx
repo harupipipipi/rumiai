@@ -10,7 +10,7 @@ type InputValue = unknown;
 function initialValue(schema: RuntimeJsonSchema, required: boolean): InputValue {
   if (schema.default !== undefined) return schema.default as InputValue;
   if (required && schema.enum && schema.enum.length > 0) return schema.enum[0];
-  if (schema.type === 'boolean') return false;
+  if (schema.type === 'boolean') return required ? false : undefined;
   return '';
 }
 

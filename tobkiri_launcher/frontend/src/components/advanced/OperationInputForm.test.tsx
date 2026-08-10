@@ -187,6 +187,100 @@ test('OperationInputForm omits blank optional values and preserves JSON enum typ
   }
 });
 
+test('OperationInputForm omits an untouched optional boolean while keeping it visually unchecked', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  let received: Record<string, unknown> | null = null;
+  const booleanOperation: RuntimeOperationDescriptor = {
+    ...operation(),
+    operation_id: 'optional.boolean',
+    input_schema: {
+      type: 'object',
+      properties: {
+        enabled: {type: 'boolean', title: 'Enabled'},
+      },
+    },
+  };
+  try {
+    await act(async () => {
+      root.render(
+        <OperationInputForm
+          operation={booleanOperation}
+          busy={false}
+          onInvoke={async (payload) => { received = payload; }}
+        />,
+      );
+    });
+    const checkbox = container.querySelector<HTMLInputElement>('input[aria-label="Enabled"]');
+    assert.ok(checkbox);
+    assert.equal(checkbox.checked, false);
+    const form = container.querySelector<HTMLFormElement>('form');
+    assert.ok(form);
+    await act(async () => {
+      form.dispatchEvent(new dom.window.Event('submit', {bubbles: true, cancelable: true}));
+    });
+    assert.deepEqual(received, {});
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
+test('OperationInputForm submits explicit false and required boolean values', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  let received: Record<string, unknown> | null = null;
+  const booleanOperation: RuntimeOperationDescriptor = {
+    ...operation(),
+    operation_id: 'explicit.boolean',
+    input_schema: {
+      type: 'object',
+      required: ['required_enabled'],
+      properties: {
+        optional_enabled: {type: 'boolean', title: 'Optional enabled'},
+        required_enabled: {type: 'boolean', title: 'Required enabled'},
+      },
+    },
+  };
+  try {
+    await act(async () => {
+      root.render(
+        <OperationInputForm
+          operation={booleanOperation}
+          busy={false}
+          onInvoke={async (payload) => { received = payload; }}
+        />,
+      );
+    });
+    const optionalCheckbox = container.querySelector<HTMLInputElement>('input[aria-label="Optional enabled"]');
+    const requiredCheckbox = container.querySelector<HTMLInputElement>('input[aria-label="Required enabled"]');
+    assert.ok(optionalCheckbox);
+    assert.ok(requiredCheckbox);
+    assert.equal(optionalCheckbox.checked, false);
+    assert.equal(requiredCheckbox.checked, false);
+    await act(async () => {
+      optionalCheckbox.click();
+      optionalCheckbox.click();
+    });
+    assert.equal(optionalCheckbox.checked, false);
+    const form = container.querySelector<HTMLFormElement>('form');
+    assert.ok(form);
+    await act(async () => {
+      form.dispatchEvent(new dom.window.Event('submit', {bubbles: true, cancelable: true}));
+    });
+    assert.deepEqual(received, {optional_enabled: false, required_enabled: false});
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
 test('OperationInputForm visibly rejects missing required values and malformed JSON', async () => {
   const previousWindow = globalThis.window;
   const previousDocument = globalThis.document;
