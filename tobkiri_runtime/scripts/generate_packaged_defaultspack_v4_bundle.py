@@ -406,6 +406,20 @@ def _source_commit(explicit: str | None) -> str:
             raise ValueError(
                 "packaged Profile source revision must be a full lowercase checkout SHA"
             )
+        supplied_commit = subprocess.run(
+            ["git", "rev-parse", "--verify", f"{explicit}^{{commit}}"],
+            cwd=ROOT.parent,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if (
+            supplied_commit.returncode != 0
+            or supplied_commit.stdout.strip() != explicit
+        ):
+            raise ValueError(
+                "packaged Profile source revision must resolve in the checkout"
+            )
         result = subprocess.run(
             ["git", "status", "--porcelain=v1", "--untracked-files=all"],
             cwd=ROOT.parent,
@@ -419,6 +433,29 @@ def _source_commit(explicit: str | None) -> str:
             raise ValueError(
                 "packaged Profile generation refuses a dirty checkout when a "
                 "clean source revision is requested"
+            )
+        head_tree = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD^{tree}"],
+            cwd=ROOT.parent,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        supplied_tree = subprocess.run(
+            ["git", "rev-parse", "--verify", f"{explicit}^{{tree}}"],
+            cwd=ROOT.parent,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if (
+            head_tree.returncode != 0
+            or supplied_tree.returncode != 0
+            or head_tree.stdout.strip() != supplied_tree.stdout.strip()
+        ):
+            raise ValueError(
+                "packaged Profile source revision must match the clean checkout "
+                "HEAD tree"
             )
     return informational_source_commit(ROOT.parent, explicit)
 

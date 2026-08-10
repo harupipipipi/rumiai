@@ -377,9 +377,48 @@ fn verify_symlink_free_tree(root: &Path, current: &Path) -> Result<()> {
                 "packaged tree contains an unsupported entry: {}",
                 path.strip_prefix(root).unwrap_or(&path).display()
             );
+        } else if has_multiple_links(&path, &metadata)? {
+            bail!(
+                "packaged tree contains a multiply-linked file: {}",
+                path.strip_prefix(root).unwrap_or(&path).display()
+            );
         }
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn has_multiple_links(_path: &Path, metadata: &fs::Metadata) -> Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+
+    Ok(metadata.nlink() != 1)
+}
+
+#[cfg(windows)]
+fn has_multiple_links(path: &Path, _metadata: &fs::Metadata) -> Result<bool> {
+    use std::mem::MaybeUninit;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+    };
+
+    let file = fs::File::open(path).with_context(|| {
+        format!(
+            "failed to inspect packaged file links at {}",
+            path.display()
+        )
+    })?;
+    let mut information = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::zeroed();
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), information.as_mut_ptr()) } == 0 {
+        return Err(std::io::Error::last_os_error()).with_context(|| {
+            format!(
+                "failed to inspect packaged file links at {}",
+                path.display()
+            )
+        });
+    }
+    let information = unsafe { information.assume_init() };
+    Ok(information.nNumberOfLinks != 1)
 }
 
 fn read_regular_file(path: &Path, label: &str) -> Result<Vec<u8>> {
@@ -1274,5 +1313,49 @@ mod tests {
         symlink(&outside_contract_map, &contract_map).unwrap();
         assert!(resolve(&contract_map_config).is_err());
         fs::remove_dir_all(contract_map_root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unindexed_external_hardlink_in_pack_tree_fails_closed() {
+        let (root, config) = fixture("external-hardlink");
+        let outside = root.join("outside-runtime.py");
+        fs::write(&outside, b"raise SystemExit('outside mutation')\n").unwrap();
+        fs::hard_link(
+            &outside,
+            config
+                .app_dir
+                .join("ecosystem/defaultspack/unindexed-runtime.py"),
+        )
+        .unwrap();
+
+        let error = resolve(&config).unwrap_err().to_string();
+        assert!(
+            error.contains("multiply-linked file"),
+            "unexpected hardlink error: {error}"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn ntfs_hardlink_count_is_detected() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-defaultspack-ntfs-hardlink-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("source.py");
+        let linked = root.join("linked.py");
+        fs::write(&source, b"pass\n").unwrap();
+        fs::hard_link(&source, &linked).unwrap();
+
+        let metadata = fs::symlink_metadata(&linked).unwrap();
+        assert!(has_multiple_links(&linked, &metadata).unwrap());
+        fs::remove_dir_all(root).unwrap();
     }
 }

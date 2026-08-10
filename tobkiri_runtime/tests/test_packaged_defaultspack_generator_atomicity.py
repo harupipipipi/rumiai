@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -222,3 +223,63 @@ def test_generator_rejects_non_checkout_source_revision(
             bundle_identity="io.tobkiri.shell.tauri",
             source_commit=source_commit,
         )
+
+
+def _git(repository: Path, *args: str) -> str:
+    """Run a deterministic Git fixture command and return stdout."""
+    return subprocess.run(
+        ["git", *args],
+        cwd=repository,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _source_revision_repository(tmp_path: Path) -> tuple[Path, str, str]:
+    """Create distinct commits with identical trees for PR-topology tests."""
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "--quiet")
+    _git(repository, "config", "user.name", "Tobkiri Test")
+    _git(repository, "config", "user.email", "tobkiri@example.invalid")
+    (repository / "source.txt").write_text("same tree\n", encoding="utf-8")
+    _git(repository, "add", "source.txt")
+    _git(repository, "commit", "--quiet", "-m", "source head")
+    source_head = _git(repository, "rev-parse", "--verify", "HEAD^{commit}")
+    _git(repository, "commit", "--quiet", "--allow-empty", "-m", "synthetic merge")
+    synthetic_head = _git(repository, "rev-parse", "--verify", "HEAD^{commit}")
+    assert source_head != synthetic_head
+    assert _git(repository, "rev-parse", f"{source_head}^{{tree}}") == _git(
+        repository, "rev-parse", f"{synthetic_head}^{{tree}}"
+    )
+    return repository, source_head, synthetic_head
+
+
+def test_generator_accepts_exact_clean_checkout_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository, _, synthetic_head = _source_revision_repository(tmp_path)
+    monkeypatch.setattr(generator, "ROOT", repository / "tobkiri_runtime")
+    assert generator._source_commit(synthetic_head) == synthetic_head
+
+
+def test_generator_accepts_distinct_commit_with_identical_checkout_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository, source_head, _ = _source_revision_repository(tmp_path)
+    monkeypatch.setattr(generator, "ROOT", repository / "tobkiri_runtime")
+    assert generator._source_commit(source_head) == source_head
+
+
+def test_generator_rejects_resolved_commit_with_different_checkout_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository, source_head, _ = _source_revision_repository(tmp_path)
+    (repository / "source.txt").write_text("different tree\n", encoding="utf-8")
+    _git(repository, "add", "source.txt")
+    _git(repository, "commit", "--quiet", "-m", "different source")
+    monkeypatch.setattr(generator, "ROOT", repository / "tobkiri_runtime")
+
+    with pytest.raises(ValueError, match="match the clean checkout HEAD tree"):
+        generator._source_commit(source_head)
