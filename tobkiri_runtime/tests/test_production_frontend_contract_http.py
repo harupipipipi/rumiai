@@ -830,6 +830,146 @@ def test_contract_replay_unknown_and_stale_capture_fail_closed(
     assert stale_server.server is None
 
 
+def test_replayed_mutation_without_record_is_filesystem_immutable(
+    production_server,
+) -> None:
+    server, _session, _authority = production_server
+    cookie, csrf, origin = _authenticate(server)
+    request_id = str(uuid.uuid4())
+    journal = server._operation_journal.path
+    assert not journal.exists()
+    status, profile, _ = _request(
+        server,
+        "GET",
+        _contract("GET", "/api/runtime-surface/profile"),
+        headers={"Cookie": cookie, "X-Tobkiri-Request-ID": request_id},
+    )
+    assert status == 200
+    envelope = profile["data"]
+    desired = [
+        item["pack_id"]
+        for item in envelope["data"]["profile_document"]["packs"]
+        if item.get("role") != "application"
+    ]
+
+    status, rejected, _ = _request(
+        server,
+        "POST",
+        _contract("POST", "/api/runtime-surface/profile-change/resolve"),
+        body={
+            "profile_id": "defaults",
+            "expected_profile_revision": envelope["profile_revision"],
+            "expected_plan_digest": envelope["plan_digest"],
+            "desired_pack_ids": desired,
+        },
+        headers={
+            "Cookie": cookie,
+            "Origin": origin,
+            "X-Rumi-CSRF": csrf,
+            "X-Tobkiri-Request-ID": request_id,
+        },
+    )
+
+    assert status == 409, rejected
+    assert not journal.exists()
+
+
+def test_corrupt_reconciliation_journal_maps_to_typed_503_without_detail(
+    production_server,
+) -> None:
+    server, _session, _authority = production_server
+    cookie, csrf, origin = _authenticate(server)
+    journal = server._operation_journal.path
+    journal.parent.mkdir(parents=True)
+    journal.write_bytes(b"not a sqlite database")
+    status, profile, _ = _request(
+        server,
+        "GET",
+        _contract("GET", "/api/runtime-surface/profile"),
+        headers={"Cookie": cookie, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+    )
+    assert status == 200
+    envelope = profile["data"]
+    desired = [
+        item["pack_id"]
+        for item in envelope["data"]["profile_document"]["packs"]
+        if item.get("role") != "application"
+    ]
+
+    status, rejected, _ = _request(
+        server,
+        "POST",
+        _contract("POST", "/api/runtime-surface/profile-change/resolve"),
+        body={
+            "profile_id": "defaults",
+            "expected_profile_revision": envelope["profile_revision"],
+            "expected_plan_digest": envelope["plan_digest"],
+            "desired_pack_ids": desired,
+        },
+        headers={
+            "Cookie": cookie,
+            "Origin": origin,
+            "X-Rumi-CSRF": csrf,
+            "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+        },
+    )
+
+    assert status == 503
+    assert rejected["data"]["code"] == "operation_reconciliation_unavailable"
+    assert rejected["error"] == "Control operation reconciliation is unavailable"
+    assert "sqlite" not in json.dumps(rejected).lower()
+
+
+def test_reconciliation_binding_conflict_maps_to_typed_409_without_detail(
+    production_server,
+) -> None:
+    server, _session, _authority = production_server
+    cookie, csrf, origin = _authenticate(server)
+    status, profile, _ = _request(
+        server,
+        "GET",
+        _contract("GET", "/api/runtime-surface/profile"),
+        headers={"Cookie": cookie, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+    )
+    assert status == 200
+    envelope = profile["data"]
+    desired = [
+        item["pack_id"]
+        for item in envelope["data"]["profile_document"]["packs"]
+        if item.get("role") != "application"
+    ]
+    assert len(desired) > 1
+    request_id = str(uuid.uuid4())
+    headers = {
+        "Cookie": cookie,
+        "Origin": origin,
+        "X-Rumi-CSRF": csrf,
+        "X-Tobkiri-Request-ID": request_id,
+    }
+    path = _contract("POST", "/api/runtime-surface/profile-change/resolve")
+    body = {
+        "profile_id": "defaults",
+        "expected_profile_revision": envelope["profile_revision"],
+        "expected_plan_digest": envelope["plan_digest"],
+        "desired_pack_ids": desired,
+    }
+    assert _request(server, "POST", path, body=body, headers=headers)[0] == 200
+    tampered = {**body, "desired_pack_ids": list(reversed(desired))}
+
+    status, rejected, _ = _request(
+        server,
+        "POST",
+        path,
+        body=tampered,
+        headers=headers,
+    )
+
+    assert status == 409
+    assert rejected["data"]["code"] == "operation_reconciliation_mismatch"
+    assert rejected["error"] == "Control operation conflicts with durable state"
+    assert "digest" not in json.dumps(rejected).lower()
+
+
 def test_contract_server_rejects_missing_or_wrong_capture_before_bind(
     production_server,
 ) -> None:

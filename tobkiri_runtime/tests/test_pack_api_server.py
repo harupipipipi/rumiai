@@ -22,6 +22,7 @@ from core_runtime.pack_api_server import (
     RuntimeHTTPConfig,
 )
 from core_runtime.panel_auth import PanelAuthManager
+from tobkiri_protocol.canonical import canonical_digest
 
 
 def _bundle_root() -> Path:
@@ -402,6 +403,48 @@ def test_server_construction_without_requests_is_filesystem_immutable(
 
     assert server.server is None
     assert not user_data.exists()
+
+
+def test_server_stop_closes_drained_journal_heartbeat_and_restart_reads_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(tmp_path / "user-data"))
+    request_id = "12121212-1212-4212-8212-121212121212"
+    first = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+    )
+    first.start()
+    first._operation_journal.begin_operation(
+        request_id=request_id,
+        session_id="session-a",
+        operation_id="profile.change.approve",
+        contract_id="tobkiri.host.control-presentation.v4",
+        request_digest=canonical_digest({"request_id": request_id}),
+    )
+    first._operation_journal.finish_operation(
+        request_id,
+        session_id="session-a",
+        state="succeeded",
+        result={"state": "approved"},
+    )
+    heartbeat = first._operation_journal._heartbeat_thread
+    first.stop()
+
+    assert heartbeat is not None
+    assert not heartbeat.is_alive()
+    restarted = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+    )
+    assert (
+        restarted._operation_journal.operation_status(
+            request_id,
+            session_id="session-a",
+        )["state"]
+        == "succeeded"
+    )
 
 
 def test_packvm_failure_before_authorization_does_not_initialize_journal(

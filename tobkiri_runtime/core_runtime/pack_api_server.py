@@ -28,8 +28,10 @@ from .capability_bindings_v4 import (
     capture_capability_binding_snapshot,
 )
 from .control_reconciliation_v4 import (
+    ControlReconciliationConflictError,
     ControlReconciliationError,
     ControlReconciliationStore,
+    ControlReconciliationUnavailableError,
 )
 from .frontend_contract_routes import (
     ContractRouteError,
@@ -204,6 +206,42 @@ class _PackThreadingHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     block_on_close = False
     request_queue_size = 128
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self._request_condition = threading.Condition()
+        self._active_requests = 0
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        with self._request_condition:
+            self._active_requests += 1
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            with self._request_condition:
+                self._active_requests -= 1
+                self._request_condition.notify_all()
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            with self._request_condition:
+                self._active_requests -= 1
+                self._request_condition.notify_all()
+
+    def wait_for_request_drain(self, timeout: float) -> bool:
+        """Wait a bounded interval for accepted handlers to finish."""
+
+        deadline = time.monotonic() + timeout
+        with self._request_condition:
+            while self._active_requests:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._request_condition.wait(remaining)
+        return True
 
 
 class _RequestReplayGuard:
@@ -560,14 +598,30 @@ class PackAPIHandler(
             )
             fresh = replay_guard.consume(session_id, request_id)
             try:
-                operation_record, created = operation_journal.begin_operation(
-                    request_id=request_id,
-                    session_id=session_id,
-                    operation_id=target.operation_id,
-                    contract_id=target.contract_id,
-                    request_digest=request_digest,
-                )
-            except ControlReconciliationError as error:
+                if fresh:
+                    operation_record, created = operation_journal.begin_operation(
+                        request_id=request_id,
+                        session_id=session_id,
+                        operation_id=target.operation_id,
+                        contract_id=target.contract_id,
+                        request_digest=request_digest,
+                    )
+                else:
+                    existing = operation_journal.lookup_operation(
+                        request_id=request_id,
+                        session_id=session_id,
+                        operation_id=target.operation_id,
+                        contract_id=target.contract_id,
+                        request_digest=request_digest,
+                    )
+                    if existing is None:
+                        self._send_response(
+                            APIResponse(False, error="Canonical request identity is replayed"),
+                            409,
+                        )
+                        return True
+                    operation_record, created = existing, False
+            except ControlReconciliationConflictError:
                 self._send_response(
                     APIResponse(
                         False,
@@ -575,22 +629,22 @@ class PackAPIHandler(
                             "state": "contract_dispatch_denied",
                             "code": "operation_reconciliation_mismatch",
                         },
-                        error=str(error),
+                        error="Control operation conflicts with durable state",
                     ),
                     409,
                 )
                 return True
-            if not fresh and created:
-                operation_journal.finish_operation(
-                    request_id,
-                    session_id=session_id,
-                    state="failed",
-                    result=None,
-                    safe_error_code="REPLAY_GUARD_MISMATCH",
-                )
+            except (ControlReconciliationUnavailableError, ControlReconciliationError):
                 self._send_response(
-                    APIResponse(False, error="Canonical request identity is replayed"),
-                    409,
+                    APIResponse(
+                        False,
+                        data={
+                            "state": "contract_dispatch_denied",
+                            "code": "operation_reconciliation_unavailable",
+                        },
+                        error="Control operation reconciliation is unavailable",
+                    ),
+                    503,
                 )
                 return True
             if not created:
@@ -1604,12 +1658,19 @@ class PackAPIServer:
             thread = self.thread
             if server is not None:
                 server.shutdown()
-                server.server_close()
-                self.server = None
             if thread is not None:
                 thread.join(timeout=THREAD_JOIN_TIMEOUT_SECONDS)
                 self.thread = None
+            drained = True
+            if server is not None:
+                drained = server.wait_for_request_drain(THREAD_JOIN_TIMEOUT_SECONDS)
+                server.server_close()
+                self.server = None
+            if drained:
+                self._operation_journal.close()
             self.handler_class = None
+            if not drained:
+                raise RuntimeError("Pack v4 API requests did not drain during stop")
         logger.info("Pack v4 API server stopped")
 
     def is_running(self) -> bool:

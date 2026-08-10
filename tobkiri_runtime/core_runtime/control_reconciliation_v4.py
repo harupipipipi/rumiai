@@ -8,6 +8,7 @@ import secrets
 import shutil
 import sqlite3
 import stat
+import subprocess
 import tempfile
 import threading
 import time
@@ -19,8 +20,61 @@ from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.errors import CanonicalizationError
 
 
+def _current_boot_id() -> str:
+    """Return a stable local boot identity without creating filesystem state."""
+
+    linux_boot_id = Path("/proc/sys/kernel/random/boot_id")
+    try:
+        if linux_boot_id.is_file():
+            return linux_boot_id.read_text(encoding="ascii").strip()
+        result = subprocess.run(
+            ["sysctl", "-n", "kern.boottime"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return canonical_digest({"boot": result.stdout.strip()})
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "boot-identity-unavailable"
+
+
+def _process_start_identity(process_id: int) -> str | None:
+    """Return a PID start binding, None when dead, or unknown when unobservable."""
+
+    linux_stat = Path(f"/proc/{process_id}/stat")
+    try:
+        if linux_stat.exists():
+            fields = linux_stat.read_text(encoding="ascii").rsplit(")", 1)[1].split()
+            return f"linux:{fields[19]}"
+        result = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(process_id)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        return canonical_digest({"process_start": result.stdout.strip()})
+    except FileNotFoundError:
+        return None
+    except (IndexError, OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
 class ControlReconciliationError(RuntimeError):
     """Raised when durable control state is missing, stale, or inconsistent."""
+
+
+class ControlReconciliationConflictError(ControlReconciliationError):
+    """Raised when a request conflicts with durable reconciliation state."""
+
+
+class ControlReconciliationUnavailableError(ControlReconciliationError):
+    """Raised when durable reconciliation state is not safely available."""
 
 
 class ControlReconciliationStore:
@@ -34,12 +88,19 @@ class ControlReconciliationStore:
         lease_timeout_seconds: float = 30.0,
         heartbeat_interval_seconds: float | None = None,
         clock: Callable[[], float] = time.time,
+        monotonic_clock: Callable[[], float] = time.monotonic,
+        retry_sleep: Callable[[float], None] = time.sleep,
+        open_retry_seconds: float = 0.5,
+        boot_id: str | None = None,
+        process_start_reader: Callable[[int], str | None] | None = None,
     ) -> None:
         if lease_timeout_seconds <= 0:
             raise ValueError("lease_timeout_seconds must be positive")
         heartbeat_interval = heartbeat_interval_seconds or min(5.0, lease_timeout_seconds / 3.0)
         if heartbeat_interval <= 0 or heartbeat_interval >= lease_timeout_seconds:
             raise ValueError("heartbeat interval must be positive and shorter than lease")
+        if open_retry_seconds <= 0 or open_retry_seconds > 5.0:
+            raise ValueError("open_retry_seconds must be positive and bounded")
         self.path = Path(path)
         self.instance_id = instance_id or f"store-{secrets.token_hex(16)}"
         self._process_id = os.getpid()
@@ -47,35 +108,124 @@ class ControlReconciliationStore:
         self._lease_timeout_seconds = lease_timeout_seconds
         self._heartbeat_interval_seconds = heartbeat_interval
         self._clock = clock
+        self._monotonic_clock = monotonic_clock
+        self._retry_sleep = retry_sleep
+        self._open_retry_seconds = open_retry_seconds
+        self._boot_id = boot_id or _current_boot_id()
+        self._process_start_reader = process_start_reader or _process_start_identity
+        self._process_start = self._process_start_reader(self._process_id) or "unknown"
         self._initialization_lock = threading.RLock()
         self._initialized = False
-        self._heartbeat_lock = threading.Lock()
+        self._heartbeat_lock = threading.RLock()
         self._heartbeat_stop = threading.Event()
         self._heartbeat_thread: threading.Thread | None = None
 
     def _prepare_path(self) -> None:
         try:
             if self.path.is_symlink():
-                raise ControlReconciliationError("control journal path cannot be a symlink")
+                raise ControlReconciliationUnavailableError(
+                    "control journal path cannot be a symlink"
+                )
             self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            if self.path.parent.is_symlink():
-                raise ControlReconciliationError("control journal parent cannot be a symlink")
+            with self._secure_parent_descriptor() as parent_descriptor:
+                for name in (
+                    self.path.name,
+                    f"{self.path.name}-wal",
+                    f"{self.path.name}-shm",
+                ):
+                    self._validate_owned_file(parent_descriptor, name, required=False)
         except ControlReconciliationError:
             raise
         except OSError as error:
-            raise ControlReconciliationError("control journal path is unavailable") from error
+            raise ControlReconciliationUnavailableError(
+                "control journal path is unavailable"
+            ) from error
+
+    @contextmanager
+    def _secure_parent_descriptor(self) -> Iterator[int]:
+        """Open every ancestor descriptor-relative without following symlinks."""
+
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open("/", flags)
+        try:
+            for component in self.path.parent.absolute().parts[1:]:
+                next_descriptor = os.open(component, flags, dir_fd=descriptor)
+                os.close(descriptor)
+                descriptor = next_descriptor
+            yield descriptor
+        except FileNotFoundError as error:
+            raise ControlReconciliationUnavailableError("control journal is unavailable") from error
+        except OSError as error:
+            raise ControlReconciliationUnavailableError(
+                "control journal ancestor is unsafe"
+            ) from error
+        finally:
+            os.close(descriptor)
+
+    @staticmethod
+    def _validate_owned_file(
+        parent_descriptor: int,
+        name: str,
+        *,
+        required: bool,
+    ) -> os.stat_result | None:
+        try:
+            metadata = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+        except FileNotFoundError:
+            if required:
+                raise ControlReconciliationUnavailableError(
+                    "control journal is unavailable"
+                ) from None
+            return None
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+        ):
+            raise ControlReconciliationUnavailableError("control journal file identity is unsafe")
+        return metadata
+
+    def _secure_chmod_database(self) -> None:
+        if os.name == "nt":
+            return
+        with self._secure_parent_descriptor() as parent_descriptor:
+            descriptor = os.open(
+                self.path.name,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent_descriptor,
+            )
+            try:
+                metadata = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or metadata.st_nlink != 1
+                    or metadata.st_uid != os.getuid()
+                ):
+                    raise ControlReconciliationUnavailableError(
+                        "control journal file identity is unsafe"
+                    )
+                os.fchmod(descriptor, 0o600)
+            finally:
+                os.close(descriptor)
 
     def _open_connection(self) -> sqlite3.Connection:
-        for attempt in range(50):
+        deadline = self._monotonic_clock() + self._open_retry_seconds
+        while True:
             connection: sqlite3.Connection | None = None
+            remaining = deadline - self._monotonic_clock()
+            if remaining <= 0:
+                raise ControlReconciliationUnavailableError(
+                    "control journal open deadline exceeded"
+                )
+            attempt_timeout = min(0.05, remaining)
             try:
                 connection = sqlite3.connect(
                     str(self.path),
-                    timeout=30.0,
+                    timeout=attempt_timeout,
                     isolation_level=None,
                 )
                 connection.row_factory = sqlite3.Row
-                connection.execute("PRAGMA busy_timeout=30000")
+                connection.execute(f"PRAGMA busy_timeout={max(1, int(attempt_timeout * 1000))}")
                 connection.execute("PRAGMA journal_mode=WAL")
                 connection.execute("PRAGMA synchronous=FULL")
                 connection.execute("PRAGMA trusted_schema=OFF")
@@ -84,14 +234,18 @@ class ControlReconciliationStore:
             except sqlite3.OperationalError as error:
                 if connection is not None:
                     connection.close()
-                if "locked" not in str(error).lower() or attempt == 49:
-                    raise ControlReconciliationError("control journal is unavailable") from error
-                time.sleep(min(0.01 * (attempt + 1), 0.1))
+                remaining = deadline - self._monotonic_clock()
+                if "locked" not in str(error).lower() or remaining <= 0:
+                    raise ControlReconciliationUnavailableError(
+                        "control journal is unavailable"
+                    ) from error
+                self._retry_sleep(min(0.01, remaining))
             except (OSError, sqlite3.Error) as error:
                 if connection is not None:
                     connection.close()
-                raise ControlReconciliationError("control journal is unavailable") from error
-        raise ControlReconciliationError("control journal is unavailable")  # pragma: no cover
+                raise ControlReconciliationUnavailableError(
+                    "control journal is unavailable"
+                ) from error
 
     def _connect(self) -> sqlite3.Connection:
         self._initialize()
@@ -119,9 +273,11 @@ class ControlReconciliationStore:
         except ControlReconciliationError:
             raise
         except OSError as error:
-            raise ControlReconciliationError("control journal path is unavailable") from error
+            raise ControlReconciliationUnavailableError(
+                "control journal path is unavailable"
+            ) from error
         except sqlite3.Error as error:
-            raise ControlReconciliationError("control journal is unavailable") from error
+            raise ControlReconciliationUnavailableError("control journal is unavailable") from error
         finally:
             if connection is not None:
                 connection.close()
@@ -129,63 +285,77 @@ class ControlReconciliationStore:
     def _copy_immutable_snapshot(self, snapshot: Path) -> None:
         """Copy a stable database/WAL pair through no-follow file descriptors."""
 
-        source_paths = (self.path, Path(f"{self.path}-wal"))
-        fingerprints: dict[Path, tuple[int, int, int, int]] = {}
+        source_names = (self.path.name, f"{self.path.name}-wal")
+        fingerprints: dict[str, tuple[int, int, int, int, int, int]] = {}
         try:
-            if self.path.parent.is_symlink():
-                raise ControlReconciliationError("control journal path is unsafe")
-            for source in source_paths:
-                try:
-                    metadata = source.lstat()
-                except FileNotFoundError:
-                    if source == self.path:
-                        raise ControlReconciliationError("control journal is unavailable") from None
-                    continue
-                if not stat.S_ISREG(metadata.st_mode):
-                    raise ControlReconciliationError("control journal path is unsafe")
-                fingerprints[source] = (
-                    metadata.st_dev,
-                    metadata.st_ino,
-                    metadata.st_size,
-                    metadata.st_mtime_ns,
-                )
-            no_follow = getattr(os, "O_NOFOLLOW", 0)
-            for source, fingerprint in fingerprints.items():
-                descriptor = os.open(source, os.O_RDONLY | no_follow)
-                try:
-                    opened = os.fstat(descriptor)
-                    opened_fingerprint = (
-                        opened.st_dev,
-                        opened.st_ino,
-                        opened.st_size,
-                        opened.st_mtime_ns,
+            with self._secure_parent_descriptor() as parent_descriptor:
+                for name in (*source_names, f"{self.path.name}-shm"):
+                    metadata = self._validate_owned_file(
+                        parent_descriptor,
+                        name,
+                        required=name == self.path.name,
                     )
-                    if opened_fingerprint != fingerprint:
-                        raise ControlReconciliationError(
+                    if metadata is not None and name in source_names:
+                        fingerprints[name] = (
+                            metadata.st_dev,
+                            metadata.st_ino,
+                            metadata.st_size,
+                            metadata.st_mtime_ns,
+                            metadata.st_nlink,
+                            metadata.st_uid,
+                        )
+                no_follow = getattr(os, "O_NOFOLLOW", 0)
+                for name, fingerprint in fingerprints.items():
+                    descriptor = os.open(
+                        name,
+                        os.O_RDONLY | no_follow,
+                        dir_fd=parent_descriptor,
+                    )
+                    try:
+                        opened = os.fstat(descriptor)
+                        opened_fingerprint = (
+                            opened.st_dev,
+                            opened.st_ino,
+                            opened.st_size,
+                            opened.st_mtime_ns,
+                            opened.st_nlink,
+                            opened.st_uid,
+                        )
+                        if opened_fingerprint != fingerprint:
+                            raise ControlReconciliationUnavailableError(
+                                "control journal changed during immutable read"
+                            )
+                        target = snapshot if name == self.path.name else Path(f"{snapshot}-wal")
+                        with os.fdopen(os.dup(descriptor), "rb") as reader:
+                            with target.open("wb") as writer:
+                                shutil.copyfileobj(reader, writer)
+                    finally:
+                        os.close(descriptor)
+                for name, fingerprint in fingerprints.items():
+                    metadata = self._validate_owned_file(
+                        parent_descriptor,
+                        name,
+                        required=True,
+                    )
+                    assert metadata is not None
+                    current = (
+                        metadata.st_dev,
+                        metadata.st_ino,
+                        metadata.st_size,
+                        metadata.st_mtime_ns,
+                        metadata.st_nlink,
+                        metadata.st_uid,
+                    )
+                    if current != fingerprint:
+                        raise ControlReconciliationUnavailableError(
                             "control journal changed during immutable read"
                         )
-                    target = snapshot if source == self.path else Path(f"{snapshot}-wal")
-                    with os.fdopen(os.dup(descriptor), "rb") as reader:
-                        with target.open("wb") as writer:
-                            shutil.copyfileobj(reader, writer)
-                finally:
-                    os.close(descriptor)
-            for source, fingerprint in fingerprints.items():
-                metadata = source.lstat()
-                current = (
-                    metadata.st_dev,
-                    metadata.st_ino,
-                    metadata.st_size,
-                    metadata.st_mtime_ns,
-                )
-                if current != fingerprint:
-                    raise ControlReconciliationError(
-                        "control journal changed during immutable read"
-                    )
         except ControlReconciliationError:
             raise
         except OSError as error:
-            raise ControlReconciliationError("control journal path is unavailable") from error
+            raise ControlReconciliationUnavailableError(
+                "control journal path is unavailable"
+            ) from error
 
     def _read_existing_one(
         self,
@@ -198,7 +368,7 @@ class ControlReconciliationStore:
         except ControlReconciliationError:
             raise
         except (OSError, sqlite3.Error) as error:
-            raise ControlReconciliationError("control journal read failed") from error
+            raise ControlReconciliationUnavailableError("control journal read failed") from error
 
     def _initialize(self) -> None:
         if self._initialized:
@@ -209,9 +379,9 @@ class ControlReconciliationStore:
             self._prepare_path()
             try:
                 with self._open_connection() as connection:
-                    connection.execute("BEGIN IMMEDIATE")
                     connection.executescript(
                         """
+                BEGIN EXCLUSIVE;
                 CREATE TABLE IF NOT EXISTS profile_ceremonies (
                     candidate_id TEXT PRIMARY KEY,
                     candidate_digest TEXT NOT NULL UNIQUE,
@@ -245,6 +415,8 @@ class ControlReconciliationStore:
                     owner_instance TEXT NOT NULL,
                     owner_pid INTEGER NOT NULL,
                     owner_process_token TEXT NOT NULL,
+                    owner_boot_id TEXT NOT NULL,
+                    owner_process_start TEXT NOT NULL,
                     lease_expires_at REAL NOT NULL,
                     result_json TEXT,
                     result_digest TEXT,
@@ -275,6 +447,8 @@ class ControlReconciliationStore:
                     migrations = {
                         "owner_pid": "INTEGER NOT NULL DEFAULT 0",
                         "owner_process_token": "TEXT NOT NULL DEFAULT ''",
+                        "owner_boot_id": "TEXT NOT NULL DEFAULT ''",
+                        "owner_process_start": "TEXT NOT NULL DEFAULT ''",
                         "lease_expires_at": "REAL NOT NULL DEFAULT 0",
                     }
                     for column, declaration in migrations.items():
@@ -283,10 +457,12 @@ class ControlReconciliationStore:
                                 f"ALTER TABLE control_operations ADD COLUMN {column} {declaration}"
                             )
                     connection.commit()
-                if os.name != "nt":
-                    os.chmod(self.path, 0o600)
+                self._secure_chmod_database()
+                self._prepare_path()
             except (OSError, sqlite3.Error) as error:
-                raise ControlReconciliationError("control journal initialization failed") from error
+                raise ControlReconciliationUnavailableError(
+                    "control journal initialization failed"
+                ) from error
             self._initialized = True
 
     def prepare_for_operation(self) -> None:
@@ -307,7 +483,11 @@ class ControlReconciliationStore:
     def _ensure_heartbeat(self) -> None:
         with self._heartbeat_lock:
             if self._heartbeat_thread is not None and self._heartbeat_thread.is_alive():
-                return
+                if not self._heartbeat_stop.is_set():
+                    return
+                self._heartbeat_thread.join(
+                    timeout=max(0.1, self._heartbeat_interval_seconds * 2.0)
+                )
             self._heartbeat_stop.clear()
             thread = threading.Thread(
                 target=self._heartbeat_loop,
@@ -658,8 +838,9 @@ class ControlReconciliationStore:
                     request_id, session_digest, operation_id, contract_id,
                     request_digest, state, owner_instance, owner_pid,
                     owner_process_token, lease_expires_at, record_refs_json,
+                    owner_boot_id, owner_process_start,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, '[]', ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, '[]', ?, ?, ?, ?)
                 """,
                 (
                     request_id,
@@ -671,6 +852,8 @@ class ControlReconciliationStore:
                     self._process_id,
                     self._process_token,
                     now + self._lease_timeout_seconds,
+                    self._boot_id,
+                    self._process_start,
                     now,
                     now,
                 ),
@@ -692,7 +875,7 @@ class ControlReconciliationStore:
         """Publish a terminal operation result exactly once."""
 
         if state not in {"succeeded", "failed", "indeterminate"}:
-            raise ControlReconciliationError("operation terminal state is invalid")
+            raise ControlReconciliationConflictError("operation terminal state is invalid")
         result_value = dict(result) if result is not None else None
         result_digest = canonical_digest(result_value) if result_value is not None else None
         stop_heartbeat = False
@@ -704,21 +887,21 @@ class ControlReconciliationStore:
             ).fetchone()
             record = _operation_record(row)
             if record is None or record["session_digest"] != self.session_digest(session_id):
-                raise ControlReconciliationError("operation binding does not match")
+                raise ControlReconciliationConflictError("operation binding does not match")
             if record["state"] != "pending":
                 if (
                     record["state"] != state
                     or record["result_digest"] != result_digest
                     or record["result"] != result_value
                 ):
-                    raise ControlReconciliationError("operation outcome is immutable")
+                    raise ControlReconciliationConflictError("operation outcome is immutable")
                 connection.commit()
                 return self._operation_projection(record)
             if (
                 record["owner_instance"] != self.instance_id
                 or record["owner_process_token"] != self._process_token
             ):
-                raise ControlReconciliationError("operation lease ownership changed")
+                raise ControlReconciliationConflictError("operation lease ownership changed")
             connection.execute(
                 """
                 UPDATE control_operations
@@ -749,8 +932,23 @@ class ControlReconciliationStore:
             )
             connection.commit()
         if stop_heartbeat:
-            self._heartbeat_stop.set()
+            with self._heartbeat_lock:
+                if not self._has_pending_owned_operation():
+                    self._heartbeat_stop.set()
         return self.operation_status(request_id, session_id=session_id)
+
+    def _has_pending_owned_operation(self) -> bool:
+        with self._connect() as connection:
+            return bool(
+                connection.execute(
+                    """
+                    SELECT 1 FROM control_operations
+                    WHERE state='pending' AND owner_instance=?
+                        AND owner_process_token=? LIMIT 1
+                    """,
+                    (self.instance_id, self._process_token),
+                ).fetchone()
+            )
 
     def operation_status(self, request_id: str, *, session_id: str) -> Mapping[str, Any]:
         """Read one durable operation outcome for its originating session."""
@@ -761,47 +959,81 @@ class ControlReconciliationStore:
         )
         record = _operation_record(row)
         if record is None:
-            raise ControlReconciliationError("operation request is unknown")
+            raise ControlReconciliationConflictError("operation request is unknown")
         if record["session_digest"] != self.session_digest(session_id):
-            raise ControlReconciliationError("operation request belongs to another session")
+            raise ControlReconciliationConflictError("operation request belongs to another session")
+        return self._operation_projection(record)
+
+    def lookup_operation(
+        self,
+        *,
+        request_id: str,
+        session_id: str,
+        operation_id: str,
+        contract_id: str,
+        request_digest: str,
+    ) -> Mapping[str, Any] | None:
+        """Read a replay record without initializing or reserving journal state."""
+
+        try:
+            if not self.path.exists():
+                return None
+        except OSError as error:
+            raise ControlReconciliationUnavailableError(
+                "control journal path is unavailable"
+            ) from error
+        row = self._read_existing_one(
+            "SELECT * FROM control_operations WHERE request_id = ?",
+            (request_id,),
+        )
+        record = _operation_record(row)
+        if record is None:
+            return None
+        self._check_operation(
+            record,
+            session_digest=self.session_digest(session_id),
+            operation_id=operation_id,
+            contract_id=contract_id,
+            request_digest=request_digest,
+        )
         return self._operation_projection(record)
 
     def recover_abandoned_operations(self) -> int:
-        """Mark only expired operation leases indeterminate and audit recovery."""
+        """Recover only owners proven dead, PID-reused, rebooted, or legacy-expired."""
 
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             now = self._clock()
-            expired = connection.execute(
+            pending = connection.execute(
                 """
-                SELECT owner_instance, owner_pid, owner_process_token, COUNT(*)
+                SELECT request_id, owner_instance, owner_pid,
+                       owner_process_token, owner_boot_id,
+                       owner_process_start, lease_expires_at
                 FROM control_operations
-                WHERE state='pending' AND lease_expires_at <= ?
-                    AND NOT (
-                        owner_instance=? AND owner_process_token=?
-                    )
-                GROUP BY owner_instance, owner_pid, owner_process_token
+                WHERE state='pending' AND NOT (
+                    owner_instance=? AND owner_process_token=?
+                )
                 """,
-                (now, self.instance_id, self._process_token),
+                (self.instance_id, self._process_token),
             ).fetchall()
-            cursor = connection.execute(
-                """
-                UPDATE control_operations
-                SET state='indeterminate', safe_error_code='PROCESS_RESTART',
-                    updated_at=?
-                WHERE state='pending' AND lease_expires_at <= ?
-                    AND NOT (
-                        owner_instance=? AND owner_process_token=?
-                    )
-                """,
-                (
-                    now,
-                    now,
-                    self.instance_id,
-                    self._process_token,
-                ),
-            )
-            for row in expired:
+            recovered = 0
+            for row in pending:
+                reason = self._abandonment_reason(row, now=now)
+                if reason is None:
+                    continue
+                cursor = connection.execute(
+                    """
+                    UPDATE control_operations
+                    SET state='indeterminate', safe_error_code='PROCESS_RESTART',
+                        updated_at=?
+                    WHERE request_id=? AND state='pending'
+                        AND owner_process_token=?
+                    """,
+                    (now, str(row["request_id"]), str(row["owner_process_token"])),
+                )
+                if cursor.rowcount != 1:
+                    continue
+                recovered += 1
                 connection.execute(
                     """
                     INSERT INTO control_recovery_audit(
@@ -809,20 +1041,36 @@ class ControlReconciliationStore:
                         recovered_by_process_token, abandoned_owner_instance,
                         abandoned_owner_pid, abandoned_owner_process_token,
                         recovered_count, reason
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'lease_expired')
+                    ) VALUES (?, ?, ?, ?, ?, ?, 1, ?)
                     """,
                     (
                         now,
                         self.instance_id,
                         self._process_token,
-                        str(row[0]),
-                        int(row[1]),
-                        str(row[2]),
-                        int(row[3]),
+                        str(row["owner_instance"]),
+                        int(row["owner_pid"]),
+                        str(row["owner_process_token"]),
+                        reason,
                     ),
                 )
             connection.commit()
-            return int(cursor.rowcount)
+            return recovered
+
+    def _abandonment_reason(self, row: sqlite3.Row, *, now: float) -> str | None:
+        owner_boot_id = str(row["owner_boot_id"])
+        owner_start = str(row["owner_process_start"])
+        if owner_boot_id and owner_boot_id != self._boot_id:
+            return "host_rebooted"
+        if owner_boot_id and owner_start and owner_start != "unknown":
+            observed_start = self._process_start_reader(int(row["owner_pid"]))
+            if observed_start is None:
+                return "process_dead"
+            if observed_start != "unknown" and observed_start != owner_start:
+                return "pid_reused"
+            return None
+        if float(row["lease_expires_at"]) <= now:
+            return "legacy_lease_expired"
+        return None
 
     def _transition(
         self,
@@ -888,7 +1136,7 @@ class ControlReconciliationStore:
             record["request_digest"],
         )
         if actual != expected:
-            raise ControlReconciliationError("operation request binding changed")
+            raise ControlReconciliationConflictError("operation request binding changed")
 
     @staticmethod
     def _operation_projection(record: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -933,7 +1181,7 @@ def _ceremony_record(row: sqlite3.Row | None) -> Mapping[str, Any] | None:
         TypeError,
         ValueError,
     ) as error:
-        raise ControlReconciliationError("Profile ceremony record is invalid") from error
+        raise ControlReconciliationUnavailableError("Profile ceremony record is invalid") from error
     expected = (
         str(row["candidate_digest"]),
         str(row["expected_profile_revision"]),
@@ -955,7 +1203,7 @@ def _ceremony_record(row: sqlite3.Row | None) -> Mapping[str, Any] | None:
         plan.get("security_epoch"),
     )
     if actual != expected:
-        raise ControlReconciliationError("Profile ceremony record digest changed")
+        raise ControlReconciliationUnavailableError("Profile ceremony record digest changed")
     return {
         **dict(row),
         "review": review,
@@ -971,14 +1219,14 @@ def _operation_record(row: sqlite3.Row | None) -> Mapping[str, Any] | None:
         result = json.loads(str(row["result_json"])) if row["result_json"] is not None else None
         record_refs = json.loads(str(row["record_refs_json"]))
     except (CanonicalizationError, json.JSONDecodeError, TypeError, ValueError) as error:
-        raise ControlReconciliationError("operation record is invalid") from error
+        raise ControlReconciliationUnavailableError("operation record is invalid") from error
     if (
         row["state"] not in {"pending", "succeeded", "failed", "indeterminate"}
         or not isinstance(record_refs, list)
         or (result is None) != (row["result_digest"] is None)
         or (result is not None and _record_digest(result) != row["result_digest"])
     ):
-        raise ControlReconciliationError("operation record digest changed")
+        raise ControlReconciliationUnavailableError("operation record digest changed")
     return {
         **dict(row),
         "result": result,
@@ -1012,7 +1260,14 @@ def _record_digest(value: object) -> str:
     try:
         return canonical_digest(value)
     except CanonicalizationError as error:
-        raise ControlReconciliationError("durable control record is not canonical") from error
+        raise ControlReconciliationUnavailableError(
+            "durable control record is not canonical"
+        ) from error
 
 
-__all__ = ["ControlReconciliationError", "ControlReconciliationStore"]
+__all__ = [
+    "ControlReconciliationConflictError",
+    "ControlReconciliationError",
+    "ControlReconciliationStore",
+    "ControlReconciliationUnavailableError",
+]

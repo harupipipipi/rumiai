@@ -7,6 +7,7 @@ import multiprocessing
 import os
 from pathlib import Path
 import sqlite3
+import threading
 import time
 
 import pytest
@@ -14,6 +15,7 @@ import pytest
 from core_runtime.control_reconciliation_v4 import (
     ControlReconciliationError,
     ControlReconciliationStore,
+    ControlReconciliationUnavailableError,
 )
 from tobkiri_protocol.canonical import canonical_digest
 
@@ -58,6 +60,15 @@ def _process_operation(
     )
     results.put(status["state"])  # type: ignore[attr-defined]
     store.close()
+
+
+def _process_prepare(path_value: str, results: object) -> None:
+    try:
+        store = ControlReconciliationStore(Path(path_value))
+        store.prepare_for_operation()
+        results.put("ok")  # type: ignore[attr-defined]
+    except Exception as error:  # pragma: no cover - reported to parent
+        results.put(type(error).__name__)  # type: ignore[attr-defined]
 
 
 def _begin(
@@ -152,6 +163,51 @@ def test_concurrent_first_operation_initialization_is_serialized(
     }
 
 
+def test_legacy_schema_migration_is_atomic_across_processes(tmp_path: Path) -> None:
+    path = tmp_path / "control" / "reconciliation-v4.sqlite3"
+    path.parent.mkdir()
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE control_operations (
+                request_id TEXT PRIMARY KEY,
+                session_digest TEXT NOT NULL,
+                operation_id TEXT NOT NULL,
+                contract_id TEXT NOT NULL,
+                request_digest TEXT NOT NULL,
+                state TEXT NOT NULL,
+                owner_instance TEXT NOT NULL,
+                result_json TEXT,
+                result_digest TEXT,
+                record_refs_json TEXT NOT NULL,
+                safe_error_code TEXT,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
+    context = multiprocessing.get_context("spawn")
+    results = context.Queue()
+    processes = [
+        context.Process(target=_process_prepare, args=(str(path), results)) for _index in range(6)
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(10.0)
+        assert process.exitcode == 0
+    assert [results.get(timeout=5.0) for _process in processes] == ["ok"] * 6
+    with sqlite3.connect(path) as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(control_operations)")}
+    assert {
+        "owner_pid",
+        "owner_process_token",
+        "owner_boot_id",
+        "owner_process_start",
+        "lease_expires_at",
+    } <= columns
+
+
 def test_live_foreign_operation_is_not_reclaimed_during_slow_mutation(
     tmp_path: Path,
 ) -> None:
@@ -197,6 +253,59 @@ def test_live_foreign_operation_is_not_reclaimed_during_slow_mutation(
     assert succeeded["state"] == "succeeded"
     first.close()
     second.close()
+
+
+def test_finish_and_concurrent_begin_cannot_stop_the_only_heartbeat(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "control" / "reconciliation-v4.sqlite3"
+    store = ControlReconciliationStore(
+        path,
+        instance_id="process-a",
+        lease_timeout_seconds=1.0,
+        heartbeat_interval_seconds=0.05,
+    )
+    first_id = "10101010-1010-4010-8010-101010101010"
+    second_id = "11101010-1010-4010-8010-101010101010"
+    _begin(store, first_id)
+    entered = threading.Event()
+    release = threading.Event()
+    original = store._has_pending_owned_operation
+
+    def blocked_check() -> bool:
+        entered.set()
+        assert release.wait(5.0)
+        return original()
+
+    monkeypatch.setattr(store, "_has_pending_owned_operation", blocked_check)
+    finish = threading.Thread(
+        target=lambda: store.finish_operation(
+            first_id,
+            session_id="session-a",
+            state="succeeded",
+            result={"state": "approved"},
+        )
+    )
+    finish.start()
+    assert entered.wait(5.0)
+    begin = threading.Thread(target=lambda: _begin(store, second_id))
+    begin.start()
+    time.sleep(0.05)
+    release.set()
+    finish.join(5.0)
+    begin.join(5.0)
+    assert not finish.is_alive() and not begin.is_alive()
+    assert store._heartbeat_thread is not None
+    assert store._heartbeat_thread.is_alive()
+    assert store.operation_status(second_id, session_id="session-a")["state"] == "pending"
+    store.finish_operation(
+        second_id,
+        session_id="session-a",
+        state="failed",
+        result=None,
+    )
+    store.close()
 
 
 def test_live_operation_is_not_reclaimed_across_processes(tmp_path: Path) -> None:
@@ -274,6 +383,7 @@ def test_expired_crashed_operation_is_reclaimed_with_pid_reuse_audit(
         lease_timeout_seconds=10.0,
         heartbeat_interval_seconds=1.0,
         clock=clock,
+        process_start_reader=lambda _pid: "start-a",
     )
     request_id = "02020202-0202-4202-8202-020202020202"
     _begin(crashed, request_id)
@@ -291,6 +401,7 @@ def test_expired_crashed_operation_is_reclaimed_with_pid_reuse_audit(
         lease_timeout_seconds=10.0,
         heartbeat_interval_seconds=1.0,
         clock=clock,
+        process_start_reader=lambda _pid: None,
     )
     assert restarted.recover_abandoned_operations() == 1
     status = restarted.operation_status(request_id, session_id="session-a")
@@ -305,7 +416,167 @@ def test_expired_crashed_operation_is_reclaimed_with_pid_reuse_audit(
         ).fetchone()
     assert audit[0] == crashed_token
     assert audit[1] != crashed_token
-    assert audit[2:] == (1, "lease_expired")
+    assert audit[2:] == (1, "process_dead")
+
+
+@pytest.mark.parametrize("jump", [1_000_000.0, -1_000_000.0])
+def test_wall_clock_jump_never_reclaims_demonstrably_live_owner(
+    tmp_path: Path,
+    jump: float,
+) -> None:
+    clock = _Clock()
+    path = tmp_path / "control" / "reconciliation-v4.sqlite3"
+
+    def process_reader(_pid: int) -> str:
+        return "same-process-start"
+
+    owner = ControlReconciliationStore(
+        path,
+        instance_id="owner",
+        clock=clock,
+        boot_id="boot-a",
+        process_start_reader=process_reader,
+    )
+    request_id = "08080808-0808-4808-8808-080808080808"
+    _begin(owner, request_id)
+    owner.close()
+    clock.value += jump
+    contender = ControlReconciliationStore(
+        path,
+        instance_id="contender",
+        clock=clock,
+        boot_id="boot-a",
+        process_start_reader=process_reader,
+    )
+
+    assert contender.recover_abandoned_operations() == 0
+    assert contender.operation_status(request_id, session_id="session-a")["state"] == "pending"
+
+
+@pytest.mark.parametrize(
+    ("boot_id", "observed_start", "reason"),
+    [
+        ("boot-b", "same-process-start", "host_rebooted"),
+        ("boot-a", "reused-process-start", "pid_reused"),
+    ],
+)
+def test_reboot_and_pid_reuse_are_proven_recovery_boundaries(
+    tmp_path: Path,
+    boot_id: str,
+    observed_start: str,
+    reason: str,
+) -> None:
+    path = tmp_path / "control" / "reconciliation-v4.sqlite3"
+    owner = ControlReconciliationStore(
+        path,
+        instance_id="owner",
+        boot_id="boot-a",
+        process_start_reader=lambda _pid: "same-process-start",
+    )
+    request_id = "09090909-0909-4909-8909-090909090909"
+    _begin(owner, request_id)
+    owner.close()
+    restarted = ControlReconciliationStore(
+        path,
+        instance_id="restarted",
+        boot_id=boot_id,
+        process_start_reader=lambda _pid: observed_start,
+    )
+
+    assert restarted.recover_abandoned_operations() == 1
+    with sqlite3.connect(path) as connection:
+        assert (
+            connection.execute(
+                "SELECT reason FROM control_recovery_audit ORDER BY recovery_id DESC"
+            ).fetchone()[0]
+            == reason
+        )
+
+
+def test_hardlinked_database_and_ancestor_symlink_are_rejected_without_alias_mutation(
+    tmp_path: Path,
+) -> None:
+    victim = tmp_path / "victim.sqlite3"
+    victim.write_bytes(b"outside victim")
+    victim.chmod(0o640)
+    victim_before = (victim.read_bytes(), victim.stat().st_mode)
+    control = tmp_path / "control"
+    control.mkdir()
+    os.link(victim, control / "reconciliation-v4.sqlite3")
+
+    with pytest.raises(ControlReconciliationUnavailableError, match="unsafe"):
+        ControlReconciliationStore(control / "reconciliation-v4.sqlite3").prepare_for_operation()
+    assert (victim.read_bytes(), victim.stat().st_mode) == victim_before
+
+    alias_root = tmp_path / "alias"
+    alias_root.symlink_to(control, target_is_directory=True)
+    with pytest.raises(ControlReconciliationUnavailableError, match="unsafe"):
+        ControlReconciliationStore(alias_root / "reconciliation-v4.sqlite3").operation_status(
+            "missing", session_id="session-a"
+        )
+    assert (victim.read_bytes(), victim.stat().st_mode) == victim_before
+
+
+@pytest.mark.parametrize("suffix", ["-wal", "-shm"])
+def test_hardlinked_sidecars_are_rejected_without_victim_mutation(
+    tmp_path: Path,
+    suffix: str,
+) -> None:
+    path = tmp_path / "control" / "reconciliation-v4.sqlite3"
+    request_id = "13131313-1313-4313-8313-131313131313"
+    store = ControlReconciliationStore(path)
+    _begin(store, request_id)
+    store.finish_operation(
+        request_id,
+        session_id="session-a",
+        state="succeeded",
+        result={"state": "approved"},
+    )
+    store.close()
+    sidecar = Path(f"{path}{suffix}")
+    sidecar.unlink(missing_ok=True)
+    victim = tmp_path / f"victim{suffix}"
+    victim.write_bytes(b"outside sidecar victim")
+    victim.chmod(0o640)
+    before = (victim.read_bytes(), victim.stat().st_mode)
+    os.link(victim, sidecar)
+
+    with pytest.raises(ControlReconciliationUnavailableError, match="unsafe"):
+        ControlReconciliationStore(path).operation_status(
+            request_id,
+            session_id="session-a",
+        )
+
+    assert (victim.read_bytes(), victim.stat().st_mode) == before
+
+
+def test_bounded_open_retry_uses_one_small_total_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monotonic = _Clock(0.0)
+    attempts = 0
+
+    def locked_connect(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise sqlite3.OperationalError("database is locked")
+
+    def advance(duration: float) -> None:
+        monotonic.value += duration
+
+    monkeypatch.setattr(sqlite3, "connect", locked_connect)
+    store = ControlReconciliationStore(
+        tmp_path / "control" / "reconciliation-v4.sqlite3",
+        monotonic_clock=monotonic,
+        retry_sleep=advance,
+        open_retry_seconds=0.05,
+    )
+
+    with pytest.raises(ControlReconciliationUnavailableError):
+        store.prepare_for_operation()
+    assert monotonic.value <= 0.05
+    assert attempts <= 6
 
 
 def test_valid_wal_without_shm_is_read_from_immutable_private_snapshot(
@@ -534,6 +805,7 @@ def test_operation_journal_marks_only_abandoned_pending_work_indeterminate(
         lease_timeout_seconds=10.0,
         heartbeat_interval_seconds=1.0,
         clock=clock,
+        process_start_reader=lambda _pid: None,
     )
     assert restarted.recover_abandoned_operations() == 1
     pending = restarted.operation_status(pending_id, session_id="session-a")
