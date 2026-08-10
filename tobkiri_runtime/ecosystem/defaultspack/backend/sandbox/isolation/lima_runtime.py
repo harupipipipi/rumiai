@@ -615,11 +615,7 @@ def _packvm_config_semantic_digest(config: bytes) -> str:
     if not isinstance(loaded, dict):
         raise ValueError("PackVM Lima config is invalid")
     images = loaded.get("images")
-    if (
-        not isinstance(images, list)
-        or len(images) != 1
-        or not isinstance(images[0], dict)
-    ):
+    if not isinstance(images, list) or len(images) != 1 or not isinstance(images[0], dict):
         raise ValueError("PackVM Lima image config is invalid")
     location = images[0].get("location")
     if not isinstance(location, str):
@@ -1145,11 +1141,13 @@ class PackVMLimaProvisioner:
             image_cache_status != "verified_source"
         )
         image_download_bytes = (
-            self._image_cache.remaining_bytes(self._image_authority(
-                plan_digest="sha256:" + "0" * 64,
-                session_digest="sha256:" + "0" * 64,
-                operation_id="prepare",
-            ))
+            self._image_cache.remaining_bytes(
+                self._image_authority(
+                    plan_digest="sha256:" + "0" * 64,
+                    session_digest="sha256:" + "0" * 64,
+                    operation_id="prepare",
+                )
+            )
             if image_download_required and image_cache_status != "unsafe"
             else (int(str(image["size_bytes"])) if image_download_required else 0)
         )
@@ -1317,12 +1315,8 @@ class PackVMLimaProvisioner:
                     config = self._rendered_config(image_location=handoff.url)
                     self._require_config_image_location(config, handoff.url)
                     executed_config_digest = self._config_digest(config)
-                    if not hmac.compare_digest(
-                        executed_config_digest, plan.config_digest
-                    ):
-                        raise ValueError(
-                            "PackVM executed Lima config differs from reviewed plan"
-                        )
+                    if not hmac.compare_digest(executed_config_digest, plan.config_digest):
+                        raise ValueError("PackVM executed Lima config differs from reviewed plan")
                     recovery["phase"] = "start_pending"
                     recovery["image_handoff"] = "one-shot-loopback-v1"
                     recovery["executed_config_digest"] = executed_config_digest
@@ -1334,13 +1328,19 @@ class PackVMLimaProvisioner:
                             "PackVM image provisioning was cancelled",
                         )
                     try:
-                        self._checked_call(
-                            (limactl, "start", "--name", self._instance, "-"),
-                            timeout=900,
-                            input_text=config.decode("utf-8"),
-                            max_stdin_bytes=len(config),
-                            stage="start",
-                        )
+                        try:
+                            self._checked_call(
+                                (limactl, "start", "--name", self._instance, "-"),
+                                timeout=900,
+                                input_text=config.decode("utf-8"),
+                                max_stdin_bytes=len(config),
+                                stage="start",
+                                sensitive_values=handoff.sensitive_values,
+                            )
+                        finally:
+                            self._scrub_lima_handoff_artifacts(
+                                handoff.url, handoff.sensitive_values
+                            )
                     except PackVMProcessError:
                         if cancelled is not None and cancelled():
                             raise PackVMImageCancelled(
@@ -1424,9 +1424,7 @@ class PackVMLimaProvisioner:
             state = self._load_authenticated_state()
             if state.get("limactl_digest") != _file_digest(Path(limactl)):
                 raise ValueError("limactl binary changed after provisioning")
-            if state.get("config_digest") != self._config_digest(
-                self._rendered_config()
-            ):
+            if state.get("config_digest") != self._config_digest(self._rendered_config()):
                 raise ValueError("managed PackVM pinned config changed")
             if state.get("image_digest") != _PACKVM_IMAGES[self._machine]["digest"]:
                 raise ValueError("managed PackVM pinned image changed")
@@ -1811,11 +1809,13 @@ class PackVMLimaProvisioner:
             image_cache_status != "verified_source"
         )
         image_download_bytes = (
-            self._image_cache.remaining_bytes(self._image_authority(
-                plan_digest="sha256:" + "0" * 64,
-                session_digest="sha256:" + "0" * 64,
-                operation_id="prepare",
-            ))
+            self._image_cache.remaining_bytes(
+                self._image_authority(
+                    plan_digest="sha256:" + "0" * 64,
+                    session_digest="sha256:" + "0" * 64,
+                    operation_id="prepare",
+                )
+            )
             if image_download_required and image_cache_status != "unsafe"
             else (int(str(image["size_bytes"])) if image_download_required else 0)
         )
@@ -1884,9 +1884,7 @@ class PackVMLimaProvisioner:
         ):
             raise ValueError("PackVM disk policy is below the bounded runtime minimum")
         if image_location is None:
-            image_location = (
-                "http://127.0.0.1:0/packvm-image/" + "0" * 64
-            )
+            image_location = "http://127.0.0.1:0/packvm-image/" + "0" * 64
         template = _PACKVM_CONFIG.read_text(encoding="utf-8")
         rendered = (
             template.replace("{{ARCH}}", str(image["lima_arch"]))
@@ -1915,6 +1913,154 @@ class PackVMLimaProvisioner:
         ):
             raise ValueError("PackVM executed Lima image locator changed")
 
+    def _scrub_lima_handoff_artifacts(self, endpoint: str, sensitive_values: Sequence[str]) -> None:
+        """Replace the ephemeral endpoint in private Lima metadata and logs."""
+
+        instance_directory = self._lima_home / self._instance
+        try:
+            initial = instance_directory.lstat()
+        except FileNotFoundError:
+            return
+        if (
+            instance_directory.is_symlink()
+            or not stat.S_ISDIR(initial.st_mode)
+            or (hasattr(os, "getuid") and initial.st_uid != os.getuid())
+            or (os.name == "posix" and initial.st_mode & 0o077)
+        ):
+            raise ValueError("PackVM Lima handoff metadata directory is unsafe")
+        descriptor, device, inode, chain = _open_pinned_owned_directory(instance_directory)
+        visited = 0
+
+        def scrub_directory(directory_descriptor: int, *, depth: int) -> None:
+            nonlocal visited
+            if depth > 16:
+                raise ValueError("PackVM Lima handoff metadata is too deeply nested")
+            for name in os.listdir(directory_descriptor):
+                visited += 1
+                if visited > 16_384:
+                    raise ValueError("PackVM Lima handoff metadata is too large")
+                if name in {".", ".."} or "/" in name or "\x00" in name:
+                    raise ValueError("PackVM Lima handoff metadata name is unsafe")
+                try:
+                    metadata = os.stat(name, dir_fd=directory_descriptor, follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                if stat.S_ISLNK(metadata.st_mode):
+                    target = os.readlink(name, dir_fd=directory_descriptor)
+                    if any(value in target for value in sensitive_values):
+                        raise ValueError("PackVM Lima handoff token persisted in a link")
+                    continue
+                if stat.S_ISDIR(metadata.st_mode):
+                    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                    if hasattr(os, "O_NOFOLLOW"):
+                        flags |= os.O_NOFOLLOW
+                    child_descriptor = os.open(name, flags, dir_fd=directory_descriptor)
+                    try:
+                        opened = os.fstat(child_descriptor)
+                        if (opened.st_dev, opened.st_ino) != (metadata.st_dev, metadata.st_ino) or (
+                            hasattr(os, "getuid") and opened.st_uid != os.getuid()
+                        ):
+                            raise ValueError("PackVM Lima handoff metadata directory changed")
+                        scrub_directory(child_descriptor, depth=depth + 1)
+                        current = os.stat(
+                            name,
+                            dir_fd=directory_descriptor,
+                            follow_symlinks=False,
+                        )
+                        if (current.st_dev, current.st_ino) != (
+                            opened.st_dev,
+                            opened.st_ino,
+                        ):
+                            raise ValueError("PackVM Lima handoff metadata directory changed")
+                    finally:
+                        os.close(child_descriptor)
+                    continue
+                if not stat.S_ISREG(metadata.st_mode):
+                    continue
+                if metadata.st_size > MAX_LIMA_STATE_BYTES:
+                    continue
+                file_descriptor = os.open(
+                    name,
+                    os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=directory_descriptor,
+                )
+                try:
+                    opened = os.fstat(file_descriptor)
+                    if (
+                        opened.st_nlink != 1
+                        or (opened.st_dev, opened.st_ino) != (metadata.st_dev, metadata.st_ino)
+                        or (hasattr(os, "getuid") and opened.st_uid != os.getuid())
+                    ):
+                        raise ValueError("PackVM Lima handoff metadata is unsafe")
+                    payload = os.read(file_descriptor, MAX_LIMA_STATE_BYTES + 1)
+                finally:
+                    os.close(file_descriptor)
+                replacement = payload
+                if depth == 0 and name == "lima.yaml":
+                    count = replacement.count(endpoint.encode())
+                    if count > 1:
+                        raise ValueError("PackVM Lima config contains repeated handoff URLs")
+                    replacement = replacement.replace(
+                        endpoint.encode(),
+                        str(_PACKVM_IMAGES[self._machine]["url"]).encode(),
+                    )
+                for sensitive in sensitive_values:
+                    replacement = replacement.replace(
+                        sensitive.encode(), b"<packvm-handoff-redacted>"
+                    )
+                if replacement != payload:
+                    self._replace_lima_metadata_file(
+                        directory_descriptor, name, replacement, metadata
+                    )
+
+        try:
+            scrub_directory(descriptor, depth=0)
+            _require_pinned_directory_identity(instance_directory, descriptor, device, inode, chain)
+            visited = 0
+            scrub_directory(descriptor, depth=0)
+            _require_pinned_directory_identity(instance_directory, descriptor, device, inode, chain)
+        finally:
+            os.close(descriptor)
+
+    @staticmethod
+    def _replace_lima_metadata_file(
+        directory_descriptor: int,
+        name: str,
+        payload: bytes,
+        expected: os.stat_result,
+    ) -> None:
+        """Atomically replace one exact private Lima metadata file."""
+
+        current = os.stat(name, dir_fd=directory_descriptor, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != (expected.st_dev, expected.st_ino):
+            raise ValueError("PackVM Lima handoff metadata identity changed")
+        temporary = f".packvm-scrub-{secrets.token_hex(16)}"
+        flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        temporary_descriptor = os.open(temporary, flags, 0o600, dir_fd=directory_descriptor)
+        try:
+            written = 0
+            while written < len(payload):
+                count = os.write(temporary_descriptor, payload[written:])
+                if count <= 0:
+                    raise ValueError("PackVM Lima handoff metadata write was incomplete")
+                written += count
+            os.fsync(temporary_descriptor)
+            os.replace(
+                temporary,
+                name,
+                src_dir_fd=directory_descriptor,
+                dst_dir_fd=directory_descriptor,
+            )
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(temporary_descriptor)
+            try:
+                os.unlink(temporary, dir_fd=directory_descriptor)
+            except FileNotFoundError:
+                pass
+
     def _image_authority(
         self, *, plan_digest: str, session_digest: str, operation_id: str
     ) -> PackVMImageAuthority:
@@ -1935,11 +2081,13 @@ class PackVMLimaProvisioner:
     def _packvm_image_cache_status(self) -> tuple[str, str | None]:
         """Classify only the dedicated PackVM cache, never Lima user state."""
 
-        return self._image_cache.status(self._image_authority(
-            plan_digest="sha256:" + "0" * 64,
-            session_digest="sha256:" + "0" * 64,
-            operation_id="prepare",
-        ))
+        return self._image_cache.status(
+            self._image_authority(
+                plan_digest="sha256:" + "0" * 64,
+                session_digest="sha256:" + "0" * 64,
+                operation_id="prepare",
+            )
+        )
 
     def _staging_image_path(self, authority: PackVMImageAuthority) -> Path:
         """Return the deterministic Lima handoff path for one content digest."""
@@ -1980,9 +2128,7 @@ class PackVMLimaProvisioner:
                 directory_chain,
             ) = _open_pinned_owned_directory(staging_directory)
             source_descriptor = os.dup(pinned.descriptor)
-            self._reconcile_legacy_staging(
-                staging_path, directory_descriptor, verified
-            )
+            self._reconcile_legacy_staging(staging_path, directory_descriptor, verified)
             temporary_flags = os.O_CREAT | os.O_EXCL | os.O_RDWR
             if hasattr(os, "O_NOFOLLOW"):
                 temporary_flags |= os.O_NOFOLLOW
@@ -2056,12 +2202,14 @@ class PackVMLimaProvisioner:
             staged = _PinnedStagedImage(staged_verified, temporary_descriptor)
             self._verify_sealed_staged_identity(staged)
             if progress is not None:
-                progress(PackVMImageProgress(
-                    "verified",
-                    verified.size_bytes,
-                    verified.size_bytes,
-                    verified.size_bytes,
-                ))
+                progress(
+                    PackVMImageProgress(
+                        "verified",
+                        verified.size_bytes,
+                        verified.size_bytes,
+                        verified.size_bytes,
+                    )
+                )
             if cancelled is not None and cancelled():
                 raise PackVMImageCancelled(
                     "packvm_image_cancelled",
@@ -2093,11 +2241,6 @@ class PackVMLimaProvisioner:
         if platform.system() != "Darwin" or not hasattr(stat, "UF_IMMUTABLE"):
             return
         directory_metadata = os.fstat(directory_descriptor)
-        if directory_metadata.st_flags & stat.UF_IMMUTABLE:
-            _set_descriptor_flags(
-                directory_descriptor,
-                int(directory_metadata.st_flags) & ~int(stat.UF_IMMUTABLE),
-            )
         try:
             descriptor = os.open(
                 staging_path.name,
@@ -2113,13 +2256,10 @@ class PackVMLimaProvisioner:
                 or metadata.st_nlink != 1
                 or metadata.st_size != verified.size_bytes
                 or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+                or not metadata.st_flags & stat.UF_IMMUTABLE
+                or not directory_metadata.st_flags & stat.UF_IMMUTABLE
             ):
                 raise ValueError("PackVM legacy staging residue is unsafe")
-            if metadata.st_flags & stat.UF_IMMUTABLE:
-                _set_descriptor_flags(
-                    descriptor,
-                    int(metadata.st_flags) & ~int(stat.UF_IMMUTABLE),
-                )
             hasher = hashlib.sha256()
             offset = 0
             while offset < verified.size_bytes:
@@ -2143,6 +2283,14 @@ class PackVMLimaProvisioner:
             )
             if (current.st_dev, current.st_ino) != (metadata.st_dev, metadata.st_ino):
                 raise ValueError("PackVM legacy staging residue identity changed")
+            _set_descriptor_flags(
+                descriptor,
+                int(metadata.st_flags) & ~int(stat.UF_IMMUTABLE),
+            )
+            _set_descriptor_flags(
+                directory_descriptor,
+                int(directory_metadata.st_flags) & ~int(stat.UF_IMMUTABLE),
+            )
             os.unlink(staging_path.name, dir_fd=directory_descriptor)
             os.fsync(directory_descriptor)
         finally:
@@ -2169,13 +2317,11 @@ class PackVMLimaProvisioner:
         if os.pread(staged.image_descriptor, 1, offset):
             raise ValueError("PackVM Lima staged image grew before execution")
         after = os.fstat(staged.image_descriptor)
-        if (
-            (before.st_dev, before.st_ino, before.st_size)
-            != (after.st_dev, after.st_ino, after.st_size)
-            or not hmac.compare_digest(
-                "sha256:" + hasher.hexdigest(), verified.digest
-            )
-        ):
+        if (before.st_dev, before.st_ino, before.st_size) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+        ) or not hmac.compare_digest("sha256:" + hasher.hexdigest(), verified.digest):
             raise ValueError("PackVM Lima staged image digest changed before execution")
         self._verify_sealed_staged_identity(staged)
 
@@ -2344,9 +2490,7 @@ class PackVMLimaProvisioner:
             "backend_id": PACKVM_BACKEND_ID,
             "instance": self._instance,
             "config_digest": self._config_digest(self._rendered_config()),
-            "executed_config_digest": self._config_digest(
-                self._rendered_config()
-            ),
+            "executed_config_digest": self._config_digest(self._rendered_config()),
             "image_digest": _PACKVM_IMAGES[self._machine]["digest"],
             "image_source": _PACKVM_IMAGES[self._machine]["url"],
             "guest_runner_digest": _file_digest(_PACKVM_RUNNER),
@@ -2697,9 +2841,7 @@ class PackVMLimaProvisioner:
             if inherited_fds:
                 if input_text is None or input_text.count(PACKVM_IMAGE_FD_TOKEN) != 1:
                     raise ValueError("PackVM image descriptor token is invalid")
-                materialized = input_text.replace(
-                    PACKVM_IMAGE_FD_TOKEN, str(inherited_fds[0])
-                )
+                materialized = input_text.replace(PACKVM_IMAGE_FD_TOKEN, str(inherited_fds[0]))
                 return self._runner(command, materialized, timeout, inherited_fds)
             return self._runner(command, input_text, timeout)
         environment = self._lima_process_environment()
@@ -2724,9 +2866,7 @@ class PackVMLimaProvisioner:
                 allow_inherited_readonly_fds=bool(inherited_fds),
             ),
             inherited_fds=inherited_fds,
-            inherited_fd_tokens=(
-                (PACKVM_IMAGE_FD_TOKEN,) if inherited_fds else ()
-            ),
+            inherited_fd_tokens=((PACKVM_IMAGE_FD_TOKEN,) if inherited_fds else ()),
         )
         return _LimaCallResult(
             returncode=result.exit_code if result.exit_code is not None else 1,
@@ -2744,6 +2884,7 @@ class PackVMLimaProvisioner:
         max_stdin_bytes: int = 1024 * 1024,
         inherited_fds: Sequence[int] = (),
         stage: str | None = None,
+        sensitive_values: Sequence[str] = (),
     ) -> Any:
         result = self._call(
             command,
@@ -2757,14 +2898,16 @@ class PackVMLimaProvisioner:
             raise PackVMProcessError(
                 stage=operation_stage,
                 kind="timeout",
-                stderr=_decode(getattr(result, "stderr", "")),
+                stderr=_safe_process_diagnostic(
+                    _decode(getattr(result, "stderr", "")), sensitive_values
+                ),
             )
         if result.returncode != 0:
             raise PackVMProcessError(
                 stage=operation_stage,
                 kind="exit",
                 exit_code=int(result.returncode),
-                stderr=_decode(result.stderr),
+                stderr=_safe_process_diagnostic(_decode(result.stderr), sensitive_values),
             )
         return result
 
@@ -2867,12 +3010,25 @@ def _format_gib(value: int) -> str:
     return f"{value / (1024**3):.2f} GiB"
 
 
-def _safe_process_diagnostic(value: str | None) -> str | None:
+def _safe_process_diagnostic(value: str | None, sensitive_values: Sequence[str] = ()) -> str | None:
     """Bound stderr and remove control characters and absolute host paths."""
 
     if not value:
         return None
     sanitized = "".join(char if char in "\n\t" or ord(char) >= 32 else "?" for char in value)
+    for sensitive in sorted(set(sensitive_values), key=len, reverse=True):
+        if sensitive:
+            sanitized = sanitized.replace(sensitive, "<packvm-handoff-redacted>")
+    sanitized = re.sub(
+        r"http://127\.0\.0\.1:[0-9]+/packvm-image/[0-9a-f]{64}",
+        "<packvm-handoff-redacted>",
+        sanitized,
+    )
+    sanitized = re.sub(
+        r"(?<=packvm-image/)[0-9a-f]{64}",
+        "<packvm-handoff-redacted>",
+        sanitized,
+    )
     sanitized = re.sub(r"(?<![A-Za-z0-9_.-])/(?:[^\s:'\"]+/?)+", "<host-path>", sanitized)
     sanitized = sanitized.strip()[:1000]
     return sanitized or None
@@ -2942,12 +3098,8 @@ def _constant_mapping_equal(left: Mapping[str, Any], right: Mapping[str, Any]) -
 def _claim_binding_equal(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
     """Compare the operation and authorization binding while ignoring a dead PID."""
 
-    left_binding = {
-        key: left.get(key) for key in ("version", "operation", "instance", "binding")
-    }
-    right_binding = {
-        key: right.get(key) for key in ("version", "operation", "instance", "binding")
-    }
+    left_binding = {key: left.get(key) for key in ("version", "operation", "instance", "binding")}
+    right_binding = {key: right.get(key) for key in ("version", "operation", "instance", "binding")}
     return _constant_mapping_equal(left_binding, right_binding)
 
 

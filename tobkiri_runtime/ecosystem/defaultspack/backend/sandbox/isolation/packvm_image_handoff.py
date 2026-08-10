@@ -6,24 +6,25 @@ import hashlib
 import hmac
 import os
 import secrets
+import selectors
 import socket
 import stat
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Callable
+
+
+_MAX_HEADER_BYTES = 16 * 1024
+_MAX_PENDING_CONNECTIONS = 64
+_HEADER_TIMEOUT_SECONDS = 0.5
 
 
 class PackVMImageHandoffError(RuntimeError):
     """The local image consumer did not receive the exact pinned bytes."""
 
 
-class _LoopbackServer(HTTPServer):
-    allow_reuse_address = False
-
-
 class PackVMLoopbackImageHandoff:
-    """Serve one exact image GET over an unguessable loopback-only endpoint."""
+    """Serve one exact GET through a bounded, selector-driven loopback endpoint."""
 
     def __init__(
         self,
@@ -54,10 +55,13 @@ class PackVMLoopbackImageHandoff:
         self._overall_timeout = overall_timeout_seconds
         self._inactivity_timeout = inactivity_timeout_seconds
         self._token = secrets.token_hex(32)
-        self._server: _LoopbackServer | None = None
+        self._listener: socket.socket | None = None
         self._thread: threading.Thread | None = None
-        self._lock = threading.Lock()
+        self._stop = threading.Event()
         self._finished = threading.Event()
+        self._lock = threading.Lock()
+        self._clients: set[socket.socket] = set()
+        self._active: socket.socket | None = None
         self._claimed = False
         self._consumed = False
         self._error: BaseException | None = None
@@ -67,35 +71,32 @@ class PackVMLoopbackImageHandoff:
     def url(self) -> str:
         """Return the active loopback URL containing the single-use token."""
 
-        server = self._server
-        if server is None:
+        listener = self._listener
+        if listener is None:
             raise PackVMImageHandoffError("PackVM image handoff is not active")
-        port = int(server.server_address[1])
-        return f"http://127.0.0.1:{port}/packvm-image/{self._token}"
+        return f"http://127.0.0.1:{listener.getsockname()[1]}{self._expected_path}"
+
+    @property
+    def sensitive_values(self) -> tuple[str, str]:
+        """Return exact ephemeral values that must never enter durable diagnostics."""
+
+        return self.url, self._token
+
+    @property
+    def _expected_path(self) -> str:
+        return f"/packvm-image/{self._token}"
 
     def __enter__(self) -> PackVMLoopbackImageHandoff:
-        """Bind loopback and start the bounded one-shot server."""
+        """Bind loopback and start the bounded header/event loop."""
 
-        owner = self
-
-        class Handler(BaseHTTPRequestHandler):
-            protocol_version = "HTTP/1.1"
-
-            def do_GET(self) -> None:  # noqa: N802
-                owner._handle_get(self)
-
-            def do_HEAD(self) -> None:  # noqa: N802
-                owner._reject(self, 405)
-
-            def do_POST(self) -> None:  # noqa: N802
-                owner._reject(self, 405)
-
-            def log_message(self, _format: str, *args: object) -> None:
-                del args
-
+        listener: socket.socket | None = None
         try:
-            self._server = _LoopbackServer(("127.0.0.1", 0), Handler)
-            self._server.timeout = 0.2
+            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(_MAX_PENDING_CONNECTIONS)
+            listener.setblocking(False)
+            self._listener = listener
             self._deadline = time.monotonic() + self._overall_timeout
             self._thread = threading.Thread(
                 target=self._serve,
@@ -105,22 +106,39 @@ class PackVMLoopbackImageHandoff:
             self._thread.start()
             return self
         except Exception:
+            self._stop.set()
+            if listener is not None:
+                listener.close()
+            thread = self._thread
+            if thread is not None and thread.is_alive():
+                thread.join(timeout=2.0)
+            self._listener = None
+            self._thread = None
             os.close(self._descriptor)
             raise
 
     def __exit__(self, *_exc: object) -> None:
-        """Stop the endpoint and deterministically close the pinned descriptor."""
+        """Close every socket and return within a fixed bound on every path."""
 
-        server = self._server
-        if server is not None:
-            server.shutdown()
-            server.server_close()
+        self._stop.set()
+        listener = self._listener
+        if listener is not None:
+            listener.close()
+        with self._lock:
+            sockets = tuple(self._clients) + ((self._active,) if self._active is not None else ())
+        for client in sockets:
+            self._close_socket(client)
         thread = self._thread
         if thread is not None:
             thread.join(timeout=2.0)
+        alive = thread is not None and thread.is_alive()
         os.close(self._descriptor)
-        self._server = None
+        self._listener = None
         self._thread = None
+        if alive:
+            raise PackVMImageHandoffError(
+                "PackVM image handoff did not stop within its close bound"
+            )
 
     def require_consumed(self) -> None:
         """Fail unless exactly one complete, digest-matching GET finished."""
@@ -130,54 +148,160 @@ class PackVMLoopbackImageHandoff:
             error = self._error
             consumed = self._consumed
         if error is not None:
-            raise PackVMImageHandoffError(
-                "PackVM local image handoff failed"
-            ) from error
+            raise PackVMImageHandoffError("PackVM local image handoff failed") from error
         if not consumed:
-            raise PackVMImageHandoffError(
-                "Lima did not consume the complete PackVM local image"
-            )
+            raise PackVMImageHandoffError("Lima did not consume the complete PackVM local image")
 
     def _serve(self) -> None:
-        server = self._server
-        if server is None:
+        listener = self._listener
+        if listener is None:
             return
-        server.serve_forever(poll_interval=0.1)
+        selector = selectors.DefaultSelector()
+        pending: dict[socket.socket, tuple[bytearray, float]] = {}
+        try:
+            selector.register(listener, selectors.EVENT_READ)
+            while not self._stop.is_set():
+                if self._cancelled is not None and self._cancelled():
+                    self._record_error(InterruptedError("PackVM local image handoff was cancelled"))
+                    return
+                now = time.monotonic()
+                if now >= self._deadline:
+                    self._record_error(TimeoutError("PackVM image handoff timed out"))
+                    return
+                timeout = min(0.1, self._deadline - now)
+                for key, _events in selector.select(timeout):
+                    if key.fileobj is listener:
+                        self._accept_ready(selector, pending)
+                    else:
+                        client = key.fileobj
+                        if isinstance(client, socket.socket):
+                            self._read_header(selector, pending, client)
+                now = time.monotonic()
+                for client, (_buffer, deadline) in tuple(pending.items()):
+                    if now >= deadline:
+                        self._drop_pending(selector, pending, client)
+        except (OSError, ValueError) as exc:
+            if not self._stop.is_set():
+                self._record_error(exc)
+        finally:
+            for client in tuple(pending):
+                self._drop_pending(selector, pending, client)
+            try:
+                selector.unregister(listener)
+            except (KeyError, ValueError):
+                pass
+            selector.close()
 
-    def _handle_get(self, handler: BaseHTTPRequestHandler) -> None:
-        server = self._server
-        if server is None:
-            self._reject(handler, 503)
+    def _accept_ready(
+        self,
+        selector: selectors.BaseSelector,
+        pending: dict[socket.socket, tuple[bytearray, float]],
+    ) -> None:
+        listener = self._listener
+        if listener is None:
             return
-        expected_host = f"127.0.0.1:{int(server.server_address[1])}"
-        expected_path = f"/packvm-image/{self._token}"
-        if (
-            handler.client_address[0] != "127.0.0.1"
-            or handler.path != expected_path
-            or handler.headers.get("Host") != expected_host
-            or handler.headers.get("Range") is not None
-            or handler.headers.get("Content-Length") not in {None, "0"}
-            or handler.headers.get("Transfer-Encoding") is not None
-        ):
-            self._reject(handler, 403)
+        while True:
+            try:
+                client, address = listener.accept()
+            except BlockingIOError:
+                return
+            if address[0] != "127.0.0.1":
+                self._close_socket(client)
+                continue
+            # Apply a kernel socket timeout immediately.  The selector deadline
+            # below is authoritative and also bounds partial-header trickles.
+            client.settimeout(_HEADER_TIMEOUT_SECONDS)
+            while len(pending) >= _MAX_PENDING_CONNECTIONS:
+                oldest = next(iter(pending))
+                self._drop_pending(selector, pending, oldest)
+            pending[client] = (bytearray(), time.monotonic() + _HEADER_TIMEOUT_SECONDS)
+            with self._lock:
+                self._clients.add(client)
+            selector.register(client, selectors.EVENT_READ)
+
+    def _read_header(
+        self,
+        selector: selectors.BaseSelector,
+        pending: dict[socket.socket, tuple[bytearray, float]],
+        client: socket.socket,
+    ) -> None:
+        try:
+            chunk = client.recv(4096)
+        except (BlockingIOError, TimeoutError):
+            return
+        if not chunk:
+            self._drop_pending(selector, pending, client)
+            return
+        buffer, deadline = pending[client]
+        buffer.extend(chunk)
+        if len(buffer) > _MAX_HEADER_BYTES:
+            self._reject_pending(selector, pending, client, 431)
+            return
+        if b"\r\n\r\n" not in buffer:
+            pending[client] = (buffer, deadline)
+            return
+        request = bytes(buffer)
+        self._detach_pending(selector, pending, client)
+        if not self._valid_request(request):
+            self._respond_and_close(client, 403)
             return
         with self._lock:
             if self._claimed:
-                self._reject(handler, 410)
-                return
-            self._claimed = True
+                claimed = True
+            else:
+                self._claimed = True
+                self._active = client
+                claimed = False
+        if claimed:
+            self._respond_and_close(client, 410)
+            return
+        self._stream(client)
+        with self._lock:
+            self._active = None
+        self._close_socket(client)
+
+    def _valid_request(self, request: bytes) -> bool:
+        try:
+            head, remainder = request.split(b"\r\n\r\n", 1)
+            lines = head.decode("ascii").split("\r\n")
+        except (UnicodeDecodeError, ValueError):
+            return False
+        if remainder or lines[0] != f"GET {self._expected_path} HTTP/1.1":
+            return False
+        headers: dict[str, list[str]] = {}
+        for line in lines[1:]:
+            if not line or line[0] in " \t" or ":" not in line:
+                return False
+            name, value = line.split(":", 1)
+            if not name or not name.replace("-", "").isalnum():
+                return False
+            headers.setdefault(name.casefold(), []).append(value.strip())
+        listener = self._listener
+        if listener is None:
+            return False
+        expected_host = f"127.0.0.1:{listener.getsockname()[1]}"
+        return (
+            headers.get("host") == [expected_host]
+            and "range" not in headers
+            and headers.get("content-length", ["0"]) == ["0"]
+            and "transfer-encoding" not in headers
+        )
+
+    def _stream(self, client: socket.socket) -> None:
         try:
             remaining = self._deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError("PackVM local image handoff timed out")
-            handler.connection.settimeout(min(self._inactivity_timeout, remaining))
-            handler.send_response(200)
-            handler.send_header("Content-Length", str(self._size))
-            handler.send_header("Content-Type", "application/octet-stream")
-            handler.send_header("Cache-Control", "no-store")
-            handler.send_header("Accept-Ranges", "none")
-            handler.send_header("Connection", "close")
-            handler.end_headers()
+            client.settimeout(min(self._inactivity_timeout, remaining))
+            response = (
+                "HTTP/1.1 200 OK\r\n"
+                f"Content-Length: {self._size}\r\n"
+                "Content-Type: application/octet-stream\r\n"
+                "Cache-Control: no-store\r\n"
+                "Accept-Ranges: none\r\n"
+                "Connection: close\r\n\r\n"
+            ).encode("ascii")
+            client.sendall(response)
             hasher = hashlib.sha256()
             offset = 0
             while offset < self._size:
@@ -185,13 +309,14 @@ class PackVMLoopbackImageHandoff:
                     raise InterruptedError("PackVM local image handoff was cancelled")
                 if time.monotonic() >= self._deadline:
                     raise TimeoutError("PackVM local image handoff timed out")
-                chunk = os.pread(
-                    self._descriptor, min(64 * 1024, self._size - offset), offset
-                )
+                chunk = os.pread(self._descriptor, min(64 * 1024, self._size - offset), offset)
                 if not chunk:
                     raise EOFError("PackVM local image handoff was truncated")
-                handler.wfile.write(chunk)
-                handler.wfile.flush()
+                remaining = self._deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("PackVM local image handoff timed out")
+                client.settimeout(min(self._inactivity_timeout, remaining))
+                client.sendall(chunk)
                 hasher.update(chunk)
                 offset += len(chunk)
             if os.pread(self._descriptor, 1, offset):
@@ -203,17 +328,65 @@ class PackVMLoopbackImageHandoff:
                 self._consumed = True
             self._finished.set()
         except Exception as exc:
-            with self._lock:
-                self._error = exc
-            self._finished.set()
-            try:
-                handler.connection.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
+            self._record_error(exc)
+
+    def _record_error(self, error: BaseException) -> None:
+        with self._lock:
+            if self._error is None and not self._consumed:
+                self._error = error
+        self._finished.set()
+
+    def _reject_pending(
+        self,
+        selector: selectors.BaseSelector,
+        pending: dict[socket.socket, tuple[bytearray, float]],
+        client: socket.socket,
+        status: int,
+    ) -> None:
+        self._detach_pending(selector, pending, client)
+        self._respond_and_close(client, status)
+
+    def _drop_pending(
+        self,
+        selector: selectors.BaseSelector,
+        pending: dict[socket.socket, tuple[bytearray, float]],
+        client: socket.socket,
+    ) -> None:
+        self._detach_pending(selector, pending, client)
+        self._close_socket(client)
+
+    def _detach_pending(
+        self,
+        selector: selectors.BaseSelector,
+        pending: dict[socket.socket, tuple[bytearray, float]],
+        client: socket.socket,
+    ) -> None:
+        pending.pop(client, None)
+        try:
+            selector.unregister(client)
+        except (KeyError, ValueError):
+            pass
+        with self._lock:
+            self._clients.discard(client)
+
+    def _respond_and_close(self, client: socket.socket, status: int) -> None:
+        reasons = {403: "Forbidden", 410: "Gone", 431: "Request Header Fields Too Large"}
+        try:
+            client.settimeout(0.2)
+            client.sendall(
+                (
+                    f"HTTP/1.1 {status} {reasons[status]}\r\n"
+                    "Content-Length: 0\r\nConnection: close\r\n\r\n"
+                ).encode("ascii")
+            )
+        except OSError:
+            pass
+        self._close_socket(client)
 
     @staticmethod
-    def _reject(handler: BaseHTTPRequestHandler, status: int) -> None:
-        handler.send_response(status)
-        handler.send_header("Content-Length", "0")
-        handler.send_header("Connection", "close")
-        handler.end_headers()
+    def _close_socket(client: socket.socket) -> None:
+        try:
+            client.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        client.close()

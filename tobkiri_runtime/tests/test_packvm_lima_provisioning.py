@@ -44,6 +44,7 @@ from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
     _load_file_lock_module,
     _process_is_alive,
     _release_exclusive_file_lock,
+    _safe_process_diagnostic,
 )
 from ecosystem.defaultspack.backend.sandbox.isolation.packvm_image_cache import (
     PackVMImageCache,
@@ -84,6 +85,9 @@ class FakeLima:
         self.response_identity_missing = False
         self.challenge_digest_mismatch = False
         self.challenge_calls = 0
+        self.persist_start_config = False
+        self.include_handoff_in_stderr = False
+        self.last_start_location = ""
         self.before_start: Callable[[bytes, tuple[int, ...]], None] | None = None
 
     def __call__(self, command, input_text, _timeout, inherited_fds=()):
@@ -98,6 +102,17 @@ class FakeLima:
                 self.before_start(str(input_text).encode("utf-8"), tuple(inherited_fds))
             config = yaml.safe_load(str(input_text))
             location = config["images"][0]["location"]
+            self.last_start_location = str(location)
+            if self.persist_start_config:
+                self.instance_dir.chmod(0o700)
+                config_path = self.instance_dir / "lima.yaml"
+                config_path.write_text(str(input_text), encoding="utf-8")
+                config_path.chmod(0o600)
+                log_directory = self.instance_dir / "logs"
+                log_directory.mkdir(mode=0o700, exist_ok=True)
+                log_path = log_directory / "download.log"
+                log_path.write_text(f"source={location}\n", encoding="utf-8")
+                log_path.chmod(0o600)
             with urllib.request.urlopen(location, timeout=5) as response:
                 consumed_image = response.read()
             assert consumed_image == b"fixture image boundary"
@@ -111,10 +126,13 @@ class FakeLima:
                     timed_out=True,
                 )
             if self.fail_start_after_create:
+                stderr = "start failed at /private/secret/instance"
+                if self.include_handoff_in_stderr:
+                    stderr += f" {location} {str(location).rsplit('/', 1)[-1]}"
                 return SimpleNamespace(
                     returncode=23,
                     stdout="",
-                    stderr="start failed at /private/secret/instance",
+                    stderr=stderr,
                 )
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         if args[:3] == ("stop", "--force", PACKVM_LIMA_INSTANCE):
@@ -176,10 +194,7 @@ class FakeLima:
             )
         if args[-1] == "/usr/local/libexec/tobkiri-packvm-supervisor":
             request = json.loads(input_text)
-            if (
-                request["operation"] == "invoke"
-                and request.get("operation_id") == "challenge"
-            ):
+            if request["operation"] == "invoke" and request.get("operation_id") == "challenge":
                 challenge = request["payload"]["challenge"]
                 self.challenge_calls += 1
                 payload = {
@@ -190,9 +205,7 @@ class FakeLima:
                 identities = {}
             elif request["operation"] == "invoke":
                 payload = {"result": "ok"}
-                identities = {
-                    "guest_artifact_identity": request["guest_artifact_identity"]
-                }
+                identities = {"guest_artifact_identity": request["guest_artifact_identity"]}
             elif request["operation"] == "materialize":
                 payload = None
                 identities = {
@@ -243,7 +256,7 @@ def provisioner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     command.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     command.chmod(0o755)
     instance_dir = test_lima_home / PACKVM_LIMA_INSTANCE
-    instance_dir.mkdir()
+    instance_dir.mkdir(mode=0o700)
     fake = FakeLima(command, instance_dir)
     image_cache = _FixtureImageCache(state_dir / "packvm-image-cache")
     manager = PackVMLimaProvisioner(
@@ -820,9 +833,7 @@ def test_default_runtime_root_is_persistent_short_and_restart_stable(
     assert not str(first).startswith(("/tmp/", "/private/tmp/"))
     assert len(os.fsencode(first)) < 80
 
-    different_state = _default_packvm_lima_home(
-        tmp_path / "other-state", PACKVM_LIMA_INSTANCE
-    )
+    different_state = _default_packvm_lima_home(tmp_path / "other-state", PACKVM_LIMA_INSTANCE)
     assert different_state != first
 
 
@@ -1424,9 +1435,7 @@ def test_orphan_cleanup_uses_authenticated_instance_not_evicted_source_cache(
     manager.image_cache._verified = None
     fake.fail_delete = False
 
-    result = manager.cleanup_failed_provision(
-        f"DELETE {PACKVM_LIMA_INSTANCE}", recovery
-    )
+    result = manager.cleanup_failed_provision(f"DELETE {PACKVM_LIMA_INSTANCE}", recovery)
 
     assert result == {"missing": False}
     assert fake.exists is False
@@ -1449,9 +1458,7 @@ def test_evicted_cache_does_not_weaken_unrelated_orphan_protection(provisioner) 
     fake.fail_delete = False
 
     with pytest.raises(PackVMForeignInstanceError, match="reconciliation"):
-        manager.cleanup_failed_provision(
-            f"DELETE {PACKVM_LIMA_INSTANCE}", recovery
-        )
+        manager.cleanup_failed_provision(f"DELETE {PACKVM_LIMA_INSTANCE}", recovery)
     assert fake.exists is True
 
 
@@ -1619,9 +1626,7 @@ def test_lima_child_consumes_one_shot_stream_before_uninherited_hostagent_bounda
     assert result == []
     child_result = json.loads(consumed.read_text(encoding="utf-8"))
     assert child_result["config"] == consumer.expected_config_digest
-    assert child_result["image"] == hashlib.sha256(
-        b"fixture image boundary"
-    ).hexdigest()
+    assert child_result["image"] == hashlib.sha256(b"fixture image boundary").hexdigest()
     assert fake.exists is True
 
 
@@ -1853,9 +1858,7 @@ def test_executed_stdin_config_must_match_reviewed_semantics(
         if mutation == "cpus":
             return rendered.replace(b"cpus: 2", b"cpus: 3")
         loaded = yaml.safe_load(rendered)
-        loaded["images"][0]["location"] = (
-            "http://127.0.0.1:1/packvm-image/" + "f" * 64
-        )
+        loaded["images"][0]["location"] = "http://127.0.0.1:1/packvm-image/" + "f" * 64
         return yaml.safe_dump(loaded).encode("utf-8")
 
     monkeypatch.setattr(manager, "_rendered_config", mutate_only_executed)
@@ -1898,9 +1901,7 @@ def test_progress_retained_writable_inode_cannot_change_lima_handoff(
 
     fake.before_start = consume
     try:
-        assert manager.provision(
-            _request(manager.prepare()), progress=retain_writer
-        ).ready is True
+        assert manager.provision(_request(manager.prepare()), progress=retain_writer).ready is True
     finally:
         for descriptor in retained:
             os.close(descriptor)
@@ -1958,9 +1959,7 @@ def test_crash_reclaims_complete_unlinked_staging_inode(provisioner) -> None:
 
     def stage_until_crash() -> None:
         with manager.image_cache.provisioning_image(authority) as pinned:
-            with manager._staged_image(
-                pinned, progress=None, cancelled=None
-            ):
+            with manager._staged_image(pinned, progress=None, cancelled=None):
                 ready.set()
                 release.wait(timeout=30)
 
@@ -2002,6 +2001,77 @@ def test_restart_reconciles_only_valid_legacy_immutable_staging(provisioner) -> 
     assert fake.exists is True
 
 
+@pytest.mark.skipif(platform.system() != "Darwin", reason="legacy flags are Darwin-only")
+def test_legacy_cleanup_never_clears_unproven_immutable_residue(provisioner) -> None:
+    manager, _fake, _command = provisioner
+    authority = manager._image_authority(
+        plan_digest="sha256:" + "0" * 64,
+        session_digest="sha256:" + "0" * 64,
+        operation_id="legacy-invalid",
+    )
+    verified = manager.image_cache.prefetch(authority)
+    staged = manager._staging_image_path(authority)
+    staged.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    staged.write_bytes(b"changed image boundary")
+    staged.chmod(0o400)
+    os.chflags(staged, stat.UF_IMMUTABLE)
+    os.chflags(staged.parent, stat.UF_IMMUTABLE)
+    descriptor = os.open(staged.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        before_file_flags = staged.stat().st_flags
+        before_directory_flags = staged.parent.stat().st_flags
+        with pytest.raises(ValueError, match="digest changed"):
+            manager._reconcile_legacy_staging(staged, descriptor, verified)
+        assert staged.read_bytes() == b"changed image boundary"
+        assert staged.stat().st_flags == before_file_flags
+        assert staged.parent.stat().st_flags == before_directory_flags
+        os.chflags(staged.parent, 0)
+        os.chflags(staged, 0)
+        staged.unlink()
+        os.chflags(staged.parent, stat.UF_IMMUTABLE)
+        missing_directory_flags = staged.parent.stat().st_flags
+        manager._reconcile_legacy_staging(staged, descriptor, verified)
+        assert staged.parent.stat().st_flags == missing_directory_flags
+    finally:
+        os.close(descriptor)
+        os.chflags(staged.parent, 0)
+        if staged.exists():
+            os.chflags(staged, 0)
+
+
+def test_handoff_token_is_scrubbed_after_success_and_failure(provisioner) -> None:
+    manager, fake, _command = provisioner
+    fake.persist_start_config = True
+    assert manager.provision(_request(manager.prepare())).ready is True
+    endpoint = fake.last_start_location
+    token = endpoint.rsplit("/", 1)[-1]
+    persisted = (fake.instance_dir / "lima.yaml").read_text(encoding="utf-8")
+    assert endpoint not in persisted
+    assert token not in persisted
+    assert "https://cloud-images.ubuntu.com/" in persisted
+    for path in (manager.state_path.parent, manager.lima_home):
+        for candidate in path.rglob("*"):
+            if candidate.is_file() and candidate.stat().st_size < 1024 * 1024:
+                assert token.encode() not in candidate.read_bytes()
+
+    manager.cleanup(f"DELETE {PACKVM_LIMA_INSTANCE}")
+    fake.persist_start_config = True
+    fake.fail_start_after_create = True
+    fake.include_handoff_in_stderr = True
+    with pytest.raises(PackVMProcessError) as captured:
+        manager.provision(_request(manager.prepare()))
+    endpoint = fake.last_start_location
+    token = endpoint.rsplit("/", 1)[-1]
+    assert endpoint not in str(captured.value)
+    assert token not in str(captured.value)
+    assert captured.value.stderr is not None
+    assert "<packvm-handoff-redacted>" in captured.value.stderr
+    for path in (manager.state_path.parent, manager.lima_home):
+        for candidate in path.rglob("*"):
+            if candidate.is_file() and candidate.stat().st_size < 1024 * 1024:
+                assert token.encode() not in candidate.read_bytes()
+
+
 def test_cancellation_after_final_seal_prevents_start(
     provisioner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2016,9 +2086,7 @@ def test_cancellation_after_final_seal_prevents_start(
 
     monkeypatch.setattr(manager, "_seal_staged_image", seal_then_cancel)
     with pytest.raises(PackVMImageCancelled):
-        manager.provision(
-            _request(manager.prepare()), cancelled=lambda: cancel_requested
-        )
+        manager.provision(_request(manager.prepare()), cancelled=lambda: cancel_requested)
 
     assert fake.exists is False
     assert not manager.recovery_path.exists()
@@ -2026,15 +2094,15 @@ def test_cancellation_after_final_seal_prevents_start(
 
 
 @pytest.mark.skipif(platform.system() != "Darwin", reason="Lima VZ is macOS-only")
-def test_installed_lima_220_consumes_production_one_shot_before_vm_start() -> None:
+def test_installed_lima_220_consumes_production_one_shot_before_vm_start(
+    provisioner,
+) -> None:
     """Exercise the exact production stream without a VM or external download."""
 
     limactl = shutil.which("limactl")
     if limactl is None:
         pytest.skip("installed Lima compatibility probe requires limactl")
-    version = subprocess.run(
-        (limactl, "--version"), capture_output=True, text=True, timeout=5
-    )
+    version = subprocess.run((limactl, "--version"), capture_output=True, text=True, timeout=5)
     if version.returncode != 0 or "version 2.2.0" not in version.stdout:
         pytest.skip("compatibility probe is pinned to installed Lima 2.2.0")
 
@@ -2054,6 +2122,8 @@ def test_installed_lima_220_consumes_production_one_shot_before_vm_start() -> No
             with PackVMLoopbackImageHandoff(
                 descriptor, size_bytes=len(content), digest=digest
             ) as handoff:
+                endpoint = handoff.url
+                sensitive_values = handoff.sensitive_values
                 config = {
                     "vmType": "vz",
                     "arch": "aarch64",
@@ -2084,6 +2154,25 @@ def test_installed_lima_220_consumes_production_one_shot_before_vm_start() -> No
         assert result.returncode == 0, result.stderr
         assert "Downloaded the image from `http://127.0.0.1:" in result.stderr
         assert "https://" not in result.stderr
+        manager, _fake, _command = provisioner
+        previous_home = manager._lima_home
+        previous_instance = manager._instance
+        try:
+            manager._lima_home = lima_home
+            manager._instance = "p"
+            manager._scrub_lima_handoff_artifacts(endpoint, sensitive_values)
+        finally:
+            manager._lima_home = previous_home
+            manager._instance = previous_instance
+        diagnostic = _safe_process_diagnostic(result.stderr, sensitive_values)
+        assert diagnostic is not None
+        assert endpoint not in diagnostic
+        assert sensitive_values[1] not in diagnostic
+        for candidate in lima_home.rglob("*"):
+            if candidate.is_file() and candidate.stat().st_size < 1024 * 1024:
+                payload = candidate.read_bytes()
+                assert endpoint.encode() not in payload
+                assert sensitive_values[1].encode() not in payload
         assert (lima_home / "p" / "disk").exists()
         assert not (lima_home / "p" / "disk").stat().st_flags & stat.UF_IMMUTABLE
         assert not (lima_home / "p" / "ha.sock").exists()
@@ -2188,9 +2277,7 @@ def test_active_image_download_cancellation_is_terminal_cancelled(
         entered.set()
         while not cancelled():
             time.sleep(0.001)
-        raise PackVMImageCancelled(
-            "packvm_image_cancelled", "PackVM image download was cancelled"
-        )
+        raise PackVMImageCancelled("packvm_image_cancelled", "PackVM image download was cancelled")
 
     monkeypatch.setattr(manager, "provision", downloading)
     operation_id = str(uuid.uuid4())
@@ -2200,9 +2287,7 @@ def test_active_image_download_cancellation_is_terminal_cancelled(
     )
     assert entered.wait(2)
     lifecycle.cancel({"operation_id": operation_id}, session_id="panel-session-a")
-    result = _wait_operation(
-        lifecycle, operation_id, session_id="panel-session-a"
-    )
+    result = _wait_operation(lifecycle, operation_id, session_id="panel-session-a")
     assert result["state"] == "cancelled"
     assert result["stage"] == "image_prefetch"
     assert "error" not in result
@@ -2243,14 +2328,10 @@ def test_cache_hit_progress_fences_cancellation_before_lima_mutation(
     assert entered.wait(2)
     try:
         with pytest.raises(ValueError, match="cannot be cancelled after it starts"):
-            lifecycle.cancel(
-                {"operation_id": operation_id}, session_id="panel-session-a"
-            )
+            lifecycle.cancel({"operation_id": operation_id}, session_id="panel-session-a")
     finally:
         release.set()
-    result = _wait_operation(
-        lifecycle, operation_id, session_id="panel-session-a"
-    )
+    result = _wait_operation(lifecycle, operation_id, session_id="panel-session-a")
     assert result["state"] == "succeeded"
     assert result["stage"] == "provisioning"
 
@@ -2290,9 +2371,7 @@ def test_cancel_accepted_before_verified_barrier_is_terminal_cancelled(
     lifecycle.cancel({"operation_id": operation_id}, session_id="panel-session-a")
     release_verification.set()
 
-    result = _wait_operation(
-        lifecycle, operation_id, session_id="panel-session-a"
-    )
+    result = _wait_operation(lifecycle, operation_id, session_id="panel-session-a")
     assert result["state"] == "cancelled"
     assert result["stage"] == "image_prefetch"
     assert fake.exists is False
