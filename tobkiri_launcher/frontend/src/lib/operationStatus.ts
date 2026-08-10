@@ -303,14 +303,15 @@ export async function reconcileMutationStatus({
   if (statusDigests !== undefined && !isRecord(statusDigests)) {
     throw new OperationStatusValidationError('The journaled operation status digests are invalid.');
   }
-  const storedDigest = isRecord(statusDigests)
+  const storedDigestValue = isRecord(statusDigests)
     ? statusDigests[statusPhase]
     : statusPhase === 'primary'
       ? record.metadata.status_request_digest
       : undefined;
-  if (storedDigest !== undefined && typeof storedDigest !== 'string') {
+  if (storedDigestValue !== undefined && typeof storedDigestValue !== 'string') {
     throw new OperationStatusValidationError('The journaled operation digest is invalid.');
   }
+  const storedDigest = typeof storedDigestValue === 'string' ? storedDigestValue : undefined;
   const status = await fetchOperationStatus(
     {
       ...binding,

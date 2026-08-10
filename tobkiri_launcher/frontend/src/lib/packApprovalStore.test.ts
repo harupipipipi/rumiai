@@ -130,6 +130,35 @@ function dynamicCatalog() {
   };
 }
 
+function operationStatusResponse(route: string, operationId: string): Response {
+  const requestId = route.match(/[?&]request_id=([^&]+)/)?.[1];
+  assert.ok(requestId);
+  return new Response(JSON.stringify({
+    success: true,
+    data: {
+      runtime_surface_api_version: 'io.tobkiri.launcher.runtime-surface.v4',
+      operation_status_api_version: 'io.tobkiri.control-operation-status.v1',
+      request_id: requestId,
+      operation_id: operationId,
+      contract_id: 'tobkiri.host.pack-control.v4',
+      request_digest: `sha256:${'a'.repeat(64)}`,
+      state: 'indeterminate',
+      result: null,
+      result_digest: null,
+      record_refs: [],
+      safe_error_code: 'PROCESS_RESTART',
+      created_at: 1,
+      updated_at: 2,
+    },
+  }), {headers: {'Content-Type': 'application/json'}});
+}
+
+function normalizeOperationStatusRoute(route: string): string {
+  if (!route.startsWith('GET /api/runtime-surface/operation-status?')) return route;
+  assert.match(route, /^GET \/api\/runtime-surface\/operation-status\?request_id=[0-9a-f-]{36}$/i);
+  return 'GET /api/runtime-surface/operation-status';
+}
+
 test('store revoke action calls the typed route, refreshes catalog, and confirms state', async () => {
   const routes = installFetch(async (route, init) => {
     if (route === 'POST /api/pack-control/approval-revoke') {
@@ -209,6 +238,9 @@ test('store revoke action clears pending and surfaces a timeout without changing
     if (route === 'POST /api/pack-control/approval-revoke') {
       throw new Error('POST request timed out after 10000ms: /api/pack-control/approval-revoke');
     }
+    if (route.startsWith('GET /api/runtime-surface/operation-status?')) {
+      return operationStatusResponse(route, 'approval.revoke');
+    }
     assert.equal(route, 'GET /api/pack-control/catalog');
     return new Response(JSON.stringify({
       success: true,
@@ -234,10 +266,12 @@ test('store revoke action clears pending and surfaces a timeout without changing
     /result is unknown/,
   );
 
-  assert.deepEqual(routes, [
-    'POST /api/pack-control/approval-revoke',
+  assert.equal(routes[0], 'POST /api/pack-control/approval-revoke');
+  assert.deepEqual(routes.slice(1).map(normalizeOperationStatusRoute).sort(), [
     'GET /api/pack-control/catalog',
-  ]);
+    'GET /api/runtime-surface/operation-status',
+    'GET /api/runtime-surface/operation-status',
+  ].sort());
   const refreshedPack = useAppStore.getState().packs[0];
   assert.equal(refreshedPack.approved, samplePack.approved);
   assert.equal(refreshedPack.enabled, samplePack.enabled);

@@ -26,7 +26,28 @@ function createSurface(): {dom: JSDOM; container: HTMLElement; root: Root} {
 
 const nextTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-test('Header avatar is an actionable Profile/Settings entry with focus, Escape, return focus, and tap behavior', async () => {
+async function waitForFocus(dom: JSDOM, target: HTMLElement): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (dom.window.document.activeElement === target) return;
+    await act(async () => { await nextTick(); });
+  }
+  assert.ok(dom.window.document.activeElement === target, 'expected the popover to move focus');
+}
+
+let domTestLock = Promise.resolve();
+
+async function acquireDomTestLock(): Promise<() => void> {
+  const previous = domTestLock;
+  let release!: () => void;
+  domTestLock = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  return release;
+}
+
+test('Header avatar is an actionable Profile/Settings entry with focus, Escape, return focus, and tap behavior', {concurrency: false}, async () => {
+  const release = await acquireDomTestLock();
   const previousState = useAppStore.getState();
   const previousWindow = globalThis.window;
   const previousDocument = globalThis.document;
@@ -43,7 +64,7 @@ test('Header avatar is an actionable Profile/Settings entry with focus, Escape, 
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Test User profile and settings"]');
     assert.ok(trigger);
     trigger.focus();
-    assert.equal(dom.window.document.activeElement, trigger);
+    assert.ok(dom.window.document.activeElement === trigger);
 
     await act(async () => { trigger.click(); await nextTick(); });
     const dialog = dom.window.document.querySelector('[role="dialog"][aria-label="Profile menu"]');
@@ -58,7 +79,7 @@ test('Header avatar is an actionable Profile/Settings entry with focus, Escape, 
     });
     assert.equal(dom.window.document.querySelector('[role="dialog"][aria-label="Profile menu"]'), null);
     await act(async () => { await nextTick(); });
-    assert.equal(dom.window.document.activeElement, trigger);
+    assert.ok(dom.window.document.activeElement === trigger);
 
     await act(async () => { trigger.click(); await nextTick(); });
     const settings = dom.window.document.querySelector<HTMLAnchorElement>('[role="dialog"][aria-label="Profile menu"] a[href="/settings"]');
@@ -66,15 +87,17 @@ test('Header avatar is an actionable Profile/Settings entry with focus, Escape, 
     await act(async () => { settings.click(); await nextTick(); });
     assert.equal(dom.window.document.querySelector('[role="dialog"][aria-label="Profile menu"]'), null);
   } finally {
-    act(() => root.unmount());
+    await act(async () => { root.unmount(); });
     useAppStore.setState(previousState, true);
     dom.window.close();
     Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
     Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+    release();
   }
 });
 
-test('mobile navigation exposes a named menu, moves focus, and closes on Escape or selection', async () => {
+test('mobile navigation exposes a named menu, moves focus, and closes on Escape or selection', {concurrency: false}, async () => {
+  const release = await acquireDomTestLock();
   const previousWindow = globalThis.window;
   const previousDocument = globalThis.document;
   const {dom, container, root} = createSurface();
@@ -98,14 +121,14 @@ test('mobile navigation exposes a named menu, moves focus, and closes on Escape 
     assert.equal(trigger.getAttribute('aria-controls'), menu.id);
     const firstItem = menu.querySelector<HTMLElement>('[role="menuitem"]');
     assert.ok(firstItem);
-    assert.equal(dom.window.document.activeElement, firstItem);
+    await waitForFocus(dom, firstItem);
 
     await act(async () => {
       dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', {key: 'Escape'}));
       await nextTick();
     });
     assert.equal(dom.window.document.querySelector('[role="menu"][aria-label="Mobile navigation"]'), null);
-    assert.equal(dom.window.document.activeElement, trigger);
+    assert.ok(dom.window.document.activeElement === trigger);
 
     await act(async () => { trigger.click(); await nextTick(); });
     const packsLink = dom.window.document.querySelector<HTMLAnchorElement>('[role="menuitem"][href="/packs"]');
@@ -113,9 +136,10 @@ test('mobile navigation exposes a named menu, moves focus, and closes on Escape 
     await act(async () => { packsLink.click(); await nextTick(); });
     assert.equal(dom.window.document.querySelector('[role="menu"][aria-label="Mobile navigation"]'), null);
   } finally {
-    act(() => root.unmount());
+    await act(async () => { root.unmount(); });
     dom.window.close();
     Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
     Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+    release();
   }
 });

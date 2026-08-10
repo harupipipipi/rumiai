@@ -3,97 +3,97 @@
   "initial_javascript": {
     "files": [
       {
-        "file": "assets/index-R1cNYXXk.js",
-        "raw_bytes": 326374,
-        "gzip_bytes": 99011
+        "file": "assets/index-xXUH4Ogg.js",
+        "raw_bytes": 326513,
+        "gzip_bytes": 99072
       },
       {
-        "file": "assets/Card-WcSlNZlp.js",
-        "raw_bytes": 98247,
-        "gzip_bytes": 26411
+        "file": "assets/Card-CnWQ48Z1.js",
+        "raw_bytes": 117639,
+        "gzip_bytes": 31089
       }
     ],
-    "raw_bytes": 424621,
-    "gzip_bytes": 125422
+    "raw_bytes": 444152,
+    "gzip_bytes": 130161
   },
   "initial_css": {
     "files": [
       {
-        "file": "assets/index-6FcwerVZ.css",
-        "raw_bytes": 65261,
-        "gzip_bytes": 12238
+        "file": "assets/index-D-IHdQxi.css",
+        "raw_bytes": 65634,
+        "gzip_bytes": 12266
       }
     ],
-    "raw_bytes": 65261,
-    "gzip_bytes": 12238
+    "raw_bytes": 65634,
+    "gzip_bytes": 12266
   },
   "initial_assets": {
     "files": [
       {
-        "file": "assets/index-R1cNYXXk.js",
-        "raw_bytes": 326374,
-        "gzip_bytes": 99011
+        "file": "assets/index-xXUH4Ogg.js",
+        "raw_bytes": 326513,
+        "gzip_bytes": 99072
       },
       {
-        "file": "assets/Card-WcSlNZlp.js",
-        "raw_bytes": 98247,
-        "gzip_bytes": 26411
+        "file": "assets/Card-CnWQ48Z1.js",
+        "raw_bytes": 117639,
+        "gzip_bytes": 31089
       },
       {
-        "file": "assets/index-6FcwerVZ.css",
-        "raw_bytes": 65261,
-        "gzip_bytes": 12238
+        "file": "assets/index-D-IHdQxi.css",
+        "raw_bytes": 65634,
+        "gzip_bytes": 12266
       }
     ],
-    "raw_bytes": 489882,
-    "gzip_bytes": 137660
+    "raw_bytes": 509786,
+    "gzip_bytes": 142427
   },
   "all_javascript": {
     "files": [
       {
-        "file": "assets/Card-WcSlNZlp.js",
-        "raw_bytes": 98247,
-        "gzip_bytes": 26411
+        "file": "assets/Card-CnWQ48Z1.js",
+        "raw_bytes": 117639,
+        "gzip_bytes": 31089
       },
       {
-        "file": "assets/InlineLoadError-BeRbhBXg.js",
+        "file": "assets/InlineLoadError-2oh9SPG7.js",
         "raw_bytes": 1833,
-        "gzip_bytes": 872
+        "gzip_bytes": 869
       },
       {
-        "file": "assets/Input-CZVzOF9N.js",
+        "file": "assets/Input-CExzgLAx.js",
         "raw_bytes": 1280,
-        "gzip_bytes": 651
+        "gzip_bytes": 652
       },
       {
-        "file": "assets/advancedSurfaces-BooBW1_3.js",
-        "raw_bytes": 37318,
-        "gzip_bytes": 9933
+        "file": "assets/advancedSurfaces-B_H14pFT.js",
+        "raw_bytes": 37339,
+        "gzip_bytes": 9945
       },
       {
-        "file": "assets/arrow-right-JOta021G.js",
+        "file": "assets/arrow-right-Duryz21t.js",
         "raw_bytes": 153,
         "gzip_bytes": 153
       },
       {
-        "file": "assets/check-CGDlf9QQ.js",
+        "file": "assets/check-42eV9phA.js",
         "raw_bytes": 112,
         "gzip_bytes": 129
       },
       {
-        "file": "assets/triangle-alert-DVbZGXCQ.js",
+        "file": "assets/triangle-alert-Dej-Zo1c.js",
         "raw_bytes": 521,
-        "gzip_bytes": 313
+        "gzip_bytes": 312
       },
       {
-        "file": "assets/useRuntimeOperationInvocation-CEO3clH-.js",
-        "raw_bytes": 6770,
-        "gzip_bytes": 2436
+        "file": "assets/useRuntimeOperationInvocation-seK9f4iC.js",
+        "raw_bytes": 9270,
+        "gzip_bytes": 3215
       },
       {
-        "file": "assets/index-R1cNYXXk.js",
-        "raw_bytes": 326374,
-        "gzip_bytes": 99011
+        "file": "assets/index-xXUH4Ogg.js",
+        "raw_bytes": 326513,
+        "gzip_bytes": 99072
       },
       {
         "file": "assets/core-SwWLTXZB.js",
@@ -101,63 +101,63 @@
         "gzip_bytes": 1054
       },
       {
-        "file": "assets/AiInput-C3Xm209L.js",
-        "raw_bytes": 3289,
-        "gzip_bytes": 1473
+        "file": "assets/AiInput-_a926U96.js",
+        "raw_bytes": 3726,
+        "gzip_bytes": 1616
       },
       {
-        "file": "assets/ApiMap-BfoPTJVS.js",
+        "file": "assets/ApiMap-Cn6md5P9.js",
         "raw_bytes": 3967,
-        "gzip_bytes": 1300
+        "gzip_bytes": 1301
       },
       {
-        "file": "assets/Flow-D65K26yA.js",
-        "raw_bytes": 4577,
-        "gzip_bytes": 1896
+        "file": "assets/Flow-B0v1CYYY.js",
+        "raw_bytes": 4818,
+        "gzip_bytes": 1967
       },
       {
-        "file": "assets/Graph-DmynG_Or.js",
+        "file": "assets/Graph-CiUFk5iM.js",
         "raw_bytes": 2371,
         "gzip_bytes": 1043
       },
       {
-        "file": "assets/NodeManager-C-xRxEvh.js",
-        "raw_bytes": 5045,
-        "gzip_bytes": 2025
+        "file": "assets/NodeManager-C3AgIVn2.js",
+        "raw_bytes": 5324,
+        "gzip_bytes": 2134
       },
       {
-        "file": "assets/PackDetail-Afivy1Fj.js",
-        "raw_bytes": 31889,
-        "gzip_bytes": 8221
+        "file": "assets/PackDetail-BBJoz8o8.js",
+        "raw_bytes": 32702,
+        "gzip_bytes": 8417
       },
       {
-        "file": "assets/Packs-CiGMZjIw.js",
-        "raw_bytes": 6824,
-        "gzip_bytes": 2499
+        "file": "assets/Packs-ZuCpJ188.js",
+        "raw_bytes": 7610,
+        "gzip_bytes": 2716
       },
       {
-        "file": "assets/Profile-CVm3WuCx.js",
-        "raw_bytes": 41577,
-        "gzip_bytes": 10275
+        "file": "assets/Profile-CeQ8G70x.js",
+        "raw_bytes": 47503,
+        "gzip_bytes": 11538
       },
       {
-        "file": "assets/ProfileFiles-2rzxXrdS.js",
+        "file": "assets/ProfileFiles-Dns0Kcmk.js",
         "raw_bytes": 2355,
-        "gzip_bytes": 1141
+        "gzip_bytes": 1142
       },
       {
-        "file": "assets/ProfileWiring-BUa54XpR.js",
+        "file": "assets/ProfileWiring-ClExi7r6.js",
         "raw_bytes": 3043,
-        "gzip_bytes": 1316
+        "gzip_bytes": 1317
       },
       {
-        "file": "assets/Settings-C4HgQVkU.js",
+        "file": "assets/Settings-DQXngC9d.js",
         "raw_bytes": 6339,
-        "gzip_bytes": 2002
+        "gzip_bytes": 2005
       }
     ],
-    "raw_bytes": 586590,
-    "gzip_bytes": 174154
+    "raw_bytes": 617124,
+    "gzip_bytes": 181686
   },
   "routes": {
     "src/pages/Setup.tsx": {
@@ -170,408 +170,408 @@
       "present": true,
       "files": [
         {
-          "file": "assets/Packs-CiGMZjIw.js",
-          "raw_bytes": 6824,
-          "gzip_bytes": 2499
+          "file": "assets/Packs-ZuCpJ188.js",
+          "raw_bytes": 7610,
+          "gzip_bytes": 2716
         },
         {
-          "file": "assets/Card-WcSlNZlp.js",
-          "raw_bytes": 98247,
-          "gzip_bytes": 26411
+          "file": "assets/Card-CnWQ48Z1.js",
+          "raw_bytes": 117639,
+          "gzip_bytes": 31089
         },
         {
-          "file": "assets/index-R1cNYXXk.js",
-          "raw_bytes": 326374,
-          "gzip_bytes": 99011
+          "file": "assets/index-xXUH4Ogg.js",
+          "raw_bytes": 326513,
+          "gzip_bytes": 99072
         },
         {
-          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "file": "assets/triangle-alert-Dej-Zo1c.js",
           "raw_bytes": 521,
-          "gzip_bytes": 313
+          "gzip_bytes": 312
         },
         {
-          "file": "assets/InlineLoadError-BeRbhBXg.js",
+          "file": "assets/InlineLoadError-2oh9SPG7.js",
           "raw_bytes": 1833,
-          "gzip_bytes": 872
+          "gzip_bytes": 869
         },
         {
-          "file": "assets/Input-CZVzOF9N.js",
+          "file": "assets/Input-CExzgLAx.js",
           "raw_bytes": 1280,
-          "gzip_bytes": 651
+          "gzip_bytes": 652
         }
       ],
-      "raw_bytes": 435079,
-      "gzip_bytes": 129757
+      "raw_bytes": 455396,
+      "gzip_bytes": 134710
     },
     "src/pages/PackDetail.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/PackDetail-Afivy1Fj.js",
-          "raw_bytes": 31889,
-          "gzip_bytes": 8221
+          "file": "assets/PackDetail-BBJoz8o8.js",
+          "raw_bytes": 32702,
+          "gzip_bytes": 8417
         },
         {
-          "file": "assets/Card-WcSlNZlp.js",
-          "raw_bytes": 98247,
-          "gzip_bytes": 26411
+          "file": "assets/Card-CnWQ48Z1.js",
+          "raw_bytes": 117639,
+          "gzip_bytes": 31089
         },
         {
-          "file": "assets/index-R1cNYXXk.js",
-          "raw_bytes": 326374,
-          "gzip_bytes": 99011
+          "file": "assets/index-xXUH4Ogg.js",
+          "raw_bytes": 326513,
+          "gzip_bytes": 99072
         },
         {
-          "file": "assets/InlineLoadError-BeRbhBXg.js",
+          "file": "assets/InlineLoadError-2oh9SPG7.js",
           "raw_bytes": 1833,
-          "gzip_bytes": 872
+          "gzip_bytes": 869
         },
         {
-          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "file": "assets/triangle-alert-Dej-Zo1c.js",
           "raw_bytes": 521,
-          "gzip_bytes": 313
+          "gzip_bytes": 312
         },
         {
-          "file": "assets/Input-CZVzOF9N.js",
+          "file": "assets/Input-CExzgLAx.js",
           "raw_bytes": 1280,
-          "gzip_bytes": 651
+          "gzip_bytes": 652
         }
       ],
-      "raw_bytes": 460144,
-      "gzip_bytes": 135479
+      "raw_bytes": 480488,
+      "gzip_bytes": 140411
     },
     "src/pages/Profile.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/Profile-CVm3WuCx.js",
-          "raw_bytes": 41577,
-          "gzip_bytes": 10275
+          "file": "assets/Profile-CeQ8G70x.js",
+          "raw_bytes": 47503,
+          "gzip_bytes": 11538
         },
         {
-          "file": "assets/Card-WcSlNZlp.js",
-          "raw_bytes": 98247,
-          "gzip_bytes": 26411
+          "file": "assets/Card-CnWQ48Z1.js",
+          "raw_bytes": 117639,
+          "gzip_bytes": 31089
         },
         {
-          "file": "assets/index-R1cNYXXk.js",
-          "raw_bytes": 326374,
-          "gzip_bytes": 99011
+          "file": "assets/index-xXUH4Ogg.js",
+          "raw_bytes": 326513,
+          "gzip_bytes": 99072
         },
         {
-          "file": "assets/arrow-right-JOta021G.js",
+          "file": "assets/arrow-right-Duryz21t.js",
           "raw_bytes": 153,
           "gzip_bytes": 153
         },
         {
-          "file": "assets/check-CGDlf9QQ.js",
+          "file": "assets/check-42eV9phA.js",
           "raw_bytes": 112,
           "gzip_bytes": 129
         },
         {
-          "file": "assets/advancedSurfaces-BooBW1_3.js",
-          "raw_bytes": 37318,
-          "gzip_bytes": 9933
+          "file": "assets/advancedSurfaces-B_H14pFT.js",
+          "raw_bytes": 37339,
+          "gzip_bytes": 9945
         },
         {
-          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "file": "assets/triangle-alert-Dej-Zo1c.js",
           "raw_bytes": 521,
-          "gzip_bytes": 313
+          "gzip_bytes": 312
         },
         {
-          "file": "assets/Input-CZVzOF9N.js",
+          "file": "assets/Input-CExzgLAx.js",
           "raw_bytes": 1280,
-          "gzip_bytes": 651
+          "gzip_bytes": 652
         }
       ],
-      "raw_bytes": 505582,
-      "gzip_bytes": 146876
+      "raw_bytes": 531060,
+      "gzip_bytes": 152890
     },
     "src/pages/Settings.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/Settings-C4HgQVkU.js",
+          "file": "assets/Settings-DQXngC9d.js",
           "raw_bytes": 6339,
-          "gzip_bytes": 2002
+          "gzip_bytes": 2005
         },
         {
-          "file": "assets/Card-WcSlNZlp.js",
-          "raw_bytes": 98247,
-          "gzip_bytes": 26411
+          "file": "assets/Card-CnWQ48Z1.js",
+          "raw_bytes": 117639,
+          "gzip_bytes": 31089
         },
         {
-          "file": "assets/check-CGDlf9QQ.js",
+          "file": "assets/check-42eV9phA.js",
           "raw_bytes": 112,
           "gzip_bytes": 129
         },
         {
-          "file": "assets/advancedSurfaces-BooBW1_3.js",
-          "raw_bytes": 37318,
-          "gzip_bytes": 9933
+          "file": "assets/advancedSurfaces-B_H14pFT.js",
+          "raw_bytes": 37339,
+          "gzip_bytes": 9945
         },
         {
-          "file": "assets/index-R1cNYXXk.js",
-          "raw_bytes": 326374,
-          "gzip_bytes": 99011
+          "file": "assets/index-xXUH4Ogg.js",
+          "raw_bytes": 326513,
+          "gzip_bytes": 99072
         },
         {
-          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "file": "assets/triangle-alert-Dej-Zo1c.js",
           "raw_bytes": 521,
-          "gzip_bytes": 313
+          "gzip_bytes": 312
         }
       ],
-      "raw_bytes": 468911,
-      "gzip_bytes": 137799
+      "raw_bytes": 488463,
+      "gzip_bytes": 142552
     },
     "src/pages/ProfileWiring.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/ProfileWiring-BUa54XpR.js",
+          "file": "assets/ProfileWiring-ClExi7r6.js",
           "raw_bytes": 3043,
-          "gzip_bytes": 1316
+          "gzip_bytes": 1317
         },
         {
-          "file": "assets/Card-WcSlNZlp.js",
-          "raw_bytes": 98247,
-          "gzip_bytes": 26411
+          "file": "assets/Card-CnWQ48Z1.js",
+          "raw_bytes": 117639,
+          "gzip_bytes": 31089
         },
         {
-          "file": "assets/index-R1cNYXXk.js",
-          "raw_bytes": 326374,
-          "gzip_bytes": 99011
+          "file": "assets/index-xXUH4Ogg.js",
+          "raw_bytes": 326513,
+          "gzip_bytes": 99072
         },
         {
-          "file": "assets/advancedSurfaces-BooBW1_3.js",
-          "raw_bytes": 37318,
-          "gzip_bytes": 9933
+          "file": "assets/advancedSurfaces-B_H14pFT.js",
+          "raw_bytes": 37339,
+          "gzip_bytes": 9945
         },
         {
-          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "file": "assets/triangle-alert-Dej-Zo1c.js",
           "raw_bytes": 521,
-          "gzip_bytes": 313
+          "gzip_bytes": 312
         }
       ],
-      "raw_bytes": 465503,
-      "gzip_bytes": 136984
+      "raw_bytes": 485055,
+      "gzip_bytes": 141735
     },
     "src/pages/ProfileFiles.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/ProfileFiles-2rzxXrdS.js",
+          "file": "assets/ProfileFiles-Dns0Kcmk.js",
           "raw_bytes": 2355,
-          "gzip_bytes": 1141
+          "gzip_bytes": 1142
         },
         {
-          "file": "assets/Card-WcSlNZlp.js",
-          "raw_bytes": 98247,
-          "gzip_bytes": 26411
+          "file": "assets/Card-CnWQ48Z1.js",
+          "raw_bytes": 117639,
+          "gzip_bytes": 31089
         },
         {
-          "file": "assets/advancedSurfaces-BooBW1_3.js",
-          "raw_bytes": 37318,
-          "gzip_bytes": 9933
+          "file": "assets/advancedSurfaces-B_H14pFT.js",
+          "raw_bytes": 37339,
+          "gzip_bytes": 9945
         },
         {
-          "file": "assets/index-R1cNYXXk.js",
-          "raw_bytes": 326374,
-          "gzip_bytes": 99011
+          "file": "assets/index-xXUH4Ogg.js",
+          "raw_bytes": 326513,
+          "gzip_bytes": 99072
         },
         {
-          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "file": "assets/triangle-alert-Dej-Zo1c.js",
           "raw_bytes": 521,
-          "gzip_bytes": 313
+          "gzip_bytes": 312
         }
       ],
-      "raw_bytes": 464815,
-      "gzip_bytes": 136809
+      "raw_bytes": 484367,
+      "gzip_bytes": 141560
     },
     "src/pages/Flow.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/Flow-D65K26yA.js",
-          "raw_bytes": 4577,
-          "gzip_bytes": 1896
+          "file": "assets/Flow-B0v1CYYY.js",
+          "raw_bytes": 4818,
+          "gzip_bytes": 1967
         },
         {
-          "file": "assets/Card-WcSlNZlp.js",
-          "raw_bytes": 98247,
-          "gzip_bytes": 26411
+          "file": "assets/Card-CnWQ48Z1.js",
+          "raw_bytes": 117639,
+          "gzip_bytes": 31089
         },
         {
-          "file": "assets/index-R1cNYXXk.js",
-          "raw_bytes": 326374,
-          "gzip_bytes": 99011
+          "file": "assets/index-xXUH4Ogg.js",
+          "raw_bytes": 326513,
+          "gzip_bytes": 99072
         },
         {
-          "file": "assets/advancedSurfaces-BooBW1_3.js",
-          "raw_bytes": 37318,
-          "gzip_bytes": 9933
+          "file": "assets/advancedSurfaces-B_H14pFT.js",
+          "raw_bytes": 37339,
+          "gzip_bytes": 9945
         },
         {
-          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "file": "assets/triangle-alert-Dej-Zo1c.js",
           "raw_bytes": 521,
-          "gzip_bytes": 313
+          "gzip_bytes": 312
         },
         {
-          "file": "assets/useRuntimeOperationInvocation-CEO3clH-.js",
-          "raw_bytes": 6770,
-          "gzip_bytes": 2436
+          "file": "assets/useRuntimeOperationInvocation-seK9f4iC.js",
+          "raw_bytes": 9270,
+          "gzip_bytes": 3215
         },
         {
-          "file": "assets/Input-CZVzOF9N.js",
+          "file": "assets/Input-CExzgLAx.js",
           "raw_bytes": 1280,
-          "gzip_bytes": 651
+          "gzip_bytes": 652
         }
       ],
-      "raw_bytes": 475087,
-      "gzip_bytes": 140651
+      "raw_bytes": 497380,
+      "gzip_bytes": 146252
     },
     "src/pages/Graph.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/Graph-DmynG_Or.js",
+          "file": "assets/Graph-CiUFk5iM.js",
           "raw_bytes": 2371,
           "gzip_bytes": 1043
         },
         {
-          "file": "assets/Card-WcSlNZlp.js",
-          "raw_bytes": 98247,
-          "gzip_bytes": 26411
+          "file": "assets/Card-CnWQ48Z1.js",
+          "raw_bytes": 117639,
+          "gzip_bytes": 31089
         },
         {
-          "file": "assets/index-R1cNYXXk.js",
-          "raw_bytes": 326374,
-          "gzip_bytes": 99011
+          "file": "assets/index-xXUH4Ogg.js",
+          "raw_bytes": 326513,
+          "gzip_bytes": 99072
         },
         {
-          "file": "assets/arrow-right-JOta021G.js",
+          "file": "assets/arrow-right-Duryz21t.js",
           "raw_bytes": 153,
           "gzip_bytes": 153
         },
         {
-          "file": "assets/advancedSurfaces-BooBW1_3.js",
-          "raw_bytes": 37318,
-          "gzip_bytes": 9933
+          "file": "assets/advancedSurfaces-B_H14pFT.js",
+          "raw_bytes": 37339,
+          "gzip_bytes": 9945
         },
         {
-          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "file": "assets/triangle-alert-Dej-Zo1c.js",
           "raw_bytes": 521,
-          "gzip_bytes": 313
+          "gzip_bytes": 312
         }
       ],
-      "raw_bytes": 464984,
-      "gzip_bytes": 136864
+      "raw_bytes": 484536,
+      "gzip_bytes": 141614
     },
     "src/pages/AiInput.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/AiInput-C3Xm209L.js",
-          "raw_bytes": 3289,
-          "gzip_bytes": 1473
+          "file": "assets/AiInput-_a926U96.js",
+          "raw_bytes": 3726,
+          "gzip_bytes": 1616
         },
         {
-          "file": "assets/Card-WcSlNZlp.js",
-          "raw_bytes": 98247,
-          "gzip_bytes": 26411
+          "file": "assets/Card-CnWQ48Z1.js",
+          "raw_bytes": 117639,
+          "gzip_bytes": 31089
         },
         {
-          "file": "assets/index-R1cNYXXk.js",
-          "raw_bytes": 326374,
-          "gzip_bytes": 99011
+          "file": "assets/index-xXUH4Ogg.js",
+          "raw_bytes": 326513,
+          "gzip_bytes": 99072
         },
         {
-          "file": "assets/advancedSurfaces-BooBW1_3.js",
-          "raw_bytes": 37318,
-          "gzip_bytes": 9933
+          "file": "assets/advancedSurfaces-B_H14pFT.js",
+          "raw_bytes": 37339,
+          "gzip_bytes": 9945
         },
         {
-          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "file": "assets/triangle-alert-Dej-Zo1c.js",
           "raw_bytes": 521,
-          "gzip_bytes": 313
+          "gzip_bytes": 312
         },
         {
-          "file": "assets/useRuntimeOperationInvocation-CEO3clH-.js",
-          "raw_bytes": 6770,
-          "gzip_bytes": 2436
+          "file": "assets/useRuntimeOperationInvocation-seK9f4iC.js",
+          "raw_bytes": 9270,
+          "gzip_bytes": 3215
         },
         {
-          "file": "assets/Input-CZVzOF9N.js",
+          "file": "assets/Input-CExzgLAx.js",
           "raw_bytes": 1280,
-          "gzip_bytes": 651
+          "gzip_bytes": 652
         }
       ],
-      "raw_bytes": 473799,
-      "gzip_bytes": 140228
+      "raw_bytes": 496288,
+      "gzip_bytes": 145901
     },
     "src/pages/ApiMap.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/ApiMap-BfoPTJVS.js",
+          "file": "assets/ApiMap-Cn6md5P9.js",
           "raw_bytes": 3967,
-          "gzip_bytes": 1300
+          "gzip_bytes": 1301
         },
         {
-          "file": "assets/Card-WcSlNZlp.js",
-          "raw_bytes": 98247,
-          "gzip_bytes": 26411
+          "file": "assets/Card-CnWQ48Z1.js",
+          "raw_bytes": 117639,
+          "gzip_bytes": 31089
         },
         {
-          "file": "assets/index-R1cNYXXk.js",
-          "raw_bytes": 326374,
-          "gzip_bytes": 99011
+          "file": "assets/index-xXUH4Ogg.js",
+          "raw_bytes": 326513,
+          "gzip_bytes": 99072
         },
         {
-          "file": "assets/advancedSurfaces-BooBW1_3.js",
-          "raw_bytes": 37318,
-          "gzip_bytes": 9933
+          "file": "assets/advancedSurfaces-B_H14pFT.js",
+          "raw_bytes": 37339,
+          "gzip_bytes": 9945
         },
         {
-          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "file": "assets/triangle-alert-Dej-Zo1c.js",
           "raw_bytes": 521,
-          "gzip_bytes": 313
+          "gzip_bytes": 312
         }
       ],
-      "raw_bytes": 466427,
-      "gzip_bytes": 136968
+      "raw_bytes": 485979,
+      "gzip_bytes": 141719
     },
     "src/pages/NodeManager.tsx": {
       "present": true,
       "files": [
         {
-          "file": "assets/NodeManager-C-xRxEvh.js",
-          "raw_bytes": 5045,
-          "gzip_bytes": 2025
+          "file": "assets/NodeManager-C3AgIVn2.js",
+          "raw_bytes": 5324,
+          "gzip_bytes": 2134
         },
         {
-          "file": "assets/Card-WcSlNZlp.js",
-          "raw_bytes": 98247,
-          "gzip_bytes": 26411
+          "file": "assets/Card-CnWQ48Z1.js",
+          "raw_bytes": 117639,
+          "gzip_bytes": 31089
         },
         {
-          "file": "assets/index-R1cNYXXk.js",
-          "raw_bytes": 326374,
-          "gzip_bytes": 99011
+          "file": "assets/index-xXUH4Ogg.js",
+          "raw_bytes": 326513,
+          "gzip_bytes": 99072
         },
         {
-          "file": "assets/advancedSurfaces-BooBW1_3.js",
-          "raw_bytes": 37318,
-          "gzip_bytes": 9933
+          "file": "assets/advancedSurfaces-B_H14pFT.js",
+          "raw_bytes": 37339,
+          "gzip_bytes": 9945
         },
         {
-          "file": "assets/triangle-alert-DVbZGXCQ.js",
+          "file": "assets/triangle-alert-Dej-Zo1c.js",
           "raw_bytes": 521,
-          "gzip_bytes": 313
+          "gzip_bytes": 312
         }
       ],
-      "raw_bytes": 467505,
-      "gzip_bytes": 137693
+      "raw_bytes": 487336,
+      "gzip_bytes": 142552
     }
   }
 }

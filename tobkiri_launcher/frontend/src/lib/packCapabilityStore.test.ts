@@ -165,6 +165,35 @@ function packsResponse(): Response {
   }), {headers: {'Content-Type': 'application/json'}});
 }
 
+function operationStatusResponse(route: string, operationId: string, contractId: string): Response {
+  const requestId = route.match(/[?&]request_id=([^&]+)/)?.[1];
+  assert.ok(requestId);
+  return new Response(JSON.stringify({
+    success: true,
+    data: {
+      runtime_surface_api_version: 'io.tobkiri.launcher.runtime-surface.v4',
+      operation_status_api_version: 'io.tobkiri.control-operation-status.v1',
+      request_id: requestId,
+      operation_id: operationId,
+      contract_id: contractId,
+      request_digest: `sha256:${'a'.repeat(64)}`,
+      state: 'indeterminate',
+      result: null,
+      result_digest: null,
+      record_refs: [],
+      safe_error_code: 'PROCESS_RESTART',
+      created_at: 1,
+      updated_at: 2,
+    },
+  }), {headers: {'Content-Type': 'application/json'}});
+}
+
+function normalizeOperationStatusRoute(route: string): string {
+  if (!route.startsWith('GET /api/runtime-surface/operation-status?')) return route;
+  assert.match(route, /^GET \/api\/runtime-surface\/operation-status\?request_id=[0-9a-f-]{36}$/i);
+  return 'GET /api/runtime-surface/operation-status';
+}
+
 function readyState(): void {
   useAppStore.setState({
     packs: [samplePack],
@@ -334,6 +363,9 @@ test('a lost capability response transitions to unknown and never sends a replac
       postCount += 1;
       throw new Error('POST request timed out after 10000ms');
     }
+    if (route.startsWith('GET /api/runtime-surface/operation-status?')) {
+      return operationStatusResponse(route, operation.operation_id, operation.contract_id);
+    }
     if (route === 'GET /api/pack-control/catalog') return packsResponse();
     if (route === 'GET /api/ui/catalog') return catalogResponse();
     throw new Error(`unexpected route ${route}`);
@@ -354,11 +386,13 @@ test('a lost capability response transitions to unknown and never sends a replac
     /result is unknown/,
   );
   assert.equal(postCount, 1);
-  assert.deepEqual(routes, [
-    'POST /api/ui/capability/invoke',
+  assert.equal(routes[0], 'POST /api/ui/capability/invoke');
+  assert.deepEqual(routes.slice(1).map(normalizeOperationStatusRoute).sort(), [
     'GET /api/pack-control/catalog',
+    'GET /api/runtime-surface/operation-status',
+    'GET /api/runtime-surface/operation-status',
     'GET /api/ui/catalog',
-  ]);
+  ].sort());
   assert.deepEqual(useAppStore.getState().packOperationPending, {});
   assert.equal(Object.keys(useAppStore.getState().packOperationUnknown).length, 1);
 });
