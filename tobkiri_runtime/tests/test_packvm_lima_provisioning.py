@@ -390,6 +390,8 @@ def _write_environment_probe(path: Path) -> None:
         "#!/bin/sh\n"
         "printf 'HOME=%s\\n' \"${HOME-}\"\n"
         "printf 'LIMA_HOME=%s\\n' \"${LIMA_HOME-}\"\n"
+        "printf 'XDG_CACHE_HOME=%s\\n' \"${XDG_CACHE_HOME-}\"\n"
+        "printf 'TMPDIR=%s\\n' \"${TMPDIR-}\"\n"
         "printf 'PATH=%s\\n' \"${PATH-}\"\n"
         "printf 'UNTRUSTED=%s\\n' \"${PACKVM_UNTRUSTED-}\"\n",
         encoding="utf-8",
@@ -733,9 +735,12 @@ def test_call_passes_only_validated_lima_environment_to_real_subprocess(
     result = manager._call((str(probe),), timeout=10)
 
     assert result.returncode == 0
+    private_home = manager.state_path.parent / "packvm-lima-process-home"
     assert result.stdout.splitlines() == [
-        f"HOME={home}",
+        f"HOME={private_home / 'home'}",
         f"LIMA_HOME={manager.lima_home}",
+        f"XDG_CACHE_HOME={private_home / 'cache'}",
+        f"TMPDIR={private_home / 'tmp'}",
         "PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin",
         "UNTRUSTED=",
     ]
@@ -746,7 +751,7 @@ def test_call_passes_only_validated_lima_environment_to_real_subprocess(
     "invalid_kind",
     ["empty", "relative", "parent", "symlink", "file", "unsafe_permissions"],
 )
-def test_lima_environment_rejects_unsafe_directory_paths(
+def test_lima_environment_ignores_unsafe_host_overrides(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     variable: str,
@@ -793,8 +798,12 @@ def test_lima_environment_rejects_unsafe_directory_paths(
         machine="arm64",
     )
 
-    with pytest.raises(ValueError, match=variable):
-        manager._call((str(probe),), timeout=10)
+    result = manager._call((str(probe),), timeout=10)
+    environment = manager._lima_process_environment()
+    assert result.returncode == 0
+    assert environment["HOME"].startswith(str(manager.state_path.parent))
+    assert environment["LIMA_HOME"] == str(manager.lima_home)
+    assert invalid not in environment.values()
 
 
 def test_packvm_rejects_user_default_lima_home_and_foreign_instance(
@@ -811,7 +820,10 @@ def test_packvm_rejects_user_default_lima_home_and_foreign_instance(
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("LIMA_HOME", str(default_lima_home))
     manager = PackVMLimaProvisioner(
-        command_path=str(command), state_dir=tmp_path / "state", machine="arm64"
+        command_path=str(command),
+        state_dir=tmp_path / "state",
+        machine="arm64",
+        lima_home=default_lima_home,
     )
     with pytest.raises(ValueError, match=r"~/.lima"):
         manager._call((str(command), "list"), timeout=10)
@@ -918,7 +930,7 @@ def test_fresh_provision_requires_download_approval_and_consumes_ceremony(
         PACKVM_DISK_SIZE_BYTES
         + PACKVM_HOST_STORAGE_RESERVE_BYTES
         + PACKVM_PINNED_IMAGE_VIRTUAL_SIZE_BYTES
-        + plan.image_size_bytes
+        + 4 * plan.image_size_bytes
         + plan.image_size_bytes
     )
     assert plan.host_free_space_available_bytes == 64 * 1024**3
@@ -1021,7 +1033,7 @@ def test_user_lima_cache_hit_is_never_packvm_authority(
         PACKVM_DISK_SIZE_BYTES
         + PACKVM_HOST_STORAGE_RESERVE_BYTES
         + PACKVM_PINNED_IMAGE_VIRTUAL_SIZE_BYTES
-        + len(content)
+        + 4 * len(content)
         + len(content)
     )
     (entry / "data").write_bytes(b"tampered-test-image")
@@ -1070,7 +1082,7 @@ def test_user_lima_cache_mismatch_cannot_influence_packvm_status(
         PACKVM_DISK_SIZE_BYTES
         + PACKVM_HOST_STORAGE_RESERVE_BYTES
         + PACKVM_PINNED_IMAGE_VIRTUAL_SIZE_BYTES
-        + len(content)
+        + 4 * len(content)
         + len(content)
     )
     with pytest.raises(ValueError, match="explicit approval"):
@@ -2141,25 +2153,72 @@ def test_handoff_scrub_rejects_unprovable_links(
     assert target.read_text(encoding="utf-8") == endpoint
 
 
-def test_handoff_scrub_total_byte_bound_fails_without_mutation(
+def test_handoff_scrub_budget_failure_is_tree_atomic(
     provisioner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from ecosystem.defaultspack.backend.sandbox.isolation import lima_runtime
 
     manager, fake, _command = provisioner
     endpoint = "http://127.0.0.1:32123/packvm-image/" + "c" * 64
-    log = fake.instance_dir / "bounded.log"
-    payload = b"unrelated-log-data" * 128
-    log.write_bytes(payload)
-    identity = (log.stat().st_dev, log.stat().st_ino)
-    monkeypatch.setattr(lima_runtime, "PACKVM_LIMA_SCRUB_MAX_TOTAL_BYTES", 512)
+    first = fake.instance_dir / "first.log"
+    second = fake.instance_dir / "second.log"
+    first_payload = b"token=" + endpoint.encode()
+    second_payload = b"unrelated-log-data" * 128
+    first.write_bytes(first_payload)
+    second.write_bytes(second_payload)
+    identity = (first.stat().st_dev, first.stat().st_ino)
+    monkeypatch.setattr(
+        lima_runtime,
+        "PACKVM_LIMA_SCRUB_MAX_TOTAL_BYTES",
+        len(first_payload) * 2 + 128,
+    )
 
     with pytest.raises(ValueError, match="byte bound"):
         manager._scrub_lima_handoff_artifacts(endpoint, (endpoint, "c" * 64))
 
-    assert log.read_bytes() == payload
-    assert (log.stat().st_dev, log.stat().st_ino) == identity
+    assert first.read_bytes() == first_payload
+    assert second.read_bytes() == second_payload
+    assert (first.stat().st_dev, first.stat().st_ino) == identity
     assert not list(fake.instance_dir.glob(".packvm-scrub-*"))
+
+
+def test_handoff_scrub_rejects_hardlink_added_during_replace(
+    provisioner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ecosystem.defaultspack.backend.sandbox.isolation import lima_runtime
+
+    manager, fake, _command = provisioner
+    endpoint = "http://127.0.0.1:32123/packvm-image/" + "d" * 64
+    source = fake.instance_dir / "late.log"
+    alias = fake.instance_dir / "late-alias.log"
+    source.write_text(endpoint, encoding="utf-8")
+    original_replace = lima_runtime.os.replace
+
+    def add_alias_then_replace(
+        source_name: str,
+        destination_name: str,
+        *,
+        src_dir_fd: int,
+        dst_dir_fd: int,
+    ) -> None:
+        os.link(
+            destination_name,
+            alias.name,
+            src_dir_fd=dst_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+        original_replace(
+            source_name,
+            destination_name,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+
+    monkeypatch.setattr(lima_runtime.os, "replace", add_alias_then_replace)
+    with pytest.raises(ValueError, match="alias survived"):
+        manager._scrub_lima_handoff_artifacts(endpoint, (endpoint, "d" * 64))
+
+    assert alias.read_text(encoding="utf-8") == endpoint
 
 
 def test_unredactable_lima_log_fails_and_cleans_created_instance(provisioner) -> None:
@@ -2204,10 +2263,8 @@ def test_cancellation_after_final_seal_prevents_start(
 
 
 @pytest.mark.skipif(platform.system() != "Darwin", reason="Lima VZ is macOS-only")
-def test_installed_lima_220_consumes_production_one_shot_before_vm_start(
-    provisioner,
-) -> None:
-    """Exercise the exact production stream without a VM or external download."""
+def test_installed_lima_220_never_persists_handoff_in_dedicated_home_cache() -> None:
+    """Exercise production HOME/cache isolation with installed Lima and no VM."""
 
     limactl = shutil.which("limactl")
     if limactl is None:
@@ -2218,74 +2275,80 @@ def test_installed_lima_220_consumes_production_one_shot_before_vm_start(
 
     root = Path(tempfile.mkdtemp(prefix="pv", dir="/tmp")).resolve()
     try:
-        home = root / "h"
         lima_home = root / "l"
-        home.mkdir(mode=0o700)
         lima_home.mkdir(mode=0o700)
+        state = root / "s"
+        probe = PackVMLimaProvisioner(
+            command_path=limactl,
+            state_dir=state,
+            lima_home=lima_home,
+            machine="arm64",
+        )
         image = root / "i"
         content = b"packvm-local-image-probe\n"
         image.write_bytes(content)
         descriptor = os.open(image, os.O_RDONLY)
         image.unlink()
         digest = "sha256:" + hashlib.sha256(content).hexdigest()
+        operation_root: Path | None = None
         try:
-            with PackVMLoopbackImageHandoff(
-                descriptor, size_bytes=len(content), digest=digest
-            ) as handoff:
-                endpoint = handoff.url
-                sensitive_values = handoff.sensitive_values
-                config = {
-                    "vmType": "vz",
-                    "arch": "aarch64",
-                    "cpus": 1,
-                    "memory": "1GiB",
-                    "disk": "1GiB",
-                    "plain": True,
-                    "containerd": {"system": False, "user": False},
-                    "images": [{"location": handoff.url, "digest": digest}],
-                    "mounts": [],
-                    "networks": [],
-                }
-                result = subprocess.run(
-                    (limactl, "create", "--name", "p", "-"),
-                    input=yaml.safe_dump(config),
-                    capture_output=True,
-                    text=True,
-                    timeout=20,
-                    env={
-                        "PATH": "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin",
-                        "HOME": str(home),
-                        "LIMA_HOME": str(lima_home),
-                    },
+            with probe._lima_handoff_operation_environment() as operation_root:
+                environment = probe._lima_process_environment()
+                assert Path(environment["HOME"]).is_relative_to(operation_root)
+                assert Path(environment["XDG_CACHE_HOME"]).is_relative_to(
+                    operation_root
                 )
-                handoff.require_consumed()
+                with PackVMLoopbackImageHandoff(
+                    descriptor, size_bytes=len(content), digest=digest
+                ) as handoff:
+                    endpoint = handoff.url
+                    sensitive_values = handoff.sensitive_values
+                    config = {
+                        "vmType": "vz",
+                        "arch": "aarch64",
+                        "cpus": 1,
+                        "memory": "1GiB",
+                        "disk": "1GiB",
+                        "plain": True,
+                        "containerd": {"system": False, "user": False},
+                        "images": [{"location": handoff.url, "digest": digest}],
+                        "mounts": [],
+                        "networks": [],
+                    }
+                    result = subprocess.run(
+                        (limactl, "create", "--name", PACKVM_LIMA_INSTANCE, "-"),
+                        input=yaml.safe_dump(config),
+                        capture_output=True,
+                        text=True,
+                        timeout=20,
+                        env=environment,
+                    )
+                    handoff.require_consumed()
+                    probe._scrub_lima_handoff_artifacts(
+                        endpoint, sensitive_values
+                    )
         finally:
             os.close(descriptor)
         assert result.returncode == 0, result.stderr
         assert "Downloaded the image from `http://127.0.0.1:" in result.stderr
         assert "https://" not in result.stderr
-        manager, _fake, _command = provisioner
-        previous_home = manager._lima_home
-        previous_instance = manager._instance
-        try:
-            manager._lima_home = lima_home
-            manager._instance = "p"
-            manager._scrub_lima_handoff_artifacts(endpoint, sensitive_values)
-        finally:
-            manager._lima_home = previous_home
-            manager._instance = previous_instance
         diagnostic = _safe_process_diagnostic(result.stderr, sensitive_values)
         assert diagnostic is not None
         assert endpoint not in diagnostic
         assert sensitive_values[1] not in diagnostic
-        for candidate in lima_home.rglob("*"):
-            if candidate.is_file() and candidate.stat().st_size < 1024 * 1024:
-                payload = candidate.read_bytes()
-                assert endpoint.encode() not in payload
-                assert sensitive_values[1].encode() not in payload
-        assert (lima_home / "p" / "disk").exists()
-        assert not (lima_home / "p" / "disk").stat().st_flags & stat.UF_IMMUTABLE
-        assert not (lima_home / "p" / "ha.sock").exists()
+        for private_root in (lima_home, state):
+            for candidate in private_root.rglob("*"):
+                if candidate.is_file() and candidate.stat().st_size < 1024 * 1024:
+                    payload = candidate.read_bytes()
+                    assert endpoint.encode() not in payload
+                    assert sensitive_values[1].encode() not in payload
+        assert operation_root is not None
+        assert list(operation_root.iterdir()) == []
+        assert (lima_home / PACKVM_LIMA_INSTANCE / "disk").exists()
+        assert not (
+            lima_home / PACKVM_LIMA_INSTANCE / "disk"
+        ).stat().st_flags & stat.UF_IMMUTABLE
+        assert not (lima_home / PACKVM_LIMA_INSTANCE / "ha.sock").exists()
     finally:
         shutil.rmtree(root)
 

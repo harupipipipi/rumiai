@@ -12,6 +12,7 @@ import secrets
 import shutil
 import socket
 import stat
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -154,6 +155,7 @@ class PackVMImageCache:
         self._inactivity_timeout = _positive_bound(inactivity_timeout_seconds, 900.0)
         self._overall_timeout = _positive_bound(overall_timeout_seconds, 7 * 24 * 3600.0)
         self._signing_key_bytes: bytes | None = None
+        self._capacity_lock = threading.Lock()
         self._root_chain_identity = self._capture_root_chain(require_complete=False)
 
     @property
@@ -465,7 +467,7 @@ class PackVMImageCache:
         ):
             raise ValueError("PackVM image cache GC policy is invalid")
         current_key = self._key(current)
-        candidates: list[tuple[int, int, Path, bool, int, int]] = []
+        candidates: list[tuple[int, int, Path, bool, int, int, str]] = []
         total = 0
         for child in self._root.iterdir():
             if child.name == "image-cache.key" or child.name == current_key:
@@ -477,29 +479,24 @@ class PackVMImageCache:
                     with self._exclusive_lock(pinned, "download.lock"):
                         metadata = self._owned_entry_metadata(child, pinned)
                         if metadata is None:
-                            descriptor = self._open_regular(
-                                child / "partial.img",
-                                writable=False,
-                                directory_fd=pinned.entry_descriptor,
+                            residue_name, residue = self._uncheckpointed_residue(
+                                child, pinned
                             )
-                            try:
-                                partial = os.fstat(descriptor)
-                            finally:
-                                os.close(descriptor)
-                            size = int(partial.st_size)
+                            size = int(residue.st_size)
                             total += size
-                            age_ns = time.time_ns() - int(partial.st_mtime_ns)
+                            age_ns = time.time_ns() - int(residue.st_mtime_ns)
                             if age_ns < int(
                                 uncheckpointed_minimum_age_seconds * 1_000_000_000
                             ):
                                 continue
                             candidates.append((
-                                int(partial.st_mtime_ns),
+                                int(residue.st_mtime_ns),
                                 size,
                                 child,
                                 True,
-                                int(partial.st_dev),
-                                int(partial.st_ino),
+                                int(residue.st_dev),
+                                int(residue.st_ino),
+                                residue_name,
                             ))
                             continue
                         size = int(metadata.get("size_bytes") or 0)
@@ -511,13 +508,21 @@ class PackVMImageCache:
                             or 0
                         )
                         total += size
-                        candidates.append((timestamp, size, child, False, 0, 0))
+                        candidates.append((timestamp, size, child, False, 0, 0, ""))
             except (FileNotFoundError, OSError, PackVMImageError):
                 continue
         total += current.size_bytes
         removed = 0
         generations = len(candidates) + 1
-        for _timestamp, size, child, uncheckpointed, device, inode in sorted(candidates):
+        for (
+            _timestamp,
+            size,
+            child,
+            uncheckpointed,
+            device,
+            inode,
+            residue_name,
+        ) in sorted(candidates):
             if generations <= maximum_generations and total <= limit:
                 break
             try:
@@ -527,23 +532,18 @@ class PackVMImageCache:
                         if uncheckpointed:
                             if metadata is not None:
                                 continue
-                            descriptor = self._open_regular(
-                                child / "partial.img",
-                                writable=False,
-                                directory_fd=pinned.entry_descriptor,
+                            current_name, current_partial = self._uncheckpointed_residue(
+                                child, pinned
                             )
-                            try:
-                                current_partial = os.fstat(descriptor)
-                            finally:
-                                os.close(descriptor)
                             if (
-                                current_partial.st_dev != device
+                                current_name != residue_name
+                                or current_partial.st_dev != device
                                 or current_partial.st_ino != inode
                                 or current_partial.st_nlink != 1
                             ):
                                 continue
                             self._unlink_regular_if_present(
-                                child / "partial.img", pinned
+                                child / residue_name, pinned
                             )
                         else:
                             if metadata is None:
@@ -582,7 +582,7 @@ class PackVMImageCache:
                             entry / "partial.json", directory_fd=pinned.entry_descriptor
                         )
                     except FileNotFoundError:
-                        self._delete_uncheckpointed_partial(entry, pinned)
+                        self._delete_uncheckpointed_residue(entry, pinned)
                         return True
                 expected = self._immutable_metadata(authority)
                 if any(metadata.get(key) != value for key, value in expected.items()):
@@ -596,6 +596,28 @@ class PackVMImageCache:
         return True
 
     def _download_locked(
+        self,
+        authority: PackVMImageAuthority,
+        entry: Path,
+        pinned: _PinnedEntry,
+        progress: Callable[[PackVMImageProgress], None] | None,
+        cancelled: Callable[[], bool] | None,
+        *,
+        emit_verified: bool,
+    ) -> PackVMVerifiedImage:
+        """Serialize capacity reservation across every content generation."""
+
+        with self._root_quota_lock(pinned):
+            return self._download_under_quota_lock(
+                authority,
+                entry,
+                pinned,
+                progress,
+                cancelled,
+                emit_verified=emit_verified,
+            )
+
+    def _download_under_quota_lock(
         self,
         authority: PackVMImageAuthority,
         entry: Path,
@@ -857,6 +879,58 @@ class PackVMImageCache:
         self._require_pinned_identity(entry, pinned)
         return verified
 
+    @contextmanager
+    def _root_quota_lock(self, pinned: _PinnedEntry) -> Iterator[int]:
+        """Hold the stable cache-wide OS reservation until publication finishes."""
+
+        self._capacity_lock.acquire()
+        name = "capacity-reservation.lock"
+        flags = os.O_CREAT | os.O_RDWR
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            descriptor = os.open(name, flags, 0o600, dir_fd=pinned.root_descriptor)
+        except Exception:
+            self._capacity_lock.release()
+            raise
+        locked = False
+        try:
+            metadata = os.fstat(descriptor)
+            current = os.stat(
+                name, dir_fd=pinned.root_descriptor, follow_symlinks=False
+            )
+            if (
+                not _safe_regular(metadata)
+                or metadata.st_nlink != 1
+                or (current.st_dev, current.st_ino)
+                != (metadata.st_dev, metadata.st_ino)
+            ):
+                raise PackVMImageError(
+                    "packvm_image_reservation_unsafe",
+                    "PackVM image capacity reservation is unsafe",
+                )
+            _acquire_portable_lock(descriptor)
+            locked = True
+            current = os.stat(
+                name, dir_fd=pinned.root_descriptor, follow_symlinks=False
+            )
+            if (current.st_dev, current.st_ino) != (
+                metadata.st_dev,
+                metadata.st_ino,
+            ):
+                raise PackVMImageError(
+                    "packvm_image_reservation_unsafe",
+                    "PackVM image capacity reservation changed",
+                )
+            yield descriptor
+        finally:
+            try:
+                if locked:
+                    _release_portable_lock(descriptor)
+            finally:
+                os.close(descriptor)
+                self._capacity_lock.release()
+
     def _resume_state(
         self,
         authority: PackVMImageAuthority,
@@ -869,7 +943,7 @@ class PackVMImageCache:
                 metadata_path, directory_fd=pinned.entry_descriptor
             )
         except FileNotFoundError:
-            self._delete_uncheckpointed_partial(partial_path.parent, pinned)
+            self._delete_uncheckpointed_residue(partial_path.parent, pinned)
             return 0, {}
         expected = self._immutable_metadata(authority)
         if any(metadata.get(key) != value for key, value in expected.items()):
@@ -1515,13 +1589,46 @@ class PackVMImageCache:
                 "PackVM image cache has insufficient bounded free space",
             )
 
-    def _delete_uncheckpointed_partial(
+    def _delete_uncheckpointed_residue(
         self, entry: Path, pinned: _PinnedEntry
     ) -> None:
-        """Remove only a safe owned partial when no authenticated state exists."""
+        """Remove one safe unpublished partial or post-rename image residue."""
 
-        self._unlink_regular_if_present(entry / "partial.img", pinned)
+        try:
+            name, _metadata = self._uncheckpointed_residue(entry, pinned)
+        except FileNotFoundError:
+            return
+        self._unlink_regular_if_present(entry / name, pinned)
         os.fsync(pinned.entry_descriptor)
+
+    def _uncheckpointed_residue(
+        self, entry: Path, pinned: _PinnedEntry
+    ) -> tuple[str, os.stat_result]:
+        """Return exactly one owned uncheckpointed data inode."""
+
+        found: list[tuple[str, os.stat_result]] = []
+        for name in ("partial.img", "image.img"):
+            try:
+                descriptor = self._open_regular(
+                    entry / name,
+                    writable=False,
+                    directory_fd=pinned.entry_descriptor,
+                )
+            except FileNotFoundError:
+                continue
+            try:
+                metadata = os.fstat(descriptor)
+            finally:
+                os.close(descriptor)
+            found.append((name, metadata))
+        if not found:
+            raise FileNotFoundError(entry)
+        if len(found) != 1:
+            raise PackVMImageError(
+                "packvm_image_uncheckpointed_unsafe",
+                "PackVM uncheckpointed image residue is ambiguous",
+            )
+        return found[0]
 
     def _unlink_regular_if_present(self, path: Path, pinned: _PinnedEntry) -> None:
         try:
@@ -1695,6 +1802,22 @@ def _try_portable_lock(descriptor: int) -> None:
         return
     backend = importlib.import_module("fcntl")
     backend.flock(descriptor, backend.LOCK_EX | backend.LOCK_NB)
+
+
+def _acquire_portable_lock(descriptor: int) -> None:
+    """Acquire one blocking cache-wide reservation released by process exit."""
+
+    if os.name == "nt":
+        backend = importlib.import_module("msvcrt")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        if os.fstat(descriptor).st_size == 0:
+            os.write(descriptor, b"\0")
+            os.fsync(descriptor)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        backend.locking(descriptor, backend.LK_LOCK, 1)
+        return
+    backend = importlib.import_module("fcntl")
+    backend.flock(descriptor, backend.LOCK_EX)
 
 
 def _release_portable_lock(descriptor: int) -> None:

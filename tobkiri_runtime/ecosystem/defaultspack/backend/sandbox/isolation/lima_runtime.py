@@ -91,7 +91,9 @@ PACKVM_LIMA_DERIVED_PATH_SUFFIXES = (
     f"{PACKVM_LIMA_INSTANCE}/serial.sock",
 )
 LIMA_PROCESS_PATH = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
-LIMA_PROCESS_ENVIRONMENT_KEYS = frozenset({"PATH", "HOME", "LIMA_HOME"})
+LIMA_PROCESS_ENVIRONMENT_KEYS = frozenset(
+    {"PATH", "HOME", "LIMA_HOME", "TMPDIR", "XDG_CACHE_HOME"}
+)
 _PACKVM_RESOURCE_ROOT = Path(__file__).with_name("resources")
 _PACKVM_CONFIG = _PACKVM_RESOURCE_ROOT / "packvm-lima.v1.yaml"
 _PACKVM_RUNNER = _PACKVM_RESOURCE_ROOT / "packvm_guest_runner.py"
@@ -174,6 +176,18 @@ class _PinnedStagedImage:
 
     verified: PackVMVerifiedImage
     image_descriptor: int
+
+
+@dataclass
+class _PreparedLimaScrub:
+    """Pinned old and replacement inodes prepared without mutating Lima state."""
+
+    directory_descriptor: int
+    source_descriptor: int
+    temporary_descriptor: int
+    name: str
+    temporary_name: str
+    expected: os.stat_result
 
 
 class PackVMProcessError(RuntimeError):
@@ -984,6 +998,7 @@ class PackVMLimaProvisioner:
             self._state_dir / "packvm-image-cache",
             disk_usage=self._disk_usage,
         )
+        self._active_lima_operation_root: Path | None = None
 
     @property
     def state_path(self) -> Path:
@@ -1333,19 +1348,20 @@ class PackVMLimaProvisioner:
                             "PackVM image provisioning was cancelled",
                         )
                     try:
-                        try:
-                            self._checked_call(
-                                (limactl, "start", "--name", self._instance, "-"),
-                                timeout=900,
-                                input_text=config.decode("utf-8"),
-                                max_stdin_bytes=len(config),
-                                stage="start",
-                                sensitive_values=handoff.sensitive_values,
-                            )
-                        finally:
-                            self._scrub_lima_handoff_artifacts(
-                                handoff.url, handoff.sensitive_values
-                            )
+                        with self._lima_handoff_operation_environment():
+                            try:
+                                self._checked_call(
+                                    (limactl, "start", "--name", self._instance, "-"),
+                                    timeout=900,
+                                    input_text=config.decode("utf-8"),
+                                    max_stdin_bytes=len(config),
+                                    stage="start",
+                                    sensitive_values=handoff.sensitive_values,
+                                )
+                            finally:
+                                self._scrub_lima_handoff_artifacts(
+                                    handoff.url, handoff.sensitive_values
+                                )
                     except PackVMProcessError:
                         if cancelled is not None and cancelled():
                             raise PackVMImageCancelled(
@@ -1944,6 +1960,7 @@ class PackVMLimaProvisioner:
                 reverse=True,
             )
         )
+        prepared: list[_PreparedLimaScrub] = []
 
         def require_budget(count: int) -> None:
             nonlocal scanned_bytes
@@ -2032,7 +2049,7 @@ class PackVMLimaProvisioner:
                         )
                         for pattern in patterns
                     )
-                    self._stream_redact_lima_metadata_file(
+                    candidate = self._stream_redact_lima_metadata_file(
                         directory_descriptor=directory_descriptor,
                         name=name,
                         descriptor=file_descriptor,
@@ -2040,16 +2057,29 @@ class PackVMLimaProvisioner:
                         replacements=replacements,
                         require_budget=require_budget,
                     )
+                    if candidate is not None:
+                        prepared.append(candidate)
                 finally:
                     os.close(file_descriptor)
 
         try:
             scrub_directory(descriptor, depth=0)
             _require_pinned_directory_identity(instance_directory, descriptor, device, inode, chain)
-            visited = 0
-            scrub_directory(descriptor, depth=0)
+            for candidate in prepared:
+                self._commit_lima_metadata_scrub(candidate)
             _require_pinned_directory_identity(instance_directory, descriptor, device, inode, chain)
         finally:
+            for candidate in prepared:
+                try:
+                    os.unlink(
+                        candidate.temporary_name,
+                        dir_fd=candidate.directory_descriptor,
+                    )
+                except FileNotFoundError:
+                    pass
+                os.close(candidate.temporary_descriptor)
+                os.close(candidate.source_descriptor)
+                os.close(candidate.directory_descriptor)
             os.close(descriptor)
 
     @staticmethod
@@ -2061,7 +2091,7 @@ class PackVMLimaProvisioner:
         expected: os.stat_result,
         replacements: Sequence[tuple[bytes, bytes]],
         require_budget: Callable[[int], None],
-    ) -> None:
+    ) -> _PreparedLimaScrub | None:
         """Stream-scan and atomically redact one pinned private Lima file."""
 
         max_pattern = max((len(pattern) for pattern, _value in replacements), default=1)
@@ -2091,7 +2121,7 @@ class PackVMLimaProvisioner:
         if any(getattr(after_scan, field) != getattr(expected, field) for field in stable_fields):
             raise ValueError("PackVM Lima handoff metadata changed during scan")
         if not matched:
-            return
+            return None
         if binary:
             raise ValueError("PackVM Lima binary metadata contains a handoff token")
 
@@ -2103,6 +2133,7 @@ class PackVMLimaProvisioner:
         if hasattr(os, "O_NOFOLLOW"):
             flags |= os.O_NOFOLLOW
         temporary_descriptor = os.open(temporary, flags, 0o600, dir_fd=directory_descriptor)
+        keep_temporary = False
         try:
             os.fchmod(temporary_descriptor, stat.S_IMODE(expected.st_mode))
             buffer = b""
@@ -2164,23 +2195,91 @@ class PackVMLimaProvisioner:
             ):
                 raise ValueError("PackVM Lima handoff metadata changed during redaction")
             current = os.stat(name, dir_fd=directory_descriptor, follow_symlinks=False)
-            if (current.st_dev, current.st_ino) != (expected.st_dev, expected.st_ino):
+            current_source = os.fstat(descriptor)
+            if (
+                (current.st_dev, current.st_ino) != (expected.st_dev, expected.st_ino)
+                or current_source.st_nlink != 1
+                or (
+                    hasattr(os, "getuid")
+                    and current_source.st_uid != os.getuid()
+                )
+            ):
                 raise ValueError("PackVM Lima handoff metadata identity changed")
             os.fsync(temporary_descriptor)
             require_budget(0)
-            os.replace(
-                temporary,
-                name,
-                src_dir_fd=directory_descriptor,
-                dst_dir_fd=directory_descriptor,
-            )
-            os.fsync(directory_descriptor)
-        finally:
-            os.close(temporary_descriptor)
+            pinned_directory = os.dup(directory_descriptor)
             try:
-                os.unlink(temporary, dir_fd=directory_descriptor)
-            except FileNotFoundError:
-                pass
+                pinned_source = os.dup(descriptor)
+            except Exception:
+                os.close(pinned_directory)
+                raise
+            candidate = _PreparedLimaScrub(
+                directory_descriptor=pinned_directory,
+                source_descriptor=pinned_source,
+                temporary_descriptor=temporary_descriptor,
+                name=name,
+                temporary_name=temporary,
+                expected=expected,
+            )
+            keep_temporary = True
+            return candidate
+        finally:
+            if not keep_temporary:
+                os.close(temporary_descriptor)
+                try:
+                    os.unlink(temporary, dir_fd=directory_descriptor)
+                except FileNotFoundError:
+                    pass
+
+    @staticmethod
+    def _commit_lima_metadata_scrub(candidate: _PreparedLimaScrub) -> None:
+        """Publish one prepared redaction after final alias and identity checks."""
+
+        source = os.fstat(candidate.source_descriptor)
+        current = os.stat(
+            candidate.name,
+            dir_fd=candidate.directory_descriptor,
+            follow_symlinks=False,
+        )
+        expected = candidate.expected
+        stable_fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+        if (
+            any(getattr(source, field) != getattr(expected, field) for field in stable_fields)
+            or source.st_nlink != 1
+            or (current.st_dev, current.st_ino) != (source.st_dev, source.st_ino)
+            or current.st_nlink != 1
+            or (hasattr(os, "getuid") and source.st_uid != os.getuid())
+        ):
+            raise ValueError("PackVM Lima handoff metadata acquired an unsafe alias")
+        replacement = os.fstat(candidate.temporary_descriptor)
+        if (
+            not stat.S_ISREG(replacement.st_mode)
+            or replacement.st_nlink != 1
+            or (hasattr(os, "getuid") and replacement.st_uid != os.getuid())
+        ):
+            raise ValueError("PackVM Lima handoff replacement is unsafe")
+        os.replace(
+            candidate.temporary_name,
+            candidate.name,
+            src_dir_fd=candidate.directory_descriptor,
+            dst_dir_fd=candidate.directory_descriptor,
+        )
+        os.fsync(candidate.directory_descriptor)
+        old_after = os.fstat(candidate.source_descriptor)
+        published = os.stat(
+            candidate.name,
+            dir_fd=candidate.directory_descriptor,
+            follow_symlinks=False,
+        )
+        if (
+            (old_after.st_dev, old_after.st_ino) != (source.st_dev, source.st_ino)
+            or old_after.st_nlink != 0
+            or (hasattr(os, "getuid") and old_after.st_uid != os.getuid())
+            or (published.st_dev, published.st_ino)
+            != (replacement.st_dev, replacement.st_ino)
+            or published.st_nlink != 1
+        ):
+            raise ValueError("PackVM Lima handoff metadata alias survived redaction")
 
     @staticmethod
     def _write_all(descriptor: int, payload: bytes) -> None:
@@ -2478,7 +2577,9 @@ class PackVMLimaProvisioner:
             PACKVM_DISK_SIZE_BYTES
             + PACKVM_HOST_STORAGE_RESERVE_BYTES
             + PACKVM_PINNED_IMAGE_VIRTUAL_SIZE_BYTES
-            + int(str(_PACKVM_IMAGES[self._machine]["size_bytes"]))
+            # Lima 2.2 may materialize source, converted, and raw cache copies
+            # below its isolated operation HOME before creating the VM disk.
+            + 4 * int(str(_PACKVM_IMAGES[self._machine]["size_bytes"]))
             + image_download_bytes
         )
 
@@ -2496,6 +2597,7 @@ class PackVMLimaProvisioner:
         """Measure host capacity and format a stable insufficiency diagnostic."""
 
         try:
+            self._reconcile_stale_lima_operation_root()
             available = int(self._disk_usage(self._host_storage_path()).free)
         except (AttributeError, OSError, TypeError, ValueError) as exc:
             return 0, f"PackVM host storage preflight failed: {exc}"
@@ -2532,25 +2634,161 @@ class PackVMLimaProvisioner:
         """Create and revalidate the private state and dedicated Lima roots."""
 
         self._validate_managed_identity()
-        for directory in (self._state_dir, self._lima_home):
+        for directory in (
+            self._state_dir,
+            self._lima_home,
+            self._state_dir / "packvm-lima-process-home",
+        ):
             _ensure_owned_directory_chain(directory)
         self._validate_managed_identity()
+
+    @contextmanager
+    def _lima_handoff_operation_environment(self) -> Iterator[Path]:
+        """Isolate and deterministically reclaim Lima downloader cache state."""
+
+        if self._active_lima_operation_root is not None:
+            raise ValueError("PackVM Lima operation environment is already active")
+        root = self._state_dir / "packvm-lima-handoff-operation"
+        with self._lima_operation_cache_lock():
+            _ensure_owned_directory_chain(root)
+            self._clear_private_operation_root(root)
+            for child in ("home", "cache", "tmp"):
+                _ensure_owned_directory_chain(root / child)
+            self._active_lima_operation_root = root
+            try:
+                yield root
+            finally:
+                self._active_lima_operation_root = None
+                self._clear_private_operation_root(root)
+
+    def _reconcile_stale_lima_operation_root(self) -> None:
+        """Reclaim crash residue only when no live process owns its OS lock."""
+
+        root = self._state_dir / "packvm-lima-handoff-operation"
+        if not root.exists() and not root.is_symlink():
+            return
+        try:
+            with self._lima_operation_cache_lock():
+                self._clear_private_operation_root(root)
+        except _FileLockUnavailable:
+            # A live/unknown process retains authority over this cache. Its
+            # allocated bytes remain visible to the host free-space check.
+            return
+
+    @contextmanager
+    def _lima_operation_cache_lock(self) -> Iterator[int]:
+        """Hold the stable cross-process ownership lock for downloader cache."""
+
+        _ensure_owned_directory_chain(self._state_dir)
+        path = self._state_dir / "packvm-lima-handoff-operation.lock"
+        flags = os.O_CREAT | os.O_RDWR
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(path, flags, 0o600)
+        locked = False
+        try:
+            metadata = os.fstat(descriptor)
+            current = path.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_nlink != 1
+                or (metadata.st_dev, metadata.st_ino)
+                != (current.st_dev, current.st_ino)
+                or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+            ):
+                raise ValueError("PackVM Lima operation lock is unsafe")
+            _acquire_exclusive_file_lock(descriptor, timeout_seconds=0)
+            locked = True
+            yield descriptor
+        finally:
+            try:
+                if locked:
+                    _release_exclusive_file_lock(descriptor)
+            finally:
+                os.close(descriptor)
+
+    @staticmethod
+    def _clear_private_operation_root(root: Path) -> None:
+        """Descriptor-relatively delete only proven owned operation artifacts."""
+
+        descriptor, device, inode, chain = _open_pinned_owned_directory(root)
+
+        def clear(directory_descriptor: int) -> None:
+            for name in os.listdir(directory_descriptor):
+                if name in {".", ".."} or "/" in name or "\x00" in name:
+                    raise ValueError("PackVM Lima operation artifact name is unsafe")
+                metadata = os.stat(
+                    name, dir_fd=directory_descriptor, follow_symlinks=False
+                )
+                if stat.S_ISLNK(metadata.st_mode):
+                    os.unlink(name, dir_fd=directory_descriptor)
+                    continue
+                if stat.S_ISDIR(metadata.st_mode):
+                    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                    if hasattr(os, "O_NOFOLLOW"):
+                        flags |= os.O_NOFOLLOW
+                    child = os.open(name, flags, dir_fd=directory_descriptor)
+                    try:
+                        opened = os.fstat(child)
+                        if (
+                            (opened.st_dev, opened.st_ino)
+                            != (metadata.st_dev, metadata.st_ino)
+                            or (
+                                hasattr(os, "getuid")
+                                and opened.st_uid != os.getuid()
+                            )
+                        ):
+                            raise ValueError(
+                                "PackVM Lima operation directory changed"
+                            )
+                        clear(child)
+                    finally:
+                        os.close(child)
+                    current = os.stat(
+                        name, dir_fd=directory_descriptor, follow_symlinks=False
+                    )
+                    if (current.st_dev, current.st_ino) != (
+                        metadata.st_dev,
+                        metadata.st_ino,
+                    ):
+                        raise ValueError("PackVM Lima operation directory changed")
+                    os.rmdir(name, dir_fd=directory_descriptor)
+                    continue
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or metadata.st_nlink != 1
+                    or (
+                        hasattr(os, "getuid")
+                        and metadata.st_uid != os.getuid()
+                    )
+                ):
+                    raise ValueError("PackVM Lima operation artifact is unsafe")
+                os.unlink(name, dir_fd=directory_descriptor)
+            os.fsync(directory_descriptor)
+
+        try:
+            clear(descriptor)
+            _require_pinned_directory_identity(root, descriptor, device, inode, chain)
+        finally:
+            os.close(descriptor)
 
     def _lima_process_environment(self) -> dict[str, str]:
         """Return a minimal environment pinned to the dedicated Lima home."""
 
-        inherited = _lima_process_environment()
         self._ensure_private_managed_directories()
-        configured_lima_home = inherited.get("LIMA_HOME")
-        if configured_lima_home and Path(configured_lima_home) != self._lima_home:
-            user_home = inherited.get("HOME")
-            if user_home and Path(configured_lima_home) == Path(user_home) / ".lima":
-                raise ValueError("PackVM must never use the user default ~/.lima directory")
-            raise ValueError("LIMA_HOME must match the dedicated PackVM directory")
+        operation_root = self._active_lima_operation_root
+        process_root = operation_root or (self._state_dir / "packvm-lima-process-home")
+        home = process_root / "home"
+        cache = process_root / "cache"
+        temporary = process_root / "tmp"
+        for directory in (home, cache, temporary):
+            _ensure_owned_directory_chain(directory)
         environment = {
             "PATH": LIMA_PROCESS_PATH,
             "LIMA_HOME": str(self._lima_home),
-            **({"HOME": inherited["HOME"]} if "HOME" in inherited else {}),
+            "HOME": str(home),
+            "XDG_CACHE_HOME": str(cache),
+            "TMPDIR": str(temporary),
         }
         return environment
 

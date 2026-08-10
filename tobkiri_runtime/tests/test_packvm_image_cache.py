@@ -134,6 +134,126 @@ def test_prefetch_atomically_publishes_exact_digest_and_binding(tmp_path: Path) 
     assert metadata["acquired_session_digest"] == _authority(content).session_digest
 
 
+def test_concurrent_generations_share_one_atomic_capacity_reservation(
+    tmp_path: Path,
+) -> None:
+    first = b"first-generation"
+    second = b"second-generation"
+    first_authority = _authority(first)
+    second_authority = _authority(
+        second, source_url="https://images.example.test/second.img"
+    )
+    root = tmp_path / "owned-cache"
+    responses = {
+        first_authority.source_url: first,
+        second_authority.source_url: second,
+    }
+    active = 0
+    maximum_active = 0
+    activity_lock = threading.Lock()
+
+    def opener(request: Any, *, timeout: float) -> _Response:
+        nonlocal active, maximum_active
+        with activity_lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        content = responses[str(request.full_url)]
+
+        def reading(_count: int) -> None:
+            nonlocal active
+            time.sleep(0.02)
+            if _count == 2:
+                with activity_lock:
+                    active -= 1
+
+        return _Response(
+            content,
+            url=str(request.full_url),
+            headers=_headers(content),
+            on_read=reading,
+        )
+
+    def disk_usage(_path: Path) -> Any:
+        allocated = sum(
+            path.stat().st_size
+            for path in root.rglob("*.img")
+            if path.is_file()
+        ) if root.exists() else 0
+        return SimpleNamespace(
+            free=image_cache.PACKVM_IMAGE_DISK_RESERVE_BYTES
+            + max(len(first), len(second))
+            - allocated
+        )
+
+    cache = PackVMImageCache(root, opener=opener, disk_usage=disk_usage)
+    cache._ensure_root()
+    results: list[object] = []
+
+    def acquire(authority: PackVMImageAuthority) -> None:
+        try:
+            results.append(cache.prefetch(authority))
+        except Exception as exc:  # noqa: BLE001 - assert exact typed result below
+            results.append(exc)
+
+    workers = [
+        threading.Thread(target=acquire, args=(first_authority,)),
+        threading.Thread(target=acquire, args=(second_authority,)),
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=3)
+
+    assert all(not worker.is_alive() for worker in workers)
+    assert maximum_active == 1
+    assert sum(isinstance(result, PackVMImageError) for result in results) == 1
+    failure = next(result for result in results if isinstance(result, PackVMImageError))
+    assert failure.code == "packvm_image_disk_insufficient"
+
+
+def test_crash_after_image_rename_is_reclaimed_by_cleanup_and_gc(
+    tmp_path: Path,
+) -> None:
+    content = b"renamed-before-metadata"
+    authority = _authority(content)
+    cache = _cache(tmp_path, _Opener())
+    entry = cache.image_path(authority).parent
+    entry.mkdir(parents=True, mode=0o700)
+    image = entry / "image.img"
+    image.write_bytes(content)
+    old = time.time() - 7200
+    os.utime(image, (old, old))
+
+    assert cache.cleanup(authority) is True
+    assert not image.exists()
+
+    image.write_bytes(content)
+    os.utime(image, (old, old))
+    current_content = b"current-generation"
+    current_authority = _authority(
+        current_content, source_url="https://images.example.test/current.img"
+    )
+    current = PackVMImageCache(
+        tmp_path / "owned-cache",
+        opener=_Opener(
+            _Response(
+                current_content,
+                url=current_authority.source_url,
+                headers=_headers(current_content),
+            )
+        ),
+        disk_usage=lambda _path: SimpleNamespace(free=4 * 1024**3),
+    ).prefetch(current_authority)
+    assert cache.garbage_collect(
+        current_authority,
+        maximum_generations=1,
+        quota_bytes=len(current_content),
+        uncheckpointed_minimum_age_seconds=3600,
+    ) == 1
+    assert current.path.exists()
+    assert not image.exists()
+
+
 def test_verified_cache_hit_emits_terminal_progress_before_consumer_mutation(
     tmp_path: Path,
 ) -> None:
