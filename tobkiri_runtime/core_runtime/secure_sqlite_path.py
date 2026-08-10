@@ -17,6 +17,124 @@ class SecurePathError(RuntimeError):
     """Raised when a path cannot be proven safe for SQLite access."""
 
 
+def _is_reparse_point(metadata: os.stat_result) -> bool:
+    """Return whether Windows marked a path as a reparse point."""
+
+    attributes = getattr(metadata, "st_file_attributes", 0)
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+
+
+def _open_windows_no_follow(
+    path: Path,
+    flags: int,
+    mode: int = 0o600,
+    *,
+    directory: bool = False,
+) -> int:
+    """Open a Windows path as the reparse point itself, never its target."""
+
+    if os.name != "nt":  # pragma: no cover - guarded by platform branches
+        raise OSError("Windows no-follow open is unavailable")
+
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    generic_read = 0x80000000
+    generic_write = 0x40000000
+    file_share_all = 0x00000001 | 0x00000002 | 0x00000004
+    create_new = 1
+    create_always = 2
+    open_existing = 3
+    open_always = 4
+    truncate_existing = 5
+    file_attribute_normal = 0x00000080
+    file_flag_backup_semantics = 0x02000000
+    file_flag_open_reparse_point = 0x00200000
+
+    access_mode = flags & (os.O_WRONLY | os.O_RDWR)
+    desired_access = generic_read
+    if access_mode == os.O_WRONLY:
+        desired_access = generic_write
+    elif access_mode == os.O_RDWR:
+        desired_access = generic_read | generic_write
+
+    if flags & os.O_CREAT and flags & os.O_EXCL:
+        creation = create_new
+    elif flags & os.O_CREAT and flags & os.O_TRUNC:
+        creation = create_always
+    elif flags & os.O_CREAT:
+        creation = open_always
+    elif flags & os.O_TRUNC:
+        creation = truncate_existing
+    else:
+        creation = open_existing
+
+    native_flags = file_attribute_normal | file_flag_open_reparse_point
+    if directory:
+        native_flags |= file_flag_backup_semantics
+    win_dll = getattr(ctypes, "WinDLL")
+    kernel32 = win_dll("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = (
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    )
+    create_file.restype = wintypes.HANDLE
+    handle = create_file(
+        str(path),
+        desired_access,
+        file_share_all,
+        None,
+        creation,
+        native_flags,
+        None,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if handle == invalid_handle:
+        get_last_error = getattr(ctypes, "get_last_error")
+        win_error = getattr(ctypes, "WinError")
+        raise win_error(get_last_error())
+    descriptor_flags = flags & (os.O_WRONLY | os.O_RDWR | getattr(os, "O_APPEND", 0))
+    descriptor_flags |= getattr(os, "O_BINARY", 0)
+    try:
+        open_osfhandle = getattr(msvcrt, "open_osfhandle")
+        return open_osfhandle(int(handle), descriptor_flags)
+    except BaseException:
+        kernel32.CloseHandle(handle)
+        raise
+
+
+def _validate_windows_open(path: Path, *, directory: bool) -> FileIdentity:
+    """Prove before/open/after Windows identity without following reparses."""
+
+    before = path.lstat()
+    expected_type = stat.S_ISDIR if directory else stat.S_ISREG
+    if _is_reparse_point(before) or not expected_type(before.st_mode):
+        raise SecurePathError("path is a reparse point or has an unsafe type")
+    before_identity = FileIdentity.from_stat(before)
+    descriptor = _open_windows_no_follow(path, os.O_RDONLY, directory=directory)
+    try:
+        opened = os.fstat(descriptor)
+        if _is_reparse_point(opened) or not expected_type(opened.st_mode):
+            raise SecurePathError("opened path is a reparse point or has an unsafe type")
+        opened_identity = FileIdentity.from_stat(opened)
+    finally:
+        os.close(descriptor)
+    after = path.lstat()
+    if _is_reparse_point(after) or not expected_type(after.st_mode):
+        raise SecurePathError("path became a reparse point or has an unsafe type")
+    after_identity = FileIdentity.from_stat(after)
+    if before_identity != opened_identity or opened_identity != after_identity:
+        raise SecurePathError("path identity changed while opening")
+    return opened_identity
+
+
 def canonical_platform_path(path: Path) -> Path:
     """Normalize only OS-owned compatibility aliases before path pinning.
 
@@ -64,7 +182,7 @@ class FileIdentity:
 
 
 def _validate_regular(metadata: os.stat_result) -> FileIdentity:
-    if not stat.S_ISREG(metadata.st_mode):
+    if _is_reparse_point(metadata) or not stat.S_ISREG(metadata.st_mode):
         raise SecurePathError("file is not regular")
     if metadata.st_nlink != 1:
         raise SecurePathError("file does not have exactly one link")
@@ -97,9 +215,12 @@ class SecureParent:
     def __init__(self, path: Path, descriptor: int | None) -> None:
         self.path = path
         self.descriptor = descriptor
-        self.identity = FileIdentity.from_stat(
-            os.fstat(descriptor) if descriptor is not None else path.stat()
-        )
+        if descriptor is not None:
+            self.identity = FileIdentity.from_stat(os.fstat(descriptor))
+        elif os.name == "nt":
+            self.identity = _validate_windows_open(path, directory=True)
+        else:
+            self.identity = FileIdentity.from_stat(path.stat())
 
     def stat_file(self, name: str, *, required: bool) -> os.stat_result | None:
         """lstat one direct child and require an owned single-link regular file."""
@@ -123,6 +244,15 @@ class SecureParent:
     def open_file(self, name: str, flags: int, mode: int = 0o600) -> int:
         """Open one direct child without following a final symlink where supported."""
 
+        if self.descriptor is None and os.name == "nt":
+            self.assert_path_continuity()
+            descriptor = _open_windows_no_follow(self.path / name, flags, mode)
+            try:
+                self.assert_path_continuity()
+            except BaseException:
+                os.close(descriptor)
+                raise
+            return descriptor
         guarded_flags = flags | getattr(os, "O_NOFOLLOW", 0)
         if self.descriptor is None:
             return os.open(self.path / name, guarded_flags, mode)
@@ -229,7 +359,9 @@ class SecureParent:
         """Require the pathname to still resolve to the opened parent directory."""
 
         try:
-            if os.name == "nt" or not os.supports_dir_fd:
+            if os.name == "nt":
+                current_identity = _validate_windows_open(self.path, directory=True)
+            elif not os.supports_dir_fd:
                 current_path = Path(self.path.anchor)
                 for component in self.path.parts[1:]:
                     current_path /= component
@@ -259,7 +391,23 @@ def secure_parent(path: Path) -> Iterator[SecureParent]:
     """Open every ancestor without symlink traversal and retain the final parent."""
 
     parent = path.absolute().parent
-    if os.name == "nt" or not os.supports_dir_fd:
+    if os.name == "nt":
+        current = Path(parent.anchor)
+        try:
+            _validate_windows_open(current, directory=True)
+            for component in parent.parts[1:]:
+                current /= component
+                _validate_windows_open(current, directory=True)
+            opened_parent = SecureParent(parent, None)
+            yield opened_parent
+            opened_parent.assert_path_continuity()
+            return
+        except SecurePathError:
+            raise
+        except OSError as error:
+            raise SecurePathError("ancestor is unavailable") from error
+
+    if not os.supports_dir_fd:
         current = Path(parent.anchor)
         try:
             for component in parent.parts[1:]:

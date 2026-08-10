@@ -25,9 +25,10 @@ from .process_identity import (
 )
 from .secure_sqlite_path import (
     canonical_platform_path,
+    FileIdentity,
+    SecureParent,
     SecurePathError,
     secure_parent,
-    validate_owned_file_at,
 )
 
 
@@ -116,6 +117,8 @@ class ControlReconciliationStore:
         self._heartbeat_lock = threading.RLock()
         self._heartbeat_stop = threading.Event()
         self._heartbeat_thread: threading.Thread | None = None
+        self._database_identity: FileIdentity | None = None
+        self._parent_identity: FileIdentity | None = None
 
     def _prepare_path(self) -> None:
         try:
@@ -124,13 +127,27 @@ class ControlReconciliationStore:
                     "control journal path cannot be a symlink"
                 )
             self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            with self._secure_parent_descriptor() as parent_descriptor:
-                for name in (
+            with self._secure_parent() as parent:
+                database_identity = parent.validate_open(
                     self.path.name,
+                    required=False,
+                    expected=self._database_identity,
+                )
+                if database_identity is None:
+                    try:
+                        database_identity = parent.create_empty_file(self.path.name)
+                    except FileExistsError:
+                        database_identity = parent.validate_open(
+                            self.path.name,
+                            required=True,
+                        )
+                if self._database_identity is None:
+                    self._database_identity = database_identity
+                for name in (
                     f"{self.path.name}-wal",
                     f"{self.path.name}-shm",
                 ):
-                    self._validate_owned_file(parent_descriptor, name, required=False)
+                    parent.validate_open(name, required=False)
         except ControlReconciliationError:
             raise
         except OSError as error:
@@ -139,14 +156,16 @@ class ControlReconciliationStore:
             ) from error
 
     @contextmanager
-    def _secure_parent_descriptor(self) -> Iterator[int]:
-        """Open every ancestor descriptor-relative without following symlinks."""
+    def _secure_parent(self) -> Iterator[SecureParent]:
+        """Open the journal parent through the platform's secure path API."""
 
         try:
             with secure_parent(self.path) as parent:
-                if parent.descriptor is None:
-                    raise SecurePathError("descriptor-relative directory access is unavailable")
-                yield parent.descriptor
+                if self._parent_identity is not None and parent.identity != self._parent_identity:
+                    raise SecurePathError("control journal parent identity changed")
+                if self._parent_identity is None:
+                    self._parent_identity = parent.identity
+                yield parent
         except (OSError, SecurePathError) as error:
             if isinstance(error, FileNotFoundError) or isinstance(
                 error.__cause__, FileNotFoundError
@@ -160,17 +179,13 @@ class ControlReconciliationStore:
 
     @staticmethod
     def _validate_owned_file(
-        parent_descriptor: int,
+        parent: SecureParent,
         name: str,
         *,
         required: bool,
     ) -> os.stat_result | None:
         try:
-            return validate_owned_file_at(
-                parent_descriptor,
-                name,
-                required=required,
-            )
+            return parent.stat_file(name, required=required)
         except SecurePathError:
             raise ControlReconciliationUnavailableError(
                 "control journal file identity is unsafe"
@@ -181,12 +196,9 @@ class ControlReconciliationStore:
     def _secure_chmod_database(self) -> None:
         if os.name == "nt":
             return
-        with self._secure_parent_descriptor() as parent_descriptor:
-            descriptor = os.open(
-                self.path.name,
-                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
-                dir_fd=parent_descriptor,
-            )
+        with self._secure_parent() as parent:
+            identity = parent.validate_open(self.path.name, required=True)
+            descriptor = parent.open_file(self.path.name, os.O_RDONLY)
             try:
                 metadata = os.fstat(descriptor)
                 if (
@@ -197,9 +209,33 @@ class ControlReconciliationStore:
                     raise ControlReconciliationUnavailableError(
                         "control journal file identity is unsafe"
                     )
+                if identity is None or identity != parent.validate_open(
+                    self.path.name,
+                    required=True,
+                ):
+                    raise ControlReconciliationUnavailableError(
+                        "control journal file identity is unsafe"
+                    )
                 os.fchmod(descriptor, 0o600)
             finally:
                 os.close(descriptor)
+
+    def _validate_storage_files(self) -> None:
+        """Validate the pinned database and any current SQLite sidecars."""
+
+        try:
+            with self._secure_parent() as parent:
+                parent.validate_open(
+                    self.path.name,
+                    required=True,
+                    expected=self._database_identity,
+                )
+                for suffix in ("-wal", "-shm"):
+                    parent.validate_open(f"{self.path.name}{suffix}", required=False)
+        except (OSError, SecurePathError) as error:
+            raise ControlReconciliationUnavailableError(
+                "control journal file identity is unsafe"
+            ) from error
 
     def _open_connection(self) -> sqlite3.Connection:
         self._assert_current_process()
@@ -213,6 +249,7 @@ class ControlReconciliationStore:
                 )
             attempt_timeout = min(0.05, remaining)
             try:
+                self._validate_storage_files()
                 connection = sqlite3.connect(
                     str(self.path),
                     timeout=attempt_timeout,
@@ -224,7 +261,12 @@ class ControlReconciliationStore:
                 connection.execute("PRAGMA synchronous=FULL")
                 connection.execute("PRAGMA trusted_schema=OFF")
                 connection.execute("PRAGMA foreign_keys=ON")
+                self._validate_storage_files()
                 return connection
+            except ControlReconciliationError:
+                if connection is not None:
+                    connection.close()
+                raise
             except sqlite3.OperationalError as error:
                 if connection is not None:
                     connection.close()
@@ -306,10 +348,17 @@ class ControlReconciliationStore:
         source_names = (self.path.name, f"{self.path.name}-wal")
         fingerprints: dict[str, tuple[int, int, int, int, int, int]] = {}
         try:
-            with self._secure_parent_descriptor() as parent_descriptor:
+            with self._secure_parent() as parent:
+                database_identity = parent.validate_open(
+                    self.path.name,
+                    required=True,
+                    expected=self._database_identity,
+                )
+                if self._database_identity is None:
+                    self._database_identity = database_identity
                 for name in (*source_names, f"{self.path.name}-shm"):
                     metadata = self._validate_owned_file(
-                        parent_descriptor,
+                        parent,
                         name,
                         required=name == self.path.name,
                     )
@@ -322,13 +371,8 @@ class ControlReconciliationStore:
                             metadata.st_nlink,
                             metadata.st_uid,
                         )
-                no_follow = getattr(os, "O_NOFOLLOW", 0)
                 for name, fingerprint in fingerprints.items():
-                    descriptor = os.open(
-                        name,
-                        os.O_RDONLY | no_follow,
-                        dir_fd=parent_descriptor,
-                    )
+                    descriptor = parent.open_file(name, os.O_RDONLY)
                     try:
                         opened = os.fstat(descriptor)
                         opened_fingerprint = (
@@ -351,7 +395,7 @@ class ControlReconciliationStore:
                         os.close(descriptor)
                 for name, fingerprint in fingerprints.items():
                     metadata = self._validate_owned_file(
-                        parent_descriptor,
+                        parent,
                         name,
                         required=True,
                     )
@@ -370,6 +414,10 @@ class ControlReconciliationStore:
                         )
         except ControlReconciliationError:
             raise
+        except SecurePathError as error:
+            raise ControlReconciliationUnavailableError(
+                "control journal file identity is unsafe"
+            ) from error
         except OSError as error:
             raise ControlReconciliationUnavailableError(
                 "control journal path is unavailable"
