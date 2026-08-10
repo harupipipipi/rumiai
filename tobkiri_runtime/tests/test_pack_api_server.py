@@ -90,9 +90,7 @@ class _PackVMLifecycle:
         self.calls.append(("readiness_snapshot", {}))
         return {"ready": False}
 
-    def progress(
-        self, operation_id: str, *, session_id: str | None = None
-    ) -> Mapping[str, object]:
+    def progress(self, operation_id: str, *, session_id: str | None = None) -> Mapping[str, object]:
         self.calls.append(("progress", {"operation_id": operation_id}))
         if operation_id == "22222222-2222-4222-8222-222222222222":
             return {
@@ -388,6 +386,49 @@ def test_bind_environment_has_no_authority(monkeypatch: pytest.MonkeyPatch) -> N
         panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
     )
     assert server.host == "127.0.0.1"
+
+
+def test_server_construction_without_requests_is_filesystem_immutable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_data = tmp_path / "fresh-home"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+    )
+
+    assert server.server is None
+    assert not user_data.exists()
+
+
+def test_packvm_failure_before_authorization_does_not_initialize_journal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_data = tmp_path / "fresh-home"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    lifecycle = _PackVMLifecycle()
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+        packvm_lifecycle=lifecycle,
+    )
+    server.start()
+    try:
+        status, _, _ = _request(
+            server,
+            "POST",
+            "/api/v4/packvm/prepare",
+            body={},
+        )
+        assert status == 401
+        assert lifecycle.calls == []
+        assert not user_data.exists()
+    finally:
+        server.stop()
 
 
 def test_production_handler_has_no_legacy_route_state() -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any, Mapping
@@ -23,8 +24,9 @@ class ControlReconciliationStore:
     def __init__(self, path: Path, *, instance_id: str = "") -> None:
         self.path = Path(path)
         self.instance_id = instance_id
-        self._prepare_path()
-        self._initialize()
+        self._initialization_lock = threading.RLock()
+        self._initialized = False
+        self._operation_recovery_complete = False
 
     def _prepare_path(self) -> None:
         if self.path.is_symlink():
@@ -33,24 +35,62 @@ class ControlReconciliationStore:
         if self.path.parent.is_symlink():
             raise ControlReconciliationError("control journal parent cannot be a symlink")
 
+    def _open_connection(self) -> sqlite3.Connection:
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = sqlite3.connect(
+                str(self.path),
+                timeout=30.0,
+                isolation_level=None,
+            )
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA synchronous=FULL")
+            connection.execute("PRAGMA trusted_schema=OFF")
+            connection.execute("PRAGMA foreign_keys=ON")
+            return connection
+        except (OSError, sqlite3.Error) as error:
+            if connection is not None:
+                connection.close()
+            raise ControlReconciliationError("control journal is unavailable") from error
+
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(
-            str(self.path),
-            timeout=30.0,
-            isolation_level=None,
-        )
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA synchronous=FULL")
-        connection.execute("PRAGMA trusted_schema=OFF")
-        connection.execute("PRAGMA foreign_keys=ON")
-        return connection
+        self._initialize()
+        return self._open_connection()
+
+    def _connect_existing(self) -> sqlite3.Connection:
+        """Open existing durable state without creating files or sidecars."""
+
+        if self.path.is_symlink() or self.path.parent.is_symlink():
+            raise ControlReconciliationError("control journal path is unsafe")
+        if not self.path.is_file():
+            raise ControlReconciliationError("control journal is unavailable")
+        connection: sqlite3.Connection | None = None
+        try:
+            uri = f"{self.path.absolute().as_uri()}?mode=ro"
+            connection = sqlite3.connect(uri, timeout=30.0, uri=True)
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA query_only=ON")
+            connection.execute("PRAGMA trusted_schema=OFF")
+            connection.execute("PRAGMA foreign_keys=ON")
+            return connection
+        except (OSError, sqlite3.Error) as error:
+            if connection is not None:
+                connection.close()
+            raise ControlReconciliationError("control journal is unavailable") from error
 
     def _initialize(self) -> None:
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            connection.executescript(
-                """
+        if self._initialized:
+            return
+        with self._initialization_lock:
+            if self._initialized:
+                return
+            self._prepare_path()
+            try:
+                with self._open_connection() as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    connection.executescript(
+                        """
                 CREATE TABLE IF NOT EXISTS profile_ceremonies (
                     candidate_id TEXT PRIMARY KEY,
                     candidate_digest TEXT NOT NULL UNIQUE,
@@ -92,10 +132,23 @@ class ControlReconciliationStore:
                 CREATE INDEX IF NOT EXISTS control_operation_state_idx
                     ON control_operations(state, updated_at);
                 """
-            )
-            connection.commit()
-        if os.name != "nt":
-            os.chmod(self.path, 0o600)
+                    )
+                    connection.commit()
+                if os.name != "nt":
+                    os.chmod(self.path, 0o600)
+            except (OSError, sqlite3.Error) as error:
+                raise ControlReconciliationError("control journal initialization failed") from error
+            self._initialized = True
+
+    def prepare_for_operation(self) -> None:
+        """Initialize and recover once at an authorized mutation boundary."""
+
+        with self._initialization_lock:
+            if self._operation_recovery_complete:
+                return
+            self._initialize()
+            self.recover_abandoned_operations()
+            self._operation_recovery_complete = True
 
     @staticmethod
     def session_digest(session_id: str) -> str:
@@ -178,7 +231,7 @@ class ControlReconciliationStore:
     ) -> Mapping[str, Any]:
         """Load one exact session-bound ceremony record."""
 
-        with self._connect() as connection:
+        with self._connect_existing() as connection:
             row = connection.execute(
                 "SELECT * FROM profile_ceremonies WHERE candidate_id = ?",
                 (candidate_id,),
@@ -199,7 +252,7 @@ class ControlReconciliationStore:
     ) -> Mapping[str, Any] | None:
         """Return the candidate uniquely bound to a digest and session."""
 
-        with self._connect() as connection:
+        with self._connect_existing() as connection:
             row = connection.execute(
                 "SELECT * FROM profile_ceremonies WHERE candidate_digest = ?",
                 (candidate_digest,),
@@ -322,7 +375,7 @@ class ControlReconciliationStore:
     ) -> Mapping[str, Any]:
         """Load one durable approval without accepting client authority claims."""
 
-        with self._connect() as connection:
+        with self._connect_existing() as connection:
             row = connection.execute(
                 "SELECT * FROM profile_ceremonies WHERE approval_id = ?",
                 (approval_id,),
@@ -488,7 +541,7 @@ class ControlReconciliationStore:
     def operation_status(self, request_id: str, *, session_id: str) -> Mapping[str, Any]:
         """Read one durable operation outcome for its originating session."""
 
-        with self._connect() as connection:
+        with self._connect_existing() as connection:
             row = connection.execute(
                 "SELECT * FROM control_operations WHERE request_id = ?",
                 (request_id,),

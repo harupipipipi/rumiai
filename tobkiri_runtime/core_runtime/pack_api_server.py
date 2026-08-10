@@ -560,6 +560,7 @@ class PackAPIHandler(
             )
             fresh = replay_guard.consume(session_id, request_id)
             try:
+                operation_journal.prepare_for_operation()
                 operation_record, created = operation_journal.begin_operation(
                     request_id=request_id,
                     session_id=session_id,
@@ -1438,7 +1439,6 @@ class PackAPIServer:
             runtime_user_data_root() / "control" / "reconciliation-v4.sqlite3",
             instance_id=str(uuid.uuid4()),
         )
-        self._operation_journal.recover_abandoned_operations()
         self.server: _PackThreadingHTTPServer | None = None
         self.thread: threading.Thread | None = None
         self.handler_class: type[PackAPIHandler] | None = None

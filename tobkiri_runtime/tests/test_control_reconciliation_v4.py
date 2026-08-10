@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sqlite3
 
@@ -28,6 +29,98 @@ def _begin(
         contract_id="tobkiri.host.control-presentation.v4",
         request_digest=request_digest or canonical_digest({"request_id": request_id}),
     )
+
+
+def test_constructor_is_filesystem_immutable_until_first_operation(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "absent" / "control" / "reconciliation-v4.sqlite3"
+
+    store = ControlReconciliationStore(path, instance_id="process-a")
+
+    assert store.path == path
+    assert not (tmp_path / "absent").exists()
+
+
+def test_read_only_status_on_missing_journal_is_filesystem_immutable(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "absent"
+    store = ControlReconciliationStore(root / "control" / "reconciliation-v4.sqlite3")
+
+    with pytest.raises(ControlReconciliationError, match="unavailable"):
+        store.operation_status(
+            "00000000-0000-4000-8000-000000000000",
+            session_id="session-a",
+        )
+
+    assert not root.exists()
+
+
+def test_first_authorized_operation_initializes_and_recovers_durable_state(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "control" / "reconciliation-v4.sqlite3"
+    store = ControlReconciliationStore(path, instance_id="process-a")
+
+    store.prepare_for_operation()
+    pending, created = _begin(
+        store,
+        "00000000-0000-4000-8000-000000000001",
+    )
+
+    assert created is True
+    assert pending["state"] == "pending"
+    assert path.is_file()
+    assert (
+        ControlReconciliationStore(path).operation_status(
+            "00000000-0000-4000-8000-000000000001",
+            session_id="session-a",
+        )
+        == pending
+    )
+
+
+def test_concurrent_first_operation_initialization_is_serialized(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "control" / "reconciliation-v4.sqlite3"
+    stores = [
+        ControlReconciliationStore(path, instance_id=f"process-{index}") for index in range(8)
+    ]
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(lambda store: store.prepare_for_operation(), stores))
+
+    assert path.is_file()
+    with sqlite3.connect(path) as connection:
+        tables = {
+            row[0]
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+    assert tables == {"control_operations", "profile_ceremonies"}
+
+
+@pytest.mark.parametrize("kind", ["corrupt", "symlink"])
+def test_lazy_initialization_fails_closed_for_unsafe_journal_path(
+    tmp_path: Path,
+    kind: str,
+) -> None:
+    path = tmp_path / "control" / "reconciliation-v4.sqlite3"
+    path.parent.mkdir()
+    if kind == "corrupt":
+        path.write_bytes(b"not a sqlite database")
+    else:
+        target = tmp_path / "outside.sqlite3"
+        target.write_bytes(b"")
+        path.symlink_to(target)
+    before = path.read_bytes()
+    store = ControlReconciliationStore(path, instance_id="process-a")
+
+    with pytest.raises(ControlReconciliationError, match="journal"):
+        store.prepare_for_operation()
+
+    assert path.read_bytes() == before
 
 
 def test_operation_journal_reconciles_terminal_results_after_restart(
