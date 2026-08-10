@@ -40,7 +40,16 @@ from scripts.generate_packaged_defaultspack_v4_bundle import stage_packaged_bund
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 FROZEN = Path(__file__).parent / "fixtures/profile_v4/pre-e853-activation.json"
-SOURCE_COMMIT = "a9ea44934646b6b353ad2bcab294a35d3b99556d"
+SOURCE_COMMIT = subprocess.run(
+    ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+    cwd=ROOT.parent,
+    check=True,
+    capture_output=True,
+    text=True,
+).stdout.strip()
+assert len(SOURCE_COMMIT) == 40 and all(
+    character in "0123456789abcdef" for character in SOURCE_COMMIT
+)
 
 
 def _edge_key(edge: dict[str, object]) -> str:
