@@ -70,6 +70,8 @@ PACKVM_DISK_SIZE_BYTES = 4 * 1024 * 1024 * 1024
 PACKVM_HOST_STORAGE_RESERVE_BYTES = 512 * 1024 * 1024
 PACKVM_LOCK_RETRY_SECONDS = 0.05
 PACKVM_LIMA_UNIX_PATH_LIMIT_BYTES = 104
+PACKVM_IMAGE_FD_TOKEN = "__TOBKIRI_PACKVM_IMAGE_FD_0__"
+_PACKVM_IMAGE_FD_LOCATION = f"file:///dev/fd/{PACKVM_IMAGE_FD_TOKEN}"
 # Lima currently derives both host-agent and socket paths below LIMA_HOME.  Keep
 # this list explicit so a Lima upgrade cannot silently invalidate preflight.
 PACKVM_LIMA_DERIVED_PATH_SUFFIXES = (
@@ -600,6 +602,36 @@ def stable_lima_config_hash(instance: str, payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8", errors="replace")).hexdigest()
 
 
+def _packvm_config_semantic_digest(config: bytes, staging_path: Path) -> str:
+    """Hash config semantics while normalizing only the pinned image locator."""
+
+    try:
+        loaded = yaml.safe_load(config)
+    except yaml.YAMLError as exc:
+        raise ValueError("PackVM Lima config is invalid") from exc
+    if not isinstance(loaded, dict):
+        raise ValueError("PackVM Lima config is invalid")
+    images = loaded.get("images")
+    if (
+        not isinstance(images, list)
+        or len(images) != 1
+        or not isinstance(images[0], dict)
+    ):
+        raise ValueError("PackVM Lima image config is invalid")
+    location = images[0].get("location")
+    if not isinstance(location, str) or location not in {
+        staging_path.as_uri(),
+        _PACKVM_IMAGE_FD_LOCATION,
+    }:
+        raise ValueError("PackVM Lima image locator is not pinned")
+    try:
+        normalized = json.loads(json.dumps(loaded, sort_keys=True))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("PackVM Lima config is not canonicalizable") from exc
+    normalized["images"][0]["location"] = "packvm-pinned-image://descriptor"
+    return _canonical_digest(normalized)
+
+
 def build_guest_bwrap_argv(
     *,
     workspace: str,
@@ -1121,7 +1153,7 @@ class PackVMLimaProvisioner:
             "image_cache_status": image_cache_status,
             "disk_size_bytes": PACKVM_DISK_SIZE_BYTES,
             "host_free_space_required_bytes": required_space,
-            "config_digest": _sha256(config),
+            "config_digest": self._config_digest(config),
             "guest_runner_digest": _file_digest(_PACKVM_RUNNER),
             "host_build_digest": _file_digest(Path(__file__)),
             "runtime_root_digest": _sha256(str(self._lima_home).encode()),
@@ -1246,9 +1278,6 @@ class PackVMLimaProvisioner:
 
         self._ensure_private_managed_directories()
         recovery = self._recovery_facts(plan, request, verified_image)
-        recovery["phase"] = "start_pending"
-        recovery["authentication"] = self._sign_recovery(recovery)
-        _atomic_private_json(self.recovery_path, recovery)
         try:
             with self._staged_image(
                 pinned_image,
@@ -1260,6 +1289,18 @@ class PackVMLimaProvisioner:
                     staged_image.verified,
                     image_descriptor=staged_image.image_descriptor,
                 )
+                executed_config_digest = self._config_digest(config)
+                if not hmac.compare_digest(
+                    executed_config_digest, plan.config_digest
+                ):
+                    raise ValueError(
+                        "PackVM executed Lima config differs from reviewed plan"
+                    )
+                self._seal_staged_image(staged_image)
+                recovery["phase"] = "start_pending"
+                recovery["executed_config_digest"] = executed_config_digest
+                recovery["authentication"] = self._sign_recovery(recovery)
+                _atomic_private_json(self.recovery_path, recovery)
                 self._checked_call(
                     (limactl, "start", "--name", self._instance, "-"),
                     timeout=900,
@@ -1268,7 +1309,7 @@ class PackVMLimaProvisioner:
                     inherited_fds=(staged_image.image_descriptor,),
                     stage="start",
                 )
-                self._verify_staged_identity(staged_image)
+                self._verify_sealed_staged_identity(staged_image)
             self._install_guest_runner(limactl)
             machine_id = self._guest_machine_id(limactl)
             runner_digest = self._guest_runner_digest(limactl)
@@ -1337,7 +1378,9 @@ class PackVMLimaProvisioner:
             state = self._load_authenticated_state()
             if state.get("limactl_digest") != _file_digest(Path(limactl)):
                 raise ValueError("limactl binary changed after provisioning")
-            if state.get("config_digest") != _sha256(self._rendered_config()):
+            if state.get("config_digest") != self._config_digest(
+                self._rendered_config()
+            ):
                 raise ValueError("managed PackVM pinned config changed")
             if state.get("image_digest") != _PACKVM_IMAGES[self._machine]["digest"]:
                 raise ValueError("managed PackVM pinned image changed")
@@ -1746,7 +1789,7 @@ class PackVMLimaProvisioner:
             "image_cache_status": image_cache_status,
             "disk_size_bytes": PACKVM_DISK_SIZE_BYTES,
             "host_free_space_required_bytes": required_space,
-            "config_digest": _sha256(config),
+            "config_digest": self._config_digest(config),
             "guest_runner_digest": _file_digest(_PACKVM_RUNNER),
             "host_build_digest": _file_digest(Path(__file__)),
             "runtime_root_digest": _sha256(str(self._lima_home).encode()),
@@ -1814,7 +1857,7 @@ class PackVMLimaProvisioner:
                 or descriptor_metadata.st_size != verified_image.size_bytes
             ):
                 raise ValueError("PackVM image descriptor handoff identity changed")
-            image_location = f"file:///dev/fd/{image_descriptor}"
+            image_location = _PACKVM_IMAGE_FD_LOCATION
         else:
             image_location = expected_staging_path.as_uri()
         template = _PACKVM_CONFIG.read_text(encoding="utf-8")
@@ -1825,6 +1868,18 @@ class PackVMLimaProvisioner:
             .replace("{{DISK_SIZE_GIB}}", str(PACKVM_DISK_SIZE_BYTES // gibibyte))
         )
         return rendered.encode()
+
+    def _config_digest(self, config: bytes) -> str:
+        """Return the consent digest for exact PackVM config semantics."""
+
+        authority = self._image_authority(
+            plan_digest="sha256:" + "0" * 64,
+            session_digest="sha256:" + "0" * 64,
+            operation_id="config-digest",
+        )
+        return _packvm_config_semantic_digest(
+            config, self._staging_image_path(authority)
+        )
 
     def _image_authority(
         self, *, plan_digest: str, session_digest: str, operation_id: str
@@ -2050,6 +2105,68 @@ class PackVMLimaProvisioner:
         ):
             raise ValueError("PackVM Lima staged image identity changed")
 
+    def _seal_staged_image(self, staged: _PinnedStagedImage) -> None:
+        """Rehash and unlink the verified image immediately before child spawn."""
+
+        self._verify_staged_identity(staged)
+        verified = staged.verified
+        before = os.fstat(staged.image_descriptor)
+        hasher = hashlib.sha256()
+        offset = 0
+        while offset < verified.size_bytes:
+            chunk = os.pread(
+                staged.image_descriptor,
+                min(1024 * 1024, verified.size_bytes - offset),
+                offset,
+            )
+            if not chunk:
+                raise ValueError("PackVM Lima staged image truncated before execution")
+            hasher.update(chunk)
+            offset += len(chunk)
+        if os.pread(staged.image_descriptor, 1, offset):
+            raise ValueError("PackVM Lima staged image grew before execution")
+        after = os.fstat(staged.image_descriptor)
+        if (
+            (before.st_dev, before.st_ino, before.st_size)
+            != (after.st_dev, after.st_ino, after.st_size)
+            or not hmac.compare_digest(
+                "sha256:" + hasher.hexdigest(), verified.digest
+            )
+        ):
+            raise ValueError("PackVM Lima staged image digest changed before execution")
+        self._verify_staged_identity(staged)
+        os.unlink(
+            verified.path.name,
+            dir_fd=staged.directory_descriptor,
+        )
+        os.fsync(staged.directory_descriptor)
+        self._verify_sealed_staged_identity(staged)
+
+    def _verify_sealed_staged_identity(self, staged: _PinnedStagedImage) -> None:
+        """Require the Lima handoff inode to remain unlinked and read-only-held."""
+
+        try:
+            directory_metadata = os.fstat(staged.directory_descriptor)
+            _require_pinned_directory_identity(
+                staged.verified.path.parent,
+                staged.directory_descriptor,
+                int(directory_metadata.st_dev),
+                int(directory_metadata.st_ino),
+                staged.directory_chain,
+            )
+        except ValueError as exc:
+            raise ValueError("PackVM Lima staged image identity changed") from exc
+        metadata = os.fstat(staged.image_descriptor)
+        verified = staged.verified
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 0
+            or metadata.st_dev != verified.device
+            or metadata.st_ino != verified.inode
+            or metadata.st_size != verified.size_bytes
+        ):
+            raise ValueError("PackVM Lima sealed image identity changed")
+
     def _required_host_space(self, image_download_bytes: int) -> int:
         """Return the fail-closed host capacity needed for sparse VM growth."""
 
@@ -2154,6 +2271,7 @@ class PackVMLimaProvisioner:
             "plan_digest": plan.plan_digest,
             "ceremony_nonce_digest": _sha256(request.ceremony_nonce.encode()),
             "config_digest": plan.config_digest,
+            "executed_config_digest": plan.config_digest,
             "image_digest": plan.image_digest,
             "image_source": plan.image_source,
             "image_local_device": verified_image.device,
@@ -2199,7 +2317,10 @@ class PackVMLimaProvisioner:
         current = {
             "backend_id": PACKVM_BACKEND_ID,
             "instance": self._instance,
-            "config_digest": _sha256(self._rendered_config()),
+            "config_digest": self._config_digest(self._rendered_config()),
+            "executed_config_digest": self._config_digest(
+                self._rendered_config()
+            ),
             "image_digest": _PACKVM_IMAGES[self._machine]["digest"],
             "image_source": _PACKVM_IMAGES[self._machine]["url"],
             "guest_runner_digest": _file_digest(_PACKVM_RUNNER),
@@ -2275,7 +2396,7 @@ class PackVMLimaProvisioner:
 
         try:
             local_identity = {
-                "config_digest": _sha256(self._rendered_config()),
+                "config_digest": self._config_digest(self._rendered_config()),
                 "image_digest": _PACKVM_IMAGES[self._machine]["digest"],
                 "image_source": _PACKVM_IMAGES[self._machine]["url"],
                 "guest_runner_digest": _file_digest(_PACKVM_RUNNER),
@@ -2548,7 +2669,12 @@ class PackVMLimaProvisioner:
     ) -> Any:
         if self._runner is not None:
             if inherited_fds:
-                return self._runner(command, input_text, timeout, inherited_fds)
+                if input_text is None or input_text.count(PACKVM_IMAGE_FD_TOKEN) != 1:
+                    raise ValueError("PackVM image descriptor token is invalid")
+                materialized = input_text.replace(
+                    PACKVM_IMAGE_FD_TOKEN, str(inherited_fds[0])
+                )
+                return self._runner(command, materialized, timeout, inherited_fds)
             return self._runner(command, input_text, timeout)
         environment = self._lima_process_environment()
         argv = tuple(str(item) for item in command)
@@ -2572,6 +2698,9 @@ class PackVMLimaProvisioner:
                 allow_inherited_readonly_fds=bool(inherited_fds),
             ),
             inherited_fds=inherited_fds,
+            inherited_fd_tokens=(
+                (PACKVM_IMAGE_FD_TOKEN,) if inherited_fds else ()
+            ),
         )
         return _LimaCallResult(
             returncode=result.exit_code if result.exit_code is not None else 1,

@@ -193,6 +193,7 @@ class PackVMLifecycleV4:
                     "plan_digest": plan.plan_digest,
                     "ceremony_nonce_digest": _digest_text(plan.ceremony_nonce),
                     "config_digest": plan.config_digest,
+                    "executed_config_digest": plan.config_digest,
                     "image_digest": plan.image_digest,
                     "guest_runner_digest": plan.guest_runner_digest,
                     "host_build_digest": plan.host_build_digest,

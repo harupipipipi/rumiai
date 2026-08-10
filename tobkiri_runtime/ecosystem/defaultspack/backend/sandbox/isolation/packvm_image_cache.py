@@ -521,7 +521,7 @@ class PackVMImageCache:
                 break
             try:
                 with self._pinned_entry(child, create=False) as pinned:
-                    with self._exclusive_lock(pinned, "download.lock"):
+                    with self._exclusive_lock(pinned, "download.lock") as lock:
                         metadata = self._owned_entry_metadata(child, pinned)
                         if uncheckpointed:
                             if metadata is not None:
@@ -555,12 +555,9 @@ class PackVMImageCache:
                             ):
                                 self._unlink_regular_if_present(child / name, pinned)
                         os.fsync(pinned.entry_descriptor)
-            except FileNotFoundError:
+                        self._remove_locked_entry(child, pinned, lock)
+            except (FileNotFoundError, OSError):
                 continue
-            try:
-                child.rmdir()
-            except OSError:
-                pass
             generations -= 1
             total -= size
             removed += 1
@@ -1357,7 +1354,7 @@ class PackVMImageCache:
             )
 
     @contextmanager
-    def _exclusive_lock(self, pinned: _PinnedEntry, name: str) -> Iterator[None]:
+    def _exclusive_lock(self, pinned: _PinnedEntry, name: str) -> Iterator[int]:
         flags = os.O_CREAT | os.O_RDWR
         if hasattr(os, "O_NOFOLLOW"):
             flags |= os.O_NOFOLLOW
@@ -1377,13 +1374,39 @@ class PackVMImageCache:
                     "packvm_image_concurrent_writer",
                     "Another PackVM image writer is active",
                 ) from exc
-            yield
+            yield descriptor
         finally:
             try:
                 if locked:
                     _release_portable_lock(descriptor)
             finally:
                 os.close(descriptor)
+
+    def _remove_locked_entry(
+        self, entry: Path, pinned: _PinnedEntry, lock_descriptor: int
+    ) -> None:
+        """Unlink the held lock and empty entry without opening a lock race."""
+
+        self._require_pinned_identity(entry, pinned)
+        lock_metadata = os.fstat(lock_descriptor)
+        current = os.stat(
+            "download.lock",
+            dir_fd=pinned.entry_descriptor,
+            follow_symlinks=False,
+        )
+        if (
+            not _safe_regular(lock_metadata)
+            or lock_metadata.st_nlink != 1
+            or (current.st_dev, current.st_ino)
+            != (lock_metadata.st_dev, lock_metadata.st_ino)
+        ):
+            raise PackVMImageError(
+                "packvm_image_lock_unsafe", "PackVM image lock identity changed"
+            )
+        os.unlink("download.lock", dir_fd=pinned.entry_descriptor)
+        os.fsync(pinned.entry_descriptor)
+        os.rmdir(entry.name, dir_fd=pinned.root_descriptor)
+        os.fsync(pinned.root_descriptor)
 
     def _open_regular(
         self, path: Path, *, writable: bool, directory_fd: int | None = None

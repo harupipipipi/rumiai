@@ -155,6 +155,7 @@ class HostBoundedProcessRunner:
         policy: ProcessExecutionPolicy,
         cancel_event: threading.Event | None = None,
         inherited_fds: Sequence[int] = (),
+        inherited_fd_tokens: Sequence[str] = (),
     ) -> BoundedProcessResult:
         """Run one exact command, or raise after a requested cancellation.
 
@@ -166,15 +167,22 @@ class HostBoundedProcessRunner:
         """
         if cancel_event is not None and cancel_event.is_set():
             raise ProcessExecutionCancelled()
-        request = self._validate_request(
-            argv=argv,
-            cwd=cwd,
-            stdin=stdin,
-            timeout_seconds=timeout_seconds,
-            environment=environment,
-            policy=policy,
-        )
-        pass_fds = self._validate_inherited_fds(inherited_fds, policy)
+        pass_fds = self._pin_inherited_fds(inherited_fds, policy)
+        try:
+            request = self._validate_request(
+                argv=argv,
+                cwd=cwd,
+                stdin=stdin,
+                timeout_seconds=timeout_seconds,
+                environment=environment,
+                policy=policy,
+            )
+            request["stdin"] = self._materialize_inherited_fd_tokens(
+                request["stdin"], inherited_fd_tokens, pass_fds
+            )
+        except Exception:
+            self._close_inherited_fds(pass_fds)
+            raise
         redaction_lookahead = self._redaction_lookahead_bytes(policy)
         stdout_buffer = _CappedBytes(policy.max_stdout_bytes + redaction_lookahead)
         stderr_buffer = _CappedBytes(policy.max_stderr_bytes + redaction_lookahead)
@@ -196,7 +204,12 @@ class HostBoundedProcessRunner:
                 "CREATE_NEW_PROCESS_GROUP",
                 0x00000200,
             )
-        process = subprocess.Popen(**popen_kwargs)
+        try:
+            process = subprocess.Popen(**popen_kwargs)
+        finally:
+            # Popen has either copied these descriptors into the child or
+            # failed. The parent-owned pinned duplicates never outlive spawn.
+            self._close_inherited_fds(pass_fds)
         io_threads = [
             threading.Thread(
                 target=self._drain,
@@ -278,34 +291,92 @@ class HostBoundedProcessRunner:
         return result
 
     @staticmethod
-    def _validate_inherited_fds(
+    def _pin_inherited_fds(
         inherited_fds: Sequence[int], policy: ProcessExecutionPolicy
     ) -> tuple[int, ...]:
-        """Allow only explicit, open, read-only regular descriptors on POSIX."""
+        """Duplicate first, then validate the identities inherited by Popen."""
 
-        descriptors = tuple(int(value) for value in inherited_fds)
-        if not descriptors:
+        requested = tuple(int(value) for value in inherited_fds)
+        if not requested:
             return ()
         if os.name != "posix" or not policy.allow_inherited_readonly_fds:
             raise PermissionError("inherited process descriptors are not allowed")
-        if len(descriptors) != len(set(descriptors)) or len(descriptors) > 8:
+        if len(requested) != len(set(requested)) or len(requested) > 8:
             raise PermissionError("inherited process descriptors are invalid")
         import fcntl
 
-        for descriptor in descriptors:
-            if descriptor < 0:
-                raise PermissionError("inherited process descriptor is invalid")
-            metadata = os.fstat(descriptor)
-            access_mode = fcntl.fcntl(descriptor, fcntl.F_GETFL) & os.O_ACCMODE
+        pinned: list[int] = []
+        try:
+            for descriptor in requested:
+                if descriptor < 0:
+                    raise PermissionError("inherited process descriptor is invalid")
+                duplicate = os.dup(descriptor)
+                pinned.append(duplicate)
+                metadata = os.fstat(duplicate)
+                access_mode = fcntl.fcntl(duplicate, fcntl.F_GETFL) & os.O_ACCMODE
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or metadata.st_nlink not in {0, 1}
+                    or access_mode != os.O_RDONLY
+                ):
+                    raise PermissionError(
+                        "only read-only regular descriptors may be inherited"
+                    )
+            return tuple(pinned)
+        except Exception:
+            HostBoundedProcessRunner._close_inherited_fds(pinned)
+            raise
+
+    @staticmethod
+    def _materialize_inherited_fd_tokens(
+        stdin: str | bytes | None,
+        tokens: Sequence[str],
+        descriptors: Sequence[int],
+    ) -> str | bytes | None:
+        """Substitute exact descriptor tokens only after identities are pinned."""
+
+        if not descriptors:
+            if tokens:
+                raise PermissionError("inherited descriptor tokens are not allowed")
+            return stdin
+        if len(tokens) != len(descriptors) or stdin is None:
+            raise PermissionError("inherited descriptor token binding is incomplete")
+        if len(tokens) != len(set(tokens)):
+            raise PermissionError("inherited descriptor tokens are invalid")
+        for token in tokens:
             if (
-                not stat.S_ISREG(metadata.st_mode)
-                or metadata.st_nlink != 1
-                or access_mode != os.O_RDONLY
+                not token.startswith("__TOBKIRI_")
+                or not token.endswith("__")
+                or len(token) > 128
             ):
+                raise PermissionError("inherited descriptor token is invalid")
+        if isinstance(stdin, bytes):
+            materialized_bytes = stdin
+            for token, descriptor in zip(tokens, descriptors, strict=True):
+                needle = token.encode("ascii")
+                replacement = str(descriptor).encode("ascii")
+                if materialized_bytes.count(needle) != 1:
+                    raise PermissionError(
+                        "inherited descriptor token binding is ambiguous"
+                    )
+                materialized_bytes = materialized_bytes.replace(needle, replacement)
+            return materialized_bytes
+        materialized_text = stdin
+        for token, descriptor in zip(tokens, descriptors, strict=True):
+            if materialized_text.count(token) != 1:
                 raise PermissionError(
-                    "only read-only regular descriptors may be inherited"
+                    "inherited descriptor token binding is ambiguous"
                 )
-        return descriptors
+            materialized_text = materialized_text.replace(token, str(descriptor))
+        return materialized_text
+
+    @staticmethod
+    def _close_inherited_fds(descriptors: Sequence[int]) -> None:
+        for descriptor in descriptors:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
     def run_attested_backend(
         self,

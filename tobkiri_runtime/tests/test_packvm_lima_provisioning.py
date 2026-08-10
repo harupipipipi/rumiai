@@ -1463,8 +1463,7 @@ def test_lima_handoff_rejects_staging_replacement_and_never_writes_outside_jail(
         )
         staged = manager._staging_image_path(authority)
         if mutation == "pathname":
-            displaced = staged.with_suffix(".verified")
-            staged.rename(displaced)
+            assert not staged.exists()
             staged.write_bytes(b"unverified replacement")
             staged.chmod(0o400)
         else:
@@ -1473,12 +1472,15 @@ def test_lima_handoff_rejects_staging_replacement_and_never_writes_outside_jail(
             staged.parent.symlink_to(outside, target_is_directory=True)
 
     fake.before_start = swap
-    with pytest.raises(ValueError, match="staged image identity changed"):
-        manager.provision(_request(manager.prepare()))
+    if mutation == "pathname":
+        assert manager.provision(_request(manager.prepare())).ready is True
+    else:
+        with pytest.raises(ValueError, match="staged image identity changed"):
+            manager.provision(_request(manager.prepare()))
 
     assert list(outside.iterdir()) == []
-    assert fake.exists is False
-    assert not manager.state_path.exists()
+    assert fake.exists is (mutation == "pathname")
+    assert manager.state_path.exists() is (mutation == "pathname")
 
 
 def test_lima_handoff_rejects_same_inode_parent_alias_then_retarget(
@@ -1496,11 +1498,12 @@ def test_lima_handoff_rejects_same_inode_parent_alias_then_retarget(
             operation_id="staging",
         )
         staged = manager._staging_image_path(authority)
-        original_inode = staged.stat().st_ino
+        assert not staged.exists()
+        original_inode = staged.parent.stat().st_ino
         displaced = staged.parent.with_name("displaced-staging-chain")
         staged.parent.rename(displaced)
         staged.parent.symlink_to(displaced, target_is_directory=True)
-        assert staged.stat().st_ino == original_inode
+        assert staged.parent.stat().st_ino == original_inode
         staged.parent.unlink()
         (outside / staged.name).write_bytes(b"retargeted replacement")
         staged.parent.symlink_to(outside, target_is_directory=True)
@@ -1587,8 +1590,14 @@ def test_lima_child_consumes_pinned_image_fd_and_stdin_config_during_parent_swap
     while not ready.exists() and time.monotonic() < deadline:
         time.sleep(0.01)
     assert ready.exists()
-    staging = manager.state_path.parent / "packvm-image-staging"
-    staged = next(staging.glob("*.img"))
+    authority = manager._image_authority(
+        plan_digest="sha256:" + "0" * 64,
+        session_digest="sha256:" + "0" * 64,
+        operation_id="staging",
+    )
+    staged = manager._staging_image_path(authority)
+    staging = staged.parent
+    assert not staged.exists()
     displaced = staging.with_name("displaced-child-handoff")
     staging.rename(displaced)
     (outside / staged.name).write_bytes(b"unverified replacement")
@@ -1820,6 +1829,66 @@ def test_reviewed_config_cannot_change_before_provision(
     with pytest.raises(ValueError, match="plan changed"):
         manager.provision(_request(plan))
     assert fake.exists is False
+
+
+@pytest.mark.parametrize("mutation", ["cpus", "image_location"])
+def test_executed_stdin_config_must_match_reviewed_semantics(
+    provisioner, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    manager, fake, _command = provisioner
+    plan = manager.prepare()
+    original = manager._rendered_config
+
+    def mutate_only_executed(verified_image=None, *, image_descriptor=None):
+        rendered = original(
+            verified_image,
+            image_descriptor=image_descriptor,
+        )
+        if image_descriptor is None:
+            return rendered
+        if mutation == "cpus":
+            return rendered.replace(b"cpus: 2", b"cpus: 3")
+        return rendered.replace(
+            b"file:///dev/fd/__TOBKIRI_PACKVM_IMAGE_FD_0__",
+            b"file:///tmp/unverified.img",
+        )
+
+    monkeypatch.setattr(manager, "_rendered_config", mutate_only_executed)
+    with pytest.raises(ValueError, match="config|locator"):
+        manager.provision(_request(plan))
+    assert fake.exists is False
+    assert not any(command[1:3] == ("start", "--name") for command in fake.commands)
+
+
+def test_staged_equal_size_inode_overwrite_is_rejected_before_child_spawn(
+    provisioner,
+) -> None:
+    manager, fake, _command = provisioner
+    mutated = False
+
+    def overwrite(progress: PackVMImageProgress) -> None:
+        nonlocal mutated
+        if progress.stage != "verified" or mutated:
+            return
+        staging = manager.state_path.parent / "packvm-image-staging"
+        candidates = list(staging.glob("*.img"))
+        if not candidates:
+            return
+        staged = candidates[0]
+        original = staged.read_bytes()
+        replacement = bytes([original[0] ^ 0xFF]) + original[1:]
+        staged.chmod(0o600)
+        staged.write_bytes(replacement)
+        staged.chmod(0o400)
+        assert staged.stat().st_ino == candidates[0].stat().st_ino
+        assert staged.stat().st_size == len(original)
+        mutated = True
+
+    with pytest.raises(ValueError, match="digest changed before execution"):
+        manager.provision(_request(manager.prepare()), progress=overwrite)
+    assert mutated is True
+    assert fake.exists is False
+    assert not any(command[1:3] == ("start", "--name") for command in fake.commands)
 
 
 def test_doctor_rejects_a_changed_host_build(

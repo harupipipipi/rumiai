@@ -883,8 +883,59 @@ def test_gc_removes_only_authenticated_old_generations(tmp_path: Path) -> None:
     )
     assert removed == 1
     assert not paths[0].exists()
+    assert not paths[0].parent.exists()
     assert paths[1].exists()
     assert paths[2].exists()
+    assert cache.garbage_collect(
+        authorities[-1], maximum_generations=2,
+        quota_bytes=len(contents[-1]) + len(contents[-2]),
+    ) == 0
+
+
+def test_gc_preserves_locked_entry_then_removes_lock_and_directory(
+    tmp_path: Path,
+) -> None:
+    fcntl = pytest.importorskip("fcntl")
+    stale_content = b"stale-generation"
+    current_content = b"current-generation"
+    stale = _authority(
+        stale_content, source_url="https://images.example.test/stale-lock.img"
+    )
+    current = _authority(
+        current_content, source_url="https://images.example.test/current-lock.img"
+    )
+    cache = _cache(
+        tmp_path,
+        _Opener(
+            _Response(stale_content, url=stale.source_url, headers=_headers(stale_content)),
+            _Response(
+                current_content,
+                url=current.source_url,
+                headers=_headers(current_content),
+            ),
+        ),
+    )
+    stale_entry = cache.prefetch(stale).path.parent
+    cache.prefetch(current)
+    lock_descriptor = os.open(stale_entry / "download.lock", os.O_RDWR)
+    try:
+        fcntl.flock(lock_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert cache.garbage_collect(
+            current,
+            maximum_generations=1,
+            quota_bytes=len(current_content),
+        ) == 0
+        assert stale_entry.exists()
+    finally:
+        fcntl.flock(lock_descriptor, fcntl.LOCK_UN)
+        os.close(lock_descriptor)
+
+    assert cache.garbage_collect(
+        current,
+        maximum_generations=1,
+        quota_bytes=len(current_content),
+    ) == 1
+    assert not stale_entry.exists()
 
 
 def test_gc_reclaims_authenticated_stale_partial_but_preserves_current(
