@@ -15,6 +15,7 @@ import stat
 import subprocess
 import tempfile
 import time
+import urllib.parse
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -34,6 +35,9 @@ from ecosystem.defaultspack.backend.sandbox.isolation.packvm_image_cache import 
     PackVMImageProgress,
     PackVMPinnedImage,
     PackVMVerifiedImage,
+)
+from ecosystem.defaultspack.backend.sandbox.isolation.packvm_image_handoff import (
+    PackVMLoopbackImageHandoff,
 )
 
 
@@ -161,13 +165,10 @@ class PackVMDoctor:
 
 @dataclass(frozen=True)
 class _PinnedStagedImage:
-    """One staged image plus its pinned complete directory-chain identity."""
+    """One complete unlinked staging inode pinned by descriptor."""
 
     verified: PackVMVerifiedImage
     image_descriptor: int
-    directory_descriptor: int
-    directory_chain: tuple[tuple[Path, tuple[int, int]], ...]
-    storage_name: str
 
 
 class PackVMProcessError(RuntimeError):
@@ -604,8 +605,8 @@ def stable_lima_config_hash(instance: str, payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8", errors="replace")).hexdigest()
 
 
-def _packvm_config_semantic_digest(config: bytes, staging_path: Path) -> str:
-    """Hash config semantics while normalizing only the pinned image locator."""
+def _packvm_config_semantic_digest(config: bytes) -> str:
+    """Hash config semantics with only the one-shot endpoint normalized."""
 
     try:
         loaded = yaml.safe_load(config)
@@ -621,13 +622,30 @@ def _packvm_config_semantic_digest(config: bytes, staging_path: Path) -> str:
     ):
         raise ValueError("PackVM Lima image config is invalid")
     location = images[0].get("location")
-    if not isinstance(location, str) or location != staging_path.as_uri():
+    if not isinstance(location, str):
+        raise ValueError("PackVM Lima image locator is not pinned")
+    try:
+        parsed = urllib.parse.urlsplit(location)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("PackVM Lima image locator is not pinned") from exc
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname != "127.0.0.1"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or port is None
+        or not 0 <= port <= 65535
+        or re.fullmatch(r"/packvm-image/[0-9a-f]{64}", parsed.path) is None
+    ):
         raise ValueError("PackVM Lima image locator is not pinned")
     try:
         normalized = json.loads(json.dumps(loaded, sort_keys=True))
     except (TypeError, ValueError) as exc:
         raise ValueError("PackVM Lima config is not canonicalizable") from exc
-    normalized["images"][0]["location"] = "packvm-pinned-image://immutable-local"
+    normalized["images"][0]["location"] = "packvm-pinned-image://one-shot-loopback"
     return _canonical_digest(normalized)
 
 
@@ -1284,38 +1302,59 @@ class PackVMLimaProvisioner:
                 cancelled=cancelled,
             ) as staged_image:
                 self._verify_sealed_staged_identity(staged_image)
-                config = self._rendered_config(
-                    staged_image.verified,
-                )
-                executed_config_digest = self._config_digest(config)
-                if not hmac.compare_digest(
-                    executed_config_digest, plan.config_digest
-                ):
-                    raise ValueError(
-                        "PackVM executed Lima config differs from reviewed plan"
-                    )
                 self._seal_staged_image(staged_image)
                 if cancelled is not None and cancelled():
                     raise PackVMImageCancelled(
                         "packvm_image_cancelled",
                         "PackVM image provisioning was cancelled",
                     )
-                recovery["phase"] = "start_pending"
-                recovery["executed_config_digest"] = executed_config_digest
-                recovery["authentication"] = self._sign_recovery(recovery)
-                _atomic_private_json(self.recovery_path, recovery)
-                if cancelled is not None and cancelled():
-                    raise PackVMImageCancelled(
-                        "packvm_image_cancelled",
-                        "PackVM image provisioning was cancelled",
-                    )
-                self._checked_call(
-                    (limactl, "start", "--name", self._instance, "-"),
-                    timeout=900,
-                    input_text=config.decode("utf-8"),
-                    max_stdin_bytes=len(config),
-                    stage="start",
-                )
+                with PackVMLoopbackImageHandoff(
+                    staged_image.image_descriptor,
+                    size_bytes=staged_image.verified.size_bytes,
+                    digest=staged_image.verified.digest,
+                    cancelled=cancelled,
+                ) as handoff:
+                    config = self._rendered_config(image_location=handoff.url)
+                    self._require_config_image_location(config, handoff.url)
+                    executed_config_digest = self._config_digest(config)
+                    if not hmac.compare_digest(
+                        executed_config_digest, plan.config_digest
+                    ):
+                        raise ValueError(
+                            "PackVM executed Lima config differs from reviewed plan"
+                        )
+                    recovery["phase"] = "start_pending"
+                    recovery["image_handoff"] = "one-shot-loopback-v1"
+                    recovery["executed_config_digest"] = executed_config_digest
+                    recovery["authentication"] = self._sign_recovery(recovery)
+                    _atomic_private_json(self.recovery_path, recovery)
+                    if cancelled is not None and cancelled():
+                        raise PackVMImageCancelled(
+                            "packvm_image_cancelled",
+                            "PackVM image provisioning was cancelled",
+                        )
+                    try:
+                        self._checked_call(
+                            (limactl, "start", "--name", self._instance, "-"),
+                            timeout=900,
+                            input_text=config.decode("utf-8"),
+                            max_stdin_bytes=len(config),
+                            stage="start",
+                        )
+                    except PackVMProcessError:
+                        if cancelled is not None and cancelled():
+                            raise PackVMImageCancelled(
+                                "packvm_image_cancelled",
+                                "PackVM image provisioning was cancelled",
+                            )
+                        raise
+                    if cancelled is not None and cancelled():
+                        raise PackVMImageCancelled(
+                            "packvm_image_cancelled",
+                            "PackVM image provisioning was cancelled",
+                        )
+                    handoff.require_consumed()
+                self._seal_staged_image(staged_image)
                 self._verify_sealed_staged_identity(staged_image)
             self._install_guest_runner(limactl)
             machine_id = self._guest_machine_id(limactl)
@@ -1834,9 +1873,8 @@ class PackVMLimaProvisioner:
 
     def _rendered_config(
         self,
-        verified_image: PackVMVerifiedImage | None = None,
         *,
-        image_descriptor: int | None = None,
+        image_location: str | None = None,
     ) -> bytes:
         image = _PACKVM_IMAGES[self._machine]
         gibibyte = 1024**3
@@ -1845,28 +1883,10 @@ class PackVMLimaProvisioner:
             or PACKVM_DISK_SIZE_BYTES % gibibyte != 0
         ):
             raise ValueError("PackVM disk policy is below the bounded runtime minimum")
-        authority = self._image_authority(
-            plan_digest="sha256:" + "0" * 64,
-            session_digest="sha256:" + "0" * 64,
-            operation_id="prepare",
-        )
-        expected_staging_path = self._staging_image_path(authority)
-        if verified_image is not None and verified_image.path != expected_staging_path:
-            raise ValueError("PackVM staged image path is not deterministic")
-        if image_descriptor is not None:
-            if verified_image is None or os.name != "posix" or image_descriptor < 0:
-                raise ValueError("PackVM image descriptor handoff is unavailable")
-            descriptor_metadata = os.fstat(image_descriptor)
-            if (
-                not stat.S_ISREG(descriptor_metadata.st_mode)
-                or descriptor_metadata.st_dev != verified_image.device
-                or descriptor_metadata.st_ino != verified_image.inode
-                or descriptor_metadata.st_size != verified_image.size_bytes
-            ):
-                raise ValueError("PackVM image descriptor handoff identity changed")
-            image_location = _PACKVM_IMAGE_FD_LOCATION
-        else:
-            image_location = expected_staging_path.as_uri()
+        if image_location is None:
+            image_location = (
+                "http://127.0.0.1:0/packvm-image/" + "0" * 64
+            )
         template = _PACKVM_CONFIG.read_text(encoding="utf-8")
         rendered = (
             template.replace("{{ARCH}}", str(image["lima_arch"]))
@@ -1879,14 +1899,21 @@ class PackVMLimaProvisioner:
     def _config_digest(self, config: bytes) -> str:
         """Return the consent digest for exact PackVM config semantics."""
 
-        authority = self._image_authority(
-            plan_digest="sha256:" + "0" * 64,
-            session_digest="sha256:" + "0" * 64,
-            operation_id="config-digest",
-        )
-        return _packvm_config_semantic_digest(
-            config, self._staging_image_path(authority)
-        )
+        return _packvm_config_semantic_digest(config)
+
+    @staticmethod
+    def _require_config_image_location(config: bytes, expected: str) -> None:
+        """Require executed YAML to name the exact active one-shot endpoint."""
+
+        loaded = yaml.safe_load(config)
+        images = loaded.get("images") if isinstance(loaded, dict) else None
+        if (
+            not isinstance(images, list)
+            or len(images) != 1
+            or not isinstance(images[0], dict)
+            or images[0].get("location") != expected
+        ):
+            raise ValueError("PackVM executed Lima image locator changed")
 
     def _image_authority(
         self, *, plan_digest: str, session_digest: str, operation_id: str
@@ -1931,7 +1958,7 @@ class PackVMLimaProvisioner:
         progress: Callable[[PackVMImageProgress], None] | None,
         cancelled: Callable[[], bool] | None,
     ) -> Iterator[_PinnedStagedImage]:
-        """Copy verified bytes into an independent immutable Lima handoff file."""
+        """Copy verified bytes into an unlinked crash-safe staging inode."""
 
         authority = self._image_authority(
             plan_digest="sha256:" + "0" * 64,
@@ -1941,49 +1968,34 @@ class PackVMLimaProvisioner:
         verified = pinned.verified
         staging_path = self._staging_image_path(authority)
         staging_directory = staging_path.parent
-        (
-            directory_descriptor,
-            directory_device,
-            directory_inode,
-            directory_chain,
-        ) = (
-            _open_pinned_owned_directory(staging_directory)
-        )
-        source_descriptor = os.dup(pinned.descriptor)
-        # This is the final untrusted callback before the handoff inode exists.
-        # A callback may retain a writable descriptor to a pathname it creates,
-        # so publish the reviewed bytes only after it returns.  os.replace then
-        # detaches any callback-created inode from Lima's deterministic name.
-        if progress is not None:
-            progress(PackVMImageProgress(
-                "verified",
-                verified.size_bytes,
-                verified.size_bytes,
-                verified.size_bytes,
-            ))
-        if cancelled is not None and cancelled():
-            os.close(source_descriptor)
-            os.close(directory_descriptor)
-            raise PackVMImageCancelled(
-                "packvm_image_cancelled",
-                "PackVM image staging was cancelled",
-            )
+        directory_descriptor = -1
+        source_descriptor = -1
+        temporary_descriptor = -1
         temporary_name = f".packvm-stage-{secrets.token_hex(16)}"
-        temporary_flags = os.O_CREAT | os.O_EXCL | os.O_RDWR
-        if hasattr(os, "O_NOFOLLOW"):
-            temporary_flags |= os.O_NOFOLLOW
         try:
+            (
+                directory_descriptor,
+                directory_device,
+                directory_inode,
+                directory_chain,
+            ) = _open_pinned_owned_directory(staging_directory)
+            source_descriptor = os.dup(pinned.descriptor)
+            self._reconcile_legacy_staging(
+                staging_path, directory_descriptor, verified
+            )
+            temporary_flags = os.O_CREAT | os.O_EXCL | os.O_RDWR
+            if hasattr(os, "O_NOFOLLOW"):
+                temporary_flags |= os.O_NOFOLLOW
             temporary_descriptor = os.open(
                 temporary_name,
                 temporary_flags,
-                0o400,
+                0o600,
                 dir_fd=directory_descriptor,
             )
-        except Exception:
-            os.close(source_descriptor)
-            os.close(directory_descriptor)
-            raise
-        try:
+            # The inode has no pathname before any callback or image copy.  A
+            # crash closes the descriptor and the filesystem reclaims it.
+            os.unlink(temporary_name, dir_fd=directory_descriptor)
+            os.fsync(directory_descriptor)
             source_metadata = os.fstat(source_descriptor)
             if (
                 not stat.S_ISREG(source_metadata.st_mode)
@@ -1992,8 +2004,6 @@ class PackVMLimaProvisioner:
                 or source_metadata.st_ino != verified.inode
             ):
                 raise ValueError("PackVM verified source changed before Lima staging")
-            os.lseek(source_descriptor, 0, os.SEEK_SET)
-            os.fchmod(temporary_descriptor, 0o400)
             hasher = hashlib.sha256()
             copied = 0
             while copied < verified.size_bytes:
@@ -2002,8 +2012,10 @@ class PackVMLimaProvisioner:
                         "packvm_image_cancelled",
                         "PackVM image staging was cancelled",
                     )
-                chunk = os.read(
-                    source_descriptor, min(1024 * 1024, verified.size_bytes - copied)
+                chunk = os.pread(
+                    source_descriptor,
+                    min(1024 * 1024, verified.size_bytes - copied),
+                    copied,
                 )
                 if not chunk:
                     raise ValueError("PackVM verified source truncated during staging")
@@ -2011,7 +2023,7 @@ class PackVMLimaProvisioner:
                     raise ValueError("PackVM Lima staging write was incomplete")
                 hasher.update(chunk)
                 copied += len(chunk)
-            if os.read(source_descriptor, 1):
+            if os.pread(source_descriptor, 1, copied):
                 raise ValueError("PackVM verified source grew during staging")
             digest = "sha256:" + hasher.hexdigest()
             if not hmac.compare_digest(digest, verified.digest):
@@ -2022,6 +2034,7 @@ class PackVMLimaProvisioner:
                     "PackVM image staging was cancelled",
                 )
             os.fsync(temporary_descriptor)
+            os.fchmod(temporary_descriptor, 0o400)
             _require_pinned_directory_identity(
                 staging_directory,
                 directory_descriptor,
@@ -2030,6 +2043,8 @@ class PackVMLimaProvisioner:
                 directory_chain,
             )
             staged_metadata = os.fstat(temporary_descriptor)
+            if staged_metadata.st_nlink != 0:
+                raise ValueError("PackVM Lima staging inode remained named")
             staged_verified = PackVMVerifiedImage(
                 path=staging_path,
                 digest=digest,
@@ -2038,39 +2053,15 @@ class PackVMLimaProvisioner:
                 inode=staged_metadata.st_ino,
                 source_url=verified.source_url,
             )
-            staged = _PinnedStagedImage(
-                staged_verified,
-                -1,
-                directory_descriptor,
-                directory_chain,
-                staging_path.name,
-            )
-            if cancelled is not None and cancelled():
-                raise PackVMImageCancelled(
-                    "packvm_image_cancelled",
-                    "PackVM image staging was cancelled",
-                )
-            os.replace(
-                temporary_name,
-                staging_path.name,
-                src_dir_fd=directory_descriptor,
-                dst_dir_fd=directory_descriptor,
-            )
-            os.fsync(directory_descriptor)
-            staged = _PinnedStagedImage(
-                staged_verified,
-                os.open(
-                    staging_path.name,
-                    os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
-                    dir_fd=directory_descriptor,
-                ),
-                directory_descriptor,
-                directory_chain,
-                staging_path.name,
-            )
-            _set_descriptor_immutable(staged.image_descriptor, True)
-            _set_descriptor_immutable(staged.directory_descriptor, True)
+            staged = _PinnedStagedImage(staged_verified, temporary_descriptor)
             self._verify_sealed_staged_identity(staged)
+            if progress is not None:
+                progress(PackVMImageProgress(
+                    "verified",
+                    verified.size_bytes,
+                    verified.size_bytes,
+                    verified.size_bytes,
+                ))
             if cancelled is not None and cancelled():
                 raise PackVMImageCancelled(
                     "packvm_image_cancelled",
@@ -2078,81 +2069,87 @@ class PackVMLimaProvisioner:
                 )
             yield staged
         finally:
-            os.close(source_descriptor)
-            os.close(temporary_descriptor)
-            if "staged" in locals():
-                try:
-                    _set_descriptor_immutable(staged.directory_descriptor, False)
-                except OSError:
-                    pass
-                try:
-                    _set_descriptor_immutable(staged.image_descriptor, False)
-                except OSError:
-                    pass
-                if staged.image_descriptor >= 0:
-                    os.close(staged.image_descriptor)
-            if "staged" in locals():
-                try:
-                    current = os.stat(
-                        staged.storage_name,
-                        dir_fd=directory_descriptor,
-                        follow_symlinks=False,
-                    )
-                    if (
-                        current.st_dev == staged.verified.device
-                        and current.st_ino == staged.verified.inode
-                        and current.st_nlink == 1
-                    ):
-                        os.unlink(staged.storage_name, dir_fd=directory_descriptor)
-                        os.fsync(directory_descriptor)
-                except FileNotFoundError:
-                    pass
-            else:
+            if directory_descriptor >= 0:
                 try:
                     os.unlink(temporary_name, dir_fd=directory_descriptor)
                 except FileNotFoundError:
                     pass
-            os.close(directory_descriptor)
+                os.fsync(directory_descriptor)
+            if temporary_descriptor >= 0:
+                os.close(temporary_descriptor)
+            if source_descriptor >= 0:
+                os.close(source_descriptor)
+            if directory_descriptor >= 0:
+                os.close(directory_descriptor)
 
-    def _verify_staged_identity(self, staged: _PinnedStagedImage) -> None:
-        """Revalidate the exact independent handoff immediately around Lima start."""
+    def _reconcile_legacy_staging(
+        self,
+        staging_path: Path,
+        directory_descriptor: int,
+        verified: PackVMVerifiedImage,
+    ) -> None:
+        """Remove only a valid staging inode stranded by the flag-based design."""
 
-        verified = staged.verified
-        try:
-            _require_pinned_directory_identity(
-                verified.path.parent,
-                staged.directory_descriptor,
-                int(os.fstat(staged.directory_descriptor).st_dev),
-                int(os.fstat(staged.directory_descriptor).st_ino),
-                staged.directory_chain,
+        if platform.system() != "Darwin" or not hasattr(stat, "UF_IMMUTABLE"):
+            return
+        directory_metadata = os.fstat(directory_descriptor)
+        if directory_metadata.st_flags & stat.UF_IMMUTABLE:
+            _set_descriptor_flags(
+                directory_descriptor,
+                int(directory_metadata.st_flags) & ~int(stat.UF_IMMUTABLE),
             )
-        except ValueError as exc:
-            raise ValueError("PackVM Lima staged image identity changed") from exc
         try:
-            metadata = verified.path.lstat()
-        except FileNotFoundError as exc:
-            raise ValueError("PackVM Lima staged image identity changed") from exc
-        if (
-            verified.path.is_symlink()
-            or not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_nlink != 1
-            or metadata.st_dev != verified.device
-            or metadata.st_ino != verified.inode
-            or metadata.st_size != verified.size_bytes
-        ):
-            raise ValueError("PackVM Lima staged image identity changed")
-        descriptor_metadata = os.fstat(staged.image_descriptor)
-        if (
-            not stat.S_ISREG(descriptor_metadata.st_mode)
-            or descriptor_metadata.st_nlink != 1
-            or descriptor_metadata.st_dev != verified.device
-            or descriptor_metadata.st_ino != verified.inode
-            or descriptor_metadata.st_size != verified.size_bytes
-        ):
-            raise ValueError("PackVM Lima staged image identity changed")
+            descriptor = os.open(
+                staging_path.name,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=directory_descriptor,
+            )
+        except FileNotFoundError:
+            return
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_nlink != 1
+                or metadata.st_size != verified.size_bytes
+                or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+            ):
+                raise ValueError("PackVM legacy staging residue is unsafe")
+            if metadata.st_flags & stat.UF_IMMUTABLE:
+                _set_descriptor_flags(
+                    descriptor,
+                    int(metadata.st_flags) & ~int(stat.UF_IMMUTABLE),
+                )
+            hasher = hashlib.sha256()
+            offset = 0
+            while offset < verified.size_bytes:
+                chunk = os.pread(
+                    descriptor,
+                    min(1024 * 1024, verified.size_bytes - offset),
+                    offset,
+                )
+                if not chunk:
+                    raise ValueError("PackVM legacy staging residue is truncated")
+                hasher.update(chunk)
+                offset += len(chunk)
+            if os.pread(descriptor, 1, offset) or not hmac.compare_digest(
+                "sha256:" + hasher.hexdigest(), verified.digest
+            ):
+                raise ValueError("PackVM legacy staging residue digest changed")
+            current = os.stat(
+                staging_path.name,
+                dir_fd=directory_descriptor,
+                follow_symlinks=False,
+            )
+            if (current.st_dev, current.st_ino) != (metadata.st_dev, metadata.st_ino):
+                raise ValueError("PackVM legacy staging residue identity changed")
+            os.unlink(staging_path.name, dir_fd=directory_descriptor)
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(descriptor)
 
     def _seal_staged_image(self, staged: _PinnedStagedImage) -> None:
-        """Rehash the immutable Lima-local image immediately before child spawn."""
+        """Rehash the unlinked local image immediately around consumption."""
 
         self._verify_sealed_staged_identity(staged)
         verified = staged.verified
@@ -2183,32 +2180,18 @@ class PackVMLimaProvisioner:
         self._verify_sealed_staged_identity(staged)
 
     def _verify_sealed_staged_identity(self, staged: _PinnedStagedImage) -> None:
-        """Require the named Lima handoff and its directory to stay immutable."""
+        """Require the complete staging inode to remain unlinked and pinned."""
 
-        try:
-            directory_metadata = os.fstat(staged.directory_descriptor)
-            _require_pinned_directory_identity(
-                staged.verified.path.parent,
-                staged.directory_descriptor,
-                int(directory_metadata.st_dev),
-                int(directory_metadata.st_ino),
-                staged.directory_chain,
-            )
-        except ValueError as exc:
-            raise ValueError("PackVM Lima staged image identity changed") from exc
         metadata = os.fstat(staged.image_descriptor)
         verified = staged.verified
         if (
             not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_nlink != 1
+            or metadata.st_nlink != 0
             or metadata.st_dev != verified.device
             or metadata.st_ino != verified.inode
             or metadata.st_size != verified.size_bytes
-            or not metadata.st_flags & stat.UF_IMMUTABLE
-            or not os.fstat(staged.directory_descriptor).st_flags & stat.UF_IMMUTABLE
         ):
             raise ValueError("PackVM Lima sealed image identity changed")
-        self._verify_staged_identity(staged)
 
     def _required_host_space(self, image_download_bytes: int) -> int:
         """Return the fail-closed host capacity needed for sparse VM growth."""
@@ -2869,17 +2852,12 @@ def _sha256(value: bytes) -> str:
     return f"sha256:{hashlib.sha256(value).hexdigest()}"
 
 
-def _set_descriptor_immutable(descriptor: int, enabled: bool) -> None:
-    """Set Darwin's user-immutable flag on an already pinned descriptor."""
+def _set_descriptor_flags(descriptor: int, flags: int) -> None:
+    """Set Darwin file flags on a pinned descriptor for legacy reconciliation."""
 
-    if platform.system() != "Darwin" or not hasattr(stat, "UF_IMMUTABLE"):
-        raise OSError(errno.ENOTSUP, "PackVM immutable handoff is unavailable")
     function = ctypes.CDLL(None, use_errno=True).fchflags
     function.argtypes = (ctypes.c_int, ctypes.c_uint)
     function.restype = ctypes.c_int
-    current = int(os.fstat(descriptor).st_flags)
-    immutable = int(stat.UF_IMMUTABLE)
-    flags = current | immutable if enabled else current & ~immutable
     if function(descriptor, flags) != 0:
         error = ctypes.get_errno()
         raise OSError(error, os.strerror(error))

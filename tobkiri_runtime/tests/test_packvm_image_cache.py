@@ -7,6 +7,7 @@ import io
 import json
 import os
 import socket
+import threading
 import time
 from email.message import Message
 from pathlib import Path
@@ -763,7 +764,7 @@ def test_concurrent_writer_is_rejected_without_waiting(tmp_path: Path) -> None:
     cache = _cache(tmp_path, opener)
     entry = cache.image_path(_authority(content)).parent
     entry.mkdir(parents=True, mode=0o700)
-    lock = cache.root / "cache.lock"
+    lock = cache.root / f"entry-{entry.name}.lock"
     descriptor = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -917,7 +918,7 @@ def test_gc_preserves_locked_entry_then_removes_directory_but_not_root_lock(
     )
     stale_entry = cache.prefetch(stale).path.parent
     cache.prefetch(current)
-    root_lock = cache.root / "cache.lock"
+    root_lock = cache.root / f"entry-{stale_entry.name}.lock"
     root_lock_identity = root_lock.stat().st_dev, root_lock.stat().st_ino
     lock_descriptor = os.open(root_lock, os.O_RDWR)
     try:
@@ -946,6 +947,47 @@ def test_gc_preserves_locked_entry_then_removes_directory_but_not_root_lock(
         quota_bytes=len(current_content),
     ) == 0
     assert (root_lock.stat().st_dev, root_lock.stat().st_ino) == root_lock_identity
+
+
+def test_provisioning_pin_allows_stale_gc_and_preserves_current(tmp_path: Path) -> None:
+    stale_content = b"stale-generation"
+    current_content = b"current-generation"
+    stale = _authority(
+        stale_content, source_url="https://images.example.test/stale-nested.img"
+    )
+    current = _authority(
+        current_content, source_url="https://images.example.test/current-nested.img"
+    )
+    cache = _cache(
+        tmp_path,
+        _Opener(
+            _Response(stale_content, url=stale.source_url, headers=_headers(stale_content)),
+            _Response(
+                current_content,
+                url=current.source_url,
+                headers=_headers(current_content),
+            ),
+        ),
+    )
+    stale_entry = cache.prefetch(stale).path.parent
+    current_entry = cache.prefetch(current).path.parent
+
+    with cache.provisioning_image(current) as pinned:
+        removed: list[int] = []
+        worker = threading.Thread(target=lambda: removed.append(cache.garbage_collect(
+            current,
+            maximum_generations=1,
+            quota_bytes=len(current_content),
+        )))
+        worker.start()
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+        assert removed == [1]
+        assert os.pread(pinned.descriptor, len(current_content), 0) == current_content
+        assert not stale_entry.exists()
+        assert current_entry.exists()
+
+    assert cache.verified(current).digest == current.digest
 
 
 def test_gc_reclaims_authenticated_stale_partial_but_preserves_current(

@@ -104,6 +104,7 @@ class _PinnedEntry:
     root_inode: int
     entry_device: int
     entry_inode: int
+    entry_name: str
 
 
 class _StrictRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -1317,6 +1318,7 @@ class PackVMImageCache:
                 root_inode=root_metadata.st_ino,
                 entry_device=entry_metadata.st_dev,
                 entry_inode=entry_metadata.st_ino,
+                entry_name=entry.name,
             )
             self._require_pinned_identity(entry, pinned)
             yield pinned
@@ -1355,25 +1357,30 @@ class PackVMImageCache:
 
     @contextmanager
     def _exclusive_lock(self, pinned: _PinnedEntry, name: str) -> Iterator[int]:
-        """Hold the stable cache-root lock across any entry mutation.
+        """Hold one stable content-key lock across an entry mutation.
 
-        Entry-local locks cannot safely be unlinked during GC: another caller
-        can create a new lock inode at the same name while the old inode remains
-        locked.  One root-owned lock has a lifetime independent of generations,
-        so entry removal and recreation cannot split exclusivity.
+        The lock lives in the root rather than the removable entry, and is never
+        deleted.  Different generations can therefore be collected while the
+        current image remains pinned, without a split lock inode on recreation.
         """
 
+        del name
+        if re.fullmatch(r"[0-9a-f]{64}", pinned.entry_name) is None:
+            raise PackVMImageError(
+                "packvm_image_lock_unsafe", "PackVM image lock key is unsafe"
+            )
+        lock_name = f"entry-{pinned.entry_name}.lock"
         flags = os.O_CREAT | os.O_RDWR
         if hasattr(os, "O_NOFOLLOW"):
             flags |= os.O_NOFOLLOW
         descriptor = os.open(
-            "cache.lock", flags, 0o600, dir_fd=pinned.root_descriptor
+            lock_name, flags, 0o600, dir_fd=pinned.root_descriptor
         )
         locked = False
         try:
             metadata = os.fstat(descriptor)
             current = os.stat(
-                "cache.lock",
+                lock_name,
                 dir_fd=pinned.root_descriptor,
                 follow_symlinks=False,
             )
@@ -1395,7 +1402,7 @@ class PackVMImageCache:
                     "Another PackVM image writer is active",
                 ) from exc
             current = os.stat(
-                "cache.lock",
+                lock_name,
                 dir_fd=pinned.root_descriptor,
                 follow_symlinks=False,
             )
@@ -1422,7 +1429,9 @@ class PackVMImageCache:
         self._require_pinned_identity(entry, pinned)
         lock_metadata = os.fstat(lock_descriptor)
         current = os.stat(
-            "cache.lock", dir_fd=pinned.root_descriptor, follow_symlinks=False
+            f"entry-{pinned.entry_name}.lock",
+            dir_fd=pinned.root_descriptor,
+            follow_symlinks=False,
         )
         if not _safe_regular(lock_metadata) or lock_metadata.st_nlink != 1 or (
             current.st_dev,
