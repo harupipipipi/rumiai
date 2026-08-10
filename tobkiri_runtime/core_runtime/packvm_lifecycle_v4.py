@@ -20,6 +20,7 @@ from core_runtime.hmac_key_manager import generate_or_load_signing_key
 from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
     PACKVM_CLEANUP_PREFIX,
     PackVMLimaProvisioner,
+    PackVMProcessError,
     PackVMProvisioningPlan,
     PackVMProvisioningRequest,
 )
@@ -31,24 +32,31 @@ class PackVMLifecycleV4:
     def __init__(self, provisioner: PackVMLimaProvisioner | None = None) -> None:
         self._provisioner = provisioner or PackVMLimaProvisioner()
         self._lock = threading.RLock()
-        self._plans: dict[str, PackVMProvisioningPlan] = {}
-        self._consents: dict[str, PackVMProvisioningRequest] = {}
+        self._plans: dict[str, tuple[PackVMProvisioningPlan, str]] = {}
+        self._consents: dict[
+            str, tuple[PackVMProvisioningRequest, PackVMProvisioningPlan]
+        ] = {}
         self._operations_path = self._provisioner.state_path.parent / "packvm-operations.json"
         self._operations_key_path = self._provisioner.state_path.parent / "packvm-operations.key"
         self._operations = self._load_operations()
         if self._operations:
             self._persist_operations()
 
-    def prepare(self) -> Mapping[str, Any]:
+    def prepare(self, *, session_id: str | None = None) -> Mapping[str, Any]:
         """Return pinned download and runtime facts without provisioning."""
 
         with self._lock:
             plan = self._provisioner.prepare()
             self._plans.clear()
-            self._plans[plan.ceremony_nonce] = plan
+            self._plans[plan.ceremony_nonce] = (plan, _session_digest(session_id))
             return asdict(plan)
 
-    def consent(self, payload: Mapping[str, object]) -> Mapping[str, Any]:
+    def consent(
+        self,
+        payload: Mapping[str, object],
+        *,
+        session_id: str | None = None,
+    ) -> Mapping[str, Any]:
         """Capture explicit consent for one exact, previously displayed plan."""
 
         expected_keys = {
@@ -71,9 +79,13 @@ class PackVMLifecycleV4:
         ):
             raise ValueError("PackVM consent payload types are invalid")
         with self._lock:
-            plan = self._plans.pop(ceremony_nonce, None)
+            pending = self._plans.pop(ceremony_nonce, None)
+            current_session_digest = _session_digest(session_id)
+            if pending is None:
+                raise ValueError("PackVM consent does not match a pending plan")
+            plan, pending_session_digest = pending
             if (
-                plan is None
+                pending_session_digest != current_session_digest
                 or not secrets.compare_digest(plan.plan_digest, plan_digest)
                 or not secrets.compare_digest(plan.confirmation, confirmation)
             ):
@@ -84,11 +96,15 @@ class PackVMLifecycleV4:
                 )
             consent_id = "packvm-consent." + secrets.token_hex(24)
             self._consents.clear()
-            self._consents[consent_id] = PackVMProvisioningRequest(
-                plan_digest=plan_digest,
-                ceremony_nonce=ceremony_nonce,
-                confirmation=confirmation,
-                approve_image_download=approve_download,
+            self._consents[consent_id] = (
+                PackVMProvisioningRequest(
+                    plan_digest=plan_digest,
+                    ceremony_nonce=ceremony_nonce,
+                    confirmation=confirmation,
+                    approve_image_download=approve_download,
+                    session_digest=current_session_digest,
+                ),
+                plan,
             )
             return {
                 "consent_id": consent_id,
@@ -99,7 +115,12 @@ class PackVMLifecycleV4:
                 "image_download_approved": approve_download,
             }
 
-    def provision(self, payload: Mapping[str, object]) -> Mapping[str, Any]:
+    def provision(
+        self,
+        payload: Mapping[str, object],
+        *,
+        session_id: str | None = None,
+    ) -> Mapping[str, Any]:
         """Start one idempotent background provisioning operation."""
 
         if set(payload) != {"consent_id", "operation_id"} or not all(
@@ -111,21 +132,42 @@ class PackVMLifecycleV4:
         if re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", operation_id) is None:
             raise ValueError("PackVM operation_id must be a canonical UUID")
         with self._lock:
+            current_session_digest = _session_digest(session_id)
             existing = self._operations.get(operation_id)
             if existing is not None:
-                if existing.get("consent_digest") != _digest_text(consent_id):
+                if (
+                    existing.get("operation_kind") != "provision"
+                    or existing.get("consent_digest") != _digest_text(consent_id)
+                    or existing.get("session_digest") != current_session_digest
+                ):
                     raise ValueError("PackVM operation_id is already bound to another consent")
-                return dict(existing)
+                return _public_operation(existing)
             if len(self._operations) >= 128:
                 raise ValueError("PackVM operation journal capacity is exhausted")
-            request = self._consents.pop(consent_id, None)
-            if request is None:
+            consent = self._consents.pop(consent_id, None)
+            if consent is None:
                 raise ValueError("PackVM consent is missing or already consumed")
+            request, plan = consent
+            if request.session_digest != current_session_digest:
+                raise ValueError("PackVM consent belongs to another authenticated session")
             record: dict[str, Any] = {
                 "operation_id": operation_id,
+                "operation_kind": "provision",
                 "consent_digest": _digest_text(consent_id),
+                "session_digest": current_session_digest,
                 "state": "queued",
                 "plan_digest": request.plan_digest,
+                "recovery_proof": {
+                    "backend_id": plan.backend_id,
+                    "instance": plan.instance,
+                    "session_digest": current_session_digest,
+                    "plan_digest": plan.plan_digest,
+                    "config_digest": plan.config_digest,
+                    "image_digest": plan.image_digest,
+                    "guest_runner_digest": plan.guest_runner_digest,
+                    "host_build_digest": plan.host_build_digest,
+                    **self._provisioner.recovery_identity(),
+                },
                 "updated_unix": int(time.time()),
             }
             self._operations[operation_id] = record
@@ -137,18 +179,30 @@ class PackVMLifecycleV4:
                 name=f"packvm-provision-{operation_id[:8]}",
             )
             worker.start()
-            return dict(record)
+            return _public_operation(record)
 
-    def progress(self, operation_id: str) -> Mapping[str, Any]:
+    def progress(
+        self,
+        operation_id: str,
+        *,
+        session_id: str | None = None,
+    ) -> Mapping[str, Any]:
         """Return one persisted operation state across process restarts."""
 
         with self._lock:
             record = self._operations.get(operation_id)
             if record is None:
                 raise ValueError("PackVM operation_id is unknown")
-            return dict(record)
+            if record.get("session_digest") != _session_digest(session_id):
+                raise ValueError("PackVM operation belongs to another authenticated session")
+            return _public_operation(record)
 
-    def cancel(self, payload: Mapping[str, object]) -> Mapping[str, Any]:
+    def cancel(
+        self,
+        payload: Mapping[str, object],
+        *,
+        session_id: str | None = None,
+    ) -> Mapping[str, Any]:
         """Cancel only a queued operation; running provisioning is fenced."""
 
         if set(payload) != {"operation_id"} or not isinstance(payload.get("operation_id"), str):
@@ -158,13 +212,23 @@ class PackVMLifecycleV4:
             record = self._operations.get(operation_id)
             if record is None:
                 raise ValueError("PackVM operation_id is unknown")
+            if (
+                record.get("operation_kind") != "provision"
+                or record.get("session_digest") != _session_digest(session_id)
+            ):
+                raise ValueError("PackVM operation cannot be cancelled by this session")
             if record.get("state") == "queued":
                 record["state"] = "cancelled"
                 record["updated_unix"] = int(time.time())
                 self._persist_operations()
-            elif record.get("state") not in {"cancelled", "succeeded", "failed"}:
+            elif record.get("state") not in {
+                "cancelled",
+                "succeeded",
+                "failed",
+                "interrupted",
+            }:
                 raise ValueError("PackVM provisioning cannot be cancelled after it starts")
-            return dict(record)
+            return _public_operation(record)
 
     def doctor(self) -> Mapping[str, Any]:
         """Return authenticated health without mutating the VM."""
@@ -187,19 +251,92 @@ class PackVMLifecycleV4:
             self._provisioner.stop(str(payload["confirmation"]))
             return asdict(self._provisioner.doctor())
 
-    def cleanup(self, payload: Mapping[str, object]) -> Mapping[str, Any]:
-        """Delete only the authenticated v4 instance after exact confirmation."""
+    def cleanup(
+        self,
+        payload: Mapping[str, object],
+        *,
+        session_id: str | None = None,
+    ) -> Mapping[str, Any]:
+        """Queue one durable authenticated or failed-provision cleanup."""
 
-        if set(payload) != {"confirmation"} or not isinstance(payload.get("confirmation"), str):
+        expected_keys = {"confirmation", "operation_id", "source_operation_id"}
+        if set(payload) != expected_keys:
             raise ValueError("PackVM cleanup payload does not match the typed contract")
+        confirmation = payload.get("confirmation")
+        operation_id = payload.get("operation_id")
+        source_operation_id = payload.get("source_operation_id")
+        if (
+            not isinstance(confirmation, str)
+            or not isinstance(operation_id, str)
+            or (source_operation_id is not None and not isinstance(source_operation_id, str))
+            or not _canonical_operation_id(operation_id)
+            or (
+                isinstance(source_operation_id, str)
+                and not _canonical_operation_id(source_operation_id)
+            )
+        ):
+            raise ValueError("PackVM cleanup payload types are invalid")
+        current_session_digest = _session_digest(session_id)
+        instance = str(self._provisioner.doctor().instance)
+        expected_confirmation = f"{PACKVM_CLEANUP_PREFIX} {instance}"
+        if not secrets.compare_digest(confirmation, expected_confirmation):
+            raise ValueError(
+                f"PackVM cleanup requires exact confirmation: {expected_confirmation}"
+            )
         with self._lock:
-            instance = str(self._provisioner.doctor().instance)
-            self._provisioner.cleanup(str(payload["confirmation"]))
-            return {
-                "ready": False,
-                "instance": instance,
-                "cleanup_confirmation": f"{PACKVM_CLEANUP_PREFIX} {instance}",
+            existing = self._operations.get(operation_id)
+            if existing is not None:
+                if (
+                    existing.get("operation_kind") != "cleanup"
+                    or existing.get("session_digest") != current_session_digest
+                    or existing.get("source_operation_id") != source_operation_id
+                ):
+                    raise ValueError("PackVM cleanup operation_id is already bound")
+                return _public_operation(existing)
+            if len(self._operations) >= 128:
+                raise ValueError("PackVM operation journal capacity is exhausted")
+            proof: Mapping[str, Any] | None = None
+            mode = "attested"
+            plan_digest = "sha256:" + "0" * 64
+            if source_operation_id is not None:
+                source = self._operations.get(source_operation_id)
+                if (
+                    source is None
+                    or source.get("operation_kind") != "provision"
+                    or source.get("state") not in {"failed", "interrupted"}
+                    or source.get("session_digest") != current_session_digest
+                    or not isinstance(source.get("recovery_proof"), dict)
+                ):
+                    raise ValueError("PackVM failed-provision cleanup source is invalid")
+                bound_cleanup = source.get("cleanup_operation_id")
+                if bound_cleanup is not None and bound_cleanup != operation_id:
+                    raise ValueError("PackVM failed-provision cleanup is already bound")
+                source["cleanup_operation_id"] = operation_id
+                proof = dict(source["recovery_proof"])
+                plan_digest = str(source["plan_digest"])
+                mode = "failed_provision"
+            elif not self._provisioner.state_path.exists():
+                raise ValueError("PackVM cleanup requires failed-provision recovery evidence")
+            record: dict[str, Any] = {
+                "operation_id": operation_id,
+                "operation_kind": "cleanup",
+                "state": "queued",
+                "session_digest": current_session_digest,
+                "source_operation_id": source_operation_id,
+                "cleanup_mode": mode,
+                "plan_digest": plan_digest,
+                "updated_unix": int(time.time()),
             }
+            self._operations[operation_id] = record
+            self._persist_operations()
+            worker = threading.Thread(
+                target=self._run_cleanup,
+                args=(operation_id, confirmation, proof),
+                daemon=True,
+                name=f"packvm-cleanup-{operation_id[:8]}",
+            )
+            worker.start()
+            return _public_operation(record)
 
     def _run_provision(
         self,
@@ -218,11 +355,55 @@ class PackVMLifecycleV4:
         except Exception as error:
             with self._lock:
                 record = self._operations[operation_id]
+                failure = _operation_failure(error)
+                record.update({"state": "failed", **failure, "updated_unix": int(time.time())})
+                self._persist_operations()
+            return
+        with self._lock:
+            record = self._operations[operation_id]
+            record.update(
+                {
+                    "state": "succeeded",
+                    "doctor": doctor,
+                    "updated_unix": int(time.time()),
+                }
+            )
+            self._persist_operations()
+
+    def _run_cleanup(
+        self,
+        operation_id: str,
+        confirmation: str,
+        recovery_proof: Mapping[str, Any] | None,
+    ) -> None:
+        with self._lock:
+            record = self._operations[operation_id]
+            record["state"] = "running"
+            record["updated_unix"] = int(time.time())
+            self._persist_operations()
+        try:
+            instance = str(self._provisioner.doctor().instance)
+            missing = False
+            if recovery_proof is None:
+                self._provisioner.cleanup(confirmation)
+            else:
+                result = self._provisioner.cleanup_failed_provision(
+                    confirmation, recovery_proof
+                )
+                missing = bool(result["missing"])
+            cleanup_result = {
+                "ready": False,
+                "instance": instance,
+                "cleanup_confirmation": f"{PACKVM_CLEANUP_PREFIX} {instance}",
+                "missing": missing,
+            }
+        except Exception as error:
+            with self._lock:
+                record = self._operations[operation_id]
                 record.update(
                     {
                         "state": "failed",
-                        "error": str(error),
-                        "error_type": type(error).__name__,
+                        **_operation_failure(error),
                         "updated_unix": int(time.time()),
                     }
                 )
@@ -233,7 +414,7 @@ class PackVMLifecycleV4:
             record.update(
                 {
                     "state": "succeeded",
-                    "doctor": doctor,
+                    "result": cleanup_result,
                     "updated_unix": int(time.time()),
                 }
             )
@@ -277,12 +458,16 @@ class PackVMLifecycleV4:
                 raise ValueError("PackVM operation state is invalid")
             record = dict(raw)
             if record.get("state") in {"queued", "running"}:
-                if health.ready:
+                if record.get("operation_kind", "provision") == "provision" and health.ready:
                     record["state"] = "succeeded"
                     record["doctor"] = asdict(health)
                 else:
                     record["state"] = "interrupted"
-                    record["error"] = "Host restart interrupted provisioning; run doctor"
+                    operation_kind = str(record.get("operation_kind") or "provision")
+                    record["error"] = (
+                        f"Host restart interrupted PackVM {operation_kind}; inspect status and retry"
+                    )
+                    record["error_type"] = "PackVMOperationInterrupted"
                 record["updated_unix"] = int(time.time())
             operations[operation_id] = record
         return operations
@@ -321,6 +506,51 @@ class PackVMLifecycleV4:
 
 def _digest_text(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode()).hexdigest()
+
+
+def _session_digest(session_id: str | None) -> str:
+    """Digest the server-observed panel session without persisting its secret."""
+
+    value = session_id if isinstance(session_id, str) and session_id else "direct-local-lifecycle"
+    return _digest_text(value)
+
+
+def _canonical_operation_id(value: str) -> bool:
+    return re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value) is not None
+
+
+def _operation_failure(error: Exception) -> dict[str, Any]:
+    """Normalize failures without exposing host paths or unbounded stderr."""
+
+    message = str(error)
+    message = re.sub(r"(?<![A-Za-z0-9_.-])/(?:[^\s:'\"]+/?)+", "<host-path>", message)
+    result: dict[str, Any] = {
+        "error": message[:1000] or "PackVM operation failed",
+        "error_type": type(error).__name__,
+    }
+    if isinstance(error, PackVMProcessError):
+        result["diagnostic"] = error.diagnostic()
+    return result
+
+
+def _public_operation(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Project the exact pollable schema without server authorization proof."""
+
+    allowed = {
+        "operation_id",
+        "operation_kind",
+        "state",
+        "plan_digest",
+        "updated_unix",
+        "doctor",
+        "error",
+        "error_type",
+        "diagnostic",
+        "result",
+        "source_operation_id",
+        "cleanup_mode",
+    }
+    return {key: value for key, value in record.items() if key in allowed}
 
 
 def _read_private_key(path: Path) -> bytes:

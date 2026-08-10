@@ -95,6 +95,7 @@ test('PackVM normalization rejects tampered digests and missing success evidence
   assert.throws(
     () => normalizePackVMOperation({
       operation_id: '11111111-1111-4111-8111-111111111111',
+      operation_kind: 'provision',
       state: 'succeeded',
       plan_digest: digest('e'),
       updated_unix: 1,
@@ -106,6 +107,7 @@ test('PackVM normalization rejects tampered digests and missing success evidence
 test('PackVM operation normalization preserves interrupted restart state and doctor evidence', () => {
   const interrupted = normalizePackVMOperation({
     operation_id: '11111111-1111-4111-8111-111111111111',
+    operation_kind: 'provision',
     state: 'interrupted',
     plan_digest: digest('e'),
     updated_unix: 1,
@@ -114,6 +116,7 @@ test('PackVM operation normalization preserves interrupted restart state and doc
 
   const succeeded = normalizePackVMOperation({
     operation_id: '11111111-1111-4111-8111-111111111111',
+    operation_kind: 'provision',
     state: 'succeeded',
     plan_digest: digest('e'),
     updated_unix: 2,

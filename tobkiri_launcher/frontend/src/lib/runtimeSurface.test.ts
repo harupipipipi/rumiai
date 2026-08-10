@@ -203,7 +203,7 @@ test('generated Contract Map is pinned to the canonical raw artifact and include
     GENERATED_FRONTEND_CONTRACT_MAP.artifact_digest,
     PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST,
   );
-  assert.equal(GENERATED_FRONTEND_CONTRACT_MAP.routes.length, 21);
+  assert.equal(GENERATED_FRONTEND_CONTRACT_MAP.routes.length, 22);
   assert.doesNotThrow(() => validateGeneratedFrontendContractMap(GENERATED_FRONTEND_CONTRACT_MAP));
 
   const tampered = structuredClone(GENERATED_FRONTEND_CONTRACT_MAP);

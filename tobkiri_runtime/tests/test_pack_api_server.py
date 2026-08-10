@@ -52,7 +52,7 @@ class _PackVMLifecycle:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
 
-    def prepare(self) -> Mapping[str, object]:
+    def prepare(self, *, session_id: str | None = None) -> Mapping[str, object]:
         self.calls.append(("prepare", {}))
         return {
             "instance": "tobkiri-packvm-v4",
@@ -64,11 +64,15 @@ class _PackVMLifecycle:
             "confirmation": "PROVISION tobkiri-packvm-v4 bbbbbbbbbbbb",
         }
 
-    def consent(self, payload: Mapping[str, object]) -> Mapping[str, object]:
+    def consent(
+        self, payload: Mapping[str, object], *, session_id: str | None = None
+    ) -> Mapping[str, object]:
         self.calls.append(("consent", dict(payload)))
         return {"consent_id": "packvm-consent.test"}
 
-    def provision(self, payload: Mapping[str, object]) -> Mapping[str, object]:
+    def provision(
+        self, payload: Mapping[str, object], *, session_id: str | None = None
+    ) -> Mapping[str, object]:
         self.calls.append(("provision", dict(payload)))
         return {"operation_id": payload["operation_id"], "state": "queued"}
 
@@ -80,11 +84,21 @@ class _PackVMLifecycle:
         self.calls.append(("readiness_snapshot", {}))
         return {"ready": False}
 
-    def progress(self, operation_id: str) -> Mapping[str, object]:
+    def progress(
+        self, operation_id: str, *, session_id: str | None = None
+    ) -> Mapping[str, object]:
         self.calls.append(("progress", {"operation_id": operation_id}))
+        if operation_id == "22222222-2222-4222-8222-222222222222":
+            return {
+                "operation_id": operation_id,
+                "operation_kind": "cleanup",
+                "state": "succeeded",
+            }
         return {"operation_id": operation_id, "state": "succeeded"}
 
-    def cancel(self, payload: Mapping[str, object]) -> Mapping[str, object]:
+    def cancel(
+        self, payload: Mapping[str, object], *, session_id: str | None = None
+    ) -> Mapping[str, object]:
         self.calls.append(("cancel", dict(payload)))
         return {"operation_id": payload["operation_id"], "state": "cancelled"}
 
@@ -92,9 +106,15 @@ class _PackVMLifecycle:
         self.calls.append(("stop", dict(payload)))
         return {"ready": False}
 
-    def cleanup(self, payload: Mapping[str, object]) -> Mapping[str, object]:
+    def cleanup(
+        self, payload: Mapping[str, object], *, session_id: str | None = None
+    ) -> Mapping[str, object]:
         self.calls.append(("cleanup", dict(payload)))
-        return {"ready": False, "instance": "tobkiri-packvm-v4"}
+        return {
+            "operation_id": payload["operation_id"],
+            "operation_kind": "cleanup",
+            "state": "queued",
+        }
 
 
 def test_profile_activation_refresh_requires_durable_success_result() -> None:
@@ -305,6 +325,35 @@ def test_packvm_lifecycle_routes_require_auth_csrf_and_fresh_request_id() -> Non
         assert status == 200
         assert doctor["data"]["ready"] is True
         assert refreshed == [None]
+
+        cleanup_id = "22222222-2222-4222-8222-222222222222"
+        status, cleanup, _headers = _request(
+            server,
+            "POST",
+            "/api/v4/packvm/cleanup",
+            body={
+                "confirmation": "DELETE tobkiri-packvm-v4",
+                "operation_id": cleanup_id,
+                "source_operation_id": None,
+            },
+            headers={**authenticated, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+        )
+        assert status == 200
+        assert cleanup["data"] == {
+            "operation_id": cleanup_id,
+            "operation_kind": "cleanup",
+            "state": "queued",
+        }
+        assert refreshed == [None]
+        status, cleanup_progress, _headers = _request(
+            server,
+            "GET",
+            f"/api/v4/packvm/progress?operation_id={cleanup_id}",
+            headers={"Cookie": cookie, "Origin": origin},
+        )
+        assert status == 200
+        assert cleanup_progress["data"]["state"] == "succeeded"
+        assert refreshed == [None, None]
     finally:
         server.stop()
 

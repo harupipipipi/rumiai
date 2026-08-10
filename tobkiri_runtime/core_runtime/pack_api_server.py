@@ -128,23 +128,33 @@ class LifecyclePort(Protocol):
 class PackVMLifecyclePort(Protocol):
     """Typed Host-owned lifecycle for the dedicated v4 PackVM."""
 
-    def prepare(self) -> Mapping[str, object]: ...
+    def prepare(self, *, session_id: str | None = None) -> Mapping[str, object]: ...
 
-    def consent(self, payload: Mapping[str, object]) -> Mapping[str, object]: ...
+    def consent(
+        self, payload: Mapping[str, object], *, session_id: str | None = None
+    ) -> Mapping[str, object]: ...
 
-    def provision(self, payload: Mapping[str, object]) -> Mapping[str, object]: ...
+    def provision(
+        self, payload: Mapping[str, object], *, session_id: str | None = None
+    ) -> Mapping[str, object]: ...
 
     def doctor(self) -> Mapping[str, object]: ...
 
     def readiness_snapshot(self) -> Mapping[str, object]: ...
 
-    def progress(self, operation_id: str) -> Mapping[str, object]: ...
+    def progress(
+        self, operation_id: str, *, session_id: str | None = None
+    ) -> Mapping[str, object]: ...
 
-    def cancel(self, payload: Mapping[str, object]) -> Mapping[str, object]: ...
+    def cancel(
+        self, payload: Mapping[str, object], *, session_id: str | None = None
+    ) -> Mapping[str, object]: ...
 
     def stop(self, payload: Mapping[str, object]) -> Mapping[str, object]: ...
 
-    def cleanup(self, payload: Mapping[str, object]) -> Mapping[str, object]: ...
+    def cleanup(
+        self, payload: Mapping[str, object], *, session_id: str | None = None
+    ) -> Mapping[str, object]: ...
 
 
 @dataclass(frozen=True)
@@ -400,7 +410,8 @@ class PackAPIHandler(
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return True
         panel_session = self._panel_session
-        session_id = panel_session.get("session_id") if panel_session else None
+        raw_session_id = panel_session.get("session_id") if panel_session else None
+        session_id: str | None = raw_session_id if isinstance(raw_session_id, str) else None
         request_id = self.headers.get("X-Tobkiri-Request-ID", "").strip().lower()
         replay_guard = self._contract_replay_guard
         if (
@@ -547,15 +558,18 @@ class PackAPIHandler(
             self._discard_request_body()
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return True
+        panel_session = self._panel_session
+        raw_packvm_session_id = panel_session.get("session_id") if panel_session else None
+        packvm_session_id: str | None = (
+            raw_packvm_session_id if isinstance(raw_packvm_session_id, str) else None
+        )
         if method == "POST":
-            panel_session = self._panel_session
-            session_id = panel_session.get("session_id") if panel_session else None
             request_id = self.headers.get("X-Tobkiri-Request-ID", "").strip().lower()
             guard = self._contract_replay_guard
             if (
-                not isinstance(session_id, str)
+                packvm_session_id is None
                 or guard is None
-                or not guard.consume(session_id, request_id)
+                or not guard.consume(packvm_session_id, request_id)
             ):
                 self._discard_request_body()
                 self._send_response(
@@ -577,27 +591,36 @@ class PackAPIHandler(
             if operation == "prepare":
                 if payload:
                     raise ValueError("PackVM prepare payload must be empty")
-                result = lifecycle.prepare()
+                result = lifecycle.prepare(session_id=packvm_session_id)
             elif operation == "consent":
-                result = lifecycle.consent(payload)
+                result = lifecycle.consent(payload, session_id=packvm_session_id)
             elif operation == "provision":
-                result = lifecycle.provision(payload)
+                result = lifecycle.provision(payload, session_id=packvm_session_id)
             elif operation == "doctor":
                 result = lifecycle.doctor()
             elif operation == "progress":
                 operation_values = parse_qs(urlparse(self.path).query).get("operation_id", [])
                 if len(operation_values) != 1:
                     raise ValueError("PackVM progress requires one operation_id")
-                result = lifecycle.progress(operation_values[0])
+                result = lifecycle.progress(
+                    operation_values[0], session_id=packvm_session_id
+                )
             elif operation == "cancel":
-                result = lifecycle.cancel(payload)
+                result = lifecycle.cancel(payload, session_id=packvm_session_id)
             elif operation == "stop":
                 result = lifecycle.stop(payload)
             else:
-                result = lifecycle.cleanup(payload)
+                result = lifecycle.cleanup(payload, session_id=packvm_session_id)
             if operation == "doctor" and result.get("ready") is True and self._runtime_refresh:
                 self._runtime_refresh(None)
-            elif operation in {"stop", "cleanup"} and self._runtime_refresh:
+            elif operation == "stop" and self._runtime_refresh:
+                self._runtime_refresh(None)
+            elif (
+                operation == "progress"
+                and result.get("operation_kind") == "cleanup"
+                and result.get("state") == "succeeded"
+                and self._runtime_refresh
+            ):
                 self._runtime_refresh(None)
         except (OSError, RuntimeError, ValueError) as error:
             self._send_response(

@@ -79,6 +79,28 @@ function positiveIntegerField(value: Record<string, unknown>, key: string): numb
   return field;
 }
 
+function normalizeProcessDiagnostic(value: unknown): NonNullable<ApiPackVMOperation['diagnostic']> {
+  const payload = record(value);
+  const kind = stringField(payload, 'kind');
+  const exitCode = payload.exit_code;
+  const stderr = payload.stderr;
+  if (
+    stringField(payload, 'code', {identifier: true}) !== 'packvm_lima_process_failed'
+    || (kind !== 'timeout' && kind !== 'exit')
+    || (exitCode !== null && (!Number.isSafeInteger(exitCode) || Number(exitCode) < 0))
+    || (stderr !== null && typeof stderr !== 'string')
+  ) {
+    throw new PackVMLifecycleProtocolError('Tobkiri returned an invalid PackVM diagnostic.');
+  }
+  return {
+    code: 'packvm_lima_process_failed',
+    stage: stringField(payload, 'stage', {identifier: true}),
+    kind,
+    exit_code: exitCode as number | null,
+    stderr: stderr as string | null,
+  };
+}
+
 function safeHttpsUrl(value: Record<string, unknown>, key: string): string {
   const source = stringField(value, key);
   let parsed: URL;
@@ -162,13 +184,17 @@ export function normalizePackVMOperation(value: unknown): ApiPackVMOperation {
   const payload = record(value);
   const operationId = stringField(payload, 'operation_id');
   const state = stringField(payload, 'state') as ApiPackVMOperationState;
+  const operationKind = stringField(payload, 'operation_kind');
   if (!isCanonicalPackVMOperationId(operationId) || !OPERATION_STATES.includes(state)) {
     throw new PackVMLifecycleProtocolError('Tobkiri returned an invalid PackVM operation state.');
+  }
+  if (operationKind !== 'provision' && operationKind !== 'cleanup') {
+    throw new PackVMLifecycleProtocolError('Tobkiri returned an invalid PackVM operation kind.');
   }
   const doctor = payload.doctor === undefined
     ? undefined
     : normalizePackVMDoctor(payload.doctor);
-  if (state === 'succeeded' && !doctor) {
+  if (state === 'succeeded' && operationKind === 'provision' && !doctor) {
     throw new PackVMLifecycleProtocolError(
       'Tobkiri reported PackVM provisioning success without doctor evidence.',
     );
@@ -185,8 +211,18 @@ export function normalizePackVMOperation(value: unknown): ApiPackVMOperation {
   const errorType = payload.error_type === undefined
     ? undefined
     : stringField(payload, 'error_type', {identifier: true});
+  const result = payload.result === undefined ? undefined : normalizePackVMCleanup(payload.result);
+  const diagnostic = payload.diagnostic === undefined
+    ? undefined
+    : normalizeProcessDiagnostic(payload.diagnostic);
+  if (state === 'succeeded' && operationKind === 'cleanup' && !result) {
+    throw new PackVMLifecycleProtocolError(
+      'Tobkiri reported PackVM cleanup success without a typed result.',
+    );
+  }
   return {
     operation_id: operationId,
+    operation_kind: operationKind,
     ...(consentDigest ? {consent_digest: consentDigest} : {}),
     state,
     plan_digest: stringField(payload, 'plan_digest', {digest: true}),
@@ -194,6 +230,8 @@ export function normalizePackVMOperation(value: unknown): ApiPackVMOperation {
     ...(doctor ? {doctor} : {}),
     ...(error ? {error} : {}),
     ...(errorType ? {error_type: errorType} : {}),
+    ...(result ? {result} : {}),
+    ...(diagnostic ? {diagnostic} : {}),
   };
 }
 
@@ -206,6 +244,7 @@ export function normalizePackVMCleanup(value: unknown): ApiPackVMCleanupResult {
     ready: false,
     instance: stringField(payload, 'instance', {identifier: true}),
     cleanup_confirmation: stringField(payload, 'cleanup_confirmation'),
+    missing: booleanField(payload, 'missing'),
   };
 }
 

@@ -7,6 +7,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -24,6 +25,7 @@ from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
     PACKVM_LIMA_INSTANCE,
     PACKVM_PINNED_IMAGE_VIRTUAL_SIZE_BYTES,
     PackVMLimaProvisioner,
+    PackVMProcessError,
     PackVMProvisioningRequest,
 )
 from ecosystem.defaultspack.backend.sandbox.isolation.resources import (
@@ -45,6 +47,12 @@ class FakeLima:
         self.machine_id = MACHINE_ID
         self.commands: list[tuple[str, ...]] = []
         self.fail_install = False
+        self.fail_start_after_create = False
+        self.fail_delete = False
+        self.timeout_start = False
+        self.block_delete = False
+        self.delete_started = threading.Event()
+        self.delete_release = threading.Event()
 
     def __call__(self, command, input_text, _timeout):
         argv = tuple(str(item) for item in command)
@@ -55,12 +63,30 @@ class FakeLima:
             return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
         if len(args) >= 4 and args[:2] == ("start", "--name"):
             self.exists = True
-            self.running = True
+            self.running = not self.fail_start_after_create
+            if self.timeout_start:
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="",
+                    stderr="download stalled at /private/secret/image.img",
+                    timed_out=True,
+                )
+            if self.fail_start_after_create:
+                return SimpleNamespace(
+                    returncode=23,
+                    stdout="",
+                    stderr="start failed at /private/secret/instance",
+                )
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         if args[:3] == ("stop", "--force", PACKVM_LIMA_INSTANCE):
             self.running = False
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         if args[:3] == ("delete", "--force", PACKVM_LIMA_INSTANCE):
+            if self.block_delete:
+                self.delete_started.set()
+                self.delete_release.wait(timeout=5)
+            if self.fail_delete:
+                return SimpleNamespace(returncode=31, stdout="", stderr="delete blocked")
             self.exists = False
             self.running = False
             return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -148,14 +174,14 @@ def _isolate_packvm_home(
 def provisioner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     test_home = tmp_path / "home"
     test_lima_home = tmp_path / "lima-home"
-    test_home.mkdir()
+    test_home.mkdir(exist_ok=True)
     test_lima_home.mkdir()
     monkeypatch.setenv("HOME", str(test_home))
     monkeypatch.setenv("LIMA_HOME", str(test_lima_home))
     command = tmp_path / "limactl"
     command.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     command.chmod(0o755)
-    instance_dir = tmp_path / PACKVM_LIMA_INSTANCE
+    instance_dir = test_lima_home / PACKVM_LIMA_INSTANCE
     instance_dir.mkdir()
     fake = FakeLima(command, instance_dir)
     manager = PackVMLimaProvisioner(
@@ -177,6 +203,20 @@ def _request(plan, *, approve: bool = True) -> PackVMProvisioningRequest:
     )
 
 
+def _wait_operation(
+    lifecycle: PackVMLifecycleV4,
+    operation_id: str,
+    *,
+    session_id: str = "panel-session-a",
+) -> dict[str, object]:
+    for _ in range(200):
+        result = dict(lifecycle.progress(operation_id, session_id=session_id))
+        if result["state"] not in {"queued", "running"}:
+            return result
+        time.sleep(0.01)
+    raise AssertionError("PackVM operation did not settle")
+
+
 def _write_environment_probe(path: Path) -> None:
     path.write_text(
         "#!/bin/sh\n"
@@ -194,7 +234,7 @@ def test_call_passes_only_validated_lima_environment_to_real_subprocess(
 ) -> None:
     home = tmp_path / "home"
     lima_home = tmp_path / "lima-home"
-    home.mkdir()
+    home.mkdir(exist_ok=True)
     lima_home.mkdir()
     probe = tmp_path / "environment-probe"
     _write_environment_probe(probe)
@@ -272,6 +312,36 @@ def test_lima_environment_rejects_unsafe_directory_paths(
 
     with pytest.raises(ValueError, match=variable):
         manager._call((str(probe),), timeout=10)
+
+
+def test_packvm_rejects_user_default_lima_home_and_foreign_instance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    default_lima_home = home / ".lima"
+    default_lima_home.mkdir()
+    command = tmp_path / "limactl"
+    command.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    command.chmod(0o700)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("LIMA_HOME", str(default_lima_home))
+    manager = PackVMLimaProvisioner(
+        command_path=str(command), state_dir=tmp_path / "state", machine="arm64"
+    )
+    with pytest.raises(ValueError, match=r"~/.lima"):
+        manager._call((str(command), "list"), timeout=10)
+
+    monkeypatch.setenv("LIMA_HOME", str(tmp_path / "dedicated"))
+    foreign = PackVMLimaProvisioner(
+        command_path=str(command),
+        state_dir=tmp_path / "foreign-state",
+        machine="arm64",
+        instance="default",
+    )
+    with pytest.raises(ValueError, match="fixed managed identity"):
+        foreign.prepare()
 
 
 def test_lifecycle_rejects_environment_injection_payload(provisioner) -> None:
@@ -648,12 +718,209 @@ def test_partial_provision_stops_guest_without_attesting(provisioner) -> None:
     manager, fake, _command = provisioner
     fake.fail_install = True
     plan = manager.prepare()
-    with pytest.raises(ValueError, match="install failed"):
+    with pytest.raises(PackVMProcessError, match="install failed"):
         manager.provision(_request(plan))
     assert fake.exists is False
     assert fake.running is False
     assert not manager.state_path.exists()
     assert "provision_failed" in manager.audit_path.read_text(encoding="utf-8")
+
+
+def test_failed_start_reconciles_created_stopped_instance(provisioner) -> None:
+    manager, fake, _command = provisioner
+    fake.fail_start_after_create = True
+    plan = manager.prepare()
+
+    with pytest.raises(PackVMProcessError) as captured:
+        manager.provision(_request(plan))
+
+    assert captured.value.stage == "start"
+    assert captured.value.kind == "exit"
+    assert captured.value.exit_code == 23
+    assert captured.value.stderr == "start failed at <host-path>"
+    assert fake.exists is False
+    assert manager.recovery_path.exists() is False
+    assert "failed_provision_reconciled" in manager.audit_path.read_text(encoding="utf-8")
+
+
+def test_failed_start_timeout_preserves_typed_bounded_diagnostic(provisioner) -> None:
+    manager, fake, _command = provisioner
+    fake.timeout_start = True
+    plan = manager.prepare()
+
+    with pytest.raises(PackVMProcessError) as captured:
+        manager.provision(_request(plan))
+
+    assert captured.value.kind == "timeout"
+    assert captured.value.exit_code is None
+    assert captured.value.stderr == "download stalled at <host-path>"
+    assert "/private/secret" not in str(captured.value)
+
+
+def test_reconciled_failed_provision_cleanup_is_safely_idempotent(provisioner) -> None:
+    manager, fake, _command = provisioner
+    fake.fail_start_after_create = True
+    lifecycle = PackVMLifecycleV4(manager)
+    plan = lifecycle.prepare(session_id="panel-session-a")
+    consent = lifecycle.consent(
+        {
+            "plan_digest": plan["plan_digest"],
+            "ceremony_nonce": plan["ceremony_nonce"],
+            "confirmation": plan["confirmation"],
+            "approve_image_download": True,
+        },
+        session_id="panel-session-a",
+    )
+    provision_operation_id = str(uuid.uuid4())
+    lifecycle.provision(
+        {"consent_id": consent["consent_id"], "operation_id": provision_operation_id},
+        session_id="panel-session-a",
+    )
+    assert _wait_operation(lifecycle, provision_operation_id)["state"] == "failed"
+    assert fake.exists is False
+    cleanup_operation_id = str(uuid.uuid4())
+    lifecycle.cleanup(
+        {
+            "confirmation": f"DELETE {PACKVM_LIMA_INSTANCE}",
+            "operation_id": cleanup_operation_id,
+            "source_operation_id": provision_operation_id,
+        },
+        session_id="panel-session-a",
+    )
+    result = _wait_operation(lifecycle, cleanup_operation_id)
+    assert result["state"] == "succeeded"
+    assert result["result"]["missing"] is True
+
+
+def test_failed_provision_cleanup_is_durable_session_bound_and_replay_safe(
+    provisioner,
+) -> None:
+    manager, fake, _command = provisioner
+    fake.fail_start_after_create = True
+    fake.fail_delete = True
+    lifecycle = PackVMLifecycleV4(manager)
+    session_id = "panel-session-a"
+    plan = lifecycle.prepare(session_id=session_id)
+    consent = lifecycle.consent(
+        {
+            "plan_digest": plan["plan_digest"],
+            "ceremony_nonce": plan["ceremony_nonce"],
+            "confirmation": plan["confirmation"],
+            "approve_image_download": True,
+        },
+        session_id=session_id,
+    )
+    provision_operation_id = str(uuid.uuid4())
+    lifecycle.provision(
+        {"consent_id": consent["consent_id"], "operation_id": provision_operation_id},
+        session_id=session_id,
+    )
+    failed = _wait_operation(lifecycle, provision_operation_id)
+    assert failed["state"] == "failed"
+    assert failed["operation_kind"] == "provision"
+    assert failed["diagnostic"] == {
+        "code": "packvm_lima_process_failed",
+        "stage": "start",
+        "kind": "exit",
+        "exit_code": 23,
+        "stderr": "start failed at <host-path>",
+    }
+    assert "recovery_proof" not in failed
+    assert manager.recovery_path.exists()
+    assert fake.exists
+
+    recovery = manager._load_authenticated_recovery()
+    with pytest.raises(ValueError, match="proof does not match"):
+        manager.cleanup_failed_provision(
+            f"DELETE {PACKVM_LIMA_INSTANCE}",
+            {**recovery, "image_digest": "sha256:" + "0" * 64},
+        )
+
+    cleanup_operation_id = str(uuid.uuid4())
+    cleanup_payload = {
+        "confirmation": f"DELETE {PACKVM_LIMA_INSTANCE}",
+        "operation_id": cleanup_operation_id,
+        "source_operation_id": provision_operation_id,
+    }
+    with pytest.raises(ValueError, match="another authenticated session"):
+        lifecycle.progress(provision_operation_id, session_id="wrong-session")
+    with pytest.raises(ValueError, match="source is invalid"):
+        lifecycle.cleanup(cleanup_payload, session_id="wrong-session")
+    with pytest.raises(ValueError, match="exact confirmation"):
+        lifecycle.cleanup(
+            {**cleanup_payload, "confirmation": "DELETE default"},
+            session_id=session_id,
+        )
+
+    fake.fail_delete = False
+    queued = lifecycle.cleanup(cleanup_payload, session_id=session_id)
+    assert queued["operation_kind"] == "cleanup"
+    assert queued["state"] in {"queued", "running"}
+    cleaned = _wait_operation(lifecycle, cleanup_operation_id)
+    assert cleaned["state"] == "succeeded"
+    assert cleaned["result"] == {
+        "ready": False,
+        "instance": PACKVM_LIMA_INSTANCE,
+        "cleanup_confirmation": f"DELETE {PACKVM_LIMA_INSTANCE}",
+        "missing": False,
+    }
+    assert fake.exists is False
+    assert manager.recovery_path.exists() is False
+    assert lifecycle.cleanup(cleanup_payload, session_id=session_id) == cleaned
+    with pytest.raises(ValueError, match="already bound"):
+        lifecycle.cleanup(
+            {**cleanup_payload, "operation_id": str(uuid.uuid4())},
+            session_id=session_id,
+        )
+
+    restarted = PackVMLifecycleV4(manager)
+    assert restarted.progress(cleanup_operation_id, session_id=session_id) == cleaned
+
+
+def test_running_cleanup_recovers_as_interrupted_after_host_restart(provisioner) -> None:
+    manager, fake, _command = provisioner
+    assert manager.provision(_request(manager.prepare())).ready
+    lifecycle = PackVMLifecycleV4(manager)
+    fake.block_delete = True
+    operation_id = str(uuid.uuid4())
+    lifecycle.cleanup(
+        {
+            "confirmation": f"DELETE {PACKVM_LIMA_INSTANCE}",
+            "operation_id": operation_id,
+            "source_operation_id": None,
+        },
+        session_id="panel-session-a",
+    )
+    assert fake.delete_started.wait(timeout=2)
+
+    restarted = PackVMLifecycleV4(manager)
+    interrupted = restarted.progress(operation_id, session_id="panel-session-a")
+    assert interrupted["operation_kind"] == "cleanup"
+    assert interrupted["state"] == "interrupted"
+    assert interrupted["error_type"] == "PackVMOperationInterrupted"
+    fake.delete_release.set()
+
+
+def test_orphan_cleanup_rejects_symlinked_dedicated_lima_home(
+    provisioner,
+    tmp_path: Path,
+) -> None:
+    manager, fake, _command = provisioner
+    fake.fail_start_after_create = True
+    fake.fail_delete = True
+    with pytest.raises(PackVMProcessError):
+        manager.provision(_request(manager.prepare()))
+    recovery = manager._load_authenticated_recovery()
+    original = manager.lima_home
+    moved = tmp_path / "moved-lima-home"
+    original.rename(moved)
+    original.symlink_to(moved, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlinks|unsafe"):
+        manager.cleanup_failed_provision(
+            f"DELETE {PACKVM_LIMA_INSTANCE}", recovery
+        )
+    assert fake.exists is True
 
 
 def test_reviewed_image_digest_cannot_change_before_provision(

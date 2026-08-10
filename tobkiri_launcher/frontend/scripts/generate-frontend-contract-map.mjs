@@ -12,7 +12,7 @@ const MAP_PATH = resolve(
 const OUTPUT_PATH = resolve(FRONTEND_ROOT, "src/lib/generatedFrontendContractMap.ts");
 const MAP_ARTIFACT_PATH = "defaultspack/frontend_contract_map.v4.json";
 const PINNED_ARTIFACT_DIGEST =
-  "sha256:3b0e6c0360fad519cabc25eb7fb5f442a0d37cb9f1590e94f7cdff8f69a420e3";
+  "sha256:b46fde48be7d67dc2ab6527d0e80058c2c83e2bbe904191db7e411b70bef6f2c";
 
 const RUNTIME_TARGET_SPECS = [
   {
@@ -74,6 +74,9 @@ const RUNTIME_TARGET_SPECS = [
       "expected_profile_revision",
       "expected_plan_digest",
       "desired_pack_ids",
+      "profile_definition_digest",
+      "profile_catalog_digest",
+      "bundle_lock_digest",
     ],
   },
   {

@@ -105,7 +105,11 @@ export function PackVMLifecyclePanel() {
   ) => {
     if (
       nextOperation.operation_id !== expectedOperationId
-      || (plan && nextOperation.plan_digest !== plan.plan_digest)
+      || (
+        nextOperation.operation_kind === 'provision'
+        && plan
+        && nextOperation.plan_digest !== plan.plan_digest
+      )
     ) {
       clearPackVMOperationId();
       setPlan(null);
@@ -116,8 +120,26 @@ export function PackVMLifecyclePanel() {
     }
     setOperation(nextOperation);
     writePackVMOperationId(nextOperation.operation_id);
-    if (nextOperation.state === 'succeeded') {
+    if (nextOperation.state === 'succeeded' && nextOperation.operation_kind === 'provision') {
       await verifyDoctorAfterSuccess(nextOperation);
+    } else if (nextOperation.state === 'succeeded' && nextOperation.operation_kind === 'cleanup') {
+      const result = nextOperation.result;
+      const currentDoctor = doctor ?? await refreshPackVMDoctor();
+      if (!result || !currentDoctor || result.instance !== currentDoctor.instance) {
+        throw new Error('PackVM returned a stale or tampered cleanup result.');
+      }
+      setPackVMDoctor({
+        ...currentDoctor,
+        ready: false,
+        reason: result.missing
+          ? 'PackVM cleanup confirmed the managed instance was already absent.'
+          : 'PackVM instance was cleaned up.',
+        attestation_digest: null,
+      });
+      setPlan(null);
+      setConsent(null);
+      setCleanupRequested(false);
+      setCleanupText('');
     }
   };
 
@@ -259,23 +281,20 @@ export function PackVMLifecyclePanel() {
     if (!doctor || cleanupText !== cleanupConfirmationForInstance(doctor.instance)) return;
     if (!beginAction('cleanup')) return;
     try {
-      const result = await cleanupPackVM(cleanupText);
-      if (result.instance !== doctor.instance || result.cleanup_confirmation !== cleanupText) {
-        throw new Error('PackVM did not confirm cleanup of the authenticated instance.');
+      const cleanupOperationId = globalThis.crypto?.randomUUID?.();
+      if (!cleanupOperationId || !isCanonicalPackVMOperationId(cleanupOperationId)) {
+        throw new Error('Tobkiri could not create a canonical cleanup operation identity.');
       }
-      setPackVMDoctor({
-        ...doctor,
-        ready: false,
-        reason: 'PackVM instance was cleaned up.',
-        attestation_digest: null,
-      });
-      setPlan(null);
-      setConsent(null);
-      setOperation(null);
-      setCleanupRequested(false);
-      setCleanupText('');
-      clearPackVMOperationId();
-      settledOperationRef.current = null;
+      const sourceOperationId = operation?.operation_kind === 'provision'
+        && (operation.state === 'failed' || operation.state === 'interrupted')
+        ? operation.operation_id
+        : null;
+      const nextOperation = await cleanupPackVM(
+        cleanupText,
+        cleanupOperationId,
+        sourceOperationId,
+      );
+      await acceptOperation(nextOperation, cleanupOperationId);
     } catch (error) {
       setLifecycleError(safeUserError(error, 'PackVM cleanup was denied.'));
     } finally {
@@ -283,7 +302,9 @@ export function PackVMLifecyclePanel() {
     }
   };
 
-  const operationStatus = operation ? operationStatusLabel(operation.state) : null;
+  const operationStatus = operation
+    ? `${operation.operation_kind === 'cleanup' ? 'Cleanup' : 'Provisioning'}: ${operationStatusLabel(operation.state)}`
+    : null;
   const cleanupConfirmation = doctor ? cleanupConfirmationForInstance(doctor.instance) : '';
   const hasActiveOperation = Boolean(operation && operationIsPolling(operation.state));
   const canPrepareNewPlan = Boolean(
@@ -470,7 +491,9 @@ export function PackVMLifecyclePanel() {
             <div className="rounded-lg border border-border p-4" aria-busy={pendingAction === 'status'}>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-medium text-text-main">Provisioning status</p>
+                  <p className="text-sm font-medium text-text-main">
+                    {operation.operation_kind === 'cleanup' ? 'Cleanup status' : 'Provisioning status'}
+                  </p>
                   <p className="mt-1 break-all font-mono text-xs text-text-muted">
                     Operation {operation.operation_id}
                   </p>
@@ -479,7 +502,10 @@ export function PackVMLifecyclePanel() {
                   {operationStatus}
                 </Badge>
               </div>
-              <ol className="mt-4 grid gap-2 text-xs text-text-muted sm:grid-cols-3" aria-label="Provisioning progress">
+              <ol
+                className="mt-4 grid gap-2 text-xs text-text-muted sm:grid-cols-3"
+                aria-label={operation.operation_kind === 'cleanup' ? 'Cleanup progress' : 'Provisioning progress'}
+              >
                 {(['queued', 'running', 'succeeded'] as const).map((state) => (
                   <li
                     key={state}

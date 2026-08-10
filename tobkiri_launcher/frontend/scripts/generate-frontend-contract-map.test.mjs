@@ -11,8 +11,8 @@ import {
 
 test("the checked-in generated map is deterministic and current", async () => {
   const result = await checkGeneratedFrontendContractMap();
-  assert.equal(result.rawDigest, "sha256:3b0e6c0360fad519cabc25eb7fb5f442a0d37cb9f1590e94f7cdff8f69a420e3");
-  assert.equal(result.runtimeMap.routes.length, 21);
+  assert.equal(result.rawDigest, "sha256:b46fde48be7d67dc2ab6527d0e80058c2c83e2bbe904191db7e411b70bef6f2c");
+  assert.equal(result.runtimeMap.routes.length, 22);
 });
 
 test("a stale or tampered canonical artifact fails closed before generation", async () => {

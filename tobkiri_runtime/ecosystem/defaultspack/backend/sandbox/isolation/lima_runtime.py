@@ -5,6 +5,7 @@ import hmac
 import json
 import os
 import platform
+import re
 import secrets
 import shutil
 import stat
@@ -114,6 +115,7 @@ class PackVMProvisioningRequest:
     ceremony_nonce: str
     confirmation: str
     approve_image_download: bool = False
+    session_digest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -126,6 +128,48 @@ class PackVMDoctor:
     instance: str
     reason: str | None = None
     attestation_digest: str | None = None
+
+
+class PackVMProcessError(RuntimeError):
+    """Typed, bounded diagnostic for one failed Lima subprocess stage."""
+
+    def __init__(
+        self,
+        *,
+        stage: str,
+        kind: str,
+        exit_code: int | None = None,
+        stderr: str | None = None,
+    ) -> None:
+        self.stage = stage
+        self.kind = kind
+        self.exit_code = exit_code
+        self.stderr = _safe_process_diagnostic(stderr)
+        detail = "timed out" if kind == "timeout" else "failed"
+        if exit_code is not None:
+            detail += f" with exit code {exit_code}"
+        if self.stderr:
+            detail += f": {self.stderr}"
+        super().__init__(f"PackVM Lima {stage} {detail}")
+
+    def diagnostic(self) -> dict[str, Any]:
+        """Return the stable public operation-ledger diagnostic."""
+
+        return {
+            "code": "packvm_lima_process_failed",
+            "stage": self.stage,
+            "kind": self.kind,
+            "exit_code": self.exit_code,
+            "stderr": self.stderr,
+        }
+
+
+@dataclass(frozen=True)
+class _LimaCallResult:
+    returncode: int
+    stdout: bytes | str
+    stderr: bytes | str
+    timed_out: bool = False
 
 
 def lima_state_path() -> Path:
@@ -316,6 +360,7 @@ def lima_instance_payload(
     instance: str,
     *,
     runner: LimaRunner | None = None,
+    environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     if runner is None:
         executable = (
@@ -325,13 +370,13 @@ def lima_instance_payload(
             raise ValueError("limactl is unavailable")
         argv = (executable, "list", instance, "--format", "json")
         cwd = Path.cwd().resolve()
-        environment = _lima_process_environment()
+        process_environment = dict(environment or _lima_process_environment())
         result = HostBoundedProcessRunner().run_local(
             argv=argv,
             cwd=cwd,
             stdin=None,
             timeout_seconds=10,
-            environment=environment,
+            environment=process_environment,
             policy=ProcessExecutionPolicy(
                 allowed_executables=frozenset({argv[0]}),
                 allowed_argv=(argv,),
@@ -585,14 +630,24 @@ class PackVMLimaProvisioner:
         machine: str | None = None,
         instance: str = PACKVM_LIMA_INSTANCE,
         disk_usage: DiskUsage | None = None,
+        lima_home: Path | None = None,
     ) -> None:
         self._command_path = command_path
         self._runner = runner
-        self._state_dir = (state_dir or lima_state_path().parent).resolve()
+        state_root = state_dir or lima_state_path().parent
+        self._state_dir = state_root.resolve()
         self._machine = _normalize_packvm_machine(machine or platform.machine())
         self._instance = instance
         self._disk_usage = disk_usage or shutil.disk_usage
         self._pending: dict[str, str] = {}
+        configured_lima_home = str(os.environ.get("LIMA_HOME") or "").strip()
+        requested_lima_home = (
+            lima_home
+            or (Path(configured_lima_home) if configured_lima_home else None)
+            or self._state_dir / "packvm-lima-home"
+        )
+        self._lima_home = requested_lima_home.resolve()
+        self._requested_lima_home = requested_lima_home
 
     @property
     def state_path(self) -> Path:
@@ -601,6 +656,30 @@ class PackVMLimaProvisioner:
     @property
     def audit_path(self) -> Path:
         return self._state_dir / "packvm-lima-audit.jsonl"
+
+    @property
+    def recovery_path(self) -> Path:
+        """Host-authenticated evidence for a partially created instance."""
+
+        return self._state_dir / "packvm-lima-recovery.json"
+
+    @property
+    def lima_home(self) -> Path:
+        """Return the canonical dedicated Lima home used by this PackVM."""
+
+        return self._lima_home
+
+    def recovery_identity(self) -> dict[str, int | str]:
+        """Return non-path Host identity fields for the dedicated Lima root."""
+
+        self._ensure_private_managed_directories()
+        metadata = self._lima_home.lstat()
+        return {
+            "lima_home_digest": _sha256(str(self._lima_home).encode()),
+            "lima_home_device": int(metadata.st_dev),
+            "lima_home_inode": int(metadata.st_ino),
+            "limactl_digest": _file_digest(Path(self._require_command())),
+        }
 
     def prepare(self) -> PackVMProvisioningPlan:
         """Return download and identity facts without creating or starting a VM."""
@@ -688,8 +767,11 @@ class PackVMLimaProvisioner:
             raise ValueError(current_cache_reason or "PackVM image cache is unsafe")
         self._require_host_capacity(plan.image_download_required)
 
-        self._state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        created = False
+        self._ensure_private_managed_directories()
+        recovery = self._recovery_facts(plan, request)
+        recovery["phase"] = "start_pending"
+        recovery["authentication"] = self._sign_recovery(recovery)
+        _atomic_private_json(self.recovery_path, recovery)
         try:
             with tempfile.NamedTemporaryFile(
                 prefix=".packvm-lima-",
@@ -704,8 +786,8 @@ class PackVMLimaProvisioner:
                 self._checked_call(
                     (plan.limactl, "start", "--name", self._instance, str(config_path)),
                     timeout=900,
+                    stage="start",
                 )
-                created = True
             finally:
                 config_path.unlink(missing_ok=True)
             self._install_guest_runner(plan.limactl)
@@ -718,6 +800,7 @@ class PackVMLimaProvisioner:
                 plan.limactl,
                 self._instance,
                 runner=self._runner,
+                environment=self._lima_process_environment(),
             )
             violation = validate_lima_instance_config(payload)
             if violation:
@@ -735,17 +818,24 @@ class PackVMLimaProvisioner:
                 "host_build_digest": plan.host_build_digest,
                 "ceremony_nonce_digest": _sha256(request.ceremony_nonce.encode()),
                 "created_unix": int(time.time()),
+                **self.recovery_identity(),
             }
             state["attestation_digest"] = _canonical_digest(state)
             state["authentication"] = self._sign_state(state)
             _atomic_private_json(self.state_path, state)
+            self.recovery_path.unlink(missing_ok=True)
             self._audit("provisioned", str(state["attestation_digest"]))
             return self.doctor()
-        except Exception:
-            if created and plan.limactl:
-                self._call((plan.limactl, "stop", "--force", self._instance), timeout=60)
-                self._call((plan.limactl, "delete", "--force", self._instance), timeout=120)
-            self._audit("provision_failed", None)
+        except Exception as error:
+            recovery_status = self._reconcile_failed_provision(plan.limactl, recovery)
+            self._audit(
+                "provision_failed",
+                None,
+                details={
+                    "recovery_status": recovery_status,
+                    "failure_stage": getattr(error, "stage", None),
+                },
+            )
             raise
 
     def doctor(self) -> PackVMDoctor:
@@ -764,7 +854,15 @@ class PackVMLimaProvisioner:
                 raise ValueError("packaged PackVM guest supervisor changed")
             if state.get("host_build_digest") != _file_digest(Path(__file__)):
                 raise ValueError("PackVM Host build changed after provisioning")
-            payload = lima_instance_payload(limactl, self._instance, runner=self._runner)
+            for field, value in self.recovery_identity().items():
+                if state.get(field) != value:
+                    raise ValueError(f"managed PackVM {field} changed")
+            payload = lima_instance_payload(
+                limactl,
+                self._instance,
+                runner=self._runner,
+                environment=self._lima_process_environment(),
+            )
             violation = validate_lima_instance_config(payload)
             if violation:
                 raise ValueError(violation)
@@ -814,7 +912,8 @@ class PackVMLimaProvisioner:
 
     def stop(self, confirmation: str) -> None:
         """Stop only the authenticated instance after exact confirmation."""
-        self._load_authenticated_state()
+        state = self._load_authenticated_state()
+        self._verify_attested_host_binding(state)
         expected = f"{PACKVM_STOP_PREFIX} {self._instance}"
         if not hmac.compare_digest(confirmation, expected):
             raise ValueError(f"PackVM stop requires exact confirmation: {expected}")
@@ -825,14 +924,90 @@ class PackVMLimaProvisioner:
     def cleanup(self, confirmation: str) -> None:
         """Delete only the authenticated instance after an exact typed ceremony."""
         state = self._load_authenticated_state()
+        self._verify_attested_host_binding(state)
         expected = f"{PACKVM_CLEANUP_PREFIX} {self._instance}"
         if not hmac.compare_digest(confirmation, expected):
             raise ValueError(f"PackVM cleanup requires exact confirmation: {expected}")
         limactl = self._require_command()
-        self._checked_call((limactl, "delete", "--force", self._instance), timeout=120)
+        if self._instance_exists(limactl):
+            self._checked_call(
+                (limactl, "delete", "--force", self._instance),
+                timeout=120,
+                stage="cleanup_delete",
+            )
         self._audit("deleted", str(state["attestation_digest"]))
         self.state_path.unlink(missing_ok=True)
         (self._state_dir / "packvm-lima-attestation.key").unlink(missing_ok=True)
+
+    def cleanup_failed_provision(
+        self,
+        confirmation: str,
+        expected_proof: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Delete only the server-attested orphan from one failed provision."""
+
+        expected = f"{PACKVM_CLEANUP_PREFIX} {self._instance}"
+        if not hmac.compare_digest(confirmation, expected):
+            raise ValueError(f"PackVM cleanup requires exact confirmation: {expected}")
+        try:
+            recovery = self._load_authenticated_recovery()
+        except ValueError as error:
+            if "evidence is unavailable" not in str(error):
+                raise
+            self._verify_recovery_environment(expected_proof)
+            limactl = self._require_command()
+            if self._instance_exists(limactl):
+                raise ValueError(
+                    "PackVM orphan exists without authenticated recovery evidence"
+                ) from error
+            self._audit(
+                "failed_provision_delete_idempotent",
+                None,
+                details={"missing": True, "plan_digest": expected_proof["plan_digest"]},
+            )
+            return {"missing": True}
+        proof_fields = {
+            "backend_id",
+            "instance",
+            "session_digest",
+            "plan_digest",
+            "config_digest",
+            "image_digest",
+            "guest_runner_digest",
+            "host_build_digest",
+            "limactl_digest",
+            "lima_home_digest",
+            "lima_home_device",
+            "lima_home_inode",
+        }
+        for field in proof_fields:
+            actual = recovery.get(field)
+            supplied = expected_proof.get(field)
+            if isinstance(actual, str) and isinstance(supplied, str):
+                if not hmac.compare_digest(actual, supplied):
+                    raise ValueError("PackVM orphan recovery proof does not match")
+            elif isinstance(actual, int) and isinstance(supplied, int):
+                if actual != supplied:
+                    raise ValueError("PackVM orphan recovery proof does not match")
+            else:
+                raise ValueError("PackVM orphan recovery proof is incomplete")
+        self._verify_recovery_environment(recovery)
+        limactl = self._require_command()
+        missing = not self._instance_exists(limactl)
+        if not missing:
+            self._verify_dedicated_instance_directory()
+            self._checked_call(
+                (limactl, "delete", "--force", self._instance),
+                timeout=120,
+                stage="cleanup_delete",
+            )
+        self._audit(
+            "failed_provision_deleted",
+            None,
+            details={"missing": missing, "plan_digest": recovery["plan_digest"]},
+        )
+        self.recovery_path.unlink(missing_ok=True)
+        return {"missing": missing}
 
     def invoke_guest(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
         """Invoke only through the authenticated guest supervisor channel."""
@@ -977,10 +1152,7 @@ class PackVMLimaProvisioner:
     def _host_storage_path(self) -> Path:
         """Return the volume on which Lima stores its managed instance."""
 
-        home = str(os.environ.get("HOME") or "").strip()
-        if not home:
-            raise ValueError("PackVM host storage preflight cannot resolve the user home")
-        path = Path(home).expanduser()
+        path = self._lima_home
         while not path.exists() and path != path.parent:
             path = path.parent
         if not path.exists():
@@ -1078,6 +1250,189 @@ class PackVMLimaProvisioner:
         _available, reason = self._host_free_space(required)
         if reason is not None:
             raise ValueError(reason)
+
+    def _validate_managed_identity(self) -> None:
+        """Require the fixed instance and state-owned dedicated Lima home."""
+
+        if self._instance != PACKVM_LIMA_INSTANCE:
+            raise ValueError("PackVM instance must use the fixed managed identity")
+        if not self._requested_lima_home.is_absolute():
+            raise ValueError("PackVM LIMA_HOME must be an absolute dedicated directory")
+        if self._requested_lima_home != self._lima_home:
+            raise ValueError("PackVM LIMA_HOME must not contain symlinks or traversal")
+        user_home = str(os.environ.get("HOME") or "").strip()
+        if user_home and self._lima_home == Path(user_home).resolve() / ".lima":
+            raise ValueError("PackVM must never use the user default ~/.lima directory")
+
+    def _ensure_private_managed_directories(self) -> None:
+        """Create and revalidate the private state and dedicated Lima roots."""
+
+        self._validate_managed_identity()
+        for directory in (self._state_dir, self._lima_home):
+            try:
+                directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+            except OSError as exc:
+                raise ValueError("PackVM LIMA_HOME is not a safe directory") from exc
+            metadata = directory.lstat()
+            if (
+                directory.is_symlink()
+                or not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_mode & 0o022
+                or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+            ):
+                raise ValueError("PackVM managed directory is unsafe")
+            if metadata.st_mode & 0o077:
+                os.chmod(directory, 0o700)
+
+    def _lima_process_environment(self) -> dict[str, str]:
+        """Return a minimal environment pinned to the dedicated Lima home."""
+
+        inherited = _lima_process_environment()
+        self._ensure_private_managed_directories()
+        configured_lima_home = inherited.get("LIMA_HOME")
+        if configured_lima_home and Path(configured_lima_home) != self._lima_home:
+            raise ValueError("LIMA_HOME must match the dedicated PackVM directory")
+        environment = {
+            "PATH": LIMA_PROCESS_PATH,
+            "LIMA_HOME": str(self._lima_home),
+            **({"HOME": inherited["HOME"]} if "HOME" in inherited else {}),
+        }
+        return environment
+
+    def _recovery_facts(
+        self,
+        plan: PackVMProvisioningPlan,
+        request: PackVMProvisioningRequest,
+    ) -> dict[str, Any]:
+        """Capture immutable server evidence before the first Lima mutation."""
+
+        if request.session_digest is None:
+            session_digest = _sha256(b"direct-local-lifecycle")
+        else:
+            session_digest = request.session_digest
+        metadata = self._lima_home.lstat()
+        return {
+            "version": 1,
+            "backend_id": PACKVM_BACKEND_ID,
+            "instance": self._instance,
+            "session_digest": session_digest,
+            "plan_digest": plan.plan_digest,
+            "config_digest": plan.config_digest,
+            "image_digest": plan.image_digest,
+            "guest_runner_digest": plan.guest_runner_digest,
+            "host_build_digest": plan.host_build_digest,
+            "limactl_digest": _file_digest(Path(str(plan.limactl))),
+            "lima_home_digest": _sha256(str(self._lima_home).encode()),
+            "lima_home_device": int(metadata.st_dev),
+            "lima_home_inode": int(metadata.st_ino),
+            "created_unix": int(time.time()),
+        }
+
+    def _sign_recovery(self, recovery: Mapping[str, Any]) -> str:
+        key = generate_or_load_signing_key(self._state_dir / "packvm-recovery.key")
+        unsigned = {key: value for key, value in recovery.items() if key != "authentication"}
+        return hmac.new(key, _canonical_json(unsigned), hashlib.sha256).hexdigest()
+
+    def _load_authenticated_recovery(self) -> dict[str, Any]:
+        try:
+            raw = _read_private_file(self.recovery_path, MAX_LIMA_STATE_BYTES)
+        except FileNotFoundError as exc:
+            raise ValueError("PackVM failed-provision recovery evidence is unavailable") from exc
+        try:
+            recovery = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("PackVM failed-provision recovery evidence is invalid") from exc
+        if not isinstance(recovery, dict) or recovery.get("version") != 1:
+            raise ValueError("PackVM failed-provision recovery evidence is invalid")
+        authentication = recovery.get("authentication")
+        if not isinstance(authentication, str):
+            raise ValueError("PackVM failed-provision recovery evidence is unauthenticated")
+        expected = self._sign_recovery(recovery)
+        if not hmac.compare_digest(authentication, expected):
+            raise ValueError("PackVM failed-provision recovery authentication failed")
+        return recovery
+
+    def _verify_recovery_environment(self, recovery: Mapping[str, Any]) -> None:
+        """Recompute every Host-owned recovery binding before deletion."""
+
+        self._ensure_private_managed_directories()
+        metadata = self._lima_home.lstat()
+        current = {
+            "backend_id": PACKVM_BACKEND_ID,
+            "instance": self._instance,
+            "config_digest": _sha256(self._rendered_config()),
+            "image_digest": _PACKVM_IMAGES[self._machine]["digest"],
+            "guest_runner_digest": _file_digest(_PACKVM_RUNNER),
+            "host_build_digest": _file_digest(Path(__file__)),
+            "limactl_digest": _file_digest(Path(self._require_command())),
+            "lima_home_digest": _sha256(str(self._lima_home).encode()),
+            "lima_home_device": int(metadata.st_dev),
+            "lima_home_inode": int(metadata.st_ino),
+        }
+        for field, value in current.items():
+            if recovery.get(field) != value:
+                raise ValueError(f"PackVM recovery {field} changed")
+
+    def _verify_dedicated_instance_directory(self) -> None:
+        """Reject symlink, path escape, foreign ownership, and unsafe config."""
+
+        instance_dir = self._lima_home / self._instance
+        metadata = instance_dir.lstat()
+        if (
+            instance_dir.is_symlink()
+            or not stat.S_ISDIR(metadata.st_mode)
+            or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+            or instance_dir.parent != self._lima_home
+        ):
+            raise ValueError("PackVM recovery instance directory is unsafe")
+        payload = lima_instance_payload(
+            self._require_command(),
+            self._instance,
+            runner=self._runner,
+            environment=self._lima_process_environment(),
+        )
+        payload_dir = Path(str(payload.get("dir") or ""))
+        if payload_dir != instance_dir or payload_dir.is_symlink():
+            raise ValueError("PackVM recovery instance escaped the dedicated Lima home")
+        violation = validate_lima_instance_config(payload)
+        if violation:
+            raise ValueError(violation)
+
+    def _write_recovery_phase(
+        self,
+        recovery: Mapping[str, Any],
+        phase: str,
+    ) -> None:
+        updated = {**recovery, "phase": phase, "updated_unix": int(time.time())}
+        updated.pop("authentication", None)
+        updated["authentication"] = self._sign_recovery(updated)
+        _atomic_private_json(self.recovery_path, updated)
+
+    def _reconcile_failed_provision(
+        self,
+        limactl: str | None,
+        recovery: Mapping[str, Any],
+    ) -> str:
+        """Best-effort delete an instance created by a failed Lima start."""
+
+        if limactl is None or not self._instance_exists(limactl):
+            self.recovery_path.unlink(missing_ok=True)
+            return "missing"
+        try:
+            self._verify_recovery_environment(recovery)
+            self._verify_dedicated_instance_directory()
+            self._call((limactl, "stop", "--force", self._instance), timeout=60)
+            self._checked_call(
+                (limactl, "delete", "--force", self._instance),
+                timeout=120,
+                stage="reconcile_delete",
+            )
+        except Exception:
+            self._write_recovery_phase(recovery, "orphaned")
+            return "orphaned"
+        self.recovery_path.unlink(missing_ok=True)
+        self._audit("failed_provision_reconciled", None)
+        return "reconciled"
 
     def _resolve_command(self) -> str | None:
         if self._command_path is None and platform.system() != "Darwin":
@@ -1229,7 +1584,7 @@ class PackVMLimaProvisioner:
     ) -> Any:
         if self._runner is not None:
             return self._runner(command, input_text, timeout)
-        environment = _lima_process_environment()
+        environment = self._lima_process_environment()
         argv = tuple(str(item) for item in command)
         cwd = Path.cwd().resolve()
         bounded_timeout = min(max(float(timeout), 1.0), 900.0)
@@ -1250,11 +1605,11 @@ class PackVMLimaProvisioner:
                 max_timeout_seconds=bounded_timeout,
             ),
         )
-        return subprocess.CompletedProcess(
-            argv,
-            result.exit_code if result.exit_code is not None else 1,
-            result.stdout,
-            result.stderr or result.transport_error or "",
+        return _LimaCallResult(
+            returncode=result.exit_code if result.exit_code is not None else 1,
+            stdout=result.stdout,
+            stderr=result.stderr or result.transport_error or "",
+            timed_out=result.timed_out,
         )
 
     def _checked_call(
@@ -1264,6 +1619,7 @@ class PackVMLimaProvisioner:
         timeout: float,
         input_text: str | None = None,
         max_stdin_bytes: int = 1024 * 1024,
+        stage: str | None = None,
     ) -> Any:
         result = self._call(
             command,
@@ -1271,8 +1627,20 @@ class PackVMLimaProvisioner:
             timeout=timeout,
             max_stdin_bytes=max_stdin_bytes,
         )
+        operation_stage = stage or (str(command[1]) if len(command) > 1 else "execute")
+        if bool(getattr(result, "timed_out", False)):
+            raise PackVMProcessError(
+                stage=operation_stage,
+                kind="timeout",
+                stderr=_decode(getattr(result, "stderr", "")),
+            )
         if result.returncode != 0:
-            raise ValueError(_decode(result.stderr)[:1000] or f"command failed: {command[1]}")
+            raise PackVMProcessError(
+                stage=operation_stage,
+                kind="exit",
+                exit_code=int(result.returncode),
+                stderr=_decode(result.stderr),
+            )
         return result
 
     def _sign_state(self, state: Mapping[str, Any]) -> str:
@@ -1280,6 +1648,13 @@ class PackVMLimaProvisioner:
         key = generate_or_load_signing_key(key_path)
         unsigned = {key: value for key, value in state.items() if key != "authentication"}
         return hmac.new(key, _canonical_json(unsigned), hashlib.sha256).hexdigest()
+
+    def _verify_attested_host_binding(self, state: Mapping[str, Any]) -> None:
+        """Recheck executable and dedicated Lima-root identity before mutation."""
+
+        for field, value in self.recovery_identity().items():
+            if state.get(field) != value:
+                raise ValueError(f"managed PackVM {field} changed")
 
     def _load_authenticated_state(self) -> dict[str, Any]:
         try:
@@ -1306,7 +1681,13 @@ class PackVMLimaProvisioner:
             raise ValueError("PackVM attestation digest failed")
         return state
 
-    def _audit(self, event: str, attestation_digest: str | None) -> None:
+    def _audit(
+        self,
+        event: str,
+        attestation_digest: str | None,
+        *,
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
         self._state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         record = {
             "event": event,
@@ -1314,10 +1695,27 @@ class PackVMLimaProvisioner:
             "instance": self._instance,
             "attestation_digest": attestation_digest,
             "timestamp_unix": int(time.time()),
+            **({"details": dict(details)} if details else {}),
         }
-        with self.audit_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
-        os.chmod(self.audit_path, 0o600)
+        flags = os.O_APPEND | os.O_CREAT | os.O_WRONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(self.audit_path, flags, 0o600)
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_mode & 0o077
+                or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+            ):
+                raise ValueError("PackVM audit history is unsafe")
+            encoded = (
+                json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+            ).encode()
+            os.write(descriptor, encoded)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
 
 def _normalize_packvm_machine(value: str) -> str:
@@ -1333,6 +1731,17 @@ def _sha256(value: bytes) -> str:
 
 def _format_gib(value: int) -> str:
     return f"{value / (1024**3):.2f} GiB"
+
+
+def _safe_process_diagnostic(value: str | None) -> str | None:
+    """Bound stderr and remove control characters and absolute host paths."""
+
+    if not value:
+        return None
+    sanitized = "".join(char if char in "\n\t" or ord(char) >= 32 else "?" for char in value)
+    sanitized = re.sub(r"(?<![A-Za-z0-9_.-])/(?:[^\s:'\"]+/?)+", "<host-path>", sanitized)
+    sanitized = sanitized.strip()[:1000]
+    return sanitized or None
 
 
 def _file_digest(path: Path) -> str:

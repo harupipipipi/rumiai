@@ -58,6 +58,7 @@ const consent = {
 function operation(state: 'queued' | 'cancelled' | 'interrupted' | 'succeeded', overrides = {}) {
   return {
     operation_id: operationId,
+    operation_kind: 'provision',
     state,
     plan_digest: plan.plan_digest,
     updated_unix: 1,
@@ -325,12 +326,24 @@ test('PackVM GUI stops and cleans only the authenticated instance', {concurrency
       return jsonResponse(notReadyDoctor);
     }
     if (route === '/api/v4/packvm/cleanup') {
-      const body = JSON.parse(String(init?.body)) as {confirmation: string};
+      const body = JSON.parse(String(init?.body)) as {
+        confirmation: string;
+        operation_id: string;
+        source_operation_id: string | null;
+      };
       assert.equal(body.confirmation, 'DELETE tobkiri-packvm-v4');
       return jsonResponse({
-        ready: false,
-        instance: 'tobkiri-packvm-v4',
-        cleanup_confirmation: 'DELETE tobkiri-packvm-v4',
+        operation_id: body.operation_id,
+        operation_kind: 'cleanup',
+        state: 'succeeded',
+        plan_digest: digest('0'),
+        updated_unix: 1,
+        result: {
+          ready: false,
+          instance: 'tobkiri-packvm-v4',
+          cleanup_confirmation: 'DELETE tobkiri-packvm-v4',
+          missing: false,
+        },
       });
     }
     throw new Error(`unexpected route ${route}`);
@@ -360,10 +373,10 @@ test('PackVM GUI stops and cleans only the authenticated instance', {concurrency
   await act(async () => buttonWithText(surface.container, 'Delete authenticated PackVM').click());
   await settle();
   assert.equal(routes.at(-1), '/api/v4/packvm/cleanup');
-  assert.deepEqual(bodies, [
-    {confirmation: 'STOP tobkiri-packvm-v4'},
-    {confirmation: 'DELETE tobkiri-packvm-v4'},
-  ]);
+  assert.deepEqual(bodies[0], {confirmation: 'STOP tobkiri-packvm-v4'});
+  assert.equal(bodies[1]?.confirmation, 'DELETE tobkiri-packvm-v4');
+  assert.equal(bodies[1]?.source_operation_id, null);
+  assert.match(String(bodies[1]?.operation_id), /^[0-9a-f-]{36}$/i);
   assert.doesNotMatch(surface.container.textContent ?? '', /Confirm PackVM cleanup/);
   assert.match(surface.container.textContent ?? '', /PackVM instance was cleaned up/);
 });

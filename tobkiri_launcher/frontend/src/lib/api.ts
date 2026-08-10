@@ -2,7 +2,6 @@ import type {
   ApiDashboard,
   ApiDynamicFrontendCatalog,
   ApiPackVMConsent,
-  ApiPackVMCleanupResult,
   ApiPackVMDoctor,
   ApiPackVMOperation,
   ApiPackVMProvisioningPlan,
@@ -29,7 +28,6 @@ import {
 } from './getRequestCoordinator';
 import {
   normalizePackVMConsent,
-  normalizePackVMCleanup,
   normalizePackVMDoctor,
   normalizePackVMOperation,
   normalizePackVMPlan,
@@ -715,8 +713,16 @@ export function stopPackVM(confirmation: string): Promise<ApiPackVMDoctor> {
   return packVMLifecyclePost<unknown>('stop', {confirmation}).then(normalizePackVMDoctor);
 }
 
-export function cleanupPackVM(confirmation: string): Promise<ApiPackVMCleanupResult> {
-  return packVMLifecyclePost<unknown>('cleanup', {confirmation}).then(normalizePackVMCleanup);
+export function cleanupPackVM(
+  confirmation: string,
+  operationId: string,
+  sourceOperationId: string | null,
+): Promise<ApiPackVMOperation> {
+  return packVMLifecyclePost<unknown>('cleanup', {
+    confirmation,
+    operation_id: operationId,
+    source_operation_id: sourceOperationId,
+  }).then(normalizePackVMOperation);
 }
 
 export function invokeFrontendCapability(

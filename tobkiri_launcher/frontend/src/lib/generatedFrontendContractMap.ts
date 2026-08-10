@@ -1,7 +1,7 @@
 /* eslint-disable */
 // GENERATED FILE. Do not edit by hand.
 // Source: defaultspack/frontend_contract_map.v4.json
-// Raw source digest: sha256:3b0e6c0360fad519cabc25eb7fb5f442a0d37cb9f1590e94f7cdff8f69a420e3
+// Raw source digest: sha256:b46fde48be7d67dc2ab6527d0e80058c2c83e2bbe904191db7e411b70bef6f2c
 import type {FrontendContractMethod} from './api';
 
 export interface GeneratedFrontendContractTarget {
@@ -28,13 +28,13 @@ export interface GeneratedFrontendContractMap {
   routes: GeneratedFrontendContractRoute[];
 }
 
-export const PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST = "sha256:3b0e6c0360fad519cabc25eb7fb5f442a0d37cb9f1590e94f7cdff8f69a420e3" as const;
+export const PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST = "sha256:b46fde48be7d67dc2ab6527d0e80058c2c83e2bbe904191db7e411b70bef6f2c" as const;
 
 export const GENERATED_FRONTEND_CONTRACT_MAP: GeneratedFrontendContractMap = {
   "schema": "io.tobkiri.frontend-contract-map.v4",
   "pack_id": "defaultspack",
   "artifact_path": "defaultspack/frontend_contract_map.v4.json",
-  "artifact_digest": "sha256:3b0e6c0360fad519cabc25eb7fb5f442a0d37cb9f1590e94f7cdff8f69a420e3",
+  "artifact_digest": "sha256:b46fde48be7d67dc2ab6527d0e80058c2c83e2bbe904191db7e411b70bef6f2c",
   "routes": [
     {
       "method": "GET",
@@ -204,6 +204,21 @@ export const GENERATED_FRONTEND_CONTRACT_MAP: GeneratedFrontendContractMap = {
     },
     {
       "method": "GET",
+      "path": "/api/runtime-surface/profiles",
+      "presentation": "broker_result",
+      "targets": [
+        {
+          "contribution_id": "defaults.runtime-surface.profile-catalog",
+          "contract_id": "tobkiri.host.control-presentation.v4",
+          "operation_id": "profile.catalog.read",
+          "provider_id": "tobkiri.host.control-presentation",
+          "function_id": "tobkiri.host.control-presentation",
+          "allowed_payload_keys": []
+        }
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/api/runtime-surface/settings",
       "presentation": "broker_result",
       "targets": [
@@ -304,7 +319,10 @@ export const GENERATED_FRONTEND_CONTRACT_MAP: GeneratedFrontendContractMap = {
             "profile_id",
             "expected_profile_revision",
             "expected_plan_digest",
-            "desired_pack_ids"
+            "desired_pack_ids",
+            "profile_definition_digest",
+            "profile_catalog_digest",
+            "bundle_lock_digest"
           ]
         }
       ]
@@ -622,6 +640,19 @@ const EXPECTED_ROUTES = {
       }
     ]
   },
+  "GET /api/runtime-surface/profiles": {
+    "presentation": "broker_result",
+    "targets": [
+      {
+        "contribution_id": "defaults.runtime-surface.profile-catalog",
+        "contract_id": "tobkiri.host.control-presentation.v4",
+        "operation_id": "profile.catalog.read",
+        "provider_id": "tobkiri.host.control-presentation",
+        "function_id": "tobkiri.host.control-presentation",
+        "allowed_payload_keys": []
+      }
+    ]
+  },
   "GET /api/runtime-surface/settings": {
     "presentation": "broker_result",
     "targets": [
@@ -712,7 +743,10 @@ const EXPECTED_ROUTES = {
           "profile_id",
           "expected_profile_revision",
           "expected_plan_digest",
-          "desired_pack_ids"
+          "desired_pack_ids",
+          "profile_definition_digest",
+          "profile_catalog_digest",
+          "bundle_lock_digest"
         ]
       }
     ]

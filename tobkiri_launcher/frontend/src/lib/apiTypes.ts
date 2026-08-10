@@ -144,6 +144,7 @@ export type ApiPackVMOperationState =
 
 export interface ApiPackVMOperation {
   operation_id: string;
+  operation_kind: 'provision' | 'cleanup';
   consent_digest?: string;
   state: ApiPackVMOperationState;
   plan_digest: string;
@@ -151,6 +152,14 @@ export interface ApiPackVMOperation {
   doctor?: ApiPackVMDoctor;
   error?: string;
   error_type?: string;
+  diagnostic?: {
+    code: string;
+    stage: string;
+    kind: 'timeout' | 'exit';
+    exit_code: number | null;
+    stderr: string | null;
+  };
+  result?: ApiPackVMCleanupResult;
 }
 
 export interface ApiPackVMDoctor {
@@ -166,6 +175,7 @@ export interface ApiPackVMCleanupResult {
   ready: false;
   instance: string;
   cleanup_confirmation: string;
+  missing: boolean;
 }
 
 export interface ApiDashboard {
