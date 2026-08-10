@@ -18,6 +18,15 @@ class GlobalContractInvocationError(RuntimeError):
         self.code = code
 
 
+class HostCredentialTransportError(RuntimeError):
+    """Fixed failure raised when a Host credential capability cannot complete."""
+
+    code = "host_credential_transport_failed"
+
+    def __init__(self) -> None:
+        super().__init__(self.code)
+
+
 class V4ContractDispatch(Protocol):
     """Explicit Host adapter; implementations own an immutable activation."""
 
@@ -160,19 +169,23 @@ class GlobalContractClient:
         """Use the finite Host transport capability; never resolve material."""
         if self.host_credential_transport is None:
             raise PermissionError("Host credential transport is unavailable")
-        value = self.host_credential_transport.post_json(
-            endpoint=endpoint,
-            headers=headers,
-            body=body,
-            credential_handle=credential_handle,
-            provider_instance_id=provider_instance_id,
-            credential_scope=credential_scope,
-            credential_scheme=credential_scheme,
-            deadline=deadline,
-        )
-        if not isinstance(value, Mapping):
-            raise RuntimeError("Host credential transport returned invalid data")
-        return dict(value)
+        try:
+            value = self.host_credential_transport.post_json(
+                endpoint=endpoint,
+                headers=headers,
+                body=body,
+                credential_handle=credential_handle,
+                provider_instance_id=provider_instance_id,
+                credential_scope=credential_scope,
+                credential_scheme=credential_scheme,
+                deadline=deadline,
+            )
+            if not isinstance(value, Mapping):
+                raise HostCredentialTransportError
+            return dict(value)
+        except Exception:
+            pass
+        raise HostCredentialTransportError
 
     def _require_declared(self, contract_id: str) -> None:
         if contract_id not in self.allowed_contract_ids:
@@ -183,6 +196,7 @@ __all__ = [
     "GlobalContractClient",
     "GlobalContractInvocationError",
     "GlobalContractUnavailable",
+    "HostCredentialTransportError",
     "V4ContractDispatch",
     "captured_profile_id",
     "invoke_global_contract",

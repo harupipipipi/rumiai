@@ -35,6 +35,23 @@ from tobkiri_host.broker import RequestEnvelope
 class CredentialTransportDenied(PermissionError):
     """Uniform denial returned for every credential-binding failure."""
 
+    _SAFE_CODES = frozenset(
+        {
+            "audit_failure",
+            "binding_invalid",
+            "material_invalid",
+            "provider_failure",
+            "response_invalid",
+            "store_failure",
+        }
+    )
+
+    def __init__(self, code: str = "binding_invalid") -> None:
+        """Create a fixed, material-independent public denial."""
+
+        self.code = code if code in self._SAFE_CODES else "binding_invalid"
+        super().__init__(f"credential transport denied ({self.code})")
+
 
 class JsonResponse(Protocol):
     """Small response protocol used by the Host HTTP adapter."""
@@ -47,6 +64,41 @@ class JsonResponse(Protocol):
 
 
 _MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+_MAX_RESPONSE_DEPTH = 32
+_PROVIDER_RESPONSE_FIELDS = frozenset(
+    {
+        "arguments",
+        "b64_json",
+        "choices",
+        "completion_tokens",
+        "content",
+        "created",
+        "data",
+        "embedding",
+        "finish_reason",
+        "function",
+        "id",
+        "index",
+        "input_tokens",
+        "logprobs",
+        "message",
+        "model",
+        "name",
+        "object",
+        "output_tokens",
+        "prompt_tokens",
+        "revised_prompt",
+        "role",
+        "stop_reason",
+        "system_fingerprint",
+        "text",
+        "tool_calls",
+        "total_tokens",
+        "type",
+        "url",
+        "usage",
+    }
+)
 
 
 class CredentialMaterialStore(Protocol):
@@ -236,6 +288,38 @@ class HostBoundCredentialTransport:
         credential_scheme: str,
         deadline: float,
     ) -> dict[str, Any]:
+        """Run one request while severing every internal exception chain."""
+
+        denial_code = "provider_failure"
+        try:
+            return self._post_json(
+                endpoint=endpoint,
+                headers=headers,
+                body=body,
+                credential_handle=credential_handle,
+                provider_instance_id=provider_instance_id,
+                credential_scope=credential_scope,
+                credential_scheme=credential_scheme,
+                deadline=deadline,
+            )
+        except CredentialTransportDenied as error:
+            denial_code = error.code
+        except Exception:
+            denial_code = "provider_failure"
+        raise CredentialTransportDenied(denial_code)
+
+    def _post_json(
+        self,
+        *,
+        endpoint: str,
+        headers: Mapping[str, str],
+        body: Mapping[str, Any],
+        credential_handle: str,
+        provider_instance_id: str,
+        credential_scope: str,
+        credential_scheme: str,
+        deadline: float,
+    ) -> dict[str, Any]:
         """Consume the sealed lease and perform one credentialed HTTP request."""
         self._consume_once(
             endpoint=endpoint,
@@ -248,18 +332,23 @@ class HostBoundCredentialTransport:
         secret_text = ""
         audit_status = "failed"
         try:
-            material = self._store.resolve(
-                self._binding.credential_handle,
-                consumer_pack_id=self._binding.consumer_pack_id,
-                provider_instance_id=self._binding.provider_instance_id,
-                profile_id=self._binding.profile_id,
-                scope=self._binding.credential_scope,
-                key_version=self._binding.credential_key_version,
-                purpose=self._binding.credential_purpose,
-            )
+            try:
+                material = self._store.resolve(
+                    self._binding.credential_handle,
+                    consumer_pack_id=self._binding.consumer_pack_id,
+                    provider_instance_id=self._binding.provider_instance_id,
+                    profile_id=self._binding.profile_id,
+                    scope=self._binding.credential_scope,
+                    key_version=self._binding.credential_key_version,
+                    purpose=self._binding.credential_purpose,
+                )
+            except Exception:
+                raise CredentialTransportDenied("store_failure") from None
+            if not isinstance(material, dict):
+                raise CredentialTransportDenied("material_invalid")
             value = material.get("api_key") or material.get("token")
             if not isinstance(value, str) or not value:
-                raise CredentialTransportDenied("credential transport denied")
+                raise CredentialTransportDenied("material_invalid")
             secret_bytes = bytearray(value.encode("utf-8"))
             secret_text = secret_bytes.decode("utf-8")
             outbound_headers = {
@@ -283,12 +372,13 @@ class HostBoundCredentialTransport:
             with self._opener(request, timeout=timeout) as response:
                 response_bytes = response.read(_MAX_RESPONSE_BYTES + 1)
                 if len(response_bytes) > _MAX_RESPONSE_BYTES:
-                    raise CredentialTransportDenied("credential transport denied")
+                    raise CredentialTransportDenied("response_invalid")
                 value = json.loads(response_bytes.decode("utf-8"))
             if not isinstance(value, dict):
-                raise RuntimeError("provider returned a non-object response")
+                raise CredentialTransportDenied("response_invalid")
+            sanitized = _sanitize_provider_response(value, secret_text)
             audit_status = "completed"
-            return _redact_secret(value, secret_text)
+            return sanitized
         except CredentialTransportDenied:
             audit_status = "denied"
             raise
@@ -297,13 +387,12 @@ class HostBoundCredentialTransport:
                 raise CredentialTransportDenied("credential transport denied") from None
             code = "quota" if exc.code == 429 else "provider_unavailable"
             raise RuntimeError(f"{code}: provider HTTP {exc.code}") from None
-        except (KeyError, PermissionError, ValueError):
-            raise CredentialTransportDenied("credential transport denied") from None
-        except OSError as exc:
-            raise RuntimeError(f"provider_unavailable: {type(exc).__name__}") from None
+        except (KeyError, PermissionError, UnicodeError, ValueError):
+            raise CredentialTransportDenied("response_invalid") from None
+        except Exception:
+            raise CredentialTransportDenied("provider_failure") from None
         finally:
-            if material is not None:
-                material.clear()
+            _clear_material(material)
             if secret_bytes is not None:
                 secret_bytes[:] = b"\x00" * len(secret_bytes)
             self._audit(
@@ -375,27 +464,30 @@ class HostBoundCredentialTransport:
         if self._audit_sink is None:
             return
         binding = self._binding
-        self._audit_sink(
-            {
-                "event": "credential_transport",
-                "status": status,
-                "profile_id": binding.profile_id,
-                "activation_id": binding.activation_id,
-                "security_epoch": binding.security_epoch,
-                "caller_principal_id": binding.caller_principal_id,
-                "provider_principal_id": binding.provider_principal_id,
-                "provider_function_id": binding.provider_function_id,
-                "operation_id": binding.operation_id,
-                "target_domain_id": binding.target_domain_id,
-                "target_boot_epoch": binding.target_boot_epoch,
-                "request_id": binding.request_id,
-                "request_digest": binding.request_digest,
-                "credential_handle": binding.credential_handle,
-                "provider_instance_id": binding.provider_instance_id,
-                "credential_scope": binding.credential_scope,
-                "endpoint_origin": endpoint_origin,
-            }
-        )
+        try:
+            self._audit_sink(
+                {
+                    "event": "credential_transport",
+                    "status": status if status in {"completed", "denied", "failed"} else "failed",
+                    "profile_id": binding.profile_id,
+                    "activation_id": binding.activation_id,
+                    "security_epoch": binding.security_epoch,
+                    "caller_principal_id": binding.caller_principal_id,
+                    "provider_principal_id": binding.provider_principal_id,
+                    "provider_function_id": binding.provider_function_id,
+                    "operation_id": binding.operation_id,
+                    "target_domain_id": binding.target_domain_id,
+                    "target_boot_epoch": binding.target_boot_epoch,
+                    "request_id": binding.request_id,
+                    "request_digest": binding.request_digest,
+                    "credential_handle": binding.credential_handle,
+                    "provider_instance_id": binding.provider_instance_id,
+                    "credential_scope": binding.credential_scope,
+                    "endpoint_origin": endpoint_origin,
+                }
+            )
+        except Exception:
+            return
 
 
 def _safe_text(value: object) -> bool:
@@ -561,14 +653,36 @@ def _safe_egress_address(value: str) -> bool:
     )
 
 
-def _redact_secret(value: Any, secret: str) -> Any:
+def _sanitize_provider_response(value: Any, secret: str, *, depth: int = 0) -> Any:
+    """Return JSON data whose field names and values cannot expose material."""
+
+    if depth > _MAX_RESPONSE_DEPTH:
+        raise CredentialTransportDenied("response_invalid")
     if isinstance(value, dict):
-        return {key: _redact_secret(item, secret) for key, item in value.items()}
+        if any(not isinstance(key, str) or key not in _PROVIDER_RESPONSE_FIELDS for key in value):
+            raise CredentialTransportDenied("response_invalid")
+        return {
+            key: _sanitize_provider_response(item, secret, depth=depth + 1)
+            for key, item in value.items()
+        }
     if isinstance(value, list):
-        return [_redact_secret(item, secret) for item in value]
+        return [_sanitize_provider_response(item, secret, depth=depth + 1) for item in value]
     if isinstance(value, str) and secret and secret in value:
         return value.replace(secret, "[REDACTED]")
+    if value is not None and not isinstance(value, (str, int, float, bool)):
+        raise CredentialTransportDenied("response_invalid")
     return value
+
+
+def _clear_material(material: dict[str, Any] | None) -> None:
+    """Release resolved material without allowing cleanup failures to escape."""
+
+    if material is None:
+        return
+    try:
+        material.clear()
+    except Exception:
+        return
 
 
 __all__ = [

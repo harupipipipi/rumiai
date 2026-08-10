@@ -8,7 +8,7 @@ from pathlib import Path
 import socket
 import sys
 from threading import Thread
-from typing import Any
+from typing import Any, Mapping
 import urllib.request
 from dataclasses import replace
 
@@ -22,7 +22,10 @@ from core_runtime.credential_transport import (
     _MAX_RESPONSE_BYTES,
 )
 from core_runtime import credential_transport as transport_module
-from core_runtime.global_contract_dispatch import GlobalContractClient
+from core_runtime.global_contract_dispatch import (
+    GlobalContractClient,
+    HostCredentialTransportError,
+)
 from ecosystem.rumi_credential_broker_pack.runtime.service import (
     CredentialBrokerService,
 )
@@ -443,6 +446,8 @@ def test_generic_resolution_is_denied_and_host_transport_applies_once(
         sort_keys=True,
     )
     assert "fixture-secret" not in public_snapshot
+    assert audit[-1]["credential_handle"] == created["handle"]
+    assert audit[-1]["provider_instance_id"] == "provider.adapter-main"
     with pytest.raises(CredentialTransportDenied, match="denied"):
         transport.post_json(
             endpoint="https://provider.example/v1/messages",
@@ -705,6 +710,165 @@ def test_host_transport_rejects_wrong_exact_binding(
     with pytest.raises(CredentialTransportDenied, match="denied") as denied:
         transport.post_json(**arguments)
     assert "binding-sentinel" not in str(denied.value)
+
+
+@pytest.mark.parametrize(
+    "response",
+    (
+        {"credential-canary": "value"},
+        {"choices": [{"credential-canary": "nested-value"}]},
+    ),
+)
+def test_host_transport_rejects_material_in_response_keys_without_observable_leak(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    response: dict[str, Any],
+) -> None:
+    canary = "credential-canary"
+    transport, arguments = _https_transport(tmp_path, secret=canary)
+    audit: list[dict[str, Any]] = []
+    transport._audit_sink = audit.append
+    monkeypatch.setattr(transport, "_opener", lambda *_args, **_kwargs: _Response(response))
+
+    with pytest.raises(CredentialTransportDenied) as caught:
+        transport.post_json(**arguments)
+
+    error = caught.value
+    assert error.code == "response_invalid"
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    print(json.dumps({"args": error.args, "audit": audit}, sort_keys=True))
+    captured = capsys.readouterr()
+    observable = "\n".join((str(error), repr(error), caplog.text, captured.out, captured.err))
+    assert observable.count(canary) == 0
+
+
+@pytest.mark.parametrize("failure_source", ("store", "provider"))
+def test_host_transport_severs_material_bearing_exception_chains(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    failure_source: str,
+) -> None:
+    canary = "exception-material-canary"
+    transport, arguments = _https_transport(tmp_path, secret=canary)
+    audit: list[dict[str, Any]] = []
+    transport._audit_sink = audit.append
+
+    def fail(*_args: object, **_kwargs: object) -> Any:
+        try:
+            raise ValueError(canary)
+        except ValueError as cause:
+            raise RuntimeError({canary: [canary]}) from cause
+
+    if failure_source == "store":
+        monkeypatch.setattr(transport._store, "resolve", fail)
+    else:
+        monkeypatch.setattr(transport, "_opener", fail)
+
+    with pytest.raises(CredentialTransportDenied) as caught:
+        transport.post_json(**arguments)
+
+    error = caught.value
+    expected = "store_failure" if failure_source == "store" else "provider_failure"
+    assert error.code == expected
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    print(json.dumps({"args": error.args, "audit": audit}, sort_keys=True))
+    captured = capsys.readouterr()
+    observable = "\n".join((str(error), repr(error), caplog.text, captured.out, captured.err))
+    assert observable.count(canary) == 0
+
+
+def test_host_transport_sanitizes_values_and_isolates_material_bearing_audit_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    canary = "successful-material-canary"
+    transport, arguments = _https_transport(tmp_path, secret=canary)
+    original_resolve = transport._store.resolve
+
+    def resolve_with_sensitive_key(*args: object, **kwargs: object) -> dict[str, Any]:
+        return {**original_resolve(*args, **kwargs), canary: {canary: canary}}
+
+    def failing_audit(_event: Mapping[str, Any]) -> None:
+        raise RuntimeError({canary: canary})
+
+    monkeypatch.setattr(transport._store, "resolve", resolve_with_sensitive_key)
+    monkeypatch.setattr(transport, "_audit_sink", failing_audit)
+    monkeypatch.setattr(
+        transport,
+        "_opener",
+        lambda *_args, **_kwargs: _Response(
+            {
+                "id": "response-1",
+                "model": "model-1",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": f"ok {canary}"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+        ),
+    )
+
+    result = transport.post_json(**arguments)
+    print(json.dumps(result, sort_keys=True))
+    captured = capsys.readouterr()
+    observable = "\n".join((repr(result), caplog.text, captured.out, captured.err))
+    assert observable.count(canary) == 0
+    assert result["id"] == "response-1"
+    assert result["model"] == "model-1"
+    assert result["choices"][0]["message"]["content"] == "ok [REDACTED]"
+
+
+def test_global_client_normalizes_injected_transport_exception_without_chain(
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    canary = "adapter-exception-material-canary"
+
+    class FailingTransport:
+        def post_json(self, **_kwargs: object) -> dict[str, Any]:
+            try:
+                raise ValueError(canary)
+            except ValueError as cause:
+                raise RuntimeError({canary: canary}) from cause
+
+    client = GlobalContractClient(
+        session=object(),  # type: ignore[arg-type]
+        allowed_contract_ids=frozenset(),
+        consumer_pack_id="provider-adapter-pack",
+        host_credential_transport=FailingTransport(),
+    )
+    with pytest.raises(HostCredentialTransportError) as caught:
+        client.post_json_with_credential(
+            endpoint="https://provider.example/v1/messages",
+            headers={},
+            body={},
+            credential_handle="credential:opaque",
+            provider_instance_id="provider.adapter-main",
+            credential_scope="ai.generate",
+            credential_scheme="bearer",
+            deadline=9_999_999_999.0,
+        )
+
+    error = caught.value
+    assert error.code == "host_credential_transport_failed"
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    print(json.dumps({"args": error.args}, sort_keys=True))
+    captured = capsys.readouterr()
+    observable = "\n".join((str(error), repr(error), caplog.text, captured.out, captured.err))
+    assert observable.count(canary) == 0
 
 
 def test_host_transport_rejects_missing_approval_and_revocation(
