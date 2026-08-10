@@ -32,6 +32,11 @@ from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
     PackVMProcessError,
     PackVMProvisioningRequest,
     PackVMResponseReconciliationRequired,
+    _FileLockUnavailable,
+    _acquire_exclusive_file_lock,
+    _load_file_lock_module,
+    _process_is_alive,
+    _release_exclusive_file_lock,
 )
 from ecosystem.defaultspack.backend.sandbox.isolation.resources import (
     packvm_guest_runner,
@@ -288,7 +293,7 @@ def _write_environment_probe(path: Path) -> None:
 
 def test_fixed_instance_claim_is_single_flight_across_processes(provisioner) -> None:
     manager, _fake, command = provisioner
-    context = multiprocessing.get_context("fork")
+    context = multiprocessing.get_context("spawn" if os.name == "nt" else "fork")
     entered = context.Event()
     release = context.Event()
     process = context.Process(
@@ -311,6 +316,157 @@ def test_fixed_instance_claim_is_single_flight_across_processes(provisioner) -> 
         release.set()
         process.join(5)
     assert process.exitcode == 0
+
+
+def test_lock_backend_selection_never_imports_fcntl_for_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ecosystem.defaultspack.backend.sandbox.isolation import lima_runtime
+
+    requested: list[str] = []
+    windows_backend = object()
+
+    def import_module(name: str) -> object:
+        requested.append(name)
+        if name == "msvcrt":
+            return windows_backend
+        raise AssertionError(f"unexpected lock backend import: {name}")
+
+    monkeypatch.setattr(lima_runtime.importlib, "import_module", import_module)
+    assert _load_file_lock_module("nt") is windows_backend
+    assert requested == ["msvcrt"]
+
+
+def test_windows_pid_probe_uses_open_process_not_os_kill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ecosystem.defaultspack.backend.sandbox.isolation import lima_runtime
+
+    class Function:
+        def __init__(self, result) -> None:
+            self.result = result
+            self.argtypes = None
+            self.restype = None
+
+        def __call__(self, *_args):
+            return self.result
+
+    exit_code = SimpleNamespace(value=259)
+    ctypes = SimpleNamespace(
+        windll=SimpleNamespace(
+            kernel32=SimpleNamespace(
+                OpenProcess=Function(123),
+                GetExitCodeProcess=Function(1),
+                CloseHandle=Function(1),
+            )
+        ),
+        c_ulong=lambda: exit_code,
+        c_int=object(),
+        c_void_p=object(),
+        POINTER=lambda _value: object(),
+        byref=lambda value: value,
+        get_last_error=lambda: 0,
+    )
+    monkeypatch.setattr(lima_runtime.os, "name", "nt")
+    monkeypatch.setattr(
+        lima_runtime.importlib,
+        "import_module",
+        lambda name: ctypes if name == "ctypes" else None,
+    )
+    monkeypatch.setattr(
+        lima_runtime.os,
+        "kill",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("os.kill used on Windows")),
+    )
+    assert _process_is_alive(1234) is True
+
+
+def test_file_lock_is_non_reentrant_and_owns_one_byte(tmp_path: Path) -> None:
+    lock_path = tmp_path / "portable.lock"
+    first = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    second = os.open(lock_path, os.O_RDWR, 0o600)
+    try:
+        _acquire_exclusive_file_lock(first, timeout_seconds=0.0)
+        assert os.fstat(first).st_size == 1
+        with pytest.raises(_FileLockUnavailable):
+            _acquire_exclusive_file_lock(second, timeout_seconds=0.0)
+        _release_exclusive_file_lock(first)
+        _acquire_exclusive_file_lock(second, timeout_seconds=0.0)
+        _release_exclusive_file_lock(second)
+    finally:
+        os.close(second)
+        os.close(first)
+
+
+def test_file_lock_waits_only_for_the_explicit_timeout(tmp_path: Path) -> None:
+    lock_path = tmp_path / "bounded-wait.lock"
+    first = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    second = os.open(lock_path, os.O_RDWR, 0o600)
+    released = threading.Event()
+
+    def release_owner() -> None:
+        time.sleep(0.05)
+        _release_exclusive_file_lock(first)
+        released.set()
+
+    try:
+        _acquire_exclusive_file_lock(first, timeout_seconds=0.0)
+        worker = threading.Thread(target=release_owner)
+        worker.start()
+        _acquire_exclusive_file_lock(second, timeout_seconds=1.0)
+        assert released.wait(1)
+        _release_exclusive_file_lock(second)
+        worker.join(1)
+        assert not worker.is_alive()
+    finally:
+        os.close(second)
+        os.close(first)
+
+
+def test_process_crash_releases_os_lock_for_exact_recovery(provisioner) -> None:
+    manager, _fake, command = provisioner
+    context = multiprocessing.get_context("spawn" if os.name == "nt" else "fork")
+    entered = context.Event()
+    release = context.Event()
+    process = context.Process(
+        target=_hold_packvm_process_claim,
+        args=(
+            str(command),
+            str(manager.state_path.parent),
+            str(manager.lima_home),
+            entered,
+            release,
+        ),
+    )
+    process.start()
+    assert entered.wait(5)
+    process.terminate()
+    process.join(5)
+    assert process.exitcode not in {None, 0}
+    binding = {
+        "session_digest": "sha256:" + "1" * 64,
+        "plan_digest": "sha256:" + "2" * 64,
+        "ceremony_nonce_digest": "sha256:" + "3" * 64,
+    }
+    with manager.operation_gate("provision", binding, recover_claim=True):
+        assert manager.mutation_claim_path.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires the Windows msvcrt backend")
+def test_windows_byte_range_lock_excludes_independent_handles(tmp_path: Path) -> None:
+    lock_path = tmp_path / "windows-byte-range.lock"
+    first = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    second = os.open(lock_path, os.O_RDWR, 0o600)
+    try:
+        _acquire_exclusive_file_lock(first, timeout_seconds=0.0)
+        with pytest.raises(_FileLockUnavailable):
+            _acquire_exclusive_file_lock(second, timeout_seconds=0.0)
+        _release_exclusive_file_lock(first)
+        _acquire_exclusive_file_lock(second, timeout_seconds=0.0)
+        _release_exclusive_file_lock(second)
+    finally:
+        os.close(second)
+        os.close(first)
 
 
 def test_failed_competitor_never_reconciles_the_owner_instance(provisioner) -> None:

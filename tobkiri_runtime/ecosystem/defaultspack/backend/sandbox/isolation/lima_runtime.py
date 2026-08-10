@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import hmac
+import importlib
 import json
 import os
-import fcntl
 import platform
 import re
 import secrets
@@ -59,6 +60,7 @@ PACKVM_MIN_DISK_SIZE_BYTES = (
 )
 PACKVM_DISK_SIZE_BYTES = 4 * 1024 * 1024 * 1024
 PACKVM_HOST_STORAGE_RESERVE_BYTES = 512 * 1024 * 1024
+PACKVM_LOCK_RETRY_SECONDS = 0.05
 LIMA_PROCESS_PATH = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
 LIMA_PROCESS_ENVIRONMENT_KEYS = frozenset({"PATH", "HOME", "LIMA_HOME"})
 _PACKVM_RESOURCE_ROOT = Path(__file__).with_name("resources")
@@ -180,6 +182,90 @@ class PackVMMutationConflict(RuntimeError):
 
 class PackVMResponseReconciliationRequired(PackVMForeignInstanceError):
     """A guest response could not be bound to the exact current instance."""
+
+
+class _FileLockUnavailable(RuntimeError):
+    """The exclusive byte range is already owned by another descriptor."""
+
+
+def _load_file_lock_module(platform_name: str | None = None) -> Any:
+    """Load only the lock backend available on the current operating system."""
+
+    selected = os.name if platform_name is None else platform_name
+    if selected == "nt":
+        return importlib.import_module("msvcrt")
+    if selected == "posix":
+        return importlib.import_module("fcntl")
+    raise RuntimeError(f"PackVM file locking is unsupported on {selected}")
+
+
+def _prepare_file_lock_byte(descriptor: int) -> None:
+    """Ensure Windows has one stable byte at offset zero to lock."""
+
+    metadata = os.fstat(descriptor)
+    if metadata.st_size > 1:
+        raise ValueError("PackVM mutation lock has an invalid size")
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    if metadata.st_size == 0:
+        written = os.write(descriptor, b"\0")
+        if written != 1:
+            raise OSError("PackVM mutation lock initialization failed")
+        os.fsync(descriptor)
+    os.lseek(descriptor, 0, os.SEEK_SET)
+
+
+def _try_exclusive_file_lock(descriptor: int) -> None:
+    """Attempt one non-blocking OS lock acquisition."""
+
+    backend = _load_file_lock_module()
+    try:
+        if os.name == "nt":
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            backend.locking(descriptor, backend.LK_NBLCK, 1)
+        else:
+            backend.flock(descriptor, backend.LOCK_EX | backend.LOCK_NB)
+    except (BlockingIOError, OSError) as exc:
+        if isinstance(exc, BlockingIOError) or exc.errno in {
+            errno.EACCES,
+            errno.EAGAIN,
+            errno.EDEADLK,
+        }:
+            raise _FileLockUnavailable from exc
+        raise
+
+
+def _acquire_exclusive_file_lock(descriptor: int, *, timeout_seconds: float) -> None:
+    """Acquire exclusively, polling only up to the explicit bounded timeout.
+
+    A timeout of zero performs exactly one non-blocking attempt. The descriptor
+    must remain open until ``_release_exclusive_file_lock`` completes; the OS
+    releases the lock automatically if the process exits or crashes.
+    """
+
+    if timeout_seconds < 0:
+        raise ValueError("PackVM mutation lock timeout must be non-negative")
+    _prepare_file_lock_byte(descriptor)
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            _try_exclusive_file_lock(descriptor)
+            return
+        except _FileLockUnavailable:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            time.sleep(min(PACKVM_LOCK_RETRY_SECONDS, remaining))
+
+
+def _release_exclusive_file_lock(descriptor: int) -> None:
+    """Release the exact POSIX file or Windows byte-range lock."""
+
+    backend = _load_file_lock_module()
+    if os.name == "nt":
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        backend.locking(descriptor, backend.LK_UNLCK, 1)
+    else:
+        backend.flock(descriptor, backend.LOCK_UN)
 
 
 @dataclass(frozen=True)
@@ -724,14 +810,14 @@ class PackVMLimaProvisioner:
             metadata = os.fstat(descriptor)
             if (
                 not stat.S_ISREG(metadata.st_mode)
-                or metadata.st_mode & 0o077
+                or (os.name == "posix" and metadata.st_mode & 0o077)
                 or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
             ):
                 raise ValueError("PackVM mutation lock is unsafe")
             try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _acquire_exclusive_file_lock(descriptor, timeout_seconds=0.0)
                 locked = True
-            except BlockingIOError as exc:
+            except _FileLockUnavailable as exc:
                 raise PackVMMutationConflict(
                     "PackVM fixed instance has another operation in progress"
                 ) from exc
@@ -762,7 +848,7 @@ class PackVMLimaProvisioner:
                 self._remove_owned_mutation_claim(claim)
             try:
                 if locked:
-                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                    _release_exclusive_file_lock(descriptor)
             finally:
                 os.close(descriptor)
 
@@ -1586,11 +1672,11 @@ class PackVMLimaProvisioner:
             if (
                 directory.is_symlink()
                 or not stat.S_ISDIR(metadata.st_mode)
-                or metadata.st_mode & 0o022
+                or (os.name == "posix" and metadata.st_mode & 0o022)
                 or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
             ):
                 raise ValueError("PackVM managed directory is unsafe")
-            if metadata.st_mode & 0o077:
+            if os.name == "posix" and metadata.st_mode & 0o077:
                 os.chmod(directory, 0o700)
 
     def _lima_process_environment(self) -> dict[str, str]:
@@ -2247,6 +2333,37 @@ def _process_is_alive(value: object) -> bool:
 
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         return False
+    if os.name == "nt":
+        ctypes = importlib.import_module("ctypes")
+        process_query_limited_information = 0x1000
+        still_active = 259
+        kernel32 = ctypes.windll.kernel32
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+        open_process.restype = ctypes.c_void_p
+        get_exit_code = kernel32.GetExitCodeProcess
+        get_exit_code.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        get_exit_code.restype = ctypes.c_int
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = [ctypes.c_void_p]
+        close_handle.restype = ctypes.c_int
+        handle = open_process(
+            process_query_limited_information,
+            False,
+            value,
+        )
+        if not handle:
+            return ctypes.get_last_error() == 5  # ERROR_ACCESS_DENIED is fail-closed.
+        exit_code = ctypes.c_ulong()
+        try:
+            if not get_exit_code(
+                handle,
+                ctypes.byref(exit_code),
+            ):
+                return True
+            return int(exit_code.value) == still_active
+        finally:
+            close_handle(handle)
     try:
         os.kill(value, 0)
     except ProcessLookupError:
@@ -2273,7 +2390,7 @@ def _read_private_file(path: Path, maximum: int) -> bytes:
     metadata = path.lstat()
     if path.is_symlink() or not stat.S_ISREG(metadata.st_mode) or metadata.st_size > maximum:
         raise ValueError(f"unsafe PackVM state file: {path.name}")
-    if metadata.st_mode & 0o077:
+    if os.name == "posix" and metadata.st_mode & 0o077:
         raise ValueError(f"PackVM state permissions are too broad: {path.name}")
     if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
         raise ValueError(f"PackVM state owner changed: {path.name}")
