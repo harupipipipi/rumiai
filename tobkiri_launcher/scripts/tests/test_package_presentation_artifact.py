@@ -93,6 +93,7 @@ def test_package_binds_exact_build_output_to_signed_index_and_lock() -> None:
         staged = output / str(report["path"])
         assert staged.is_file() and os.access(staged, os.X_OK)
         assert report["sha256"] == artifact_digest(staged)
+        assert report["entrypoint_sha256"] == MODULE.file_digest(staged)
         assert report["size"] == staged.stat().st_size
         subprocess.run([staged], check=True)
 
@@ -100,6 +101,7 @@ def test_package_binds_exact_build_output_to_signed_index_and_lock() -> None:
         variant = catalog["shell_providers"][0]["artifact_variants"][0]
         assert variant["path"] == report["path"]
         assert variant["sha256"] == report["sha256"]
+        assert variant["entrypoint_sha256"] == report["entrypoint_sha256"]
         assert variant["source_revision"] == report["source_revision"]
         index = json.loads(
             (output / "bundled/shell_artifact_index.v4.json").read_text()
@@ -107,6 +109,11 @@ def test_package_binds_exact_build_output_to_signed_index_and_lock() -> None:
         lock = json.loads((output / "bundled/shell_profile_lock.v4.json").read_text())
         assert index["artifact_id"] == lock["artifact_id"] == report["artifact_id"]
         assert lock["artifact_sha256"] == report["sha256"]
+        assert (
+            index["entrypoint_sha256"]
+            == lock["entrypoint_sha256"]
+            == report["entrypoint_sha256"]
+        )
 
         release = json.loads(
             (output / "bundled/presentation_release.v4.json").read_text()

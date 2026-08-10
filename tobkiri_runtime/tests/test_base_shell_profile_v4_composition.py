@@ -102,6 +102,7 @@ def _fixtures(tmp_path: Path) -> tuple[dict, dict, Path, bytes]:
                         "platform": "linux",
                         "architecture": "x86_64",
                         "artifact_digest": _digest(shell_bytes),
+                        "entrypoint_digest": _digest(shell_bytes),
                         "relative_path": "shell.bin",
                         "entrypoint": "shell.bin",
                         "bundle_identity": "io.tobkiri.shell.cli",

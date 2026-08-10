@@ -52,6 +52,7 @@ RELEASE_PATH = Path("bundled/presentation_release.v4.json")
 INSTALLED_METADATA_FIELDS = (
     "path",
     "sha256",
+    "entrypoint_sha256",
     "size",
     "source_identity",
     "source_revision",
@@ -309,7 +310,7 @@ def _validate_macos_signature(artifact: Path, platform: str) -> None:
         raise RuntimeError(f"macOS artifact signature verification failed: {detail}")
 
 
-def _validate_entrypoint(artifact: Path, entrypoint: str) -> None:
+def _validate_entrypoint(artifact: Path, entrypoint: str) -> Path:
     entry = Path(entrypoint)
     if not entrypoint or entry.is_absolute() or ".." in entry.parts:
         raise RuntimeError(f"artifact entrypoint is unsafe: {entrypoint}")
@@ -327,6 +328,7 @@ def _validate_entrypoint(artifact: Path, entrypoint: str) -> None:
         raise RuntimeError(
             f"declared artifact entrypoint is not executable: {candidate}"
         )
+    return candidate
 
 
 def _copy_file(source: Path, destination: Path) -> None:
@@ -482,10 +484,14 @@ def package_artifact(
     output.mkdir(parents=True)
     staged = _copy_artifact(source, output / ARTIFACT_ROOT / artifact_id, entrypoint)
     digest, size = artifact_digest_and_size(staged)
+    entrypoint_digest = "sha256:" + hashlib.sha256(
+        _validate_entrypoint(staged, entrypoint).read_bytes()
+    ).hexdigest()
     relative = staged.relative_to(output).as_posix()
     variant.update(
         path=relative,
         sha256=digest,
+        entrypoint_sha256=entrypoint_digest,
         size=size,
         source_identity=source_identity,
         source_revision=source_revision,
@@ -496,6 +502,7 @@ def package_artifact(
         "artifact_id": artifact_id,
         "path": relative,
         "sha256": digest,
+        "entrypoint_sha256": entrypoint_digest,
         "size": size,
         "platform": platform,
         "architecture": architecture,
@@ -510,6 +517,7 @@ def package_artifact(
         "artifact_index_sha256": index_digest,
         "artifact_id": artifact_id,
         "artifact_sha256": digest,
+        "entrypoint_sha256": entrypoint_digest,
         "platform": platform,
         "architecture": architecture,
         "source_identity": source_identity,
@@ -561,6 +569,7 @@ def package_artifact(
         "artifact_id": artifact_id,
         "path": relative,
         "sha256": digest,
+        "entrypoint_sha256": entrypoint_digest,
         "size": size,
         "platform": platform,
         "architecture": architecture,

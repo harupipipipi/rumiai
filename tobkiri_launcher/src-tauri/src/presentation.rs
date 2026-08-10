@@ -92,6 +92,8 @@ pub struct ArtifactVariant {
     #[serde(default)]
     pub sha256: Option<String>,
     #[serde(default)]
+    pub entrypoint_sha256: Option<String>,
+    #[serde(default)]
     pub size: Option<u64>,
     #[serde(default)]
     pub source_identity: Option<String>,
@@ -219,6 +221,7 @@ struct ShellArtifactIndex {
     artifact_id: String,
     path: String,
     sha256: String,
+    entrypoint_sha256: String,
     size: u64,
     platform: String,
     architecture: String,
@@ -233,6 +236,7 @@ struct ShellProfileLock {
     artifact_index_sha256: String,
     artifact_id: String,
     artifact_sha256: String,
+    entrypoint_sha256: String,
     platform: String,
     architecture: String,
     source_identity: String,
@@ -550,7 +554,10 @@ fn verify_release_binding(
         .iter()
         .flat_map(|shell| &shell.artifact_variants)
         .any(|variant| {
-            variant.path.is_some() || variant.sha256.is_some() || variant.size.is_some()
+            variant.path.is_some()
+                || variant.sha256.is_some()
+                || variant.entrypoint_sha256.is_some()
+                || variant.size.is_some()
         });
     let Some(binding) = catalog.release_binding.as_ref() else {
         if installed {
@@ -620,6 +627,7 @@ fn verify_release_binding(
         || index.artifact_id != binding.artifact_id
         || lock.artifact_id != binding.artifact_id
         || index.sha256 != lock.artifact_sha256
+        || index.entrypoint_sha256 != lock.entrypoint_sha256
         || index.platform != binding.platform
         || lock.platform != binding.platform
         || index.architecture != binding.architecture
@@ -644,6 +652,7 @@ fn verify_release_binding(
         .context("signed Shell artifact does not match the default Profile Shell")?;
     if variant.path.as_deref() != Some(index.path.as_str())
         || variant.sha256.as_deref() != Some(index.sha256.as_str())
+        || variant.entrypoint_sha256.as_deref() != Some(index.entrypoint_sha256.as_str())
         || variant.size != Some(index.size)
         || variant.source_identity.as_deref() != Some(index.source_identity.as_str())
         || variant.source_revision.as_deref() != Some(index.source_revision.as_str())
@@ -886,14 +895,25 @@ fn validate_catalog_integrity(catalog: &PresentationCatalog) -> AnyResult<()> {
                     shell.provider_id
                 );
             }
+            if variant
+                .entrypoint_sha256
+                .as_deref()
+                .is_some_and(|digest| !is_sha256_digest(digest))
+            {
+                bail!(
+                    "Shell Provider {} has an invalid installed entrypoint digest",
+                    shell.provider_id
+                );
+            }
             match (
                 variant.path.as_deref(),
                 variant.sha256.as_deref(),
+                variant.entrypoint_sha256.as_deref(),
                 variant.size,
                 variant.source_identity.as_deref(),
                 variant.source_revision.as_deref(),
             ) {
-                (Some(path), Some(_), Some(size), Some(identity), Some(revision))
+                (Some(path), Some(_), Some(_), Some(size), Some(identity), Some(revision))
                     if !Path::new(path).is_absolute()
                         && !Path::new(path)
                             .components()
@@ -901,8 +921,8 @@ fn validate_catalog_integrity(catalog: &PresentationCatalog) -> AnyResult<()> {
                         && size > 0
                         && !identity.trim().is_empty()
                         && !revision.trim().is_empty() => {}
-                (None, None, None, None, None) => {}
-                (Some(_), Some(_), Some(_), Some(_), Some(_)) => {
+                (None, None, None, None, None, None) => {}
+                (Some(_), Some(_), Some(_), Some(_), Some(_), Some(_)) => {
                     bail!(
                         "Shell Provider {} has an unsafe installed artifact path",
                         shell.provider_id
@@ -2005,6 +2025,7 @@ mod tests {
             descriptor_digest: "sha256:".to_string() + &"a".repeat(64),
             path: Some("installed.bin".into()),
             sha256: Some(digest),
+            entrypoint_sha256: Some(byte_digest(contents)),
             size: Some(contents.len() as u64),
             source_identity: Some("test:fixture".into()),
             source_revision: Some("test-revision".into()),
@@ -2083,6 +2104,7 @@ mod tests {
                 .into_owned(),
         );
         variant.sha256 = Some(digest);
+        variant.entrypoint_sha256 = Some(byte_digest(contents));
         variant.size = Some(contents.len() as u64);
         variant.source_identity = Some("test:persistence".into());
         variant.source_revision = Some("test-revision".into());
@@ -2251,6 +2273,7 @@ mod tests {
             .unwrap();
         variant.path = Some("bundled/presentation-artifacts/unsigned".into());
         variant.sha256 = Some("sha256:".to_string() + &"a".repeat(64));
+        variant.entrypoint_sha256 = Some("sha256:".to_string() + &"b".repeat(64));
         variant.size = Some(1);
         variant.source_identity = Some("test:unsigned".into());
         variant.source_revision = Some("test-revision".into());

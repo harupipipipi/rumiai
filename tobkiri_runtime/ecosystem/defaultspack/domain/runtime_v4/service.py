@@ -516,6 +516,7 @@ def resolve_default_profile(
     expected_application = (
         selected_variant["relative_path"],
         selected_variant["artifact_digest"],
+        selected_variant["entrypoint_digest"],
         f"{selected_variant['platform']}-{selected_variant['architecture']}",
         selected_variant["entrypoint"],
     )
@@ -523,6 +524,7 @@ def resolve_default_profile(
         (
             item.get("path"),
             item.get("digest"),
+            item.get("entrypoint_digest"),
             item.get("platform"),
             item.get("entrypoint"),
         )
@@ -532,7 +534,7 @@ def resolve_default_profile(
     if (
         actual_applications != [expected_application]
         or any(
-            function["implementation_digest"] != selected_variant["artifact_digest"]
+            function["implementation_digest"] != selected_variant["entrypoint_digest"]
             for function in application_manifest["functions"]
         )
     ):
@@ -679,7 +681,7 @@ def resolve_default_profile(
         "provider_id": provider_id,
         "pack_id": shell_pack_id,
         "artifact_digest": shell_manifest["pack"]["artifact_digest"],
-        "executable_artifact_digest": selected_variant["artifact_digest"],
+        "executable_artifact_digest": selected_variant["entrypoint_digest"],
         "definition_revision": shell_definition["definition_revision"],
         "contract_id": "app.shell.v1",
         "platform": shell_request["platform"],
@@ -743,7 +745,7 @@ def resolve_default_profile(
     application = {
         "pack_id": application_ids[0],
         "artifact_digest": application_manifest["pack"]["artifact_digest"],
-        "executable_artifact_digest": selected_variant["artifact_digest"],
+        "executable_artifact_digest": selected_variant["entrypoint_digest"],
         "definition_digest": canonical_digest(application_manifest),
     }
 
@@ -765,7 +767,7 @@ def resolve_default_profile(
             "provider_id": provider_id,
             "pack_id": shell_pack_id,
             "artifact_digest": shell_manifest["pack"]["artifact_digest"],
-            "executable_artifact_digest": selected_variant["artifact_digest"],
+            "executable_artifact_digest": selected_variant["entrypoint_digest"],
             "contract_id": "app.shell.v1",
             "definition_digest": canonical_digest(shell_definition),
         },
@@ -1685,7 +1687,7 @@ class ActivationStore:
             for item in definition["launch"]["variants"]
             if item["platform"] == shell.get("platform")
             and item["architecture"] == shell.get("architecture")
-            and item["artifact_digest"]
+            and item["entrypoint_digest"]
             == shell.get("executable_artifact_digest")
         ]
         if len(variants) != 1 or self._catalog.artifact_root is None:

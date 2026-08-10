@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -34,6 +35,57 @@ from tobkiri_protocol.provenance import informational_source_commit  # noqa: E40
 from tobkiri_protocol.validation import validate_document  # noqa: E402
 
 
+def _entrypoint_path(artifact_root: Path, entrypoint: str) -> Path:
+    path = artifact_root / entrypoint
+    try:
+        path.resolve(strict=True).relative_to(artifact_root.resolve(strict=True))
+    except (OSError, ValueError) as exc:
+        raise ValueError("packaged entrypoint escapes its artifact root") from exc
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("packaged entrypoint must be a regular file")
+    return path
+
+
+def stage_packaged_bundle(
+    *,
+    source_artifact: Path,
+    bundle_root: Path,
+    artifact_root: Path,
+    relative_path: str,
+    entrypoint: str,
+    platform: str,
+    architecture: str,
+    bundle_identity: str,
+    source_commit: str | None = None,
+) -> None:
+    """Own release-artifact materialization and packaged Profile generation."""
+
+    source = source_artifact.resolve(strict=True)
+    if source_artifact.is_symlink() or not (source.is_file() or source.is_dir()):
+        raise ValueError("verified release artifact is unavailable or symlinked")
+    # Validate the entire source before copying. Besides computing the canonical
+    # tree shape this rejects symlinks and unsupported entries recursively.
+    artifact_digest(source)
+    destination = artifact_root / relative_path
+    if destination.exists() or destination.is_symlink():
+        raise ValueError("packaged Profile artifact destination already exists")
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    if source.is_dir():
+        shutil.copytree(source, destination, symlinks=False)
+    else:
+        shutil.copy2(source, destination)
+    package_bundle(
+        bundle_root=bundle_root,
+        artifact_root=artifact_root,
+        relative_path=relative_path,
+        entrypoint=entrypoint,
+        platform=platform,
+        architecture=architecture,
+        bundle_identity=bundle_identity,
+        source_commit=source_commit,
+    )
+
+
 def package_bundle(
     *,
     bundle_root: Path,
@@ -52,10 +104,14 @@ def package_bundle(
     artifact_root = artifact_root.resolve(strict=True)
     selected_path = artifact_root / relative_path
     digest = artifact_digest(selected_path)
+    entrypoint_digest = "sha256:" + hashlib.sha256(
+        _entrypoint_path(artifact_root, entrypoint).read_bytes()
+    ).hexdigest()
     variant = {
         "platform": platform,
         "architecture": architecture,
         "artifact_digest": digest,
+        "entrypoint_digest": entrypoint_digest,
         "relative_path": relative_path,
         "entrypoint": entrypoint,
         "bundle_identity": bundle_identity,
@@ -122,6 +178,7 @@ def package_bundle(
             {
                 "path": relative_path,
                 "digest": digest,
+                "entrypoint_digest": entrypoint_digest,
                 "kind": "executable",
                 "platform": f"{platform}-{architecture}",
                 "entrypoint": entrypoint,
@@ -131,7 +188,7 @@ def package_bundle(
         ]
         pack["pack"]["artifact_digest"] = canonical_digest(pack["artifacts"])
         for function in pack["functions"]:
-            function["implementation_digest"] = digest
+            function["implementation_digest"] = entrypoint_digest
         source_path = f"ecosystem/defaultspack/v4/packs/{pack_name}"
         pack["provenance"] = _generated_provenance(
             pack, source_path, commit, generator_path=Path(__file__)
@@ -163,6 +220,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--bundle-root", type=Path, required=True)
     parser.add_argument("--artifact-root", type=Path, required=True)
+    parser.add_argument("--source-artifact", type=Path)
     parser.add_argument("--relative-path", required=True)
     parser.add_argument("--entrypoint", required=True)
     parser.add_argument("--platform", choices=("macos", "windows", "linux"), required=True)
@@ -170,7 +228,9 @@ def main() -> int:
     parser.add_argument("--bundle-identity", required=True)
     parser.add_argument("--source-commit")
     args = parser.parse_args()
-    package_bundle(
+    operation = stage_packaged_bundle if args.source_artifact else package_bundle
+    operation(
+        **({"source_artifact": args.source_artifact} if args.source_artifact else {}),
         bundle_root=args.bundle_root,
         artifact_root=args.artifact_root,
         relative_path=args.relative_path,

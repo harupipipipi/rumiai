@@ -215,7 +215,7 @@ def _shell_artifact(
         for item in definition["launch"]["variants"]
         if item["platform"] == selected_shell["platform"]
         and item["architecture"] == selected_shell["architecture"]
-        and item["artifact_digest"]
+        and item["entrypoint_digest"]
         == selected_shell["executable_artifact_digest"]
     ]
     if definition.get("availability") != "verified" or len(selected_variants) != 1:
@@ -261,7 +261,7 @@ def _shell_artifact(
         variants.append(
             ArtifactVariant(
                 variant_id=variant_id,
-                digest=selected_variant["artifact_digest"],
+                digest=selected_variant["entrypoint_digest"],
                 execution_kind=ExecutionKind.HOST_EXTENSION,
                 os=str(selected_variant["platform"]),
                 architecture=str(selected_variant["architecture"]),

@@ -62,13 +62,24 @@ The tracked source catalog deliberately marks Tauri and CLI Shell artifacts as
 `build_required`; it contains no launch variants or placeholder executable
 digests and cannot be activated. A packaging build stages its actual
 Application/Shell bytes and then runs
-`scripts/generate_packaged_defaultspack_v4_bundle.py`. That generator rejects
+`scripts/generate_packaged_defaultspack_v4_bundle.py`. The outer Launcher
+release staging path is the sole owner of this step: after it verifies the
+signed Presentation release, it passes that exact selected artifact to the
+generator, which copies it under `platform-artifacts`, writes the packaged
+Profile successor, and only then allows the runtime resource manifest to be
+sealed. The generic resource-preparation script cannot inject or overwrite a
+Profile artifact. The generator rejects
 missing paths, symlinks, sentinel or mismatched digests, wrong platform or CPU
 architecture, and a mismatched macOS bundle identifier. It writes one verified
-variant to the staged Shell definition and the same path and byte digest to the
-Application Pack and bundle lock. Runtime resolution verifies those bytes
-again, and production capture consumes the selected definition variant rather
-than synthesizing one from Function metadata.
+variant to the staged Shell definition. A directory artifact such as a macOS
+`.app` binds two typed digests: `artifact_digest` covers its deterministic,
+symlink-free whole tree, while `entrypoint_digest` covers the exact executable
+bytes. File artifacts on Linux and Windows retain the same distinction even
+when both values derive from one file. The Application Pack, launch Function,
+signed release index/lock, Python verifier, and Rust authority resolver preserve
+and independently verify both bindings. Production capture consumes the
+selected definition variant rather than synthesizing one from Function
+metadata.
 
 ## Transactions and settings
 

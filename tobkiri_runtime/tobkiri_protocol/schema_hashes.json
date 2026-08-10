@@ -14,7 +14,7 @@
     "inventory_v1.schema.json": "sha256:2cd124a405d451cd0858ee10a72e031cd34a5cfa5787ba93ed3b5e29123e1156",
     "pack_artifact_index_v4.schema.json": "sha256:861c30621208af2aac98c2e8c678171c6aba493d8fcec4d37b6ed00d769af305",
     "pack_contract_catalog_v4.schema.json": "sha256:132c18aeb94952853a914a3bb962150898dd2f8f9d24ec245b7252012603eebf",
-    "pack_manifest_v4.schema.json": "sha256:631876d5f930e352e54f09070d85d2dee6e767e33f8296b442dd92edd283524e",
+    "pack_manifest_v4.schema.json": "sha256:38ea3d19e207003bf4a8e07b08610c9ab3fd4e547113f74b1c9afcc282538900",
     "profile_lock_v4.schema.json": "sha256:879f2e8b975b9877a59f057e686b785ab4dd81357df688e6efa07927ec89e45e",
     "profile_lock_v5.schema.json": "sha256:ca9bf711182486d9e8aea29a84e980f9f28b1e960893da3568427fd493ee6f50",
     "profile_v4.schema.json": "sha256:b8e026f38d7477903f6ccbd04a0e855123491652c86c5bed6ae62c54cf146e85",
@@ -25,8 +25,8 @@
     "request_frame_v1.schema.json": "sha256:c8f54f0453faeb682103611a4b11e5996dd6f81d526588b7a2e7aebf8c7cba90",
     "resolved_plan_v1.schema.json": "sha256:c02a20f1c851ffd0957ee88bf0e1da914f45fef033cdc1f472a93ffbe41fde16",
     "resolved_plan_v2.schema.json": "sha256:8bbfff98ad91a8b119a5bcc07043c4eb4e28e3d4edb48e27a93fbca60c022fd5",
-    "shell_definition_v4.schema.json": "sha256:eb2c2fa49cb7903c11e57be4083154a840f099baecce23ab4daa4581a0902053",
-    "shell_definition_v5.schema.json": "sha256:0f654a7cd3595e05bac4785b8342755e44ce4dbd4d274ece6dd79e77e46af31b"
+    "shell_definition_v4.schema.json": "sha256:c1e4b4005b4c3267f33a72b9348b9777a3386279283390c4a12e9d9da55f2e81",
+    "shell_definition_v5.schema.json": "sha256:24ab2058a7dbe24018481a9ce06fc951211ebe9a84525da3a23aeed1df12daf6"
   },
   "generator": "tobkiri-protocol",
   "generator_version": "1.0.0",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from scripts.generate_packaged_defaultspack_v4_bundle import package_bundle
+from scripts.generate_packaged_defaultspack_v4_bundle import stage_packaged_bundle
 
 
 _INJECTED_BUNDLE_ROOT: Path | None = None
@@ -36,12 +36,13 @@ def build_packaged_profile_bundle(
 
     bundle = destination / "defaultspack" / "v4"
     artifacts = destination / "defaultspack" / "platform-artifacts"
-    executable = artifacts / "Tobkiri.AppImage"
+    executable = destination / "verified-release" / "Tobkiri.AppImage"
     executable.parent.mkdir(parents=True, exist_ok=True)
     executable.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 10 + b">\x00fixture")
     executable.chmod(0o755)
     shutil.copytree(source_bundle, bundle)
-    package_bundle(
+    stage_packaged_bundle(
+        source_artifact=executable,
         bundle_root=bundle,
         artifact_root=artifacts,
         relative_path="Tobkiri.AppImage",

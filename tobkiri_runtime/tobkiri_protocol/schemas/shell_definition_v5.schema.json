@@ -55,11 +55,12 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["platform", "architecture", "artifact_digest", "relative_path", "entrypoint", "bundle_identity"],
+            "required": ["platform", "architecture", "artifact_digest", "entrypoint_digest", "relative_path", "entrypoint", "bundle_identity"],
             "properties": {
               "platform": {"enum": ["macos", "windows", "linux"]},
               "architecture": {"enum": ["arm64", "x86_64"]},
               "artifact_digest": {"$ref": "https://schemas.tobkiri.local/io.tobkiri/common.v1.schema.json#/$defs/digest"},
+              "entrypoint_digest": {"$ref": "https://schemas.tobkiri.local/io.tobkiri/common.v1.schema.json#/$defs/digest"},
               "relative_path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
               "entrypoint": {"type": "string", "minLength": 1},
               "bundle_identity": {"type": "string", "minLength": 1}

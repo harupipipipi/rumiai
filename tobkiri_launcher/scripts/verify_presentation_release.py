@@ -153,6 +153,31 @@ def _validate_bundle_identity(artifact: Path, expected: object) -> None:
         )
 
 
+def _entrypoint_path(artifact: Path, value: object) -> Path:
+    """Resolve a catalog entrypoint strictly within its selected artifact."""
+
+    if not isinstance(value, str) or not value or "\\" in value:
+        raise RuntimeError("packaged artifact entrypoint is unsafe")
+    relative = Path(value)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise RuntimeError("packaged artifact entrypoint is unsafe")
+    if artifact.is_dir():
+        candidate = (
+            artifact / Path(*relative.parts[1:])
+            if relative.parts and relative.parts[0] == artifact.name
+            else artifact / relative
+        )
+        boundary = artifact.resolve()
+    else:
+        candidate = artifact
+        boundary = artifact.parent.resolve()
+    if candidate.is_symlink() or not candidate.is_file():
+        raise RuntimeError("packaged artifact entrypoint is missing or unsafe")
+    if not candidate.resolve().is_relative_to(boundary):
+        raise RuntimeError("packaged artifact entrypoint escapes its artifact")
+    return candidate
+
+
 def _host_target() -> tuple[str, str]:
     """Return the platform/architecture of the verifier host."""
     if sys.platform == "darwin":
@@ -238,6 +263,10 @@ def verify_release_binding(catalog: dict[str, Any], root: Path) -> dict[str, Any
     lock_body = {key: value for key, value in lock.items() if key != "lock_revision"}
     if _canonical_digest(lock_body) != lock.get("lock_revision"):
         raise RuntimeError("profile lock revision mismatch")
+    if index.get("sha256") != lock.get("artifact_sha256"):
+        raise RuntimeError("artifact tree digest differs between index and lock")
+    if index.get("entrypoint_sha256") != lock.get("entrypoint_sha256"):
+        raise RuntimeError("artifact entrypoint digest differs between index and lock")
     catalog_without_binding = {
         key: value for key, value in catalog.items() if key != "release_binding"
     }
@@ -325,9 +354,16 @@ def verify_catalog(
                 raise RuntimeError("packaged artifact variant is invalid")
             path_value = variant.get("path")
             digest_value = variant.get("sha256")
-            if (path_value is None) != (digest_value is None):
+            entrypoint_digest = variant.get("entrypoint_sha256")
+            if len(
+                {
+                    path_value is None,
+                    digest_value is None,
+                    entrypoint_digest is None,
+                }
+            ) != 1:
                 raise RuntimeError(
-                    "packaged artifact path and digest must be supplied together"
+                    "packaged artifact path and digests must be supplied together"
                 )
             if path_value is None:
                 blocked_artifacts.append(str(variant["artifact_id"]))
@@ -359,6 +395,11 @@ def verify_catalog(
             if variant.get("size") != actual_size:
                 raise RuntimeError(
                     f"packaged artifact size mismatch for {variant['artifact_id']}"
+                )
+            entrypoint = _entrypoint_path(artifact, variant.get("entrypoint"))
+            if _byte_digest(entrypoint.read_bytes()) != entrypoint_digest:
+                raise RuntimeError(
+                    f"packaged artifact entrypoint digest mismatch for {variant['artifact_id']}"
                 )
             if not variant.get("source_identity") or not variant.get("source_revision"):
                 raise RuntimeError(
@@ -427,7 +468,7 @@ def verify_catalog(
             ) from error
         index_path = resource_root_path / "bundled" / "shell_artifact_index.v4.json"
         index = json.loads(_regular_bytes(index_path, "artifact index"))
-        for field in ("path", "sha256", "size"):
+        for field in ("path", "sha256", "entrypoint_sha256", "size"):
             if selected_variant.get(field) != index.get(field):
                 raise RuntimeError(
                     f"catalog artifact metadata differs from artifact index: {field}"

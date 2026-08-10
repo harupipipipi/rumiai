@@ -6,6 +6,7 @@ import copy
 import hashlib
 import json
 import plistlib
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,7 @@ from tobkiri_protocol.provenance import (
     trusted_source_commit,
 )
 from scripts import generate_defaultspack_v4_bundle
+from scripts.generate_packaged_defaultspack_v4_bundle import stage_packaged_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
@@ -98,6 +100,8 @@ def _macos_artifact(tmp_path: Path) -> tuple[Path, dict[str, object]]:
         "architecture": "arm64",
         "bundle_identity": "io.tobkiri.shell.tauri",
         "artifact_digest": artifact_digest(application),
+        "entrypoint_digest": "sha256:"
+        + hashlib.sha256(executable.read_bytes()).hexdigest(),
     }
 
 
@@ -200,6 +204,45 @@ def test_macos_bundle_identity_mismatch_is_rejected(tmp_path: Path) -> None:
     variant["bundle_identity"] = "io.tobkiri.attacker"
     with pytest.raises(Exception, match="bundle identity does not match"):
         verify_platform_artifact(artifact_root, variant)
+
+
+def test_packaged_generator_binds_macos_tree_and_entrypoint_digests(
+    tmp_path: Path,
+) -> None:
+    source_root, _ = _macos_artifact(tmp_path / "source")
+    source_app = source_root / "Tobkiri.app"
+    resource = source_app / "Contents" / "Resources" / "presentation.json"
+    resource.parent.mkdir(parents=True)
+    resource.write_text("sealed presentation", encoding="utf-8")
+    bundle = tmp_path / "staged" / "defaultspack" / "v4"
+    artifacts = tmp_path / "staged" / "defaultspack" / "platform-artifacts"
+    shutil.copytree(SOURCE_BUNDLE, bundle)
+    stage_packaged_bundle(
+        source_artifact=source_app,
+        bundle_root=bundle,
+        artifact_root=artifacts,
+        relative_path="Tobkiri.app",
+        entrypoint="Tobkiri.app/Contents/MacOS/tobkiri-shell",
+        platform="macos",
+        architecture="arm64",
+        bundle_identity="io.tobkiri.shell.tauri",
+        source_commit=SOURCE_COMMIT,
+    )
+    shell = json.loads((bundle / "shell.tauri.default.shell.v1.json").read_text())
+    variant = shell["launch"]["variants"][0]
+    assert variant["artifact_digest"] != variant["entrypoint_digest"]
+    verify_platform_artifact(artifacts, variant)
+
+    staged_resource = artifacts / "Tobkiri.app/Contents/Resources/presentation.json"
+    staged_resource.write_text("tampered presentation", encoding="utf-8")
+    with pytest.raises(Exception, match="selected bytes"):
+        verify_platform_artifact(artifacts, variant)
+    staged_resource.write_text("sealed presentation", encoding="utf-8")
+
+    staged_entrypoint = artifacts / str(variant["entrypoint"])
+    staged_entrypoint.write_bytes(staged_entrypoint.read_bytes() + b"tamper")
+    with pytest.raises(Exception, match="selected bytes|entrypoint digest"):
+        verify_platform_artifact(artifacts, variant)
 
 
 def test_production_bundle_root_ignores_environment_attack(

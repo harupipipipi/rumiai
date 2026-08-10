@@ -363,6 +363,12 @@ fn write_runtime_resource_manifest(staged_root: &Path) -> io::Result<()> {
 struct VerifiedPresentationRelease {
     public_key: String,
     key_id: String,
+    artifact_path: PathBuf,
+    artifact_ref: String,
+    entrypoint: String,
+    bundle_identity: String,
+    platform: String,
+    architecture: String,
 }
 
 fn invalid_release(message: impl Into<String>) -> io::Error {
@@ -473,6 +479,34 @@ fn require_release_path(root: &Path, relative: &str, label: &str) -> io::Result<
 
 fn release_artifact_digest(path: &Path) -> io::Result<(String, u64)> {
     artifact_integrity::digest_and_size(path)
+}
+
+fn release_entrypoint(artifact: &Path, entrypoint: &str) -> io::Result<PathBuf> {
+    let relative = safe_release_relative_path(entrypoint, "artifact entrypoint")?;
+    let candidate = if artifact.is_dir()
+        && relative.components().next().and_then(|part| match part {
+            Component::Normal(value) => Some(value),
+            _ => None,
+        }) == artifact.file_name()
+    {
+        artifact.join(relative.components().skip(1).collect::<PathBuf>())
+    } else if artifact.is_dir() {
+        artifact.join(relative)
+    } else {
+        artifact.to_path_buf()
+    };
+    require_regular_file(&candidate, "release artifact entrypoint")?;
+    let artifact_parent = if artifact.is_dir() {
+        artifact.canonicalize()?
+    } else {
+        artifact.parent().unwrap_or(artifact).canonicalize()?
+    };
+    if !candidate.canonicalize()?.starts_with(artifact_parent) {
+        return Err(invalid_release(
+            "release artifact entrypoint escapes its artifact",
+        ));
+    }
+    Ok(candidate)
 }
 
 fn git_value(repo_root: &Path, args: &[&str], label: &str) -> io::Result<String> {
@@ -718,6 +752,7 @@ fn verify_presentation_release(release_root: &Path) -> io::Result<VerifiedPresen
     )?;
     let (artifact_digest, artifact_size) = release_artifact_digest(&artifact_path)?;
     if digest_field(index_object, "sha256", "artifact index")? != artifact_digest
+        || digest_field(lock_object, "artifact_sha256", "profile lock")? != artifact_digest
         || object_field(index_object, "size", "artifact index")?.as_u64() != Some(artifact_size)
     {
         return Err(invalid_release("artifact digest or size mismatch"));
@@ -755,7 +790,13 @@ fn verify_presentation_release(release_root: &Path) -> io::Result<VerifiedPresen
         .ok_or_else(|| {
             invalid_release("signed artifact does not match the default Profile Shell")
         })?;
-    for field in ["path", "sha256", "source_identity", "source_revision"] {
+    for field in [
+        "path",
+        "sha256",
+        "entrypoint_sha256",
+        "source_identity",
+        "source_revision",
+    ] {
         if text_field(selected_variant, field, "selected artifact variant")?
             != text_field(index_object, field, "artifact index")?
         {
@@ -764,6 +805,24 @@ fn verify_presentation_release(release_root: &Path) -> io::Result<VerifiedPresen
             )));
         }
     }
+    let entrypoint = text_field(selected_variant, "entrypoint", "selected artifact variant")?;
+    let entrypoint_path = release_entrypoint(&artifact_path, &entrypoint)?;
+    let entrypoint_digest = byte_digest(&fs::read(&entrypoint_path)?);
+    if digest_field(index_object, "entrypoint_sha256", "artifact index")? != entrypoint_digest
+        || digest_field(lock_object, "entrypoint_sha256", "profile lock")? != entrypoint_digest
+    {
+        return Err(invalid_release("artifact entrypoint digest mismatch"));
+    }
+    let artifact_ref = text_field(
+        selected_variant,
+        "artifact_ref",
+        "selected artifact variant",
+    )?;
+    let bundle_identity = text_field(
+        selected_variant,
+        "bundle_identifier",
+        "selected artifact variant",
+    )?;
     if object_field(selected_variant, "size", "selected artifact variant")?.as_u64()
         != Some(artifact_size)
     {
@@ -872,7 +931,16 @@ fn verify_presentation_release(release_root: &Path) -> io::Result<VerifiedPresen
             ));
         }
     }
-    Ok(VerifiedPresentationRelease { public_key, key_id })
+    Ok(VerifiedPresentationRelease {
+        public_key,
+        key_id,
+        artifact_path,
+        artifact_ref,
+        entrypoint,
+        bundle_identity,
+        platform,
+        architecture,
+    })
 }
 
 fn is_intermediate_shell_build() -> bool {
@@ -961,6 +1029,39 @@ fn stage_presentation_release_at(
             &release_bundled.join(filename),
             &staged_bundled.join(filename),
         )?;
+    }
+    let bundle_root = staged_root.join("ecosystem/defaultspack/v4");
+    if bundle_root.is_dir() {
+        let generator = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tobkiri_runtime/scripts/generate_packaged_defaultspack_v4_bundle.py");
+        let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
+        let status = Command::new(python)
+            .arg(generator)
+            .arg("--source-artifact")
+            .arg(&verified.artifact_path)
+            .arg("--bundle-root")
+            .arg(&bundle_root)
+            .arg("--artifact-root")
+            .arg(staged_root.join("ecosystem/defaultspack/platform-artifacts"))
+            .arg("--relative-path")
+            .arg(&verified.artifact_ref)
+            .arg("--entrypoint")
+            .arg(&verified.entrypoint)
+            .arg("--platform")
+            .arg(&verified.platform)
+            .arg("--architecture")
+            .arg(&verified.architecture)
+            .arg("--bundle-identity")
+            .arg(&verified.bundle_identity)
+            .status()
+            .map_err(|error| {
+                invalid_release(format!("failed to run packaged Profile generator: {error}"))
+            })?;
+        if !status.success() {
+            return Err(invalid_release(format!(
+                "packaged Profile generator exited with {status}"
+            )));
+        }
     }
     Ok(Some(catalog))
 }
@@ -2163,6 +2264,7 @@ mod tests {
         fs::write(&artifacts, artifact_payload).expect("release artifact should be writable");
         let (artifact_digest, artifact_size) =
             release_artifact_digest(&artifacts).expect("fixture artifact should hash");
+        let entrypoint_digest = byte_digest(artifact_payload);
         let source_identity = "test:source";
         let source_revision = "a".repeat(40);
         let index = serde_json::json!({
@@ -2170,6 +2272,7 @@ mod tests {
             "artifact_id": artifact_id,
             "path": artifact_path.to_string_lossy().replace('\\', "/"),
             "sha256": artifact_digest,
+            "entrypoint_sha256": entrypoint_digest,
             "size": artifact_size,
             "platform": "linux",
             "architecture": "x86_64",
@@ -2192,6 +2295,10 @@ mod tests {
                     "architecture": "x86_64",
                     "path": artifact_path.to_string_lossy().replace('\\', "/"),
                     "sha256": artifact_digest,
+                    "entrypoint_sha256": entrypoint_digest,
+                    "artifact_ref": "verified-shell",
+                    "entrypoint": "verified-shell",
+                    "bundle_identifier": "io.tobkiri.shell.tauri",
                     "size": artifact_size,
                     "source_identity": source_identity,
                     "source_revision": source_revision,
@@ -2209,6 +2316,7 @@ mod tests {
             "artifact_index_sha256": index_digest,
             "artifact_id": artifact_id,
             "artifact_sha256": artifact_digest,
+            "entrypoint_sha256": entrypoint_digest,
             "platform": "linux",
             "architecture": "x86_64",
             "source_identity": source_identity,

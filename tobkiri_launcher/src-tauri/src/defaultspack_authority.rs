@@ -122,21 +122,14 @@ pub(crate) fn resolve(config: &AppConfig) -> Result<GuardianAuthority> {
         DEFAULTSPACK_PACK_PATH,
         catalog.source_manifest_digests.get("defaultspack"),
     )?;
-    require_catalog_digest(
-        &entries,
-        SHELL_PACK_PATH,
-        catalog.source_manifest_digests.get(DEFAULT_SHELL_ID),
-    )?;
-    require_catalog_digest(
-        &entries,
-        RUNTIME_PACK_PATH,
-        catalog.source_manifest_digests.get(DEFAULT_RUNTIME_ID),
-    )?;
-    require_catalog_digest(
-        &entries,
-        PROFILE_PATH,
-        Some(&catalog.default_profile_digest),
-    )?;
+    // Shell, Application, and Profile are intentional packaged successors of
+    // the signed source definitions. Their exact bytes are bound by the sealed
+    // bundle lock; the selected release artifact is independently bound below.
+    for path in [SHELL_PACK_PATH, RUNTIME_PACK_PATH, PROFILE_PATH] {
+        if !entries.contains_key(path) {
+            bail!("packaged authority is absent from the bundle lock: {path}");
+        }
+    }
 
     let profile = read_json(&bundle_root.join(PROFILE_PATH), "Defaults Profile v5")?;
     let selected_variant = validate_profile(&profile, &catalog)?;
@@ -155,11 +148,15 @@ pub(crate) fn resolve(config: &AppConfig) -> Result<GuardianAuthority> {
     verify_pack_artifact_index(&pack_root, &bundle_root)?;
 
     let catalog_revision = crate::presentation::catalog_revision(&catalog)?;
+    let profile_digest = entries
+        .get(PROFILE_PATH)
+        .context("packaged Profile is absent from the bundle lock")?
+        .clone();
     Ok(GuardianAuthority {
         pack_root,
         launch,
         profile_id: DEFAULT_PROFILE_ID.to_string(),
-        profile_digest: catalog.default_profile_digest,
+        profile_digest,
         catalog_revision,
     })
 }
@@ -221,7 +218,27 @@ fn validate_application_pack(
 
     let artifact_digest = value_str(&artifacts[0], "/digest")
         .context("application Pack artifact digest is missing")?;
-    if value_str(&functions[0], "/implementation_digest") != Some(artifact_digest)
+    let entrypoint_digest = value_str(&artifacts[0], "/entrypoint_digest")
+        .context("application Pack entrypoint digest is missing")?;
+    #[cfg(not(test))]
+    if selected_variant.sha256.as_deref() != Some(artifact_digest)
+        || selected_variant.entrypoint_sha256.as_deref() != Some(entrypoint_digest)
+    {
+        bail!("application Pack differs from its signed release artifact");
+    }
+    #[cfg(test)]
+    if selected_variant
+        .sha256
+        .as_deref()
+        .is_some_and(|digest| digest != artifact_digest)
+        || selected_variant
+            .entrypoint_sha256
+            .as_deref()
+            .is_some_and(|digest| digest != entrypoint_digest)
+    {
+        bail!("application Pack differs from its test release artifact");
+    }
+    if value_str(&functions[0], "/implementation_digest") != Some(entrypoint_digest)
         || value_str(pack, "/pack/artifact_digest")
             != value_str(pack, "/integrity/artifact_set_digest")
         || sha256(&serde_json::to_vec(artifacts)?)
@@ -251,12 +268,16 @@ fn validate_application_pack(
         bail!("application Pack entrypoint escapes its selected artifact");
     }
     let artifact_root = pack_root.join("platform-artifacts");
+    let artifact_candidate = artifact_root.join(&artifact_relative);
     let candidate = artifact_root.join(relative);
     let bytes = read_regular_file(&candidate, "application Pack entrypoint")?;
     let canonical = candidate
         .canonicalize()
         .context("failed to canonicalize application Pack entrypoint")?;
-    if !canonical.starts_with(&artifact_root) || sha256(&bytes) != artifact_digest {
+    if !canonical.starts_with(&artifact_root)
+        || artifact_tree_digest(&artifact_candidate)? != artifact_digest
+        || sha256(&bytes) != entrypoint_digest
+    {
         bail!("application Pack entrypoint escaped or failed artifact verification");
     }
 
@@ -292,7 +313,7 @@ fn validate_application_pack(
     Ok(GuardianLaunch {
         entrypoint: canonical,
         argv: Vec::new(),
-        artifact_digest: artifact_digest.to_string(),
+        artifact_digest: entrypoint_digest.to_string(),
         function_id: DEFAULT_RUNTIME_ID.to_string(),
         provider_id: DEFAULT_RUNTIME_ID.to_string(),
     })
@@ -339,6 +360,46 @@ fn read_json(path: &Path, label: &str) -> Result<Value> {
 
 fn sha256(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+fn artifact_tree_digest(path: &Path) -> Result<String> {
+    fn visit(root: &Path, path: &Path, hasher: &mut Sha256) -> Result<()> {
+        let metadata = fs::symlink_metadata(path)
+            .with_context(|| format!("packaged artifact is missing at {}", path.display()))?;
+        if metadata.file_type().is_symlink() {
+            bail!(
+                "packaged artifact may not contain a symlink: {}",
+                path.display()
+            );
+        }
+        if metadata.is_file() {
+            let relative = path
+                .strip_prefix(root)
+                .unwrap_or(Path::new(""))
+                .to_string_lossy()
+                .replace('\\', "/");
+            hasher.update(relative.as_bytes());
+            hasher.update([0]);
+            hasher.update(read_regular_file(path, "packaged artifact file")?);
+            return Ok(());
+        }
+        if !metadata.is_dir() {
+            bail!(
+                "packaged artifact contains an unsupported entry: {}",
+                path.display()
+            );
+        }
+        let mut children = fs::read_dir(path)?.collect::<std::io::Result<Vec<_>>>()?;
+        children.sort_by_key(|entry| entry.file_name());
+        for child in children {
+            visit(root, &child.path(), hasher)?;
+        }
+        Ok(())
+    }
+
+    let mut hasher = Sha256::new();
+    visit(path, path, &mut hasher)?;
+    Ok(format!("sha256:{:x}", hasher.finalize()))
 }
 
 fn safe_relative(value: &str) -> Result<PathBuf> {
@@ -639,45 +700,64 @@ mod tests {
     }
 
     fn package_fixture_application(config: &AppConfig) {
-        let relative = "Tobkiri.app";
-        let entrypoint = "Tobkiri.app/Contents/MacOS/tobkiri-shell";
-        let executable = config
-            .app_dir
-            .join("ecosystem/defaultspack/platform-artifacts")
-            .join(entrypoint);
+        let source = config.app_dir.join("fixture-release/Tobkiri.app");
+        let executable = source.join("Contents/MacOS/tobkiri-shell");
         fs::create_dir_all(executable.parent().unwrap()).unwrap();
-        fs::write(&executable, b"packaged Tauri fixture").unwrap();
-        let executable_digest = sha256(&fs::read(&executable).unwrap());
-        rewrite_runtime_pack(config, |pack| {
-            let contract_map = pack["artifacts"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|artifact| artifact["kind"] == "asset")
-                .unwrap()
-                .clone();
-            let artifacts = serde_json::json!([
-                {
-                    "path": relative,
-                    "digest": executable_digest.clone(),
-                    "kind": "executable",
-                    "platform": "macos-arm64",
-                    "entrypoint": entrypoint,
-                    "argv": []
-                },
-                {
-                    "path": contract_map["path"],
-                    "digest": contract_map["digest"],
-                    "kind": "asset",
-                    "platform": "host"
-                }
-            ]);
-            let artifact_set_digest = sha256(&serde_json::to_vec(&artifacts).unwrap());
-            pack["artifacts"] = artifacts;
-            pack["pack"]["artifact_digest"] = Value::String(artifact_set_digest.clone());
-            pack["integrity"]["artifact_set_digest"] = Value::String(artifact_set_digest);
-            pack["functions"][0]["implementation_digest"] = Value::String(executable_digest);
-        });
+        fs::write(
+            &executable,
+            b"\xcf\xfa\xed\xfe\x0c\x00\x00\x01packaged Tauri fixture",
+        )
+        .unwrap();
+        fs::write(
+            source.join("Contents/Info.plist"),
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict><key>CFBundleIdentifier</key>
+<string>io.tobkiri.shell.tauri</string></dict></plist>"#,
+        )
+        .unwrap();
+        fs::create_dir_all(source.join("Contents/Resources")).unwrap();
+        fs::write(
+            source.join("Contents/Resources/presentation.json"),
+            b"sealed presentation fixture",
+        )
+        .unwrap();
+
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
+        let status = std::process::Command::new(python)
+            .arg(
+                repository
+                    .join("tobkiri_runtime/scripts/generate_packaged_defaultspack_v4_bundle.py"),
+            )
+            .arg("--source-artifact")
+            .arg(&source)
+            .arg("--bundle-root")
+            .arg(config.app_dir.join("ecosystem/defaultspack/v4"))
+            .arg("--artifact-root")
+            .arg(
+                config
+                    .app_dir
+                    .join("ecosystem/defaultspack/platform-artifacts"),
+            )
+            .arg("--relative-path")
+            .arg("Tobkiri.app")
+            .arg("--entrypoint")
+            .arg("Tobkiri.app/Contents/MacOS/tobkiri-shell")
+            .arg("--platform")
+            .arg("macos")
+            .arg("--architecture")
+            .arg("arm64")
+            .arg("--bundle-identity")
+            .arg("io.tobkiri.shell.tauri")
+            .arg("--source-commit")
+            .arg("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .current_dir(repository)
+            .status()
+            .unwrap();
+        assert!(
+            status.success(),
+            "official packaged Profile generator failed"
+        );
     }
 
     fn copy_tree(source: &Path, destination: &Path) {
@@ -859,7 +939,7 @@ mod tests {
             fs::write(
                 config
                     .app_dir
-                    .join("ecosystem/defaultspack/defaultspack/desktop_app.py"),
+                    .join("ecosystem/defaultspack/platform-artifacts/Tobkiri.app/Contents/MacOS/tobkiri-shell"),
                 b"raise SystemExit(0)\n",
             )
             .unwrap();
@@ -873,6 +953,25 @@ mod tests {
             );
             fs::remove_dir_all(root).unwrap();
         }
+    }
+
+    #[test]
+    fn macos_non_entrypoint_bundle_tamper_fails_tree_digest() {
+        let (root, config) = fixture("macos-resource-tamper");
+        resolve(&config).unwrap();
+        fs::write(
+            config.app_dir.join(
+                "ecosystem/defaultspack/platform-artifacts/Tobkiri.app/Contents/Resources/presentation.json",
+            ),
+            b"tampered presentation fixture",
+        )
+        .unwrap();
+        let error = resolve(&config).unwrap_err().to_string();
+        assert!(
+            error.contains("failed artifact verification"),
+            "unexpected tree tamper error: {error}"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -928,7 +1027,7 @@ mod tests {
         fs::write(
             tamper_config
                 .app_dir
-                .join("ecosystem/defaultspack/defaultspack/desktop_app.py"),
+                .join("ecosystem/defaultspack/platform-artifacts/Tobkiri.app/Contents/MacOS/tobkiri-shell"),
             b"raise SystemExit(0)\n",
         )
         .unwrap();

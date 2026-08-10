@@ -12,26 +12,24 @@ from .errors import ProtocolError
 
 
 def artifact_digest(path: Path) -> str:
-    """Digest a regular file or a symlink-free artifact tree deterministically."""
+    """Return the canonical v1 artifact-tree digest used by release packaging."""
 
     digest = hashlib.sha256()
-    if path.is_symlink():
-        raise ProtocolError("packaged artifact must not be a symlink")
-    if path.is_file():
-        digest.update(_stable_read(path))
-    elif path.is_dir():
-        for item in sorted(path.rglob("*")):
-            if item.is_symlink():
-                raise ProtocolError("packaged artifact tree contains a symlink")
-            if item.is_file():
-                relative = item.relative_to(path).as_posix().encode("utf-8")
-                digest.update(len(relative).to_bytes(8, "big"))
-                digest.update(relative)
-                payload = _stable_read(item)
-                digest.update(len(payload).to_bytes(8, "big"))
-                digest.update(payload)
-    else:
-        raise ProtocolError("packaged artifact is missing")
+
+    def visit(current: Path, relative: tuple[str, ...]) -> None:
+        if current.is_symlink():
+            raise ProtocolError("packaged artifact tree contains a symlink")
+        if current.is_file():
+            digest.update("/".join(relative).encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(_stable_read(current))
+            return
+        if not current.is_dir():
+            raise ProtocolError("packaged artifact entry is unavailable")
+        for child in sorted(current.iterdir(), key=lambda item: item.name):
+            visit(child, (*relative, child.name))
+
+    visit(path, ())
     return "sha256:" + digest.hexdigest()
 
 
@@ -91,6 +89,9 @@ def verify_platform_artifact(
         raise ProtocolError("packaged artifact entrypoint is missing or outside artifact") from exc
     if entrypoint.is_symlink() or not entrypoint.is_file():
         raise ProtocolError("packaged artifact entrypoint is not a regular file")
+    entrypoint_digest = "sha256:" + hashlib.sha256(_stable_read(entrypoint)).hexdigest()
+    if entrypoint_digest != variant.get("entrypoint_digest"):
+        raise ProtocolError("packaged artifact entrypoint digest does not match")
     if str(variant["platform"]) == "macos":
         info_path = artifact / "Contents" / "Info.plist"
         if info_path.is_symlink() or not info_path.is_file():
