@@ -30,8 +30,7 @@ struct GitHubRelease {
 pub const RELEASE_REPOSITORY: &str = "harupipipipi/tobkiri";
 
 /// The GitHub API endpoint for the latest release.
-const RELEASES_API: &str =
-    "https://api.github.com/repos/harupipipipi/tobkiri/releases/latest";
+const RELEASES_API: &str = "https://api.github.com/repos/harupipipipi/tobkiri/releases/latest";
 
 /// HTTP request timeout in seconds.
 const TIMEOUT_SECS: u64 = 10;
