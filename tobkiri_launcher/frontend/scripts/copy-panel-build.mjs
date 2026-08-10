@@ -1,6 +1,8 @@
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+import { canonicalBuildBytes } from "./canonical-build-output.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const FRONTEND_ROOT = resolve(SCRIPT_DIR, "..");
@@ -10,16 +12,46 @@ const DEFAULT_PANEL_DIR = resolve(
   "../../tobkiri_runtime/core_runtime/core_pack/core_control_panel/web",
 );
 
+function compareNames(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+async function listFiles(current) {
+  const entries = await readdir(current, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries.sort((left, right) => compareNames(left.name, right.name))) {
+    const path = resolve(current, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await listFiles(path));
+    } else if (entry.isFile()) {
+      files.push(path);
+    } else {
+      throw new Error(`panel build contains an unsupported entry: ${path}`);
+    }
+  }
+  return files;
+}
+
+async function copyCanonicalFile(sourcePath, distDir, panelDir) {
+  const relativePath = relative(distDir, sourcePath).split(sep).join("/");
+  const destination = resolve(panelDir, relativePath);
+  await mkdir(dirname(destination), { recursive: true });
+  const bytes = await readFile(sourcePath);
+  const output = canonicalBuildBytes(relativePath, bytes);
+  if (!bytes.equals(output)) await writeFile(sourcePath, output);
+  await writeFile(destination, output);
+}
+
 export async function copyPanelBuild({
   distDir = DEFAULT_DIST_DIR,
   panelDir = DEFAULT_PANEL_DIR,
 } = {}) {
   await rm(panelDir, { recursive: true, force: true });
   await mkdir(panelDir, { recursive: true });
-  await cp(distDir, panelDir, { recursive: true });
-  const indexPath = resolve(panelDir, "index.html");
-  const indexHtml = await readFile(indexPath, "utf8");
-  await writeFile(indexPath, indexHtml.replace(/\r\n?/g, "\n"), "utf8");
+  const files = await listFiles(distDir);
+  for (const sourcePath of files) {
+    await copyCanonicalFile(sourcePath, distDir, panelDir);
+  }
   return { distDir, panelDir };
 }
 

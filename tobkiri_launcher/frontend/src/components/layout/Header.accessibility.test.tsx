@@ -24,6 +24,69 @@ function createSurface(): {dom: JSDOM; container: HTMLElement; root: Root} {
   return {dom, container, root: createRoot(container)};
 }
 
+const GLOBAL_SURFACE_KEYS = [
+  'window',
+  'document',
+  'navigator',
+  'localStorage',
+  'IS_REACT_ACT_ENVIRONMENT',
+] as const;
+
+type GlobalSurfaceKey = (typeof GLOBAL_SURFACE_KEYS)[number];
+type GlobalSurfaceSnapshot = {
+  [key in GlobalSurfaceKey]: PropertyDescriptor | undefined;
+};
+
+function captureGlobalSurface(): GlobalSurfaceSnapshot {
+  return {
+    window: Object.getOwnPropertyDescriptor(globalThis, 'window'),
+    document: Object.getOwnPropertyDescriptor(globalThis, 'document'),
+    navigator: Object.getOwnPropertyDescriptor(globalThis, 'navigator'),
+    localStorage: Object.getOwnPropertyDescriptor(globalThis, 'localStorage'),
+    IS_REACT_ACT_ENVIRONMENT: Object.getOwnPropertyDescriptor(globalThis, 'IS_REACT_ACT_ENVIRONMENT'),
+  };
+}
+
+function restoreGlobalSurface(snapshot: GlobalSurfaceSnapshot): void {
+  for (const key of GLOBAL_SURFACE_KEYS) {
+    const descriptor = snapshot[key];
+    if (descriptor) {
+      Object.defineProperty(globalThis, key, descriptor);
+    } else {
+      Reflect.deleteProperty(globalThis, key);
+    }
+  }
+}
+
+type Surface = ReturnType<typeof createSurface>;
+
+async function cleanupSurface(
+  surface: Surface | undefined,
+  snapshot: GlobalSurfaceSnapshot,
+  release: () => void,
+  restoreState?: () => void,
+): Promise<void> {
+  try {
+    if (surface) {
+      await act(async () => { surface.root.unmount(); });
+    }
+  } finally {
+    try {
+      restoreState?.();
+    } finally {
+      try {
+        surface?.dom.window.close();
+      } finally {
+        try {
+          restoreGlobalSurface(snapshot);
+        } finally {
+          release();
+        }
+      }
+    }
+  }
+}
+
 const nextTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 async function waitForFocus(dom: JSDOM, target: HTMLElement): Promise<void> {
@@ -48,12 +111,13 @@ async function acquireDomTestLock(): Promise<() => void> {
 
 test('Header avatar is an actionable Profile/Settings entry with focus, Escape, return focus, and tap behavior', {concurrency: false}, async () => {
   const release = await acquireDomTestLock();
+  const globalSurfaceSnapshot = captureGlobalSurface();
   const previousState = useAppStore.getState();
-  const previousWindow = globalThis.window;
-  const previousDocument = globalThis.document;
-  const {dom, container, root} = createSurface();
-  useAppStore.setState({profile: {...previousState.profile, username: 'Test User'}});
+  let surface: Surface | undefined;
   try {
+    surface = createSurface();
+    const {dom, container, root} = surface;
+    useAppStore.setState({profile: {...previousState.profile, username: 'Test User'}});
     await act(async () => {
       root.render(
         <MemoryRouter initialEntries={['/']}>
@@ -87,21 +151,17 @@ test('Header avatar is an actionable Profile/Settings entry with focus, Escape, 
     await act(async () => { settings.click(); await nextTick(); });
     assert.equal(dom.window.document.querySelector('[role="dialog"][aria-label="Profile menu"]'), null);
   } finally {
-    await act(async () => { root.unmount(); });
-    useAppStore.setState(previousState, true);
-    dom.window.close();
-    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
-    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
-    release();
+    await cleanupSurface(surface, globalSurfaceSnapshot, release, () => useAppStore.setState(previousState, true));
   }
 });
 
 test('mobile navigation exposes a named menu, moves focus, and closes on Escape or selection', {concurrency: false}, async () => {
   const release = await acquireDomTestLock();
-  const previousWindow = globalThis.window;
-  const previousDocument = globalThis.document;
-  const {dom, container, root} = createSurface();
+  const globalSurfaceSnapshot = captureGlobalSurface();
+  let surface: Surface | undefined;
   try {
+    surface = createSurface();
+    const {dom, container, root} = surface;
     await act(async () => {
       root.render(
         <MemoryRouter initialEntries={['/']}>
@@ -136,10 +196,6 @@ test('mobile navigation exposes a named menu, moves focus, and closes on Escape 
     await act(async () => { packsLink.click(); await nextTick(); });
     assert.equal(dom.window.document.querySelector('[role="menu"][aria-label="Mobile navigation"]'), null);
   } finally {
-    await act(async () => { root.unmount(); });
-    dom.window.close();
-    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
-    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
-    release();
+    await cleanupSurface(surface, globalSurfaceSnapshot, release);
   }
 });

@@ -11,11 +11,13 @@ test('measureBuild separates initial JavaScript, CSS, and lazy route chunks', as
   try {
     await mkdir(join(root, 'assets'), {recursive: true});
     await writeFile(join(root, 'assets/main.js'), 'console.log("main")');
+    await writeFile(join(root, 'assets/extra.js'), 'console.log("extra")');
     await writeFile(join(root, 'assets/shared.js'), 'export const shared = true');
     await writeFile(join(root, 'assets/Packs.js'), 'console.log("packs")');
     await writeFile(join(root, 'assets/main.css'), 'body{}');
     await writeFile(join(root, 'manifest.json'), JSON.stringify({
-      'src/main.tsx': {file: 'assets/main.js', css: ['assets/main.css'], imports: ['shared'], isEntry: true},
+      'src/main.tsx': {file: 'assets/main.js', css: ['assets/main.css'], imports: ['shared', 'extra'], isEntry: true},
+      extra: {file: 'assets/extra.js'},
       shared: {file: 'assets/shared.js'},
       'src/pages/Packs.tsx': {file: 'assets/Packs.js', imports: ['shared']},
     }));
@@ -44,6 +46,16 @@ test('measureBuild separates initial JavaScript, CSS, and lazy route chunks', as
     assert.equal(JSON.parse(firstReport).entry, 'src/main.tsx');
     assert.equal('generated_at' in report, false);
 
+    const manifest = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8'));
+    const reorderedManifest = Object.fromEntries(
+      Object.entries(manifest)
+        .reverse()
+        .map(([key, entry]) => [key, {
+          ...entry,
+          imports: entry.imports ? [...entry.imports].reverse() : entry.imports,
+        }]),
+    );
+    await writeFile(join(root, 'manifest.json'), JSON.stringify(reorderedManifest));
     await measureBuild({distDir: root});
     assert.equal(await readFile(outputPath, 'utf8'), firstReport);
   } finally {

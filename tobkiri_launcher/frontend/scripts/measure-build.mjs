@@ -3,6 +3,8 @@ import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
+import {canonicalBuildBytes} from './canonical-build-output.mjs';
+
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const FRONTEND_ROOT = resolve(SCRIPT_DIR, '..');
 const DEFAULT_DIST_DIR = resolve(FRONTEND_ROOT, 'dist');
@@ -10,6 +12,14 @@ const STATIC_ROUTE_SOURCES = [
   'src/pages/Setup.tsx',
   'src/pages/Dashboard.tsx',
 ];
+
+function comparePaths(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function sortedUnique(values) {
+  return [...new Set(values)].sort(comparePaths);
+}
 
 /**
  * Keep build metrics mechanically aligned with the lazy route registry. The
@@ -35,7 +45,7 @@ async function fileMetric(distDir, relativePath) {
 
 function manifestKey(manifest, source) {
   if (manifest[source]) return source;
-  return Object.keys(manifest).find((key) => key.endsWith(source)) ?? null;
+  return [...Object.keys(manifest)].sort(comparePaths).find((key) => key.endsWith(source)) ?? null;
 }
 
 function collectStaticClosure(manifest, startKeys) {
@@ -43,23 +53,29 @@ function collectStaticClosure(manifest, startKeys) {
   const visit = (key) => {
     if (!key || keys.has(key) || !manifest[key]) return;
     keys.add(key);
-    for (const imported of manifest[key].imports ?? []) visit(imported);
+    for (const imported of [...(manifest[key].imports ?? [])].sort(comparePaths)) visit(imported);
   };
-  for (const key of startKeys) visit(key);
-  return [...keys];
+  for (const key of [...startKeys].sort(comparePaths)) visit(key);
+  return [...keys].sort(comparePaths);
 }
 
 function sumMetrics(files) {
+  const sortedFiles = [...files].sort((left, right) => comparePaths(left.file, right.file));
   return {
-    files,
-    raw_bytes: files.reduce((sum, item) => sum + item.raw_bytes, 0),
-    gzip_bytes: files.reduce((sum, item) => sum + item.gzip_bytes, 0),
+    files: sortedFiles,
+    raw_bytes: sortedFiles.reduce((sum, item) => sum + item.raw_bytes, 0),
+    gzip_bytes: sortedFiles.reduce((sum, item) => sum + item.gzip_bytes, 0),
   };
 }
 
 export async function measureBuild({distDir = DEFAULT_DIST_DIR, baselinePath} = {}) {
-  const manifest = JSON.parse(await readFile(resolve(distDir, 'manifest.json'), 'utf8'));
-  const entryKey = Object.keys(manifest).find((key) => manifest[key].isEntry) ?? manifestKey(manifest, 'src/main.tsx');
+  const manifestPath = resolve(distDir, 'manifest.json');
+  const manifestBytes = await readFile(manifestPath);
+  const canonicalManifestBytes = canonicalBuildBytes('manifest.json', manifestBytes);
+  if (!manifestBytes.equals(canonicalManifestBytes)) await writeFile(manifestPath, canonicalManifestBytes);
+  const manifest = JSON.parse(canonicalManifestBytes.toString('utf8'));
+  const entryKey = [...Object.keys(manifest)].sort(comparePaths).find((key) => manifest[key].isEntry)
+    ?? manifestKey(manifest, 'src/main.tsx');
   if (!entryKey) throw new Error('Vite manifest does not contain an application entry');
 
   const initialKeys = collectStaticClosure(manifest, [entryKey]);
@@ -71,9 +87,9 @@ export async function measureBuild({distDir = DEFAULT_DIST_DIR, baselinePath} = 
   }
 
   const allJs = [...new Set(Object.values(manifest).map((entry) => entry.file).filter((file) => file.endsWith('.js')))];
-  const initialJavaScript = await Promise.all([...initialJsFiles].map((file) => fileMetric(distDir, file)));
-  const initialCss = await Promise.all([...initialCssFiles].map((file) => fileMetric(distDir, file)));
-  const allJavaScript = await Promise.all(allJs.map((file) => fileMetric(distDir, file)));
+  const initialJavaScript = await Promise.all(sortedUnique(initialJsFiles).map((file) => fileMetric(distDir, file)));
+  const initialCss = await Promise.all(sortedUnique(initialCssFiles).map((file) => fileMetric(distDir, file)));
+  const allJavaScript = await Promise.all(sortedUnique(allJs).map((file) => fileMetric(distDir, file)));
 
   const routes = {};
   const routeSources = [...STATIC_ROUTE_SOURCES, ...(await lazyRouteSources())];
@@ -84,7 +100,7 @@ export async function measureBuild({distDir = DEFAULT_DIST_DIR, baselinePath} = 
       continue;
     }
     const closure = collectStaticClosure(manifest, [key]);
-    const files = [...new Set(closure.map((item) => manifest[item].file))];
+    const files = sortedUnique(closure.map((item) => manifest[item].file));
     const metrics = await Promise.all(files.map((file) => fileMetric(distDir, file)));
     routes[source] = {present: true, ...sumMetrics(metrics)};
   }
