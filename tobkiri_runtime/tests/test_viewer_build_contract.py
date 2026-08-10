@@ -121,14 +121,25 @@ def test_macos_installer_uses_finder_free_verified_dmg_packager():
     for required in (
         "codesign --verify --deep --strict",
         "ditto",
+        "command -v plutil",
         "ln -s /Applications",
         "hdiutil create",
+        "hdiutil info",
+        "hdiutil detach",
         "-fs APFS",
         "-format UDZO",
+        'mktemp -d "$output_dir/.tobkiri-dmg.XXXXXX"',
+        "owned_image_paths",
+        "Resource busy",
+        "trap cleanup EXIT",
+        "trap 'exit 130' INT",
+        "trap 'exit 143' TERM",
+        'ln "$source_path" "$dmg_path"',
         "hdiutil verify",
         "unsafe version for a DMG filename",
     ):
         assert required in packager
+    assert "-ov" not in packager
     assert "osascript" not in packager
     assert "bundle_dmg.sh" not in packager
 
