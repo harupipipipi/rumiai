@@ -69,6 +69,15 @@ VALID_TARGETS = {
     ("linux", "x86_64"),
 }
 GIT_REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
+WINDOWS_DRIVE_ABSOLUTE_RE = re.compile(r"^[A-Za-z]:\\")
+WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -278,13 +287,56 @@ def _reject_symlinks(path: Path) -> None:
 
 
 def _reject_symlink_components(path: Path) -> None:
-    """Reject symlinked parent components before resolving an input path."""
+    """Reject symlinked or reparse-point components before resolving a path."""
     path = path.expanduser().absolute()
     current = Path(path.anchor)
     for part in path.parts[1:]:
         current /= part
-        if current.is_symlink() and current not in {Path("/var"), Path("/tmp")}:
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError:
+            continue
+        attributes = getattr(metadata, "st_file_attributes", 0)
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        is_reparse_point = bool(attributes & reparse_flag)
+        if (
+            (current.is_symlink() or is_reparse_point)
+            and current not in {Path("/var"), Path("/tmp")}
+        ):
             raise RuntimeError(f"release artifact is missing or symlinked: {current}")
+
+
+def _canonical_windows_absolute_artifact_path(
+    value: str, repository_root: str
+) -> PureWindowsPath:
+    """Validate a native Windows manifest path without lossy normalization."""
+    if (
+        not WINDOWS_DRIVE_ABSOLUTE_RE.match(value)
+        or "/" in value
+        or "\x00" in value
+        or value.startswith("~")
+    ):
+        raise RuntimeError(f"release artifact path is unsafe: {value}")
+    declared = PureWindowsPath(value)
+    if not declared.is_absolute() or str(declared) != value:
+        raise RuntimeError(f"release artifact path is unsafe: {value}")
+    for part in declared.parts[1:]:
+        stem = part.split(".", 1)[0].upper()
+        if (
+            part in {"", ".", ".."}
+            or part.endswith((" ", "."))
+            or any(character in part for character in '<>:"|?*')
+            or any(ord(character) < 32 for character in part)
+            or stem in WINDOWS_RESERVED_NAMES
+        ):
+            raise RuntimeError(f"release artifact path is unsafe: {value}")
+
+    root = PureWindowsPath(repository_root)
+    if not root.is_absolute() or root.drive.casefold() != declared.drive.casefold():
+        raise RuntimeError(f"release artifact path escapes its repository: {value}")
+    if not declared.is_relative_to(root):
+        raise RuntimeError(f"release artifact path escapes its repository: {value}")
+    return declared
 
 
 def _normalize_relative_path(value: str, field: str) -> str:
@@ -839,15 +891,35 @@ def package_artifact(
     if variant.get("development_command") not in (None, ""):
         raise RuntimeError(f"development command is forbidden for {artifact_id}")
 
-    if artifact_value.startswith("~") or "\\" in artifact_value or "\x00" in artifact_value:
+    if platform == "windows" and os.name == "nt" and "/" in artifact_value:
         raise RuntimeError(f"release artifact path is unsafe: {artifact_value}")
-    declared_path = Path(artifact_value)
-    if declared_path.is_absolute():
-        source_input = declared_path
+    if "\\" in artifact_value:
+        if platform != "windows" or os.name != "nt" or repository_root is None:
+            raise RuntimeError(f"release artifact path is unsafe: {artifact_value}")
+        repository_input = repository_root.expanduser().absolute()
+        _reject_symlink_components(repository_input)
+        try:
+            repository_source = repository_input.resolve(strict=True)
+        except OSError as error:
+            raise RuntimeError(
+                f"release repository root is missing or symlinked: {repository_input}"
+            ) from error
+        _canonical_windows_absolute_artifact_path(
+            artifact_value, os.fspath(repository_source)
+        )
+        source_input = Path(artifact_value)
     else:
-        if ".." in declared_path.parts:
-            raise RuntimeError(f"release artifact path escapes its manifest: {artifact_value}")
-        source_input = manifest_path.parent / declared_path
+        if artifact_value.startswith("~") or "\x00" in artifact_value:
+            raise RuntimeError(f"release artifact path is unsafe: {artifact_value}")
+        declared_path = Path(artifact_value)
+        if declared_path.is_absolute():
+            source_input = declared_path
+        else:
+            if ".." in declared_path.parts:
+                raise RuntimeError(
+                    f"release artifact path escapes its manifest: {artifact_value}"
+                )
+            source_input = manifest_path.parent / declared_path
     source_input = source_input.expanduser().absolute()
     _reject_symlink_components(source_input)
     if source_input.is_symlink():
@@ -855,9 +927,16 @@ def package_artifact(
     try:
         source = source_input.resolve(strict=True)
     except OSError as error:
-        raise RuntimeError(f"release artifact is missing or symlinked: {source_input}") from error
+        raise RuntimeError(
+            f"release artifact is missing or symlinked: {source_input}"
+        ) from error
     if not source.exists():
         raise RuntimeError(f"release artifact is missing or symlinked: {source_input}")
+    if "\\" in artifact_value:
+        if not source.is_relative_to(repository_source):
+            raise RuntimeError(
+                f"release artifact path escapes its repository: {artifact_value}"
+            )
 
     output = output_dir.expanduser().absolute()
     _reject_symlink_components(output.parent)

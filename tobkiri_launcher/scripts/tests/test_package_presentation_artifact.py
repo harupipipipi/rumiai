@@ -53,6 +53,18 @@ def _catalog(entrypoint: str = "true") -> dict[str, object]:
     }
 
 
+def _windows_catalog(entrypoint: str = "tobkiri-shell.exe") -> dict[str, object]:
+    """Return the production Windows variant used by path portability tests."""
+    catalog = _catalog(entrypoint)
+    variant = catalog["shell_providers"][0]["artifact_variants"][0]
+    variant.update(
+        artifact_id="shell.cli.default.windows-x86_64",
+        variant="windows-x86_64",
+        platform="windows",
+    )
+    return catalog
+
+
 def _fixture(
     root: Path, *, artifact_path: str | None = None
 ) -> tuple[Path, Path, Path]:
@@ -78,6 +90,129 @@ def _fixture(
     key = root / "signing-key.raw"
     key.write_bytes(bytes(range(32)))
     return catalog_path, manifest, key
+
+
+def test_windows_absolute_artifact_path_accepts_canonical_contained_path() -> None:
+    value = (
+        r"D:\a\tobkiri\tobkiri\tobkiri_launcher\src-tauri\target"
+        r"\x86_64-pc-windows-msvc\release\tobkiri-shell.exe"
+    )
+    result = MODULE._canonical_windows_absolute_artifact_path(
+        value, r"d:\A\TOBKIRI\TOBKIRI"
+    )
+    assert str(result) == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        r"E:\a\tobkiri\tobkiri\tobkiri-shell.exe",
+        r"C:tobkiri-shell.exe",
+        r"D:\a\tobkiri\tobkiri\..\outside\tobkiri-shell.exe",
+        r"\\server\share\tobkiri\tobkiri-shell.exe",
+        r"\\?\D:\a\tobkiri\tobkiri\tobkiri-shell.exe",
+        r"\\.\D:\a\tobkiri\tobkiri\tobkiri-shell.exe",
+        r"D:/a/tobkiri/tobkiri/tobkiri-shell.exe",
+        r"D:\a/tobkiri\tobkiri\tobkiri-shell.exe",
+        r"D:\a\\tobkiri\tobkiri\tobkiri-shell.exe",
+        r"D:\a\.\tobkiri\tobkiri\tobkiri-shell.exe",
+        "D:\\a\\tobkiri\\tobkiri\\tobkiri-shell.exe\x00ignored",
+        r"D:\a\tobkiri\outside\tobkiri-shell.exe",
+        r"D:\a\tobkiri\tobkiri\release.\tobkiri-shell.exe",
+        r"D:\a\tobkiri\tobkiri\CON\tobkiri-shell.exe",
+        r"D:\a\tobkiri\tobkiri\tobkiri-shell.exe:payload",
+    ],
+)
+def test_windows_absolute_artifact_path_rejects_noncanonical_or_escape(
+    value: str,
+) -> None:
+    with pytest.raises(RuntimeError, match="release artifact path"):
+        MODULE._canonical_windows_absolute_artifact_path(
+            value, r"D:\a\tobkiri\tobkiri"
+        )
+
+
+def test_windows_absolute_artifact_path_requires_windows_and_repository_root() -> None:
+    with TemporaryDirectory(prefix="tobkiri-windows-path-gate-") as temp:
+        root = Path(temp)
+        catalog, manifest, key = _fixture(root)
+        build = json.loads(manifest.read_text())
+        build.update(
+            artifact_id="shell.cli.default.windows-x86_64",
+            artifact_path=r"D:\a\tobkiri\tobkiri\tobkiri-shell.exe",
+            platform="windows",
+        )
+        catalog.write_text(json.dumps(_windows_catalog()), encoding="utf-8")
+        manifest.write_text(json.dumps(build), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="release artifact path is unsafe"):
+            package_artifact(catalog, manifest, key, "key", root / "release")
+
+        build.update(
+            artifact_id="shell.cli.default.linux-x86_64",
+            platform="linux",
+        )
+        catalog.write_text(json.dumps(_catalog()), encoding="utf-8")
+        manifest.write_text(json.dumps(build), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="release artifact path is unsafe"):
+            package_artifact(catalog, manifest, key, "key", root / "linux-release")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires native Windows Path semantics")
+def test_windows_absolute_artifact_path_packages_native_manifest() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    ignored_target = repository_root / "tobkiri_launcher/src-tauri/target"
+    ignored_target.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(
+        prefix="tobkiri-windows-path-", dir=ignored_target
+    ) as source_temp, TemporaryDirectory(
+        prefix="tobkiri-windows-output-"
+    ) as output_temp:
+        source = Path(source_temp) / "tobkiri-shell.exe"
+        source.write_bytes(b"MZ-stub-windows\r\n")
+        source.chmod(0o755)
+
+        root = Path(output_temp)
+        catalog = root / "presentation_catalog.json"
+        catalog.write_text(json.dumps(_windows_catalog()), encoding="utf-8")
+        manifest = root / "shell_build_output.v4.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "schema": "io.tobkiri.shell.build-output.v4",
+                    "artifact_id": "shell.cli.default.windows-x86_64",
+                    "artifact_path": os.fspath(source.resolve()),
+                    "platform": "windows",
+                    "architecture": "x86_64",
+                    "build_profile": "release",
+                    "source_identity": MODULE.source_identity_for_repository(
+                        repository_root
+                    ),
+                    "source_revision": MODULE.source_revision_for_repository(
+                        repository_root
+                    ),
+                }
+            ),
+            encoding="utf-8",
+        )
+        key = root / "signing-key.raw"
+        key.write_bytes(bytes(range(32)))
+
+        report = package_artifact(
+            catalog,
+            manifest,
+            key,
+            "windows-path-test-key",
+            root / "release",
+            repository_root,
+        )
+        assert "\\" not in str(report["path"])
+        index = json.loads(
+            (root / "release/bundled/shell_artifact_index.v4.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert index["path"] == report["path"]
+        assert "\\" not in index["path"]
 
 
 def _package(root: Path) -> dict[str, object]:

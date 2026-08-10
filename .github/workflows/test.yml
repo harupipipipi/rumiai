@@ -843,6 +843,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Test native Windows presentation artifact paths
+        run: |
+          python -m pip install pytest cryptography
+          python -m pytest -q tobkiri_launcher/scripts/tests/test_package_presentation_artifact.py -k windows_absolute_artifact_path
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
