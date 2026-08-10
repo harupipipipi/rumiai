@@ -1291,7 +1291,6 @@ class PackAPIServer:
         web_mounts: tuple[WebMountEntry, ...] | None = None,
         workspace_binding_resolver: WorkspaceBindingResolver | None = None,
         packvm_lifecycle: PackVMLifecyclePort | None = None,
-        require_macos_code_signature: bool = True,
     ) -> None:
         self.config = RuntimeHTTPConfig.verify(host, port)
         self.host = self.config.host
@@ -1307,7 +1306,6 @@ class PackAPIServer:
 
             packvm_lifecycle = PackVMLifecycleV4()
         self._packvm_lifecycle = packvm_lifecycle
-        self._require_macos_code_signature = require_macos_code_signature
         self._replay_guard = _RequestReplayGuard()
         self.server: _PackThreadingHTTPServer | None = None
         self.thread: threading.Thread | None = None
@@ -1425,9 +1423,6 @@ class PackAPIServer:
                     authority_store=authority,
                     packvm_readiness_reader=self._packvm_lifecycle.readiness_snapshot,
                     frontend_contract_bindings=bindings,
-                    require_macos_code_signature=(
-                        self._require_macos_code_signature
-                    ),
                 )
                 created_session = True
             except Exception:
@@ -1510,7 +1505,6 @@ def initialize_pack_api_server(
     web_mounts: tuple[WebMountEntry, ...] | None = None,
     workspace_binding_resolver: WorkspaceBindingResolver | None = None,
     packvm_lifecycle: PackVMLifecyclePort | None = None,
-    require_macos_code_signature: bool = True,
 ) -> PackAPIServer:
     """Replace the process-local server with one verified v4 instance."""
 
@@ -1527,7 +1521,6 @@ def initialize_pack_api_server(
         web_mounts=web_mounts,
         workspace_binding_resolver=workspace_binding_resolver,
         packvm_lifecycle=packvm_lifecycle,
-        require_macos_code_signature=require_macos_code_signature,
     )
     server.start()
     _api_server = server

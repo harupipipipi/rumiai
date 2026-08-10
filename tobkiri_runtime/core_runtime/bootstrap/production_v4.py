@@ -207,8 +207,6 @@ def _shell_artifact(
     catalog: BundledCatalog,
     shell_id: str,
     selected_shell: Mapping[str, Any],
-    *,
-    require_macos_code_signature: bool,
 ) -> PackArtifact:
     manifest = catalog.packs[shell_id]
     definition = catalog.shells[str(selected_shell["provider_id"])]
@@ -229,7 +227,7 @@ def _shell_artifact(
         verify_platform_artifact(
             catalog.artifact_root,
             selected_variant,
-            require_macos_code_signature=require_macos_code_signature,
+            require_macos_code_signature=True,
         )
     except ProtocolError as exc:
         raise AuthorityDenied(f"captured Shell artifact verification failed: {exc}") from exc
@@ -512,7 +510,6 @@ def capture_production_dispatch(
     packvm_provisioner: Any | None = None,
     packvm_readiness_reader: Callable[[], Mapping[str, Any]] | None = None,
     frontend_contract_bindings: tuple[Any, ...] = (),
-    require_macos_code_signature: bool = True,
 ) -> V4DispatchSession:
     """Capture ProductionRuntimeV4 and its RequestBroker from verified records."""
 
@@ -553,7 +550,6 @@ def capture_production_dispatch(
         catalog,
         shell_id,
         profile["shell"],
-        require_macos_code_signature=require_macos_code_signature,
     )
     principals: dict[str, FunctionPrincipal] = {}
     for function in shell.functions:

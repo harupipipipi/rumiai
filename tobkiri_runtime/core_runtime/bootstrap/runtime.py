@@ -50,14 +50,11 @@ class Kernel:
     API_INIT_STEP = "api_init"
     owns_host_http_surface = True
 
-    def __init__(self, *, require_macos_code_signature: bool = True) -> None:
+    def __init__(self) -> None:
         self._lock = RLock()
         self._server: PackAPIServer | None = None
         self._dispatch_session: V4DispatchSession | None = None
-        self._require_macos_code_signature = require_macos_code_signature
-        self._lifecycle = AppLifecycleManager(
-            require_macos_code_signature=require_macos_code_signature
-        )
+        self._lifecycle = AppLifecycleManager()
 
     def run_startup_until(self, step_id: str) -> dict[str, Any]:
         """Start the authenticated Host HTTP surface through ``step_id``."""
@@ -93,9 +90,6 @@ class Kernel:
                         ecosystem_root=runtime_root / "ecosystem",
                         authority_store=authority_store,
                         frontend_contract_bindings=contract_bindings,
-                        require_macos_code_signature=(
-                            self._require_macos_code_signature
-                        ),
                     )
                 except Exception:
                     authority_store.close()
@@ -109,7 +103,6 @@ class Kernel:
                 dispatch_session=dispatch_session,
                 app_lifecycle_manager=self._lifecycle,
                 contract_bindings=contract_bindings,
-                require_macos_code_signature=self._require_macos_code_signature,
             )
             mark_panel_ready()
             return {"status": "ok", "step_id": step_id, "port": port}
@@ -148,9 +141,6 @@ class Kernel:
                     dispatch_session=session,
                     app_lifecycle_manager=self._lifecycle,
                     contract_bindings=bindings,
-                    require_macos_code_signature=(
-                        self._require_macos_code_signature
-                    ),
                 )
             mark_runtime_ready()
             return {"status": "ok", "runtime_ready": True}

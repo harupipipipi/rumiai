@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import http.client
 import json
-import os
 import time
 import uuid
 from pathlib import Path
@@ -60,7 +59,9 @@ from tobkiri_protocol.canonical import canonical_digest
 
 
 def _bundle_root() -> Path:
-    return Path(os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"])
+    from tests.conformance_support.packaged_profile import packaged_profile_bundle_root
+
+    return packaged_profile_bundle_root()
 
 
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
@@ -276,7 +277,6 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         bundle_root=_bundle_root(),
         ecosystem_root=RUNTIME_ROOT / "ecosystem",
         authority_store=authority,
-        require_macos_code_signature=False,
     )
 
     catalog = BundledCatalog.load(_bundle_root())

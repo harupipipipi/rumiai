@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-import os
 from pathlib import Path
 
 import pytest
@@ -33,7 +32,9 @@ BUNDLE_ROOT = RUNTIME_ROOT / "ecosystem" / "defaultspack" / "v4"
 
 
 def _bundle_root() -> Path:
-    return Path(os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"])
+    from tests.conformance_support.packaged_profile import packaged_profile_bundle_root
+
+    return packaged_profile_bundle_root()
 
 
 @pytest.fixture

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -42,7 +41,9 @@ BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 
 
 def _bundle_root() -> Path:
-    return Path(os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"])
+    from tests.conformance_support.packaged_profile import packaged_profile_bundle_root
+
+    return packaged_profile_bundle_root()
 
 
 def _principal(binding: Mapping[str, Any]) -> FunctionPrincipal:

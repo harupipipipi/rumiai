@@ -572,6 +572,7 @@ def _verified_packaged_profile_bundle(tmp_path_factory):
 
     from tests.conformance_support.packaged_profile import (
         build_packaged_profile_bundle,
+        inject_packaged_profile_bundle,
     )
 
     source_bundle = _PROJECT_ROOT / "ecosystem" / "defaultspack" / "v4"
@@ -583,19 +584,19 @@ def _verified_packaged_profile_bundle(tmp_path_factory):
         tmp_path_factory.mktemp("verified-packaged-profile"),
         source_commit=str(profile["provenance"]["repository_commit"]),
     )
-    previous_mode = os.environ.get("TOBKIRI_RUNTIME_MODE")
-    previous = os.environ.get("TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT")
-    os.environ["TOBKIRI_RUNTIME_MODE"] = "test"
-    os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"] = str(bundle)
+    from core_runtime.bootstrap import profile_capture, runtime
+
+    injection = pytest.MonkeyPatch()
+
+    def provider(_base_dir=None):
+        return bundle
+
+    injection.setattr(profile_capture, "_bundle_root", provider)
+    injection.setattr(runtime, "_bundle_root", provider)
+    inject_packaged_profile_bundle(bundle)
     yield
-    if previous_mode is None:
-        os.environ.pop("TOBKIRI_RUNTIME_MODE", None)
-    else:
-        os.environ["TOBKIRI_RUNTIME_MODE"] = previous_mode
-    if previous is None:
-        os.environ.pop("TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT", None)
-    else:
-        os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"] = previous
+    inject_packaged_profile_bundle(None)
+    injection.undo()
 
 
 @pytest.fixture(autouse=True)
@@ -1075,7 +1076,11 @@ def _defaultspack_v4_snapshot() -> _V4TestResolvedSnapshot:
         resolve_default_profile,
     )
 
-    bundle_root = Path(os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"])
+    from tests.conformance_support.packaged_profile import (
+        packaged_profile_bundle_root,
+    )
+
+    bundle_root = packaged_profile_bundle_root()
     catalog = BundledCatalog.load(bundle_root)
     source = catalog.profiles["defaults"]
     authority_bindings = {

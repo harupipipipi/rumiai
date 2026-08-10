@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import plistlib
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,7 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
 from tests.conformance_support.packaged_profile import build_packaged_profile_bundle
 from tobkiri_protocol.canonical import canonical_digest, canonical_json
 from tobkiri_protocol.profile_scope import normalize_requested_scope_template
-from tobkiri_protocol.platform_artifact import verify_platform_artifact
+from tobkiri_protocol.platform_artifact import artifact_digest, verify_platform_artifact
 from tobkiri_protocol import platform_artifact
 from tobkiri_protocol.provenance import (
     normative_generated_provenance,
@@ -78,6 +79,26 @@ def _resolve(catalog: BundledCatalog):
     )
 
 
+def _macos_artifact(tmp_path: Path) -> tuple[Path, dict[str, object]]:
+    artifact_root = tmp_path / "artifacts"
+    application = artifact_root / "Tobkiri.app"
+    executable = application / "Contents" / "MacOS" / "tobkiri-shell"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"\xcf\xfa\xed\xfe\x0c\x00\x00\x01fixture")
+    executable.chmod(0o755)
+    (application / "Contents" / "Info.plist").write_bytes(
+        plistlib.dumps({"CFBundleIdentifier": "io.tobkiri.shell.tauri"})
+    )
+    return artifact_root, {
+        "relative_path": "Tobkiri.app",
+        "entrypoint": "Tobkiri.app/Contents/MacOS/tobkiri-shell",
+        "platform": "macos",
+        "architecture": "arm64",
+        "bundle_identity": "io.tobkiri.shell.tauri",
+        "artifact_digest": artifact_digest(application),
+    }
+
+
 def test_source_checkout_profile_is_explicitly_unavailable() -> None:
     catalog = BundledCatalog.load(SOURCE_BUNDLE)
     assert catalog.shells["shell.tauri.default"]["availability"] == "build_required"
@@ -121,10 +142,8 @@ def test_activation_and_restart_reverify_selected_executable(tmp_path: Path) -> 
         authority=authority,
         catalog=catalog,
     )
-    executable = (
-        catalog.artifact_root
-        / "Tobkiri.app/Contents/MacOS/tobkiri-shell"
-    )
+    variant = catalog.shells["shell.tauri.default"]["launch"]["variants"][0]
+    executable = catalog.artifact_root / str(variant["entrypoint"])
     executable.write_bytes(executable.read_bytes() + b"pre-activation-tamper")
     with pytest.raises(ProfileResolutionDenied, match="artifact rejected"):
         store.activate(
@@ -150,10 +169,8 @@ def test_activation_and_restart_reverify_selected_executable(tmp_path: Path) -> 
         activation_id="activation:defaults-restart-tamper",
         created_at="2026-08-10T00:00:00Z",
     )
-    executable = (
-        catalog.artifact_root
-        / "Tobkiri.app/Contents/MacOS/tobkiri-shell"
-    )
+    variant = catalog.shells["shell.tauri.default"]["launch"]["variants"][0]
+    executable = catalog.artifact_root / str(variant["entrypoint"])
     executable.write_bytes(executable.read_bytes() + b"restart-tamper")
     with pytest.raises(ProfileResolutionDenied, match="artifact rejected"):
         restart_store.load_active_snapshot()
@@ -162,8 +179,7 @@ def test_activation_and_restart_reverify_selected_executable(tmp_path: Path) -> 
 def test_production_macos_artifact_requires_valid_code_signature(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    catalog = _packaged_catalog(tmp_path)
-    variant = catalog.shells["shell.tauri.default"]["launch"]["variants"][0]
+    artifact_root, variant = _macos_artifact(tmp_path)
     monkeypatch.setattr(
         platform_artifact.subprocess,
         "run",
@@ -171,10 +187,17 @@ def test_production_macos_artifact_requires_valid_code_signature(
     )
     with pytest.raises(Exception, match="signature is invalid"):
         verify_platform_artifact(
-            catalog.artifact_root,
+            artifact_root,
             variant,
             require_macos_code_signature=True,
         )
+
+
+def test_macos_bundle_identity_mismatch_is_rejected(tmp_path: Path) -> None:
+    artifact_root, variant = _macos_artifact(tmp_path)
+    variant["bundle_identity"] = "io.tobkiri.attacker"
+    with pytest.raises(Exception, match="bundle identity does not match"):
+        verify_platform_artifact(artifact_root, variant)
 
 
 def test_production_bundle_root_ignores_environment_attack(
@@ -189,8 +212,9 @@ def test_production_bundle_root_ignores_environment_attack(
     attacker = tmp_path / "attacker-bundle"
     attacker.mkdir()
     monkeypatch.setenv("TOBKIRI_DEFAULTS_BUNDLE_ROOT", str(attacker))
-    monkeypatch.delenv("TOBKIRI_RUNTIME_MODE", raising=False)
-    monkeypatch.delenv("TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT", raising=False)
+    monkeypatch.setenv("TOBKIRI_RUNTIME_MODE", "test")
+    monkeypatch.setenv("TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT", str(attacker))
+    monkeypatch.setattr(profile_capture, "_bundle_root", _bundle_root)
     assert _bundle_root() == SOURCE_BUNDLE
 
     observed: list[Path] = []
@@ -248,22 +272,27 @@ def test_installed_bundle_is_exactly_bound_to_resource_manifest(tmp_path: Path) 
         encoding="utf-8",
     )
     _verify_installed_bundle_binding(runtime_root, bundle_root)
-    executable = artifact_root / "Tobkiri.app/Contents/MacOS/tobkiri-shell"
+    executable = artifact_root / "Tobkiri.AppImage"
     executable.write_bytes(executable.read_bytes() + b"tamper")
     with pytest.raises(ProfileResolutionDenied, match="not launcher-bound"):
         _verify_installed_bundle_binding(runtime_root, bundle_root)
 
+    executable.write_bytes(executable.read_bytes().removesuffix(b"tamper"))
+    unlisted = bundle_root / "unlisted.json"
+    unlisted.write_text("{}", encoding="utf-8")
+    with pytest.raises(ProfileResolutionDenied, match="resource is unlisted"):
+        _verify_installed_bundle_binding(runtime_root, bundle_root)
 
-@pytest.mark.parametrize("field", ("platform", "architecture", "bundle_identity"))
+
+@pytest.mark.parametrize("field", ("platform", "architecture"))
 def test_packaged_artifact_metadata_mismatch_is_rejected(
     tmp_path: Path, field: str
 ) -> None:
     catalog = _packaged_catalog(tmp_path)
     shell = copy.deepcopy(catalog.shells["shell.tauri.default"])
     replacement = {
-        "platform": "linux",
-        "architecture": "x86_64",
-        "bundle_identity": "io.tobkiri.wrong",
+        "platform": "macos",
+        "architecture": "arm64",
     }[field]
     shell["launch"]["variants"][0][field] = replacement
     tampered = type(catalog)(
@@ -286,10 +315,7 @@ def test_packaged_artifact_path_digest_and_symlink_rejection(
     variant = copy.deepcopy(
         catalog.shells["shell.tauri.default"]["launch"]["variants"][0]
     )
-    executable = (
-        catalog.artifact_root
-        / "Tobkiri.app/Contents/MacOS/tobkiri-shell"
-    )
+    executable = catalog.artifact_root / str(variant["entrypoint"])
     if case == "missing":
         variant["relative_path"] = "Missing.app"
     elif case == "digest":

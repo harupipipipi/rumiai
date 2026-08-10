@@ -40,12 +40,10 @@ from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 
 
 ROOT = Path(os.environ["TOBKIRI_TEST_RUNTIME_ROOT"])
-BUNDLE_ROOT = Path(
-    os.environ.get(
-        "TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT",
-        str(ROOT / "ecosystem" / "defaultspack" / "v4"),
-    )
-)
+BUNDLE_ROOT = Path(sys.argv[1])
+from core_runtime.bootstrap import profile_capture
+
+profile_capture._bundle_root = lambda _base_dir=None: BUNDLE_ROOT
 MAP_PATH = (
     ROOT
     / "ecosystem"
@@ -64,7 +62,7 @@ def _capture():
         active = capture_default_profile()
     else:
         active = capture_default_profile(
-            confirmation=prepare_default_profile_confirmation()
+            confirmation=prepare_default_profile_confirmation(),
         )
     authority = AuthorityStore(USER_DATA / "authority" / "v4.sqlite3")
     session = capture_production_dispatch(
@@ -72,7 +70,6 @@ def _capture():
         bundle_root=BUNDLE_ROOT,
         ecosystem_root=ROOT / "ecosystem",
         authority_store=authority,
-        require_macos_code_signature=False,
     )
     catalog = BundledCatalog.load(BUNDLE_ROOT)
     bindings = load_frontend_contract_bindings(
@@ -85,7 +82,6 @@ def _capture():
         panel_auth_manager=manager,
         dispatch_session=session,
         contract_bindings=bindings,
-        require_macos_code_signature=False,
     )
     server.start()
     return server, active, manager
@@ -145,8 +141,10 @@ def _write_host_contract(user_data: Path) -> Path:
 def _spawn_child(
     env: Mapping[str, str],
 ) -> tuple[subprocess.Popen[str], dict[str, Any]]:
+    from tests.conformance_support.packaged_profile import packaged_profile_bundle_root
+
     process = subprocess.Popen(
-        [sys.executable, "-c", _CHILD],
+        [sys.executable, "-c", _CHILD, str(packaged_profile_bundle_root())],
         env=dict(env),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,

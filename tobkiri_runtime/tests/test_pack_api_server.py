@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import http.client
 import json
-import os
 import uuid
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -26,7 +25,9 @@ from core_runtime.panel_auth import PanelAuthManager
 
 
 def _bundle_root() -> Path:
-    return Path(os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"])
+    from tests.conformance_support.packaged_profile import packaged_profile_bundle_root
+
+    return packaged_profile_bundle_root()
 
 
 class _Dispatch:
@@ -645,7 +646,6 @@ def test_authenticated_generic_dispatch_is_retired_before_production_broker(
         bundle_root=_bundle_root(),
         ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
         authority_store=AuthorityStore(user_data / "authority" / "v4.sqlite3"),
-        require_macos_code_signature=False,
     )
     server = PackAPIServer(
         port=0,

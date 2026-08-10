@@ -87,7 +87,6 @@ class AppLifecycleManager:
     """
 
     base_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parent.parent)
-    require_macos_code_signature: bool = True
     _activation_lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False
     )
@@ -176,7 +175,6 @@ class AppLifecycleManager:
                     user_data / "authority" / "v4.sqlite3"
                 ),
                 frontend_contract_bindings=bindings,
-                require_macos_code_signature=self.require_macos_code_signature,
             )
             install_dispatch_session(get_container(), session)
             mark_runtime_ready()

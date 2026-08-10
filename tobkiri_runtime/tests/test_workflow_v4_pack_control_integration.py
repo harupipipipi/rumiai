@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import shutil
 from dataclasses import replace
@@ -29,7 +28,9 @@ from tobkiri_host.errors import BackendUnavailableError
 
 
 def _bundle_root() -> Path:
-    return Path(os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"])
+    from tests.conformance_support.packaged_profile import packaged_profile_bundle_root
+
+    return packaged_profile_bundle_root()
 
 PACK_ID = "tobkiri_workflow_pack"
 SESSION_ID = "workflow-v4-integration"
@@ -149,7 +150,6 @@ def test_optional_workflow_pack_enters_closure_only_after_full_ceremony(
         bundle_root=_bundle_root(),
         ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
         authority_store=authority,
-        require_macos_code_signature=False,
     )
     try:
         binding = restarted.broker._catalog.resolve_pinned(
@@ -281,7 +281,6 @@ def test_optional_workflow_pack_enters_closure_only_after_full_ceremony(
         authority_store=AuthorityStore(
             tmp_path / "user-data" / "authority" / "v4.sqlite3"
         ),
-        require_macos_code_signature=False,
     )
     try:
         persisted = restarted_again.invoke(

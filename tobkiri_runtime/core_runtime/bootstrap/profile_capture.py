@@ -34,12 +34,14 @@ def runtime_user_data_root(base_dir: Path | None = None) -> Path:
 
 
 def _bundle_root(base_dir: Path | None = None) -> Path:
+    """Return the compile-time installed Defaults bundle location.
+
+    Environment is intentionally not consulted here.  Tests that need a
+    packaged fixture replace this dependency in their own process.
+    """
+
     del base_dir
     runtime_root = Path(__file__).resolve().parents[2]
-    if os.getenv("TOBKIRI_RUNTIME_MODE") == "test":
-        configured = os.getenv("TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT")
-        if configured:
-            return Path(configured).resolve(strict=True)
     bundle_root = runtime_root / "ecosystem" / "defaultspack" / "v4"
     _verify_installed_bundle_binding(runtime_root, bundle_root)
     return bundle_root
@@ -94,19 +96,34 @@ def _verify_installed_bundle_binding(runtime_root: Path, bundle_root: Path) -> N
     for root in roots:
         if root.is_symlink() or not root.is_dir():
             raise ProfileResolutionDenied("packaged Profile resource root is unsafe")
-        for path in root.rglob("*"):
-            if path.is_symlink():
-                raise ProfileResolutionDenied("packaged Profile resource contains a symlink")
-            if not path.is_file():
-                continue
-            relative = path.relative_to(runtime_root).as_posix()
-            actual_paths.add(relative)
-            binding = expected.get(relative)
-            payload = path.read_bytes()
-            if binding != (len(payload), hashlib.sha256(payload).hexdigest()):
+        for current, directories, filenames in os.walk(root, followlinks=False):
+            current_path = Path(current)
+            children = tuple(directories) + tuple(filenames)
+            if current_path.is_symlink() or any(
+                (current_path / child).is_symlink() for child in children
+            ):
                 raise ProfileResolutionDenied(
-                    f"packaged Profile resource is not launcher-bound: {relative}"
+                    "packaged Profile resource contains a symlink"
                 )
+            for filename in filenames:
+                path = current_path / filename
+                if not path.is_file():
+                    raise ProfileResolutionDenied(
+                        "packaged Profile resource contains a non-file entry"
+                    )
+                relative = path.relative_to(runtime_root).as_posix()
+                actual_paths.add(relative)
+                binding = expected.get(relative)
+                if binding is None:
+                    raise ProfileResolutionDenied(
+                        f"packaged Profile resource is unlisted: {relative}"
+                    )
+                payload = path.read_bytes()
+                if binding != (len(payload), hashlib.sha256(payload).hexdigest()):
+                    raise ProfileResolutionDenied(
+                        "packaged Profile resource is not launcher-bound: "
+                        f"{relative}"
+                    )
     expected_paths = {
         path for path in expected if any(path.startswith(prefix) for prefix in prefixes)
     }
