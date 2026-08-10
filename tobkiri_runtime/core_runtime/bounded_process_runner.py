@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import signal
+import stat
 import subprocess
 import threading
 import time
@@ -65,6 +66,7 @@ class ProcessExecutionPolicy:
     max_timeout_seconds: float = 300.0
     redact_values: tuple[str, ...] = ()
     allow_path_search: bool = False
+    allow_inherited_readonly_fds: bool = False
 
 
 @dataclass(frozen=True)
@@ -152,6 +154,7 @@ class HostBoundedProcessRunner:
         environment: Mapping[str, str],
         policy: ProcessExecutionPolicy,
         cancel_event: threading.Event | None = None,
+        inherited_fds: Sequence[int] = (),
     ) -> BoundedProcessResult:
         """Run one exact command, or raise after a requested cancellation.
 
@@ -171,6 +174,7 @@ class HostBoundedProcessRunner:
             environment=environment,
             policy=policy,
         )
+        pass_fds = self._validate_inherited_fds(inherited_fds, policy)
         redaction_lookahead = self._redaction_lookahead_bytes(policy)
         stdout_buffer = _CappedBytes(policy.max_stdout_bytes + redaction_lookahead)
         stderr_buffer = _CappedBytes(policy.max_stderr_bytes + redaction_lookahead)
@@ -185,6 +189,7 @@ class HostBoundedProcessRunner:
         }
         if os.name == "posix":
             popen_kwargs["start_new_session"] = True
+            popen_kwargs["pass_fds"] = pass_fds
         elif os.name == "nt":
             popen_kwargs["creationflags"] = getattr(
                 subprocess,
@@ -271,6 +276,36 @@ class HostBoundedProcessRunner:
         if not timed_out and (cancelled or (cancel_event is not None and cancel_event.is_set())):
             raise ProcessExecutionCancelled(result)
         return result
+
+    @staticmethod
+    def _validate_inherited_fds(
+        inherited_fds: Sequence[int], policy: ProcessExecutionPolicy
+    ) -> tuple[int, ...]:
+        """Allow only explicit, open, read-only regular descriptors on POSIX."""
+
+        descriptors = tuple(int(value) for value in inherited_fds)
+        if not descriptors:
+            return ()
+        if os.name != "posix" or not policy.allow_inherited_readonly_fds:
+            raise PermissionError("inherited process descriptors are not allowed")
+        if len(descriptors) != len(set(descriptors)) or len(descriptors) > 8:
+            raise PermissionError("inherited process descriptors are invalid")
+        import fcntl
+
+        for descriptor in descriptors:
+            if descriptor < 0:
+                raise PermissionError("inherited process descriptor is invalid")
+            metadata = os.fstat(descriptor)
+            access_mode = fcntl.fcntl(descriptor, fcntl.F_GETFL) & os.O_ACCMODE
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_nlink != 1
+                or access_mode != os.O_RDONLY
+            ):
+                raise PermissionError(
+                    "only read-only regular descriptors may be inherited"
+                )
+        return descriptors
 
     def run_attested_backend(
         self,

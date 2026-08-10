@@ -12,7 +12,7 @@ import re
 import stat
 import tempfile
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -23,6 +23,10 @@ from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
     PackVMProcessError,
     PackVMProvisioningPlan,
     PackVMProvisioningRequest,
+)
+from ecosystem.defaultspack.backend.sandbox.isolation.packvm_image_cache import (
+    PackVMImageCancelled,
+    PackVMImageProgress,
 )
 
 
@@ -200,7 +204,7 @@ class PackVMLifecycleV4:
             self._persist_operations()
             worker = threading.Thread(
                 target=self._run_provision,
-                args=(operation_id, request),
+                args=(operation_id, replace(request, operation_id=operation_id)),
                 daemon=True,
                 name=f"packvm-provision-{operation_id[:8]}",
             )
@@ -246,6 +250,10 @@ class PackVMLifecycleV4:
                 return _public_operation(record)
             if record.get("state") == "queued":
                 record["state"] = "cancelled"
+                record["updated_unix"] = int(time.time())
+                self._persist_operations()
+            elif record.get("state") == "running" and record.get("stage") == "image_prefetch":
+                record["cancel_requested"] = True
                 record["updated_unix"] = int(time.time())
                 self._persist_operations()
             elif record.get("state") not in {
@@ -372,10 +380,26 @@ class PackVMLifecycleV4:
             if record.get("state") == "cancelled":
                 return
             record["state"] = "running"
+            record["stage"] = "image_prefetch"
             record["updated_unix"] = int(time.time())
             self._persist_operations()
         try:
-            doctor = asdict(self._provisioner.provision(request))
+            doctor = asdict(self._provisioner.provision(
+                request,
+                progress=lambda update: self._record_prefetch_progress(operation_id, update),
+                cancelled=lambda: self._operation_cancel_requested(operation_id),
+            ))
+        except PackVMImageCancelled:
+            with self._lock:
+                record = self._operations[operation_id]
+                record.update({
+                    "state": "cancelled",
+                    "stage": "image_prefetch",
+                    "updated_unix": int(time.time()),
+                })
+                record.pop("cancel_requested", None)
+                self._persist_operations()
+            return
         except Exception as error:
             with self._lock:
                 record = self._operations[operation_id]
@@ -394,6 +418,29 @@ class PackVMLifecycleV4:
             )
             self._compact_operations()
             self._persist_operations()
+
+    def _record_prefetch_progress(
+        self, operation_id: str, update: PackVMImageProgress
+    ) -> None:
+        """Persist bounded typed download progress without exposing cache paths."""
+
+        with self._lock:
+            record = self._operations[operation_id]
+            if update.stage == "verified" and record.get("cancel_requested"):
+                raise PackVMImageCancelled(
+                    "packvm_image_cancelled",
+                    "PackVM image download was cancelled before provisioning",
+                )
+            record.update({
+                "stage": "provisioning" if update.stage == "verified" else "image_prefetch",
+                "progress": asdict(update),
+                "updated_unix": int(time.time()),
+            })
+            self._persist_operations()
+
+    def _operation_cancel_requested(self, operation_id: str) -> bool:
+        with self._lock:
+            return bool(self._operations[operation_id].get("cancel_requested"))
 
     def _run_cleanup(
         self,
@@ -799,7 +846,7 @@ def _operation_failure(error: Exception) -> dict[str, Any]:
         "error": message[:1000] or "PackVM operation failed",
         "error_type": type(error).__name__,
     }
-    if isinstance(error, PackVMProcessError):
+    if isinstance(error, PackVMProcessError) or hasattr(error, "diagnostic"):
         result["diagnostic"] = error.diagnostic()
     return result
 
@@ -820,6 +867,8 @@ def _public_operation(record: Mapping[str, Any]) -> dict[str, Any]:
         "result",
         "source_operation_id",
         "cleanup_mode",
+        "stage",
+        "progress",
     }
     return {key: value for key, value in record.items() if key in allowed}
 

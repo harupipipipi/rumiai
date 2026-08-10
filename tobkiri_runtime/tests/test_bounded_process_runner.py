@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 import time
@@ -88,6 +89,64 @@ def test_runner_accepts_bounded_binary_stdin(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert result.stdout.strip() == payload.hex()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX descriptor inheritance")
+def test_runner_inherits_only_explicit_readonly_regular_descriptor(
+    tmp_path: Path,
+) -> None:
+    payload = b"pinned-packvm-image"
+    source = tmp_path / "image.img"
+    source.write_bytes(payload)
+    descriptor = os.open(source, os.O_RDONLY)
+    argv = (
+        sys.executable,
+        "-c",
+        "import os,sys; print(os.read(int(sys.argv[1]), 4096).hex())",
+        str(descriptor),
+    )
+    try:
+        result = HostBoundedProcessRunner().run_local(
+            argv=argv,
+            cwd=tmp_path,
+            stdin=None,
+            timeout_seconds=1,
+            environment={},
+            policy=_policy(
+                argv,
+                tmp_path,
+                allow_inherited_readonly_fds=True,
+            ),
+            inherited_fds=(descriptor,),
+        )
+    finally:
+        os.close(descriptor)
+    assert result.exit_code == 0
+    assert result.stdout.strip() == payload.hex()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX descriptor inheritance")
+def test_runner_rejects_writable_inherited_descriptor(tmp_path: Path) -> None:
+    target = tmp_path / "writable.img"
+    descriptor = os.open(target, os.O_CREAT | os.O_RDWR, 0o600)
+    argv = (sys.executable, "-c", "pass")
+    try:
+        with pytest.raises(PermissionError, match="read-only"):
+            HostBoundedProcessRunner().run_local(
+                argv=argv,
+                cwd=tmp_path,
+                stdin=None,
+                timeout_seconds=1,
+                environment={},
+                policy=_policy(
+                    argv,
+                    tmp_path,
+                    allow_inherited_readonly_fds=True,
+                ),
+                inherited_fds=(descriptor,),
+            )
+    finally:
+        os.close(descriptor)
 
 
 def test_runner_allows_exactly_allowlisted_empty_argument(tmp_path: Path) -> None:
