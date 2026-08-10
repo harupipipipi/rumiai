@@ -16,6 +16,7 @@ const DEFAULT_PROFILE_ID: &str = "defaults";
 const DEFAULT_BASE_ID: &str = "defaults-basepack";
 const DEFAULT_SHELL_ID: &str = "shell.tauri.default";
 const DEFAULT_RUNTIME_ID: &str = "runtime.tauri.application.default";
+const DEFAULT_PROFILE_API_VERSION: &str = "io.tobkiri.profile.v5";
 const DEFAULT_PROFILE_SOURCE: &str =
     "tobkiri_runtime/ecosystem/defaultspack/v4/defaults.profile.v4.json";
 const DEFAULT_PROVIDER_PACK_IDS: [&str; 13] = [
@@ -137,8 +138,8 @@ pub(crate) fn resolve(config: &AppConfig) -> Result<GuardianAuthority> {
         Some(&catalog.default_profile_digest),
     )?;
 
-    let profile = read_json(&bundle_root.join(PROFILE_PATH), "Defaults Profile v4")?;
-    validate_profile(&profile, &catalog)?;
+    let profile = read_json(&bundle_root.join(PROFILE_PATH), "Defaults Profile v5")?;
+    let selected_variant = validate_profile(&profile, &catalog)?;
     validate_defaultspack_pack(&read_json(
         &bundle_root.join(DEFAULTSPACK_PACK_PATH),
         "Defaultspack Pack v4",
@@ -149,6 +150,7 @@ pub(crate) fn resolve(config: &AppConfig) -> Result<GuardianAuthority> {
             &bundle_root.join(RUNTIME_PACK_PATH),
             "Defaultspack application Pack v4",
         )?,
+        selected_variant,
     )?;
     verify_pack_artifact_index(&pack_root, &bundle_root)?;
 
@@ -162,7 +164,15 @@ pub(crate) fn resolve(config: &AppConfig) -> Result<GuardianAuthority> {
     })
 }
 
-fn validate_application_pack(pack_root: &Path, pack: &Value) -> Result<GuardianLaunch> {
+fn validate_application_pack(
+    pack_root: &Path,
+    pack: &Value,
+    selected_variant: &crate::presentation::ArtifactVariant,
+) -> Result<GuardianLaunch> {
+    let selected_platform = format!(
+        "{}-{}",
+        selected_variant.platform, selected_variant.architecture
+    );
     let functions = pack
         .get("functions")
         .and_then(Value::as_array)
@@ -199,7 +209,7 @@ fn validate_application_pack(pack_root: &Path, pack: &Value) -> Result<GuardianL
         || value_str(&operations[0], "/provider_id") != Some(DEFAULT_RUNTIME_ID)
         || value_str(&operations[0], "/contract_reference") != Some("runtime.tauri.application.v1")
         || value_str(&artifacts[0], "/kind") != Some("executable")
-        || value_str(&artifacts[0], "/platform") != Some("host")
+        || value_str(&artifacts[0], "/platform") != Some(selected_platform.as_str())
         || value_str(&artifacts[1], "/path") != Some("defaultspack/frontend_contract_map.v4.json")
         || value_str(&artifacts[1], "/kind") != Some("asset")
         || value_str(&artifacts[1], "/platform") != Some("host")
@@ -224,8 +234,8 @@ fn validate_application_pack(pack_root: &Path, pack: &Value) -> Result<GuardianL
         value_str(&artifacts[0], "/path").context("application Pack artifact path is missing")?;
     let entrypoint = value_str(&artifacts[0], "/entrypoint")
         .context("application Pack entrypoint is missing")?;
-    if artifact_path != entrypoint {
-        bail!("application Pack entrypoint does not identify its executable artifact");
+    if artifact_path != selected_variant.artifact_ref || entrypoint != selected_variant.entrypoint {
+        bail!("application Pack does not identify the selected Shell artifact");
     }
     let argv = artifacts[0]
         .get("argv")
@@ -235,13 +245,18 @@ fn validate_application_pack(pack_root: &Path, pack: &Value) -> Result<GuardianL
         bail!("application Pack launch argv must not contain positional arguments");
     }
 
+    let artifact_relative = safe_relative(artifact_path)?;
     let relative = safe_relative(entrypoint)?;
-    let candidate = pack_root.join(relative);
+    if !relative.starts_with(&artifact_relative) {
+        bail!("application Pack entrypoint escapes its selected artifact");
+    }
+    let artifact_root = pack_root.join("platform-artifacts");
+    let candidate = artifact_root.join(relative);
     let bytes = read_regular_file(&candidate, "application Pack entrypoint")?;
     let canonical = candidate
         .canonicalize()
         .context("failed to canonicalize application Pack entrypoint")?;
-    if !canonical.starts_with(pack_root) || sha256(&bytes) != artifact_digest {
+    if !canonical.starts_with(&artifact_root) || sha256(&bytes) != artifact_digest {
         bail!("application Pack entrypoint escaped or failed artifact verification");
     }
 
@@ -418,10 +433,10 @@ fn value_str<'a>(value: &'a Value, pointer: &str) -> Option<&'a str> {
     value.pointer(pointer).and_then(Value::as_str)
 }
 
-fn validate_profile(
+fn validate_profile<'a>(
     profile: &Value,
-    catalog: &crate::presentation::PresentationCatalog,
-) -> Result<()> {
+    catalog: &'a crate::presentation::PresentationCatalog,
+) -> Result<&'a crate::presentation::ArtifactVariant> {
     let shell_platform = value_str(profile, "/shell/platform")
         .context("Defaults Profile Shell platform is missing")?;
     let shell_architecture = value_str(profile, "/shell/architecture")
@@ -439,8 +454,8 @@ fn validate_profile(
                     && variant.development_command.is_none()
             })
         })
-        .is_some();
-    if value_str(profile, "/profile_api_version") != Some("io.tobkiri.profile.v4")
+        .context("Defaults Profile has no exact packaged Shell variant")?;
+    if value_str(profile, "/profile_api_version") != Some(DEFAULT_PROFILE_API_VERSION)
         || value_str(profile, "/profile_id") != Some(DEFAULT_PROFILE_ID)
         || value_str(profile, "/mode") != Some("interactive")
         || value_str(profile, "/state") != Some("needs_resolution")
@@ -448,11 +463,11 @@ fn validate_profile(
         || value_str(profile, "/shell/provider_id") != Some(DEFAULT_SHELL_ID)
         || value_str(profile, "/shell/pack_id") != Some(DEFAULT_SHELL_ID)
         || value_str(profile, "/shell/contract_id") != Some("app.shell.v1")
-        || !declared_production_variant
     {
         bail!("Defaults Profile does not bind the exact Base and Tauri Shell");
     }
-    validate_effective_pack_set(profile)
+    validate_effective_pack_set(profile)?;
+    Ok(declared_production_variant)
 }
 
 fn validate_effective_pack_set(profile: &Value) -> Result<()> {
@@ -623,6 +638,48 @@ mod tests {
         rewrite_locked_document(config, RUNTIME_PACK_PATH, mutate);
     }
 
+    fn package_fixture_application(config: &AppConfig) {
+        let relative = "Tobkiri.app";
+        let entrypoint = "Tobkiri.app/Contents/MacOS/tobkiri-shell";
+        let executable = config
+            .app_dir
+            .join("ecosystem/defaultspack/platform-artifacts")
+            .join(entrypoint);
+        fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        fs::write(&executable, b"packaged Tauri fixture").unwrap();
+        let executable_digest = sha256(&fs::read(&executable).unwrap());
+        rewrite_runtime_pack(config, |pack| {
+            let contract_map = pack["artifacts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|artifact| artifact["kind"] == "asset")
+                .unwrap()
+                .clone();
+            let artifacts = serde_json::json!([
+                {
+                    "path": relative,
+                    "digest": executable_digest.clone(),
+                    "kind": "executable",
+                    "platform": "macos-arm64",
+                    "entrypoint": entrypoint,
+                    "argv": []
+                },
+                {
+                    "path": contract_map["path"],
+                    "digest": contract_map["digest"],
+                    "kind": "asset",
+                    "platform": "host"
+                }
+            ]);
+            let artifact_set_digest = sha256(&serde_json::to_vec(&artifacts).unwrap());
+            pack["artifacts"] = artifacts;
+            pack["pack"]["artifact_digest"] = Value::String(artifact_set_digest.clone());
+            pack["integrity"]["artifact_set_digest"] = Value::String(artifact_set_digest);
+            pack["functions"][0]["implementation_digest"] = Value::String(executable_digest);
+        });
+    }
+
     fn copy_tree(source: &Path, destination: &Path) {
         fs::create_dir_all(destination).unwrap();
         for entry in fs::read_dir(source).unwrap() {
@@ -683,6 +740,7 @@ mod tests {
             kernel_port: 8765,
             dev_workspace_root: None,
         };
+        package_fixture_application(&config);
         (root, config)
     }
 
@@ -710,6 +768,10 @@ mod tests {
         let profile: Value = serde_json::from_slice(&fs::read(profile_path).unwrap()).unwrap();
 
         assert_eq!(value_str(&profile, "/base/pack_id"), Some(DEFAULT_BASE_ID));
+        assert_eq!(
+            value_str(&profile, "/profile_api_version"),
+            Some(DEFAULT_PROFILE_API_VERSION)
+        );
         assert_eq!(
             value_str(&profile, "/shell/pack_id"),
             Some(DEFAULT_SHELL_ID)
@@ -763,7 +825,7 @@ mod tests {
                 first.launch.entrypoint,
                 first
                     .pack_root
-                    .join("defaultspack/desktop_app.py")
+                    .join("platform-artifacts/Tobkiri.app/Contents/MacOS/tobkiri-shell",)
                     .canonicalize()
                     .unwrap()
             );

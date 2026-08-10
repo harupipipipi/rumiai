@@ -114,6 +114,10 @@ def package_bundle(
         retained_artifacts = [
             item for item in pack.get("artifacts", ()) if item.get("kind") != "executable"
         ]
+        if pack_name == "runtime.tauri.application.default.pack.v4.json":
+            retained_artifacts = [
+                {**item, "platform": "host"} for item in retained_artifacts
+            ]
         pack["artifacts"] = [
             {
                 "path": relative_path,
@@ -125,6 +129,7 @@ def package_bundle(
             },
             *retained_artifacts,
         ]
+        pack["pack"]["artifact_digest"] = canonical_digest(pack["artifacts"])
         for function in pack["functions"]:
             function["implementation_digest"] = digest
         source_path = f"ecosystem/defaultspack/v4/packs/{pack_name}"

@@ -4,7 +4,7 @@
   "pack_id": "shell.cli.default",
   "availability": "build_required",
   "artifact_digest": null,
-  "definition_revision": "sha256:363af03ae277251c1e9c0f4a353dfeeb64d16a49813928c85d2f72b6ba7a6d44",
+  "definition_revision": "sha256:95e8d006c4d74925ef29b2205ab8091c2a60057595b7d3b4f8b33d157ae67bd7",
   "contract_id": "app.shell.v1",
   "presentation": {
     "family": "terminal",
@@ -45,7 +45,7 @@
     "source_kind": "generated",
     "source_path": "ecosystem/defaultspack/v4/shell.cli.default.shell.v1.json",
     "source_digest": "sha256:06f340483ec0b8416fab8cbb202003b2e4bb7befdd6645b43c0a50fa4112adf3",
-    "repository_commit": "fb5ecdef18f2887616d328a4e57d77de757f4f35",
+    "repository_commit": "working-tree",
     "repository_commit_trusted": false,
     "content_root_digest": "sha256:5839974c5b5b3153604791aed03ac3241839b4a63b868d88ab832342dadb4a9a",
     "generator": "defaultspack-v4-core",

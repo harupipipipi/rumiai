@@ -29,9 +29,11 @@ from tobkiri_protocol.profile_scope import normalize_requested_scope_template
 from tobkiri_protocol.platform_artifact import artifact_digest, verify_platform_artifact
 from tobkiri_protocol import platform_artifact
 from tobkiri_protocol.provenance import (
+    informational_source_commit,
     normative_generated_provenance,
     trusted_source_commit,
 )
+from scripts import generate_defaultspack_v4_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
@@ -684,6 +686,44 @@ def test_normative_generator_rejects_dirty_implicit_commit(tmp_path: Path) -> No
     source.write_text('{"dirty":true}', encoding="utf-8")
     with pytest.raises(Exception, match="dirty working tree"):
         trusted_source_commit(repository)
+
+
+def test_official_bundle_render_is_byte_identical_across_two_passes() -> None:
+    first = generate_defaultspack_v4_bundle._render()
+    second = generate_defaultspack_v4_bundle._render()
+    assert first == second
+
+
+def test_informational_commit_is_stable_across_child_and_shallow_checkout(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.invalid"],
+        cwd=repository,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"], cwd=repository, check=True
+    )
+    source = repository / "source.json"
+    source.write_text("{}", encoding="utf-8")
+    subprocess.run(["git", "add", "source.json"], cwd=repository, check=True)
+    subprocess.run(["git", "commit", "-qm", "source"], cwd=repository, check=True)
+    first = informational_source_commit(repository)
+    marker = repository / "unrelated.txt"
+    marker.write_text("unrelated", encoding="utf-8")
+    subprocess.run(["git", "add", "unrelated.txt"], cwd=repository, check=True)
+    subprocess.run(["git", "commit", "-qm", "child"], cwd=repository, check=True)
+    second = informational_source_commit(repository)
+    shallow = tmp_path / "shallow"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", repository.as_uri(), str(shallow)],
+        check=True,
+    )
+    assert first == second == informational_source_commit(shallow) == "working-tree"
 
 
 def test_normative_provenance_is_non_self_referential_and_source_bound() -> None:
