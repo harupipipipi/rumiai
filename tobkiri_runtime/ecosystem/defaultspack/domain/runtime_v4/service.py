@@ -80,6 +80,15 @@ def _sha256_bytes(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
 
 
+def _bundle_digest(catalog: "BundledCatalog") -> str:
+    """Digest the exact lock bytes that admitted the finite bundle."""
+
+    lock_path = catalog.root / "bundle.lock.json"
+    if lock_path.is_symlink() or not lock_path.is_file():
+        raise ProfileResolutionDenied("bundle lock is unavailable")
+    return _sha256_bytes(lock_path.read_bytes())
+
+
 def _require_digest(value: object, field: str) -> str:
     if not isinstance(value, str) or _DIGEST_RE.fullmatch(value) is None:
         raise ProfileResolutionDenied(f"{field} must be an exact sha256 digest")
@@ -422,6 +431,8 @@ def resolve_default_profile(
         raise ProfileResolutionDenied(f"profile is not in the bundled inventory: {profile_id}")
     if source["state"] != "needs_resolution":
         raise ProfileResolutionDenied("bundled Profile must begin in needs_resolution state")
+    profile_definition_digest = canonical_digest(source)
+    bundle_digest = _bundle_digest(catalog)
 
     base_id = source["base"]["pack_id"]
     base_manifest = catalog.packs.get(base_id)
@@ -455,6 +466,21 @@ def resolve_default_profile(
     requested_pack_roles = {
         item["pack_id"]: item.get("role", "provider") for item in source["packs"]
     }
+    application_ids = sorted(
+        pack_id for pack_id, role in requested_pack_roles.items() if role == "application"
+    )
+    if len(application_ids) != 1:
+        raise ProfileResolutionDenied(
+            "canonical defaults Profile requires exactly one Application Pack"
+        )
+    application_manifest = catalog.packs.get(application_ids[0])
+    if (
+        application_manifest is None
+        or application_manifest["pack"]["kind"] != "application"
+    ):
+        raise ProfileResolutionDenied(
+            "canonical defaults Application must be a Pack v4 application"
+        )
     selected_ids = [base_id, shell_pack_id, *requested_pack_ids, *additional_pack_ids]
     pending = list(selected_ids)
     while pending:
@@ -557,12 +583,18 @@ def resolve_default_profile(
         }
         bindings.append(
             {
+                "caller_function_id": edge["caller_function_id"],
                 "pack_id": manifest["pack"]["id"],
                 "artifact_digest": manifest["pack"]["artifact_digest"],
                 "function_principal": principal,
                 "contract_id": edge["contract_id"],
                 "operation_id": edge["operation_id"],
                 "domain_kind": function.get("isolation", "pack_vm"),
+                "authority_reference": reference,
+                "requested_scope_digest": canonical_digest(
+                    edge["requested_scope_template"]
+                ),
+                "adapter_digests": [],
             }
         )
 
@@ -600,11 +632,58 @@ def resolve_default_profile(
     )
     profile = validate_document(profile, "profile")
     profile_revision = canonical_digest(profile)
+    effective_set = [
+        {
+            "role": (
+                "base"
+                if manifest["pack"]["id"] == base_id
+                else "shell"
+                if manifest["pack"]["id"] == shell_pack_id
+                else "pack"
+            ),
+            "identity": manifest["pack"]["id"],
+            "artifact_digest": manifest["pack"]["artifact_digest"],
+        }
+        for manifest in selected
+    ]
+    requested_edges_digest = canonical_digest(resolved_edges)
+    constraints_digest = canonical_digest(
+        {
+            "base": {
+                "definition_revision": base_definition["definition_revision"],
+                "shell_requirements": base_definition["shell_requirements"],
+                "dependencies": base_definition["dependencies"],
+            },
+            "shell": {
+                "definition_revision": shell_definition["definition_revision"],
+                "presentation": shell_definition["presentation"],
+                "launch": shell_definition["launch"],
+            },
+            "packs": {
+                manifest["pack"]["id"]: manifest["requirements"]
+                for manifest in sorted(selected, key=lambda item: item["pack"]["id"])
+            },
+            "requested_scope_templates": [
+                edge["requested_scope_template"] for edge in resolved_edges
+            ],
+        }
+    )
+    closure_digest = canonical_digest(effective_set)
+    provenance_digest = canonical_digest(profile["provenance"])
+    application = {
+        "pack_id": application_ids[0],
+        "artifact_digest": application_manifest["pack"]["artifact_digest"],
+        "definition_digest": canonical_digest(application_manifest),
+    }
 
     plan: dict[str, Any] = {
         "plan_api_version": "io.tobkiri.resolved-plan.v1",
         "profile_id": profile_id,
         "profile_revision": profile_revision,
+        "profile_definition_digest": profile_definition_digest,
+        "catalog_revision": profile["catalog_revision"],
+        "bundle_digest": bundle_digest,
+        "profile_authority_snapshot_digest": snapshot_digest,
         "security_epoch": security_epoch,
         "base": {
             "pack_id": base_id,
@@ -618,6 +697,12 @@ def resolve_default_profile(
             "contract_id": "app.shell.v1",
             "definition_digest": canonical_digest(shell_definition),
         },
+        "application": application,
+        "effective_set": effective_set,
+        "requested_edges_digest": requested_edges_digest,
+        "constraints_digest": constraints_digest,
+        "closure_digest": closure_digest,
+        "provenance_digest": provenance_digest,
         "bindings": bindings,
         "plan_digest": "sha256:" + "0" * 64,
     }
@@ -630,7 +715,9 @@ def resolve_default_profile(
         "lock_api_version": "io.tobkiri.profile-lock.v4",
         "profile_id": profile_id,
         "profile_revision": profile_revision,
+        "profile_definition_digest": profile_definition_digest,
         "catalog_revision": profile["catalog_revision"],
+        "bundle_digest": bundle_digest,
         "security_epoch": security_epoch,
         "base": {
             "pack_id": base_id,
@@ -638,20 +725,12 @@ def resolve_default_profile(
             "definition_revision": base_definition["definition_revision"],
         },
         "shell": dict(profile["shell"]),
-        "effective_set": [
-            {
-                "role": (
-                    "base"
-                    if manifest["pack"]["id"] == base_id
-                    else "shell"
-                    if manifest["pack"]["id"] == shell_pack_id
-                    else "pack"
-                ),
-                "identity": manifest["pack"]["id"],
-                "artifact_digest": manifest["pack"]["artifact_digest"],
-            }
-            for manifest in selected
-        ],
+        "application": application,
+        "effective_set": effective_set,
+        "requested_edges_digest": requested_edges_digest,
+        "constraints_digest": constraints_digest,
+        "closure_digest": closure_digest,
+        "provenance_digest": provenance_digest,
         "plan_digest": plan["plan_digest"],
         "profile_authority_snapshot_digest": snapshot_digest,
         "lock_digest": "sha256:" + "0" * 64,
@@ -734,6 +813,7 @@ class ActivationStore:
         try:
             activation = self._activation_record(
                 profile,
+                lock,
                 plan,
                 activation_id=activation_id,
                 state=state,
@@ -763,6 +843,7 @@ class ActivationStore:
             state = "ready_without_authority"
             activation = self._activation_record(
                 profile,
+                lock,
                 plan,
                 activation_id=activation_id,
                 state=state,
@@ -792,6 +873,7 @@ class ActivationStore:
             state = "committing"
             activation = self._activation_record(
                 profile,
+                lock,
                 plan,
                 activation_id=activation_id,
                 state=state,
@@ -804,6 +886,7 @@ class ActivationStore:
 
             activation = self._activation_record(
                 profile,
+                lock,
                 plan,
                 activation_id=activation_id,
                 state="active",
@@ -949,6 +1032,7 @@ class ActivationStore:
     def _activation_record(
         self,
         profile: Mapping[str, Any],
+        lock: Mapping[str, Any],
         plan: Mapping[str, Any],
         *,
         activation_id: str,
@@ -961,10 +1045,15 @@ class ActivationStore:
         record: dict[str, Any] = {
             "activation_api_version": "io.tobkiri.activation-record.v1",
             "profile_id": profile["profile_id"],
+            "profile_revision": plan["profile_revision"],
             "activation_id": activation_id,
             "state": state,
             "state_generation": generation,
+            "catalog_revision": plan["catalog_revision"],
+            "bundle_digest": plan["bundle_digest"],
+            "lock_digest": lock["lock_digest"],
             "plan_digest": plan["plan_digest"],
+            "closure_digest": plan["closure_digest"],
             "profile_authority_snapshot_digest": profile["profile_authority_snapshot_digest"],
             "security_epoch": plan["security_epoch"],
             "fencing_token": fencing_token,
@@ -1080,7 +1169,15 @@ class ActivationStore:
         self._validate_record_graph(profile, lock, plan)
         if activation["activation_id"] != pointer["activation_id"]:
             raise ProfileResolutionDenied("active pointer selects another activation")
-        if activation["state"] != "active" or activation["plan_digest"] != plan["plan_digest"]:
+        if (
+            activation["state"] != "active"
+            or activation["profile_revision"] != plan["profile_revision"]
+            or activation["catalog_revision"] != plan["catalog_revision"]
+            or activation["bundle_digest"] != plan["bundle_digest"]
+            or activation["lock_digest"] != lock["lock_digest"]
+            or activation["plan_digest"] != plan["plan_digest"]
+            or activation["closure_digest"] != plan["closure_digest"]
+        ):
             raise ProfileResolutionDenied("activation is stale or not active")
         authority = self._authority.active_activation_reservation(str(activation["activation_id"]))
         expected_authority = (
@@ -1152,5 +1249,107 @@ class ActivationStore:
         if lock["security_epoch"] != plan["security_epoch"]:
             raise ProfileResolutionDenied("ProfileLock security epoch is stale")
         snapshot = profile["profile_authority_snapshot_digest"]
-        if lock["profile_authority_snapshot_digest"] != snapshot:
+        shared_fields = (
+            "profile_definition_digest",
+            "catalog_revision",
+            "bundle_digest",
+            "application",
+            "effective_set",
+            "requested_edges_digest",
+            "constraints_digest",
+            "closure_digest",
+            "provenance_digest",
+        )
+        if any(lock[field] != plan[field] for field in shared_fields):
+            raise ProfileResolutionDenied("ProfileLock and ResolvedPlan bindings diverge")
+        if (
+            plan["profile_authority_snapshot_digest"] != snapshot
+            or lock["profile_authority_snapshot_digest"] != snapshot
+        ):
             raise ProfileResolutionDenied("Profile authority snapshot is stale")
+        if plan["catalog_revision"] != profile["catalog_revision"]:
+            raise ProfileResolutionDenied("Profile catalog revision is stale")
+        if plan["requested_edges_digest"] != canonical_digest(
+            profile["requested_edges"]
+        ):
+            raise ProfileResolutionDenied("Profile requested edge set is stale")
+        if plan["provenance_digest"] != canonical_digest(profile["provenance"]):
+            raise ProfileResolutionDenied("Profile provenance binding is stale")
+        if plan["closure_digest"] != canonical_digest(plan["effective_set"]):
+            raise ProfileResolutionDenied("Profile closure digest is stale")
+        effective_ids = [item["identity"] for item in plan["effective_set"]]
+        if len(effective_ids) != len(set(effective_ids)):
+            raise ProfileResolutionDenied("Profile closure contains duplicate artifacts")
+        base_rows = [
+            item for item in plan["effective_set"] if item["role"] == "base"
+        ]
+        shell_rows = [
+            item for item in plan["effective_set"] if item["role"] == "shell"
+        ]
+        if len(base_rows) != 1 or (
+            base_rows[0]["identity"],
+            base_rows[0]["artifact_digest"],
+        ) != (plan["base"]["pack_id"], plan["base"]["artifact_digest"]):
+            raise ProfileResolutionDenied("Profile Base closure binding is stale")
+        if len(shell_rows) != 1 or (
+            shell_rows[0]["identity"],
+            shell_rows[0]["artifact_digest"],
+        ) != (plan["shell"]["pack_id"], plan["shell"]["artifact_digest"]):
+            raise ProfileResolutionDenied("Profile Shell closure binding is stale")
+        profile_pack_set = {
+            (item["pack_id"], item["artifact_digest"])
+            for item in profile["packs"]
+        }
+        closure_pack_set = {
+            (item["identity"], item["artifact_digest"])
+            for item in plan["effective_set"]
+            if item["role"] == "pack"
+        }
+        if profile_pack_set != closure_pack_set:
+            raise ProfileResolutionDenied("Profile Pack closure binding is stale")
+        application_rows = [
+            item for item in profile["packs"] if item.get("role") == "application"
+        ]
+        if len(application_rows) != 1 or (
+            application_rows[0]["pack_id"],
+            application_rows[0]["artifact_digest"],
+        ) != (
+            plan["application"]["pack_id"],
+            plan["application"]["artifact_digest"],
+        ):
+            raise ProfileResolutionDenied("Profile Application binding is stale")
+        edge_bindings = {
+            _edge_key(edge): (
+                edge["authority_reference"],
+                canonical_digest(edge["requested_scope_template"]),
+            )
+            for edge in profile["requested_edges"]
+        }
+        plan_bindings = {
+            _edge_key(
+                {
+                    "caller_function_id": binding["caller_function_id"],
+                    "target_provider_id": binding["function_principal"]["function_id"],
+                    "contract_id": binding["contract_id"],
+                    "operation_id": binding["operation_id"],
+                }
+            ): binding
+            for binding in plan["bindings"]
+        }
+        for edge in profile["requested_edges"]:
+            matches = [
+                binding
+                for binding in plan["bindings"]
+                if binding["function_principal"]["function_id"]
+                == edge["target_provider_id"]
+                and binding["caller_function_id"] == edge["caller_function_id"]
+                and binding["contract_id"] == edge["contract_id"]
+                and binding["operation_id"] == edge["operation_id"]
+            ]
+            if len(matches) != 1 or (
+                matches[0]["authority_reference"],
+                matches[0]["requested_scope_digest"],
+            ) != edge_bindings[_edge_key(edge)]:
+                raise ProfileResolutionDenied("ResolvedPlan Authority binding is stale")
+        if len(plan_bindings) != len(plan["bindings"]):
+            raise ProfileResolutionDenied("ResolvedPlan contains duplicate bindings")

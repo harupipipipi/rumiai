@@ -254,6 +254,33 @@ def compose_runtime_profile(
         for item in sorted(selected_packs, key=lambda item: item["pack_id"])
     )
     profile_revision = canonical_digest(resolved)
+    profile_definition_digest = canonical_digest(resolved)
+    requested_edges_digest = canonical_digest(resolved["requested_edges"])
+    constraints_digest = canonical_digest(
+        {
+            "base": base["shell_requirements"],
+            "packs": resolved["packs"],
+            "requested_scope_templates": [
+                edge["requested_scope_template"] for edge in resolved["requested_edges"]
+            ],
+        }
+    )
+    closure_digest = canonical_digest(effective_set)
+    provenance_digest = canonical_digest(resolved["provenance"])
+    application_rows = [
+        item for item in resolved["packs"] if item.get("role") == "application"
+    ]
+    if len(application_rows) > 1:
+        raise CompositionError("Profile contains multiple Application Packs")
+    application = (
+        {
+            "pack_id": application_rows[0]["pack_id"],
+            "artifact_digest": application_rows[0]["artifact_digest"],
+            "definition_digest": application_rows[0]["artifact_digest"],
+        }
+        if application_rows
+        else None
+    )
     plan_digest = canonical_digest(
         {
             "profile_revision": profile_revision,
@@ -265,7 +292,9 @@ def compose_runtime_profile(
         "lock_api_version": "io.tobkiri.profile-lock.v4",
         "profile_id": resolved["profile_id"],
         "profile_revision": profile_revision,
+        "profile_definition_digest": profile_definition_digest,
         "catalog_revision": catalog.revision,
+        "bundle_digest": catalog.revision,
         "security_epoch": security_epoch,
         "base": {
             "pack_id": base["pack_id"],
@@ -273,7 +302,12 @@ def compose_runtime_profile(
             "definition_revision": base["definition_revision"],
         },
         "shell": shell_lock,
+        "application": application,
         "effective_set": effective_set,
+        "requested_edges_digest": requested_edges_digest,
+        "constraints_digest": constraints_digest,
+        "closure_digest": closure_digest,
+        "provenance_digest": provenance_digest,
         "plan_digest": plan_digest,
         "profile_authority_snapshot_digest": resolved["profile_authority_snapshot_digest"],
     }

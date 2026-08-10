@@ -54,6 +54,9 @@ def _digest(label: str) -> str:
 
 MINIMAL_PROFILE_AUTHORITY_DIGEST = _digest("profile-authority-snapshot")
 MINIMAL_CATALOG_REVISION = _digest("catalog")
+MINIMAL_BUNDLE_DIGEST = _digest("bundle")
+MINIMAL_PROFILE_DEFINITION_DIGEST = _digest("profile-definition")
+MINIMAL_CONSTRAINTS_DIGEST = _digest("constraints")
 MINIMAL_BASE_DIGEST = _digest("base-artifact")
 MINIMAL_SHELL_DIGEST = _digest("shell-artifact")
 MINIMAL_PACK_DIGEST = _digest("echo-artifact")
@@ -321,13 +324,26 @@ def minimal_profile() -> MinimalProfile:
         ),
     }
     profile_revision = canonical_digest(profile)
+    effective_set = [
+        {"role": "base", "identity": base.pack_id, "artifact_digest": base.digest},
+        {"role": "shell", "identity": shell.pack_id, "artifact_digest": shell.digest},
+        {"role": "pack", "identity": pack.pack_id, "artifact_digest": pack.digest},
+    ]
+    requested_edges_digest = canonical_digest(profile["requested_edges"])
+    closure_digest = canonical_digest(effective_set)
+    provenance_digest = canonical_digest(profile["provenance"])
     binding = {
+        "caller_function_id": caller.function_id,
         "pack_id": pack.pack_id,
         "artifact_digest": pack.digest,
         "function_principal": target.to_dict(),
         "contract_id": MINIMAL_CONTRACT_ID,
         "operation_id": MINIMAL_OPERATION_ID,
         "domain_kind": "wasm_component",
+        "authority_reference": authority_reference,
+        "requested_scope_digest": canonical_digest(
+            profile["requested_edges"][0]["requested_scope_template"]
+        ),
         "provider_authority_digest": _digest("provider-authority"),
         "adapter_digests": [],
     }
@@ -335,6 +351,10 @@ def minimal_profile() -> MinimalProfile:
         "plan_api_version": "io.tobkiri.resolved-plan.v1",
         "profile_id": MINIMAL_PROFILE_ID,
         "profile_revision": profile_revision,
+        "profile_definition_digest": MINIMAL_PROFILE_DEFINITION_DIGEST,
+        "catalog_revision": MINIMAL_CATALOG_REVISION,
+        "bundle_digest": MINIMAL_BUNDLE_DIGEST,
+        "profile_authority_snapshot_digest": MINIMAL_PROFILE_AUTHORITY_DIGEST,
         "security_epoch": 1,
         "base": {
             "pack_id": base.pack_id,
@@ -348,6 +368,12 @@ def minimal_profile() -> MinimalProfile:
             "contract_id": "app.shell.v1",
             "definition_digest": MINIMAL_SHELL_DEFINITION_DIGEST,
         },
+        "application": None,
+        "effective_set": effective_set,
+        "requested_edges_digest": requested_edges_digest,
+        "constraints_digest": MINIMAL_CONSTRAINTS_DIGEST,
+        "closure_digest": closure_digest,
+        "provenance_digest": provenance_digest,
         "bindings": [binding],
     }
     plan = {
@@ -358,7 +384,9 @@ def minimal_profile() -> MinimalProfile:
         "lock_api_version": "io.tobkiri.profile-lock.v4",
         "profile_id": MINIMAL_PROFILE_ID,
         "profile_revision": profile_revision,
+        "profile_definition_digest": MINIMAL_PROFILE_DEFINITION_DIGEST,
         "catalog_revision": MINIMAL_CATALOG_REVISION,
+        "bundle_digest": MINIMAL_BUNDLE_DIGEST,
         "security_epoch": 1,
         "base": {
             "pack_id": base.pack_id,
@@ -374,11 +402,12 @@ def minimal_profile() -> MinimalProfile:
             "platform": "linux",
             "architecture": "x86_64",
         },
-        "effective_set": [
-            {"role": "base", "identity": base.pack_id, "artifact_digest": base.digest},
-            {"role": "shell", "identity": shell.pack_id, "artifact_digest": shell.digest},
-            {"role": "pack", "identity": pack.pack_id, "artifact_digest": pack.digest},
-        ],
+        "application": None,
+        "effective_set": effective_set,
+        "requested_edges_digest": requested_edges_digest,
+        "constraints_digest": MINIMAL_CONSTRAINTS_DIGEST,
+        "closure_digest": closure_digest,
+        "provenance_digest": provenance_digest,
         "plan_digest": plan["plan_digest"],
         "profile_authority_snapshot_digest": MINIMAL_PROFILE_AUTHORITY_DIGEST,
     }
@@ -389,10 +418,15 @@ def minimal_profile() -> MinimalProfile:
     activation = {
         "activation_api_version": "io.tobkiri.activation-record.v1",
         "profile_id": MINIMAL_PROFILE_ID,
+        "profile_revision": profile_revision,
         "activation_id": "activation:conformance-minimal-1",
         "state": "active",
         "state_generation": 0,
+        "catalog_revision": MINIMAL_CATALOG_REVISION,
+        "bundle_digest": MINIMAL_BUNDLE_DIGEST,
+        "lock_digest": lock["lock_digest"],
         "plan_digest": plan["plan_digest"],
+        "closure_digest": closure_digest,
         "profile_authority_snapshot_digest": MINIMAL_PROFILE_AUTHORITY_DIGEST,
         "security_epoch": 1,
         "fencing_token": 1,

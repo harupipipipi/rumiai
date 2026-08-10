@@ -6,6 +6,9 @@ import hashlib
 import hmac
 from typing import Any, Mapping
 
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
+
 from ecosystem.defaultspack.domain.runtime_v4 import ActiveDefaultProfile, BundledCatalog
 from tobkiri_protocol.canonical import canonical_digest
 
@@ -127,8 +130,36 @@ def _project_definition(
         shell["artifact_digest"] != catalog.packs[str(shell["pack_id"])]["pack"]["artifact_digest"]
     ):
         diagnostics.append({"code": "SHELL_DIGEST_MISMATCH", "subject": shell_id})
+    elif base is not None:
+        requirements = base["shell_requirements"]
+        presentation = shell["presentation"]
+        if presentation["family"] not in requirements["presentation_families"]:
+            diagnostics.append({"code": "SHELL_FAMILY_INCOMPATIBLE", "subject": shell_id})
+        missing_capabilities = sorted(
+            set(requirements["required_capabilities"])
+            - set(presentation["capabilities"])
+        )
+        diagnostics.extend(
+            {"code": "SHELL_CAPABILITY_MISSING", "subject": capability}
+            for capability in missing_capabilities
+        )
+        requested_variant = (
+            str(definition["shell"]["platform"]),
+            str(definition["shell"]["architecture"]),
+        )
+        matching_variants = [
+            variant
+            for variant in shell["launch"]["variants"]
+            if (variant["platform"], variant["architecture"]) == requested_variant
+            and variant["artifact_digest"] == shell["artifact_digest"]
+        ]
+        if len(matching_variants) != 1:
+            diagnostics.append({"code": "SHELL_VARIANT_INCOMPATIBLE", "subject": shell_id})
 
     requested = [dict(item) for item in definition["packs"]]
+    requested_ids = [str(item["pack_id"]) for item in requested]
+    if len(requested_ids) != len(set(requested_ids)):
+        diagnostics.append({"code": "PACK_DUPLICATE", "subject": profile_id})
     application_rows = [item for item in requested if item.get("role") == "application"]
     if len(application_rows) != 1:
         diagnostics.append({"code": "APPLICATION_BINDING_INVALID", "subject": profile_id})
@@ -142,6 +173,10 @@ def _project_definition(
             manifest["pack"]["artifact_digest"],
         }:
             diagnostics.append({"code": "PACK_DIGEST_MISMATCH", "subject": pack_id})
+        if item.get("role") == "application" and (
+            manifest is None or manifest["pack"]["kind"] != "application"
+        ):
+            diagnostics.append({"code": "APPLICATION_KIND_INVALID", "subject": pack_id})
 
     closure = _static_pack_closure(catalog, base_id, shell, requested, diagnostics)
     is_active = profile_id == active_profile_id
@@ -219,6 +254,18 @@ def _static_pack_closure(
             roles.setdefault(dependency, "dependency")
             if dependency not in catalog.packs:
                 diagnostics.append({"code": "DEPENDENCY_UNAVAILABLE", "subject": dependency})
+                continue
+            version_range = manifest["requirements"]["pack_dependencies"][dependency]
+            try:
+                compatible = Version(catalog.packs[dependency]["pack"]["version"]) in SpecifierSet(
+                    version_range.replace(" ", ",")
+                )
+            except (InvalidSpecifier, InvalidVersion):
+                compatible = False
+            if not compatible:
+                diagnostics.append(
+                    {"code": "DEPENDENCY_VERSION_INCOMPATIBLE", "subject": dependency}
+                )
         pack = manifest["pack"]
         result.append(
             {

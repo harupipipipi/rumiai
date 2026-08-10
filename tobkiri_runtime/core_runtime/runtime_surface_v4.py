@@ -895,6 +895,7 @@ class RuntimeSurfaceService:
                 }
         edge_lookup = {
             (
+                str(edge["caller_function_id"]),
                 str(edge["target_provider_id"]),
                 str(edge["contract_id"]),
                 str(edge["operation_id"]),
@@ -907,6 +908,7 @@ class RuntimeSurfaceService:
             principal = dict(binding["function_principal"])
             edge = edge_lookup.get(
                 (
+                    str(binding["caller_function_id"]),
                     str(principal["function_id"]),
                     str(binding["contract_id"]),
                     str(binding["operation_id"]),
@@ -926,9 +928,9 @@ class RuntimeSurfaceService:
                 "function_principal_id": _principal_id(principal),
                 "contract_revision_digest": str(principal["contract_revision_digest"]),
                 "function_implementation_digest": str(principal["function_implementation_digest"]),
-                "caller_function_id": str(edge.get("caller_function_id") or ""),
+                "caller_function_id": str(binding["caller_function_id"]),
                 "target_provider_id": str(edge.get("target_provider_id") or ""),
-                "authority_reference": str(edge.get("authority_reference") or ""),
+                "authority_reference": str(binding["authority_reference"]),
                 "route": {
                     "contract_id": str(binding["contract_id"]),
                     "operation_id": str(binding["operation_id"]),
@@ -1271,6 +1273,7 @@ def _normalized_plan_bindings(
         }
     edge_lookup = {
         (
+            str(edge["caller_function_id"]),
             str(edge["target_provider_id"]),
             str(edge["contract_id"]),
             str(edge["operation_id"]),
@@ -1282,12 +1285,13 @@ def _normalized_plan_bindings(
         target = binding["function_principal"]
         edge = edge_lookup.get(
             (
+                str(binding["caller_function_id"]),
                 str(target["function_id"]),
                 str(binding["contract_id"]),
                 str(binding["operation_id"]),
             )
         )
-        if edge is None or edge["caller_function_id"] not in principals:
+        if edge is None or binding["caller_function_id"] not in principals:
             raise RuntimeSurfaceError(
                 RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
                 "ResolvedPlan binding has no exact Profile edge principals",
@@ -1295,13 +1299,15 @@ def _normalized_plan_bindings(
         result.append(
             {
                 "binding_id": canonical_digest(binding),
-                "source_principal_id": _principal_id(principals[str(edge["caller_function_id"])]),
+                "source_principal_id": _principal_id(
+                    principals[str(binding["caller_function_id"])]
+                ),
                 "target_principal_id": _principal_id(target),
                 "target_contract_id": str(binding["contract_id"]),
                 "operation_id": str(binding["operation_id"]),
                 "owner_pack_id": str(binding["pack_id"]),
                 "edge_digest": canonical_digest(edge),
-                "authority_reference": str(edge["authority_reference"]),
+                "authority_reference": str(binding["authority_reference"]),
             }
         )
     return result

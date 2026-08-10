@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import shutil
 from dataclasses import replace
@@ -201,6 +202,115 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
         "rumi_file_inspect_pack.file-inspect.service",
     ]
     assert resolved.lock["plan_digest"] == resolved.plan["plan_digest"]
+
+
+def test_lock_plan_and_activation_bind_the_complete_canonical_definition(
+    tmp_path: Path,
+) -> None:
+    catalog = _catalog()
+    resolved = _resolve(catalog)
+    expected_bundle_digest = "sha256:" + hashlib.sha256(
+        (BUNDLE_ROOT / "bundle.lock.json").read_bytes()
+    ).hexdigest()
+    application = catalog.packs["runtime.tauri.application.default"]
+
+    assert resolved.lock["profile_definition_digest"] == canonical_digest(
+        catalog.profiles["defaults"]
+    )
+    assert resolved.lock["bundle_digest"] == expected_bundle_digest
+    assert resolved.lock["application"] == {
+        "pack_id": "runtime.tauri.application.default",
+        "artifact_digest": application["pack"]["artifact_digest"],
+        "definition_digest": canonical_digest(application),
+    }
+    for field in (
+        "profile_definition_digest",
+        "catalog_revision",
+        "bundle_digest",
+        "application",
+        "effective_set",
+        "requested_edges_digest",
+        "constraints_digest",
+        "closure_digest",
+        "provenance_digest",
+    ):
+        assert resolved.plan[field] == resolved.lock[field]
+    assert resolved.plan["closure_digest"] == canonical_digest(
+        resolved.plan["effective_set"]
+    )
+    assert resolved.plan["requested_edges_digest"] == canonical_digest(
+        resolved.profile["requested_edges"]
+    )
+    assert resolved.plan["provenance_digest"] == canonical_digest(
+        resolved.profile["provenance"]
+    )
+    edge_by_key = {
+        _edge_key(edge): edge for edge in resolved.profile["requested_edges"]
+    }
+    assert len(resolved.plan["bindings"]) == len(edge_by_key)
+    for binding in resolved.plan["bindings"]:
+        key = "|".join(
+            (
+                binding["caller_function_id"],
+                binding["function_principal"]["function_id"],
+                binding["contract_id"],
+                binding["operation_id"],
+            )
+        )
+        edge = edge_by_key[key]
+        assert binding["authority_reference"] == edge["authority_reference"]
+        assert binding["requested_scope_digest"] == canonical_digest(
+            edge["requested_scope_template"]
+        )
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = _authority(tmp_path / "authority.sqlite3")
+    store = ActivationStore(
+        tmp_path / "state", workspace, profile_id="defaults", authority=authority
+    )
+    activation = store.activate(
+        resolved,
+        activation_id="activation:defaults-complete",
+        created_at="2026-08-10T00:00:00Z",
+    )
+    assert activation["profile_revision"] == resolved.plan["profile_revision"]
+    assert activation["catalog_revision"] == resolved.plan["catalog_revision"]
+    assert activation["bundle_digest"] == expected_bundle_digest
+    assert activation["lock_digest"] == resolved.lock["lock_digest"]
+    assert activation["closure_digest"] == resolved.plan["closure_digest"]
+
+
+def test_self_consistent_plan_tamper_cannot_change_authority_binding(
+    tmp_path: Path,
+) -> None:
+    resolved = _resolve()
+    profile = copy.deepcopy(resolved.profile)
+    plan = copy.deepcopy(resolved.plan)
+    lock = copy.deepcopy(resolved.lock)
+    plan["bindings"][0]["authority_reference"] = "authority-ref:tampered.reference"
+    plan["plan_digest"] = canonical_digest(
+        {key: value for key, value in plan.items() if key != "plan_digest"}
+    )
+    lock["plan_digest"] = plan["plan_digest"]
+    lock["lock_digest"] = canonical_digest(
+        {key: value for key, value in lock.items() if key != "lock_digest"}
+    )
+    tampered = type(resolved)(profile=profile, lock=lock, plan=plan)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = _authority(tmp_path / "authority.sqlite3")
+    store = ActivationStore(
+        tmp_path / "state", workspace, profile_id="defaults", authority=authority
+    )
+
+    with pytest.raises(ProfileResolutionDenied, match="Authority binding is stale"):
+        store.activate(
+            tampered,
+            activation_id="activation:defaults-tampered",
+            created_at="2026-08-10T00:00:00Z",
+        )
+    assert authority.incomplete_activation_reservations("defaults") == ()
 
 
 def test_unreferenced_caller_cannot_piggyback_on_shared_provider_operation() -> None:
