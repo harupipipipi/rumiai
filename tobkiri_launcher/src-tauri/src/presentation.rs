@@ -17,12 +17,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{bail, Context, Result as AnyResult};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use log::error;
+use log::{error, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::artifact_integrity;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, State, Url, WebviewWindow};
 
 use crate::config::AppConfig;
 
@@ -33,6 +33,80 @@ const SELECTION_FILE: &str = "selection.json";
 const SELECTION_SCHEMA: &str = "io.tobkiri.launcher.profile-selection.v4";
 const RELEASE_SCHEMA: &str = "io.tobkiri.shell.release.v4";
 const RELEASE_FILE: &str = "presentation_release.v4.json";
+const LAUNCHER_PANEL_PORT: u16 = 8765;
+const PRESENTATION_CALLER_DENIED: &str =
+    "presentation access is unavailable from this Launcher window";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PresentationCallerDenial {
+    WindowLabel,
+    ConfiguredPort,
+    Scheme,
+    Host,
+    Port,
+    Route,
+}
+
+impl PresentationCallerDenial {
+    fn audit_code(self) -> &'static str {
+        match self {
+            Self::WindowLabel => "window_label",
+            Self::ConfiguredPort => "configured_port",
+            Self::Scheme => "scheme",
+            Self::Host => "host",
+            Self::Port => "port",
+            Self::Route => "route",
+        }
+    }
+}
+
+fn validate_presentation_caller_context(
+    window_label: &str,
+    url: &Url,
+    configured_port: u16,
+) -> Result<(), PresentationCallerDenial> {
+    if window_label != "main" {
+        return Err(PresentationCallerDenial::WindowLabel);
+    }
+    if configured_port != LAUNCHER_PANEL_PORT {
+        return Err(PresentationCallerDenial::ConfiguredPort);
+    }
+    if url.scheme() != "http" {
+        return Err(PresentationCallerDenial::Scheme);
+    }
+    if !matches!(url.host_str(), Some("127.0.0.1") | Some("localhost")) {
+        return Err(PresentationCallerDenial::Host);
+    }
+    if url.port_or_known_default() != Some(LAUNCHER_PANEL_PORT) {
+        return Err(PresentationCallerDenial::Port);
+    }
+    if url.path() != "/panel" && !url.path().starts_with("/panel/") {
+        return Err(PresentationCallerDenial::Route);
+    }
+    Ok(())
+}
+
+fn validate_presentation_caller(window: &WebviewWindow, config: &AppConfig) -> Result<(), String> {
+    let url = window.url().map_err(|error| {
+        error!("presentation IPC caller inspection failed: {error}");
+        PRESENTATION_CALLER_DENIED.to_string()
+    })?;
+    validate_presentation_caller_context(window.label(), &url, config.kernel_port).map_err(
+        |denial| {
+            // Do not log the current URL: its query may contain a panel session code.
+            warn!(
+                "presentation IPC denied: caller_class={} reason={}",
+                if window.label() == "main" {
+                    "main"
+                } else {
+                    "non_main"
+                },
+                denial.audit_code()
+            );
+            PRESENTATION_CALLER_DENIED.to_string()
+        },
+    )
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresentationApproval {
@@ -295,34 +369,40 @@ pub struct PresentationLaunchResponse {
 }
 
 #[tauri::command]
-pub fn get_presentation_catalog(config: State<'_, AppConfig>) -> Result<PresentationState, String> {
+pub fn get_presentation_catalog(
+    window: WebviewWindow,
+    config: State<'_, AppConfig>,
+) -> Result<PresentationState, String> {
+    validate_presentation_caller(&window, config.inner())?;
     build_state(config.inner()).map_err(|error| {
-        let message = format!("presentation catalog could not be loaded: {error:#}");
-        error!("{message}");
-        message
+        error!("presentation catalog could not be loaded: {error:#}");
+        "presentation catalog is unavailable".to_string()
     })
 }
 
 #[tauri::command]
 pub fn select_presentation(
+    window: WebviewWindow,
     config: State<'_, AppConfig>,
     selection: PresentationSelection,
 ) -> Result<PresentationState, String> {
+    validate_presentation_caller(&window, config.inner())?;
     select_presentation_impl(config.inner(), selection).map_err(|error| {
-        let message = format!("presentation selection could not be saved: {error:#}");
-        error!("{message}");
-        message
+        error!("presentation selection could not be saved: {error:#}");
+        "presentation selection could not be saved".to_string()
     })
 }
 
 #[tauri::command]
 pub fn launch_selected_presentation(
+    window: WebviewWindow,
     app: AppHandle,
     config: State<'_, AppConfig>,
 ) -> Result<PresentationLaunchResponse, String> {
+    validate_presentation_caller(&window, config.inner())?;
     launch_selected_presentation_impl(&app, config.inner()).map_err(|error| {
         error!("selected presentation launch blocked: {error:#}");
-        format!("{error:#}")
+        "selected presentation could not be launched".to_string()
     })
 }
 
@@ -1560,6 +1640,139 @@ fn now_seconds() -> u64 {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    fn capability_permissions(value: &serde_json::Value) -> Vec<&str> {
+        value["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|permission| permission.as_str().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn presentation_capabilities_are_split_from_the_default_surface() {
+        let default: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        assert_eq!(capability_permissions(&default), vec!["core:default"]);
+
+        let catalog: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/presentation-catalog.json"))
+                .unwrap();
+        assert_eq!(catalog["windows"], serde_json::json!(["main"]));
+        assert_eq!(
+            capability_permissions(&catalog),
+            vec!["allow-get-presentation-catalog"]
+        );
+
+        let control: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/presentation-control.json"))
+                .unwrap();
+        assert_eq!(control["windows"], serde_json::json!(["main"]));
+        assert_eq!(
+            capability_permissions(&control),
+            vec![
+                "allow-select-presentation",
+                "allow-launch-selected-presentation"
+            ]
+        );
+
+        let expected_urls = serde_json::json!([
+            "http://127.0.0.1:8765/panel",
+            "http://127.0.0.1:8765/panel/*",
+            "http://localhost:8765/panel",
+            "http://localhost:8765/panel/*"
+        ]);
+        assert_eq!(catalog["remote"]["urls"], expected_urls);
+        assert_eq!(control["remote"]["urls"], expected_urls);
+    }
+
+    #[test]
+    fn presentation_caller_accepts_only_the_launcher_panel() {
+        for url in [
+            "http://127.0.0.1:8765/panel",
+            "http://127.0.0.1:8765/panel/",
+            "http://localhost:8765/panel/setup?code=secret#section",
+            "http://127.0.0.1:8765/panel/packs/example",
+        ] {
+            validate_presentation_caller_context(
+                "main",
+                &Url::parse(url).unwrap(),
+                LAUNCHER_PANEL_PORT,
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn presentation_caller_rejects_non_launcher_windows_origins_and_navigation() {
+        for label in [
+            "defaultspack-main",
+            "authority-approval",
+            "defaults-console",
+            "host-permissions",
+        ] {
+            assert_eq!(
+                validate_presentation_caller_context(
+                    label,
+                    &Url::parse("http://127.0.0.1:8765/panel/").unwrap(),
+                    LAUNCHER_PANEL_PORT,
+                ),
+                Err(PresentationCallerDenial::WindowLabel)
+            );
+        }
+
+        for (url, denial) in [
+            ("tauri://localhost/panel/", PresentationCallerDenial::Scheme),
+            (
+                "https://127.0.0.1:8765/panel/",
+                PresentationCallerDenial::Scheme,
+            ),
+            (
+                "http://example.invalid:8765/panel/",
+                PresentationCallerDenial::Host,
+            ),
+            (
+                "http://localhost:8764/panel/",
+                PresentationCallerDenial::Port,
+            ),
+            (
+                "http://127.0.0.1:8766/panel/",
+                PresentationCallerDenial::Port,
+            ),
+            (
+                "http://127.0.0.1:8765/console",
+                PresentationCallerDenial::Route,
+            ),
+            (
+                "http://127.0.0.1:8765/approval",
+                PresentationCallerDenial::Route,
+            ),
+            (
+                "http://127.0.0.1:8765/panel-legacy",
+                PresentationCallerDenial::Route,
+            ),
+        ] {
+            assert_eq!(
+                validate_presentation_caller_context(
+                    "main",
+                    &Url::parse(url).unwrap(),
+                    LAUNCHER_PANEL_PORT,
+                ),
+                Err(denial),
+                "unexpected decision for {url}"
+            );
+        }
+
+        assert_eq!(
+            validate_presentation_caller_context(
+                "main",
+                &Url::parse("http://127.0.0.1:8765/panel/").unwrap(),
+                18772,
+            ),
+            Err(PresentationCallerDenial::ConfiguredPort)
+        );
+    }
 
     fn sample_catalog() -> PresentationCatalog {
         let selection = PresentationSelection {

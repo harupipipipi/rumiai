@@ -11,10 +11,5 @@
       "http://localhost:8766/*"
     ]
   },
-  "permissions": [
-    "core:default",
-    "allow-get-presentation-catalog",
-    "allow-select-presentation",
-    "allow-launch-selected-presentation"
-  ]
+  "permissions": ["core:default"]
 }
