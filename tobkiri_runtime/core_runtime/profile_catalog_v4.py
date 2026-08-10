@@ -126,10 +126,6 @@ def _project_definition(
         diagnostics.append({"code": "BASE_DIGEST_MISMATCH", "subject": base_id})
     if shell is None or str(shell.get("pack_id") or "") not in catalog.packs:
         diagnostics.append({"code": "SHELL_UNAVAILABLE", "subject": shell_id})
-    elif (
-        shell["artifact_digest"] != catalog.packs[str(shell["pack_id"])]["pack"]["artifact_digest"]
-    ):
-        diagnostics.append({"code": "SHELL_DIGEST_MISMATCH", "subject": shell_id})
     elif base is not None:
         requirements = base["shell_requirements"]
         presentation = shell["presentation"]

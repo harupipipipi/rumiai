@@ -206,7 +206,10 @@ def compose_runtime_profile(
         if len(variants) != 1:
             raise CompositionError("Shell platform artifact is missing or duplicated")
         variant = variants[0]
-        if variant["artifact_digest"] != shell_ref["artifact_digest"]:
+        expected_executable_digest = shell_ref.get(
+            "executable_artifact_digest", shell_ref["artifact_digest"]
+        )
+        if variant["artifact_digest"] != expected_executable_digest:
             raise CompositionError("Shell platform artifact digest is stale")
         shell_path = _verify_artifact(
             catalog.artifact_root,
@@ -225,6 +228,10 @@ def compose_runtime_profile(
                 "architecture",
             )
         }
+        # This v5 trust field is reconstructed only from the authenticated
+        # definition variant whose bytes were verified above.  A v4 Profile
+        # cannot supply or invent it.
+        shell_lock["executable_artifact_digest"] = variant["artifact_digest"]
         local_auth_protocol = shell["local_auth"]["protocol"]
         local_auth_audience = shell["local_auth"]["audience"]
     elif base["shell_requirements"]["mode"] != "headless":

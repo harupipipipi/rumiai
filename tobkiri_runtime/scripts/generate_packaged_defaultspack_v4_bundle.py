@@ -30,7 +30,7 @@ from tobkiri_protocol.platform_artifact import (  # noqa: E402
     artifact_digest,
     verify_platform_artifact,
 )
-from tobkiri_protocol.provenance import trusted_source_commit  # noqa: E402
+from tobkiri_protocol.provenance import informational_source_commit  # noqa: E402
 from tobkiri_protocol.validation import validate_document  # noqa: E402
 
 
@@ -47,7 +47,7 @@ def package_bundle(
 ) -> None:
     """Select exact staged bytes and atomically rewrite their locked definitions."""
 
-    commit = trusted_source_commit(ROOT.parent, source_commit)
+    commit = informational_source_commit(ROOT.parent, source_commit)
     bundle_root = bundle_root.resolve(strict=True)
     artifact_root = artifact_root.resolve(strict=True)
     selected_path = artifact_root / relative_path
@@ -64,14 +64,32 @@ def package_bundle(
 
     shell_path = bundle_root / "shell.tauri.default.shell.v1.json"
     shell = json.loads(shell_path.read_text(encoding="utf-8"))
+    matching_targets = [
+        target
+        for target in shell["launch"]["build_targets"]
+        if target["platform"] == platform
+        and target["architecture"] == architecture
+        and target["artifact_ref"] == relative_path
+        and target["entrypoint"] == entrypoint
+        and target["bundle_identity"] == bundle_identity
+    ]
+    if len(matching_targets) != 1:
+        raise ValueError("packaged artifact does not match one declared Shell build target")
     shell.update(
         shell_api_version="io.tobkiri.shell.v5",
         availability="verified",
         artifact_digest=digest,
     )
-    shell["launch"] = {"prebuilt_only": True, "variants": [variant]}
+    shell["launch"] = {
+        "prebuilt_only": True,
+        "build_targets": shell["launch"]["build_targets"],
+        "variants": [variant],
+    }
     shell["provenance"] = _generated_provenance(
-        shell, "ecosystem/defaultspack/v4/shell.tauri.default.shell.v1.json", commit
+        shell,
+        "ecosystem/defaultspack/v4/shell.tauri.default.shell.v1.json",
+        commit,
+        generator_path=Path(__file__),
     )
     shell["definition_revision"] = canonical_digest(
         {key: value for key, value in shell.items() if key != "definition_revision"}
@@ -110,7 +128,9 @@ def package_bundle(
         for function in pack["functions"]:
             function["implementation_digest"] = digest
         source_path = f"ecosystem/defaultspack/v4/packs/{pack_name}"
-        pack["provenance"] = _generated_provenance(pack, source_path, commit)
+        pack["provenance"] = _generated_provenance(
+            pack, source_path, commit, generator_path=Path(__file__)
+        )
         pack = _normalize_pack(pack)
         pack_path.write_bytes(_pretty(pack))
 
@@ -118,7 +138,10 @@ def package_bundle(
     profile = json.loads(profile_path.read_text(encoding="utf-8"))
     profile["shell"].update(platform=platform, architecture=architecture)
     profile["provenance"] = _generated_provenance(
-        profile, "ecosystem/defaultspack/v4/defaults.profile.v4.json", commit
+        profile,
+        "ecosystem/defaultspack/v4/defaults.profile.v4.json",
+        commit,
+        generator_path=Path(__file__),
     )
     shell_path.write_bytes(_pretty(shell))
     profile_path.write_bytes(_pretty(validate_document(profile, "profile")))

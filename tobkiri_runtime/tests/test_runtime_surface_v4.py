@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 from pathlib import Path
 import time
 
@@ -33,6 +34,10 @@ RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 BUNDLE_ROOT = RUNTIME_ROOT / "ecosystem" / "defaultspack" / "v4"
 
 
+def _bundle_root() -> Path:
+    return Path(os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"])
+
+
 @pytest.fixture
 def active_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(tmp_path / "user-data"))
@@ -42,7 +47,9 @@ def active_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def _service(active_runtime, **kwargs) -> RuntimeSurfaceService:
     return RuntimeSurfaceService(
         snapshot_loader=lambda: active_runtime,
-        catalog_loader=lambda: BundledCatalog.load(BUNDLE_ROOT),
+        catalog_loader=lambda: BundledCatalog.load(
+            _bundle_root()
+        ),
         **kwargs,
     )
 
@@ -206,7 +213,7 @@ def test_operation_and_principal_views_are_resolved_plan_derived(active_runtime)
 def test_contract_routes_are_exact_digest_pinned_broker_bindings(active_runtime) -> None:
     result = _service(active_runtime).read_advanced("contracts")
     routes = result["data"]["routes"]
-    catalog = BundledCatalog.load(BUNDLE_ROOT)
+    catalog = BundledCatalog.load(_bundle_root())
     application = catalog.packs["runtime.tauri.application.default"]
     map_digest = next(
         item["digest"]
@@ -245,7 +252,7 @@ def test_contract_routes_are_exact_digest_pinned_broker_bindings(active_runtime)
 def test_contract_route_principal_mismatch_fails_closed(active_runtime) -> None:
     from core_runtime.frontend_contract_routes import load_frontend_contract_bindings
 
-    catalog = BundledCatalog.load(BUNDLE_ROOT)
+    catalog = BundledCatalog.load(_bundle_root())
     bindings = load_frontend_contract_bindings(
         RUNTIME_ROOT
         / "ecosystem"
@@ -408,7 +415,7 @@ def test_expected_revision_and_digest_fail_closed(active_runtime) -> None:
 
 
 def test_catalog_artifact_mismatch_fails_closed(active_runtime) -> None:
-    catalog = BundledCatalog.load(BUNDLE_ROOT)
+    catalog = BundledCatalog.load(_bundle_root())
     pack_id = str(active_runtime.resolved.lock["effective_set"][0]["identity"])
     manifest = dict(catalog.packs[pack_id])
     manifest["pack"] = {

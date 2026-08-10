@@ -20,7 +20,7 @@ def build_packaged_profile_bundle(
     bundle = destination / "defaultspack" / "v4"
     artifacts = destination / "defaultspack" / "platform-artifacts"
     application = artifacts / "Tobkiri.app"
-    executable = application / "Contents" / "MacOS" / "tobkiri"
+    executable = application / "Contents" / "MacOS" / "tobkiri-shell"
     executable.parent.mkdir(parents=True)
     executable.write_bytes(b"\xcf\xfa\xed\xfe\x0c\x00\x00\x01fixture")
     executable.chmod(0o755)
@@ -32,7 +32,7 @@ def build_packaged_profile_bundle(
         bundle_root=bundle,
         artifact_root=artifacts,
         relative_path="Tobkiri.app",
-        entrypoint="Tobkiri.app/Contents/MacOS/tobkiri",
+        entrypoint="Tobkiri.app/Contents/MacOS/tobkiri-shell",
         platform="macos",
         architecture="arm64",
         bundle_identity="io.tobkiri.shell.tauri",

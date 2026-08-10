@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import http.client
 import json
+import os
 import time
 import uuid
 from pathlib import Path
@@ -58,8 +59,11 @@ from tobkiri_host.models import (
 from tobkiri_protocol.canonical import canonical_digest
 
 
+def _bundle_root() -> Path:
+    return Path(os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"])
+
+
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
-BUNDLE_ROOT = RUNTIME_ROOT / "ecosystem" / "defaultspack" / "v4"
 MAP_PATH = (
     RUNTIME_ROOT / "ecosystem" / "defaultspack" / "defaultspack" / "frontend_contract_map.v4.json"
 )
@@ -269,12 +273,13 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     authority = AuthorityStore(user_data / "authority" / "v4.sqlite3")
     session = capture_production_dispatch(
         active,
-        bundle_root=BUNDLE_ROOT,
+        bundle_root=_bundle_root(),
         ecosystem_root=RUNTIME_ROOT / "ecosystem",
         authority_store=authority,
+        require_macos_code_signature=False,
     )
 
-    catalog = BundledCatalog.load(BUNDLE_ROOT)
+    catalog = BundledCatalog.load(_bundle_root())
     bindings = load_frontend_contract_bindings(
         MAP_PATH,
         catalog.packs["runtime.tauri.application.default"],
@@ -576,7 +581,7 @@ def test_media_dependency_graph_rejects_missing_or_forged_pack(
 ) -> None:
     """A Pack ID alone cannot forge the signed Media-to-File dependency edge."""
 
-    bundled = BundledCatalog.load(BUNDLE_ROOT)
+    bundled = BundledCatalog.load(_bundle_root())
     media_manifest = json.loads(
         (RUNTIME_ROOT / "ecosystem" / MEDIA_PACK / "pack.v4.json").read_text(encoding="utf-8")
     )

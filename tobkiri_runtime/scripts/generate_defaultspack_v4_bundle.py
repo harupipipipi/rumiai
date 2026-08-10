@@ -19,8 +19,8 @@ from tobkiri_protocol.profile_scope import (  # noqa: E402
     normalize_requested_scope_template,
 )
 from tobkiri_protocol.provenance import (  # noqa: E402
+    informational_source_commit,
     normative_generated_provenance,
-    trusted_source_commit,
 )
 from tobkiri_protocol.validation import validate_document  # noqa: E402
 
@@ -176,7 +176,11 @@ def _normalize_pack(document: dict[str, Any]) -> dict[str, Any]:
 
 
 def _generated_provenance(
-    document: dict[str, Any], source_path: str, source_commit: str
+    document: dict[str, Any],
+    source_path: str,
+    source_commit: str,
+    *,
+    generator_path: Path | None = None,
 ) -> dict[str, Any]:
     payload = {
         key: value
@@ -189,6 +193,8 @@ def _generated_provenance(
         repository_commit_value=source_commit,
         generator="defaultspack-v4-core",
         generator_version="2.0.0",
+        generator_path=(generator_path or Path(__file__)).relative_to(ROOT.parent).as_posix(),
+        generator_payload=(generator_path or Path(__file__)).read_bytes(),
     )
 
 
@@ -387,6 +393,29 @@ def _normalize_shell(document: dict[str, Any]) -> dict[str, Any]:
         technology = "cli"
         capabilities = list(document["required_capabilities"])
         contribution_contracts = list(document["consumes_contribution_contracts"])
+    target_specs: tuple[tuple[str, str, str, str], ...]
+    if technology == "tauri":
+        target_specs = (
+            ("macos", "arm64", "Tobkiri.app", "Tobkiri.app/Contents/MacOS/tobkiri-shell"),
+            ("macos", "x86_64", "Tobkiri.app", "Tobkiri.app/Contents/MacOS/tobkiri-shell"),
+            ("windows", "x86_64", "tobkiri-shell.exe", "tobkiri-shell.exe"),
+            ("linux", "x86_64", "Tobkiri.AppImage", "Tobkiri.AppImage"),
+        )
+        bundle_identity = "io.tobkiri.shell.tauri"
+    else:
+        target_specs = (("macos", "arm64", "bin/tobkiri-shell", "tobkiri-shell"),)
+        bundle_identity = "io.tobkiri.shell.cli.default"
+    build_targets = [
+        {
+            "artifact_id": f"{document['provider_id']}.{platform}-{architecture}",
+            "platform": platform,
+            "architecture": architecture,
+            "artifact_ref": artifact_ref,
+            "entrypoint": entrypoint,
+            "bundle_identity": bundle_identity,
+        }
+        for platform, architecture, artifact_ref, entrypoint in target_specs
+    ]
     normalized = {
         "shell_api_version": "io.tobkiri.shell.v5",
         "provider_id": document["provider_id"],
@@ -404,6 +433,7 @@ def _normalize_shell(document: dict[str, Any]) -> dict[str, Any]:
         },
         "launch": {
             "prebuilt_only": True,
+            "build_targets": build_targets,
             "variants": [],
         },
         "local_auth": {
@@ -432,7 +462,7 @@ def _normalize_profile(document: dict[str, Any]) -> dict[str, Any]:
 
 
 def _render(source_commit: str | None = None) -> dict[Path, bytes]:
-    source_commit = trusted_source_commit(ROOT.parent, source_commit)
+    source_commit = informational_source_commit(ROOT.parent, source_commit)
     rendered: dict[Path, bytes] = {}
     pack_paths = (
         set(PACKS.glob("*.pack.v4.json"))

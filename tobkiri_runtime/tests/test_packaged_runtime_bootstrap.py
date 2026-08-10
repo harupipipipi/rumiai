@@ -42,7 +42,7 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
         PanelAuthManager(bootstrap_secret="first-request-bootstrap")
     )
 
-    kernel = Kernel()
+    kernel = Kernel(require_macos_code_signature=False)
     try:
         kernel.run_startup_until("api_init")
         remaining = kernel.run_startup_remaining()
@@ -147,7 +147,7 @@ def test_clean_bootstrap_captures_and_restarts_without_legacy_profile(
     assert len(providers) == 1
     assert not (user_data / "settings" / "startup_profiles.json").exists()
 
-    kernel = Kernel()
+    kernel = Kernel(require_macos_code_signature=False)
     monkeypatch.setenv("RUMI_PORT", str(_free_port()))
     try:
         kernel.run_startup_until("api_init")

@@ -28,9 +28,27 @@
     "launch": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["prebuilt_only", "variants"],
+      "required": ["prebuilt_only", "build_targets", "variants"],
       "properties": {
         "prebuilt_only": {"const": true},
+        "build_targets": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["artifact_id", "platform", "architecture", "artifact_ref", "entrypoint", "bundle_identity"],
+            "properties": {
+              "artifact_id": {"type": "string", "minLength": 1},
+              "platform": {"enum": ["macos", "windows", "linux"]},
+              "architecture": {"enum": ["arm64", "x86_64"]},
+              "artifact_ref": {"type": "string", "minLength": 1},
+              "entrypoint": {"type": "string", "minLength": 1},
+              "bundle_identity": {"type": "string", "minLength": 1}
+            }
+          }
+        },
         "variants": {
           "type": "array",
           "minItems": 0,

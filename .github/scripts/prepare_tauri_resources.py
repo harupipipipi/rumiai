@@ -118,7 +118,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--profile-bundle-identity")
     parser.add_argument(
         "--source-commit",
-        help="Trusted source commit for normative generated Profile records.",
+        help="Informational source commit recorded in content-bound Profile provenance.",
     )
     return parser.parse_args()
 

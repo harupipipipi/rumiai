@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -42,6 +43,10 @@ from tobkiri_host.models import (
     RuntimeEvidence,
 )
 from tobkiri_host.ports import FinalAuthorizationQuery
+
+
+def _bundle_root() -> Path:
+    return Path(os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"])
 
 
 def _digest(seed: str) -> str:
@@ -133,11 +138,12 @@ def test_clean_home_broker_dispatches_then_revocation_fails_closed(
     store = AuthorityStore(user_data / "authority" / "v4.sqlite3")
     session = capture_production_dispatch(
         active,
-        bundle_root=Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack" / "v4",
+        bundle_root=_bundle_root(),
         ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
         authority_store=store,
         backends=BackendRegistry((backend,)),
         target_backend_digests={target.principal_id: backend.status.backend_digest},
+        require_macos_code_signature=False,
     )
     control = session.authority_control
     assert control is not None
@@ -293,9 +299,10 @@ def test_pack_catalog_read_is_profile_bound_audited_and_restart_safe(
     def capture():
         return capture_production_dispatch(
             capture_default_profile(),
-            bundle_root=Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack" / "v4",
+            bundle_root=_bundle_root(),
             ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
             authority_store=store,
+            require_macos_code_signature=False,
         )
 
     session = capture()
@@ -423,14 +430,10 @@ def test_dispatch_rejects_authority_store_from_another_state_root(
         with pytest.raises(AuthorityDenied, match="not bound to the captured"):
             capture_production_dispatch(
                 active,
-                bundle_root=(
-                    Path(__file__).resolve().parents[1]
-                    / "ecosystem"
-                    / "defaultspack"
-                    / "v4"
-                ),
+                bundle_root=_bundle_root(),
                 ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
                 authority_store=alternate_store,
+                require_macos_code_signature=False,
             )
     finally:
         alternate_store.close()

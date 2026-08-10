@@ -102,10 +102,13 @@ architecture, integrity, boundary, and checked-in evidence generators remain
 the release authority; runtime Registry or installed-Pack discovery is never a
 Profile source.
 
-Normative provenance is derived from a canonical payload that excludes its own
-provenance field. `repository_commit` must be a real 40-hex Git commit and the
-source and tree digests are derived from that explicit payload and path, so no
-self-referential digest cycle exists. An implicit commit is accepted only from
-a clean tracked worktree. Dirty builds must receive a commit from their trusted
-build context; generation otherwise stops instead of recording
-`working-tree`, placeholder, or sentinel provenance.
+Normative provenance v2 is derived from a canonical payload that excludes its
+own provenance field. Its trust root is `content_root_digest`, which binds the
+source payload digest, exact generator bytes, generator path, and canonical
+input-inventory digest without a self-referential cycle. `repository_commit` is
+explicitly informational (`repository_commit_trusted: false`): shallow builds
+do not need the parent object, and dirty builds remain deterministic because
+trust comes from content rather than worktree state. Explicit placeholder or
+sentinel commit metadata is rejected. Release verification must use the v2
+content bindings and the signed runtime resource manifest, never the commit
+label as authority.

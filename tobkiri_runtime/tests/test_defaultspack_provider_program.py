@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,7 +68,9 @@ def _v4_provider_fixture(
         "rumi_credential_broker_pack",
     )
     fixture_root = tmp_path / f"v4-{provider_id}"
-    catalog = BundledCatalog.load(DEFAULTSPACK_ROOT / "v4")
+    catalog = BundledCatalog.load(
+        Path(os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"])
+    )
     packs = dict(catalog.packs)
     for pack_id in provider_packs:
         pack_path = ROOT / "ecosystem" / pack_id / "pack.v4.json"
@@ -87,6 +90,7 @@ def _v4_provider_fixture(
         catalog.bases,
         catalog.shells,
         profiles,
+        catalog.artifact_root,
     )
 
     authority_bindings = {
@@ -167,6 +171,7 @@ def _v4_provider_fixture(
             workspace,
             profile_id="defaults",
             authority=authority,
+            catalog=catalog,
         )
         activation_store.activate(
             resolved,

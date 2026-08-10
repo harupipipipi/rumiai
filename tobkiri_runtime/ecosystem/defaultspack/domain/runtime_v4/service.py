@@ -888,6 +888,7 @@ class ActivationStore:
         lock = resolved.lock
         plan = resolved.plan
         self._recover_locked()
+        self._verify_selected_artifact(profile)
         reservation_id, fencing_token = self._authority.reserve_activation(
             activation_id=activation_id,
             profile_id=self.profile_id,
@@ -1001,6 +1002,7 @@ class ActivationStore:
                 ),
             )
             self._fault("before_authority_commit")
+            self._verify_selected_artifact(profile)
             self._authority.transition_activation(
                 reservation_id,
                 expected_state=state,
@@ -1015,6 +1017,7 @@ class ActivationStore:
                 profile=profile,
                 fencing_token=fencing_token,
             )
+            self._verify_selected_artifact(profile)
             _write_atomic(
                 self.state_root / "active.json",
                 self._active_pointer(activation_id, envelope_path, envelope_digest),
@@ -1120,6 +1123,9 @@ class ActivationStore:
                 profile=envelope["profile"],
                 fencing_token=int(pending["fencing_token"]),
             )
+            if not isinstance(envelope.get("profile"), Mapping):
+                raise ProfileResolutionDenied("committed activation profile is invalid")
+            self._verify_selected_artifact(envelope["profile"])
             _write_atomic(
                 self.state_root / "active.json",
                 self._active_pointer(
@@ -1419,6 +1425,7 @@ class ActivationStore:
             raise ProfileResolutionDenied(
                 "active activation authority, fence, or SecurityEpoch is stale"
             )
+        self._verify_selected_artifact(profile)
         return ActiveDefaultProfile(
             resolved=ResolvedDefaultProfile(profile=profile, lock=lock, plan=plan),
             activation=activation,
@@ -1474,15 +1481,12 @@ class ActivationStore:
             or activation["state"] != "active"
         ):
             raise ProfileResolutionDenied("legacy activation predecessor is stale or tampered")
-        legacy_effective = {
-            (item["identity"], item["artifact_digest"])
-            for item in lock["effective_set"]
-        }
+        legacy_effective = lock["effective_set"]
         profile_effective = {
-            (profile["base"]["pack_id"], profile["base"]["artifact_digest"]),
-            (profile["shell"]["pack_id"], profile["shell"]["artifact_digest"]),
+            (profile["base"]["pack_id"], profile["base"]["artifact_digest"], "base"),
+            (profile["shell"]["pack_id"], profile["shell"]["artifact_digest"], "shell"),
             *(
-                (item["pack_id"], item["artifact_digest"])
+                (item["pack_id"], item["artifact_digest"], "pack")
                 for item in profile["packs"]
             ),
         }
@@ -1496,7 +1500,11 @@ class ActivationStore:
             or lock["base"]["artifact_digest"] != plan["base"]["artifact_digest"]
             or lock["shell"]["pack_id"] != plan["shell"]["pack_id"]
             or lock["shell"]["artifact_digest"] != plan["shell"]["artifact_digest"]
-            or legacy_effective != profile_effective
+            or {
+                (item["identity"], item["artifact_digest"], item["role"])
+                for item in legacy_effective
+            }
+            != profile_effective
         ):
             raise ProfileResolutionDenied("legacy activation record graph is inconsistent")
         authority = self._authority.active_activation_reservation(
@@ -1543,6 +1551,78 @@ class ActivationStore:
             authority_bindings=bindings,
             security_epoch=int(activation["security_epoch"]),
         )
+        if (
+            legacy_effective != successor.plan["effective_set"]
+            or canonical_digest(legacy_effective) != successor.plan["closure_digest"]
+            or lock["base"] != successor.lock["base"]
+            or {
+                key: plan["base"][key] for key in ("pack_id", "artifact_digest")
+            }
+            != {
+                key: successor.plan["base"][key]
+                for key in ("pack_id", "artifact_digest")
+            }
+            or lock["shell"]
+            != {
+                key: successor.lock["shell"][key]
+                for key in lock["shell"]
+            }
+            or {
+                key: plan["shell"][key]
+                for key in ("provider_id", "pack_id", "artifact_digest", "contract_id")
+            }
+            != {
+                key: successor.plan["shell"][key]
+                for key in ("provider_id", "pack_id", "artifact_digest", "contract_id")
+            }
+        ):
+            raise ProfileResolutionDenied(
+                "legacy activation artifact closure changed during migration"
+            )
+        legacy_bindings = {
+            (
+                item["function_principal"]["function_id"],
+                item["contract_id"],
+                item["operation_id"],
+            ): {
+                key: item[key]
+                for key in (
+                    "pack_id",
+                    "artifact_digest",
+                    "function_principal",
+                    "contract_id",
+                    "operation_id",
+                    "domain_kind",
+                )
+            }
+            for item in plan["bindings"]
+        }
+        successor_bindings = {
+            (
+                item["function_principal"]["function_id"],
+                item["contract_id"],
+                item["operation_id"],
+            ): {
+                key: item[key]
+                for key in (
+                    "pack_id",
+                    "artifact_digest",
+                    "function_principal",
+                    "contract_id",
+                    "operation_id",
+                    "domain_kind",
+                )
+            }
+            for item in successor.plan["bindings"]
+        }
+        if (
+            len(legacy_bindings) != len(plan["bindings"])
+            or len(successor_bindings) != len(successor.plan["bindings"])
+            or legacy_bindings != successor_bindings
+        ):
+            raise ProfileResolutionDenied(
+                "legacy activation principal binding changed during migration"
+            )
         if {
             _edge_key(edge) for edge in successor.profile["requested_edges"]
         } != edge_keys:
@@ -1588,6 +1668,34 @@ class ActivationStore:
             activation_id=successor_id,
             created_at=str(activation.get("committed_at") or activation["created_at"]),
         )
+
+    def _verify_selected_artifact(self, profile: Mapping[str, Any]) -> None:
+        """Reverify the exact selected Shell/Application bytes when catalogued."""
+
+        if self._catalog is None:
+            return
+        shell = profile.get("shell")
+        if not isinstance(shell, Mapping):
+            raise ProfileResolutionDenied("active Profile Shell binding is unavailable")
+        definition = self._catalog.shells.get(str(shell.get("provider_id")))
+        if not isinstance(definition, Mapping) or definition.get("availability") != "verified":
+            raise ProfileResolutionDenied("active Profile Shell definition is unavailable")
+        variants = [
+            item
+            for item in definition["launch"]["variants"]
+            if item["platform"] == shell.get("platform")
+            and item["architecture"] == shell.get("architecture")
+            and item["artifact_digest"]
+            == shell.get("executable_artifact_digest")
+        ]
+        if len(variants) != 1 or self._catalog.artifact_root is None:
+            raise ProfileResolutionDenied("active Profile Shell artifact is unavailable")
+        try:
+            verify_platform_artifact(self._catalog.artifact_root, variants[0])
+        except ProtocolError as exc:
+            raise ProfileResolutionDenied(
+                f"active Profile Shell artifact rejected: {exc}"
+            ) from exc
 
     @staticmethod
     def _reject_symlink(path: Path, label: str) -> None:

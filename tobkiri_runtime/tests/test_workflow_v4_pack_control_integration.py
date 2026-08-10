@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import shutil
+from dataclasses import replace
 
 import pytest
 
@@ -24,7 +26,10 @@ from core_runtime.pack_control_v4 import (
 from tobkiri_host.errors import ResolutionError
 from tobkiri_host.models import OpaqueAuthorityRef
 from tobkiri_host.errors import BackendUnavailableError
-from dataclasses import replace
+
+
+def _bundle_root() -> Path:
+    return Path(os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"])
 
 PACK_ID = "tobkiri_workflow_pack"
 SESSION_ID = "workflow-v4-integration"
@@ -141,12 +146,10 @@ def test_optional_workflow_pack_enters_closure_only_after_full_ceremony(
     )
     restarted = capture_production_dispatch(
         restarted_active,
-        bundle_root=Path(__file__).resolve().parents[1]
-        / "ecosystem"
-        / "defaultspack"
-        / "v4",
+        bundle_root=_bundle_root(),
         ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
         authority_store=authority,
+        require_macos_code_signature=False,
     )
     try:
         binding = restarted.broker._catalog.resolve_pinned(
@@ -273,14 +276,12 @@ def test_optional_workflow_pack_enters_closure_only_after_full_ceremony(
 
     restarted_again = capture_production_dispatch(
         capture_default_profile(),
-        bundle_root=Path(__file__).resolve().parents[1]
-        / "ecosystem"
-        / "defaultspack"
-        / "v4",
+        bundle_root=_bundle_root(),
         ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
         authority_store=AuthorityStore(
             tmp_path / "user-data" / "authority" / "v4.sqlite3"
         ),
+        require_macos_code_signature=False,
     )
     try:
         persisted = restarted_again.invoke(

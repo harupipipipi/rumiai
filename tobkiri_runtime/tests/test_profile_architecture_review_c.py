@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
+import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from core_runtime.authority.v4 import AuthorityStore
+from core_runtime.bootstrap.profile_capture import (
+    _bundle_root,
+    _verify_installed_bundle_binding,
+)
 from ecosystem.defaultspack.domain.runtime_v4 import (
     ActivationStore,
     BundledCatalog,
@@ -19,6 +26,7 @@ from tests.conformance_support.packaged_profile import build_packaged_profile_bu
 from tobkiri_protocol.canonical import canonical_digest, canonical_json
 from tobkiri_protocol.profile_scope import normalize_requested_scope_template
 from tobkiri_protocol.platform_artifact import verify_platform_artifact
+from tobkiri_protocol import platform_artifact
 from tobkiri_protocol.provenance import (
     normative_generated_provenance,
     trusted_source_commit,
@@ -100,6 +108,152 @@ def test_packaged_artifact_resolves_activates_and_restarts(tmp_path: Path) -> No
     assert store.load_active_snapshot().resolved.plan == resolved.plan
 
 
+def test_activation_and_restart_reverify_selected_executable(tmp_path: Path) -> None:
+    catalog = _packaged_catalog(tmp_path)
+    resolved = _resolve(catalog)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = AuthorityStore(tmp_path / "authority.sqlite3")
+    store = ActivationStore(
+        tmp_path / "state",
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        catalog=catalog,
+    )
+    executable = (
+        catalog.artifact_root
+        / "Tobkiri.app/Contents/MacOS/tobkiri-shell"
+    )
+    executable.write_bytes(executable.read_bytes() + b"pre-activation-tamper")
+    with pytest.raises(ProfileResolutionDenied, match="artifact rejected"):
+        store.activate(
+            resolved,
+            activation_id="activation:defaults-final-tamper",
+            created_at="2026-08-10T00:00:00Z",
+        )
+
+    catalog = _packaged_catalog(tmp_path / "restart")
+    resolved = _resolve(catalog)
+    restart_workspace = tmp_path / "restart-workspace"
+    restart_workspace.mkdir()
+    restart_authority = AuthorityStore(tmp_path / "restart-authority.sqlite3")
+    restart_store = ActivationStore(
+        tmp_path / "restart-state",
+        restart_workspace,
+        profile_id="defaults",
+        authority=restart_authority,
+        catalog=catalog,
+    )
+    restart_store.activate(
+        resolved,
+        activation_id="activation:defaults-restart-tamper",
+        created_at="2026-08-10T00:00:00Z",
+    )
+    executable = (
+        catalog.artifact_root
+        / "Tobkiri.app/Contents/MacOS/tobkiri-shell"
+    )
+    executable.write_bytes(executable.read_bytes() + b"restart-tamper")
+    with pytest.raises(ProfileResolutionDenied, match="artifact rejected"):
+        restart_store.load_active_snapshot()
+
+
+def test_production_macos_artifact_requires_valid_code_signature(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    catalog = _packaged_catalog(tmp_path)
+    variant = catalog.shells["shell.tauri.default"]["launch"]["variants"][0]
+    monkeypatch.setattr(
+        platform_artifact.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 1, "", "invalid"),
+    )
+    with pytest.raises(Exception, match="signature is invalid"):
+        verify_platform_artifact(
+            catalog.artifact_root,
+            variant,
+            require_macos_code_signature=True,
+        )
+
+
+def test_production_bundle_root_ignores_environment_attack(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core_runtime import pack_control_v4
+    from core_runtime.app_lifecycle_manager import AppLifecycleManager
+    from core_runtime.bootstrap import profile_capture
+    from core_runtime.pack_api_server import PackAPIServer
+    from core_runtime.runtime_surface_v4 import RuntimeSurfaceService
+
+    attacker = tmp_path / "attacker-bundle"
+    attacker.mkdir()
+    monkeypatch.setenv("TOBKIRI_DEFAULTS_BUNDLE_ROOT", str(attacker))
+    monkeypatch.delenv("TOBKIRI_RUNTIME_MODE", raising=False)
+    monkeypatch.delenv("TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT", raising=False)
+    assert _bundle_root() == SOURCE_BUNDLE
+
+    observed: list[Path] = []
+
+    class CatalogProbe(RuntimeError):
+        pass
+
+    def probe(_cls: Any, root: Path, **_kwargs: Any) -> None:
+        observed.append(Path(root))
+        raise CatalogProbe
+
+    monkeypatch.setattr(BundledCatalog, "load", classmethod(probe))
+    monkeypatch.setattr(
+        profile_capture, "capture_default_profile", lambda **_kwargs: object()
+    )
+    entrypoints = (
+        lambda: RuntimeSurfaceService._load_catalog(),
+        lambda: pack_control_v4._required_profile_pack_ids("defaults"),
+        lambda: PackAPIServer._refresh_runtime_capture(object()),
+        lambda: AppLifecycleManager(base_dir=tmp_path).activate_default_profile({}),
+    )
+    for entrypoint in entrypoints:
+        with pytest.raises(CatalogProbe):
+            entrypoint()
+    assert observed == [SOURCE_BUNDLE] * len(entrypoints)
+
+
+def test_installed_bundle_is_exactly_bound_to_resource_manifest(tmp_path: Path) -> None:
+    runtime_root = tmp_path / "runtime"
+    bundle_root = build_packaged_profile_bundle(
+        SOURCE_BUNDLE,
+        runtime_root / "ecosystem",
+        source_commit=SOURCE_COMMIT,
+    )
+    artifact_root = bundle_root.parent / "platform-artifacts"
+    entries = []
+    for path in sorted((*bundle_root.rglob("*"), *artifact_root.rglob("*"))):
+        if not path.is_file():
+            continue
+        payload = path.read_bytes()
+        entries.append(
+            {
+                "path": path.relative_to(runtime_root).as_posix(),
+                "size": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+    (runtime_root / "runtime-resource-manifest.v1.json").write_text(
+        json.dumps(
+            {
+                "schema": "io.tobkiri.runtime-resource-manifest.v1",
+                "entries": entries,
+            }
+        ),
+        encoding="utf-8",
+    )
+    _verify_installed_bundle_binding(runtime_root, bundle_root)
+    executable = artifact_root / "Tobkiri.app/Contents/MacOS/tobkiri-shell"
+    executable.write_bytes(executable.read_bytes() + b"tamper")
+    with pytest.raises(ProfileResolutionDenied, match="not launcher-bound"):
+        _verify_installed_bundle_binding(runtime_root, bundle_root)
+
+
 @pytest.mark.parametrize("field", ("platform", "architecture", "bundle_identity"))
 def test_packaged_artifact_metadata_mismatch_is_rejected(
     tmp_path: Path, field: str
@@ -134,7 +288,7 @@ def test_packaged_artifact_path_digest_and_symlink_rejection(
     )
     executable = (
         catalog.artifact_root
-        / "Tobkiri.app/Contents/MacOS/tobkiri"
+        / "Tobkiri.app/Contents/MacOS/tobkiri-shell"
     )
     if case == "missing":
         variant["relative_path"] = "Missing.app"
@@ -170,9 +324,12 @@ def test_requested_scope_normalization_denies_expansion_and_is_canonical() -> No
 
 
 def _write_frozen_activation(
-    state: Path, workspace: Path, authority: AuthorityStore
+    state: Path,
+    workspace: Path,
+    authority: AuthorityStore,
+    fixture: dict[str, Any] | None = None,
 ) -> None:
-    fixture = json.loads(FROZEN.read_text(encoding="utf-8"))
+    fixture = fixture or json.loads(FROZEN.read_text(encoding="utf-8"))
     activation = fixture["activation"]
     reservation_id, fencing_token = authority.reserve_activation(
         activation_id=activation["activation_id"],
@@ -216,7 +373,195 @@ def _write_frozen_activation(
     (state / "active.json").write_bytes(canonical_json(pointer) + b"\n")
 
 
-def test_frozen_pre_e853_restart_migrates_once_and_tamper_fails(
+def _compatible_legacy_fixture(resolved: Any) -> dict[str, Any]:
+    profile = copy.deepcopy(resolved.profile)
+    plan = {
+        "plan_api_version": "io.tobkiri.resolved-plan.v1",
+        "profile_id": profile["profile_id"],
+        "profile_revision": canonical_digest(profile),
+        "security_epoch": resolved.plan["security_epoch"],
+        "base": {
+            key: resolved.plan["base"][key]
+            for key in ("pack_id", "artifact_digest")
+        },
+        "shell": {
+            key: resolved.plan["shell"][key]
+            for key in ("provider_id", "pack_id", "artifact_digest", "contract_id")
+        },
+        "bindings": [
+            {
+                key: binding[key]
+                for key in (
+                    "pack_id",
+                    "artifact_digest",
+                    "function_principal",
+                    "contract_id",
+                    "operation_id",
+                    "domain_kind",
+                )
+            }
+            for binding in resolved.plan["bindings"]
+        ],
+        "plan_digest": "sha256:" + "0" * 64,
+    }
+    plan["plan_digest"] = canonical_digest(
+        {key: value for key, value in plan.items() if key != "plan_digest"}
+    )
+    lock = {
+        "lock_api_version": "io.tobkiri.profile-lock.v4",
+        "profile_id": profile["profile_id"],
+        "profile_revision": canonical_digest(profile),
+        "catalog_revision": profile["catalog_revision"],
+        "security_epoch": resolved.plan["security_epoch"],
+        "base": copy.deepcopy(resolved.lock["base"]),
+        "shell": {
+            key: resolved.lock["shell"][key]
+            for key in resolved.lock["shell"]
+            if key != "executable_artifact_digest"
+        },
+        "effective_set": copy.deepcopy(resolved.plan["effective_set"]),
+        "plan_digest": plan["plan_digest"],
+        "profile_authority_snapshot_digest": profile[
+            "profile_authority_snapshot_digest"
+        ],
+        "lock_digest": "sha256:" + "0" * 64,
+    }
+    lock["lock_digest"] = canonical_digest(
+        {key: value for key, value in lock.items() if key != "lock_digest"}
+    )
+    activation = {
+        "activation_api_version": "io.tobkiri.activation-record.v1",
+        "profile_id": profile["profile_id"],
+        "activation_id": "activation:defaults-compatible-legacy",
+        "state": "active",
+        "state_generation": 4,
+        "plan_digest": plan["plan_digest"],
+        "profile_authority_snapshot_digest": profile[
+            "profile_authority_snapshot_digest"
+        ],
+        "security_epoch": resolved.plan["security_epoch"],
+        "fencing_token": 1,
+        "created_at": "2026-08-10T00:00:00Z",
+        "committed_at": "2026-08-10T00:00:00Z",
+    }
+    return {"profile": profile, "lock": lock, "plan": plan, "activation": activation}
+
+
+def _redigest_legacy_fixture(fixture: dict[str, Any]) -> None:
+    profile = fixture["profile"]
+    plan = fixture["plan"]
+    lock = fixture["lock"]
+    activation = fixture["activation"]
+    revision = canonical_digest(profile)
+    plan["profile_revision"] = revision
+    lock["profile_revision"] = revision
+    plan["plan_digest"] = canonical_digest(
+        {key: value for key, value in plan.items() if key != "plan_digest"}
+    )
+    lock["plan_digest"] = plan["plan_digest"]
+    lock["lock_digest"] = canonical_digest(
+        {key: value for key, value in lock.items() if key != "lock_digest"}
+    )
+    activation["plan_digest"] = plan["plan_digest"]
+
+
+def _retarget_legacy_artifact(fixture: dict[str, Any], role: str) -> None:
+    replacement = "sha256:" + {"base": "a", "shell": "b", "pack": "c"}[role] * 64
+    profile = fixture["profile"]
+    lock = fixture["lock"]
+    plan = fixture["plan"]
+    if role in {"base", "shell"}:
+        pack_id = profile[role]["pack_id"]
+        profile[role]["artifact_digest"] = replacement
+        lock[role]["artifact_digest"] = replacement
+        plan[role]["artifact_digest"] = replacement
+    else:
+        selected = profile["packs"][0]
+        pack_id = selected["pack_id"]
+        selected["artifact_digest"] = replacement
+    for item in lock["effective_set"]:
+        if item["identity"] == pack_id:
+            item["artifact_digest"] = replacement
+    for binding in plan["bindings"]:
+        if binding["pack_id"] == pack_id:
+            binding["artifact_digest"] = replacement
+            binding["function_principal"]["parent_artifact_digest"] = replacement
+    _redigest_legacy_fixture(fixture)
+
+
+def test_exact_legacy_activation_migrates_once_without_drift(tmp_path: Path) -> None:
+    catalog = _packaged_catalog(tmp_path)
+    resolved = _resolve(catalog)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state = tmp_path / "state"
+    authority = AuthorityStore(tmp_path / "authority.sqlite3")
+    _write_frozen_activation(
+        state,
+        workspace,
+        authority,
+        _compatible_legacy_fixture(resolved),
+    )
+    store = ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        catalog=catalog,
+    )
+    migrated = store.load_active_snapshot()
+    assert migrated.resolved.plan == resolved.plan
+    assert migrated.activation["activation_api_version"] == (
+        "io.tobkiri.activation-record.v2"
+    )
+    assert store.load_active_snapshot().activation == migrated.activation
+
+
+@pytest.mark.parametrize("role", ("base", "shell", "pack"))
+def test_legacy_migration_rejects_self_consistent_artifact_drift(
+    tmp_path: Path, role: str
+) -> None:
+    catalog = _packaged_catalog(tmp_path)
+    fixture = _compatible_legacy_fixture(_resolve(catalog))
+    _retarget_legacy_artifact(fixture, role)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = AuthorityStore(tmp_path / "authority.sqlite3")
+    state = tmp_path / "state"
+    _write_frozen_activation(state, workspace, authority, fixture)
+    with pytest.raises(ProfileResolutionDenied, match="artifact closure changed"):
+        ActivationStore(
+            state,
+            workspace,
+            profile_id="defaults",
+            authority=authority,
+            catalog=catalog,
+        ).load_active_snapshot()
+
+
+def test_legacy_migration_rejects_principal_drift(tmp_path: Path) -> None:
+    catalog = _packaged_catalog(tmp_path)
+    fixture = _compatible_legacy_fixture(_resolve(catalog))
+    fixture["plan"]["bindings"][0]["function_principal"][
+        "function_implementation_digest"
+    ] = "sha256:" + "e" * 64
+    _redigest_legacy_fixture(fixture)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = AuthorityStore(tmp_path / "authority.sqlite3")
+    state = tmp_path / "state"
+    _write_frozen_activation(state, workspace, authority, fixture)
+    with pytest.raises(ProfileResolutionDenied, match="principal binding changed"):
+        ActivationStore(
+            state,
+            workspace,
+            profile_id="defaults",
+            authority=authority,
+            catalog=catalog,
+        ).load_active_snapshot()
+
+
+def test_frozen_pre_e853_restart_rejects_implicit_artifact_upgrade(
     tmp_path: Path,
 ) -> None:
     catalog = _packaged_catalog(tmp_path)
@@ -232,10 +577,10 @@ def test_frozen_pre_e853_restart_migrates_once_and_tamper_fails(
         authority=authority,
         catalog=catalog,
     )
-    migrated = store.load_active_snapshot()
-    assert migrated.activation["activation_api_version"] == "io.tobkiri.activation-record.v2"
-    assert migrated.resolved.lock["lock_api_version"] == "io.tobkiri.profile-lock.v5"
-    assert store.load_active_snapshot().activation == migrated.activation
+    with pytest.raises(ProfileResolutionDenied, match="artifact closure changed"):
+        store.load_active_snapshot()
+    with pytest.raises(ProfileResolutionDenied, match="artifact closure changed"):
+        store.load_active_snapshot()
 
 
 def test_frozen_pre_e853_tamper_and_migration_crash_fail_closed(
@@ -280,23 +625,39 @@ def test_frozen_pre_e853_tamper_and_migration_crash_fail_closed(
         catalog=catalog,
         fault=crash,
     )
-    with pytest.raises(RuntimeError, match="migration crash"):
+    with pytest.raises(ProfileResolutionDenied, match="artifact closure changed"):
         crashing.load_active_snapshot()
-    recovered = ActivationStore(
-        clean_state,
-        workspace,
-        profile_id="defaults",
-        authority=clean_authority,
-        catalog=catalog,
-    ).load_active_snapshot()
-    assert recovered.activation["activation_api_version"] == (
-        "io.tobkiri.activation-record.v2"
+    with pytest.raises(ProfileResolutionDenied, match="artifact closure changed"):
+        ActivationStore(
+            clean_state,
+            workspace,
+            profile_id="defaults",
+            authority=clean_authority,
+            catalog=catalog,
+        ).load_active_snapshot()
+
+
+def test_normative_generator_rejects_dirty_implicit_commit(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.invalid"],
+        cwd=repository,
+        check=True,
     )
-
-
-def test_normative_generator_rejects_dirty_implicit_commit() -> None:
+    subprocess.run(
+        ["git", "config", "user.name", "Test"], cwd=repository, check=True
+    )
+    source = repository / "source.json"
+    source.write_text("{}", encoding="utf-8")
+    subprocess.run(["git", "add", "source.json"], cwd=repository, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "fixture"], cwd=repository, check=True
+    )
+    source.write_text('{"dirty":true}', encoding="utf-8")
     with pytest.raises(Exception, match="dirty working tree"):
-        trusted_source_commit(ROOT.parent)
+        trusted_source_commit(repository)
 
 
 def test_normative_provenance_is_non_self_referential_and_source_bound() -> None:
@@ -305,23 +666,61 @@ def test_normative_provenance_is_non_self_referential_and_source_bound() -> None
         payload={"value": 1},
         repository_commit_value=SOURCE_COMMIT,
         generator="test",
-        generator_version="1",
+        generator_version="1.0.0",
+        generator_path="generator.py",
+        generator_payload=b"generator-v1",
     )
     second = normative_generated_provenance(
         source_path="source.json",
         payload={"value": 2},
         repository_commit_value=SOURCE_COMMIT,
         generator="test",
-        generator_version="1",
+        generator_version="1.0.0",
+        generator_path="generator.py",
+        generator_payload=b"generator-v1",
     )
     assert first["source_digest"] != second["source_digest"]
-    assert first["repository_tree"] != second["repository_tree"]
+    assert first["content_root_digest"] != second["content_root_digest"]
+    assert first["generator_digest"] == second["generator_digest"]
+    assert first["repository_commit_trusted"] is False
+    generator_changed = normative_generated_provenance(
+        source_path="source.json",
+        payload={"value": 1},
+        repository_commit_value=SOURCE_COMMIT,
+        generator="test",
+        generator_version="1.0.0",
+        generator_path="generator.py",
+        generator_payload=b"generator-v2",
+    )
+    assert generator_changed["content_root_digest"] != first["content_root_digest"]
     assert "provenance" not in json.dumps({"value": 1})
-    with pytest.raises(Exception, match="exact repository commit"):
+    shallow = normative_generated_provenance(
+        source_path="source.json",
+        payload={"value": 1},
+        repository_commit_value="working-tree",
+        generator="test",
+        generator_version="1.0.0",
+        generator_path="generator.py",
+        generator_payload=b"generator-v1",
+    )
+    assert shallow["content_root_digest"] == first["content_root_digest"]
+    mismatched_commit = normative_generated_provenance(
+        source_path="source.json",
+        payload={"value": 1},
+        repository_commit_value="b" * 39 + "c",
+        generator="test",
+        generator_version="1.0.0",
+        generator_path="generator.py",
+        generator_payload=b"generator-v1",
+    )
+    assert mismatched_commit["content_root_digest"] == first["content_root_digest"]
+    with pytest.raises(Exception, match="informational repository commit"):
         normative_generated_provenance(
             source_path="source.json",
             payload={"value": 1},
-            repository_commit_value="working-tree",
+            repository_commit_value="0" * 40,
             generator="test",
-            generator_version="1",
+            generator_version="1.0.0",
+            generator_path="generator.py",
+            generator_payload=b"generator-v1",
         )

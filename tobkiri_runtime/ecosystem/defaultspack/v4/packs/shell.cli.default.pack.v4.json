@@ -22,7 +22,7 @@
     }
   ],
   "integrity": {
-    "source_identity": "sha256:dc003a7295e0fe271504873c952451363ef443ff61a15a421f013a97f75fd635",
+    "source_identity": "sha256:84adc9fca3a5eb5fd00625f60a6bd544a0e613829d58eb0c307919057ad34e08",
     "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     "contract_catalog_digest": "sha256:ba36ee3e7bb8d0a8cce3ceed290a5a68fd604bf7edb3be684bd4da0ed889b135"
   },
@@ -51,16 +51,31 @@
   },
   "pack_api_version": "io.tobkiri.pack.v4",
   "provenance": {
-    "schema": "io.tobkiri.provenance.v1",
+    "schema": "io.tobkiri.provenance.v2",
     "source_kind": "generated",
     "source_path": "ecosystem/defaultspack/v4/packs/shell.cli.default.pack.v4.json",
     "source_digest": "sha256:cf31300861b05724a360c8dd778393f2ae67094c548d008d09e0c65f6743db8a",
-    "repository_commit": "a2cae0ca5b2b9d23391cd6dc3d2708e9c6b7645e",
-    "repository_tree": "d5d564bef54e74ba119e2d20840ee7ed8f9be0a7d08a26cb56989b719d7e0ccf",
+    "repository_commit": "fb5ecdef18f2887616d328a4e57d77de757f4f35",
+    "repository_commit_trusted": false,
+    "content_root_digest": "sha256:a54a90daed4b6f7049d7ea150c0068adc78d06872c698d9050436527f433200a",
     "generator": "defaultspack-v4-core",
     "generator_version": "2.0.0",
+    "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+    "generator_digest": "sha256:9f5e54d3eb85938a9866dfba5a7101cd05a53f7b9cb41eeaca42aebc4d7ff352",
+    "input_inventory_digest": "sha256:0a633f1cf81bc8199a9cf2b53904bba367c903bcccfd04014bc27852f16b44e5",
     "normative": true,
-    "evidence": []
+    "evidence": [
+      {
+        "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+        "rule_id": "normative-generator-bytes",
+        "digest": "sha256:9f5e54d3eb85938a9866dfba5a7101cd05a53f7b9cb41eeaca42aebc4d7ff352"
+      },
+      {
+        "path": "ecosystem/defaultspack/v4/packs/shell.cli.default.pack.v4.json",
+        "rule_id": "normative-input-bytes",
+        "digest": "sha256:cf31300861b05724a360c8dd778393f2ae67094c548d008d09e0c65f6743db8a"
+      }
+    ]
   },
   "provider_catalog": [
     {

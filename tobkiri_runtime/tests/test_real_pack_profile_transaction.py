@@ -42,7 +42,7 @@ from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 ROOT = Path(os.environ["TOBKIRI_TEST_RUNTIME_ROOT"])
 BUNDLE_ROOT = Path(
     os.environ.get(
-        "TOBKIRI_DEFAULTS_BUNDLE_ROOT",
+        "TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT",
         str(ROOT / "ecosystem" / "defaultspack" / "v4"),
     )
 )
@@ -72,6 +72,7 @@ def _capture():
         bundle_root=BUNDLE_ROOT,
         ecosystem_root=ROOT / "ecosystem",
         authority_store=authority,
+        require_macos_code_signature=False,
     )
     catalog = BundledCatalog.load(BUNDLE_ROOT)
     bindings = load_frontend_contract_bindings(
@@ -84,6 +85,7 @@ def _capture():
         panel_auth_manager=manager,
         dispatch_session=session,
         contract_bindings=bindings,
+        require_macos_code_signature=False,
     )
     server.start()
     return server, active, manager

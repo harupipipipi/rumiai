@@ -1006,6 +1006,8 @@ def activate_resolved_profile_pack_set(
     from ecosystem.defaultspack.domain.runtime_v4 import ActivationStore
 
     from .authority.v4 import AuthorityStore
+    from .bootstrap.profile_capture import _bundle_root
+    from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 
     binding = _capture_binding()
     if not hmac.compare_digest(
@@ -1021,6 +1023,7 @@ def activate_resolved_profile_pack_set(
             workspace,
             profile_id=profile_id,
             authority=authority,
+            catalog=BundledCatalog.load(_bundle_root()),
         )
         activation_id = (
             f"activation:{profile_id}-"

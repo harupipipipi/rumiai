@@ -4,7 +4,7 @@
   "pack_id": "shell.tauri.default",
   "availability": "build_required",
   "artifact_digest": null,
-  "definition_revision": "sha256:95d1fb6c7f01b2b343981160582d149c4739421e23fe5c0e6b5df4be4dea7f2b",
+  "definition_revision": "sha256:528a5cc505d87a5187a7a441e369e33f059fddf40fea3c17dd4d8fd07f777f33",
   "contract_id": "app.shell.v1",
   "presentation": {
     "family": "graphical",
@@ -24,6 +24,40 @@
   },
   "launch": {
     "prebuilt_only": true,
+    "build_targets": [
+      {
+        "artifact_id": "shell.tauri.default.macos-arm64",
+        "platform": "macos",
+        "architecture": "arm64",
+        "artifact_ref": "Tobkiri.app",
+        "entrypoint": "Tobkiri.app/Contents/MacOS/tobkiri-shell",
+        "bundle_identity": "io.tobkiri.shell.tauri"
+      },
+      {
+        "artifact_id": "shell.tauri.default.macos-x86_64",
+        "platform": "macos",
+        "architecture": "x86_64",
+        "artifact_ref": "Tobkiri.app",
+        "entrypoint": "Tobkiri.app/Contents/MacOS/tobkiri-shell",
+        "bundle_identity": "io.tobkiri.shell.tauri"
+      },
+      {
+        "artifact_id": "shell.tauri.default.windows-x86_64",
+        "platform": "windows",
+        "architecture": "x86_64",
+        "artifact_ref": "tobkiri-shell.exe",
+        "entrypoint": "tobkiri-shell.exe",
+        "bundle_identity": "io.tobkiri.shell.tauri"
+      },
+      {
+        "artifact_id": "shell.tauri.default.linux-x86_64",
+        "platform": "linux",
+        "architecture": "x86_64",
+        "artifact_ref": "Tobkiri.AppImage",
+        "entrypoint": "Tobkiri.AppImage",
+        "bundle_identity": "io.tobkiri.shell.tauri"
+      }
+    ],
     "variants": []
   },
   "local_auth": {
@@ -31,15 +65,30 @@
     "audience": "runtime-profile"
   },
   "provenance": {
-    "schema": "io.tobkiri.provenance.v1",
+    "schema": "io.tobkiri.provenance.v2",
     "source_kind": "generated",
     "source_path": "ecosystem/defaultspack/v4/shell.tauri.default.shell.v1.json",
-    "source_digest": "sha256:1d43e607b8b5aa8be2d224954ceeb2d6b312347f4914ff2d406c1fbf60059951",
-    "repository_commit": "a2cae0ca5b2b9d23391cd6dc3d2708e9c6b7645e",
-    "repository_tree": "2ecd23279b1bf36e4b239f74982e95b6cd5f3ac25544f2907918db5bae70b1c2",
+    "source_digest": "sha256:adfce4f931ce59d98056f6f4a7f2956a48c666067f3b7033a54d0c2bbc631fef",
+    "repository_commit": "fb5ecdef18f2887616d328a4e57d77de757f4f35",
+    "repository_commit_trusted": false,
+    "content_root_digest": "sha256:ce9bcdc277c10ffbd4e063435dcc977d1a0c27d69ad54d6c8b81b78660ef55a4",
     "generator": "defaultspack-v4-core",
     "generator_version": "2.0.0",
+    "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+    "generator_digest": "sha256:9f5e54d3eb85938a9866dfba5a7101cd05a53f7b9cb41eeaca42aebc4d7ff352",
+    "input_inventory_digest": "sha256:a0a83c046bc7976f07b61afd32b52aa6a7b665f4aafcf1fcf28ed8d485035a2a",
     "normative": true,
-    "evidence": []
+    "evidence": [
+      {
+        "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+        "rule_id": "normative-generator-bytes",
+        "digest": "sha256:9f5e54d3eb85938a9866dfba5a7101cd05a53f7b9cb41eeaca42aebc4d7ff352"
+      },
+      {
+        "path": "ecosystem/defaultspack/v4/shell.tauri.default.shell.v1.json",
+        "rule_id": "normative-input-bytes",
+        "digest": "sha256:adfce4f931ce59d98056f6f4a7f2956a48c666067f3b7033a54d0c2bbc631fef"
+      }
+    ]
   }
 }

@@ -542,6 +542,7 @@ def _shell_descriptor(
     consumed = presentation.get("consumes_contribution_contracts")
     capabilities = presentation.get("capabilities")
     variants = launch.get("variants")
+    build_targets = launch.get("build_targets")
     if not isinstance(consumed, list) or not all(isinstance(item, str) for item in consumed):
         raise PresentationCatalogError(f"Shell {shell.identity} has invalid consumed Contracts")
     if not isinstance(capabilities, list) or not all(isinstance(item, str) for item in capabilities):
@@ -555,12 +556,65 @@ def _shell_descriptor(
         edge_contract_id = edge.get("contract_id")
         if isinstance(edge_contract_id, str) and edge_contract_id not in consumed:
             consumed.append(edge_contract_id)
-    if launch.get("prebuilt_only") is not True or not isinstance(variants, list):
+    if (
+        launch.get("prebuilt_only") is not True
+        or not isinstance(variants, list)
+        or not isinstance(build_targets, list)
+        or not build_targets
+    ):
         raise PresentationCatalogError(f"Shell {shell.identity} must be prebuilt-only")
     if value.get("availability") == "build_required":
         if value.get("artifact_digest") is not None or variants:
             raise PresentationCatalogError(
                 f"unavailable Shell {shell.identity} fabricates a launch artifact"
+            )
+        declared_variants: list[dict[str, Any]] = []
+        seen_targets: set[tuple[str, str]] = set()
+        for target in build_targets:
+            if not isinstance(target, Mapping):
+                raise PresentationCatalogError(
+                    f"Shell {shell.identity} has a malformed build target"
+                )
+            platform = str(target.get("platform") or "")
+            architecture = str(target.get("architecture") or "")
+            artifact_id = str(target.get("artifact_id") or "")
+            target_key = (platform, architecture)
+            if target_key in seen_targets or artifact_id != (
+                f"{shell.identity}.{platform}-{architecture}"
+            ):
+                raise PresentationCatalogError(
+                    f"Shell {shell.identity} has an ambiguous build target"
+                )
+            seen_targets.add(target_key)
+            metadata = _preserved_variant_metadata(
+                existing, artifact_id, platform, architecture
+            )
+            if any(value is not None for value in metadata.values()):
+                metadata = {key: None for key in metadata}
+            declared_variants.append(
+                {
+                    "artifact_id": artifact_id,
+                    "variant": f"{platform}-{architecture}",
+                    "platform": platform,
+                    "architecture": architecture,
+                    "artifact_ref": str(target["artifact_ref"]),
+                    "entrypoint": str(target["entrypoint"]),
+                    "artifact_kind": "signed_prebuilt_binary",
+                    "descriptor_digest": shell.digest,
+                    **metadata,
+                    "prebuilt": True,
+                    "production": True,
+                    "development_command": None,
+                    "bundle_identifier": str(target["bundle_identity"]),
+                }
+            )
+        requested_target = (
+            profile_shell.get("platform"),
+            profile_shell.get("architecture"),
+        )
+        if requested_target not in seen_targets:
+            raise PresentationCatalogError(
+                f"defaults profile Shell target is not declared: {requested_target}"
             )
         effect_scope = sorted({contract_id, *consumed})
         return {
@@ -575,7 +629,7 @@ def _shell_descriptor(
             "capabilities": list(capabilities),
             "consumes_contracts": list(consumed),
             "contributions": [],
-            "artifact_variants": [],
+            "artifact_variants": declared_variants,
             "approval": _approval(
                 authority_mode="lease_only",
                 execution_domain=f"shell:{value['provider_id']}",
@@ -782,7 +836,11 @@ def generate_presentation_catalog(repository_root: Path, output: Path | None = N
         "shell_providers": [shell_descriptor],
         "generated_at": 0,
     }
-    binding = _release_binding(existing, shell_descriptor["artifact_variants"])
+    binding = (
+        None
+        if shell.value.get("availability") == "build_required"
+        else _release_binding(existing, shell_descriptor["artifact_variants"])
+    )
     if binding is not None:
         catalog["release_binding"] = binding
     return catalog

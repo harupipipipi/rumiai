@@ -50,7 +50,20 @@ def test_v4_catalog_is_byte_identical_and_uninstalled_variants_fail_closed(
     assert "shell.cli.default" not in catalog["source_manifest_digests"]
     shell = catalog["shell_providers"][0]
     assert shell["provider_id"] == "shell.tauri.default"
-    assert shell["artifact_variants"] == []
+    assert {
+        (item["platform"], item["architecture"])
+        for item in shell["artifact_variants"]
+    } == {
+        ("macos", "arm64"),
+        ("macos", "x86_64"),
+        ("windows", "x86_64"),
+        ("linux", "x86_64"),
+    }
+    assert all(
+        item[field] is None
+        for item in shell["artifact_variants"]
+        for field in ("path", "sha256", "size", "source_identity", "source_revision")
+    )
     assert "release_binding" not in catalog
 
 
@@ -94,7 +107,13 @@ def test_source_catalog_drops_stale_installed_metadata_and_release_binding(
     )
 
     generated = MODULE.generate_presentation_catalog(ROOT, target)
-    assert generated["shell_providers"][0]["artifact_variants"] == []
+    generated_variants = generated["shell_providers"][0]["artifact_variants"]
+    assert len(generated_variants) == 4
+    assert all(
+        item[field] is None
+        for item in generated_variants
+        for field in ("path", "sha256", "size", "source_identity", "source_revision")
+    )
     assert "release_binding" not in generated
 
 

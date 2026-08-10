@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import os
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,10 @@ RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 BUNDLE_ROOT = RUNTIME_ROOT / "ecosystem" / "defaultspack" / "v4"
 
 
+def _bundle_root() -> Path:
+    return Path(os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"])
+
+
 @pytest.fixture
 def active_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(tmp_path / "user-data"))
@@ -56,7 +61,7 @@ def _catalog_with_second_profile(catalog: BundledCatalog) -> BundledCatalog:
 def test_multiple_profile_projection_has_exact_bindings_and_active_marker(
     active_runtime,
 ) -> None:
-    catalog = _catalog_with_second_profile(BundledCatalog.load(BUNDLE_ROOT))
+    catalog = _catalog_with_second_profile(BundledCatalog.load(_bundle_root()))
 
     projection = project_profile_catalog(catalog, active_runtime)
 
@@ -84,7 +89,7 @@ def test_multiple_profile_projection_has_exact_bindings_and_active_marker(
 def test_catalog_refresh_exposes_new_profile_without_changing_active_pointer(
     active_runtime,
 ) -> None:
-    base_catalog = BundledCatalog.load(BUNDLE_ROOT)
+    base_catalog = BundledCatalog.load(_bundle_root())
     refreshed = _catalog_with_second_profile(base_catalog)
     service = RuntimeSurfaceService(
         snapshot_loader=lambda: active_runtime,
@@ -101,7 +106,7 @@ def test_catalog_refresh_exposes_new_profile_without_changing_active_pointer(
 
 
 def test_catalog_binding_rejects_unknown_stale_and_tampered_profiles() -> None:
-    catalog = BundledCatalog.load(BUNDLE_ROOT)
+    catalog = BundledCatalog.load(_bundle_root())
     definition_digest = canonical_digest(catalog.profiles["defaults"])
     catalog_digest = profile_catalog_digest(catalog)
     lock_digest = bundle_lock_digest(catalog)
@@ -138,7 +143,7 @@ def test_authoritative_resolve_binds_selected_catalog_profile(
     active_runtime,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    catalog = _catalog_with_second_profile(BundledCatalog.load(BUNDLE_ROOT))
+    catalog = _catalog_with_second_profile(BundledCatalog.load(_bundle_root()))
     service = RuntimeSurfaceService(
         snapshot_loader=lambda: active_runtime,
         catalog_loader=lambda: catalog,
@@ -193,7 +198,9 @@ def test_non_default_resolve_without_catalog_binding_fails_closed(
     ceremony = RuntimeProfileChangeService(
         surface_service=RuntimeSurfaceService(
             snapshot_loader=lambda: active_runtime,
-            catalog_loader=lambda: _catalog_with_second_profile(BundledCatalog.load(BUNDLE_ROOT)),
+            catalog_loader=lambda: _catalog_with_second_profile(
+                BundledCatalog.load(_bundle_root())
+            ),
         )
     )
     with pytest.raises(RuntimeSurfaceError) as rejected:

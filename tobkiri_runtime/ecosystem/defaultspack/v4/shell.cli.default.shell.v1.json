@@ -4,7 +4,7 @@
   "pack_id": "shell.cli.default",
   "availability": "build_required",
   "artifact_digest": null,
-  "definition_revision": "sha256:3ec874b7ad5d4b99369bc9e03efcbc3f7056af510d8e559dd000db66f3b0a56e",
+  "definition_revision": "sha256:363af03ae277251c1e9c0f4a353dfeeb64d16a49813928c85d2f72b6ba7a6d44",
   "contract_id": "app.shell.v1",
   "presentation": {
     "family": "terminal",
@@ -24,6 +24,16 @@
   },
   "launch": {
     "prebuilt_only": true,
+    "build_targets": [
+      {
+        "artifact_id": "shell.cli.default.macos-arm64",
+        "platform": "macos",
+        "architecture": "arm64",
+        "artifact_ref": "bin/tobkiri-shell",
+        "entrypoint": "tobkiri-shell",
+        "bundle_identity": "io.tobkiri.shell.cli.default"
+      }
+    ],
     "variants": []
   },
   "local_auth": {
@@ -31,15 +41,30 @@
     "audience": "runtime-profile"
   },
   "provenance": {
-    "schema": "io.tobkiri.provenance.v1",
+    "schema": "io.tobkiri.provenance.v2",
     "source_kind": "generated",
     "source_path": "ecosystem/defaultspack/v4/shell.cli.default.shell.v1.json",
-    "source_digest": "sha256:d7d65bbef4356b6cf6a972fef7dd3222394de63074cde874d62e768c57e9e404",
-    "repository_commit": "a2cae0ca5b2b9d23391cd6dc3d2708e9c6b7645e",
-    "repository_tree": "35174a18441c6487341c3bbb536c529fbc2a587d62fc154f9b81bf6c1245f9e6",
+    "source_digest": "sha256:06f340483ec0b8416fab8cbb202003b2e4bb7befdd6645b43c0a50fa4112adf3",
+    "repository_commit": "fb5ecdef18f2887616d328a4e57d77de757f4f35",
+    "repository_commit_trusted": false,
+    "content_root_digest": "sha256:5839974c5b5b3153604791aed03ac3241839b4a63b868d88ab832342dadb4a9a",
     "generator": "defaultspack-v4-core",
     "generator_version": "2.0.0",
+    "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+    "generator_digest": "sha256:9f5e54d3eb85938a9866dfba5a7101cd05a53f7b9cb41eeaca42aebc4d7ff352",
+    "input_inventory_digest": "sha256:679ba60063a5439725e534b93c8859383fd392d023a3905904c650a118ab497b",
     "normative": true,
-    "evidence": []
+    "evidence": [
+      {
+        "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+        "rule_id": "normative-generator-bytes",
+        "digest": "sha256:9f5e54d3eb85938a9866dfba5a7101cd05a53f7b9cb41eeaca42aebc4d7ff352"
+      },
+      {
+        "path": "ecosystem/defaultspack/v4/shell.cli.default.shell.v1.json",
+        "rule_id": "normative-input-bytes",
+        "digest": "sha256:06f340483ec0b8416fab8cbb202003b2e4bb7befdd6645b43c0a50fa4112adf3"
+      }
+    ]
   }
 }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import plistlib
+import subprocess
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -17,7 +18,7 @@ def artifact_digest(path: Path) -> str:
     if path.is_symlink():
         raise ProtocolError("packaged artifact must not be a symlink")
     if path.is_file():
-        digest.update(path.read_bytes())
+        digest.update(_stable_read(path))
     elif path.is_dir():
         for item in sorted(path.rglob("*")):
             if item.is_symlink():
@@ -26,7 +27,7 @@ def artifact_digest(path: Path) -> str:
                 relative = item.relative_to(path).as_posix().encode("utf-8")
                 digest.update(len(relative).to_bytes(8, "big"))
                 digest.update(relative)
-                payload = item.read_bytes()
+                payload = _stable_read(item)
                 digest.update(len(payload).to_bytes(8, "big"))
                 digest.update(payload)
     else:
@@ -34,9 +35,32 @@ def artifact_digest(path: Path) -> str:
     return "sha256:" + digest.hexdigest()
 
 
+def _stable_read(path: Path) -> bytes:
+    """Read one regular file without accepting an identity-changing race."""
+
+    before = path.stat(follow_symlinks=False)
+    if not path.is_file() or path.is_symlink():
+        raise ProtocolError("packaged artifact member is not a regular file")
+    payload = path.read_bytes()
+    after = path.stat(follow_symlinks=False)
+    def identity(value: Any) -> tuple[int, int, int, int, int]:
+        return (
+            value.st_dev,
+            value.st_ino,
+            value.st_mode,
+            value.st_size,
+            value.st_mtime_ns,
+        )
+    if identity(before) != identity(after) or len(payload) != after.st_size:
+        raise ProtocolError("packaged artifact changed while it was verified")
+    return payload
+
+
 def verify_platform_artifact(
     artifact_root: Path,
     variant: Mapping[str, Any],
+    *,
+    require_macos_code_signature: bool = False,
 ) -> Path:
     """Verify path, digest, entrypoint, architecture, and macOS bundle identity."""
 
@@ -77,8 +101,27 @@ def verify_platform_artifact(
             raise ProtocolError("macOS packaged artifact Info.plist is invalid") from exc
         if info.get("CFBundleIdentifier") != variant["bundle_identity"]:
             raise ProtocolError("macOS packaged artifact bundle identity does not match")
+        if require_macos_code_signature:
+            _verify_macos_code_signature(artifact)
     _verify_binary_architecture(entrypoint, str(variant["architecture"]))
     return artifact
+
+
+def _verify_macos_code_signature(artifact: Path) -> None:
+    """Require the installed macOS application signature to validate."""
+
+    try:
+        result = subprocess.run(
+            ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(artifact)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ProtocolError("macOS packaged artifact signature could not be verified") from exc
+    if result.returncode != 0:
+        raise ProtocolError("macOS packaged artifact signature is invalid")
 
 
 def _verify_binary_architecture(path: Path, architecture: str) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,11 +35,83 @@ def runtime_user_data_root(base_dir: Path | None = None) -> Path:
 
 def _bundle_root(base_dir: Path | None = None) -> Path:
     del base_dir
-    configured = os.getenv("TOBKIRI_DEFAULTS_BUNDLE_ROOT")
-    if configured:
-        return Path(configured).resolve()
     runtime_root = Path(__file__).resolve().parents[2]
-    return runtime_root / "ecosystem" / "defaultspack" / "v4"
+    if os.getenv("TOBKIRI_RUNTIME_MODE") == "test":
+        configured = os.getenv("TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT")
+        if configured:
+            return Path(configured).resolve(strict=True)
+    bundle_root = runtime_root / "ecosystem" / "defaultspack" / "v4"
+    _verify_installed_bundle_binding(runtime_root, bundle_root)
+    return bundle_root
+
+
+def _verify_installed_bundle_binding(runtime_root: Path, bundle_root: Path) -> None:
+    """Bind a packaged Profile bundle to the launcher's resource manifest."""
+
+    artifact_root = bundle_root.parent / "platform-artifacts"
+    if not artifact_root.exists():
+        # A source checkout contains no executable Profile artifact and will
+        # fail closed during resolution.  It is not a production override.
+        return
+    manifest_path = runtime_root / "runtime-resource-manifest.v1.json"
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise ProfileResolutionDenied("packaged runtime resource manifest is unavailable")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProfileResolutionDenied("packaged runtime resource manifest is invalid") from exc
+    if manifest.get("schema") != "io.tobkiri.runtime-resource-manifest.v1":
+        raise ProfileResolutionDenied("packaged runtime resource manifest is unsupported")
+    entries = manifest.get("entries")
+    if not isinstance(entries, list):
+        raise ProfileResolutionDenied("packaged runtime resource inventory is invalid")
+    expected: dict[str, tuple[int, str]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ProfileResolutionDenied("packaged runtime resource entry is invalid")
+        path = entry.get("path")
+        size = entry.get("size")
+        digest = entry.get("sha256")
+        if (
+            not isinstance(path, str)
+            or Path(path).is_absolute()
+            or ".." in Path(path).parts
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+            or size < 0
+            or not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+            or path in expected
+        ):
+            raise ProfileResolutionDenied("packaged runtime resource entry is unsafe")
+        expected[path] = (size, digest)
+    roots = (bundle_root, artifact_root)
+    prefixes = tuple(
+        root.relative_to(runtime_root).as_posix() + "/" for root in roots
+    )
+    actual_paths: set[str] = set()
+    for root in roots:
+        if root.is_symlink() or not root.is_dir():
+            raise ProfileResolutionDenied("packaged Profile resource root is unsafe")
+        for path in root.rglob("*"):
+            if path.is_symlink():
+                raise ProfileResolutionDenied("packaged Profile resource contains a symlink")
+            if not path.is_file():
+                continue
+            relative = path.relative_to(runtime_root).as_posix()
+            actual_paths.add(relative)
+            binding = expected.get(relative)
+            payload = path.read_bytes()
+            if binding != (len(payload), hashlib.sha256(payload).hexdigest()):
+                raise ProfileResolutionDenied(
+                    f"packaged Profile resource is not launcher-bound: {relative}"
+                )
+    expected_paths = {
+        path for path in expected if any(path.startswith(prefix) for prefix in prefixes)
+    }
+    if actual_paths != expected_paths:
+        raise ProfileResolutionDenied("packaged Profile resource inventory is incomplete")
 
 
 def _edge_key(edge: Mapping[str, Any]) -> str:

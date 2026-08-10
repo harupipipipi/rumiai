@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -38,6 +39,10 @@ from tobkiri_host.runtime import (
 
 ROOT = Path(__file__).resolve().parent.parent
 BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
+
+
+def _bundle_root() -> Path:
+    return Path(os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"])
 
 
 def _principal(binding: Mapping[str, Any]) -> FunctionPrincipal:
@@ -126,7 +131,7 @@ def _resolved(catalog: BundledCatalog):
 def test_headless_activation_compiles_exact_plan_and_reads_after_restart(
     tmp_path: Path,
 ) -> None:
-    catalog = BundledCatalog.load(BUNDLE)
+    catalog = BundledCatalog.load(_bundle_root())
     resolved = _resolved(catalog)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -136,6 +141,7 @@ def test_headless_activation_compiles_exact_plan_and_reads_after_restart(
         workspace,
         profile_id="defaults",
         authority=AuthorityStore(tmp_path / "authority.sqlite3"),
+        catalog=catalog,
     )
     activation_store.activate(
         resolved,
@@ -242,7 +248,7 @@ def test_headless_activation_compiles_exact_plan_and_reads_after_restart(
 def test_production_capture_rejects_unapproved_extra_and_stale_scope(
     tmp_path: Path,
 ) -> None:
-    catalog = BundledCatalog.load(BUNDLE)
+    catalog = BundledCatalog.load(_bundle_root())
     resolved = _resolved(catalog)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -251,6 +257,7 @@ def test_production_capture_rejects_unapproved_extra_and_stale_scope(
         workspace,
         profile_id="defaults",
         authority=AuthorityStore(tmp_path / "authority.sqlite3"),
+        catalog=catalog,
     )
     activation = store.activate(
         resolved,

@@ -14,6 +14,7 @@ from .errors import ProtocolError
 from .ids import validate_artifact_digest
 
 PROVENANCE_SCHEMA = "io.tobkiri.provenance.v1"
+NORMATIVE_PROVENANCE_SCHEMA = "io.tobkiri.provenance.v2"
 PROVENANCE_GENERATOR = "tobkiri-protocol"
 PROVENANCE_GENERATOR_VERSION = "1.0.0"
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -138,27 +139,83 @@ def normative_generated_provenance(
     repository_commit_value: str,
     generator: str,
     generator_version: str,
+    generator_path: str,
+    generator_payload: bytes,
+    input_inventory: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Create deterministic provenance over a non-self-referential payload."""
+    """Bind normative output to source content, generator bytes, and inputs."""
 
-    if _COMMIT_RE.fullmatch(repository_commit_value) is None:
-        raise ProtocolError("normative provenance requires an exact repository commit")
+    if (
+        repository_commit_value != "working-tree"
+        and (
+            _COMMIT_RE.fullmatch(repository_commit_value) is None
+            or len(set(repository_commit_value)) <= 1
+        )
+    ):
+        raise ProtocolError("informational repository commit is invalid")
+    if not generator_path or not generator_payload:
+        raise ProtocolError("normative provenance requires exact generator bytes")
     source_digest = canonical_digest(dict(payload))
-    tree_digest = canonical_digest(
-        {"source_path": source_path, "source_digest": source_digest}
-    ).removeprefix("sha256:")
+    generator_digest = sha256_bytes(generator_payload)
+    inputs = dict(input_inventory or {})
+    inputs[source_path] = source_digest
+    for path, digest in inputs.items():
+        if not path:
+            raise ProtocolError("normative provenance input path is empty")
+        validate_artifact_digest(digest, field="provenance input digest")
+    inventory_digest = canonical_digest(
+        [{"path": path, "digest": inputs[path]} for path in sorted(inputs)]
+    )
+    content_root_digest = canonical_digest(
+        {
+            "source_path": source_path,
+            "source_digest": source_digest,
+            "generator_path": generator_path,
+            "generator_digest": generator_digest,
+            "input_inventory_digest": inventory_digest,
+        }
+    )
     return {
-        "schema": PROVENANCE_SCHEMA,
+        "schema": NORMATIVE_PROVENANCE_SCHEMA,
         "source_kind": "generated",
         "source_path": source_path,
         "source_digest": source_digest,
         "repository_commit": repository_commit_value,
-        "repository_tree": tree_digest,
+        "repository_commit_trusted": False,
+        "content_root_digest": content_root_digest,
         "generator": generator,
         "generator_version": generator_version,
+        "generator_path": generator_path,
+        "generator_digest": generator_digest,
+        "input_inventory_digest": inventory_digest,
         "normative": True,
-        "evidence": [],
+        "evidence": [
+            {
+                "path": generator_path,
+                "rule_id": "normative-generator-bytes",
+                "digest": generator_digest,
+            },
+            *(
+                {
+                    "path": path,
+                    "rule_id": "normative-input-bytes",
+                    "digest": inputs[path],
+                }
+                for path in sorted(inputs)
+            ),
+        ],
     }
+
+
+def informational_source_commit(root: Path, explicit: str | None = None) -> str:
+    """Return non-authoritative source metadata without needing Git history."""
+
+    if explicit is not None:
+        if _COMMIT_RE.fullmatch(explicit) is None or len(set(explicit)) <= 1:
+            raise ProtocolError("explicit source commit must be 40 lowercase hex characters")
+        return explicit
+    commit = repository_commit(root)
+    return commit if _COMMIT_RE.fullmatch(commit) else "working-tree"
 
 
 def trusted_source_commit(root: Path, explicit: str | None = None) -> str:

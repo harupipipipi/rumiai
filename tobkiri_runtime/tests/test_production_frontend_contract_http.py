@@ -102,7 +102,7 @@ def production_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
     authority = AuthorityStore(user_data / "authority" / "v4.sqlite3")
-    bundle_root = Path(os.environ["TOBKIRI_DEFAULTS_BUNDLE_ROOT"])
+    bundle_root = Path(os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"])
     catalog = BundledCatalog.load(bundle_root)
     bindings = load_frontend_contract_bindings(
         MAP_PATH,
@@ -114,12 +114,14 @@ def production_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         ecosystem_root=RUNTIME_ROOT / "ecosystem",
         authority_store=authority,
         frontend_contract_bindings=bindings,
+        require_macos_code_signature=False,
     )
     server = PackAPIServer(
         port=0,
         panel_auth_manager=PanelAuthManager(bootstrap_secret="desktop-bootstrap"),
         dispatch_session=session,
         contract_bindings=bindings,
+        require_macos_code_signature=False,
     )
     server.start()
     try:

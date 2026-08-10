@@ -50,11 +50,14 @@ class Kernel:
     API_INIT_STEP = "api_init"
     owns_host_http_surface = True
 
-    def __init__(self) -> None:
+    def __init__(self, *, require_macos_code_signature: bool = True) -> None:
         self._lock = RLock()
         self._server: PackAPIServer | None = None
         self._dispatch_session: V4DispatchSession | None = None
-        self._lifecycle = AppLifecycleManager()
+        self._require_macos_code_signature = require_macos_code_signature
+        self._lifecycle = AppLifecycleManager(
+            require_macos_code_signature=require_macos_code_signature
+        )
 
     def run_startup_until(self, step_id: str) -> dict[str, Any]:
         """Start the authenticated Host HTTP surface through ``step_id``."""
@@ -90,6 +93,9 @@ class Kernel:
                         ecosystem_root=runtime_root / "ecosystem",
                         authority_store=authority_store,
                         frontend_contract_bindings=contract_bindings,
+                        require_macos_code_signature=(
+                            self._require_macos_code_signature
+                        ),
                     )
                 except Exception:
                     authority_store.close()
@@ -103,6 +109,7 @@ class Kernel:
                 dispatch_session=dispatch_session,
                 app_lifecycle_manager=self._lifecycle,
                 contract_bindings=contract_bindings,
+                require_macos_code_signature=self._require_macos_code_signature,
             )
             mark_panel_ready()
             return {"status": "ok", "step_id": step_id, "port": port}
@@ -124,7 +131,7 @@ class Kernel:
                 if session is None:
                     raise RuntimeError("captured v4 dispatch session is unavailable")
                 runtime_root = Path(__file__).resolve().parents[2]
-                catalog = BundledCatalog.load(runtime_root / "ecosystem" / "defaultspack" / "v4")
+                catalog = BundledCatalog.load(_bundle_root())
                 bindings = load_frontend_contract_bindings(
                     runtime_root
                     / "ecosystem"
@@ -141,6 +148,9 @@ class Kernel:
                     dispatch_session=session,
                     app_lifecycle_manager=self._lifecycle,
                     contract_bindings=bindings,
+                    require_macos_code_signature=(
+                        self._require_macos_code_signature
+                    ),
                 )
             mark_runtime_ready()
             return {"status": "ok", "runtime_ready": True}

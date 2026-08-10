@@ -583,13 +583,19 @@ def _verified_packaged_profile_bundle(tmp_path_factory):
         tmp_path_factory.mktemp("verified-packaged-profile"),
         source_commit=str(profile["provenance"]["repository_commit"]),
     )
-    previous = os.environ.get("TOBKIRI_DEFAULTS_BUNDLE_ROOT")
-    os.environ["TOBKIRI_DEFAULTS_BUNDLE_ROOT"] = str(bundle)
+    previous_mode = os.environ.get("TOBKIRI_RUNTIME_MODE")
+    previous = os.environ.get("TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT")
+    os.environ["TOBKIRI_RUNTIME_MODE"] = "test"
+    os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"] = str(bundle)
     yield
-    if previous is None:
-        os.environ.pop("TOBKIRI_DEFAULTS_BUNDLE_ROOT", None)
+    if previous_mode is None:
+        os.environ.pop("TOBKIRI_RUNTIME_MODE", None)
     else:
-        os.environ["TOBKIRI_DEFAULTS_BUNDLE_ROOT"] = previous
+        os.environ["TOBKIRI_RUNTIME_MODE"] = previous_mode
+    if previous is None:
+        os.environ.pop("TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT", None)
+    else:
+        os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"] = previous
 
 
 @pytest.fixture(autouse=True)
@@ -1069,7 +1075,7 @@ def _defaultspack_v4_snapshot() -> _V4TestResolvedSnapshot:
         resolve_default_profile,
     )
 
-    bundle_root = Path(os.environ["TOBKIRI_DEFAULTS_BUNDLE_ROOT"])
+    bundle_root = Path(os.environ["TOBKIRI_TEST_DEFAULTS_BUNDLE_ROOT"])
     catalog = BundledCatalog.load(bundle_root)
     source = catalog.profiles["defaults"]
     authority_bindings = {

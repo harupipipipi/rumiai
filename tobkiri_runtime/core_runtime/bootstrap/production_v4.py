@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import secrets
 import os
 import platform
+import secrets
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +40,8 @@ from tobkiri_host.platform_backends import (
     build_platform_backend,
 )
 from tobkiri_protocol.canonical import canonical_digest
+from tobkiri_protocol.errors import ProtocolError
+from tobkiri_protocol.platform_artifact import verify_platform_artifact
 
 from ..authority.v4 import (
     ApprovalRecord,
@@ -205,6 +207,8 @@ def _shell_artifact(
     catalog: BundledCatalog,
     shell_id: str,
     selected_shell: Mapping[str, Any],
+    *,
+    require_macos_code_signature: bool,
 ) -> PackArtifact:
     manifest = catalog.packs[shell_id]
     definition = catalog.shells[str(selected_shell["provider_id"])]
@@ -219,6 +223,16 @@ def _shell_artifact(
     if definition.get("availability") != "verified" or len(selected_variants) != 1:
         raise AuthorityDenied("captured Shell artifact variant is unavailable or ambiguous")
     selected_variant = selected_variants[0]
+    if catalog.artifact_root is None:
+        raise AuthorityDenied("captured Shell artifact root is unavailable")
+    try:
+        verify_platform_artifact(
+            catalog.artifact_root,
+            selected_variant,
+            require_macos_code_signature=require_macos_code_signature,
+        )
+    except ProtocolError as exc:
+        raise AuthorityDenied(f"captured Shell artifact verification failed: {exc}") from exc
     functions: list[FunctionArtifact] = []
     variants: list[ArtifactVariant] = []
     for index, function in enumerate(manifest["functions"]):
@@ -498,6 +512,7 @@ def capture_production_dispatch(
     packvm_provisioner: Any | None = None,
     packvm_readiness_reader: Callable[[], Mapping[str, Any]] | None = None,
     frontend_contract_bindings: tuple[Any, ...] = (),
+    require_macos_code_signature: bool = True,
 ) -> V4DispatchSession:
     """Capture ProductionRuntimeV4 and its RequestBroker from verified records."""
 
@@ -534,7 +549,12 @@ def capture_production_dispatch(
     lock = active.resolved.lock
     plan = active.resolved.plan
     shell_id = str(profile["shell"]["pack_id"])
-    shell = _shell_artifact(catalog, shell_id, profile["shell"])
+    shell = _shell_artifact(
+        catalog,
+        shell_id,
+        profile["shell"],
+        require_macos_code_signature=require_macos_code_signature,
+    )
     principals: dict[str, FunctionPrincipal] = {}
     for function in shell.functions:
         for operation in function.operations:

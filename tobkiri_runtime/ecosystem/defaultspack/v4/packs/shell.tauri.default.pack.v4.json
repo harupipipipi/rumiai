@@ -53,16 +53,31 @@
   },
   "pack_api_version": "io.tobkiri.pack.v4",
   "provenance": {
-    "schema": "io.tobkiri.provenance.v1",
+    "schema": "io.tobkiri.provenance.v2",
     "source_kind": "generated",
     "source_path": "ecosystem/defaultspack/v4/packs/shell.tauri.default.pack.v4.json",
     "source_digest": "sha256:84fa8cdae6b2bebfad1740d7ab3e756cd818c0558f3f2c5bc0b263ef5f4b38cd",
-    "repository_commit": "a2cae0ca5b2b9d23391cd6dc3d2708e9c6b7645e",
-    "repository_tree": "dfe2d3982fce857128cb8b4533313302add3c9ef6f1f50eb6de85f1c40ce5338",
+    "repository_commit": "fb5ecdef18f2887616d328a4e57d77de757f4f35",
+    "repository_commit_trusted": false,
+    "content_root_digest": "sha256:8580e2a0f1c6ae9842d3f25375c62152352f643c747cc5b24bfa4b471064a0ce",
     "generator": "defaultspack-v4-core",
     "generator_version": "2.0.0",
+    "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+    "generator_digest": "sha256:9f5e54d3eb85938a9866dfba5a7101cd05a53f7b9cb41eeaca42aebc4d7ff352",
+    "input_inventory_digest": "sha256:3d89d0ad6c0633bc04f6a4e3360b25266acf3978f32791ee03a0b52e096809ec",
     "normative": true,
-    "evidence": []
+    "evidence": [
+      {
+        "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+        "rule_id": "normative-generator-bytes",
+        "digest": "sha256:9f5e54d3eb85938a9866dfba5a7101cd05a53f7b9cb41eeaca42aebc4d7ff352"
+      },
+      {
+        "path": "ecosystem/defaultspack/v4/packs/shell.tauri.default.pack.v4.json",
+        "rule_id": "normative-input-bytes",
+        "digest": "sha256:84fa8cdae6b2bebfad1740d7ab3e756cd818c0558f3f2c5bc0b263ef5f4b38cd"
+      }
+    ]
   },
   "requirements": {
     "pack_dependencies": {},
@@ -114,7 +129,7 @@
     }
   ],
   "integrity": {
-    "source_identity": "sha256:409fa6114feaaceb0df52b24f1ec4040be589185fcfb75c4c3307d305bc2f458",
+    "source_identity": "sha256:208f7675b982f795eae17de868621fd90f378604dad3b96fc69b630bb4cd0da3",
     "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     "contract_catalog_digest": "sha256:f51dbfa1120d6407bc86a1cc888af22f515a39a55218f0d8efc9eb0eb786d335"
   }
