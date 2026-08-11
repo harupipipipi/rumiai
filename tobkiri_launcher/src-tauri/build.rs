@@ -1,4 +1,4 @@
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -365,6 +365,7 @@ fn write_runtime_resource_manifest(staged_root: &Path) -> io::Result<()> {
     )
 }
 
+#[derive(Debug)]
 struct VerifiedPresentationRelease {
     public_key: String,
     key_id: String,
@@ -374,6 +375,8 @@ struct VerifiedPresentationRelease {
     bundle_identity: String,
     platform: String,
     architecture: String,
+    default_profile_sha256: String,
+    defaultspack_lock_sha256: String,
 }
 
 fn invalid_release(message: impl Into<String>) -> io::Error {
@@ -593,8 +596,17 @@ fn expected_target() -> io::Result<(String, String)> {
 }
 
 fn verify_presentation_release(release_root: &Path) -> io::Result<VerifiedPresentationRelease> {
+    verify_presentation_release_at(
+        release_root,
+        &release_root.join(PRESENTATION_CATALOG_FILENAME),
+    )
+}
+
+fn verify_presentation_release_at(
+    release_root: &Path,
+    catalog_path: &Path,
+) -> io::Result<VerifiedPresentationRelease> {
     require_directory(release_root, "release presentation root")?;
-    let catalog_path = release_root.join(PRESENTATION_CATALOG_FILENAME);
     let index_path = release_root
         .join("bundled")
         .join(PRESENTATION_INDEX_FILENAME);
@@ -604,7 +616,7 @@ fn verify_presentation_release(release_root: &Path) -> io::Result<VerifiedPresen
     let release_path = release_root
         .join("bundled")
         .join(PRESENTATION_RELEASE_FILENAME);
-    let catalog_raw = read_regular_file(&catalog_path, "release presentation catalog")?;
+    let catalog_raw = read_regular_file(catalog_path, "release presentation catalog")?;
     let index_raw = read_regular_file(&index_path, "release presentation artifact index")?;
     let lock_raw = read_regular_file(&lock_path, "release presentation profile lock")?;
     let release_raw = read_regular_file(&release_path, "release presentation manifest")?;
@@ -628,6 +640,36 @@ fn verify_presentation_release(release_root: &Path) -> io::Result<VerifiedPresen
     let release_object = release
         .as_object()
         .ok_or_else(|| invalid_release("release manifest must be an object"))?;
+    let release_fields = [
+        "schema",
+        "catalog_path",
+        "catalog_sha256",
+        "artifact_index_path",
+        "artifact_index_sha256",
+        "profile_lock_path",
+        "profile_lock_sha256",
+        "default_profile_path",
+        "default_profile_sha256",
+        "defaultspack_lock_path",
+        "defaultspack_lock_sha256",
+        "artifact_id",
+        "platform",
+        "architecture",
+        "source_identity",
+        "source_revision",
+        "key_id",
+        "public_key",
+        "signature",
+    ];
+    if release_object.len() != release_fields.len()
+        || release_fields
+            .iter()
+            .any(|field| !release_object.contains_key(*field))
+    {
+        return Err(invalid_release(
+            "release manifest has unknown or missing fields",
+        ));
+    }
 
     if text_field(catalog_object, "schema", "presentation catalog")? != PRESENTATION_CATALOG_SCHEMA
     {
@@ -651,15 +693,58 @@ fn verify_presentation_release(release_root: &Path) -> io::Result<VerifiedPresen
             "release manifest uses non-canonical v4 paths",
         ));
     }
+    if text_field(release_object, "default_profile_path", "release manifest")?
+        != "ecosystem/defaultspack/v4/defaults.profile.v4.json"
+        || text_field(release_object, "defaultspack_lock_path", "release manifest")?
+            != "ecosystem/defaultspack/v4/bundle.lock.json"
+    {
+        return Err(invalid_release(
+            "release manifest uses non-canonical packaged Defaults paths",
+        ));
+    }
     let catalog_digest = digest_field(release_object, "catalog_sha256", "release manifest")?;
     let index_file_digest =
         digest_field(release_object, "artifact_index_sha256", "release manifest")?;
     let lock_file_digest = digest_field(release_object, "profile_lock_sha256", "release manifest")?;
+    let default_profile_sha256 =
+        digest_field(release_object, "default_profile_sha256", "release manifest")?;
+    let defaultspack_lock_sha256 = digest_field(
+        release_object,
+        "defaultspack_lock_sha256",
+        "release manifest",
+    )?;
+    let release_profile = require_release_path(
+        release_root,
+        "ecosystem/defaultspack/v4/defaults.profile.v4.json",
+        "release default Profile",
+    )?;
+    let release_defaultspack_lock = require_release_path(
+        release_root,
+        "ecosystem/defaultspack/v4/bundle.lock.json",
+        "release Defaults lock",
+    )?;
     if catalog_digest != byte_digest(&catalog_raw)
         || index_file_digest != byte_digest(&index_raw)
         || lock_file_digest != byte_digest(&lock_raw)
     {
         return Err(invalid_release("release manifest byte digest mismatch"));
+    }
+    if digest_field(
+        catalog_object,
+        "default_profile_digest",
+        "presentation catalog",
+    )? != default_profile_sha256
+    {
+        return Err(invalid_release(
+            "presentation catalog Profile identity differs from release manifest",
+        ));
+    }
+    if byte_digest(&fs::read(release_profile)?) != default_profile_sha256
+        || byte_digest(&fs::read(release_defaultspack_lock)?) != defaultspack_lock_sha256
+    {
+        return Err(invalid_release(
+            "release packaged Defaults bytes differ from signed identities",
+        ));
     }
 
     let binding = object_field(catalog_object, "release_binding", "presentation catalog")?
@@ -909,6 +994,8 @@ fn verify_presentation_release(release_root: &Path) -> io::Result<VerifiedPresen
         catalog_digest.as_str(),
         index_file_digest.as_str(),
         lock_file_digest.as_str(),
+        default_profile_sha256.as_str(),
+        defaultspack_lock_sha256.as_str(),
         source_identity.as_str(),
         source_revision.as_str(),
         platform.as_str(),
@@ -936,6 +1023,7 @@ fn verify_presentation_release(release_root: &Path) -> io::Result<VerifiedPresen
             ));
         }
     }
+    verify_release_artifact_scope(release_root, &artifact_path)?;
     Ok(VerifiedPresentationRelease {
         public_key,
         key_id,
@@ -945,6 +1033,8 @@ fn verify_presentation_release(release_root: &Path) -> io::Result<VerifiedPresen
         bundle_identity,
         platform,
         architecture,
+        default_profile_sha256,
+        defaultspack_lock_sha256,
     })
 }
 
@@ -960,6 +1050,263 @@ fn is_intermediate_shell_build() -> bool {
             .get("mainBinaryName")
             .and_then(serde_json::Value::as_str)
             == Some("tobkiri-shell")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReleaseTreeEntry {
+    path: String,
+    directory: bool,
+    size: u64,
+    digest: String,
+}
+
+#[cfg(unix)]
+fn reject_release_hardlink(metadata: &fs::Metadata, path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    if metadata.is_file() && metadata.nlink() != 1 {
+        return Err(invalid_release(format!(
+            "presentation release file must have one link: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn reject_release_hardlink(metadata: &fs::Metadata, path: &Path) -> io::Result<()> {
+    use std::os::windows::fs::MetadataExt;
+    if metadata.is_file() && metadata.number_of_links() != Some(1) {
+        return Err(invalid_release(format!(
+            "presentation release file must have one link: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn reject_release_hardlink(_metadata: &fs::Metadata, _path: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+fn release_tree_inventory(root: &Path) -> io::Result<Vec<ReleaseTreeEntry>> {
+    require_directory(root, "presentation release tree")?;
+    fn visit(root: &Path, current: &Path, output: &mut Vec<ReleaseTreeEntry>) -> io::Result<()> {
+        let mut entries = fs::read_dir(current)?.collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by_key(fs::DirEntry::file_name);
+        for entry in entries {
+            let path = entry.path();
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| invalid_release("release inventory escaped its root"))?;
+            let relative_text = portable_relative_path(relative);
+            let metadata = fs::symlink_metadata(&path)?;
+            if metadata.file_type().is_symlink() {
+                return Err(invalid_release(format!(
+                    "presentation release contains a symlink: {}",
+                    path.display()
+                )));
+            }
+            reject_release_hardlink(&metadata, &path)?;
+            if metadata.is_dir() {
+                output.push(ReleaseTreeEntry {
+                    path: relative_text,
+                    directory: true,
+                    size: 0,
+                    digest: String::new(),
+                });
+                visit(root, &path, output)?;
+            } else if metadata.is_file() {
+                output.push(ReleaseTreeEntry {
+                    path: relative_text,
+                    directory: false,
+                    size: metadata.len(),
+                    digest: byte_digest(&read_regular_file(&path, "release snapshot file")?),
+                });
+            } else {
+                return Err(invalid_release(format!(
+                    "presentation release contains an unsupported entry: {}",
+                    path.display()
+                )));
+            }
+        }
+        Ok(())
+    }
+    let mut output = Vec::new();
+    visit(root, root, &mut output)?;
+    Ok(output)
+}
+
+fn verify_release_source_shape(entries: &[ReleaseTreeEntry]) -> io::Result<()> {
+    let required_files = [
+        "presentation_catalog.json",
+        "bundled/presentation_release.v4.json",
+        "bundled/shell_artifact_index.v4.json",
+        "bundled/shell_profile_lock.v4.json",
+        "ecosystem/defaultspack/v4/defaults.profile.v4.json",
+        "ecosystem/defaultspack/v4/bundle.lock.json",
+    ];
+    let required_directories = [
+        "bundled",
+        "bundled/presentation-artifacts",
+        "ecosystem",
+        "ecosystem/defaultspack",
+        "ecosystem/defaultspack/v4",
+    ];
+    for required in required_files {
+        if !entries
+            .iter()
+            .any(|entry| !entry.directory && entry.path == required)
+        {
+            return Err(invalid_release(format!(
+                "presentation release is missing required file: {required}"
+            )));
+        }
+    }
+    for required in required_directories {
+        if !entries
+            .iter()
+            .any(|entry| entry.directory && entry.path == required)
+        {
+            return Err(invalid_release(format!(
+                "presentation release is missing required directory: {required}"
+            )));
+        }
+    }
+    let mut artifact_files = 0usize;
+    for entry in entries {
+        let allowed = required_files.contains(&entry.path.as_str())
+            || required_directories.contains(&entry.path.as_str())
+            || entry.path.starts_with("bundled/presentation-artifacts/");
+        if !allowed {
+            return Err(invalid_release(format!(
+                "presentation release contains an extra entry: {}",
+                entry.path
+            )));
+        }
+        if !entry.directory && entry.path.starts_with("bundled/presentation-artifacts/") {
+            artifact_files += 1;
+        }
+    }
+    if artifact_files == 0 {
+        return Err(invalid_release(
+            "presentation release artifact tree is empty",
+        ));
+    }
+    Ok(())
+}
+
+fn copy_release_tree(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::create_dir(destination)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(destination, fs::Permissions::from_mode(0o700))?;
+    }
+    let mut entries = fs::read_dir(source)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(fs::DirEntry::file_name);
+    for entry in entries {
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        let metadata = fs::symlink_metadata(&source_path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(invalid_release(format!(
+                "presentation release snapshot source became a symlink: {}",
+                source_path.display()
+            )));
+        }
+        reject_release_hardlink(&metadata, &source_path)?;
+        if metadata.is_dir() {
+            copy_release_tree(&source_path, &destination_path)?;
+        } else if metadata.is_file() {
+            let mut input = File::open(&source_path)?;
+            let opened_metadata = input.metadata()?;
+            reject_release_hardlink(&opened_metadata, &source_path)?;
+            let mut output = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&destination_path)?;
+            io::copy(&mut input, &mut output)?;
+            output.sync_all()?;
+            let final_metadata = fs::symlink_metadata(&source_path)?;
+            if final_metadata.file_type().is_symlink()
+                || final_metadata.len() != opened_metadata.len()
+                || input.metadata()?.len() != opened_metadata.len()
+            {
+                return Err(invalid_release(format!(
+                    "presentation release source mutated during snapshot: {}",
+                    source_path.display()
+                )));
+            }
+            fs::set_permissions(&destination_path, opened_metadata.permissions())?;
+        } else {
+            return Err(invalid_release(format!(
+                "presentation release snapshot source is unsupported: {}",
+                source_path.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn seal_release_snapshot(root: &Path) -> io::Result<()> {
+    for entry in release_tree_inventory(root)? {
+        if entry.directory {
+            continue;
+        }
+        let path = root.join(Path::new(&entry.path));
+        let mut permissions = fs::metadata(&path)?.permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(path, permissions)?;
+    }
+    Ok(())
+}
+
+fn snapshot_presentation_release_with_hook<F>(
+    source: &Path,
+    destination: &Path,
+    after_copy: F,
+) -> io::Result<()>
+where
+    F: FnOnce(),
+{
+    let before = release_tree_inventory(source)?;
+    verify_release_source_shape(&before)?;
+    copy_release_tree(source, destination)?;
+    after_copy();
+    let after = release_tree_inventory(source)?;
+    let snapshot = release_tree_inventory(destination)?;
+    if before != after || before != snapshot {
+        return Err(invalid_release(
+            "presentation release source mutated or copied partially during snapshot",
+        ));
+    }
+    seal_release_snapshot(destination)
+}
+
+fn snapshot_presentation_release(source: &Path, destination: &Path) -> io::Result<()> {
+    snapshot_presentation_release_with_hook(source, destination, || {})
+}
+
+fn verify_release_artifact_scope(root: &Path, artifact: &Path) -> io::Result<()> {
+    let artifact_root_path = root.join("bundled/presentation-artifacts");
+    let selected = portable_relative_path(
+        artifact
+            .strip_prefix(&artifact_root_path)
+            .map_err(|_| invalid_release("selected artifact escaped release artifact root"))?,
+    );
+    for entry in release_tree_inventory(&artifact_root_path)? {
+        let ancestor = selected.starts_with(&format!("{}/", entry.path));
+        let selected_or_descendant =
+            entry.path == selected || entry.path.starts_with(&format!("{selected}/"));
+        if !(ancestor || selected_or_descendant) {
+            return Err(invalid_release(format!(
+                "presentation release contains an extra artifact entry: {}",
+                entry.path
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn stage_presentation_release(staged_root: &Path) -> io::Result<Option<PathBuf>> {
@@ -991,6 +1338,33 @@ fn stage_presentation_release_at(
     release_root: &Path,
 ) -> io::Result<Option<PathBuf>> {
     require_directory(release_root, "release presentation root")?;
+    let snapshot_parent = staged_root
+        .parent()
+        .ok_or_else(|| invalid_release("staged root has no private snapshot parent"))?;
+    let snapshot_root = snapshot_parent.join(format!(
+        ".tobkiri-presentation-release-snapshot-{}",
+        std::process::id()
+    ));
+    if fs::symlink_metadata(&snapshot_root).is_ok() {
+        return Err(invalid_release(format!(
+            "private presentation snapshot already exists: {}",
+            snapshot_root.display()
+        )));
+    }
+    let result = (|| {
+        snapshot_presentation_release(release_root, &snapshot_root)?;
+        stage_presentation_release_from_snapshot(staged_root, &snapshot_root)
+    })();
+    if snapshot_root.exists() {
+        fs::remove_dir_all(&snapshot_root)?;
+    }
+    result
+}
+
+fn stage_presentation_release_from_snapshot(
+    staged_root: &Path,
+    release_root: &Path,
+) -> io::Result<Option<PathBuf>> {
     let catalog = release_root.join(PRESENTATION_CATALOG_FILENAME);
     require_regular_file(&catalog, "release presentation catalog")?;
 
@@ -1036,6 +1410,12 @@ fn stage_presentation_release_at(
         )?;
     }
     let bundle_root = staged_root.join("ecosystem/defaultspack/v4");
+    #[cfg(not(test))]
+    if !bundle_root.is_dir() {
+        return Err(invalid_release(
+            "complete staged verification requires the packaged Defaults v4 bundle",
+        ));
+    }
     if bundle_root.is_dir() {
         let generator = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../tobkiri_runtime/scripts/generate_packaged_defaultspack_v4_bundle.py");
@@ -1071,8 +1451,31 @@ fn stage_presentation_release_at(
                 "packaged Profile generator exited with {status}"
             )));
         }
+        let profile = bundle_root.join("defaults.profile.v4.json");
+        let lock = bundle_root.join("bundle.lock.json");
+        let profile_digest = byte_digest(&fs::read(&profile)?);
+        let lock_digest = byte_digest(&fs::read(&lock)?);
+        if profile_digest != verified.default_profile_sha256
+            || lock_digest != verified.defaultspack_lock_sha256
+        {
+            return Err(invalid_release(format!(
+                "packaged Defaults identity drift: profile={profile_digest}, lock={lock_digest}"
+            )));
+        }
+        let staged_catalog = staged_bundled.join(PRESENTATION_CATALOG_FILENAME);
+        let staged_verified = verify_presentation_release_at(staged_root, &staged_catalog)?;
+        if staged_verified.default_profile_sha256 != verified.default_profile_sha256
+            || staged_verified.defaultspack_lock_sha256 != verified.defaultspack_lock_sha256
+            || staged_verified.artifact_ref != verified.artifact_ref
+            || staged_verified.entrypoint != verified.entrypoint
+        {
+            return Err(invalid_release(
+                "complete staged presentation release differs from its verified snapshot",
+            ));
+        }
     }
-    Ok(Some(catalog))
+    let staged_catalog = staged_bundled.join(PRESENTATION_CATALOG_FILENAME);
+    Ok(Some(staged_catalog))
 }
 
 fn current_source_revision(repository_root: &Path) -> io::Result<String> {
@@ -2410,6 +2813,20 @@ mod tests {
         let entrypoint_digest = byte_digest(artifact_payload);
         let source_identity = "test:source";
         let source_revision = "a".repeat(40);
+        let default_profile_path =
+            release_root.join("ecosystem/defaultspack/v4/defaults.profile.v4.json");
+        let defaultspack_lock_path =
+            release_root.join("ecosystem/defaultspack/v4/bundle.lock.json");
+        fs::create_dir_all(default_profile_path.parent().expect("Profile has a parent"))
+            .expect("Defaults fixture should be creatable");
+        fs::write(&default_profile_path, b"{\"profile_id\":\"defaults\"}\n")
+            .expect("Profile fixture should be writable");
+        fs::write(&defaultspack_lock_path, b"{\"entries\":[]}\n")
+            .expect("Defaults lock fixture should be writable");
+        let default_profile_sha256 =
+            byte_digest(&fs::read(&default_profile_path).expect("Profile should exist"));
+        let defaultspack_lock_sha256 =
+            byte_digest(&fs::read(&defaultspack_lock_path).expect("Defaults lock should exist"));
         let index = serde_json::json!({
             "schema": PRESENTATION_INDEX_SCHEMA,
             "artifact_id": artifact_id,
@@ -2426,6 +2843,7 @@ mod tests {
             canonical_value_digest(&index, "fixture artifact index").expect("index should hash");
         let mut catalog = serde_json::json!({
             "schema": PRESENTATION_CATALOG_SCHEMA,
+            "default_profile_digest": default_profile_sha256,
             "default_selection": {
                 "base_pack_id": "fixture-base",
                 "shell_provider_id": "shell.tauri.default",
@@ -2532,6 +2950,8 @@ mod tests {
             catalog_file_digest.as_str(),
             index_file_digest.as_str(),
             lock_file_digest.as_str(),
+            default_profile_sha256.as_str(),
+            defaultspack_lock_sha256.as_str(),
             source_identity,
             source_revision.as_str(),
             "linux",
@@ -2549,6 +2969,10 @@ mod tests {
             "artifact_index_sha256": index_file_digest,
             "profile_lock_path": "bundled/shell_profile_lock.v4.json",
             "profile_lock_sha256": lock_file_digest,
+            "default_profile_path": "ecosystem/defaultspack/v4/defaults.profile.v4.json",
+            "default_profile_sha256": default_profile_sha256,
+            "defaultspack_lock_path": "ecosystem/defaultspack/v4/bundle.lock.json",
+            "defaultspack_lock_sha256": defaultspack_lock_sha256,
             "artifact_id": artifact_id,
             "platform": "linux",
             "architecture": "x86_64",
@@ -2626,7 +3050,8 @@ mod tests {
             .join("bundled")
             .join(PRESENTATION_CATALOG_FILENAME);
 
-        assert_eq!(source_catalog, catalog);
+        assert_ne!(source_catalog, catalog);
+        assert!(source_catalog.starts_with(&staged_root));
         assert!(source_catalog.is_file());
         assert!(staged_catalog.is_file());
         verify_staged_catalog(&source_catalog, &staged_catalog)
@@ -2637,6 +3062,141 @@ mod tests {
             .join("shell.tauri.default.linux-x86_64")
             .join("verified-shell")
             .is_file());
+    }
+
+    #[test]
+    fn snapshot_rejects_mutation_of_every_signed_identity_during_copy() {
+        for relative in [
+            "presentation_catalog.json",
+            "bundled/shell_artifact_index.v4.json",
+            "bundled/shell_profile_lock.v4.json",
+            "bundled/presentation_release.v4.json",
+            "ecosystem/defaultspack/v4/defaults.profile.v4.json",
+            "ecosystem/defaultspack/v4/bundle.lock.json",
+        ] {
+            let tree = TestTree::new(&format!("snapshot-race-{}", relative.replace('/', "-")));
+            let (release_root, _, _) = release_fixture(&tree);
+            let snapshot = tree.path().join("private-snapshot");
+            let target = release_root.join(relative);
+            let error = snapshot_presentation_release_with_hook(&release_root, &snapshot, || {
+                fs::write(&target, b"mutated during snapshot")
+                    .expect("race mutation should be writable");
+            })
+            .expect_err("source mutation during snapshot must fail closed");
+            assert!(error.to_string().contains("mutated or copied partially"));
+        }
+    }
+
+    #[test]
+    fn snapshot_rejects_missing_extra_and_partial_release_trees() {
+        let tree = TestTree::new("snapshot-tree-shape");
+        let (release_root, _, _) = release_fixture(&tree);
+        fs::write(release_root.join("unexpected.json"), b"extra")
+            .expect("extra fixture should be writable");
+        let error =
+            snapshot_presentation_release(&release_root, &tree.path().join("extra-snapshot"))
+                .expect_err("extra release entry must fail closed");
+        assert!(error.to_string().contains("extra entry"));
+
+        fs::remove_file(release_root.join("unexpected.json"))
+            .expect("extra fixture should be removable");
+        fs::remove_file(
+            release_root
+                .join("bundled")
+                .join(PRESENTATION_INDEX_FILENAME),
+        )
+        .expect("required fixture should be removable");
+        let error =
+            snapshot_presentation_release(&release_root, &tree.path().join("missing-snapshot"))
+                .expect_err("missing release entry must fail closed");
+        assert!(error.to_string().contains("missing required file"));
+    }
+
+    #[test]
+    fn verification_rejects_an_extra_artifact_sibling() {
+        let tree = TestTree::new("extra-artifact-sibling");
+        let (release_root, _, _) = release_fixture(&tree);
+        let rogue_artifact = release_root
+            .join("bundled/presentation-artifacts")
+            .join("shell.tauri.default.linux-x86_64-stale")
+            .join("verified-shell");
+        fs::create_dir_all(
+            rogue_artifact
+                .parent()
+                .expect("rogue artifact should have a parent"),
+        )
+        .expect("rogue artifact directory should be creatable");
+        fs::write(&rogue_artifact, b"stale artifact").expect("rogue artifact should be writable");
+
+        let error = verify_presentation_release(&release_root)
+            .expect_err("an unsigned artifact sibling must fail closed");
+        assert!(error.to_string().contains("extra artifact entry"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_rejects_hardlinked_release_files() {
+        let tree = TestTree::new("snapshot-hardlink");
+        let (release_root, _, catalog) = release_fixture(&tree);
+        let outside = tree.path().join("outside-catalog.json");
+        fs::rename(&catalog, &outside).expect("catalog should move outside");
+        fs::hard_link(&outside, &catalog).expect("hardlink fixture should be creatable");
+        let error =
+            snapshot_presentation_release(&release_root, &tree.path().join("hardlink-snapshot"))
+                .expect_err("hardlinked release file must fail closed");
+        assert!(error.to_string().contains("must have one link"));
+    }
+
+    #[test]
+    fn source_mutation_after_snapshot_cannot_change_staged_bytes() {
+        let tree = TestTree::new("snapshot-post-verify-mutation");
+        let (release_root, staged_root, catalog) = release_fixture(&tree);
+        let snapshot = tree.path().join("private-snapshot");
+        snapshot_presentation_release(&release_root, &snapshot)
+            .expect("release snapshot should succeed");
+        verify_presentation_release(&snapshot).expect("snapshot should verify");
+        fs::write(&catalog, b"mutated after snapshot verification")
+            .expect("mutable source should be changeable");
+
+        let staged_catalog = stage_presentation_release_from_snapshot(&staged_root, &snapshot)
+            .expect("verified snapshot should stage")
+            .expect("staged catalog should be returned");
+        assert_eq!(
+            fs::read(&staged_catalog).expect("staged catalog should be readable"),
+            fs::read(snapshot.join(PRESENTATION_CATALOG_FILENAME))
+                .expect("snapshot catalog should be readable")
+        );
+        assert_ne!(
+            fs::read(&staged_catalog).expect("staged catalog should remain readable"),
+            fs::read(&catalog).expect("mutated source should be readable")
+        );
+    }
+
+    #[test]
+    fn complete_staged_release_verification_rechecks_every_signed_file() {
+        for relative in [
+            "bundled/presentation_catalog.json",
+            "bundled/shell_artifact_index.v4.json",
+            "bundled/shell_profile_lock.v4.json",
+            "bundled/presentation_release.v4.json",
+            "ecosystem/defaultspack/v4/defaults.profile.v4.json",
+            "ecosystem/defaultspack/v4/bundle.lock.json",
+        ] {
+            let tree = TestTree::new(&format!("staged-recheck-{}", relative.replace('/', "-")));
+            let (release_root, _, _) = release_fixture(&tree);
+            let staged = tree.path().join("complete-staged");
+            copy_release_tree(&release_root, &staged).expect("release should copy to stage");
+            let source_catalog = staged.join(PRESENTATION_CATALOG_FILENAME);
+            let staged_catalog = staged.join("bundled").join(PRESENTATION_CATALOG_FILENAME);
+            fs::rename(&source_catalog, &staged_catalog)
+                .expect("catalog should move to packaged location");
+            verify_presentation_release_at(&staged, &staged_catalog)
+                .expect("complete staged release should verify before tampering");
+            fs::write(staged.join(relative), b"tampered staged release")
+                .expect("staged tamper should be writable");
+            verify_presentation_release_at(&staged, &staged_catalog)
+                .expect_err("every staged signed identity must be rechecked");
+        }
     }
 
     #[test]

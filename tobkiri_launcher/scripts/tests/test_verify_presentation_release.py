@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import os
+import plistlib
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -35,32 +40,53 @@ def _release(root: Path) -> tuple[Path, dict[str, object]]:
         / "bundled"
         / "presentation_catalog.json"
     )
-    catalog = json.loads(source_catalog_path.read_text(encoding="utf-8"))
-    variant = catalog["shell_providers"][0]["artifact_variants"][0]
-    variant.update(
-        {
-            "artifact_id": "shell.tauri.default.linux-x86_64",
-            "architecture": "x86_64",
-            "bundle_identifier": None,
-            "platform": "linux",
-            "variant": "linux-x86_64",
-        }
-    )
-    catalog_path = root / "presentation_catalog.json"
-    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
-    artifact = Path(shutil.which("true") or "/usr/bin/true")
+    if sys.platform == "darwin":
+        platform_name = "macos"
+        architecture = "arm64" if os.uname().machine.lower() in {"arm64", "aarch64"} else "x86_64"
+        artifact = root / "Tobkiri.app"
+        executable = artifact / "Contents/MacOS/tobkiri-shell"
+        executable.parent.mkdir(parents=True)
+        subprocess.run(
+            [
+                "/usr/bin/lipo",
+                "/usr/bin/true",
+                "-thin",
+                "arm64e" if architecture == "arm64" else architecture,
+                "-output",
+                executable,
+            ],
+            check=True,
+        )
+        executable.chmod(0o755)
+        (artifact / "Contents/Info.plist").write_bytes(
+            plistlib.dumps(
+                {
+                    "CFBundleExecutable": "tobkiri-shell",
+                    "CFBundleIdentifier": "io.tobkiri.shell.tauri",
+                    "CFBundlePackageType": "APPL",
+                }
+            )
+        )
+        subprocess.run(
+            ["/usr/bin/codesign", "--force", "--sign", "-", os.fspath(artifact)],
+            check=True,
+        )
+    else:
+        platform_name = "linux"
+        architecture = "x86_64"
+        artifact = Path(shutil.which("true") or "/usr/bin/true")
     manifest = root / "shell_build_output.v4.json"
     manifest.write_text(
         json.dumps(
             {
                 "schema": "io.tobkiri.shell.build-output.v4",
-                "artifact_id": "shell.tauri.default.linux-x86_64",
+                "artifact_id": f"shell.tauri.default.{platform_name}-{architecture}",
                 "artifact_path": os.fspath(artifact),
-                "platform": "linux",
-                "architecture": "x86_64",
+                "platform": platform_name,
+                "architecture": architecture,
                 "build_profile": "release",
-                "source_identity": "test:headless-release",
-                "source_revision": "a974ec811bd189c413557a00b4b073bc5898bd41",
+                "source_identity": PACKAGE.source_identity_for_repository(repository_root),
+                "source_revision": PACKAGE.source_revision_for_repository(repository_root),
             }
         )
     )
@@ -68,7 +94,12 @@ def _release(root: Path) -> tuple[Path, dict[str, object]]:
     key.write_bytes(bytes(range(32)))
     release = root / "Resources" / "app"
     report = PACKAGE.package_artifact(
-        catalog_path, manifest, key, "headless-test-key", release
+        source_catalog_path,
+        manifest,
+        key,
+        "headless-test-key",
+        release,
+        repository_root,
     )
     catalog_output = release / "presentation_catalog.json"
     packaged_catalog = release / "bundled" / "presentation_catalog.json"
@@ -88,8 +119,56 @@ def test_release_scanner_verifies_signed_artifact_and_rejects_tampering() -> Non
         assert verified["release"]["key_id"] == "headless-test-key"
 
         artifact = resource_root / str(report["path"])
-        artifact.write_bytes(artifact.read_bytes() + b"tamper")
+        tamper_target = (
+            artifact / "Contents/MacOS/tobkiri-shell" if artifact.is_dir() else artifact
+        )
+        tamper_target.write_bytes(tamper_target.read_bytes() + b"tamper")
         with pytest.raises(RuntimeError, match="digest mismatch"):
+            VERIFY.verify_catalog(catalog, resource_root)
+
+
+def test_release_scanner_rejects_stale_tampered_reordered_and_mixed_profile_identity() -> None:
+    with TemporaryDirectory(prefix="tobkiri-presentation-profile-tamper-") as temp:
+        resource_root, _ = _release(Path(temp))
+        catalog_path = resource_root / "bundled/presentation_catalog.json"
+        catalog = VERIFY.load_catalog(catalog_path)
+        profile = resource_root / "ecosystem/defaultspack/v4/defaults.profile.v4.json"
+        profile.write_bytes(profile.read_bytes() + b" ")
+        with pytest.raises(RuntimeError, match="signed default Profile digest mismatch"):
+            VERIFY.verify_catalog(catalog, resource_root)
+
+    with TemporaryDirectory(prefix="tobkiri-presentation-profile-mixed-") as temp:
+        resource_root, _ = _release(Path(temp))
+        catalog_path = resource_root / "bundled/presentation_catalog.json"
+        catalog = VERIFY.load_catalog(catalog_path)
+        catalog["default_profile_digest"] = "sha256:" + "0" * 64
+        with pytest.raises(RuntimeError, match="catalog default Profile identity mismatch"):
+            VERIFY.verify_catalog(catalog, resource_root)
+
+    with TemporaryDirectory(prefix="tobkiri-presentation-lock-reordered-") as temp:
+        resource_root, _ = _release(Path(temp))
+        catalog_path = resource_root / "bundled/presentation_catalog.json"
+        catalog = VERIFY.load_catalog(catalog_path)
+        release_path = resource_root / "bundled/presentation_release.v4.json"
+        release = json.loads(release_path.read_text())
+        release["unexpected"] = True
+        release_path.write_text(json.dumps(release, indent=2, sort_keys=True) + "\n")
+        with pytest.raises(RuntimeError, match="unknown or missing fields"):
+            VERIFY.verify_catalog(catalog, resource_root)
+        release.pop("unexpected")
+        release_path.write_text(json.dumps(release, indent=2, sort_keys=True) + "\n")
+        lock_path = resource_root / "ecosystem/defaultspack/v4/bundle.lock.json"
+        lock = json.loads(lock_path.read_text())
+        lock["entries"].reverse()
+        lock_path.write_text(json.dumps(lock, indent=2, sort_keys=True) + "\n")
+        release = json.loads(release_path.read_text())
+        release["defaultspack_lock_sha256"] = PACKAGE.file_digest(lock_path)
+        signing_key = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
+        release["signature"] = base64.b64encode(
+            signing_key.sign(PACKAGE._signature_message(release))
+        ).decode("ascii")
+        release_path.write_text(json.dumps(release, indent=2, sort_keys=True) + "\n")
+        with pytest.raises(RuntimeError, match="lock order is not canonical"):
             VERIFY.verify_catalog(catalog, resource_root)
 
 
@@ -149,8 +228,11 @@ def test_release_scanner_rejects_null_metadata_wrong_size_and_path_escape() -> N
         catalog = VERIFY.load_catalog(catalog_path)
         artifact = resource_root / str(report["path"])
         outside = Path(temp) / "outside-shell"
-        outside.write_bytes(artifact.read_bytes())
-        artifact.unlink()
+        if artifact.is_dir():
+            shutil.move(artifact, outside)
+        else:
+            outside.write_bytes(artifact.read_bytes())
+            artifact.unlink()
         artifact.symlink_to(outside)
         with pytest.raises(RuntimeError, match="symlink"):
             VERIFY.verify_catalog(catalog, resource_root)
@@ -180,6 +262,8 @@ def test_release_scanner_rejects_cross_document_identity_and_target_mismatch() -
         catalog_path = resource_root / "bundled/presentation_catalog.json"
         catalog = VERIFY.load_catalog(catalog_path)
         variant = catalog["shell_providers"][0]["artifact_variants"][0]
-        variant["architecture"] = "arm64"
+        variant["architecture"] = (
+            "x86_64" if variant["architecture"] == "arm64" else "arm64"
+        )
         with pytest.raises(RuntimeError, match="identity does not match its target"):
             VERIFY.verify_catalog(catalog, resource_root)

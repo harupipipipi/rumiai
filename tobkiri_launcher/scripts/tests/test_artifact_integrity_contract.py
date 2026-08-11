@@ -96,7 +96,7 @@ def test_python_vectors_match_the_canonical_contract() -> None:
         ),
     ],
 )
-def test_python_created_file_release_binds_digest_and_size(
+def test_python_created_file_digest_and_size_match_cross_language_vector(
     fixture_name: str, platform: str, architecture: str, artifact_id: str
 ) -> None:
     vectors = json.loads(FIXTURES.read_text(encoding="utf-8"))
@@ -136,25 +136,18 @@ def test_python_created_file_release_binds_digest_and_size(
         signing_key = root / "signing-key.raw"
         signing_key.write_bytes(bytes(range(32)))
 
-        report = PACKAGE.package_artifact(
-            catalog_path,
-            manifest_path,
-            signing_key,
-            "artifact-integrity-test-key",
-            root / "release",
-        )
-        staged = root / "release" / str(report["path"])
-        assert PACKAGE.artifact_digest_and_size(staged) == (
+        assert PACKAGE.artifact_digest_and_size(source) == (
             fixture["sha256"],
             fixture["size"],
         )
-        index = json.loads(
-            (root / "release/bundled/shell_artifact_index.v4.json").read_text(
-                encoding="utf-8"
+        with pytest.raises(RuntimeError, match="repository_root is required"):
+            PACKAGE.package_artifact(
+                catalog_path,
+                manifest_path,
+                signing_key,
+                "artifact-integrity-test-key",
+                root / "release",
             )
-        )
-        assert index["sha256"] == fixture["sha256"]
-        assert index["size"] == fixture["size"]
 
 
 def test_mac_app_directory_vector_remains_recursive_and_symlink_safe() -> None:

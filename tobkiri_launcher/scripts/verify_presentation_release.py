@@ -199,6 +199,8 @@ def _release_signature_message(release: dict[str, Any]) -> bytes:
         release["catalog_sha256"],
         release["artifact_index_sha256"],
         release["profile_lock_sha256"],
+        release["default_profile_sha256"],
+        release["defaultspack_lock_sha256"],
         release["source_identity"],
         release["source_revision"],
         release["platform"],
@@ -226,7 +228,28 @@ def verify_release_binding(catalog: dict[str, Any], root: Path) -> dict[str, Any
         "catalog_path": "bundled/presentation_catalog.json",
         "artifact_index_path": "bundled/shell_artifact_index.v4.json",
         "profile_lock_path": "bundled/shell_profile_lock.v4.json",
+        "default_profile_path": "ecosystem/defaultspack/v4/defaults.profile.v4.json",
+        "defaultspack_lock_path": "ecosystem/defaultspack/v4/bundle.lock.json",
     }
+    release_fields = {
+        "schema",
+        "catalog_sha256",
+        "artifact_index_sha256",
+        "profile_lock_sha256",
+        "default_profile_sha256",
+        "defaultspack_lock_sha256",
+        "artifact_id",
+        "platform",
+        "architecture",
+        "source_identity",
+        "source_revision",
+        "key_id",
+        "public_key",
+        "signature",
+        *fixed_paths,
+    }
+    if set(release) != release_fields:
+        raise RuntimeError("release manifest has unknown or missing fields")
     for field, expected in fixed_paths.items():
         if release.get(field) != expected:
             raise RuntimeError(f"release manifest {field} is not canonical")
@@ -242,6 +265,18 @@ def verify_release_binding(catalog: dict[str, Any], root: Path) -> dict[str, Any
         _safe_resource_path(root, fixed_paths["profile_lock_path"], "profile lock path"),
         "profile lock",
     )
+    profile_bytes = _regular_bytes(
+        _safe_resource_path(
+            root, fixed_paths["default_profile_path"], "default Profile path"
+        ),
+        "default Profile",
+    )
+    defaultspack_lock_bytes = _regular_bytes(
+        _safe_resource_path(
+            root, fixed_paths["defaultspack_lock_path"], "Defaults lock path"
+        ),
+        "Defaults lock",
+    )
     if not isinstance(release, dict):
         raise RuntimeError("release manifest must be an object")
     if _byte_digest(catalog_bytes) != release.get("catalog_sha256"):
@@ -250,6 +285,48 @@ def verify_release_binding(catalog: dict[str, Any], root: Path) -> dict[str, Any
         raise RuntimeError("signed artifact index digest mismatch")
     if _byte_digest(lock_bytes) != release.get("profile_lock_sha256"):
         raise RuntimeError("signed profile lock digest mismatch")
+    if _byte_digest(profile_bytes) != release.get("default_profile_sha256"):
+        raise RuntimeError("signed default Profile digest mismatch")
+    if _byte_digest(defaultspack_lock_bytes) != release.get(
+        "defaultspack_lock_sha256"
+    ):
+        raise RuntimeError("signed Defaults bundle lock digest mismatch")
+    if catalog.get("default_profile_digest") != release.get(
+        "default_profile_sha256"
+    ):
+        raise RuntimeError("catalog default Profile identity mismatch")
+    try:
+        defaultspack_lock = json.loads(defaultspack_lock_bytes)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Defaults bundle lock is malformed") from error
+    entries = defaultspack_lock.get("entries") if isinstance(defaultspack_lock, dict) else None
+    if not isinstance(entries, list):
+        raise RuntimeError("Defaults bundle lock entries are missing")
+    paths = [entry.get("path") for entry in entries if isinstance(entry, dict)]
+    kind_order = {"pack": 0, "base": 1, "shell": 2, "profile": 3}
+    canonical_entries = sorted(
+        entries,
+        key=lambda entry: (
+            kind_order.get(str(entry.get("kind")), 99),
+            str(entry.get("path")),
+        ),
+    )
+    if (
+        len(paths) != len(entries)
+        or entries != canonical_entries
+        or len(set(paths)) != len(paths)
+    ):
+        raise RuntimeError("Defaults bundle lock order is not canonical")
+    profile_entries = [
+        entry
+        for entry in entries
+        if entry.get("path") == "defaults.profile.v4.json"
+        and entry.get("kind") == "profile"
+    ]
+    if len(profile_entries) != 1 or profile_entries[0].get("digest") != _byte_digest(
+        profile_bytes
+    ):
+        raise RuntimeError("Defaults bundle lock does not bind the default Profile")
     index = json.loads(index_bytes)
     lock = json.loads(lock_bytes)
     if not isinstance(index, dict) or index.get("schema") != "io.tobkiri.shell.artifact-index.v4":

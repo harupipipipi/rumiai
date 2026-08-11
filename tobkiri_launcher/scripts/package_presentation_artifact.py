@@ -21,6 +21,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from pathlib import PureWindowsPath
@@ -54,6 +55,8 @@ ARTIFACT_ROOT = Path("bundled/presentation-artifacts")
 INDEX_PATH = Path("bundled/shell_artifact_index.v4.json")
 LOCK_PATH = Path("bundled/shell_profile_lock.v4.json")
 RELEASE_PATH = Path("bundled/presentation_release.v4.json")
+DEFAULT_PROFILE_PATH = Path("ecosystem/defaultspack/v4/defaults.profile.v4.json")
+DEFAULTSPACK_LOCK_PATH = Path("ecosystem/defaultspack/v4/bundle.lock.json")
 INSTALLED_METADATA_FIELDS = (
     "path",
     "sha256",
@@ -704,6 +707,29 @@ def _verify_staged_release(
     index = _load_object(index_path, ARTIFACT_INDEX_SCHEMA, "staged artifact index")
     lock = _load_object(lock_path, PROFILE_LOCK_SCHEMA, "staged profile lock")
     release = _load_object(release_path, RELEASE_SCHEMA, "staged release manifest")
+    release_fields = {
+        "schema",
+        "catalog_path",
+        "catalog_sha256",
+        "artifact_index_path",
+        "artifact_index_sha256",
+        "profile_lock_path",
+        "profile_lock_sha256",
+        "default_profile_path",
+        "default_profile_sha256",
+        "defaultspack_lock_path",
+        "defaultspack_lock_sha256",
+        "artifact_id",
+        "platform",
+        "architecture",
+        "source_identity",
+        "source_revision",
+        "key_id",
+        "public_key",
+        "signature",
+    }
+    if set(release) != release_fields:
+        raise RuntimeError("staged release manifest has unknown or missing fields")
 
     shell, variant = _find_variant(catalog, artifact_id)
     expected_path = index.get("path")
@@ -784,6 +810,20 @@ def _verify_staged_release(
         "profile_lock_sha256": file_digest(lock_path),
         **exact_fields,
     }
+    if release.get("default_profile_path") != DEFAULT_PROFILE_PATH.as_posix():
+        raise RuntimeError("staged release Profile path is not canonical")
+    if release.get("defaultspack_lock_path") != DEFAULTSPACK_LOCK_PATH.as_posix():
+        raise RuntimeError("staged release Defaults lock path is not canonical")
+    profile_digest = release.get("default_profile_sha256")
+    lock_digest = release.get("defaultspack_lock_sha256")
+    if catalog.get("default_profile_digest") != profile_digest:
+        raise RuntimeError("staged catalog Profile identity differs from release")
+    for value, label in (
+        (profile_digest, "default Profile"),
+        (lock_digest, "Defaults bundle lock"),
+    ):
+        if not isinstance(value, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", value) is None:
+            raise RuntimeError(f"staged release {label} digest is invalid")
     for field, expected in expected_release.items():
         if release.get(field) != expected:
             raise RuntimeError(f"staged release manifest mismatch: {field}")
@@ -812,6 +852,8 @@ def _signature_message(release: Mapping[str, Any]) -> bytes:
         str(release["catalog_sha256"]),
         str(release["artifact_index_sha256"]),
         str(release["profile_lock_sha256"]),
+        str(release["default_profile_sha256"]),
+        str(release["defaultspack_lock_sha256"]),
         str(release["source_identity"]),
         str(release["source_revision"]),
         str(release["platform"]),
@@ -820,6 +862,121 @@ def _signature_message(release: Mapping[str, Any]) -> bytes:
         str(release["key_id"]),
     )
     return b"\0".join(field.encode("utf-8") for field in fields)
+
+
+def _project_packaged_defaultspack(
+    *,
+    repository_root: Path,
+    source_artifact: Path,
+    artifact_ref: str,
+    entrypoint: str,
+    platform: str,
+    architecture: str,
+    bundle_identity: str,
+    source_revision: str,
+    transaction_root: Path,
+) -> dict[str, Any]:
+    """Generate the exact packaged Profile projection before release signing."""
+    source_bundle = repository_root / "tobkiri_runtime/ecosystem/defaultspack/v4"
+    generator = (
+        repository_root
+        / "tobkiri_runtime/scripts/generate_packaged_defaultspack_v4_bundle.py"
+    )
+    if source_bundle.is_symlink() or not source_bundle.is_dir():
+        raise RuntimeError(f"canonical Defaults v4 bundle is unavailable: {source_bundle}")
+    if generator.is_symlink() or not generator.is_file():
+        raise RuntimeError(f"packaged Profile generator is unavailable: {generator}")
+    bundle_root = transaction_root / "v4"
+    artifact_root = transaction_root / "platform-artifacts"
+    shutil.copytree(source_bundle, bundle_root)
+    subprocess.run(
+        [
+            sys.executable,
+            os.fspath(generator),
+            "--source-artifact",
+            os.fspath(source_artifact),
+            "--bundle-root",
+            os.fspath(bundle_root),
+            "--artifact-root",
+            os.fspath(artifact_root),
+            "--relative-path",
+            artifact_ref,
+            "--entrypoint",
+            entrypoint,
+            "--platform",
+            platform,
+            "--architecture",
+            architecture,
+            "--bundle-identity",
+            bundle_identity,
+            "--source-commit",
+            source_revision,
+        ],
+        cwd=repository_root,
+        check=True,
+    )
+    profile = bundle_root / "defaults.profile.v4.json"
+    lock_path = bundle_root / "bundle.lock.json"
+    lock = _load_object(
+        lock_path,
+        "io.tobkiri.defaultspack-bundle-lock.v1",
+        "packaged Defaults v4 bundle lock",
+    )
+    source_manifest_digests: dict[str, str] = {}
+    entries = lock.get("entries")
+    if not isinstance(entries, list):
+        raise RuntimeError("packaged Defaults v4 bundle lock entries are missing")
+    paths = [entry.get("path") for entry in entries if isinstance(entry, Mapping)]
+    kind_order = {"pack": 0, "base": 1, "shell": 2, "profile": 3}
+    canonical_entries = sorted(
+        entries,
+        key=lambda entry: (
+            kind_order.get(str(entry.get("kind")), 99),
+            str(entry.get("path")),
+        ),
+    )
+    if (
+        len(paths) != len(entries)
+        or entries != canonical_entries
+        or len(set(paths)) != len(paths)
+    ):
+        raise RuntimeError("packaged Defaults v4 bundle lock order is not canonical")
+    profile_digest = file_digest(profile)
+    profile_entries = [
+        entry
+        for entry in entries
+        if entry.get("path") == "defaults.profile.v4.json"
+        and entry.get("kind") == "profile"
+    ]
+    if len(profile_entries) != 1 or profile_entries[0].get("digest") != profile_digest:
+        raise RuntimeError("packaged Defaults lock does not bind the default Profile")
+    for entry in entries:
+        if not isinstance(entry, Mapping) or entry.get("kind") != "pack":
+            continue
+        relative = _normalize_relative_path(
+            str(entry.get("path") or ""), "packaged bundle Pack path"
+        )
+        pack_path = bundle_root / relative
+        if pack_path.is_symlink() or not pack_path.is_file():
+            raise RuntimeError(f"packaged Pack is unavailable: {pack_path}")
+        try:
+            pack = json.loads(pack_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"packaged Pack is malformed: {pack_path}") from error
+        if not isinstance(pack, dict):
+            raise RuntimeError(f"packaged Pack is not an object: {pack_path}")
+        pack_id = pack.get("pack", {}).get("id")
+        digest = entry.get("digest")
+        if not isinstance(pack_id, str) or not isinstance(digest, str):
+            raise RuntimeError("packaged bundle Pack identity is incomplete")
+        source_manifest_digests[pack_id] = digest
+    return {
+        "default_profile_sha256": profile_digest,
+        "defaultspack_lock_sha256": file_digest(lock_path),
+        "default_profile_bytes": profile.read_bytes(),
+        "defaultspack_lock_bytes": lock_path.read_bytes(),
+        "source_manifest_digests": source_manifest_digests,
+    }
 
 
 def _load_signing_key(path: Path) -> Ed25519PrivateKey:
@@ -941,6 +1098,29 @@ def package_artifact(
             raise RuntimeError(
                 f"release artifact path escapes its repository: {artifact_value}"
             )
+    signing_key = _load_signing_key(signing_key_path.expanduser())
+    entrypoint = _normalize_relative_path(
+        str(variant.get("entrypoint") or ""), "artifact entrypoint"
+    )
+    _validate_entrypoint(source, entrypoint)
+    _validate_bundle_identity(source, variant.get("bundle_identifier"))
+    _validate_macos_signature(source, platform)
+    _validate_binary_architecture(_validate_entrypoint(source, entrypoint), architecture)
+
+    if repository_root is None:
+        raise RuntimeError(
+            "repository_root is required to bind the packaged Defaults v4 identity"
+        )
+    repository = repository_root.expanduser().resolve(strict=True)
+    canonical_catalog = (
+        repository / "tobkiri_launcher/src-tauri/bundled/presentation_catalog.json"
+    )
+    if (
+        canonical_catalog.is_symlink()
+        or not canonical_catalog.is_file()
+        or catalog_path.resolve(strict=True) != canonical_catalog.resolve(strict=True)
+    ):
+        raise RuntimeError("presentation catalog must be the canonical checkout catalog")
 
     output = output_dir.expanduser().absolute()
     _reject_symlink_components(output.parent)
@@ -955,9 +1135,6 @@ def package_artifact(
         snapshot = snapshot_parent / source.name
         _snapshot_artifact(source, snapshot)
 
-        entrypoint = _normalize_relative_path(
-            str(variant.get("entrypoint") or ""), "artifact entrypoint"
-        )
         if platform == "macos" and snapshot.suffix != ".app":
             raise RuntimeError("macOS Shell release artifact must be an .app bundle")
 
@@ -966,6 +1143,7 @@ def package_artifact(
             staging / ARTIFACT_ROOT / artifact_id,
             entrypoint,
         )
+        _remove_tree(snapshot_parent)
         _validate_entrypoint(staged, entrypoint)
         _validate_bundle_identity(staged, variant.get("bundle_identifier"))
         _validate_macos_signature(staged, platform)
@@ -982,6 +1160,50 @@ def package_artifact(
             source_identity=source_identity,
             source_revision=source_revision,
         )
+
+        packaged_projection: dict[str, Any] | None = None
+        if repository_root is not None:
+            artifact_ref = _normalize_relative_path(
+                str(variant.get("artifact_ref") or ""), "Shell artifact ref"
+            )
+            bundle_identity = _required_text(variant, "bundle_identifier")
+            projection_root = Path(
+                tempfile.mkdtemp(
+                    prefix=".tobkiri-defaultspack-projection-", dir=output.parent
+                )
+            )
+            try:
+                packaged_projection = _project_packaged_defaultspack(
+                    repository_root=repository,
+                    source_artifact=staged,
+                    artifact_ref=artifact_ref,
+                    entrypoint=entrypoint,
+                    platform=platform,
+                    architecture=architecture,
+                    bundle_identity=bundle_identity,
+                    source_revision=source_revision,
+                    transaction_root=projection_root,
+                )
+            finally:
+                _remove_tree(projection_root)
+            catalog["default_profile_digest"] = packaged_projection[
+                "default_profile_sha256"
+            ]
+            selected_digests = catalog.get("source_manifest_digests")
+            if not isinstance(selected_digests, dict):
+                raise RuntimeError("presentation catalog source manifest digests are missing")
+            projected_digests = packaged_projection["source_manifest_digests"]
+            for pack_id in tuple(selected_digests):
+                if pack_id not in projected_digests:
+                    raise RuntimeError(
+                        f"packaged bundle is missing selected Pack: {pack_id}"
+                    )
+                selected_digests[pack_id] = projected_digests[pack_id]
+            profile_output = staging / DEFAULT_PROFILE_PATH
+            lock_output = staging / DEFAULTSPACK_LOCK_PATH
+            profile_output.parent.mkdir(parents=True, exist_ok=True)
+            profile_output.write_bytes(packaged_projection["default_profile_bytes"])
+            lock_output.write_bytes(packaged_projection["defaultspack_lock_bytes"])
 
         index = {
             "schema": ARTIFACT_INDEX_SCHEMA,
@@ -1028,7 +1250,6 @@ def package_artifact(
         _write_json(staging / INDEX_PATH, index)
         _write_json(staging / LOCK_PATH, lock)
         _write_json(catalog_output, catalog)
-        signing_key = _load_signing_key(signing_key_path.expanduser())
         release = {
             "schema": RELEASE_SCHEMA,
             "catalog_path": "bundled/presentation_catalog.json",
@@ -1044,6 +1265,17 @@ def package_artifact(
             "source_revision": source_revision,
             "key_id": signing_key_id,
         }
+        if packaged_projection is not None:
+            release.update(
+                default_profile_path=DEFAULT_PROFILE_PATH.as_posix(),
+                default_profile_sha256=packaged_projection[
+                    "default_profile_sha256"
+                ],
+                defaultspack_lock_path=DEFAULTSPACK_LOCK_PATH.as_posix(),
+                defaultspack_lock_sha256=packaged_projection[
+                    "defaultspack_lock_sha256"
+                ],
+            )
         public_key = signing_key.public_key().public_bytes_raw()
         release["public_key"] = base64.b64encode(public_key).decode("ascii")
         release["signature"] = base64.b64encode(

@@ -278,6 +278,7 @@ pub struct PresentationReleaseBinding {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PresentationReleaseManifest {
     schema: String,
     catalog_path: String,
@@ -286,6 +287,10 @@ struct PresentationReleaseManifest {
     artifact_index_sha256: String,
     profile_lock_path: String,
     profile_lock_sha256: String,
+    default_profile_path: String,
+    default_profile_sha256: String,
+    defaultspack_lock_path: String,
+    defaultspack_lock_sha256: String,
     artifact_id: String,
     platform: String,
     architecture: String,
@@ -297,6 +302,7 @@ struct PresentationReleaseManifest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ShellArtifactIndex {
     schema: String,
     artifact_id: String,
@@ -311,6 +317,7 @@ struct ShellArtifactIndex {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ShellProfileLock {
     schema: String,
     catalog_revision: String,
@@ -796,6 +803,8 @@ fn verify_release_binding(
         || manifest.catalog_path != "bundled/presentation_catalog.json"
         || manifest.artifact_index_path != binding.artifact_index_path
         || manifest.profile_lock_path != binding.profile_lock_path
+        || manifest.default_profile_path != "ecosystem/defaultspack/v4/defaults.profile.v4.json"
+        || manifest.defaultspack_lock_path != "ecosystem/defaultspack/v4/bundle.lock.json"
         || manifest.artifact_id != binding.artifact_id
         || manifest.platform != binding.platform
         || manifest.architecture != binding.architecture
@@ -816,6 +825,36 @@ fn verify_release_binding(
         || byte_digest(&lock_raw) != manifest.profile_lock_sha256
     {
         bail!("signed Shell release index or lock digest does not match packaged bytes");
+    }
+    let profile_path = safe_artifact_path(config, &manifest.default_profile_path)?;
+    let defaultspack_lock_path = safe_artifact_path(config, &manifest.defaultspack_lock_path)?;
+    let profile_raw = read_verified_regular_file(&profile_path, "default Profile")?;
+    let defaultspack_lock_raw =
+        read_verified_regular_file(&defaultspack_lock_path, "Defaults bundle lock")?;
+    if byte_digest(&profile_raw) != manifest.default_profile_sha256
+        || byte_digest(&defaultspack_lock_raw) != manifest.defaultspack_lock_sha256
+        || catalog.default_profile_digest != manifest.default_profile_sha256
+    {
+        bail!("packaged Defaults Profile/lock identity differs from the signed release");
+    }
+    let defaultspack_lock: serde_json::Value = serde_json::from_slice(&defaultspack_lock_raw)
+        .context("Defaults bundle lock is malformed")?;
+    let entries = defaultspack_lock
+        .get("entries")
+        .and_then(serde_json::Value::as_array)
+        .context("Defaults bundle lock entries are missing")?;
+    let profile_bindings = entries
+        .iter()
+        .filter(|entry| {
+            entry.get("path").and_then(serde_json::Value::as_str)
+                == Some("defaults.profile.v4.json")
+                && entry.get("kind").and_then(serde_json::Value::as_str) == Some("profile")
+                && entry.get("digest").and_then(serde_json::Value::as_str)
+                    == Some(manifest.default_profile_sha256.as_str())
+        })
+        .count();
+    if profile_bindings != 1 {
+        bail!("Defaults bundle lock does not bind the signed default Profile");
     }
 
     let index_value: serde_json::Value =
@@ -924,6 +963,8 @@ fn release_signature_message(manifest: &PresentationReleaseManifest) -> Vec<u8> 
         &manifest.catalog_sha256,
         &manifest.artifact_index_sha256,
         &manifest.profile_lock_sha256,
+        &manifest.default_profile_sha256,
+        &manifest.defaultspack_lock_sha256,
         &manifest.source_identity,
         &manifest.source_revision,
         &manifest.platform,
