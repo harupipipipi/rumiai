@@ -29,7 +29,13 @@ class ResponseWriterMixin(_HTTPHandlerBase):
         if self._panel_session_cookie:
             response_headers.append(("Set-Cookie", self._panel_session_cookie))
         try:
-            self.send_response(status)
+            # ``BaseHTTPRequestHandler.send_response`` calls ``log_request``
+            # before it emits the status line.  Keep access logging outside the
+            # response critical path so a slow diagnostic sink cannot prevent
+            # an otherwise complete bounded response from reaching the client.
+            self.send_response_only(status)
+            self.send_header("Server", self.version_string())
+            self.send_header("Date", self.date_time_string())
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
             origin = self._get_cors_origin(self.headers.get("Origin", ""))
@@ -40,6 +46,10 @@ class ResponseWriterMixin(_HTTPHandlerBase):
                 self.send_header(header_name, header_value)
             self.end_headers()
             self.wfile.write(data)
+            # Complete delivery before callers perform diagnostics or other
+            # post-response cleanup that may contend under suite-wide load.
+            self.wfile.flush()
+            self.log_request(status, len(data))
         except self._CLIENT_DISCONNECT_EXCEPTIONS:
             self.close_connection = True
 

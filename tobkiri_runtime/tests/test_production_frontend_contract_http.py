@@ -8,7 +8,7 @@ import logging
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Mapping
 from urllib.parse import quote
@@ -348,7 +348,7 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
 ) -> None:
     """Known denials remain bounded under logging delay and concurrent retry."""
 
-    server, session, _authority = production_server
+    server, session, authority = production_server
     cookie, csrf, origin = _authenticate(server)
     mutation_headers = {
         "Cookie": cookie,
@@ -356,8 +356,7 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
         "X-Rumi-CSRF": csrf,
     }
 
-    def revoke(request_id: str) -> tuple[int, dict[str, object], float]:
-        started = time.monotonic()
+    def revoke(request_id: str) -> tuple[int, dict[str, object]]:
         status, payload, _headers = _request(
             server,
             "POST",
@@ -368,7 +367,7 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
                 "X-Tobkiri-Request-ID": request_id,
             },
         )
-        return status, payload, time.monotonic() - started
+        return status, payload
 
     install_status, install_payload, _headers = _request(
         server,
@@ -383,39 +382,69 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
     assert install_status == 200, install_payload
 
     log_entered = threading.Event()
+    all_denials_logged = threading.Event()
     release_log = threading.Event()
+    denial_log_count = 0
+    denial_log_lock = threading.Lock()
 
     class DelayedDenialLog(logging.Handler):
         def emit(self, record: logging.LogRecord) -> None:
+            nonlocal denial_log_count
             if record.getMessage().startswith("Contract dispatch denied"):
+                with denial_log_lock:
+                    denial_log_count += 1
+                    if denial_log_count == len(request_ids):
+                        all_denials_logged.set()
                 log_entered.set()
-                release_log.wait(timeout=5)
+                release_log.wait()
 
     delayed_log = DelayedDenialLog()
     api_logger = logging.getLogger("core_runtime.pack_api_server")
     original_log_level = api_logger.level
     api_logger.setLevel(logging.INFO)
     api_logger.addHandler(delayed_log)
-    delayed_request_id = str(uuid.uuid4())
+    request_ids = [str(uuid.uuid4()) for _index in range(8)]
+    executor = ThreadPoolExecutor(max_workers=len(request_ids))
     try:
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            response = executor.submit(revoke, delayed_request_id)
-            assert log_entered.wait(timeout=5)
-            status, payload, elapsed = response.result(timeout=1)
-            assert status == 403
-            assert payload["data"]["code"] == "UNAPPROVED"
-            assert payload["data"]["retryable"] is False
-            assert elapsed < 5
-            release_log.set()
+        responses = [executor.submit(revoke, request_id) for request_id in request_ids]
+        assert log_entered.wait(timeout=FRONTEND_MUTATION_TIMEOUT_SECONDS)
+        completed, pending = wait(
+            responses,
+            timeout=FRONTEND_MUTATION_TIMEOUT_SECONDS,
+        )
+        assert not pending
+        assert len(completed) == len(request_ids)
+        initial = [response.result() for response in responses]
+        assert all(status == 403 for status, _payload in initial)
+        assert all(
+            payload["data"]["code"] == "UNAPPROVED"
+            for _status, payload in initial
+        )
+        assert all(
+            payload["data"]["retryable"] is False
+            for _status, payload in initial
+        )
+        # Every client received its complete body while the first diagnostic
+        # log still held this Handler's serialization lock.  The remaining
+        # request handlers therefore cannot have completed their denial log.
+        assert not release_log.is_set()
+        assert not all_denials_logged.is_set()
+        assert server.server is not None
+        assert server.server._active_requests > 0
     finally:
         release_log.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+        if server.server is not None:
+            assert server.server.wait_for_request_drain(
+                FRONTEND_MUTATION_TIMEOUT_SECONDS
+            )
         api_logger.removeHandler(delayed_log)
         api_logger.setLevel(original_log_level)
         delayed_log.close()
 
-    request_ids = [str(uuid.uuid4()) for _index in range(8)]
-    with ThreadPoolExecutor(max_workers=len(request_ids)) as executor:
-        initial = list(executor.map(revoke, request_ids))
+    assert all_denials_logged.wait(timeout=FRONTEND_MUTATION_TIMEOUT_SECONDS)
+    assert denial_log_count == len(request_ids)
+    audit_after_initial = len(authority.audit_events())
     worker_count = sum(
         thread.name.startswith("tobkiri-v4-request")
         for thread in threading.enumerate()
@@ -423,25 +452,20 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
     with ThreadPoolExecutor(max_workers=len(request_ids)) as executor:
         replayed = list(executor.map(revoke, request_ids))
 
-    assert all(status == 403 for status, _payload, _elapsed in initial)
-    assert all(payload["data"]["code"] == "UNAPPROVED" for _, payload, _ in initial)
-    assert all(elapsed < 5 for _status, _payload, elapsed in initial)
-    assert [(status, payload) for status, payload, _elapsed in replayed] == [
-        (status, payload) for status, payload, _elapsed in initial
-    ]
+    assert replayed == initial
+    assert len(authority.audit_events()) == audit_after_initial
     assert sum(
         thread.name.startswith("tobkiri-v4-request")
         for thread in threading.enumerate()
     ) == worker_count
     assert server.server is not None
-    deadline = time.monotonic() + 1
-    while server.server._active_requests and time.monotonic() < deadline:
-        time.sleep(0.01)
+    assert server.server.wait_for_request_drain(FRONTEND_MUTATION_TIMEOUT_SECONDS)
     assert server.server._active_requests == 0
-    retry_status, retry_payload, retry_elapsed = revoke(str(uuid.uuid4()))
+    retry_status, retry_payload = revoke(str(uuid.uuid4()))
     assert retry_status == 403
     assert retry_payload["data"]["code"] == "UNAPPROVED"
-    assert retry_elapsed < 5
+    assert len(authority.audit_events()) > audit_after_initial
+    assert session.broker._executor._work_queue.empty()
     assert not session.broker._closed
 
 

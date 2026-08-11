@@ -10,6 +10,7 @@ import signal
 import sqlite3
 import subprocess
 import sys
+from concurrent.futures import Future
 from threading import Barrier, Lock, Thread
 import time
 from typing import Any, Mapping
@@ -550,6 +551,44 @@ def test_provider_exception_is_sanitized_and_request_authority_is_fenced() -> No
         fixture.broker.close()
     assert "provider-secret" not in str(raised.value)
     assert fixture.authority.fenced == ["request-1"]
+    assert fixture.audit.failures == [("provider_failed", False)]
+
+
+def test_provider_rejection_always_releases_submitted_future() -> None:
+    """Broker cleanup cancels its Future even when result retrieval raises."""
+
+    class CancelTrackedFuture(Future[object]):
+        def __init__(self) -> None:
+            super().__init__()
+            self.cancel_calls = 0
+
+        def cancel(self) -> bool:
+            self.cancel_calls += 1
+            return super().cancel()
+
+    class FailedExecutor:
+        def __init__(self) -> None:
+            self.future = CancelTrackedFuture()
+
+        def submit(self, _callable, _request) -> CancelTrackedFuture:
+            self.future.set_exception(RuntimeError("provider-private-detail"))
+            return self.future
+
+        def shutdown(self, **_kwargs: object) -> None:
+            return None
+
+    fixture = make_broker(effect=EffectClass.WRITE)
+    fixture.broker._executor.shutdown(wait=True, cancel_futures=True)
+    executor = FailedExecutor()
+    fixture.broker._executor = executor  # type: ignore[assignment]
+    try:
+        with pytest.raises(ProviderExecutionError):
+            fixture.broker.invoke(frame(), context(), effect_scope={})
+    finally:
+        fixture.broker.close()
+
+    assert executor.future.cancel_calls == 1
+    assert fixture.admission.released
     assert fixture.audit.failures == [("provider_failed", False)]
 
 
