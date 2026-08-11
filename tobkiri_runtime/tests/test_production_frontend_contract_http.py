@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import http.client
 import json
+import logging
+import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Mapping
 from urllib.parse import quote
@@ -338,6 +341,108 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
     assert retired["data"]["state"] == "legacy_api_retired"
     with AuthorityStore(authority_path) as current_authority:
         assert len(current_authority.audit_events()) == audit_before_legacy
+
+
+def test_revoke_denials_respond_before_logging_and_release_for_retry(
+    production_server,
+) -> None:
+    """Known denials remain bounded under logging delay and concurrent retry."""
+
+    server, session, _authority = production_server
+    cookie, csrf, origin = _authenticate(server)
+    mutation_headers = {
+        "Cookie": cookie,
+        "Origin": origin,
+        "X-Rumi-CSRF": csrf,
+    }
+
+    def revoke(request_id: str) -> tuple[int, dict[str, object], float]:
+        started = time.monotonic()
+        status, payload, _headers = _request(
+            server,
+            "POST",
+            _contract("POST", "/api/pack-control/approval-revoke"),
+            body={"pack_id": "rumi_git_read_pack"},
+            headers={
+                **mutation_headers,
+                "X-Tobkiri-Request-ID": request_id,
+            },
+        )
+        return status, payload, time.monotonic() - started
+
+    install_status, install_payload, _headers = _request(
+        server,
+        "POST",
+        _contract("POST", "/api/pack-control/install"),
+        body={"pack_id": "rumi_git_read_pack"},
+        headers={
+            **mutation_headers,
+            "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+        },
+    )
+    assert install_status == 200, install_payload
+
+    log_entered = threading.Event()
+    release_log = threading.Event()
+
+    class DelayedDenialLog(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            if record.getMessage().startswith("Contract dispatch denied"):
+                log_entered.set()
+                release_log.wait(timeout=5)
+
+    delayed_log = DelayedDenialLog()
+    api_logger = logging.getLogger("core_runtime.pack_api_server")
+    original_log_level = api_logger.level
+    api_logger.setLevel(logging.INFO)
+    api_logger.addHandler(delayed_log)
+    delayed_request_id = str(uuid.uuid4())
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            response = executor.submit(revoke, delayed_request_id)
+            assert log_entered.wait(timeout=5)
+            status, payload, elapsed = response.result(timeout=1)
+            assert status == 403
+            assert payload["data"]["code"] == "UNAPPROVED"
+            assert payload["data"]["retryable"] is False
+            assert elapsed < 5
+            release_log.set()
+    finally:
+        release_log.set()
+        api_logger.removeHandler(delayed_log)
+        api_logger.setLevel(original_log_level)
+        delayed_log.close()
+
+    request_ids = [str(uuid.uuid4()) for _index in range(8)]
+    with ThreadPoolExecutor(max_workers=len(request_ids)) as executor:
+        initial = list(executor.map(revoke, request_ids))
+    worker_count = sum(
+        thread.name.startswith("tobkiri-v4-request")
+        for thread in threading.enumerate()
+    )
+    with ThreadPoolExecutor(max_workers=len(request_ids)) as executor:
+        replayed = list(executor.map(revoke, request_ids))
+
+    assert all(status == 403 for status, _payload, _elapsed in initial)
+    assert all(payload["data"]["code"] == "UNAPPROVED" for _, payload, _ in initial)
+    assert all(elapsed < 5 for _status, _payload, elapsed in initial)
+    assert [(status, payload) for status, payload, _elapsed in replayed] == [
+        (status, payload) for status, payload, _elapsed in initial
+    ]
+    assert sum(
+        thread.name.startswith("tobkiri-v4-request")
+        for thread in threading.enumerate()
+    ) == worker_count
+    assert server.server is not None
+    deadline = time.monotonic() + 1
+    while server.server._active_requests and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert server.server._active_requests == 0
+    retry_status, retry_payload, retry_elapsed = revoke(str(uuid.uuid4()))
+    assert retry_status == 403
+    assert retry_payload["data"]["code"] == "UNAPPROVED"
+    assert retry_elapsed < 5
+    assert not session.broker._closed
 
 
 def test_runtime_surface_reads_use_the_canonical_broker_contract(

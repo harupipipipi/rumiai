@@ -314,6 +314,7 @@ class RequestBroker:
         audit_reservation: OpaqueAuditReservation | None,
         deadline: float,
     ) -> Mapping[str, Any]:
+        future: Future[object] | None = None
         try:
             self._authority.recheck_effect_boundary(
                 envelope.context,
@@ -322,7 +323,7 @@ class RequestBroker:
             )
             if audit_reservation is not None:
                 self._audit.mark_dispatched(audit_reservation)
-            future: Future[object] = self._executor.submit(backend.invoke, envelope)
+            future = self._executor.submit(backend.invoke, envelope)
             remaining = max(0.0, deadline - time.monotonic())
             raw = future.result(timeout=remaining)
             if not isinstance(raw, ProviderOutcome):
@@ -374,6 +375,14 @@ class RequestBroker:
         except Exception as exc:
             self._record_audit_failure(audit_reservation, ambiguous=False)
             raise ProviderExecutionError("provider execution failed") from exc
+        finally:
+            # A completed Future retains the provider exception and traceback until
+            # its last reference is released.  A timed-out Future may still be
+            # queued even after authenticated backend cancellation.  Always drop
+            # the broker-side work item promptly; ``cancel`` is harmless once the
+            # invocation has completed or started running.
+            if future is not None:
+                future.cancel()
 
     def _record_audit_failure(
         self,

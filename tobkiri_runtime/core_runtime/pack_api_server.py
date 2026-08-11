@@ -1031,12 +1031,7 @@ class PackAPIHandler(
             ValueError,
         ) as error:
             public_result = _public_error_result(_exception_error_code(error))
-            logger.warning(
-                "Contract dispatch failed for %s/%s",
-                target.contract_id,
-                target.operation_id,
-                exc_info=error,
-            )
+            journal_error: BaseException | None = None
             if operation_journal is not None and operation_record is not None:
                 try:
                     operation_journal.finish_operation(
@@ -1046,9 +1041,36 @@ class PackAPIHandler(
                         result=public_result,
                         safe_error_code=str(public_result["code"]),
                     )
-                except ControlReconciliationError:
-                    pass
+                except ControlReconciliationError as reconciliation_error:
+                    journal_error = reconciliation_error
+                    public_result = _public_error_result(
+                        RuntimeSurfaceErrorCode.API_FAILURE
+                    )
             self._send_contract_outcome(route_binding, public_result)
+            # Write the bounded, sanitized response before diagnostic logging.
+            # Logging a provider traceback can contend with suite-wide capture or
+            # a slow sink and must never extend the frontend response deadline.
+            if journal_error is not None:
+                logger.warning(
+                    "Contract rejection reconciliation failed for %s/%s",
+                    target.contract_id,
+                    target.operation_id,
+                    exc_info=journal_error,
+                )
+            elif public_result["code"] == RuntimeSurfaceErrorCode.UNAPPROVED.value:
+                logger.info(
+                    "Contract dispatch denied for %s/%s: %s",
+                    target.contract_id,
+                    target.operation_id,
+                    public_result["code"],
+                )
+            else:
+                logger.warning(
+                    "Contract dispatch failed for %s/%s",
+                    target.contract_id,
+                    target.operation_id,
+                    exc_info=error,
+                )
             return True
         self._send_contract_outcome(route_binding, safe_result)
         return True
