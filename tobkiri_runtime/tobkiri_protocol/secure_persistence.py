@@ -537,11 +537,28 @@ class SecureDirectory:
     def read_bytes(self, relative: str | Path) -> bytes:
         """Read one owned single-link regular file with name/inode continuity."""
 
+        return self.read_bytes_bounded(relative, max_bytes=None)
+
+    def read_bytes_bounded(
+        self,
+        relative: str | Path,
+        *,
+        max_bytes: int | None,
+    ) -> bytes:
+        """Read one safe file while enforcing an optional allocation bound."""
+
+        if max_bytes is not None and (
+            isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0
+        ):
+            raise ValueError("max_bytes must be a non-negative integer or None")
+
         if os.name == "nt":
-            return self._read_bytes_windows(relative)
+            return self._read_bytes_windows(relative, max_bytes=max_bytes)
         with self._parent_descriptor(relative, create=False) as (parent, name):
             before = self._stat_entry(parent, name, required=True)
             assert before is not None
+            if max_bytes is not None and before.st_size > max_bytes:
+                raise SecurePersistenceError("persistence entry exceeds read limit")
             descriptor = os.open(
                 name,
                 os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
@@ -554,10 +571,14 @@ class SecureDirectory:
                 ):
                     raise SecurePersistenceError("persistence entry changed before read")
                 chunks: list[bytes] = []
+                total = 0
                 while True:
                     chunk = os.read(descriptor, 1024 * 1024)
                     if not chunk:
                         break
+                    total += len(chunk)
+                    if max_bytes is not None and total > max_bytes:
+                        raise SecurePersistenceError("persistence entry exceeds read limit")
                     chunks.append(chunk)
                 after_open = os.fstat(descriptor)
                 after_name = self._stat_entry(parent, name, required=True)
@@ -570,7 +591,12 @@ class SecureDirectory:
             finally:
                 os.close(descriptor)
 
-    def _read_bytes_windows(self, relative: str | Path) -> bytes:
+    def _read_bytes_windows(
+        self,
+        relative: str | Path,
+        *,
+        max_bytes: int | None,
+    ) -> bytes:
         with self._windows_parent(relative, create=False) as (parent, name):
             descriptor, opened_id = _windows_open_file_descriptor(
                 parent / name,
@@ -580,11 +606,17 @@ class SecureDirectory:
                 opened = os.fstat(descriptor)
                 if not _owned_regular(opened):
                     raise SecurePersistenceError("persistence entry identity is unsafe")
+                if max_bytes is not None and opened.st_size > max_bytes:
+                    raise SecurePersistenceError("persistence entry exceeds read limit")
                 chunks: list[bytes] = []
+                total = 0
                 while True:
                     chunk = os.read(descriptor, 1024 * 1024)
                     if not chunk:
                         break
+                    total += len(chunk)
+                    if max_bytes is not None and total > max_bytes:
+                        raise SecurePersistenceError("persistence entry exceeds read limit")
                     chunks.append(chunk)
                 if (
                     _read_fingerprint(os.fstat(descriptor)) != _read_fingerprint(opened)

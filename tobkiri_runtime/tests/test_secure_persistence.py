@@ -25,6 +25,18 @@ def test_missing_leaf_is_preserved_for_exists_and_read(tmp_path: Path) -> None:
         store.read_bytes("approval.json")
 
 
+def test_bounded_read_rejects_oversized_entry_before_returning_bytes(
+    tmp_path: Path,
+) -> None:
+    store = SecureDirectory(tmp_path / "root")
+    store.write_bytes_atomic("artifact.bin", b"oversized")
+
+    with pytest.raises(SecurePersistenceError, match="exceeds read limit"):
+        store.read_bytes_bounded("artifact.bin", max_bytes=4)
+
+    assert store.read_bytes_bounded("artifact.bin", max_bytes=9) == b"oversized"
+
+
 def test_missing_nested_parent_is_not_treated_as_a_missing_leaf(
     tmp_path: Path,
 ) -> None:

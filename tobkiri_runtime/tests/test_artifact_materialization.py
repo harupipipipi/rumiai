@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -120,6 +121,95 @@ def test_capture_rejects_pack_root_swap(
         swap_after_first_read,
     )
     with pytest.raises(InvalidArtifactError, match="root changed"):
+        capture_materialized_artifact(root, binding)
+
+
+def test_capture_rejects_hardlinked_indexed_file(tmp_path: Path) -> None:
+    root, binding = _copied_binding(tmp_path)
+    runtime = root / "runtime" / "echo.py"
+    outside = tmp_path / "outside.py"
+    runtime.rename(outside)
+    os.link(outside, runtime)
+
+    with pytest.raises(InvalidArtifactError, match="regular file"):
+        capture_materialized_artifact(root, binding)
+
+
+def test_windows_capture_uses_bounded_pinned_reader_without_path_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, binding = _copied_binding(tmp_path)
+    reads: list[tuple[str, int | None]] = []
+
+    class FakeSecureDirectory:
+        def __init__(self, path: Path, *, create: bool) -> None:
+            assert path == root
+            assert create is False
+
+        def read_bytes_bounded(
+            self,
+            relative: str,
+            *,
+            max_bytes: int | None,
+        ) -> bytes:
+            reads.append((relative, max_bytes))
+            return (root / relative).read_bytes()
+
+    monkeypatch.setattr(
+        materialization_module,
+        "_requires_windows_secure_reader",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        materialization_module,
+        "SecureDirectory",
+        FakeSecureDirectory,
+    )
+
+    captured = capture_materialized_artifact(root, binding)
+
+    assert {relative for relative, _limit in reads} == {item.path for item in captured.files}
+    assert all(
+        limit == materialization_module._MAX_MATERIALIZED_FILE_BYTES for _relative, limit in reads
+    )
+
+
+def test_windows_capture_fails_closed_when_pinned_read_detects_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, binding = _copied_binding(tmp_path)
+
+    class ReplacedSecureDirectory:
+        def __init__(self, _path: Path, *, create: bool) -> None:
+            assert create is False
+
+        def read_bytes_bounded(
+            self,
+            relative: str,
+            *,
+            max_bytes: int | None,
+        ) -> bytes:
+            assert max_bytes == materialization_module._MAX_MATERIALIZED_FILE_BYTES
+            if relative == "runtime/echo.py":
+                raise materialization_module.SecurePersistenceError(
+                    "persistence entry changed during read"
+                )
+            return (root / relative).read_bytes()
+
+    monkeypatch.setattr(
+        materialization_module,
+        "_requires_windows_secure_reader",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        materialization_module,
+        "SecureDirectory",
+        ReplacedSecureDirectory,
+    )
+
+    with pytest.raises(InvalidArtifactError, match="file is unavailable"):
         capture_materialized_artifact(root, binding)
 
 

@@ -8,10 +8,14 @@ import hashlib
 import os
 from pathlib import Path, PurePosixPath
 import stat
-from typing import Any
+from typing import Any, Callable
 
 from tobkiri_protocol.canonical import canonical_digest
-from tobkiri_protocol.validation import validate_file
+from tobkiri_protocol.secure_persistence import (
+    SecureDirectory,
+    SecurePersistenceError,
+)
+from tobkiri_protocol.validation import validate_document
 
 from .contracts import ResolvedOperationBinding
 from .errors import InvalidArtifactError
@@ -135,18 +139,113 @@ def capture_materialized_artifact(
         initial_root = unresolved_root.lstat()
     except OSError as exc:
         raise InvalidArtifactError("Pack materialization root is unavailable") from exc
-    if unresolved_root.is_symlink() or not stat.S_ISDIR(initial_root.st_mode):
+    if (
+        stat.S_ISLNK(initial_root.st_mode)
+        or _is_reparse_point(initial_root)
+        or not stat.S_ISDIR(initial_root.st_mode)
+    ):
         raise InvalidArtifactError("Pack materialization root must be a real directory")
-    root = unresolved_root.resolve(strict=True)
-    if binding.artifact.pack_id != root.name:
+    if binding.artifact.pack_id != unresolved_root.name:
         raise InvalidArtifactError("Pack materialization root identity mismatch")
 
-    manifest = validate_file(root / "pack.v4.json", "pack")
-    index = validate_file(root / "artifact-index.v4.json", "pack_artifact_index")
-    executable = validate_file(root / "executables.v4.json", "executable_catalog")
+    root_descriptor: int | None = None
+    if _requires_windows_secure_reader():
+        try:
+            secure_root = SecureDirectory(unresolved_root, create=False)
+        except (OSError, SecurePersistenceError) as exc:
+            raise InvalidArtifactError("Pack materialization root is unavailable") from exc
+
+        def read_regular(relative: str) -> tuple[bytes, int]:
+            try:
+                return (
+                    secure_root.read_bytes_bounded(
+                        relative,
+                        max_bytes=_MAX_MATERIALIZED_FILE_BYTES,
+                    ),
+                    0,
+                )
+            except (OSError, SecurePersistenceError) as exc:
+                raise InvalidArtifactError("Pack materialization file is unavailable") from exc
+
+    else:
+        if os.open not in os.supports_dir_fd:
+            raise InvalidArtifactError(
+                "secure descriptor-relative Pack materialization is unavailable"
+            )
+        root_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        root_flags |= getattr(os, "O_NOFOLLOW", 0)
+        try:
+            root_descriptor = os.open(unresolved_root, root_flags)
+        except OSError as exc:
+            raise InvalidArtifactError("Pack materialization root is unavailable") from exc
+        opened_root = os.fstat(root_descriptor)
+        if _file_identity(initial_root) != _file_identity(opened_root):
+            os.close(root_descriptor)
+            raise InvalidArtifactError("Pack materialization root changed before capture")
+
+        def read_regular(relative: str) -> tuple[bytes, int]:
+            assert root_descriptor is not None
+            return _read_regular_file(root_descriptor, relative)
+
+    try:
+        captured, implementation_path = _capture_files(read_regular, binding)
+    finally:
+        if root_descriptor is not None:
+            os.close(root_descriptor)
+    try:
+        final_root = unresolved_root.lstat()
+    except OSError as exc:
+        raise InvalidArtifactError("Pack materialization root changed during capture") from exc
+    if (
+        _is_reparse_point(final_root)
+        or not stat.S_ISDIR(final_root.st_mode)
+        or _file_identity(initial_root) != _file_identity(final_root)
+    ):
+        raise InvalidArtifactError("Pack materialization root changed during capture")
+    return MaterializedPackArtifact(
+        pack_id=binding.artifact.pack_id,
+        artifact_digest=binding.artifact.digest,
+        function_id=binding.function.function_id,
+        implementation_digest=binding.function.implementation_digest,
+        implementation_path=implementation_path,
+        materialization_digest=_materialization_digest(
+            binding.artifact.pack_id,
+            binding.artifact.digest,
+            binding.function.function_id,
+            binding.function.implementation_digest,
+            implementation_path,
+            captured,
+        ),
+        root_device=int(initial_root.st_dev),
+        root_inode=int(initial_root.st_ino),
+        files=captured,
+    )
+
+
+def _capture_files(
+    read_regular: Callable[[str], tuple[bytes, int]],
+    binding: ResolvedOperationBinding,
+) -> tuple[tuple[MaterializedArtifactFile, ...], str]:
+    """Validate metadata and capture indexed bytes through one secure reader."""
+
+    metadata_files = {name: read_regular(name) for name in _METADATA_FILES}
+    manifest = validate_document(metadata_files["pack.v4.json"][0], "pack")
+    contracts = validate_document(
+        metadata_files["contracts.v4.json"][0],
+        "pack_contract_catalog",
+    )
+    index = validate_document(
+        metadata_files["artifact-index.v4.json"][0],
+        "pack_artifact_index",
+    )
+    executable = validate_document(
+        metadata_files["executables.v4.json"][0],
+        "executable_catalog",
+    )
     if (
         manifest["pack"]["id"] != binding.artifact.pack_id
         or manifest["pack"]["artifact_digest"] != binding.artifact.digest
+        or contracts["pack_id"] != binding.artifact.pack_id
         or index["pack_id"] != binding.artifact.pack_id
         or executable["pack_id"] != binding.artifact.pack_id
     ):
@@ -166,64 +265,28 @@ def capture_materialized_artifact(
     if len(variants) != 1:
         raise InvalidArtifactError("Pack materialization executable binding is ambiguous")
     implementation_path = str(variants[0]["implementation_path"])
-    indexed = {
-        str(item["path"]): str(item["digest"])
-        for item in index["artifacts"]
-    }
+    indexed = {str(item["path"]): str(item["digest"]) for item in index["artifacts"]}
     requested_paths = tuple(sorted(set(indexed) | set(_METADATA_FILES)))
     files: list[MaterializedArtifactFile] = []
-    if os.open not in os.supports_dir_fd:
-        raise InvalidArtifactError(
-            "secure descriptor-relative Pack materialization is unavailable"
-        )
-    root_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-    root_flags |= getattr(os, "O_NOFOLLOW", 0)
-    try:
-        root_descriptor = os.open(unresolved_root, root_flags)
-    except OSError as exc:
-        raise InvalidArtifactError("Pack materialization root is unavailable") from exc
-    try:
-        opened_root = os.fstat(root_descriptor)
-        if _file_identity(initial_root) != _file_identity(opened_root):
-            raise InvalidArtifactError("Pack materialization root changed before capture")
-        for relative in requested_paths:
-            content, mode = _read_regular_file(root_descriptor, relative)
-            digest = _sha256(content)
-            expected = indexed.get(relative)
-            if expected is not None and not _constant_digest(digest, expected):
-                raise InvalidArtifactError("Pack indexed artifact digest changed")
-            files.append(
-                MaterializedArtifactFile(
-                    path=relative,
-                    digest=digest,
-                    executable=bool(mode & 0o111),
-                    content=content,
-                )
+    total = 0
+    for relative in requested_paths:
+        content, mode = metadata_files.get(relative) or read_regular(relative)
+        total += len(content)
+        if total > _MAX_MATERIALIZED_TOTAL_BYTES:
+            raise InvalidArtifactError("materialized artifact exceeds total size limit")
+        digest = _sha256(content)
+        expected = indexed.get(relative)
+        if expected is not None and not _constant_digest(digest, expected):
+            raise InvalidArtifactError("Pack indexed artifact digest changed")
+        files.append(
+            MaterializedArtifactFile(
+                path=relative,
+                digest=digest,
+                executable=bool(mode & 0o111),
+                content=content,
             )
-    finally:
-        os.close(root_descriptor)
-    final_root = unresolved_root.lstat()
-    if _file_identity(initial_root) != _file_identity(final_root):
-        raise InvalidArtifactError("Pack materialization root changed during capture")
-    captured = tuple(files)
-    return MaterializedPackArtifact(
-        pack_id=binding.artifact.pack_id,
-        artifact_digest=binding.artifact.digest,
-        function_id=binding.function.function_id,
-        implementation_digest=binding.function.implementation_digest,
-        implementation_path=implementation_path,
-        materialization_digest=_materialization_digest(
-            binding.artifact.pack_id,
-            binding.artifact.digest,
-            binding.function.function_id,
-            binding.function.implementation_digest,
-            implementation_path,
-            captured,
-        ),
-        root_device=int(initial_root.st_dev),
-        root_inode=int(initial_root.st_ino),
-        files=captured,
-    )
+        )
+    return tuple(files), implementation_path
 
 
 def _read_regular_file(root_descriptor: int, relative_value: str) -> tuple[bytes, int]:
@@ -248,9 +311,7 @@ def _read_regular_file(root_descriptor: int, relative_value: str) -> tuple[bytes
                     dir_fd=parent_descriptor,
                 )
             except OSError as exc:
-                raise InvalidArtifactError(
-                    "Pack materialization directory is unavailable"
-                ) from exc
+                raise InvalidArtifactError("Pack materialization directory is unavailable") from exc
             os.close(parent_descriptor)
             parent_descriptor = next_descriptor
             metadata = os.fstat(parent_descriptor)
@@ -263,7 +324,7 @@ def _read_regular_file(root_descriptor: int, relative_value: str) -> tuple[bytes
             raise InvalidArtifactError("Pack materialization file is unavailable") from exc
         try:
             before = os.fstat(descriptor)
-            if not stat.S_ISREG(before.st_mode):
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
                 raise InvalidArtifactError("Pack materialization entry is not a regular file")
             if before.st_size > _MAX_MATERIALIZED_FILE_BYTES:
                 raise InvalidArtifactError("Pack materialization file exceeds size limit")
@@ -278,15 +339,11 @@ def _read_regular_file(root_descriptor: int, relative_value: str) -> tuple[bytes
                     break
                 total += len(chunk)
                 if total > _MAX_MATERIALIZED_FILE_BYTES:
-                    raise InvalidArtifactError(
-                        "Pack materialization file exceeds size limit"
-                    )
+                    raise InvalidArtifactError("Pack materialization file exceeds size limit")
                 chunks.append(chunk)
             after = os.fstat(descriptor)
             if _file_identity(before) != _file_identity(after):
-                raise InvalidArtifactError(
-                    "Pack materialization file changed during capture"
-                )
+                raise InvalidArtifactError("Pack materialization file changed during capture")
             return b"".join(chunks), stat.S_IMODE(before.st_mode)
         finally:
             os.close(descriptor)
@@ -296,6 +353,20 @@ def _read_regular_file(root_descriptor: int, relative_value: str) -> tuple[bytes
 
 def _file_identity(value: os.stat_result) -> tuple[int, int, int, int]:
     return (int(value.st_dev), int(value.st_ino), int(value.st_size), int(value.st_mtime_ns))
+
+
+def _is_reparse_point(value: os.stat_result) -> bool:
+    """Return whether Windows marked an entry as a reparse point."""
+
+    return bool(
+        getattr(value, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    )
+
+
+def _requires_windows_secure_reader() -> bool:
+    """Return whether descriptor-relative opens require the Win32 abstraction."""
+
+    return os.name == "nt"
 
 
 def _sha256(value: bytes) -> str:

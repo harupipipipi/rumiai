@@ -2295,9 +2295,7 @@ def test_installed_lima_220_never_persists_handoff_in_dedicated_home_cache() -> 
             with probe._lima_handoff_operation_environment() as operation_root:
                 environment = probe._lima_process_environment()
                 assert Path(environment["HOME"]).is_relative_to(operation_root)
-                assert Path(environment["XDG_CACHE_HOME"]).is_relative_to(
-                    operation_root
-                )
+                assert Path(environment["XDG_CACHE_HOME"]).is_relative_to(operation_root)
                 with PackVMLoopbackImageHandoff(
                     descriptor, size_bytes=len(content), digest=digest
                 ) as handoff:
@@ -2324,9 +2322,7 @@ def test_installed_lima_220_never_persists_handoff_in_dedicated_home_cache() -> 
                         env=environment,
                     )
                     handoff.require_consumed()
-                    probe._scrub_lima_handoff_artifacts(
-                        endpoint, sensitive_values
-                    )
+                    probe._scrub_lima_handoff_artifacts(endpoint, sensitive_values)
         finally:
             os.close(descriptor)
         assert result.returncode == 0, result.stderr
@@ -2345,9 +2341,7 @@ def test_installed_lima_220_never_persists_handoff_in_dedicated_home_cache() -> 
         assert operation_root is not None
         assert list(operation_root.iterdir()) == []
         assert (lima_home / PACKVM_LIMA_INSTANCE / "disk").exists()
-        assert not (
-            lima_home / PACKVM_LIMA_INSTANCE / "disk"
-        ).stat().st_flags & stat.UF_IMMUTABLE
+        assert not (lima_home / PACKVM_LIMA_INSTANCE / "disk").stat().st_flags & stat.UF_IMMUTABLE
         assert not (lima_home / PACKVM_LIMA_INSTANCE / "ha.sock").exists()
     finally:
         shutil.rmtree(root)
@@ -2936,6 +2930,81 @@ os.close(descriptor)
     assert acquired.wait(2)
     waiter.join(2)
     assert child.wait(timeout=2) == 0
+
+
+def test_windows_operation_lock_uses_pinned_identity_and_owner_acl(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import core_runtime.packvm_lifecycle_v4 as lifecycle_module
+
+    lock_path = tmp_path / "packvm-operations.lock"
+    secured: list[Path] = []
+    validated: list[tuple[str, int]] = []
+
+    class FakeSecureDirectory:
+        def __init__(self, path: Path, *, create: bool) -> None:
+            assert path == tmp_path
+            assert create is True
+
+        def open_lock(self, name: str) -> int:
+            assert name == lock_path.name
+            return os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+
+        def validate_open_file(self, name: str, descriptor: int) -> None:
+            validated.append((name, descriptor))
+
+    monkeypatch.setattr(lifecycle_module, "SecureDirectory", FakeSecureDirectory)
+    monkeypatch.setattr(
+        lifecycle_module,
+        "_secure_windows_journal_lock_acl",
+        secured.append,
+    )
+    lifecycle_module._WINDOWS_VERIFIED_LOCKS.clear()
+
+    first = lifecycle_module._open_windows_journal_lock(lock_path)
+    os.close(first)
+    second = lifecycle_module._open_windows_journal_lock(lock_path)
+    os.close(second)
+
+    assert secured == [lock_path]
+    assert len(validated) == 1
+    assert lock_path.read_bytes() == b"\0"
+
+
+def test_windows_operation_lock_rejects_hardlink_before_acl_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import core_runtime.packvm_lifecycle_v4 as lifecycle_module
+
+    victim = tmp_path / "victim"
+    victim.write_bytes(b"victim")
+    lock_path = tmp_path / "packvm-operations.lock"
+    os.link(victim, lock_path)
+
+    class HardlinkedSecureDirectory:
+        def __init__(self, _path: Path, *, create: bool) -> None:
+            assert create is True
+
+        def open_lock(self, _name: str) -> int:
+            return os.open(lock_path, os.O_RDWR)
+
+    monkeypatch.setattr(
+        lifecycle_module,
+        "SecureDirectory",
+        HardlinkedSecureDirectory,
+    )
+    monkeypatch.setattr(
+        lifecycle_module,
+        "_secure_windows_journal_lock_acl",
+        lambda _path: pytest.fail("unsafe lock ACL was mutated"),
+    )
+
+    with pytest.raises(ValueError, match="operation lock is unsafe"):
+        lifecycle_module._open_windows_journal_lock(lock_path)
+
+    assert victim.read_bytes() == b"victim"
 
 
 def test_guest_runner_executes_only_the_explicit_staged_python_abi(tmp_path: Path) -> None:

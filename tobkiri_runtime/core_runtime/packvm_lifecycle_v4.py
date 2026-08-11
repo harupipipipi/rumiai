@@ -17,7 +17,11 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
-from core_runtime.hmac_key_manager import generate_or_load_signing_key
+from core_runtime.hmac_key_manager import (
+    SigningKeyError,
+    _secure_windows_signing_key,
+    generate_or_load_signing_key,
+)
 from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
     PACKVM_CLEANUP_PREFIX,
     PackVMLimaProvisioner,
@@ -29,6 +33,10 @@ from ecosystem.defaultspack.backend.sandbox.isolation.packvm_image_cache import 
     PackVMImageCancelled,
     PackVMImageProgress,
 )
+from tobkiri_protocol.secure_persistence import (
+    SecureDirectory,
+    SecurePersistenceError,
+)
 
 
 _MAX_ACTIVE_OPERATIONS = 128
@@ -39,6 +47,8 @@ PACKVM_OPERATIONS_ARCHIVE_MAX_BYTES = 8 * 1024 * 1024
 PACKVM_OPERATIONS_ARCHIVE_MAX_RECORDS = 4096
 _JOURNAL_LOCKS_GUARD = threading.Lock()
 _JOURNAL_LOCKS: dict[str, threading.RLock] = {}
+_WINDOWS_VERIFIED_LOCKS_GUARD = threading.Lock()
+_WINDOWS_VERIFIED_LOCKS: set[tuple[int, int, int]] = set()
 
 
 class PackVMLifecycleV4:
@@ -933,6 +943,8 @@ def _journal_thread_lock(path: Path) -> threading.RLock:
 def _open_journal_lock(path: Path) -> int:
     """Open and validate the stable cross-process journal lock file."""
 
+    if os.name == "nt":
+        return _open_windows_journal_lock(path)
     flags = os.O_CREAT | os.O_RDWR
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
@@ -945,6 +957,7 @@ def _open_journal_lock(path: Path) -> int:
         metadata = os.fstat(descriptor)
         if (
             not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
             or metadata.st_mode & 0o077
             or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
         ):
@@ -957,6 +970,56 @@ def _open_journal_lock(path: Path) -> int:
     except Exception:
         os.close(descriptor)
         raise
+
+
+def _open_windows_journal_lock(path: Path) -> int:
+    """Open one ACL-protected, no-reparse Windows lock by stable File ID."""
+
+    descriptor: int | None = None
+    try:
+        store = SecureDirectory(path.parent, create=True)
+        descriptor = store.open_lock(path.name)
+        metadata = os.fstat(descriptor)
+        identity = (
+            int(metadata.st_dev),
+            int(metadata.st_ino),
+            int(metadata.st_ctime_ns),
+        )
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise ValueError("PackVM operation lock is unsafe")
+        with _WINDOWS_VERIFIED_LOCKS_GUARD:
+            verified = identity in _WINDOWS_VERIFIED_LOCKS
+        if not verified:
+            _secure_windows_journal_lock_acl(path)
+            store.validate_open_file(path.name, descriptor)
+        if metadata.st_size == 0:
+            os.write(descriptor, b"\0")
+            os.fsync(descriptor)
+        if not verified:
+            secured = os.fstat(descriptor)
+            secured_identity = (
+                int(secured.st_dev),
+                int(secured.st_ino),
+                int(secured.st_ctime_ns),
+            )
+            with _WINDOWS_VERIFIED_LOCKS_GUARD:
+                _WINDOWS_VERIFIED_LOCKS.add(secured_identity)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        return descriptor
+    except (OSError, SecurePersistenceError, SigningKeyError) as exc:
+        if descriptor is not None:
+            os.close(descriptor)
+        raise ValueError("PackVM operation lock is unsafe") from exc
+    except Exception:
+        if descriptor is not None:
+            os.close(descriptor)
+        raise
+
+
+def _secure_windows_journal_lock_acl(path: Path) -> None:
+    """Restrict a pinned Windows journal lock to the current user SID."""
+
+    _secure_windows_signing_key(path)
 
 
 def _acquire_journal_lock(descriptor: int) -> None:
