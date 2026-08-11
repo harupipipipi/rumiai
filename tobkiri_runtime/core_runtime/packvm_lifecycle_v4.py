@@ -12,9 +12,10 @@ import re
 import stat
 import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
 
 from core_runtime.hmac_key_manager import generate_or_load_signing_key
 from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
@@ -34,14 +35,23 @@ _MAX_ACTIVE_OPERATIONS = 128
 _COMPACT_ACTIVE_OPERATIONS_TO = 96
 _TERMINAL_OPERATION_STATES = frozenset({"cancelled", "succeeded", "failed", "interrupted"})
 _EMPTY_ARCHIVE_DIGEST = "sha256:" + "0" * 64
+PACKVM_OPERATIONS_ARCHIVE_MAX_BYTES = 8 * 1024 * 1024
+PACKVM_OPERATIONS_ARCHIVE_MAX_RECORDS = 4096
+_JOURNAL_LOCKS_GUARD = threading.Lock()
+_JOURNAL_LOCKS: dict[str, threading.RLock] = {}
 
 
 class PackVMLifecycleV4:
     """Enforce prepare, explicit consent, and one-shot provision ceremonies."""
 
-    def __init__(self, provisioner: PackVMLimaProvisioner | None = None) -> None:
+    def __init__(
+        self,
+        provisioner: PackVMLimaProvisioner | None = None,
+        *,
+        archive_max_bytes: int = PACKVM_OPERATIONS_ARCHIVE_MAX_BYTES,
+        archive_max_records: int = PACKVM_OPERATIONS_ARCHIVE_MAX_RECORDS,
+    ) -> None:
         self._provisioner = provisioner or PackVMLimaProvisioner()
-        self._lock = threading.RLock()
         self._plans: dict[str, tuple[PackVMProvisioningPlan, str]] = {}
         self._consents: dict[str, tuple[PackVMProvisioningRequest, PackVMProvisioningPlan]] = {}
         self._operations_path = self._provisioner.state_path.parent / "packvm-operations.json"
@@ -49,15 +59,31 @@ class PackVMLifecycleV4:
         self._operations_archive_path = (
             self._provisioner.state_path.parent / "packvm-operations-archive.jsonl"
         )
-        (
-            self._archived_operations,
-            self._archive_checkpoint,
-            self._archive_checkpoints,
-        ) = self._load_operations_archive()
-        self._operations = self._load_operations()
-        if self._operations or self._archived_operations:
-            self._compact_operations()
-            self._persist_operations()
+        self._operations_lock_path = self._provisioner.state_path.parent / "packvm-operations.lock"
+        if (
+            isinstance(archive_max_bytes, bool)
+            or not isinstance(archive_max_bytes, int)
+            or archive_max_bytes < 1
+            or isinstance(archive_max_records, bool)
+            or not isinstance(archive_max_records, int)
+            or archive_max_records < 1
+        ):
+            raise ValueError("PackVM operation archive bounds are invalid")
+        self._archive_max_bytes = archive_max_bytes
+        self._archive_max_records = archive_max_records
+        self._lock = _journal_thread_lock(self._operations_lock_path)
+        self._operations: dict[str, dict[str, Any]] = {}
+        self._archived_operations: dict[str, dict[str, Any]] = {}
+        self._archive_checkpoint: dict[str, Any] = {}
+        self._archive_checkpoints: dict[int, str] = {}
+        self._loaded_state_digest: str | None = None
+        self._loaded_archive_size = 0
+        self._operations_generation = 0
+        with self._journal_transaction(recover=True, reload=False):
+            self._reload_operations(recover=True)
+            if self._operations or self._archived_operations:
+                self._compact_operations()
+                self._persist_operations()
 
     def prepare(self, *, session_id: str | None = None) -> Mapping[str, Any]:
         """Return pinned download and runtime facts without provisioning."""
@@ -161,7 +187,7 @@ class PackVMLifecycleV4:
         operation_id = str(payload["operation_id"])
         if re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", operation_id) is None:
             raise ValueError("PackVM operation_id must be a canonical UUID")
-        with self._lock:
+        with self._journal_transaction():
             current_session_digest = _session_digest(session_id)
             existing = self._operation(operation_id)
             if existing is not None:
@@ -220,7 +246,7 @@ class PackVMLifecycleV4:
     ) -> Mapping[str, Any]:
         """Return one persisted operation state across process restarts."""
 
-        with self._lock:
+        with self._journal_transaction():
             record = self._operation(operation_id)
             if record is None:
                 raise ValueError("PackVM operation_id is unknown")
@@ -239,7 +265,7 @@ class PackVMLifecycleV4:
         if set(payload) != {"operation_id"} or not isinstance(payload.get("operation_id"), str):
             raise ValueError("PackVM cancel payload does not match the typed contract")
         operation_id = str(payload["operation_id"])
-        with self._lock:
+        with self._journal_transaction():
             record = self._operation(operation_id)
             if record is None:
                 raise ValueError("PackVM operation_id is unknown")
@@ -317,7 +343,7 @@ class PackVMLifecycleV4:
         expected_confirmation = f"{PACKVM_CLEANUP_PREFIX} {instance}"
         if not secrets.compare_digest(confirmation, expected_confirmation):
             raise ValueError(f"PackVM cleanup requires exact confirmation: {expected_confirmation}")
-        with self._lock:
+        with self._journal_transaction():
             existing = self._operation(operation_id)
             if existing is not None:
                 if (
@@ -376,7 +402,7 @@ class PackVMLifecycleV4:
         operation_id: str,
         request: PackVMProvisioningRequest,
     ) -> None:
-        with self._lock:
+        with self._journal_transaction():
             record = self._operations[operation_id]
             if record.get("state") == "cancelled":
                 return
@@ -385,30 +411,34 @@ class PackVMLifecycleV4:
             record["updated_unix"] = int(time.time())
             self._persist_operations()
         try:
-            doctor = asdict(self._provisioner.provision(
-                request,
-                progress=lambda update: self._record_prefetch_progress(operation_id, update),
-                cancelled=lambda: self._operation_cancel_requested(operation_id),
-            ))
+            doctor = asdict(
+                self._provisioner.provision(
+                    request,
+                    progress=lambda update: self._record_prefetch_progress(operation_id, update),
+                    cancelled=lambda: self._operation_cancel_requested(operation_id),
+                )
+            )
         except PackVMImageCancelled:
-            with self._lock:
+            with self._journal_transaction():
                 record = self._operations[operation_id]
-                record.update({
-                    "state": "cancelled",
-                    "stage": "image_prefetch",
-                    "updated_unix": int(time.time()),
-                })
+                record.update(
+                    {
+                        "state": "cancelled",
+                        "stage": "image_prefetch",
+                        "updated_unix": int(time.time()),
+                    }
+                )
                 record.pop("cancel_requested", None)
                 self._persist_operations()
             return
         except Exception as error:
-            with self._lock:
+            with self._journal_transaction():
                 record = self._operations[operation_id]
                 failure = _operation_failure(error)
                 record.update({"state": "failed", **failure, "updated_unix": int(time.time())})
                 self._persist_operations()
             return
-        with self._lock:
+        with self._journal_transaction():
             record = self._operations[operation_id]
             record.update(
                 {
@@ -420,27 +450,27 @@ class PackVMLifecycleV4:
             self._compact_operations()
             self._persist_operations()
 
-    def _record_prefetch_progress(
-        self, operation_id: str, update: PackVMImageProgress
-    ) -> None:
+    def _record_prefetch_progress(self, operation_id: str, update: PackVMImageProgress) -> None:
         """Persist bounded typed download progress without exposing cache paths."""
 
-        with self._lock:
+        with self._journal_transaction():
             record = self._operations[operation_id]
             if update.stage == "verified" and record.get("cancel_requested"):
                 raise PackVMImageCancelled(
                     "packvm_image_cancelled",
                     "PackVM image download was cancelled before provisioning",
                 )
-            record.update({
-                "stage": "provisioning" if update.stage == "verified" else "image_prefetch",
-                "progress": asdict(update),
-                "updated_unix": int(time.time()),
-            })
+            record.update(
+                {
+                    "stage": "provisioning" if update.stage == "verified" else "image_prefetch",
+                    "progress": asdict(update),
+                    "updated_unix": int(time.time()),
+                }
+            )
             self._persist_operations()
 
     def _operation_cancel_requested(self, operation_id: str) -> bool:
-        with self._lock:
+        with self._journal_transaction():
             return bool(self._operations[operation_id].get("cancel_requested"))
 
     def _run_cleanup(
@@ -449,7 +479,7 @@ class PackVMLifecycleV4:
         confirmation: str,
         recovery_proof: Mapping[str, Any] | None,
     ) -> None:
-        with self._lock:
+        with self._journal_transaction():
             record = self._operations[operation_id]
             record["state"] = "running"
             record["updated_unix"] = int(time.time())
@@ -469,7 +499,7 @@ class PackVMLifecycleV4:
                 "missing": missing,
             }
         except Exception as error:
-            with self._lock:
+            with self._journal_transaction():
                 record = self._operations[operation_id]
                 record.update(
                     {
@@ -480,7 +510,7 @@ class PackVMLifecycleV4:
                 )
                 self._persist_operations()
             return
-        with self._lock:
+        with self._journal_transaction():
             record = self._operations[operation_id]
             record.update(
                 {
@@ -492,13 +522,51 @@ class PackVMLifecycleV4:
             self._compact_operations()
             self._persist_operations()
 
-    def _load_operations(self) -> dict[str, dict[str, Any]]:
+    @contextmanager
+    def _journal_transaction(
+        self,
+        *,
+        recover: bool = False,
+        reload: bool = True,
+    ) -> Iterator[None]:
+        """Serialize and refresh one authenticated journal transaction."""
+
+        with self._lock:
+            self._operations_lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            descriptor = _open_journal_lock(self._operations_lock_path)
+            acquired = False
+            try:
+                _acquire_journal_lock(descriptor)
+                acquired = True
+                if reload:
+                    self._reload_operations(recover=recover)
+                yield
+            finally:
+                try:
+                    if acquired:
+                        _release_journal_lock(descriptor)
+                finally:
+                    os.close(descriptor)
+
+    def _reload_operations(self, *, recover: bool) -> None:
+        """Reload both authenticated journals while holding the process lock."""
+
+        (
+            self._archived_operations,
+            self._archive_checkpoint,
+            self._archive_checkpoints,
+        ) = self._load_operations_archive()
+        self._operations = self._load_operations(recover=recover)
+
+    def _load_operations(self, *, recover: bool) -> dict[str, dict[str, Any]]:
         path = self._operations_path
         try:
             metadata = path.lstat()
         except FileNotFoundError:
             if self._archived_operations:
                 raise ValueError("PackVM operation archive has no authenticated checkpoint")
+            self._loaded_state_digest = None
+            self._operations_generation = 0
             return {}
         if (
             path.is_symlink()
@@ -508,8 +576,12 @@ class PackVMLifecycleV4:
             or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
         ):
             raise ValueError("PackVM operation state is unsafe")
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict) or payload.get("version") not in {1, 2}:
+        encoded = path.read_bytes()
+        if len(encoded) != metadata.st_size:
+            raise ValueError("PackVM operation state changed while loading")
+        self._loaded_state_digest = _digest_bytes(encoded)
+        payload = json.loads(encoded)
+        if not isinstance(payload, dict) or payload.get("version") not in {1, 2, 3}:
             raise ValueError("PackVM operation state is invalid")
         authentication = payload.pop("authentication", None)
         if not isinstance(authentication, str):
@@ -523,6 +595,15 @@ class PackVMLifecycleV4:
         if not hmac.compare_digest(authentication, expected):
             raise ValueError("PackVM operation state authentication failed")
         version = int(payload["version"])
+        generation = payload.get("generation", 0)
+        if (
+            isinstance(generation, bool)
+            or not isinstance(generation, int)
+            or generation < 0
+            or (version == 3 and "generation" not in payload)
+        ):
+            raise ValueError("PackVM operation state generation is invalid")
+        self._operations_generation = generation
         checkpoint = payload.get("archive_checkpoint")
         if version == 1:
             if self._archived_operations:
@@ -559,7 +640,7 @@ class PackVMLifecycleV4:
                 if not hmac.compare_digest(_record_digest(archived_record), _record_digest(record)):
                     raise ValueError("PackVM archived operation conflicts with active state")
                 continue
-            if record.get("state") in {"queued", "running"}:
+            if recover and record.get("state") in {"queued", "running"}:
                 operation_kind = str(record.get("operation_kind") or "provision")
                 if operation_kind == "provision":
                     proof = record.get("recovery_proof")
@@ -590,8 +671,15 @@ class PackVMLifecycleV4:
     def _persist_operations(self) -> None:
         path = self._operations_path
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if not hmac.compare_digest(
+            self._loaded_state_digest or "",
+            _current_file_digest(path) or "",
+        ):
+            raise ValueError("PackVM operation state changed during transaction")
+        generation = self._operations_generation + 1
         unsigned = {
-            "version": 2,
+            "version": 3,
+            "generation": generation,
             "archive_checkpoint": self._archive_checkpoint,
             "operations": self._operations,
         }
@@ -616,6 +704,8 @@ class PackVMLifecycleV4:
                 os.fsync(handle.fileno())
             os.chmod(temporary, 0o600)
             os.replace(temporary, path)
+            self._loaded_state_digest = _digest_bytes(payload)
+            self._operations_generation = generation
         finally:
             try:
                 os.unlink(temporary)
@@ -676,7 +766,10 @@ class PackVMLifecycleV4:
         try:
             metadata = path.lstat()
         except FileNotFoundError:
+            self._loaded_archive_size = 0
             return {}, empty, {0: _EMPTY_ARCHIVE_DIGEST}
+        if metadata.st_size > self._archive_max_bytes:
+            raise ValueError("PackVM operation archive byte limit exceeded")
         if (
             path.is_symlink()
             or not stat.S_ISREG(metadata.st_mode)
@@ -684,12 +777,15 @@ class PackVMLifecycleV4:
             or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
         ):
             raise ValueError("PackVM operation archive is unsafe")
+        self._loaded_archive_size = metadata.st_size
         key = _read_private_key(self._operations_key_path)
         archived: dict[str, dict[str, Any]] = {}
         checkpoints = {0: _EMPTY_ARCHIVE_DIGEST}
         previous = _EMPTY_ARCHIVE_DIGEST
         with path.open("rb") as handle:
             for sequence, encoded in enumerate(handle, start=1):
+                if sequence > self._archive_max_records:
+                    raise ValueError("PackVM operation archive record limit exceeded")
                 if len(encoded) > 128 * 1024 or not encoded.endswith(b"\n"):
                     raise ValueError("PackVM operation archive record is invalid")
                 try:
@@ -766,8 +862,11 @@ class PackVMLifecycleV4:
                 or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
             ):
                 raise ValueError("PackVM operation archive is unsafe")
+            if metadata.st_size != self._loaded_archive_size:
+                raise ValueError("PackVM operation archive changed during transaction")
             previous = str(self._archive_checkpoint["last_digest"])
             sequence = int(self._archive_checkpoint["count"])
+            payloads: list[tuple[str, dict[str, Any], bytes, str, int]] = []
             for operation_id, record in records:
                 sequence += 1
                 unsigned = {
@@ -793,22 +892,125 @@ class PackVMLifecycleV4:
                     )
                     + b"\n"
                 )
+                payloads.append((operation_id, dict(record), payload, entry_digest, sequence))
+                previous = entry_digest
+            appended_bytes = sum(len(payload) for _, _, payload, _, _ in payloads)
+            if sequence > self._archive_max_records:
+                raise ValueError("PackVM operation archive record limit exceeded")
+            if metadata.st_size + appended_bytes > self._archive_max_bytes:
+                raise ValueError("PackVM operation archive byte limit exceeded")
+            for operation_id, record, payload, entry_digest, record_sequence in payloads:
                 view = memoryview(payload)
                 while view:
                     written = os.write(descriptor, view)
                     if written <= 0:
                         raise OSError("PackVM operation archive append failed")
                     view = view[written:]
-                self._archived_operations[operation_id] = dict(record)
-                previous = entry_digest
-                self._archive_checkpoints[sequence] = previous
+                self._archived_operations[operation_id] = record
+                self._archive_checkpoints[record_sequence] = entry_digest
             os.fsync(descriptor)
+            self._loaded_archive_size = metadata.st_size + appended_bytes
             self._archive_checkpoint = {
                 "count": sequence,
                 "last_digest": previous,
             }
         finally:
             os.close(descriptor)
+
+
+def _journal_thread_lock(path: Path) -> threading.RLock:
+    """Return the process-wide reentrant lock for one stable journal path."""
+
+    identity = str(path.resolve(strict=False))
+    with _JOURNAL_LOCKS_GUARD:
+        lock = _JOURNAL_LOCKS.get(identity)
+        if lock is None:
+            lock = threading.RLock()
+            _JOURNAL_LOCKS[identity] = lock
+        return lock
+
+
+def _open_journal_lock(path: Path) -> int:
+    """Open and validate the stable cross-process journal lock file."""
+
+    flags = os.O_CREAT | os.O_RDWR
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        else:
+            os.chmod(path, 0o600)
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_mode & 0o077
+            or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+        ):
+            raise ValueError("PackVM operation lock is unsafe")
+        if metadata.st_size == 0:
+            os.write(descriptor, b"\0")
+            os.fsync(descriptor)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _acquire_journal_lock(descriptor: int) -> None:
+    """Acquire an exclusive advisory lock on Windows, macOS, or Linux."""
+
+    while True:
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                getattr(msvcrt, "locking")(descriptor, getattr(msvcrt, "LK_LOCK"), 1)
+            else:
+                import fcntl
+
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+            return
+        except InterruptedError:
+            continue
+
+
+def _release_journal_lock(descriptor: int) -> None:
+    """Release a journal lock acquired by :func:`_acquire_journal_lock`."""
+
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        getattr(msvcrt, "locking")(descriptor, getattr(msvcrt, "LK_UNLCK"), 1)
+    else:
+        import fcntl
+
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+
+
+def _current_file_digest(path: Path) -> str | None:
+    """Return a safe bounded file digest for compare-and-swap publication."""
+
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    if (
+        path.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_size > 1024 * 1024
+        or metadata.st_mode & 0o077
+        or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+    ):
+        raise ValueError("PackVM operation state is unsafe")
+    encoded = path.read_bytes()
+    if len(encoded) != metadata.st_size:
+        raise ValueError("PackVM operation state changed during transaction")
+    return _digest_bytes(encoded)
 
 
 def _digest_text(value: str) -> str:

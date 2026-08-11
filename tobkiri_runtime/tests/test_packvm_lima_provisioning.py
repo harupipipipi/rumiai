@@ -19,7 +19,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Callable
+from typing import Any, Callable, Mapping
 
 import pytest
 import yaml
@@ -2716,6 +2716,226 @@ def test_operation_journal_compacts_with_authenticated_replay_and_dependencies(
     archive_path.chmod(0o600)
     with pytest.raises(ValueError, match="authentication failed|digest failed"):
         PackVMLifecycleV4(manager)
+
+
+def test_operation_journal_serializes_two_instances_at_publication(
+    provisioner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core_runtime import packvm_lifecycle_v4
+
+    real_thread = threading.Thread
+
+    class InertThread:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def start(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        packvm_lifecycle_v4,
+        "threading",
+        SimpleNamespace(Thread=InertThread, RLock=threading.RLock),
+    )
+    manager, _fake, _command = provisioner
+    first = PackVMLifecycleV4(manager)
+    second = PackVMLifecycleV4(manager)
+    session_id = "panel-session-a"
+
+    def consent_for(lifecycle: PackVMLifecycleV4) -> Mapping[str, Any]:
+        plan = lifecycle.prepare(session_id=session_id)
+        return lifecycle.consent(
+            {
+                "plan_digest": plan["plan_digest"],
+                "ceremony_nonce": plan["ceremony_nonce"],
+                "confirmation": plan["confirmation"],
+                "approve_image_download": True,
+            },
+            session_id=session_id,
+        )
+
+    first_consent = consent_for(first)
+    second_consent = consent_for(second)
+    first_id = str(uuid.uuid4())
+    second_id = str(uuid.uuid4())
+    first_at_replace = threading.Event()
+    release_first = threading.Event()
+    second_finished = threading.Event()
+    original_replace = os.replace
+    replace_count = 0
+    count_lock = threading.Lock()
+    operations_path = manager.state_path.parent / "packvm-operations.json"
+
+    def synchronized_replace(source, destination) -> None:
+        nonlocal replace_count
+        if Path(destination) == operations_path:
+            with count_lock:
+                replace_count += 1
+                current = replace_count
+            if current == 1:
+                first_at_replace.set()
+                assert release_first.wait(2)
+        original_replace(source, destination)
+
+    monkeypatch.setattr(packvm_lifecycle_v4.os, "replace", synchronized_replace)
+    failures: list[BaseException] = []
+
+    def provision_first() -> None:
+        try:
+            first.provision(
+                {"consent_id": first_consent["consent_id"], "operation_id": first_id},
+                session_id=session_id,
+            )
+        except BaseException as error:
+            failures.append(error)
+
+    def provision_second() -> None:
+        try:
+            second.provision(
+                {
+                    "consent_id": second_consent["consent_id"],
+                    "operation_id": second_id,
+                },
+                session_id=session_id,
+            )
+        except BaseException as error:
+            failures.append(error)
+        finally:
+            second_finished.set()
+
+    first_worker = real_thread(target=provision_first)
+    second_worker = real_thread(target=provision_second)
+    first_worker.start()
+    assert first_at_replace.wait(2)
+    second_worker.start()
+    assert second_finished.wait(0.05) is False
+    release_first.set()
+    first_worker.join(2)
+    second_worker.join(2)
+    assert failures == []
+    assert second_finished.is_set()
+
+    first.cancel({"operation_id": first_id}, session_id=session_id)
+    second.cancel({"operation_id": second_id}, session_id=session_id)
+    restarted = PackVMLifecycleV4(manager)
+    assert restarted.progress(first_id, session_id=session_id)["state"] == "cancelled"
+    assert restarted.progress(second_id, session_id=session_id)["state"] == "cancelled"
+
+
+def test_operation_archive_enforces_exact_byte_and_record_bounds(provisioner) -> None:
+    manager, _fake, _command = provisioner
+    lifecycle = PackVMLifecycleV4(
+        manager,
+        archive_max_bytes=1024 * 1024,
+        archive_max_records=1,
+    )
+    operation_id = str(uuid.uuid4())
+    record = {
+        "operation_id": operation_id,
+        "operation_kind": "provision",
+        "session_digest": "sha256:" + hashlib.sha256(b"panel-session-a").hexdigest(),
+        "state": "cancelled",
+        "plan_digest": "sha256:" + "a" * 64,
+        "updated_unix": 1,
+    }
+    with lifecycle._journal_transaction():
+        lifecycle._operations[operation_id] = record
+        lifecycle._append_operations_archive([(operation_id, record)])
+        lifecycle._persist_operations()
+
+    archive_path = manager.state_path.parent / "packvm-operations-archive.jsonl"
+    exact_size = archive_path.stat().st_size
+    at_limit = PackVMLifecycleV4(
+        manager,
+        archive_max_bytes=exact_size,
+        archive_max_records=1,
+    )
+    assert at_limit.progress(operation_id, session_id="panel-session-a")["state"] == ("cancelled")
+    with pytest.raises(ValueError, match="byte limit exceeded"):
+        PackVMLifecycleV4(
+            manager,
+            archive_max_bytes=exact_size - 1,
+            archive_max_records=1,
+        )
+
+    encoded = archive_path.read_bytes()
+    second_id = str(uuid.uuid4())
+    second_record = {**record, "operation_id": second_id, "updated_unix": 2}
+    with at_limit._journal_transaction():
+        with pytest.raises(ValueError, match="record limit exceeded"):
+            at_limit._append_operations_archive([(second_id, second_record)])
+    assert archive_path.read_bytes() == encoded
+
+
+def test_operation_state_publication_detects_authenticated_cas_conflict(
+    provisioner,
+) -> None:
+    manager, _fake, _command = provisioner
+    lifecycle = PackVMLifecycleV4(manager)
+    with lifecycle._journal_transaction():
+        lifecycle._persist_operations()
+    with lifecycle._journal_transaction():
+        payload = json.loads(lifecycle._operations_path.read_text(encoding="utf-8"))
+        payload["generation"] += 1
+        _resign_operations(manager, payload)
+        with pytest.raises(ValueError, match="changed during transaction"):
+            lifecycle._persist_operations()
+
+
+def test_operation_journal_lock_blocks_an_overlapping_process(tmp_path: Path) -> None:
+    from core_runtime.packvm_lifecycle_v4 import (
+        _acquire_journal_lock,
+        _open_journal_lock,
+        _release_journal_lock,
+    )
+
+    lock_path = tmp_path / "packvm-operations.lock"
+    child_script = """
+import os
+import sys
+from pathlib import Path
+from core_runtime.packvm_lifecycle_v4 import (
+    _acquire_journal_lock,
+    _open_journal_lock,
+    _release_journal_lock,
+)
+descriptor = _open_journal_lock(Path(sys.argv[1]))
+_acquire_journal_lock(descriptor)
+print("locked", flush=True)
+sys.stdin.readline()
+_release_journal_lock(descriptor)
+os.close(descriptor)
+"""
+    child = subprocess.Popen(
+        [sys.executable, "-c", child_script, str(lock_path)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert child.stdout is not None
+    assert child.stdin is not None
+    assert child.stdout.readline().strip() == "locked"
+    acquired = threading.Event()
+
+    def acquire_in_parent() -> None:
+        descriptor = _open_journal_lock(lock_path)
+        try:
+            _acquire_journal_lock(descriptor)
+            acquired.set()
+            _release_journal_lock(descriptor)
+        finally:
+            os.close(descriptor)
+
+    waiter = threading.Thread(target=acquire_in_parent)
+    waiter.start()
+    assert acquired.wait(0.05) is False
+    child.stdin.write("release\n")
+    child.stdin.flush()
+    assert acquired.wait(2)
+    waiter.join(2)
+    assert child.wait(timeout=2) == 0
 
 
 def test_guest_runner_executes_only_the_explicit_staged_python_abi(tmp_path: Path) -> None:
