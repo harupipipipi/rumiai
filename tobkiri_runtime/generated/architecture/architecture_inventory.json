@@ -9945,7 +9945,7 @@
         "version": "1.0.0"
       },
       {
-        "digest": "sha256:45572ddddafcc40ca5950a26e0e8c1a6b3d136e6ffec50880ed30ca98b4ec415",
+        "digest": "sha256:16aafe5034181fc97531e68371cf94fd072b88da04dbac5a24b446377abe8de7",
         "identity": "tobkiri_workflow_pack",
         "kind": "manifest",
         "legacy": true,
@@ -14797,7 +14797,7 @@
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:45572ddddafcc40ca5950a26e0e8c1a6b3d136e6ffec50880ed30ca98b4ec415",
+        "evidence_digest": "sha256:16aafe5034181fc97531e68371cf94fd072b88da04dbac5a24b446377abe8de7",
         "line": 5,
         "path": "tobkiri_runtime/ecosystem/tobkiri_workflow_pack/ecosystem.json",
         "rule_id": "legacy_host_execution"
@@ -18221,7 +18221,7 @@
       },
       {
         "legacy": true,
-        "manifest_digest": "sha256:45572ddddafcc40ca5950a26e0e8c1a6b3d136e6ffec50880ed30ca98b4ec415",
+        "manifest_digest": "sha256:16aafe5034181fc97531e68371cf94fd072b88da04dbac5a24b446377abe8de7",
         "pack_id": "tobkiri_workflow_pack",
         "path": "tobkiri_runtime/ecosystem/tobkiri_workflow_pack/ecosystem.json",
         "version": "4.0.0"
@@ -18393,8 +18393,8 @@
     ]
   },
   "repository": {
-    "commit": "fc9de6e96ed849d80251a5beecd039bec1514c5f",
-    "tree_digest": "f5ece71ea971d5892e65fde01550d3216f124abc3ccbee330f0f9c65beeca36d"
+    "commit": "bc6909d549cead7d8bc9ff1cb0be064e4ca9a16f",
+    "tree_digest": "124a90f56409457d28c11e1d86bd9da26d15bc49230c6128c44b9725822b0c40"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
   "schema": "io.tobkiri.architecture.inventory.v1"
