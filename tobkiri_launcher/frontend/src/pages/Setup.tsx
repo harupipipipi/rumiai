@@ -115,8 +115,8 @@ export function Setup() {
     }
 
     await Promise.all([
-      loadPacks(true, {skipMutationReconciliation: true}),
-      loadFrontendCatalog(true),
+      loadPacks(false, {skipMutationReconciliation: true}),
+      loadFrontendCatalog(false),
     ]);
     const refreshedState = useAppStore.getState();
     const projectionError = refreshedState.packsError || refreshedState.frontendCatalogError;

@@ -247,7 +247,15 @@ function readLocalProfile(): Profile {
 
 let packsLoadPromise: Promise<void> | null = null;
 let frontendCatalogLoadPromise: Promise<void> | null = null;
-let packVmDoctorLoadPromise: Promise<ApiPackVMDoctor | null> | null = null;
+type PackVMDoctorRefreshMode = 'observe' | 'reconcile';
+
+// Observe-only Setup recovery must never inherit reconcile-mode projection
+// work. Keep the modes separate while the generation rejects stale updates.
+const packVmDoctorLoadPromises = new Map<
+  PackVMDoctorRefreshMode,
+  Promise<ApiPackVMDoctor | null>
+>();
+let packVmDoctorRefreshGeneration = 0;
 const packMutationVersions = new Map<string, number>();
 let packMutationEpoch = 0;
 let packInvalidationRequested = 0;
@@ -801,20 +809,30 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   refreshPackVMDoctor: (options = {}) => {
-    if (packVmDoctorLoadPromise) return packVmDoctorLoadPromise;
+    const mode: PackVMDoctorRefreshMode = options.reconcile === false
+      ? 'observe'
+      : 'reconcile';
+    const existingFlight = packVmDoctorLoadPromises.get(mode);
+    if (existingFlight) return existingFlight;
+    const generation = ++packVmDoctorRefreshGeneration;
     set({packVmDoctorLoading: true, packVmError: null});
-    packVmDoctorLoadPromise = (async () => {
+
+    let flight!: Promise<ApiPackVMDoctor | null>;
+    flight = (async () => {
       try {
         const doctor = await apiFetchPackVMDoctor();
-        set({
-          packVmDoctor: doctor,
-          packVmError: doctor.ready
-            ? null
-            : (doctor.reason || 'PackVM is not ready for Pack operations.'),
-        });
-        if (doctor.ready && options.reconcile !== false) {
+        const isCurrent = generation === packVmDoctorRefreshGeneration;
+        if (isCurrent) {
+          set({
+            packVmDoctor: doctor,
+            packVmError: doctor.ready
+              ? null
+              : (doctor.reason || 'PackVM is not ready for Pack operations.'),
+          });
+        }
+        if (doctor.ready && mode === 'reconcile' && isCurrent) {
           await Promise.all([get().loadPacks(), get().loadFrontendCatalog()]);
-        } else {
+        } else if (!doctor.ready && isCurrent) {
           set({
             frontendCatalog: null,
             frontendCatalogError: doctor.reason || 'PackVM is not attested and ready.',
@@ -826,19 +844,24 @@ export const useAppStore = create<AppState>((set, get) => ({
           error,
           'PackVM readiness could not be verified.',
         );
-        set({
-          packVmDoctor: null,
-          packVmError: message,
-          frontendCatalog: null,
-          frontendCatalogError: message,
-        });
+        if (generation === packVmDoctorRefreshGeneration) {
+          set({
+            packVmDoctor: null,
+            packVmError: message,
+            frontendCatalog: null,
+            frontendCatalogError: message,
+          });
+        }
         return null;
       }
     })().finally(() => {
-      packVmDoctorLoadPromise = null;
-      set({packVmDoctorLoading: false});
+      if (packVmDoctorLoadPromises.get(mode) === flight) {
+        packVmDoctorLoadPromises.delete(mode);
+      }
+      set({packVmDoctorLoading: packVmDoctorLoadPromises.size > 0});
     });
-    return packVmDoctorLoadPromise;
+    packVmDoctorLoadPromises.set(mode, flight);
+    return flight;
   },
 
   invokePackOperation: async (packId, operationId, payload) => {

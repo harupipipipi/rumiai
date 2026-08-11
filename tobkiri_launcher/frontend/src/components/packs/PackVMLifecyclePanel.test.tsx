@@ -99,8 +99,12 @@ function setDoctor(nextDoctor: ApiPackVMDoctor): void {
   useAppStore.setState({packVmDoctor: nextDoctor, packVmError: nextDoctor.ready ? null : nextDoctor.reason});
 }
 
-function configureStore(initialDoctor = notReadyDoctor): {setNextDoctor: (doctor: ApiPackVMDoctor) => void} {
+function configureStore(initialDoctor = notReadyDoctor): {
+  setNextDoctor: (doctor: ApiPackVMDoctor) => void;
+  refreshCalls: () => number;
+} {
   let nextDoctor = initialDoctor;
+  let refreshCount = 0;
   useAppStore.setState({
     packVmDoctor: initialDoctor,
     packVmDoctorLoading: false,
@@ -108,11 +112,15 @@ function configureStore(initialDoctor = notReadyDoctor): {setNextDoctor: (doctor
     frontendCatalog: null,
     frontendCatalogError: null,
     refreshPackVMDoctor: async () => {
+      refreshCount += 1;
       setDoctor(nextDoctor);
       return nextDoctor;
     },
   });
-  return {setNextDoctor: (doctor) => { nextDoctor = doctor; }};
+  return {
+    setNextDoctor: (doctor) => { nextDoctor = doctor; },
+    refreshCalls: () => refreshCount,
+  };
 }
 
 async function renderPanel(root: Root): Promise<void> {
@@ -320,6 +328,21 @@ test('PackVM GUI displays typed failure diagnostics from authoritative progress'
   assert.match(surface.container.textContent ?? '', /doctor/);
   assert.match(surface.container.textContent ?? '', /catalog\/profile digest mismatch/);
   assert.ok(surface.container.querySelector('[aria-label="Typed PackVM failure diagnostic"]'));
+});
+
+test('PackVM GUI coalesces rapid doctor refresh clicks', {concurrency: false}, async () => {
+  const doctorControl = configureStore(healthyDoctor);
+  assert.ok(surface);
+  await renderPanel(surface.root);
+  await settle();
+  const initialCalls = doctorControl.refreshCalls();
+  const button = buttonWithText(surface.container, 'Run doctor again');
+  await act(async () => {
+    button.click();
+    button.click();
+  });
+  await settle();
+  assert.equal(doctorControl.refreshCalls(), initialCalls + 1);
 });
 
 test('PackVM GUI cancels only a queued operation', {concurrency: false}, async () => {
