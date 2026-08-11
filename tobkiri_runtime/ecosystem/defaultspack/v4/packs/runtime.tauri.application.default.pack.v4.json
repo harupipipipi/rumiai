@@ -41,7 +41,7 @@
     "source_kind": "generated",
     "source_path": "ecosystem/defaultspack/v4/packs/runtime.tauri.application.default.pack.v4.json",
     "source_digest": "sha256:fa77f6cb4451a7b814e3ae194e099fbf49ee7ec93853d25ee576471b096247a0",
-    "repository_commit": "010db3220263d7cb495289598a21c040d7c52c27",
+    "repository_commit": "working-tree",
     "repository_commit_trusted": false,
     "content_root_digest": "sha256:ed8d851aa7d7a410fe378ea213573d1b9112d7755d0e756094f3bd870066c923",
     "generator": "defaultspack-v4-core",
@@ -103,7 +103,7 @@
     }
   ],
   "integrity": {
-    "source_identity": "sha256:7f65921c82863cb3bed3a41619e72a72f80f68a45c892d36b3dbcf8f3bdb4cfb",
+    "source_identity": "sha256:121115fdd7a3ea76818e7a3496d8d42bc90c58b078d05de71bbf71af913a7eb5",
     "artifact_set_digest": "sha256:1fc3d007e46bc537f93a4fea9fe59ac220d9965403673437f84c5025ceb5e545",
     "contract_catalog_digest": "sha256:0df46117366f419dbad8685b74340a655d45e46e71fc5a0c1eb30c9fce00f614"
   }

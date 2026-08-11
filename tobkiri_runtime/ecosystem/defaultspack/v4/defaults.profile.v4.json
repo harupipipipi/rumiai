@@ -89,7 +89,7 @@
     "source_kind": "generated",
     "source_path": "ecosystem/defaultspack/v4/defaults.profile.v4.json",
     "source_digest": "sha256:708866763b3f747567f23a1d6416836ac5490c064ffa63f32fb31b281b73a754",
-    "repository_commit": "010db3220263d7cb495289598a21c040d7c52c27",
+    "repository_commit": "working-tree",
     "repository_commit_trusted": false,
     "content_root_digest": "sha256:a9ee26f304020e220b6b80c00ddf89081aaf64784f7abbe1cc4648b047265e62",
     "generator": "defaultspack-v4-core",
