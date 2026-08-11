@@ -18,10 +18,18 @@ export type DefaultsConfirmation = {
   readonly plan_digest: string;
   readonly authority_snapshot_digest: string;
   readonly security_epoch: number;
-  readonly base: {readonly pack_id: 'defaults-basepack'};
+  readonly base: {
+    readonly pack_id: 'defaults-basepack';
+    readonly artifact_digest: string;
+    readonly definition_digest: string;
+  };
   readonly shell: {
     readonly provider_id: 'shell.tauri.default';
+    readonly pack_id: string;
+    readonly artifact_digest: string;
+    readonly executable_artifact_digest: string;
     readonly contract_id: 'app.shell.v1';
+    readonly definition_digest: string;
   };
   readonly bindings: readonly DefaultsBinding[];
   readonly confirmation_digest: string;
@@ -132,12 +140,22 @@ export function parseDefaultsSetupState(value: unknown): DefaultsSetupState {
   const base = object(confirmation.base, 'Confirmed base');
   exactKeys(base, ['pack_id', 'artifact_digest', 'definition_digest'], 'Confirmed base');
   exactString(base.pack_id, 'defaults-basepack', 'Confirmed base identity');
+  digest(base.artifact_digest, 'Confirmed base artifact digest');
+  digest(base.definition_digest, 'Confirmed base definition digest');
   const confirmedShell = object(confirmation.shell, 'Confirmed Shell');
   exactKeys(confirmedShell, [
-    'provider_id', 'pack_id', 'artifact_digest', 'contract_id', 'definition_digest',
+    'provider_id', 'pack_id', 'artifact_digest', 'executable_artifact_digest',
+    'contract_id', 'definition_digest',
   ], 'Confirmed Shell');
   exactString(confirmedShell.provider_id, 'shell.tauri.default', 'Confirmed Shell provider');
+  exactString(confirmedShell.pack_id, 'shell.tauri.default', 'Confirmed Shell identity');
   exactString(confirmedShell.contract_id, 'app.shell.v1', 'Confirmed Shell contract');
+  digest(confirmedShell.artifact_digest, 'Confirmed Shell artifact digest');
+  digest(
+    confirmedShell.executable_artifact_digest,
+    'Confirmed Shell executable artifact digest',
+  );
+  digest(confirmedShell.definition_digest, 'Confirmed Shell definition digest');
   const bindings = confirmation.bindings;
   if (!Array.isArray(bindings)) throw new Error('Defaults bindings are invalid');
   const conversation = bindings.filter((item) => {

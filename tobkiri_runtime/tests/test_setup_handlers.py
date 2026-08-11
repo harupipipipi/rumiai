@@ -25,7 +25,11 @@ def _preview() -> dict[str, object]:
         "base": {"pack_id": "defaults-basepack"},
         "shell": {
             "provider_id": "shell.tauri.default",
+            "pack_id": "shell.tauri.default",
+            "artifact_digest": "sha256:" + "6" * 64,
+            "executable_artifact_digest": "sha256:" + "7" * 64,
             "contract_id": "app.shell.v1",
+            "definition_digest": "sha256:" + "8" * 64,
         },
         "bindings": [],
         "confirmation_digest": "sha256:" + "5" * 64,
@@ -112,6 +116,29 @@ def test_setup_rejects_tampered_confirmation() -> None:
     assert result["write_set"] == []
 
 
+def test_setup_rejects_tampered_or_extra_shell_digest_fields() -> None:
+    with patch.object(
+        SetupHandlersMixin,
+        "_recommended_default_profile_preview",
+        return_value=_preview(),
+    ):
+        for shell_change in (
+            {"executable_artifact_digest": "sha256:" + "0" * 64},
+            {"untrusted_digest": "sha256:" + "f" * 64},
+        ):
+            request = _request()
+            confirmation = request["confirmation"]
+            request["confirmation"] = {
+                **confirmation,
+                "shell": {**confirmation["shell"], **shell_change},
+            }
+            result = _Handler()._setup_install_pack(request)
+
+            assert result["status_code"] == 409
+            assert result["state"] == "review_required"
+            assert result["write_set"] == []
+
+
 def test_setup_requires_explicit_confirmation() -> None:
     with patch.object(
         SetupHandlersMixin,
@@ -192,9 +219,16 @@ def test_second_approval_and_runtime_migration_surfaces_are_retired() -> None:
 
 def test_real_preview_is_exact_and_integrity_checked() -> None:
     preview = SetupHandlersMixin._recommended_default_profile_preview()
+    from tests.conformance_support.packaged_profile import load_packaged_profile_catalog
 
     assert preview["profile_id"] == "defaults"
     assert preview["base_pack"] == "defaults-basepack"
     assert preview["shell"]["provider_id"] == "shell.tauri.default"
+    variant = load_packaged_profile_catalog().shells["shell.tauri.default"][
+        "launch"
+    ]["variants"][0]
+    assert preview["confirmation"]["shell"]["executable_artifact_digest"] == (
+        variant["entrypoint_digest"]
+    )
     assert len(preview["pack_ids"]) == len(set(preview["pack_ids"]))
     assert preview["conversation_provider"]

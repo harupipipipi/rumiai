@@ -56,6 +56,14 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
         with urlopen(f"http://127.0.0.1:{port}/api/setup/packs", timeout=5) as response:
             setup = json.load(response)["data"]
         assert setup["state"] == "review_required"
+        confirmation = setup["recommended_default_profile"]["confirmation"]
+        from tests.conformance_support.packaged_profile import load_packaged_profile_catalog
+
+        catalog = load_packaged_profile_catalog()
+        variant = catalog.shells["shell.tauri.default"]["launch"]["variants"][0]
+        assert confirmation["shell"]["executable_artifact_digest"] == variant[
+            "entrypoint_digest"
+        ]
         request = Request(
             f"http://127.0.0.1:{port}/api/setup/packs/install",
             method="POST",
@@ -65,9 +73,7 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
                     "setup_api_version": "io.tobkiri.setup-state.v4",
                     "operation_id": "defaults.activate",
                     "confirmed": True,
-                    "confirmation": setup["recommended_default_profile"][
-                        "confirmation"
-                    ],
+                    "confirmation": confirmation,
                 }
             ).encode(),
         )

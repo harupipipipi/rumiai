@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
     BundleIntegrityError,
     ProfileResolutionDenied,
 )
+from tobkiri_protocol.canonical import canonical_json
 
 
 def _tree_digests(root: Path) -> dict[str, str]:
@@ -35,6 +37,11 @@ def test_review_and_cancel_are_read_only(tmp_path: Path, monkeypatch) -> None:
     assert confirmation["profile_id"] == "defaults"
     assert confirmation["base"]["pack_id"] == "defaults-basepack"
     assert confirmation["shell"]["provider_id"] == "shell.tauri.default"
+    catalog = profile_capture.BundledCatalog.load(profile_capture._bundle_root())
+    variant = catalog.shells["shell.tauri.default"]["launch"]["variants"][0]
+    assert confirmation["shell"]["executable_artifact_digest"] == variant[
+        "entrypoint_digest"
+    ]
     selected = {
         confirmation["base"]["pack_id"],
         confirmation["shell"]["pack_id"],
@@ -50,6 +57,17 @@ def test_review_and_cancel_are_read_only(tmp_path: Path, monkeypatch) -> None:
     [
         ("catalog_revision", "sha256:" + "0" * 64),
         ("profile_revision", "sha256:" + "1" * 64),
+        (
+            "shell",
+            {
+                "provider_id": "shell.tauri.default",
+                "pack_id": "shell.tauri.default",
+                "artifact_digest": "sha256:" + "6" * 64,
+                "executable_artifact_digest": "sha256:" + "0" * 64,
+                "contract_id": "app.shell.v1",
+                "definition_digest": "sha256:" + "8" * 64,
+            },
+        ),
         ("security_epoch", 9),
         ("bindings", []),
     ],
@@ -69,6 +87,38 @@ def test_tamper_and_provider_mismatch_write_nothing(
         profile_capture.capture_default_profile(confirmation=confirmation)
 
     assert not user_data.exists()
+
+
+def test_stale_catalog_shell_executable_pin_is_rejected(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source = profile_capture._bundle_root()  # noqa: SLF001 - integrity fixture
+    bundle = tmp_path / "bundle"
+    shutil.copytree(source, bundle)
+    shutil.copytree(
+        source.parent / "platform-artifacts",
+        bundle.parent / "platform-artifacts",
+    )
+
+    profile_path = bundle / "defaults.profile.v4.json"
+    profile = json.loads(profile_path.read_text(encoding="utf-8"))
+    profile["shell"]["executable_artifact_digest"] = "sha256:" + "0" * 64
+    profile_bytes = canonical_json(profile) + b"\n"
+    profile_path.write_bytes(profile_bytes)
+
+    lock_path = bundle / "bundle.lock.json"
+    lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    profile_entry = next(
+        entry
+        for entry in lock["entries"]
+        if entry["path"] == "defaults.profile.v4.json"
+    )
+    profile_entry["digest"] = "sha256:" + hashlib.sha256(profile_bytes).hexdigest()
+    lock_path.write_bytes(canonical_json(lock) + b"\n")
+
+    monkeypatch.setattr(profile_capture, "_bundle_root", lambda _base=None: bundle)
+    with pytest.raises(ProfileResolutionDenied, match="Profile Shell executable pin"):
+        profile_capture.prepare_default_profile_confirmation()
 
 
 def test_commit_restart_and_replay_are_finite(tmp_path: Path, monkeypatch) -> None:

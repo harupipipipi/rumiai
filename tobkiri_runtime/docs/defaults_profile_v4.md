@@ -23,7 +23,8 @@ locked Profile source selects:
 
 The resulting ProfileLock and ResolvedPlan both bind the source definition
 digest, selected catalog revision, bundle-lock byte digest, Base and Shell
-definition digests, Application manifest digest, requested-edge digest,
+definition digests, Shell executable artifact digest, Application manifest
+digest, requested-edge digest,
 constraint digest, closure digest, provenance digest, Authority snapshot, and
 SecurityEpoch. Each Plan binding includes the exact caller Function ID, target
 FunctionPrincipal, Contract/Operation, opaque Authority reference, requested
@@ -75,7 +76,10 @@ variant to the staged Shell definition. A directory artifact such as a macOS
 `.app` binds two typed digests: `artifact_digest` covers its deterministic,
 symlink-free whole tree, while `entrypoint_digest` covers the exact executable
 bytes. File artifacts on Linux and Windows retain the same distinction even
-when both values derive from one file. The Application Pack, launch Function,
+when both values derive from one file. The setup confirmation carries the
+entrypoint binding as `confirmation.shell.executable_artifact_digest`; the
+server requires it and compares the complete confirmation with a fresh
+catalog-and-lock resolution before writing state. The Application Pack, launch Function,
 signed release index/lock, Python verifier, and Rust authority resolver preserve
 and independently verify both bindings. Production capture consumes the
 selected definition variant rather than synthesizing one from Function

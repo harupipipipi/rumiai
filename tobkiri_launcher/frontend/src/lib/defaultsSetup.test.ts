@@ -35,6 +35,7 @@ function state() {
           provider_id: 'shell.tauri.default',
           pack_id: 'shell.tauri.default',
           artifact_digest: `sha256:${'8'.repeat(64)}`,
+          executable_artifact_digest: `sha256:${'e'.repeat(64)}`,
           contract_id: 'app.shell.v1',
           definition_digest: `sha256:${'9'.repeat(64)}`,
         },
@@ -59,7 +60,40 @@ function state() {
 }
 
 test('typed setup contract accepts one exact conversation provider', () => {
-  assert.equal(parseDefaultsSetupState(state()).state, 'review_required');
+  const parsed = parseDefaultsSetupState(state());
+  assert.equal(parsed.state, 'review_required');
+  assert.equal(
+    parsed.recommended_default_profile.confirmation.shell.executable_artifact_digest,
+    `sha256:${'e'.repeat(64)}`,
+  );
+});
+
+test('typed setup contract requires a valid executable artifact digest', () => {
+  const missing = state();
+  delete (missing.recommended_default_profile.confirmation.shell as Record<string, unknown>)
+    .executable_artifact_digest;
+  assert.throws(
+    () => parseDefaultsSetupState(missing),
+    /Confirmed Shell has unknown or missing fields/,
+  );
+
+  const invalid = state();
+  (invalid.recommended_default_profile.confirmation.shell as Record<string, unknown>)
+    .executable_artifact_digest = 'sha256:not-a-digest';
+  assert.throws(
+    () => parseDefaultsSetupState(invalid),
+    /Confirmed Shell executable artifact digest is invalid/,
+  );
+});
+
+test('typed setup contract rejects extra confirmation shell fields', () => {
+  const extra = state();
+  (extra.recommended_default_profile.confirmation.shell as Record<string, unknown>)
+    .untrusted_digest = `sha256:${'f'.repeat(64)}`;
+  assert.throws(
+    () => parseDefaultsSetupState(extra),
+    /Confirmed Shell has unknown or missing fields/,
+  );
 });
 
 test('typed setup contract fails closed on provider mismatch or duplication', () => {
