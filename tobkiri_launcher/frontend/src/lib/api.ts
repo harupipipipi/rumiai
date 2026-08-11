@@ -20,6 +20,7 @@ import type {
   PackToggleResponseData,
   PacksResponseData,
   PresentationLaunchResponse,
+  RuntimeStatus,
 } from './apiTypes';
 import {
   GetRequestCoordinator,
@@ -37,6 +38,7 @@ import {
   VERIFIED_GENERATED_FRONTEND_CONTRACT_MAP,
 } from './generatedFrontendContractMap';
 import {recordClientDiagnostic} from './clientDiagnostics';
+import {assertRuntimeDispatchAllowed} from './runtimeDispatchGate';
 import {
   getBrowserStorage,
   readSafeStorageValue,
@@ -97,6 +99,97 @@ export class ApiContractError extends Error {
     this.name = 'ApiContractError';
     this.data = data;
   }
+}
+
+const RUNTIME_STATUSES = new Set<RuntimeStatus>([
+  'starting',
+  'panel_ready',
+  'runtime_ready',
+  'profile_reconfirmation_required',
+  'error',
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requiredBoolean(value: Record<string, unknown>, field: string): boolean {
+  if (typeof value[field] !== 'boolean') {
+    throw new Error(`Health response field ${field} is invalid.`);
+  }
+  return value[field] as boolean;
+}
+
+function requiredRuntimeError(value: Record<string, unknown>): string | null {
+  if (value.runtime_error !== null && typeof value.runtime_error !== 'string') {
+    throw new Error('Health response field runtime_error is invalid.');
+  }
+  if (typeof value.runtime_error === 'string' && !value.runtime_error.trim()) {
+    throw new Error('Health response field runtime_error is empty.');
+  }
+  return value.runtime_error as string | null;
+}
+
+function assertCoherentHealth(health: HealthResponseData): void {
+  const hasRuntimeError = health.runtime_error !== null;
+  const coherent = (() => {
+    switch (health.runtime_status) {
+      case 'starting':
+        return health.status === 'ok'
+          && !health.panel_ready
+          && !health.runtime_ready
+          && !hasRuntimeError;
+      case 'panel_ready':
+        return health.status === 'ok'
+          && health.panel_ready
+          && !health.runtime_ready
+          && !hasRuntimeError;
+      case 'profile_reconfirmation_required':
+        return health.status === 'ok'
+          && health.needs_setup
+          && health.panel_ready
+          && !health.runtime_ready
+          && hasRuntimeError;
+      case 'runtime_ready':
+        return health.status === 'ok'
+          && !health.needs_setup
+          && health.panel_ready
+          && health.runtime_ready
+          && !hasRuntimeError;
+      case 'error':
+        return health.status === 'error'
+          && health.panel_ready
+          && !health.runtime_ready
+          && hasRuntimeError;
+      default:
+        return false;
+    }
+  })();
+  if (!coherent) throw new Error('Health response contains contradictory readiness state.');
+}
+
+/** Parse the finite Host health contract before it reaches runtime state. */
+export function parseHealthResponse(value: unknown): HealthResponseData {
+  if (!isRecord(value)) throw new Error('Health response is not an object.');
+  if (value.status !== 'ok' && value.status !== 'error') {
+    throw new Error('Health response status is invalid.');
+  }
+  if (
+    typeof value.runtime_status !== 'string'
+    || !RUNTIME_STATUSES.has(value.runtime_status as RuntimeStatus)
+  ) {
+    throw new Error('Health response runtime_status is invalid.');
+  }
+  const health: HealthResponseData = {
+    status: value.status,
+    needs_setup: requiredBoolean(value, 'needs_setup'),
+    panel_ready: requiredBoolean(value, 'panel_ready'),
+    runtime_ready: requiredBoolean(value, 'runtime_ready'),
+    runtime_status: value.runtime_status as RuntimeStatus,
+    runtime_error: requiredRuntimeError(value),
+  };
+  assertCoherentHealth(health);
+  return health;
 }
 
 type TauriInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
@@ -387,7 +480,12 @@ export async function openExternalUrl(url: string): Promise<void> {
     await invoke('open_external_url', {url});
     return;
   }
-  window.location.href = url;
+  const destination = new URL(url, window.location.href);
+  if (destination.protocol !== 'http:' && destination.protocol !== 'https:') {
+    throw new Error('External navigation requires an HTTP(S) destination.');
+  }
+  const opened = window.open(destination.href, '_blank', 'noopener,noreferrer');
+  if (!opened) throw new Error('The external destination could not be opened.');
 }
 
 export async function sendToBackground(): Promise<void> {
@@ -525,6 +623,9 @@ export async function apiFetch<T>(
   const method = (options.method || 'GET').toUpperCase();
   if (!isExactAllowedApiRequest(path, method)) {
     throw new Error(`The frontend request is not in the exact method/path allowlist: ${method} ${path}`);
+  }
+  if (isFrontendContractPath(path) || isPackVMLifecyclePath(path)) {
+    assertRuntimeDispatchAllowed(method, path);
   }
 
   const fetchRequest = async (
@@ -908,5 +1009,7 @@ export function restartKernel(): Promise<KernelRestartResponseData> {
 }
 
 export function checkHealth(): Promise<HealthResponseData> {
-  return apiFetch<HealthResponseData>('/health');
+  return apiFetch<unknown>('/health').then(parseHealthResponse);
 }
+
+export {getRuntimeDispatchStatus, setRuntimeDispatchStatus} from './runtimeDispatchGate';

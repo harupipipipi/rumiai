@@ -534,13 +534,20 @@ export interface PresentationLaunchResponse {
   message: string;
 }
 
+export type RuntimeStatus =
+  | 'starting'
+  | 'panel_ready'
+  | 'runtime_ready'
+  | 'profile_reconfirmation_required'
+  | 'error';
+
 export interface HealthResponseData {
   status: 'ok' | 'error';
-  needs_setup?: boolean;
-  panel_ready?: boolean;
-  runtime_ready?: boolean;
-  runtime_status?: 'starting' | 'panel_ready' | 'runtime_ready' | 'error';
-  runtime_error?: string | null;
+  needs_setup: boolean;
+  panel_ready: boolean;
+  runtime_ready: boolean;
+  runtime_status: RuntimeStatus;
+  runtime_error: string | null;
 }
 
 export interface WindowRuntimeSnapshot {

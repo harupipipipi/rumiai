@@ -7,6 +7,7 @@ import {MemoryRouter, Route, Routes} from 'react-router';
 
 import type {Pack} from '@/src/store';
 import {useAppStore} from '@/src/store';
+import {setRuntimeDispatchStatus} from '@/src/lib/runtimeDispatchGate';
 import {PackDetail} from './PackDetail';
 import {Packs} from './Packs';
 
@@ -39,6 +40,7 @@ async function renderPage(element: ReactNode) {
 }
 
 test('Packs retains cached data and marks it stale after a refresh failure', async () => {
+  setRuntimeDispatchStatus('runtime_ready');
   useAppStore.setState({packs: [cachedPack], apiError: null, isLoading: false});
   const dispatchError = "('tobkiri.host.pack-control.v4', 'catalog.read')";
   globalThis.fetch = (async () => new Response(JSON.stringify({success: false, data: null, error: dispatchError}), {status: 409})) as typeof fetch;
@@ -53,6 +55,7 @@ test('Packs retains cached data and marks it stale after a refresh failure', asy
 });
 
 test('PackDetail does not mislabel a failed catalog request as an unknown id', async () => {
+  setRuntimeDispatchStatus('runtime_ready');
   useAppStore.setState({packs: [], apiError: null, isLoading: false});
   globalThis.fetch = (async () => new Response(JSON.stringify({success: false, data: null, error: 'Service unavailable'}), {status: 503})) as typeof fetch;
   const {dom, root} = await renderPage(

@@ -21,6 +21,7 @@ import {
   writeSafeStorageValue,
 } from './safeStorage';
 import {useAppStore} from '@/src/store';
+import {setRuntimeDispatchStatus} from '@/src/lib/runtimeDispatchGate';
 
 const digest = (character: string) => `sha256:${character.repeat(64)}`;
 
@@ -62,6 +63,7 @@ let previousStore: ReturnType<typeof useAppStore.getState>;
 let originalFetch: typeof fetch;
 
 beforeEach(() => {
+  setRuntimeDispatchStatus('runtime_ready');
   previousStore = useAppStore.getState();
   originalFetch = globalThis.fetch;
   dom = new JSDOM('<!doctype html><html><body></body></html>', {

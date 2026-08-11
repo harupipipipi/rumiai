@@ -12,10 +12,15 @@ import {
   type DefaultsSetupState,
 } from '@/src/lib/defaultsSetup';
 import {
+  activateDefaultsWithRecovery,
+  recoverDefaultsActivation,
+} from '@/src/lib/defaultsActivationRecovery';
+import {
   fetchPresentationState,
   launchSelectedPresentation,
   selectPresentation,
 } from '@/src/lib/api';
+import {refreshMountedRuntimeSurfaces} from '@/src/lib/runtimeSurfaceRefresh';
 import type {ApiPresentationSelection, ApiPresentationState} from '@/src/lib/apiTypes';
 import {
   defaultPresentationSelection,
@@ -33,10 +38,17 @@ export function Setup() {
   const navigate = useNavigate();
   const setSetupDone = useAppStore((state) => state.setSetupDone);
   const addToast = useAppStore((state) => state.addToast);
+  const runtimeStatus = useAppStore((state) => state.runtimeStatus);
+  const refreshRuntimeHealth = useAppStore((state) => state.refreshRuntimeHealth);
+  const refreshPackVMDoctor = useAppStore((state) => state.refreshPackVMDoctor);
+  const loadPacks = useAppStore((state) => state.loadPacks);
+  const loadFrontendCatalog = useAppStore((state) => state.loadFrontendCatalog);
   const [setup, setSetup] = useState<DefaultsSetupState | null>(null);
   const [reviewed, setReviewed] = useState(false);
   const [activating, setActivating] = useState(false);
+  const [activationCommitted, setActivationCommitted] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
+  const [reconciliationError, setReconciliationError] = useState<string | null>(null);
   const [presentation, setPresentation] = useState<ApiPresentationState | null>(null);
   const [selection, setSelection] = useState<ApiPresentationSelection | null>(null);
   const [presentationLoading, setPresentationLoading] = useState(false);
@@ -44,6 +56,7 @@ export function Setup() {
   const [presentationLaunching, setPresentationLaunching] = useState(false);
   const [presentationError, setPresentationError] = useState<string | null>(null);
   const [complete, setComplete] = useState(false);
+  const profileReconfirmationRequired = runtimeStatus === 'profile_reconfirmation_required';
 
   const loadPresentation = useCallback(async () => {
     setPresentationLoading(true);
@@ -68,6 +81,7 @@ export function Setup() {
       .then((next) => {
         if (!live) return;
         setSetup(next);
+        setActivationCommitted(next.state === 'active');
         if (next.state === 'active') void loadPresentation();
       })
       .catch((error) => {
@@ -76,18 +90,80 @@ export function Setup() {
     return () => { live = false; };
   }, [loadPresentation]);
 
-  const activate = async () => {
-    if (!setup || setup.state !== 'review_required' || !reviewed) return;
+  const reconcileActiveRuntime = useCallback(async () => {
+      await refreshRuntimeHealth();
+      if (useAppStore.getState().runtimeStatus !== 'runtime_ready') {
+        throw new Error(
+          'Defaults activation completed without a verified runtime dispatch map. Retry after the Host is ready.',
+        );
+      }
+      const packVmDoctor = await refreshPackVMDoctor();
+      if (!packVmDoctor?.ready) {
+        throw new Error(
+          'Defaults activation completed, but PackVM readiness could not be verified.',
+        );
+      }
+      await Promise.all([
+        loadPacks(true, {skipMutationReconciliation: true}),
+        loadFrontendCatalog(true),
+      ]);
+      const refreshedState = useAppStore.getState();
+      if (refreshedState.packsError || refreshedState.frontendCatalogError) {
+        throw new Error('Authoritative Pack projections could not be reconciled.');
+      }
+      await refreshMountedRuntimeSurfaces();
+  }, [loadFrontendCatalog, loadPacks, refreshMountedRuntimeSurfaces, refreshPackVMDoctor, refreshRuntimeHealth]);
+
+  const applyRecoveryResult = useCallback(async (
+    result: Awaited<ReturnType<typeof recoverDefaultsActivation>>,
+  ) => {
+    setSetup(result.state);
+    setReviewed(false);
+    setActivationCommitted(result.activationCommitted);
+    const failure = result.error
+      ? message(result.error, 'Defaults activation reconciliation failed.')
+      : null;
+    if (result.state?.state === 'active') {
+      setSetupError(null);
+      setReconciliationError(failure);
+      if (failure) {
+        addToast(failure, 'error');
+      } else {
+        await loadPresentation();
+      }
+      return;
+    }
+    setReconciliationError(null);
+    setSetupError(failure);
+    if (failure) addToast(failure, 'error');
+  }, [addToast, loadPresentation]);
+
+  const recoverActivation = useCallback(async () => {
+    if (activating) return;
     setActivating(true);
     setSetupError(null);
+    const result = await recoverDefaultsActivation({
+      fetchAuthoritativeSetup: fetchDefaultsSetupState,
+      reconcileActiveRuntime,
+    });
     try {
-      await activateDefaultsProfile(setup.recommended_default_profile.confirmation);
-      setSetup({...setup, state: 'active'});
-      await loadPresentation();
-    } catch (error) {
-      const failure = message(error, 'Defaults Profile activation was rejected.');
-      setSetupError(failure);
-      addToast(failure, 'error');
+      await applyRecoveryResult(result);
+    } finally {
+      setActivating(false);
+    }
+  }, [activating, applyRecoveryResult, reconcileActiveRuntime]);
+
+  const activate = async () => {
+    if (activationCommitted || !setup || setup.state !== 'review_required' || !reviewed) return;
+    setActivating(true);
+    setSetupError(null);
+    const result = await activateDefaultsWithRecovery({
+      submitActivation: () => activateDefaultsProfile(setup.recommended_default_profile.confirmation),
+      fetchAuthoritativeSetup: fetchDefaultsSetupState,
+      reconcileActiveRuntime,
+    });
+    try {
+      await applyRecoveryResult(result);
     } finally {
       setActivating(false);
     }
@@ -134,7 +210,11 @@ export function Setup() {
   if (setup?.state === 'active') {
     return <div className="min-h-screen bg-bg-main px-6 py-10"><div className="mx-auto max-w-4xl">
       <Header />
-      {presentation ? <PresentationSelector
+      {reconciliationError ? <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-sm text-red-500">
+        <p className="font-medium text-text-main">Activation is verified; runtime surfaces need reconciliation.</p>
+        <p className="mt-2">{reconciliationError}</p>
+        <div className="mt-4"><Button variant="outline" onClick={() => void recoverActivation()} loading={activating}>Retry runtime reconciliation</Button></div>
+      </div> : presentation ? <PresentationSelector
         state={presentation}
         selection={selection}
         saving={presentationSaving}
@@ -156,7 +236,10 @@ export function Setup() {
       setup={setup}
       reviewed={reviewed}
       activating={activating}
+      activationCommitted={activationCommitted}
       error={setupError}
+      reconfirmationRequired={profileReconfirmationRequired}
+      onRecover={() => void recoverActivation()}
       onReviewedChange={setReviewed}
       onActivate={() => void activate()}
     />

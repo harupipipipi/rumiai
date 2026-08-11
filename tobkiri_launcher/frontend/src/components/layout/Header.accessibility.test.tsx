@@ -207,3 +207,37 @@ test('mobile navigation exposes ordinary named links, moves focus, and closes on
     await cleanupSurface(surface, globalSurfaceSnapshot, release);
   }
 });
+
+test('reconfirmation status is explicit and actionable on the shared desktop/mobile header', {concurrency: false}, async () => {
+  const release = await acquireDomTestLock();
+  const globalSurfaceSnapshot = captureGlobalSurface();
+  const previousState = useAppStore.getState();
+  let surface: Surface | undefined;
+  try {
+    surface = createSurface();
+    const {container, root} = surface;
+    useAppStore.setState({
+      runtimeReady: false,
+      runtimeStatus: 'profile_reconfirmation_required',
+      runtimeError: 'internal diagnostic is intentionally not rendered',
+      runtimeDisconnected: false,
+    });
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={['/packs']}>
+          <Header />
+        </MemoryRouter>,
+      );
+    });
+    const action = container.querySelector<HTMLAnchorElement>('a[href="/setup"]');
+    assert.ok(action);
+    assert.match(action.textContent ?? '', /Profile reconfirmation required/);
+    assert.match(action.getAttribute('aria-label') ?? '', /Open Setup/);
+    assert.doesNotMatch(container.textContent ?? '', /Warming up/);
+    assert.doesNotMatch(container.textContent ?? '', /internal diagnostic/);
+    action.focus();
+    assert.equal(container.ownerDocument.activeElement, action);
+  } finally {
+    await cleanupSurface(surface, globalSurfaceSnapshot, release, () => useAppStore.setState(previousState, true));
+  }
+});

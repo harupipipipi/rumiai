@@ -1,6 +1,10 @@
 import { useDeferredValue, useEffect, useLayoutEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router';
-import { cancelPackMutationReconciliation, useAppStore } from '@/src/store';
+import {
+  cancelPackMutationReconciliation,
+  useAppStore,
+  type RuntimeStatus,
+} from '@/src/store';
 import { Layout } from '@/src/components/layout/Layout';
 import { Setup } from '@/src/pages/Setup';
 import { Dashboard } from '@/src/pages/Dashboard';
@@ -30,6 +34,7 @@ export default function App() {
   const theme = useAppStore(state => state.theme);
   const colorMode = useAppStore(state => state.colorMode);
   const isSetupDone = useAppStore(state => state.isSetupDone);
+  const runtimeStatus = useAppStore(state => state.runtimeStatus);
   const setSetupDone = useAppStore(state => state.setSetupDone);
   const addToast = useAppStore(state => state.addToast);
   const refreshRuntimeHealth = useAppStore(state => state.refreshRuntimeHealth);
@@ -136,14 +141,20 @@ export default function App() {
 
   return (
     <BrowserRouter basename="/panel">
-      <DeferredRouteTree isSetupDone={isSetupDone} />
+      <DeferredRouteTree isSetupDone={isSetupDone} runtimeStatus={runtimeStatus} />
       <ToastContainer />
       <DialogContainer />
     </BrowserRouter>
   );
 }
 
-function DeferredRouteTree({ isSetupDone }: { isSetupDone: boolean }) {
+function DeferredRouteTree({
+  isSetupDone,
+  runtimeStatus,
+}: {
+  isSetupDone: boolean;
+  runtimeStatus: RuntimeStatus;
+}) {
   const location = useLocation();
   const deferredLocation = useDeferredValue(location);
   const routePending =
@@ -159,7 +170,9 @@ function DeferredRouteTree({ isSetupDone }: { isSetupDone: boolean }) {
 
         <Route
           path={panelRoutes.home}
-          element={isSetupDone ? <Layout /> : <Navigate to={panelRoutes.setup} replace />}
+          element={isSetupDone && runtimeStatus !== 'profile_reconfirmation_required'
+            ? <Layout />
+            : <Navigate to={panelRoutes.setup} replace />}
         >
           <Route index element={<Dashboard />} />
           <Route path={panelRoutes.packs.slice(1)} element={<LazyPacks />} />

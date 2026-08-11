@@ -5,7 +5,7 @@ import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
 import { describeRuntimeBadge } from '@/src/lib/runtimeHealth';
-import { isPanelRouteActive, panelRouteMeta, panelRouteTitleKey, viewerNavGroups } from '@/src/lib/routes';
+import { isPanelRouteActive, panelRouteMeta, panelRouteTitleKey, panelRoutes, viewerNavGroups } from '@/src/lib/routes';
 import { preloadPanelRoute } from '@/src/lib/routeModules';
 import { Avatar } from '@/src/components/ui/Avatar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/src/components/ui/Popover';
@@ -26,10 +26,18 @@ export function Header() {
     runtimeDisconnected,
     lastRuntimeHealthyAt,
   });
+  const profileReconfirmationRequired = runtimeStatus === 'profile_reconfirmation_required';
 
   const pageTitle = t(panelRouteTitleKey(location.pathname));
 
   const runtimePill = (() => {
+    if (profileReconfirmationRequired) {
+      return {
+        label: 'Profile reconfirmation required',
+        dotClass: 'bg-amber-500',
+        textClass: 'text-amber-600 dark:text-amber-400',
+      };
+    }
     if (runtimeStatus === 'error') {
       return {
         label: 'Runtime error',
@@ -114,22 +122,38 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-3">
-        <div
-          className={cn(
-            "rumi-control-pill hidden md:inline-flex",
-            runtimePill.textClass,
-          )}
-          role="status"
-          aria-live="polite"
-          title={runtimePill.label}
-        >
-          {!runtimeReady && runtimeStatus !== 'error' ? (
-            <TobkiriLoadingMark className="h-3 w-6" />
-          ) : (
+        {profileReconfirmationRequired ? (
+          <Link
+            to={panelRoutes.setup}
+            className={cn(
+              "rumi-control-pill inline-flex min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]",
+              runtimePill.textClass,
+            )}
+            aria-label="Profile reconfirmation required. Open Setup to review and activate the Profile."
+            aria-live="polite"
+            title={runtimePill.label}
+          >
             <span className={cn("rumi-control-pill-dot", runtimePill.dotClass)} />
-          )}
-          <span>{runtimePill.label}</span>
-        </div>
+            <span>{runtimePill.label}</span>
+          </Link>
+        ) : (
+          <div
+            className={cn(
+              "rumi-control-pill hidden md:inline-flex",
+              runtimePill.textClass,
+            )}
+            role="status"
+            aria-live="polite"
+            title={runtimePill.label}
+          >
+            {!runtimeReady && runtimeStatus !== 'error' ? (
+              <TobkiriLoadingMark className="h-3 w-6" />
+            ) : (
+              <span className={cn("rumi-control-pill-dot", runtimePill.dotClass)} />
+            )}
+            <span>{runtimePill.label}</span>
+          </div>
+        )}
         <Popover>
           <PopoverTrigger
             className="flex min-h-11 items-center gap-2 rounded-lg px-2 text-left transition hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"

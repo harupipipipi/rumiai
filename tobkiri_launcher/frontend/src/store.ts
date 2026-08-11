@@ -10,11 +10,14 @@ import {
   installPack as apiInstallPack,
   invokeFrontendCapability,
   revokePackApproval as apiRevokePackApproval,
+  parseHealthResponse,
 } from './lib/api';
 import type {
   ApiDynamicFrontendCatalog,
   ApiPackVMDoctor,
   ApiSupervisorDashboard,
+  HealthResponseData,
+  RuntimeStatus,
 } from './lib/apiTypes';
 import {transformPacks} from './lib/transforms';
 import {
@@ -45,6 +48,7 @@ import {
   type OperationStatusState,
 } from './lib/operationStatus';
 import {recordClientDiagnostic} from './lib/clientDiagnostics';
+import {setRuntimeDispatchStatus} from './lib/runtimeDispatchGate';
 import {
   getBrowserStorage,
   readSafeStorageValue,
@@ -137,7 +141,7 @@ export interface Profile {
   connected: boolean;
 }
 
-export type RuntimeStatus = 'starting' | 'panel_ready' | 'runtime_ready' | 'error';
+export type {RuntimeStatus} from './lib/apiTypes';
 
 const SIDEBAR_STORAGE_KEY = 'tobkiri-launcher-sidebar-open';
 const LEGACY_SIDEBAR_STORAGE_KEY = 'rumi-viewer-sidebar-open';
@@ -167,13 +171,7 @@ interface AppState {
   runtimeError: string | null;
   runtimeDisconnected: boolean;
   lastRuntimeHealthyAt: number | null;
-  setRuntimeHealth: (health: {
-    status?: 'ok' | 'error';
-    panel_ready?: boolean;
-    runtime_ready?: boolean;
-    runtime_status?: RuntimeStatus;
-    runtime_error?: string | null;
-  }) => void;
+  setRuntimeHealth: (health: HealthResponseData) => void;
   refreshRuntimeHealth: () => Promise<void>;
   packs: Pack[];
   packsLoading: boolean;
@@ -602,28 +600,41 @@ export const useAppStore = create<AppState>((set, get) => ({
   runtimeError: null,
   runtimeDisconnected: false,
   lastRuntimeHealthyAt: null,
-  setRuntimeHealth: (health) =>
+  setRuntimeHealth: (health) => {
+    let parsedHealth: HealthResponseData;
+    try {
+      parsedHealth = parseHealthResponse(health);
+    } catch (error) {
+      recordClientDiagnostic({
+        code: 'runtime.health_contract_invalid',
+        operation: 'runtime.health',
+        error,
+      });
+      setRuntimeDispatchStatus('error');
+      set((state) => ({
+        runtimeReady: false,
+        runtimeStatus: 'error',
+        runtimeError: 'Runtime health response failed validation.',
+        runtimeDisconnected: state.lastRuntimeHealthyAt !== null,
+      }));
+      throw error;
+    }
+    setRuntimeDispatchStatus(parsedHealth.runtime_status);
     set((state) => ({
-      runtimeReady: Boolean(health.runtime_ready),
-      runtimeStatus:
-        health.runtime_status ??
-        (health.status === 'error'
-          ? 'error'
-          : health.runtime_ready
-            ? 'runtime_ready'
-            : health.panel_ready
-              ? 'panel_ready'
-              : state.runtimeStatus),
-      runtimeError: health.runtime_error ?? null,
+      runtimeReady: parsedHealth.runtime_ready,
+      runtimeStatus: parsedHealth.runtime_status,
+      runtimeError: parsedHealth.runtime_error,
       runtimeDisconnected: false,
-      lastRuntimeHealthyAt: health.runtime_ready ? Date.now() : state.lastRuntimeHealthyAt,
-    })),
+      lastRuntimeHealthyAt: parsedHealth.runtime_ready ? Date.now() : state.lastRuntimeHealthyAt,
+    }));
+  },
   refreshRuntimeHealth: async () => {
     try {
       const health = await checkHealth();
       get().setRuntimeHealth(health);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to read runtime health';
+      setRuntimeDispatchStatus('error');
       set((state) => ({
         runtimeReady: false,
         runtimeStatus: 'error',

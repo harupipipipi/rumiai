@@ -19,6 +19,9 @@ export function Layout() {
   if (!isSetupDone) {
     return <Navigate to={panelRoutes.setup} replace />;
   }
+  if (runtimeStatus === 'profile_reconfirmation_required') {
+    return <Navigate to={panelRoutes.setup} replace />;
+  }
 
   const runtimeBanner = describeRuntimeBanner({
     runtimeReady,

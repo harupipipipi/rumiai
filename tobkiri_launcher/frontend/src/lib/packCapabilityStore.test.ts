@@ -4,6 +4,7 @@ import {JSDOM} from 'jsdom';
 
 import {type Pack, useAppStore} from '@/src/store';
 import type {ApiPackVMDoctor} from '@/src/lib/apiTypes';
+import {setRuntimeDispatchStatus} from '@/src/lib/runtimeDispatchGate';
 
 const operation = {
   operation_id: 'rumi_file_inspect_pack.file-inspect',
@@ -79,6 +80,7 @@ let previousState: ReturnType<typeof useAppStore.getState>;
 let originalFetch: typeof fetch;
 
 beforeEach(() => {
+  setRuntimeDispatchStatus('runtime_ready');
   previousState = useAppStore.getState();
   originalFetch = globalThis.fetch;
   dom = new JSDOM('<!doctype html><html><body></body></html>', {

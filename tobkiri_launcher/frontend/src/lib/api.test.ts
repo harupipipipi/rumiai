@@ -21,6 +21,8 @@ import {
   revokePackApproval,
   restartKernel,
   selectPresentation,
+  parseHealthResponse,
+  setRuntimeDispatchStatus,
 } from './api.ts';
 import {
   extractExactOperationDescriptors,
@@ -125,6 +127,19 @@ function installFetchMock(): void {
         success: true,
       }), {headers: {'Content-Type': 'application/json'}});
     }
+    if (lastFetchUrl === '/health') {
+      return new Response(JSON.stringify({
+        data: {
+          needs_setup: false,
+          panel_ready: true,
+          runtime_ready: true,
+          runtime_status: 'runtime_ready',
+          runtime_error: null,
+          status: 'ok',
+        },
+        success: true,
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
     const route = decodeURIComponent(lastFetchUrl.replace('/api/contracts/defaultspack/', ''));
     const data = route === 'POST /api/pack-control/approval-candidate'
       ? {candidate_id: 'candidate-one', pack_id: 'pack-a', snapshot_digest: `sha256:${'a'.repeat(64)}`}
@@ -157,6 +172,7 @@ function installFetchMock(): void {
 
 beforeEach(() => {
   clearApiPrefetchCache();
+  setRuntimeDispatchStatus('runtime_ready');
   lastFetchUrl = '';
   lastFetchInit = undefined;
   exchangeCount = 0;
@@ -591,6 +607,119 @@ test('setup and health requests remain separate from Pack contract dispatch', as
     apiFetch('/api/pack-control/disable', {method: 'POST'}),
     /exact method\/path allowlist/,
   );
+});
+
+test('health parsing recognizes reconfirmation and preserves the typed setup path', async () => {
+  const health = parseHealthResponse({
+    status: 'ok',
+    needs_setup: true,
+    panel_ready: true,
+    runtime_ready: false,
+    runtime_status: 'profile_reconfirmation_required',
+    runtime_error: 'internal denial detail is not surfaced by the UI',
+  });
+  assert.equal(health.runtime_status, 'profile_reconfirmation_required');
+  assert.equal(health.runtime_ready, false);
+
+  setRuntimeDispatchStatus('profile_reconfirmation_required');
+  await apiFetch('/api/setup/packs');
+  assert.equal(lastFetchUrl, '/api/setup/packs');
+  await assert.rejects(
+    fetchDashboard(),
+    /Profile reconfirmation is required.*Setup first/,
+  );
+  assert.equal(lastFetchUrl, '/api/setup/packs');
+});
+
+test('dispatch gate releases only after the Host publishes runtime_ready', async () => {
+  setRuntimeDispatchStatus('profile_reconfirmation_required');
+  await assert.rejects(
+    fetchFrontendContractOperation('POST', '/api/runtime-surface/profile-change/activate', {
+      approval_id: 'approval',
+      approval_digest: `sha256:${'a'.repeat(64)}`,
+    }),
+    /Profile reconfirmation is required/,
+  );
+  assert.equal(lastFetchUrl, '');
+
+  setRuntimeDispatchStatus('runtime_ready');
+  await fetchFrontendContractOperation('GET', '/api/home/dashboard');
+  assert.equal(
+    decodeURIComponent(lastFetchUrl.replace('/api/contracts/defaultspack/', '')),
+    'GET /api/home/dashboard',
+  );
+});
+
+test('health parsing rejects an unknown or tampered runtime status', () => {
+  assert.throws(
+    () => parseHealthResponse({status: 'ok', runtime_status: 'runtime_ready_with_empty_map'}),
+    /runtime_status is invalid/,
+  );
+  assert.throws(
+    () => parseHealthResponse({
+      status: 'ok',
+      needs_setup: false,
+      panel_ready: true,
+      runtime_ready: 'yes',
+      runtime_status: 'runtime_ready',
+      runtime_error: null,
+    }),
+    /runtime_ready is invalid/,
+  );
+});
+
+test('health parsing accepts only coherent lifecycle relationships across all permutations', () => {
+  const statuses = [
+    'starting',
+    'panel_ready',
+    'profile_reconfirmation_required',
+    'runtime_ready',
+    'error',
+  ] as const;
+  const booleans = [false, true];
+  const errors = [null, 'denied'];
+
+  for (const runtimeStatus of statuses) {
+    for (const status of ['ok', 'error'] as const) {
+      for (const needsSetup of booleans) {
+        for (const panelReady of booleans) {
+          for (const runtimeReady of booleans) {
+            for (const runtimeError of errors) {
+              const candidate = {
+                status,
+                needs_setup: needsSetup,
+                panel_ready: panelReady,
+                runtime_ready: runtimeReady,
+                runtime_status: runtimeStatus,
+                runtime_error: runtimeError,
+              };
+              const coherent = runtimeStatus === 'starting'
+                ? status === 'ok' && !panelReady && !runtimeReady && runtimeError === null
+                : runtimeStatus === 'panel_ready'
+                  ? status === 'ok' && panelReady && !runtimeReady && runtimeError === null
+                  : runtimeStatus === 'profile_reconfirmation_required'
+                    ? status === 'ok' && needsSetup && panelReady && !runtimeReady
+                      && runtimeError === 'denied'
+                    : runtimeStatus === 'runtime_ready'
+                      ? status === 'ok' && !needsSetup && panelReady && runtimeReady
+                        && runtimeError === null
+                      : status === 'error' && panelReady && !runtimeReady
+                        && runtimeError === 'denied';
+              if (coherent) {
+                assert.doesNotThrow(() => parseHealthResponse(candidate));
+              } else {
+                assert.throws(
+                  () => parseHealthResponse(candidate),
+                  /contradictory|invalid|empty/,
+                  JSON.stringify(candidate),
+                );
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 });
 
 test('exact route allowlist rejects legacy, map-external, wildcard, and malformed host paths', async () => {

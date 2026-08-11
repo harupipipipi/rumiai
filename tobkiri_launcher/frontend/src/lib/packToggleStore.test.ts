@@ -9,6 +9,7 @@ import {
   waitForPackMutationReconciliation,
 } from '@/src/store';
 import type {ApiPackVMDoctor} from '@/src/lib/apiTypes';
+import {setRuntimeDispatchStatus} from '@/src/lib/runtimeDispatchGate';
 
 const samplePack: Pack = {
   id: 'research-pack',
@@ -78,6 +79,7 @@ function restoreGlobalSurface(snapshot: GlobalSurfaceSnapshot): void {
 }
 
 beforeEach(() => {
+  setRuntimeDispatchStatus('runtime_ready');
   previousState = useAppStore.getState();
   previousGlobals = captureGlobalSurface();
   dom = new JSDOM('<!doctype html><html><body></body></html>', {

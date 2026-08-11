@@ -11,6 +11,7 @@ import {
   writeSafeStorageValue,
 } from '@/src/lib/safeStorage';
 import {useAppStore} from '@/src/store';
+import {setRuntimeDispatchStatus} from '@/src/lib/runtimeDispatchGate';
 import {PackVMLifecyclePanel} from './PackVMLifecyclePanel';
 
 const digest = (character: string) => `sha256:${character.repeat(64)}`;
@@ -162,6 +163,7 @@ let originalFetch: typeof fetch;
 let surface: {dom: JSDOM; container: HTMLElement; root: Root} | null = null;
 
 beforeEach(() => {
+  setRuntimeDispatchStatus('runtime_ready');
   previousState = useAppStore.getState();
   originalFetch = globalThis.fetch;
   surface = createSurface();
