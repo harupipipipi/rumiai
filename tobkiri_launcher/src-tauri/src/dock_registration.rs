@@ -7,7 +7,7 @@ use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Stdio};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -28,7 +28,6 @@ const DEFAULTSPACK_READY_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULTSPACK_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const DEFAULTSPACK_WINDOW_LABEL: &str = "defaultspack-main";
 const DEFAULTSPACK_WINDOW_TITLE: &str = "Tobkiri";
-const DEFAULTSPACK_RUNPY_SHIM: &str = "import runpy,sys; root=sys.argv.pop(1); entry=sys.argv.pop(1); sys.path.insert(0,root); runpy.run_path(entry,run_name='__main__')";
 static DEFAULTSPACK_LAUNCH_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn with_defaultspack_launch_coordination<T>(
@@ -117,20 +116,6 @@ fn venv_bin_dir(venv_dir: &Path) -> PathBuf {
     } else {
         venv_dir.join("bin")
     }
-}
-
-fn defaultspack_python_argv(
-    config: &AppConfig,
-    metadata: &DefaultspackDesktopMetadata,
-) -> Vec<OsString> {
-    let mut argv = vec![
-        OsString::from("-c"),
-        OsString::from(DEFAULTSPACK_RUNPY_SHIM),
-        config.app_dir.as_os_str().to_owned(),
-        metadata.entrypoint.as_os_str().to_owned(),
-    ];
-    argv.extend(metadata.argv.iter().cloned());
-    argv
 }
 
 fn defaultspack_window_url(port: u16) -> String {
@@ -916,7 +901,7 @@ pub(crate) fn spawn_defaultspack_local_server(
     metadata: &DefaultspackDesktopMetadata,
     broker_attestation: &crate::host_broker::BrokerAttestationIdentity,
     guardian_run_id: &str,
-) -> AnyResult<Child> {
+) -> AnyResult<crate::python_env::PythonChild> {
     let api_token = read_desktop_api_token_from_config(config)?;
     let panel_bootstrap_secret = read_panel_bootstrap_secret_from_config(config)?;
     let host_contract_path = crate::host_contract::write_contract(
@@ -938,89 +923,116 @@ pub(crate) fn spawn_defaultspack_local_server(
     // Spawn the actual long-lived server as the Launcher child. pack-shell's
     // `run` command delegates to Kernel and exits, which leaves the real
     // listener orphaned and cannot provide a process-lifetime guardian.
-    let mut command = process_utils::isolated_python(config.venv_python());
-    command
-        .args(defaultspack_python_argv(config, metadata))
-        .env("PATH", path)
-        .env_remove("PYTHONPATH")
-        .env("RUMI_HOME", &config.rumi_home)
-        .env("RUMI_APP_DIR", &config.app_dir)
-        .env("RUMI_USER_DATA", &config.user_data_dir)
-        .env(
-            "RUMI_DEFAULTSPACK_SECRETS_DIR",
-            config.user_data_dir.join("secrets"),
-        )
-        .env(
-            "RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH",
-            config
-                .user_data_dir
-                .join("defaultspack")
-                .join("shared")
-                .join("frontend_settings.json"),
-        )
-        .env("RUMI_LOG_DIR", &config.log_dir)
-        .env("PYTHONDONTWRITEBYTECODE", "1")
-        .env(
-            viewer_host_broker_connection_env_key(),
-            viewer_host_broker_connection_env_value(config),
-        )
-        .env(
-            "RUMI_VIEWER_BROKER_ATTESTATION_PUBLIC_KEY",
-            broker_attestation.public_key_base64(),
-        )
-        .env(
-            "RUMI_VIEWER_BROKER_INSTANCE_NONCE",
-            broker_attestation.instance_nonce(),
-        )
-        .env("RUMI_DEFAULTSPACK_GUARDIAN_RUN_ID", guardian_run_id)
-        .env(crate::host_contract::CONTRACT_ENV, &host_contract_path)
-        .current_dir(&metadata.app_working_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    let role_arguments =
+        crate::python_env::RoleArguments::defaultspack(metadata.argv.iter().cloned())?;
+    crate::python_env::spawn_python_role(
+        config,
+        crate::python_env::PythonRole::Defaultspack,
+        role_arguments,
+        |command| {
+            if config.is_dev_workspace() {
+                command
+                    .env("PATH", &path)
+                    .env("RUMI_APP_DIR", &config.app_dir);
+            }
+            command
+                .env_remove("PYTHONPATH")
+                .env("RUMI_HOME", &config.rumi_home)
+                .env("RUMI_USER_DATA", &config.user_data_dir)
+                .env(
+                    "RUMI_DEFAULTSPACK_SECRETS_DIR",
+                    config.user_data_dir.join("secrets"),
+                )
+                .env(
+                    "RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH",
+                    config
+                        .user_data_dir
+                        .join("defaultspack")
+                        .join("shared")
+                        .join("frontend_settings.json"),
+                )
+                .env("RUMI_LOG_DIR", &config.log_dir)
+                .env("PYTHONDONTWRITEBYTECODE", "1")
+                .env(
+                    viewer_host_broker_connection_env_key(),
+                    viewer_host_broker_connection_env_value(config),
+                )
+                .env(
+                    "RUMI_VIEWER_BROKER_ATTESTATION_PUBLIC_KEY",
+                    broker_attestation.public_key_base64(),
+                )
+                .env(
+                    "RUMI_VIEWER_BROKER_INSTANCE_NONCE",
+                    broker_attestation.instance_nonce(),
+                )
+                .env("RUMI_DEFAULTSPACK_GUARDIAN_RUN_ID", guardian_run_id)
+                .env(crate::host_contract::CONTRACT_ENV, &host_contract_path)
+                .current_dir(&metadata.app_working_dir)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
 
-    for (key, value) in &metadata.env_vars {
-        command.env(key, value);
-    }
-    // Metadata is deliberately applied first.  These exact values are then
-    // asserted for the child so a desktop_app env entry cannot redirect a
-    // debug run to production/default ports or an unrelated listener.
-    command
-        .env(
-            viewer_host_broker_connection_env_key(),
-            viewer_host_broker_connection_env_value(config),
-        )
-        .env(
-            "RUMI_VIEWER_BROKER_ATTESTATION_PUBLIC_KEY",
-            broker_attestation.public_key_base64(),
-        )
-        .env(
-            "RUMI_VIEWER_BROKER_INSTANCE_NONCE",
-            broker_attestation.instance_nonce(),
-        )
-        .env("RUMI_DEFAULTSPACK_GUARDIAN_RUN_ID", guardian_run_id)
-        .env("DEFAULTS_HTTP_HOST", "127.0.0.1")
-        .env("DEFAULTS_HTTP_PORT", metadata.port.to_string())
-        .env("RUMI_DEFAULTSPACK_PORT", metadata.port.to_string())
-        .env("RUMI_PORT", config.kernel_port.to_string());
-    if crate::debug_defaultspack_ports_from_env().is_some() {
-        command
-            .env("RUMI_DEFAULTSPACK_DEBUG_ISOLATION", "1")
-            .env("RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND", "1");
-    }
-    command
-        .env("RUMI_DEFAULTSPACK_OPEN_BROWSER", "0")
-        .env("PYTHONDONTWRITEBYTECODE", "1");
+            // The metadata map exists for development launch compatibility. A
+            // packaged child receives only the typed values below; even a
+            // catalog-controlled key cannot become an environment injection
+            // path in production.
+            apply_defaultspack_metadata_environment(
+                command,
+                config.is_dev_workspace(),
+                &metadata.env_vars,
+            );
+            // Metadata is deliberately applied first.  These exact values are then
+            // asserted for the child so a desktop_app env entry cannot redirect a
+            // debug run to production/default ports or an unrelated listener.
+            command
+                .env(
+                    viewer_host_broker_connection_env_key(),
+                    viewer_host_broker_connection_env_value(config),
+                )
+                .env(
+                    "RUMI_VIEWER_BROKER_ATTESTATION_PUBLIC_KEY",
+                    broker_attestation.public_key_base64(),
+                )
+                .env(
+                    "RUMI_VIEWER_BROKER_INSTANCE_NONCE",
+                    broker_attestation.instance_nonce(),
+                )
+                .env("RUMI_DEFAULTSPACK_GUARDIAN_RUN_ID", guardian_run_id)
+                .env("DEFAULTS_HTTP_HOST", "127.0.0.1")
+                .env("DEFAULTS_HTTP_PORT", metadata.port.to_string())
+                .env("RUMI_DEFAULTSPACK_PORT", metadata.port.to_string())
+                .env("RUMI_DEFAULTSPACK_SURFACE", "webview")
+                .env("RUMI_PORT", config.kernel_port.to_string());
+            if crate::debug_defaultspack_ports_from_env().is_some() {
+                command
+                    .env("RUMI_DEFAULTSPACK_DEBUG_ISOLATION", "1")
+                    .env("RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND", "1");
+            }
+            command
+                .env("RUMI_DEFAULTSPACK_OPEN_BROWSER", "0")
+                .env("PYTHONDONTWRITEBYTECODE", "1");
 
-    #[cfg(unix)]
-    configure_defaultspack_process_group(&mut command);
-
-    command.spawn().with_context(|| {
+            #[cfg(unix)]
+            command.new_process_group();
+            Ok(())
+        },
+    )
+    .with_context(|| {
         format!(
-            "failed to spawn managed Defaultspack with {}",
+            "failed to verify and spawn managed Defaultspack with {}",
             config.venv_python().display()
         )
     })
+}
+
+fn apply_defaultspack_metadata_environment(
+    command: &mut crate::python_env::RoleCommand<'_>,
+    development_workspace: bool,
+    environment: &[(String, String)],
+) {
+    if development_workspace {
+        command.envs(environment.iter().map(|(key, value)| (key, value)));
+    }
 }
 
 fn viewer_host_broker_connection_env_key() -> &'static str {
@@ -1050,6 +1062,29 @@ mod tests {
             kernel_port: 8765,
             dev_workspace_root: None,
         }
+    }
+
+    #[test]
+    fn packaged_defaultspack_does_not_apply_generic_metadata_environment() {
+        let metadata_environment = vec![
+            ("RUMI_HOME".to_owned(), "/catalog-controlled".to_owned()),
+            ("PYTHONPATH".to_owned(), "/import-injection".to_owned()),
+        ];
+        let mut packaged = std::process::Command::new("python");
+        apply_defaultspack_metadata_environment(
+            &mut crate::python_env::RoleCommand::new(&mut packaged),
+            false,
+            &metadata_environment,
+        );
+        assert_eq!(packaged.get_envs().count(), 0);
+
+        let mut development = std::process::Command::new("python");
+        apply_defaultspack_metadata_environment(
+            &mut crate::python_env::RoleCommand::new(&mut development),
+            true,
+            &metadata_environment,
+        );
+        assert_eq!(development.get_envs().count(), 2);
     }
 
     #[test]
@@ -1283,47 +1318,6 @@ mod tests {
                 .join("connection.json")
         );
         fs::remove_dir_all(&root).ok();
-    }
-
-    #[test]
-    fn packaged_launch_materializes_verified_entrypoint_once_and_no_application_argv() {
-        let root = std::env::temp_dir().join(format!(
-            "tobkiri-defaultspack-launch-argv-{}",
-            std::process::id()
-        ));
-        let config = test_config(&root);
-        let entrypoint = config
-            .app_dir
-            .join("ecosystem/defaultspack/defaultspack/desktop_app.py");
-        let metadata = DefaultspackDesktopMetadata {
-            entrypoint: entrypoint.clone(),
-            argv: Vec::new(),
-            app_working_dir: config.app_dir.join("ecosystem/defaultspack"),
-            env_vars: Vec::new(),
-            port: DEFAULTSPACK_DEFAULT_PORT,
-            profile_id: "defaults".into(),
-            profile_digest: format!("sha256:{}", "1".repeat(64)),
-            catalog_revision: format!("sha256:{}", "2".repeat(64)),
-            artifact_digest: format!("sha256:{}", "3".repeat(64)),
-            function_id: "runtime.tauri.application.default".into(),
-            provider_id: "runtime.tauri.application.default".into(),
-        };
-
-        let argv = defaultspack_python_argv(&config, &metadata);
-
-        assert_eq!(argv.len(), 4);
-        assert_eq!(argv[0], "-c");
-        assert_eq!(argv[1], DEFAULTSPACK_RUNPY_SHIM);
-        assert_eq!(argv[2], config.app_dir.as_os_str());
-        assert_eq!(argv[3], entrypoint.as_os_str());
-        assert_eq!(
-            argv.iter()
-                .filter(|argument| argument.as_os_str() == entrypoint.as_os_str())
-                .count(),
-            1
-        );
-        assert!(DEFAULTSPACK_RUNPY_SHIM.contains("entry=sys.argv.pop(1)"));
-        fs::remove_dir_all(root).ok();
     }
 
     #[test]

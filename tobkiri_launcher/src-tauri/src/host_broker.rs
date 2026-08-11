@@ -31,7 +31,6 @@ use crate::host_broker_types::{
     HostBrokerIntentRequest, HostBrokerIntentResponse, HostBrokerStatus,
     HostBrokerStreamStopRequest,
 };
-use crate::process_utils;
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 pub(crate) const DEFAULT_PORT: u16 = 8770;
@@ -2374,38 +2373,42 @@ fn run_computer_helper(
         .join("core_runtime")
         .join("host_broker")
         .join("computer_host_helper.py");
-    if !helper_path.exists() {
+    if config.is_dev_workspace() && !helper_path.exists() {
         return Err(ComputerHelperError::Failed(anyhow!(
             "Viewer host helper is missing at {}",
             helper_path.display()
         )));
     }
 
-    let mut command = process_utils::isolated_python(config.venv_python());
-    command
-        .arg(helper_path)
-        .current_dir(&config.app_dir)
-        .env("RUMI_HOME", &config.rumi_home)
-        .env("RUMI_USER_DATA", &config.user_data_dir)
-        .env("RUMI_LOG_DIR", &config.log_dir)
-        .env("PYTHONDONTWRITEBYTECODE", "1")
-        .env_remove("RUMI_DEFAULTSPACK_CHAT_STORE_PATH");
-    if let Some(path) = trusted_helper_chat_store_path(
-        std::env::var_os("RUMI_VIEWER_TRUSTED_DEFAULTSPACK_CHAT_STORE_PATH").as_deref(),
-    ) {
-        command.env("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", path);
-    }
-
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| {
-            ComputerHelperError::Failed(
-                anyhow!(error).context("failed to start Viewer host helper"),
-            )
-        })?;
+    let mut child = crate::python_env::spawn_python_role(
+        config,
+        crate::python_env::PythonRole::HostHelper,
+        crate::python_env::RoleArguments::default(),
+        |command| {
+            command
+                .current_dir(&config.app_dir)
+                .env("RUMI_HOME", &config.rumi_home)
+                .env("RUMI_USER_DATA", &config.user_data_dir)
+                .env("RUMI_LOG_DIR", &config.log_dir)
+                .env("PYTHONDONTWRITEBYTECODE", "1")
+                .env_remove("RUMI_DEFAULTSPACK_CHAT_STORE_PATH");
+            if let Some(path) = trusted_helper_chat_store_path(
+                std::env::var_os("RUMI_VIEWER_TRUSTED_DEFAULTSPACK_CHAT_STORE_PATH").as_deref(),
+            ) {
+                command.env("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", path);
+            }
+            command
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            Ok(())
+        },
+    )
+    .map_err(|error| {
+        ComputerHelperError::Failed(
+            anyhow!(error).context("failed to verify and start Viewer host helper"),
+        )
+    })?;
 
     let body = json!({
         "function_id": function_id,

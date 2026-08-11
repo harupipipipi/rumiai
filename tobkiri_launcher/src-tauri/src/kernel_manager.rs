@@ -10,7 +10,7 @@ use std::fs;
 #[cfg(unix)]
 use std::io::ErrorKind;
 use std::path::Path;
-use std::process::{Child, Stdio};
+use std::process::Stdio;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -84,7 +84,7 @@ impl PortListener {
 
 /// Manages a single Kernel child process.
 pub struct KernelManager {
-    child: Option<Child>,
+    child: Option<crate::python_env::PythonChild>,
     config: AppConfig,
     panel_bootstrap_secret: String,
     /// Stores the exit code from the most recent child exit.
@@ -164,51 +164,54 @@ impl KernelManager {
             )],
         )?;
 
-        let mut command = process_utils::isolated_python(&venv_python);
-        command
-            .args([
-                "-c",
-                "import runpy,sys; root=sys.argv.pop(1); sys.path.insert(0,root); runpy.run_module('app',run_name='__main__',alter_sys=True)",
-            ])
-            .arg(&self.config.app_dir)
-            .current_dir(working_dir)
-            .env_remove("PYTHONPATH")
-            .env("RUMI_HOME", &self.config.rumi_home)
-            .env("RUMI_APP_DIR", &self.config.app_dir)
-            .env("RUMI_USER_DATA", &self.config.user_data_dir)
-            .env(
-                "RUMI_DEFAULTSPACK_SECRETS_DIR",
-                self.config.user_data_dir.join("secrets"),
-            )
-            .env(
-                "RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH",
-                self.config
-                    .user_data_dir
-                    .join("defaultspack")
-                    .join("shared")
-                    .join("frontend_settings.json"),
-            )
-            .env("RUMI_LOG_DIR", &self.config.log_dir)
-            .env("RUMI_PORT", self.config.kernel_port.to_string())
-            .env(crate::host_contract::CONTRACT_ENV, &host_contract_path)
-            .env(
-                "RUMI_VIEWER_HOST_BROKER_CONNECTION",
-                self.config.host_broker_connection_path(),
-            )
-            .env("RUMI_MACOS_PERMISSION_HOST", "tobkiri_launcher")
-            .envs(python_runtime_env_vars())
-            .env(
-                "RUMI_ENVIRONMENT",
-                if dev_environment {
-                    "development"
-                } else {
-                    "production"
-                },
-            )
-            .stdout(Stdio::from(log_file))
-            .stderr(Stdio::from(log_stderr));
-
-        let child = command.spawn().context("failed to spawn Kernel process")?;
+        let child = crate::python_env::spawn_python_role(
+            &self.config,
+            crate::python_env::PythonRole::Kernel,
+            crate::python_env::RoleArguments::default(),
+            |command| {
+                if self.config.is_dev_workspace() {
+                    command.env("RUMI_APP_DIR", &self.config.app_dir);
+                }
+                command
+                    .current_dir(working_dir)
+                    .env_remove("PYTHONPATH")
+                    .env("RUMI_HOME", &self.config.rumi_home)
+                    .env("RUMI_USER_DATA", &self.config.user_data_dir)
+                    .env(
+                        "RUMI_DEFAULTSPACK_SECRETS_DIR",
+                        self.config.user_data_dir.join("secrets"),
+                    )
+                    .env(
+                        "RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH",
+                        self.config
+                            .user_data_dir
+                            .join("defaultspack")
+                            .join("shared")
+                            .join("frontend_settings.json"),
+                    )
+                    .env("RUMI_LOG_DIR", &self.config.log_dir)
+                    .env("RUMI_PORT", self.config.kernel_port.to_string())
+                    .env(crate::host_contract::CONTRACT_ENV, &host_contract_path)
+                    .env(
+                        "RUMI_VIEWER_HOST_BROKER_CONNECTION",
+                        self.config.host_broker_connection_path(),
+                    )
+                    .env("RUMI_MACOS_PERMISSION_HOST", "tobkiri_launcher")
+                    .envs(python_runtime_env_vars())
+                    .env(
+                        "RUMI_ENVIRONMENT",
+                        if dev_environment {
+                            "development"
+                        } else {
+                            "production"
+                        },
+                    )
+                    .stdout(Stdio::from(log_file))
+                    .stderr(Stdio::from(log_stderr));
+                Ok(())
+            },
+        )
+        .context("failed to verify and spawn Kernel process")?;
 
         info!("Kernel started (pid {})", child.id());
         self.child = Some(child);
@@ -217,7 +220,7 @@ impl KernelManager {
     }
 
     pub fn current_pid(&self) -> Option<u32> {
-        self.child.as_ref().map(Child::id)
+        self.child.as_ref().map(|child| child.id())
     }
 
     pub fn recover_port_conflict(&mut self) -> Result<Option<String>> {
@@ -355,7 +358,7 @@ impl KernelManager {
     }
 
     #[cfg(unix)]
-    fn unix_stop(child: &mut Child) -> Result<()> {
+    fn unix_stop(child: &mut crate::python_env::PythonChild) -> Result<()> {
         use std::thread;
         use std::time::Duration;
 

@@ -18,6 +18,11 @@ from typing import Any, Mapping, TypedDict
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+GITHUB_SCRIPTS = ROOT.parent / ".github/scripts"
+if str(GITHUB_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(GITHUB_SCRIPTS))
+
+from packaging_cleanup import remove_owned_path  # noqa: E402
 
 try:
     from scripts.generate_defaultspack_v4_bundle import (
@@ -314,12 +319,11 @@ def _new_transaction(bundle_root: Path, artifact_root: Path) -> Path:
 
 def _remove_owned(path: Path) -> None:
     """Remove only a transaction or rollback path owned by this operation."""
-    if not path.exists() and not path.is_symlink():
-        return
-    if path.is_symlink() or path.is_file():
-        path.unlink()
-    else:
-        shutil.rmtree(path)
+    remove_owned_path(
+        path,
+        owner_root=path.parent,
+        operation="remove packaged Defaults transaction or rollback path",
+    )
 
 
 def _publish_directories(

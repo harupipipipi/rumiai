@@ -137,6 +137,11 @@ case "$target" in
     ;;
 esac
 
+if [[ "$mode" == "production" && "$presentation_platform" != "macos" ]]; then
+  echo "Production packaging is currently macOS-only; refusing $presentation_platform target $target" >&2
+  exit 64
+fi
+
 python3 "$REPO_ROOT/scripts/release_gate.py" signing \
   --mode "$mode" \
   --platform "$presentation_platform" \

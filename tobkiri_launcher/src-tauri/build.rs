@@ -5,6 +5,9 @@ use std::process::Command;
 
 #[path = "src/artifact_integrity.rs"]
 mod artifact_integrity;
+#[allow(dead_code)]
+#[path = "src/sealed_python_protocol.rs"]
+mod sealed_python_protocol;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 #[cfg(test)]
@@ -20,11 +23,18 @@ const PRESENTATION_INDEX_FILENAME: &str = "shell_artifact_index.v4.json";
 const PRESENTATION_LOCK_FILENAME: &str = "shell_profile_lock.v4.json";
 const RUNTIME_RESOURCE_MANIFEST: &str = "runtime-resource-manifest.v1.json";
 const RUNTIME_RESOURCE_SCHEMA: &str = "io.tobkiri.runtime-resource-manifest.v1";
+const SEALED_PYTHON_ROOT: &str = "python-runtime";
+const SEALED_PYTHON_MANIFEST: &str = "sealed-environment.v1.json";
+const SEALED_PYTHON_SCHEMA: &str = "io.tobkiri.sealed-python-environment.v1";
 const CARGO_TARGET_DIR_ENV: &str = "CARGO_TARGET_DIR";
 const PANEL_BUILD_DIR_ENV: &str = "TOBKIRI_PANEL_BUILD_DIR";
 const PANEL_RESOURCE_DIR: &str = "core_runtime/core_pack/core_control_panel/web";
-const GENERATED_RESOURCE_DIRS: &[&str] =
-    &[PANEL_RESOURCE_DIR, "ecosystem/defaultspack/ui", "bundled"];
+const GENERATED_RESOURCE_DIRS: &[&str] = &[
+    PANEL_RESOURCE_DIR,
+    "ecosystem/defaultspack/ui",
+    "bundled",
+    "python-runtime",
+];
 const CANONICAL_HOST_INVENTORY: &str = "canonical-files.v1.json";
 const CANONICAL_HOST_INVENTORY_SCHEMA: &str = "io.tobkiri.host-file-inventory.v1";
 const PRESENTATION_CATALOG_SCHEMA: &str = "io.tobkiri.launcher.presentation-catalog.v1";
@@ -46,6 +56,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/flows");
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/lang");
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/requirements.txt");
+    println!("cargo:rerun-if-changed=../../tobkiri_runtime/python-runtime");
     println!("cargo:rerun-if-changed=bundled");
     println!("cargo:rerun-if-changed=bundled/presentation_catalog.json");
     println!("cargo:rerun-if-env-changed={PRESENTATION_RELEASE_ROOT_ENV}");
@@ -165,6 +176,8 @@ fn stage_runtime_bundle() -> io::Result<()> {
 
     stage_pack_shell(repo_root, &staged_root)
         .map_err(|error| stage_error("stage pack-shell", error))?;
+    bind_sealed_python_environment(&staged_root)
+        .map_err(|error| stage_error("bind sealed Python environment", error))?;
     write_runtime_resource_manifest(&staged_root)
         .map_err(|error| stage_error("seal staged runtime", error))?;
 
@@ -196,6 +209,364 @@ fn collect_runtime_resource_files(root: &Path, current: &Path) -> io::Result<Vec
     }
     files.sort_by_key(|path| portable_relative_path(path));
     Ok(files)
+}
+
+fn bind_sealed_python_environment(staged_root: &Path) -> io::Result<()> {
+    reject_unsupported_sealed_python_release_target()?;
+    let root = staged_root.join(SEALED_PYTHON_ROOT);
+    let manifest_path = root.join(SEALED_PYTHON_MANIFEST);
+    if !manifest_path.exists() {
+        println!("cargo:rustc-env=TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256=");
+        if required_cargo_profile()? == "release" {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("release packaging requires {SEALED_PYTHON_ROOT}/{SEALED_PYTHON_MANIFEST}"),
+            ));
+        }
+        return Ok(());
+    }
+    require_directory(&root, "sealed Python environment root")?;
+    require_regular_file(&manifest_path, "sealed Python environment manifest")?;
+    let bytes = fs::read(&manifest_path)?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("sealed Python manifest is malformed: {error}"),
+        )
+    })?;
+    let object = value.as_object().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "sealed Python manifest must be an object",
+        )
+    })?;
+    let expected_fields = [
+        "schema",
+        "environment_digest",
+        "platform",
+        "architecture",
+        "python_version",
+        "package_provenance",
+        "sentinels",
+        "files",
+    ]
+    .into_iter()
+    .collect::<std::collections::BTreeSet<_>>();
+    let actual_fields = object
+        .keys()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    if actual_fields != expected_fields
+        || object.get("schema").and_then(serde_json::Value::as_str) != Some(SEALED_PYTHON_SCHEMA)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "sealed Python manifest schema or exact fields are invalid",
+        ));
+    }
+    let target = required_cargo_target()?;
+    let platform = if target.contains("windows") {
+        "windows"
+    } else if target.contains("apple-darwin") {
+        "macos"
+    } else if target.contains("linux") {
+        "linux"
+    } else {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!("sealed Python target platform is unsupported: {target}"),
+        ));
+    };
+    if object.get("platform").and_then(serde_json::Value::as_str) != Some(platform)
+        || object
+            .get("architecture")
+            .and_then(serde_json::Value::as_str)
+            != Some(expected_pack_shell_architecture(&target))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "sealed Python manifest platform/architecture differs from Cargo target",
+        ));
+    }
+    let provenance = exact_object(
+        object.get("package_provenance"),
+        &["kind", "package_id", "release_digest"],
+        "package_provenance",
+    )?;
+    let required_provenance = match platform {
+        "macos" => "apple-code-signature-v1",
+        "windows" => "windows-authenticode-v1",
+        _ => "linux-immutable-package-v1",
+    };
+    if provenance.get("kind").and_then(serde_json::Value::as_str) != Some(required_provenance)
+        || provenance
+            .get("package_id")
+            .and_then(serde_json::Value::as_str)
+            != Some("dev.tobkiri.launcher")
+        || !valid_sha256(provenance.get("release_digest"))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "sealed Python package provenance is invalid",
+        ));
+    }
+    let sentinels = exact_object(
+        object.get("sentinels"),
+        &["stdlib_sha256", "site_packages_sha256", "native_sha256"],
+        "sentinels",
+    )?;
+    if sentinels.values().any(|value| !valid_sha256(Some(value))) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "sealed Python sentinel identity is invalid",
+        ));
+    }
+    let files = object
+        .get("files")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "sealed Python files must be an array",
+            )
+        })?;
+    let environment_digest = object
+        .get("environment_digest")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "environment_digest missing"))?;
+    if raw_byte_digest(&serde_json::to_vec(files).map_err(io::Error::other)?) != environment_digest
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "sealed Python environment digest differs from sorted file inventory",
+        ));
+    }
+    let mut expected_paths = Vec::new();
+    for entry in files {
+        let entry = entry.as_object().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "sealed Python file entry must be an object",
+            )
+        })?;
+        let fields = entry
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        if fields
+            != ["path", "size", "sha256", "executable"]
+                .into_iter()
+                .collect()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "sealed Python file entry exact fields are invalid",
+            ));
+        }
+        let relative = entry
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "sealed Python file path missing",
+                )
+            })?;
+        let relative_path = safe_release_relative_path(relative, "sealed Python file")?;
+        let path = root.join(&relative_path);
+        require_regular_file(&path, "sealed Python inventory file")?;
+        reject_release_hardlink(&fs::metadata(&path)?, &path)?;
+        let payload = fs::read(&path)?;
+        if entry.get("size").and_then(serde_json::Value::as_u64) != Some(payload.len() as u64)
+            || entry.get("sha256").and_then(serde_json::Value::as_str)
+                != Some(raw_byte_digest(&payload).as_str())
+            || entry
+                .get("executable")
+                .and_then(serde_json::Value::as_bool)
+                .is_none()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("sealed Python file identity drift: {relative}"),
+            ));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = fs::metadata(&path)?;
+            let executable = metadata.permissions().mode() & 0o111 != 0;
+            if entry.get("executable").and_then(serde_json::Value::as_bool) != Some(executable)
+                || metadata.permissions().mode() & 0o022 != 0
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("sealed Python file permissions drift: {relative}"),
+                ));
+            }
+        }
+        expected_paths.push(relative.to_string());
+    }
+    if !expected_paths.windows(2).all(|pair| pair[0] < pair[1]) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "sealed Python file inventory must be strictly sorted and unique",
+        ));
+    }
+    let required_interpreter = if platform == "windows" {
+        "venv/Scripts/python.exe"
+    } else {
+        "venv/bin/python3"
+    };
+    let python_version = object
+        .get("python_version")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "python_version missing"))?;
+    let version = python_version.split('.').collect::<Vec<_>>();
+    if version.len() != 3
+        || version
+            .iter()
+            .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "python_version must be an exact numeric patch version",
+        ));
+    }
+    let bootstrap = if platform == "windows" {
+        "venv/Lib/site-packages/tobkiri_sealed/bootstrap.py".to_string()
+    } else {
+        format!(
+            "venv/lib/python{}.{}/site-packages/tobkiri_sealed/bootstrap.py",
+            version[0], version[1]
+        )
+    };
+    let mut required_paths = vec![
+        required_interpreter,
+        "app/kernel_entry.py",
+        "app/defaultspack_entry.py",
+        "app/host_helper_entry.py",
+        "sentinels/stdlib.sha256",
+        "sentinels/site-packages.sha256",
+        "sentinels/native.sha256",
+        "lease.v1",
+    ];
+    required_paths.push(&bootstrap);
+    for required in required_paths {
+        if expected_paths
+            .binary_search_by(|path| path.as_str().cmp(required))
+            .is_err()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("sealed Python fixed layout is missing {required}"),
+            ));
+        }
+    }
+    let bootstrap_bytes = fs::read(root.join(&bootstrap))?;
+    let bootstrap_text = std::str::from_utf8(&bootstrap_bytes).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("sealed Python bootstrap is not UTF-8: {error}"),
+        )
+    })?;
+    sealed_python_protocol::validate_bootstrap_template(bootstrap_text).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("sealed Python bootstrap wire contract rejected: {error}"),
+        )
+    })?;
+    if files
+        .iter()
+        .find(|entry| {
+            entry.get("path").and_then(serde_json::Value::as_str) == Some(required_interpreter)
+        })
+        .and_then(|entry| entry.get("executable"))
+        .and_then(serde_json::Value::as_bool)
+        != Some(true)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "sealed Python fixed interpreter must be executable",
+        ));
+    }
+    let mut actual_paths = collect_runtime_resource_files(&root, &root)?
+        .into_iter()
+        .filter(|path| path != Path::new(SEALED_PYTHON_MANIFEST))
+        .map(|path| portable_relative_path(&path))
+        .collect::<Vec<_>>();
+    actual_paths.sort();
+    if actual_paths != expected_paths {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "sealed Python environment contains missing or extra files",
+        ));
+    }
+    println!(
+        "cargo:rustc-env=TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256={}",
+        raw_byte_digest(&bytes)
+    );
+    Ok(())
+}
+
+fn reject_unsupported_sealed_python_release_target() -> io::Result<()> {
+    if required_cargo_profile()? != "release" {
+        return Ok(());
+    }
+    let target = required_cargo_target()?;
+    if !target.contains("apple-darwin") {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!(
+                "release packaging is disabled for {target}: sealed Python package provenance is not implemented"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn exact_object<'a>(
+    value: Option<&'a serde_json::Value>,
+    fields: &[&str],
+    label: &str,
+) -> io::Result<&'a serde_json::Map<String, serde_json::Value>> {
+    let object = value
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{label} must be an object"),
+            )
+        })?;
+    let actual = object
+        .keys()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    let expected = fields
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    if actual != expected {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{label} exact fields are invalid"),
+        ));
+    }
+    Ok(object)
+}
+
+fn valid_sha256(value: Option<&serde_json::Value>) -> bool {
+    value
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| {
+            value.len() == 64
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+}
+
+fn raw_byte_digest(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
 }
 
 fn portable_relative_path(path: &Path) -> String {
@@ -1453,7 +1824,7 @@ fn stage_presentation_release_from_snapshot(
         require_regular_file(&generator, "packaged Profile generator")?;
         let source_revision = current_source_revision(&repository_root)?;
         let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
-        let status = Command::new(python)
+        let mut child = Command::new(python)
             .arg(generator)
             .arg("--source-artifact")
             .arg(&verified.artifact_path)
@@ -1473,10 +1844,16 @@ fn stage_presentation_release_from_snapshot(
             .arg(&verified.bundle_identity)
             .arg("--source-commit")
             .arg(source_revision)
-            .status()
+            .spawn()
             .map_err(|error| {
                 invalid_release(format!("failed to run packaged Profile generator: {error}"))
             })?;
+        let status = child.wait().map_err(|error| {
+            invalid_release(format!(
+                "failed waiting for packaged Profile generator: {error}"
+            ))
+        })?;
+        drop(child);
         if !status.success() {
             return Err(invalid_release(format!(
                 "packaged Profile generator exited with {status}"
@@ -2436,6 +2813,115 @@ mod tests {
                 "lib/i18n/index.ts",
             ]
         );
+    }
+
+    #[test]
+    fn sealed_python_binding_accepts_exact_tree_and_rejects_domain_swap() {
+        let _environment = environment_lock();
+        let target = if cfg!(target_arch = "aarch64") {
+            "aarch64-apple-darwin"
+        } else {
+            "x86_64-apple-darwin"
+        };
+        let _target = EnvironmentGuard::set_value("TARGET", target);
+        let _profile = EnvironmentGuard::set_value("PROFILE", "release");
+        let tree = TestTree::new("sealed-python");
+        let root = tree.path().join(SEALED_PYTHON_ROOT);
+        let required = [
+            "app/defaultspack_entry.py",
+            "app/host_helper_entry.py",
+            "app/kernel_entry.py",
+            "lease.v1",
+            "sentinels/native.sha256",
+            "sentinels/site-packages.sha256",
+            "sentinels/stdlib.sha256",
+            "venv/bin/python3",
+            "venv/lib/python3.13/site-packages/tobkiri_sealed/bootstrap.py",
+        ];
+        let mut files = Vec::new();
+        for relative in required {
+            let path = root.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let payload = if relative.ends_with("tobkiri_sealed/bootstrap.py") {
+                sealed_python_protocol::REQUIRED_TEMPLATE_FRAGMENTS.join("\n")
+                    + "\nparse_known_args role_args chmod\n"
+            } else {
+                relative.to_string()
+            };
+            fs::write(&path, payload.as_bytes()).unwrap();
+            let executable = relative == "venv/bin/python3";
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(
+                    &path,
+                    fs::Permissions::from_mode(if executable { 0o555 } else { 0o644 }),
+                )
+                .unwrap();
+            }
+            files.push(serde_json::json!({
+                "path": relative,
+                "size": payload.len(),
+                "sha256": raw_byte_digest(payload.as_bytes()),
+                "executable": executable
+            }));
+        }
+        let inventory_digest = raw_byte_digest(&serde_json::to_vec(&files).unwrap());
+        let manifest = serde_json::json!({
+            "schema": SEALED_PYTHON_SCHEMA,
+            "environment_digest": inventory_digest,
+            "platform": "macos",
+            "architecture": expected_pack_shell_architecture(target),
+            "python_version": "3.13.13",
+            "package_provenance": {
+                "kind": "apple-code-signature-v1",
+                "package_id": "dev.tobkiri.launcher",
+                "release_digest": raw_byte_digest(b"release")
+            },
+            "sentinels": {
+                "stdlib_sha256": raw_byte_digest(b"stdlib"),
+                "site_packages_sha256": raw_byte_digest(b"site"),
+                "native_sha256": raw_byte_digest(b"native")
+            },
+            "files": files
+        });
+        fs::write(
+            root.join(SEALED_PYTHON_MANIFEST),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        bind_sealed_python_environment(tree.path()).unwrap();
+
+        let mut swapped = manifest.clone();
+        swapped["environment_digest"] = swapped["package_provenance"]["release_digest"].clone();
+        fs::write(
+            root.join(SEALED_PYTHON_MANIFEST),
+            serde_json::to_vec(&swapped).unwrap(),
+        )
+        .unwrap();
+        assert!(bind_sealed_python_environment(tree.path()).is_err());
+
+        let mut prefixed = manifest;
+        prefixed["sentinels"]["stdlib_sha256"] =
+            serde_json::Value::String(format!("sha256:{}", raw_byte_digest(b"stdlib")));
+        fs::write(
+            root.join(SEALED_PYTHON_MANIFEST),
+            serde_json::to_vec(&prefixed).unwrap(),
+        )
+        .unwrap();
+        assert!(bind_sealed_python_environment(tree.path()).is_err());
+    }
+
+    #[test]
+    fn non_macos_release_targets_are_rejected_before_packaging() {
+        let _environment = environment_lock();
+        let _profile = EnvironmentGuard::set_value("PROFILE", "release");
+        for target in ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"] {
+            let _target = EnvironmentGuard::set_value("TARGET", target);
+            let error = reject_unsupported_sealed_python_release_target().unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+            assert!(error.to_string().contains(target));
+        }
     }
 
     struct EnvironmentGuard {

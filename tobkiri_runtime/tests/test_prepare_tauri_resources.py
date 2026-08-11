@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import shutil
 import tarfile
 import zipfile
@@ -30,9 +31,15 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _write_windows_uv_archive(path: Path, *, target: str, payload: bytes) -> None:
+def _write_windows_uv_archive(
+    path: Path,
+    *,
+    target: str,
+    payload: bytes,
+    member: str = "uv.exe",
+) -> None:
     with zipfile.ZipFile(path, "w") as archive:
-        archive.writestr(f"uv-{target}/uv.exe", payload)
+        archive.writestr(member, payload)
 
 
 def _write_linux_uv_archive(path: Path, *, target: str, payload: bytes) -> None:
@@ -133,6 +140,11 @@ def _minimal_v4_stage(tmp_path: Path) -> Path:
         pack_root / "domain",
         ignore=shutil.ignore_patterns(*module.EXCLUDED_DIR_NAMES, "*.pyc"),
     )
+    shutil.copytree(
+        DEFAULTSPACK_ROOT / "defaultspack",
+        pack_root / "defaultspack",
+        ignore=shutil.ignore_patterns(*module.EXCLUDED_DIR_NAMES, "*.pyc"),
+    )
     shutil.copytree(DEFAULTSPACK_ROOT / "v4", pack_root / "v4")
     return stage
 
@@ -148,12 +160,19 @@ def test_stage_uv_extracts_only_after_pinned_checksum_verification(tmp_path, mon
 
     monkeypatch.setattr(module, "UV_PINNED_VERSION", version)
     monkeypatch.setattr(module, "UV_SHA256_BY_TARGET", {target: checksum})
+    monkeypatch.setattr(
+        module,
+        "UV_BINARY_SHA256_BY_TARGET",
+        {target: _sha256(payload)},
+    )
     monkeypatch.setattr(module, "download_to_temp", lambda url, attempts=3: archive_path)
 
     staged = module.stage_uv(tmp_path / "app", target, version)
 
     assert staged.read_bytes() == payload
     assert staged.name == "uv.exe"
+    assert staged.stat().st_mode & 0o222 == 0
+    assert staged.stat().st_nlink == 1
 
 
 def test_stage_uv_fails_on_checksum_mismatch_before_extract(tmp_path, monkeypatch):
@@ -173,6 +192,139 @@ def test_stage_uv_fails_on_checksum_mismatch_before_extract(tmp_path, monkeypatc
         module.stage_uv(tmp_path / "app", target, version)
 
     assert not (tmp_path / "app" / "bundled" / "uv").exists()
+
+
+def test_stage_uv_rejects_archive_member_fallback_and_wrong_target(
+    tmp_path,
+    monkeypatch,
+):
+    """A target archive cannot substitute a same-basename member."""
+    module = _load_prepare_tauri_resources()
+    target = "x86_64-unknown-linux-gnu"
+    archive_path = tmp_path / "uv.tar.gz"
+    _write_linux_uv_archive(
+        archive_path,
+        target="aarch64-apple-darwin",
+        payload=b"wrong target",
+    )
+    checksum = _sha256(archive_path.read_bytes())
+    monkeypatch.setattr(module, "UV_SHA256_BY_TARGET", {target: checksum})
+    monkeypatch.setattr(
+        module,
+        "UV_BINARY_SHA256_BY_TARGET",
+        {target: _sha256(b"wrong target")},
+    )
+    monkeypatch.setattr(module, "download_to_temp", lambda url, attempts=3: archive_path)
+
+    with pytest.raises(RuntimeError, match="exactly one member"):
+        module.stage_uv(tmp_path / "app", target, "0.11.14")
+
+
+def test_stage_uv_rejects_tampered_extracted_member(tmp_path, monkeypatch):
+    """An archive digest alone is not the extracted-member identity."""
+    module = _load_prepare_tauri_resources()
+    target = "x86_64-unknown-linux-gnu"
+    archive_path = tmp_path / "uv.tar.gz"
+    payload = b"member tampered after the pinned binary was recorded"
+    _write_linux_uv_archive(archive_path, target=target, payload=payload)
+    monkeypatch.setattr(
+        module,
+        "UV_SHA256_BY_TARGET",
+        {target: _sha256(archive_path.read_bytes())},
+    )
+    monkeypatch.setattr(
+        module,
+        "UV_BINARY_SHA256_BY_TARGET",
+        {target: _sha256(b"official member")},
+    )
+    monkeypatch.setattr(module, "download_to_temp", lambda url, attempts=3: archive_path)
+
+    with pytest.raises(RuntimeError, match="extracted uv SHA256 mismatch"):
+        module.stage_uv(tmp_path / "app", target, "0.11.14")
+
+
+def test_stage_uv_rejects_archive_symlink_member(tmp_path, monkeypatch):
+    """Tar link entries are never materialized as the uv executable."""
+    module = _load_prepare_tauri_resources()
+    target = "x86_64-unknown-linux-gnu"
+    archive_path = tmp_path / "uv.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as archive:
+        info = tarfile.TarInfo(name=f"uv-{target}/uv")
+        info.type = tarfile.SYMTYPE
+        info.linkname = "outside"
+        archive.addfile(info)
+    monkeypatch.setattr(
+        module,
+        "UV_SHA256_BY_TARGET",
+        {target: _sha256(archive_path.read_bytes())},
+    )
+    monkeypatch.setattr(module, "download_to_temp", lambda url, attempts=3: archive_path)
+
+    with pytest.raises(RuntimeError, match="regular file"):
+        module.stage_uv(tmp_path / "app", target, "0.11.14")
+
+
+def test_stage_uv_rejects_existing_symlink_destination(tmp_path, monkeypatch):
+    """A pre-existing destination link is never replaced through its target."""
+    module = _load_prepare_tauri_resources()
+    target = "x86_64-pc-windows-msvc"
+    payload = b"verified uv binary"
+    archive_path = tmp_path / "uv.zip"
+    _write_windows_uv_archive(archive_path, target=target, payload=payload)
+    monkeypatch.setattr(
+        module,
+        "UV_SHA256_BY_TARGET",
+        {target: _sha256(archive_path.read_bytes())},
+    )
+    monkeypatch.setattr(
+        module,
+        "UV_BINARY_SHA256_BY_TARGET",
+        {target: _sha256(payload)},
+    )
+    monkeypatch.setattr(module, "download_to_temp", lambda url, attempts=3: archive_path)
+    app_root = tmp_path / "app"
+    destination = app_root / "bundled" / "uv.exe"
+    destination.parent.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"must remain unchanged")
+    try:
+        destination.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"symlink creation is unavailable: {exc}")
+
+    with pytest.raises(RuntimeError, match="may not be a link"):
+        module.stage_uv(app_root, target, "0.11.14")
+    assert outside.read_bytes() == b"must remain unchanged"
+
+
+def test_stage_uv_rejects_existing_hardlink_destination(tmp_path, monkeypatch):
+    """A pre-existing hardlink cannot become the pinned executable."""
+    module = _load_prepare_tauri_resources()
+    target = "x86_64-pc-windows-msvc"
+    payload = b"verified uv binary"
+    archive_path = tmp_path / "uv.zip"
+    _write_windows_uv_archive(archive_path, target=target, payload=payload)
+    monkeypatch.setattr(
+        module,
+        "UV_SHA256_BY_TARGET",
+        {target: _sha256(archive_path.read_bytes())},
+    )
+    monkeypatch.setattr(
+        module,
+        "UV_BINARY_SHA256_BY_TARGET",
+        {target: _sha256(payload)},
+    )
+    monkeypatch.setattr(module, "download_to_temp", lambda url, attempts=3: archive_path)
+    app_root = tmp_path / "app"
+    destination = app_root / "bundled" / "uv.exe"
+    destination.parent.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"must remain unchanged")
+    os.link(outside, destination)
+
+    with pytest.raises(RuntimeError, match="may not be hardlinked"):
+        module.stage_uv(app_root, target, "0.11.14")
+    assert outside.read_bytes() == b"must remain unchanged"
 
 
 @pytest.mark.parametrize(
@@ -384,6 +536,24 @@ def test_validate_bundle_accepts_canonical_v4_stage_without_legacy_authority(tmp
 
     assert not list(stage.rglob("ecosystem.json"))
     assert not list(stage.rglob("rumi.pack.v3.json"))
+
+
+@pytest.mark.parametrize("case", ("missing", "tampered", "symlink"))
+def test_validate_bundle_rejects_sealed_role_closure_drift(tmp_path, case):
+    """The staged app includes each direct canonical role target byte-for-byte."""
+    module = _load_prepare_tauri_resources()
+    stage = _minimal_v4_stage(tmp_path)
+    target = stage / "app.py"
+    if case == "missing":
+        target.unlink()
+    elif case == "tampered":
+        target.write_bytes(target.read_bytes() + b"\n# drift\n")
+    else:
+        target.unlink()
+        target.symlink_to(ROOT / "tobkiri_runtime/app.py")
+
+    with pytest.raises((FileNotFoundError, RuntimeError)):
+        module.validate_bundle(stage, False, None, repository_root=ROOT)
 
 
 def test_staged_bootstrap_import_and_resource_manifest_are_self_contained(tmp_path):

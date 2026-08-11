@@ -36,6 +36,13 @@ try:
 except ModuleNotFoundError:
     from artifact_integrity import artifact_digest_and_size  # type: ignore[no-redef]
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+GITHUB_SCRIPTS = REPOSITORY_ROOT / ".github/scripts"
+if str(GITHUB_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(GITHUB_SCRIPTS))
+
+from packaging_cleanup import remove_owned_path, run_process_and_wait  # noqa: E402
+
 
 def artifact_digest(path: Path) -> str:
     """Return the canonical artifact digest for compatibility with callers."""
@@ -644,12 +651,11 @@ def _new_staging_directory(parent: Path, prefix: str) -> Path:
 
 def _remove_tree(path: Path) -> None:
     """Remove only a transaction-owned path during cleanup."""
-    if not path.exists() and not path.is_symlink():
-        return
-    if path.is_symlink() or path.is_file():
-        path.unlink()
-    else:
-        shutil.rmtree(path)
+    remove_owned_path(
+        path,
+        owner_root=path.parent,
+        operation="remove presentation packaging transaction path",
+    )
 
 
 def _publish_directory(staging: Path, output: Path) -> None:
@@ -889,7 +895,7 @@ def _project_packaged_defaultspack(
     bundle_root = transaction_root / "v4"
     artifact_root = transaction_root / "platform-artifacts"
     shutil.copytree(source_bundle, bundle_root)
-    subprocess.run(
+    run_process_and_wait(
         [
             sys.executable,
             os.fspath(generator),
@@ -913,7 +919,6 @@ def _project_packaged_defaultspack(
             source_revision,
         ],
         cwd=repository_root,
-        check=True,
     )
     profile = bundle_root / "defaults.profile.v4.json"
     lock_path = bundle_root / "bundle.lock.json"

@@ -20,6 +20,12 @@ import zipfile
 from collections.abc import Mapping
 from pathlib import Path
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from packaging_cleanup import remove_owned_path  # noqa: E402
+
 
 APP_SOURCE_DIR = "tobkiri_runtime"
 APP_RESOURCE_DIR = "tobkiri_launcher/src-tauri/gen/app"
@@ -65,6 +71,14 @@ GENERATED_RESOURCE_DIRS = (
     "core_runtime/core_pack/core_control_panel/web",
     "ecosystem/defaultspack/ui",
     "bundled",
+    "python-runtime",
+)
+SEALED_PYTHON_RESOURCE_DIR = "python-runtime"
+SEALED_PYTHON_MANIFEST = (
+    f"{SEALED_PYTHON_RESOURCE_DIR}/sealed-environment.v1.json"
+)
+SEALED_PYTHON_BUILDER = (
+    Path(".github") / "scripts" / "build_sealed_python_environment.py"
 )
 RUNTIME_RESOURCE_MANIFEST = "runtime-resource-manifest.v1.json"
 RUNTIME_RESOURCE_SCHEMA = "io.tobkiri.runtime-resource-manifest.v1"
@@ -77,6 +91,11 @@ REQUIRED_RUNTIME_BOOTSTRAP_FILES = (
     Path("core_runtime/app_lifecycle_manager.py"),
     Path("core_runtime/pack_api_server.py"),
 )
+SEALED_ROLE_TARGETS = (
+    Path("app.py"),
+    Path("ecosystem/defaultspack/defaultspack/desktop_app.py"),
+    Path("core_runtime/host_broker/computer_host_helper.py"),
+)
 CANONICAL_HOST_INVENTORY = Path("tobkiri_host/canonical-files.v1.json")
 CANONICAL_HOST_INVENTORY_SCHEMA = "io.tobkiri.host-file-inventory.v1"
 UV_PINNED_VERSION = "0.11.14"
@@ -85,6 +104,12 @@ UV_SHA256_BY_TARGET = {
     "x86_64-apple-darwin": "9836c1440b0bd6aa5f81793648a339bd01d593b7b8f575de3b855dae4ab64654",
     "x86_64-pc-windows-msvc": "52ba5d19409aaa688a8a1a6ec8dfb6a4817230d20186e75f4006105c3e39a846",
     "x86_64-unknown-linux-gnu": "f3b623eb0e6141a7053d571d59a0bdc341e0f238ea8f5f0b4815ddbec9a2a296",
+}
+UV_BINARY_SHA256_BY_TARGET = {
+    "aarch64-apple-darwin": "77b80ca26ad2142c50b870c730d9b8f617665720f09888630257b40d0678e658",
+    "x86_64-apple-darwin": "1bb756786175621eea70219911d02bf8d3e32203bb5a7a19b345e44d031f436e",
+    "x86_64-pc-windows-msvc": "442b73298cf8648217e5bc232588bb1067f98ea5b40beea18e43c9c7929c020c",
+    "x86_64-unknown-linux-gnu": "b5cbc3a3f35debad0b4770811efd190bcf460b654114d6a3f71e0ce298468e5d",
 }
 
 
@@ -222,7 +247,11 @@ def stage_canonical_host_package(source_root: Path, dest_root: Path) -> None:
     if host_root.exists():
         if host_root.is_symlink() or not host_root.is_dir():
             raise RuntimeError("Refusing unsafe staged tobkiri_host package")
-        shutil.rmtree(host_root)
+        remove_owned_path(
+            host_root,
+            owner_root=dest_root,
+            operation="remove staged canonical Host package",
+        )
     for relative in canonical_host_files(source_root):
         source = source_root / relative
         if source.is_symlink() or not source.is_file():
@@ -270,6 +299,27 @@ def verify_canonical_host_package(
             )
 
 
+def verify_sealed_role_closure(
+    dest_root: Path,
+    repository_root: Path,
+) -> None:
+    """Require direct role targets in both staged app roots."""
+    source_root = repository_root / APP_SOURCE_DIR
+    for relative in SEALED_ROLE_TARGETS:
+        source = source_root / relative
+        staged_paths = [(dest_root / relative, "staged")]
+        sealed_root = dest_root / SEALED_PYTHON_RESOURCE_DIR
+        if sealed_root.is_dir():
+            staged_paths.append((sealed_root / "app" / relative, "sealed"))
+        for path, label in ((source, "source"), *staged_paths):
+            if path.is_symlink() or not path.is_file():
+                raise FileNotFoundError(
+                    f"Sealed role {label} target is missing or unsafe: {path}"
+                )
+        if compute_sha256(source) != compute_sha256(path):
+            raise RuntimeError(f"Sealed role target hash mismatch: {relative}")
+
+
 def copy_generated_resource_dirs(source_root: Path, dest_root: Path) -> int:
     copied = 0
     for rel_dir in GENERATED_RESOURCE_DIRS:
@@ -278,6 +328,24 @@ def copy_generated_resource_dirs(source_root: Path, dest_root: Path) -> int:
             continue
         if src_dir.is_symlink():
             raise RuntimeError(f"Refusing symlinked generated resource directory: {rel_dir}")
+        if rel_dir == SEALED_PYTHON_RESOURCE_DIR:
+            for src in src_dir.rglob("*"):
+                if src.is_symlink():
+                    raise RuntimeError(
+                        "Refusing symlinked sealed Python resource: "
+                        f"{src.relative_to(source_root).as_posix()}"
+                    )
+                if src.is_dir():
+                    continue
+                if not src.is_file():
+                    raise RuntimeError(
+                        "Refusing special sealed Python resource: "
+                        f"{src.relative_to(source_root).as_posix()}"
+                    )
+                rel_under_app = src.relative_to(source_root).as_posix()
+                copy_file(src, dest_root / rel_under_app)
+                copied += 1
+            continue
         for src in src_dir.rglob("*"):
             if src.is_symlink():
                 raise RuntimeError(
@@ -292,6 +360,71 @@ def copy_generated_resource_dirs(source_root: Path, dest_root: Path) -> int:
             copy_file(src, dest_root / rel_under_app)
             copied += 1
     return copied
+
+
+def _load_sealed_python_builder(repository_root: Path):
+    """Load the sealed Python builder without making it a runtime dependency."""
+    path = repository_root / SEALED_PYTHON_BUILDER
+    spec = importlib.util.spec_from_file_location(
+        "tobkiri_sealed_python_builder",
+        path,
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load sealed Python builder: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def build_sealed_python_resource(
+    repository_root: Path,
+    source_root: Path,
+    target: str,
+) -> Path:
+    """Build the fixed sealed Python tree before Tauri resource staging."""
+    builder = _load_sealed_python_builder(repository_root)
+    output_root = source_root / SEALED_PYTHON_RESOURCE_DIR
+    requirements = source_root / "requirements.txt"
+    uv_name = uv_binary_name(target)
+    uv_path = source_root / "bundled" / uv_name
+    if not uv_path.is_file() or uv_path.is_symlink():
+        raise RuntimeError(
+            "official pinned uv was not staged at the required bundled path: "
+            f"{uv_path}"
+        )
+    manifest = builder.build_environment(
+        repository_root,
+        target,
+        output_root=output_root,
+        requirements_path=requirements,
+        uv_path=uv_path,
+    )
+    digest = builder.validate_environment(
+        output_root,
+        target,
+        run_native_smoke=True,
+    )
+    print(
+        "Prepared sealed Python environment "
+        f"{manifest.relative_to(repository_root)} "
+        f"({digest})"
+    )
+    return manifest
+
+
+def validate_sealed_python_resource(
+    dest_root: Path,
+    target: str,
+    repository_root: Path,
+) -> None:
+    """Validate the sealed Python subtree after it is copied into ``gen/app``."""
+    builder = _load_sealed_python_builder(repository_root)
+    builder.validate_environment(
+        dest_root / SEALED_PYTHON_RESOURCE_DIR,
+        target,
+        run_native_smoke=False,
+    )
 
 
 def _resource_files(dest_root: Path) -> list[Path]:
@@ -750,6 +883,31 @@ def expected_uv_sha256(target: str, version: str) -> str:
         ) from exc
 
 
+def expected_uv_binary_sha256(target: str, version: str) -> str:
+    """Return the pinned SHA256 of the exact extracted uv member."""
+    if version != UV_PINNED_VERSION:
+        raise RuntimeError(
+            "No pinned extracted uv SHA256 is configured for uv version "
+            f"{version}. Update UV_PINNED_VERSION/UV_BINARY_SHA256_BY_TARGET."
+        )
+    try:
+        return UV_BINARY_SHA256_BY_TARGET[target]
+    except KeyError as exc:
+        raise RuntimeError(
+            f"No pinned extracted uv SHA256 is configured for target {target!r}."
+        ) from exc
+
+
+def expected_uv_member(target: str) -> str:
+    """Return the exact archive member for one pinned uv target."""
+    if target not in UV_SHA256_BY_TARGET:
+        raise RuntimeError(f"No pinned uv archive member is configured for {target!r}")
+    if is_windows_target(target):
+        # uv's official Windows archive contains the executable at its root.
+        return "uv.exe"
+    return f"uv-{target}/uv"
+
+
 def parse_sha256_manifest(text: str, expected_filename: str) -> str:
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -781,58 +939,154 @@ def verify_uv_archive_checksum(archive_path: Path, *, target: str, version: str,
         )
 
 
+def _assert_uv_destination(path: Path) -> None:
+    """Reject a destination that could redirect or alias the staged binary."""
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise RuntimeError(f"cannot inspect uv staging destination: {path}") from exc
+    if path.is_symlink() or getattr(metadata, "st_file_attributes", 0) & 0x0400:
+        raise RuntimeError(f"uv staging destination may not be a link: {path}")
+    if not stat.S_ISREG(metadata.st_mode):
+        raise RuntimeError(f"uv staging destination must be a regular file: {path}")
+    if metadata.st_nlink != 1:
+        raise RuntimeError(f"uv staging destination may not be hardlinked: {path}")
+
+
+def _assert_uv_directory(path: Path) -> None:
+    """Reject symlink, reparse, and non-directory path components."""
+    current = path
+    missing: list[Path] = []
+    while True:
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError:
+            missing.append(current)
+            parent = current.parent
+            if parent == current:
+                return
+            current = parent
+            continue
+        except OSError as exc:
+            raise RuntimeError(f"cannot inspect uv staging directory: {current}") from exc
+        if current.is_symlink() or getattr(metadata, "st_file_attributes", 0) & 0x0400:
+            raise RuntimeError(f"uv staging directory contains a link: {current}")
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise RuntimeError(f"uv staging path is not a directory: {current}")
+        break
+    for component in reversed(missing):
+        if component.exists() or component.is_symlink():
+            raise RuntimeError(f"uv staging directory changed during validation: {component}")
+
+
+def _assert_uv_archive_member(member, expected: str) -> None:
+    """Require the exact regular archive member and reject link metadata."""
+    if member.name != expected:
+        raise RuntimeError(
+            f"uv archive member mismatch: expected {expected}, got {member.name}"
+        )
+    if not member.isreg() or member.issym() or member.islnk():
+        raise RuntimeError(f"uv archive member is not a regular file: {expected}")
+
+
+def _assert_uv_zip_member(info: zipfile.ZipInfo, expected: str) -> None:
+    """Require the exact regular ZIP member and reject Unix link metadata."""
+    if info.filename != expected or info.is_dir():
+        raise RuntimeError(f"uv archive member is not the expected regular file: {expected}")
+    mode = (info.external_attr >> 16) & 0xFFFF
+    file_type = stat.S_IFMT(mode)
+    if file_type and file_type != stat.S_IFREG:
+        raise RuntimeError(f"uv archive member contains link or special metadata: {expected}")
+
+
+def _validate_staged_uv(path: Path, target: str, version: str) -> None:
+    """Validate extracted bytes, metadata, and immutable executable mode."""
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise RuntimeError(f"staged uv executable is unavailable: {path}") from exc
+    if path.is_symlink() or getattr(metadata, "st_file_attributes", 0) & 0x0400:
+        raise RuntimeError(f"staged uv executable may not be a link: {path}")
+    if not stat.S_ISREG(metadata.st_mode):
+        raise RuntimeError(f"staged uv executable is not a regular file: {path}")
+    if metadata.st_nlink != 1:
+        raise RuntimeError(f"staged uv executable may not be hardlinked: {path}")
+    if metadata.st_mode & 0o222:
+        raise RuntimeError(f"staged uv executable is owner-writable: {path}")
+    if not metadata.st_mode & 0o111:
+        raise RuntimeError(f"staged uv executable is not executable: {path}")
+    expected = expected_uv_binary_sha256(target, version)
+    actual = compute_sha256(path)
+    if actual != expected:
+        raise RuntimeError(
+            "extracted uv SHA256 mismatch for "
+            f"{target}: expected {expected}, got {actual}"
+        )
+
+
 def stage_uv(source_root: Path, target: str, version: str) -> Path:
     binary_name = uv_binary_name(target)
     archive_ext = "zip" if is_windows_target(target) else "tar.gz"
     url = f"https://github.com/astral-sh/uv/releases/download/{version}/uv-{target}.{archive_ext}"
     archive_path = download_to_temp(url)
     dest = source_root / "bundled" / binary_name
+    _assert_uv_directory(dest.parent)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    expected = f"uv-{target}/{binary_name}"
+    expected = expected_uv_member(target)
+    temporary: Path | None = None
 
     try:
         verify_uv_archive_checksum(archive_path, target=target, version=version, url=url)
+        _assert_uv_destination(dest)
+        _assert_uv_directory(dest.parent)
+        temporary_fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{binary_name}.",
+            suffix=".tmp",
+            dir=dest.parent,
+        )
+        os.close(temporary_fd)
+        temporary = Path(temporary_name)
         if archive_ext == "zip":
             with zipfile.ZipFile(archive_path) as archive:
-                member_name = expected
-                if member_name not in archive.namelist():
-                    matches = [
-                        name
-                        for name in archive.namelist()
-                        if Path(name).name == binary_name
-                    ]
-                    if not matches:
-                        raise KeyError(
-                            f"{binary_name} was not found in {archive_path}"
-                        )
-                    member_name = matches[0]
-                with archive.open(member_name) as src, dest.open("wb") as out:
+                matches = [info for info in archive.infolist() if info.filename == expected]
+                if len(matches) != 1:
+                    raise RuntimeError(
+                        f"uv archive must contain exactly one member {expected!r}"
+                    )
+                info = matches[0]
+                _assert_uv_zip_member(info, expected)
+                with archive.open(info) as src, temporary.open("wb") as out:
                     shutil.copyfileobj(src, out)
+                    out.flush()
+                    os.fsync(out.fileno())
         else:
             with tarfile.open(archive_path, "r:gz") as archive:
-                try:
-                    member = archive.getmember(expected)
-                except KeyError:
-                    matches = [
-                        member
-                        for member in archive.getmembers()
-                        if Path(member.name).name == binary_name
-                    ]
-                    if not matches:
-                        raise KeyError(
-                            f"{binary_name} was not found in {archive_path}"
-                        )
-                    member = matches[0]
+                matches = [member for member in archive.getmembers() if member.name == expected]
+                if len(matches) != 1:
+                    raise RuntimeError(
+                        f"uv archive must contain exactly one member {expected!r}"
+                    )
+                member = matches[0]
+                _assert_uv_archive_member(member, expected)
                 extracted = archive.extractfile(member)
                 if extracted is None:
                     raise RuntimeError(f"{expected} is not a file in {archive_path}")
-                with extracted, dest.open("wb") as out:
+                with extracted, temporary.open("wb") as out:
                     shutil.copyfileobj(extracted, out)
+                    out.flush()
+                    os.fsync(out.fileno())
+        temporary.chmod(0o555)
+        _validate_staged_uv(temporary, target, version)
+        os.replace(temporary, dest)
+        temporary = None
+        _validate_staged_uv(dest, target, version)
     finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
         archive_path.unlink(missing_ok=True)
 
-    if not is_windows_target(target):
-        dest.chmod(dest.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return dest
 
 
@@ -891,6 +1145,7 @@ def validate_bundle(
     verify_no_python_bytecode(dest_root)
     required = [
         *REQUIRED_RUNTIME_BOOTSTRAP_FILES,
+        *SEALED_ROLE_TARGETS,
         Path("requirements.txt"),
         Path("core_runtime/core_pack/core_control_panel/web/index.html"),
         *CANONICAL_DEFAULTSPACK_FILES,
@@ -906,6 +1161,8 @@ def validate_bundle(
                 Path("bundled") / pack_shell_binary_name(target),
             ]
         )
+    if target:
+        required.append(Path(SEALED_PYTHON_MANIFEST))
 
     missing = [str(path) for path in required if not (dest_root / path).exists()]
     if missing:
@@ -941,7 +1198,10 @@ def validate_bundle(
 
     _validate_defaultspack_v4(dest_root, repository_root)
     verify_canonical_host_package(dest_root, repository_root)
+    verify_sealed_role_closure(dest_root, repository_root)
     verify_staged_bootstrap_import(dest_root)
+    if target:
+        validate_sealed_python_resource(dest_root, target, repository_root)
     verify_no_python_bytecode(dest_root)
 
 
@@ -1017,8 +1277,14 @@ def main() -> int:
         staged_uv = stage_uv(source_root, args.target, args.uv_version)
         print(f"Staged {staged_uv.relative_to(repo_root)}")
 
-    if dest_root.exists():
-        shutil.rmtree(dest_root)
+    if args.target:
+        build_sealed_python_resource(repo_root, source_root, args.target)
+
+    remove_owned_path(
+        dest_root,
+        owner_root=repo_root / "tobkiri_launcher/src-tauri/gen",
+        operation="reset staged Tauri resources",
+    )
     dest_root.mkdir(parents=True, exist_ok=True)
 
     tracked_count = copy_tracked_runtime_files(repo_root, source_root, dest_root)

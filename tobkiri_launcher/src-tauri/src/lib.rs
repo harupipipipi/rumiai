@@ -19,6 +19,9 @@ mod presentation;
 mod process_utils;
 mod python_env;
 mod runtime_resource_integrity;
+mod sealed_python;
+#[allow(dead_code)]
+mod sealed_python_protocol;
 mod shell_handoff;
 mod shell_runtime;
 mod tray;
@@ -2370,7 +2373,9 @@ fn run_launcher(context: tauri::Context<tauri::Wry>) {
 
                 // --- Normal startup sequence ---
                 update_setup_progress(Some(&handle), &progress_arc, "Checking Python environment...");
-                if let Err(e) = python_env::ensure_python_env(&config) {
+                if let Err(e) = python_env::ensure_python_env_with_progress(&config, |message| {
+                    update_setup_progress(Some(&handle), &progress_arc, message);
+                }) {
                     let msg = startup_failure_message("Python setup", &e, &config);
                     error!("{msg}");
                     update_setup_progress(Some(&handle), &progress_arc, &msg);

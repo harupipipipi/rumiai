@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from core_runtime.authority.v4 import AuthorityStoreError
+from core_runtime.app_lifecycle_manager import get_runtime_readiness
 from core_runtime.bootstrap.runtime import Kernel
 from core_runtime.bootstrap.profile_capture import capture_default_profile
 from core_runtime.di_container import get_container
@@ -29,6 +30,64 @@ def _free_port() -> int:
         return int(listener.getsockname()[1])
 
 
+def test_superseded_packaged_artifact_starts_ui_ready_reconfirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A valid predecessor transition serves setup instead of wedging startup."""
+
+    import core_runtime.bootstrap.runtime as runtime_bootstrap
+    from ecosystem.defaultspack.domain.runtime_v4 import (
+        ProfileReconfirmationRequired,
+    )
+
+    diagnostic = (
+        "active Profile Shell artifact identity was superseded by the verified "
+        "packaged release; explicit reconfirmation is required"
+    )
+
+    class SetupServer:
+        port = 8765
+        _contract_routes: tuple[object, ...] = ()
+
+        @staticmethod
+        def is_running() -> bool:
+            return True
+
+        @staticmethod
+        def stop() -> None:
+            return None
+
+    def require_reconfirmation() -> None:
+        raise ProfileReconfirmationRequired(diagnostic)
+
+    monkeypatch.setattr(runtime_bootstrap, "active_default_profile_exists", lambda: True)
+    monkeypatch.setattr(
+        runtime_bootstrap,
+        "capture_default_profile",
+        require_reconfirmation,
+    )
+    monkeypatch.setattr(runtime_bootstrap, "resolve_runtime_port", lambda: 8765)
+    monkeypatch.setattr(
+        runtime_bootstrap,
+        "initialize_pack_api_server",
+        lambda **_kwargs: SetupServer(),
+    )
+
+    kernel = Kernel()
+    try:
+        result = kernel.run_startup_until(kernel.API_INIT_STEP)
+        readiness = get_runtime_readiness()
+        assert result == {"status": "ok", "step_id": "api_init", "port": 8765}
+        assert readiness == {
+            "panel_ready": True,
+            "runtime_ready": False,
+            "runtime_status": "profile_reconfirmation_required",
+            "runtime_error": diagnostic,
+        }
+    finally:
+        kernel.shutdown()
+
+
 def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
     tmp_path: Path,
     monkeypatch,
@@ -38,9 +97,7 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
     monkeypatch.setenv("RUMI_PORT", str(port))
     monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
     monkeypatch.setenv("RUMI_LOG_DIR", str(tmp_path / "logs"))
-    reset_panel_auth_manager_for_tests(
-        PanelAuthManager(bootstrap_secret="first-request-bootstrap")
-    )
+    reset_panel_auth_manager_for_tests(PanelAuthManager(bootstrap_secret="first-request-bootstrap"))
 
     kernel = Kernel()
     try:
@@ -61,9 +118,7 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
 
         catalog = load_packaged_profile_catalog()
         variant = catalog.shells["shell.tauri.default"]["launch"]["variants"][0]
-        assert confirmation["shell"]["executable_artifact_digest"] == variant[
-            "entrypoint_digest"
-        ]
+        assert confirmation["shell"]["executable_artifact_digest"] == variant["entrypoint_digest"]
         request = Request(
             f"http://127.0.0.1:{port}/api/setup/packs/install",
             method="POST",
@@ -110,8 +165,7 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
         for contract_path in ("/api/home/dashboard", "/api/pack-control/catalog"):
             first_request = Request(
                 "http://127.0.0.1:"
-                f"{port}/api/contracts/defaultspack/"
-                + quote(f"GET {contract_path}", safe=""),
+                f"{port}/api/contracts/defaultspack/" + quote(f"GET {contract_path}", safe=""),
                 headers={"X-Tobkiri-Request-ID": str(uuid.uuid4())},
             )
             with opener.open(first_request, timeout=5) as response:

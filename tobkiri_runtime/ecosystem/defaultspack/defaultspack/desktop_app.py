@@ -29,10 +29,19 @@ _DIAGNOSTIC_ENV_KEYS = (
     "RUMI_PROFILE_SURFACE",
     "RUMI_USER_DATA",
 )
+_IMPORT_PATH_READY = False
+_SEALED_SCOPE = None
 
 
 def _pack_root() -> Path:
     return Path(__file__).resolve().parents[1]
+
+
+def _sealed_app_root() -> Path | None:
+    """Return the explicitly authorized sealed app root."""
+    if _SEALED_SCOPE is None:
+        return None
+    return _SEALED_SCOPE.app_root_for(__file__)
 
 
 def _configure_persistent_user_state() -> None:
@@ -64,6 +73,18 @@ def _configure_persistent_user_state() -> None:
 
 
 def _ensure_import_path() -> None:
+    global _IMPORT_PATH_READY
+    sealed_app_root = _sealed_app_root()
+    if sealed_app_root is not None:
+        if str(sealed_app_root) not in sys.path:
+            sys.path.insert(0, str(sealed_app_root))
+        _install_ecosystem_defaultspack_alias(
+            _pack_root(),
+            ecosystem_dirs=[sealed_app_root / "ecosystem"],
+        )
+        _IMPORT_PATH_READY = True
+        return
+
     pack_root = _pack_root()
     configured_roots = (
         os.environ.get("RUMI_APP_DIR"),
@@ -79,9 +100,14 @@ def _ensure_import_path() -> None:
         if root not in sys.path:
             sys.path.insert(0, root)
     _install_ecosystem_defaultspack_alias(pack_root)
+    _IMPORT_PATH_READY = True
 
 
-def _install_ecosystem_defaultspack_alias(pack_root: Path) -> None:
+def _install_ecosystem_defaultspack_alias(
+    pack_root: Path,
+    *,
+    ecosystem_dirs: list[Path] | None = None,
+) -> None:
     """Expose a managed pack root as ecosystem.defaultspack.
 
     Repo installs naturally import ``ecosystem.defaultspack`` via
@@ -89,7 +115,7 @@ def _install_ecosystem_defaultspack_alias(pack_root: Path) -> None:
     user-data without that parent ``ecosystem`` directory, but some legacy
     modules still import the canonical package path.
     """
-    ecosystem_dirs = _candidate_ecosystem_dirs(pack_root)
+    ecosystem_dirs = ecosystem_dirs or _candidate_ecosystem_dirs(pack_root)
     ecosystem = sys.modules.get("ecosystem")
     if ecosystem is None:
         ecosystem = types.ModuleType("ecosystem")
@@ -151,6 +177,18 @@ def _candidate_ecosystem_dirs(pack_root: Path) -> list[Path]:
         seen.add(key)
         resolved.append(candidate)
     return resolved
+
+
+def prepare_for_sealed_dispatch(scope: object) -> None:
+    """Bind import roots to the bootstrap-issued sealed dispatch scope."""
+    global _SEALED_SCOPE
+    if _SEALED_SCOPE is not None and _SEALED_SCOPE is not scope:
+        raise RuntimeError("Defaultspack sealed scope was already initialized")
+    sealed_app_root = scope.app_root_for(__file__)
+    if not isinstance(sealed_app_root, Path):
+        raise RuntimeError("Defaultspack sealed scope returned an invalid app root")
+    _SEALED_SCOPE = scope
+    _ensure_import_path()
 
 
 def _url() -> str:
@@ -384,7 +422,8 @@ def _require_host_panel_auth_manager() -> PanelAuthManager:
 def main(argv: list[str] | None = None) -> int:
     if argv is not None:
         _parse_cli_args(argv)
-    _ensure_import_path()
+    if not _IMPORT_PATH_READY:
+        _ensure_import_path()
     _configure_persistent_user_state()
     _configure_http_environment()
     url = _url()

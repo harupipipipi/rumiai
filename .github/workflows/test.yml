@@ -39,7 +39,7 @@ jobs:
           if [ "${{ matrix.python-version }}" = "3.11" ]; then
             pytest tests/ -v 2>&1 | tee "$PYTEST_LOG"
           else
-            pytest tests/test_entrypoint_contracts.py tests/test_windows_compat.py -v 2>&1 | tee "$PYTEST_LOG"
+            pytest tests/test_entrypoint_contracts.py tests/test_windows_compat.py tests/test_ci_python_dependency_contract.py -v 2>&1 | tee "$PYTEST_LOG"
           fi
 
       - name: Upload root pytest log
@@ -278,10 +278,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            tobkiri_runtime/requirements.txt
+            tobkiri_runtime/requirements-dev.txt
 
-      - name: Install locked runtime dependencies
+      - name: Install locked runtime and test dependencies
         run: |
-          python -m pip install -r tobkiri_runtime/requirements.txt
+          python .github/scripts/install_locked_python_test_dependencies.py
           python -m pip install --no-deps -e tobkiri_runtime
 
       - name: Run repository pack architecture boundary scan
@@ -342,7 +346,6 @@ jobs:
 
       - name: Exercise Base Pack/Shell and structured CLI integration
         run: |
-          python -m pip install pytest
           PYTHONPATH=tobkiri_runtime python -m pytest -q \
             tobkiri_runtime/tests/test_complete_v4_migration_gate.py \
             tobkiri_runtime/tests/test_complete_v4_migration_evidence.py \
@@ -645,6 +648,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            tobkiri_runtime/requirements.txt
+            tobkiri_runtime/requirements-dev.txt
+
+      - name: Install locked runtime and test dependencies
+        run: python .github/scripts/install_locked_python_test_dependencies.py
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -853,10 +863,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            tobkiri_runtime/requirements.txt
+            tobkiri_runtime/requirements-dev.txt
+
+      - name: Install locked runtime and test dependencies
+        run: python .github/scripts/install_locked_python_test_dependencies.py
 
       - name: Test native Windows presentation artifact paths
         run: |
-          python -m pip install pytest cryptography
+          python -m pytest -q .github/scripts/tests/test_packaging_cleanup.py
           python -m pytest -q tobkiri_launcher/scripts/tests/test_package_presentation_artifact.py -k windows_absolute_artifact_path
 
       - name: Set up Node

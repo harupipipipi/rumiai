@@ -33,18 +33,6 @@ jobs:
             presentation_variant: shell.tauri.default.macos-x86_64
             presentation_platform: macos
             presentation_architecture: x86_64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            shell_bundles: nsis
-            presentation_variant: shell.tauri.default.windows-x86_64
-            presentation_platform: windows
-            presentation_architecture: x86_64
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            shell_bundles: appimage
-            presentation_variant: shell.tauri.default.linux-x86_64
-            presentation_platform: linux
-            presentation_architecture: x86_64
 
     runs-on: ${{ matrix.os }}
 
@@ -66,6 +54,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            tobkiri_runtime/requirements.txt
+            tobkiri_runtime/requirements-dev.txt
 
       - name: Resolve checked-out source revision
         id: checked_out_source
@@ -99,9 +91,6 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          WINDOWS_TIMESTAMP_URL: https://timestamp.digicert.com
         run: |
           import os
           import subprocess
@@ -134,24 +123,8 @@ jobs:
               check=True,
           )
 
-      - name: Install Shell release signing dependency
-        run: python -m pip install -r tobkiri_runtime/requirements.txt
-
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf
+      - name: Install locked runtime and test dependencies
+        run: python .github/scripts/install_locked_python_test_dependencies.py
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -240,6 +213,68 @@ jobs:
           --target ${{ matrix.target }}
           --profile release
 
+      - name: Prepare sealed Python environment and export manifest binding
+        shell: python
+        env:
+          SEALED_TARGET: ${{ matrix.target }}
+          SEALED_BINDING: ${{ runner.temp }}/sealed-python-binding.env
+        run: |
+          import importlib.util
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          root = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          target = os.environ["SEALED_TARGET"]
+          builder_path = root / ".github/scripts/build_sealed_python_environment.py"
+          spec = importlib.util.spec_from_file_location("sealed_target_check", builder_path)
+          if spec is None or spec.loader is None:
+              raise SystemExit(f"Unable to load {builder_path}")
+          module = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = module
+          spec.loader.exec_module(module)
+          module.target_spec(target)
+
+          subprocess.run(
+              [
+                  sys.executable,
+                  ".github/scripts/prepare_tauri_resources.py",
+                  "--repo-root",
+                  str(root),
+                  "--target",
+                  target,
+                  "--uv-version",
+                  module.UV_VERSION,
+                  "--require-runtime-tools",
+              ],
+              cwd=root,
+              check=True,
+          )
+          binding = Path(os.environ["SEALED_BINDING"])
+          subprocess.run(
+              [
+                  sys.executable,
+                  str(builder_path),
+                  "--repo-root",
+                  str(root),
+                  "--target",
+                  target,
+                  "--check",
+                  "--env-output",
+                  str(binding),
+              ],
+              cwd=root,
+              check=True,
+          )
+          text = binding.read_text(encoding="utf-8")
+          prefix = "TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256="
+          digest = text.removeprefix(prefix).strip()
+          if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+              raise SystemExit("sealed Python manifest binding is not a lowercase SHA-256")
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as output:
+              output.write(text if text.endswith("\n") else text + "\n")
+
       - name: Build verified Tauri Shell artifact
         working-directory: tobkiri_launcher
         env:
@@ -269,24 +304,6 @@ jobs:
             --app-bundle "$artifact" \
             --artifact "$artifact"
 
-      - name: Authenticode-sign and verify Windows Shell artifact
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          WINDOWS_TIMESTAMP_URL: https://timestamp.digicert.com
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $artifact = Join-Path $env:GITHUB_WORKSPACE "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/tobkiri-shell.exe"
-          if (-not (Test-Path -LiteralPath $artifact -PathType Leaf)) { throw "Tauri Shell binary not found: $artifact" }
-          python scripts/release_gate.py sign-artifacts `
-            --repo-root $env:GITHUB_WORKSPACE `
-            --mode production `
-            --platform windows `
-            --artifact $artifact
-          if ($LASTEXITCODE -ne 0) { throw 'Windows Shell Authenticode signing failed' }
-
       - name: Stage verified macOS Tauri Shell artifact
         if: runner.os == 'macOS'
         shell: bash
@@ -308,50 +325,6 @@ jobs:
             --signing-key-id 'github-actions:${{ github.run_id }}:${{ matrix.target }}' \
             --repository-root "$GITHUB_WORKSPACE" \
             --output-dir "$RELEASE_ROOT"
-
-      - name: Stage verified Linux Tauri Shell artifact
-        if: runner.os == 'Linux'
-        shell: bash
-        env:
-          RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
-        run: |
-          artifact="$(find "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/appimage" -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
-          test -n "$artifact"
-          python -c 'import secrets,sys; open(sys.argv[1], "wb").write(secrets.token_bytes(32))' "$RUNNER_TEMP/tobkiri-presentation-signing-key.raw"
-          python tobkiri_launcher/scripts/write_shell_build_output.py \
-            --artifact-id '${{ matrix.presentation_variant }}' --artifact "$artifact" \
-            --platform '${{ matrix.presentation_platform }}' --architecture '${{ matrix.presentation_architecture }}' \
-            --source-identity 'github:${{ github.repository }}' --source-revision '${{ steps.checked_out_source.outputs.source_revision }}' \
-            --output "$RUNNER_TEMP/shell-build-output.v4.json"
-          python tobkiri_launcher/scripts/package_presentation_artifact.py \
-            --catalog tobkiri_launcher/src-tauri/bundled/presentation_catalog.json \
-            --build-output-manifest "$RUNNER_TEMP/shell-build-output.v4.json" \
-            --signing-key "$RUNNER_TEMP/tobkiri-presentation-signing-key.raw" \
-            --signing-key-id 'github-actions:${{ github.run_id }}:${{ matrix.target }}' \
-            --repository-root "$GITHUB_WORKSPACE" \
-            --output-dir "$RELEASE_ROOT"
-
-      - name: Stage verified Windows Tauri Shell artifact
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
-        run: |
-          $artifact = Join-Path $env:GITHUB_WORKSPACE "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/tobkiri-shell.exe"
-          if (-not (Test-Path -LiteralPath $artifact -PathType Leaf)) { throw "Tauri Shell binary not found: $artifact" }
-          $key = Join-Path $env:RUNNER_TEMP "tobkiri-presentation-signing-key.raw"
-          $manifest = Join-Path $env:RUNNER_TEMP "shell-build-output.v4.json"
-          python -c "import secrets,sys; open(sys.argv[1], 'wb').write(secrets.token_bytes(32))" $key
-          python tobkiri_launcher/scripts/write_shell_build_output.py `
-            --artifact-id '${{ matrix.presentation_variant }}' --artifact $artifact `
-            --platform '${{ matrix.presentation_platform }}' --architecture '${{ matrix.presentation_architecture }}' `
-            --source-identity 'github:${{ github.repository }}' --source-revision '${{ steps.checked_out_source.outputs.source_revision }}' --output $manifest
-          python tobkiri_launcher/scripts/package_presentation_artifact.py `
-            --catalog tobkiri_launcher/src-tauri/bundled/presentation_catalog.json `
-            --build-output-manifest $manifest --signing-key $key `
-            --signing-key-id 'github-actions:${{ github.run_id }}:${{ matrix.target }}' `
-            --repository-root $env:GITHUB_WORKSPACE `
-            --output-dir $env:RELEASE_ROOT
 
       - name: Build signed macOS application
         if: runner.os == 'macOS'
@@ -418,37 +391,6 @@ jobs:
             --artifact "$app" \
             --artifact "$dmg"
 
-      - name: Build with cargo tauri
-        if: runner.os != 'macOS'
-        working-directory: tobkiri_launcher
-        env:
-          TOBKIRI_PRESENTATION_RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
-          TOBKIRI_PANEL_BUILD_DIR: ${{ runner.temp }}/tobkiri-panel-build
-        run: cargo tauri build --target ${{ matrix.target }} --ci
-
-      - name: Sign and verify Windows installer
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          WINDOWS_TIMESTAMP_URL: https://timestamp.digicert.com
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $installers = @(Get-ChildItem -LiteralPath "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/nsis" -Filter '*.exe' -File)
-          if ($installers.Count -eq 0) { throw 'No Windows NSIS installer was produced' }
-          $arguments = @(
-            'scripts/release_gate.py',
-            'sign-artifacts',
-            '--repo-root', $env:GITHUB_WORKSPACE,
-            '--mode', 'production',
-            '--platform', 'windows'
-          )
-          foreach ($installer in $installers) {
-            $arguments += @('--artifact', $installer.FullName)
-          }
-          python @arguments
-          if ($LASTEXITCODE -ne 0) { throw 'Windows installer Authenticode signing failed' }
 
       - name: Prepare immutable target release upload
         shell: python
@@ -471,15 +413,9 @@ jobs:
               "release",
               "bundle",
           )
-          if runner_os == "Linux":
-              source_dirs = [
-                  os.path.join(bundle_root, "deb"),
-                  os.path.join(bundle_root, "appimage"),
-              ]
-          elif runner_os == "Windows":
-              source_dirs = [os.path.join(bundle_root, "nsis")]
-          else:
-              source_dirs = [os.path.join(bundle_root, "dmg")]
+          if runner_os != "macOS":
+              raise SystemExit("release workflow is currently macOS-only")
+          source_dirs = [os.path.join(bundle_root, "dmg")]
           command = [
               sys.executable,
               "scripts/release_inventory.py",

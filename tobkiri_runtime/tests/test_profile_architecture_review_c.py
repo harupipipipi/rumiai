@@ -74,6 +74,30 @@ def _packaged_catalog(tmp_path: Path) -> BundledCatalog:
     return BundledCatalog.load(bundle)
 
 
+def _packaged_catalog_revision(tmp_path: Path, marker: bytes) -> BundledCatalog:
+    """Build one valid packaged catalog with a distinct Shell identity."""
+
+    bundle = tmp_path / "defaultspack" / "v4"
+    artifacts = tmp_path / "defaultspack" / "platform-artifacts"
+    executable = tmp_path / "verified-release" / "Tobkiri.AppImage"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 10 + b">\x00fixture-" + marker)
+    executable.chmod(0o755)
+    shutil.copytree(SOURCE_BUNDLE, bundle)
+    stage_packaged_bundle(
+        source_artifact=executable,
+        bundle_root=bundle,
+        artifact_root=artifacts,
+        relative_path="Tobkiri.AppImage",
+        entrypoint="Tobkiri.AppImage",
+        platform="linux",
+        architecture="x86_64",
+        bundle_identity="io.tobkiri.shell.tauri",
+        source_commit=None,
+    )
+    return BundledCatalog.load(bundle)
+
+
 def _resolve(catalog: BundledCatalog):
     profile = catalog.profiles["defaults"]
     return resolve_default_profile(
@@ -188,6 +212,273 @@ def test_activation_and_restart_reverify_selected_executable(tmp_path: Path) -> 
     executable.write_bytes(executable.read_bytes() + b"restart-tamper")
     with pytest.raises(ProfileResolutionDenied, match="artifact rejected"):
         restart_store.load_active_snapshot()
+
+
+def test_relocated_packaged_artifact_preserves_exact_active_identity(
+    tmp_path: Path,
+) -> None:
+    catalog = _packaged_catalog_revision(tmp_path / "installed", b"same-release")
+    resolved = _resolve(catalog)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state = tmp_path / "state"
+    authority = AuthorityStore(tmp_path / "authority.sqlite3")
+    ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        catalog=catalog,
+    ).activate(
+        resolved,
+        activation_id="activation:defaults-before-relocation",
+        created_at="2026-08-12T00:00:00Z",
+    )
+
+    relocated = tmp_path / "relocated" / "defaultspack"
+    shutil.copytree(catalog.root.parent, relocated)
+    relocated_catalog = BundledCatalog.load(relocated / "v4")
+    restarted = ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        catalog=relocated_catalog,
+    ).load_active_snapshot()
+
+    assert restarted.resolved == resolved
+    assert relocated_catalog.artifact_root == (relocated / "platform-artifacts").resolve()
+
+
+def test_valid_active_artifact_revision_requires_explicit_reconfirmation(
+    tmp_path: Path,
+) -> None:
+    predecessor_catalog = _packaged_catalog_revision(tmp_path / "predecessor", b"predecessor")
+    successor_catalog = _packaged_catalog_revision(tmp_path / "successor", b"successor")
+    predecessor = _resolve(predecessor_catalog)
+    successor = _resolve(successor_catalog)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state = tmp_path / "state"
+    authority = AuthorityStore(tmp_path / "authority.sqlite3")
+    ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        catalog=predecessor_catalog,
+    ).activate(
+        predecessor,
+        activation_id="activation:defaults-predecessor-artifact",
+        created_at="2026-08-12T00:00:00Z",
+    )
+    pointer_before = (state / "active.json").read_bytes()
+    predecessor_envelope = next((state / "activations").iterdir())
+    predecessor_bytes = predecessor_envelope.read_bytes()
+    store = ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        catalog=successor_catalog,
+    )
+
+    with pytest.raises(
+        ProfileReconfirmationRequired,
+        match="artifact identity was superseded",
+    ):
+        store.load_active_snapshot()
+    assert (state / "active.json").read_bytes() == pointer_before
+    assert predecessor_envelope.read_bytes() == predecessor_bytes
+    assert len(tuple((state / "activations").iterdir())) == 1
+
+    store.reconcile_active(
+        successor,
+        activation_id="activation:defaults-confirmed-artifact",
+        created_at="2026-08-12T00:01:00Z",
+    )
+    restarted = ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        catalog=successor_catalog,
+    ).load_active_snapshot()
+    assert restarted.resolved == successor
+    assert restarted.activation["activation_id"] == ("activation:defaults-confirmed-artifact")
+    assert predecessor_envelope.read_bytes() == predecessor_bytes
+
+
+def test_capture_flow_reconfirms_valid_artifact_successor_and_persists_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core_runtime.bootstrap import profile_capture
+
+    predecessor_catalog = _packaged_catalog_revision(tmp_path / "predecessor", b"predecessor")
+    successor_catalog = _packaged_catalog_revision(tmp_path / "successor", b"successor")
+    predecessor = _resolve(predecessor_catalog)
+    successor = _resolve(successor_catalog)
+    user_data = tmp_path / "user-data"
+    workspace = user_data / "workspaces" / "defaults"
+    workspace.mkdir(parents=True)
+    state = workspace / "activation"
+    with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
+        ActivationStore(
+            state,
+            workspace,
+            profile_id="defaults",
+            authority=authority,
+            catalog=predecessor_catalog,
+        ).activate(
+            predecessor,
+            activation_id="activation:defaults-capture-predecessor",
+            created_at="2026-08-12T00:00:00Z",
+        )
+    confirmation = {
+        "operation_id": "defaults.activate",
+        "confirmation_digest": "sha256:" + "a" * 64,
+    }
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    monkeypatch.setattr(
+        profile_capture,
+        "_bundle_root",
+        lambda _base=None: successor_catalog.root,
+    )
+    monkeypatch.setattr(
+        profile_capture,
+        "_resolve_candidate",
+        lambda **_kwargs: (successor, confirmation),
+    )
+
+    with pytest.raises(ProfileReconfirmationRequired, match="superseded"):
+        profile_capture.capture_default_profile()
+    with pytest.raises(ProfileResolutionDenied, match="stale or tampered"):
+        profile_capture.capture_default_profile(
+            confirmation={**confirmation, "operation_id": "attacker.activate"}
+        )
+    active = profile_capture.capture_default_profile(confirmation=confirmation)
+    restarted = profile_capture.capture_default_profile()
+    assert restarted == active
+    assert active.resolved == successor
+
+
+def test_confirmed_artifact_reconfirmation_recovers_interrupted_commit(
+    tmp_path: Path,
+) -> None:
+    predecessor_catalog = _packaged_catalog_revision(tmp_path / "predecessor", b"predecessor")
+    successor_catalog = _packaged_catalog_revision(tmp_path / "successor", b"successor")
+    successor = _resolve(successor_catalog)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state = tmp_path / "state"
+    authority = AuthorityStore(tmp_path / "authority.sqlite3")
+    ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        catalog=predecessor_catalog,
+    ).activate(
+        _resolve(predecessor_catalog),
+        activation_id="activation:defaults-interrupted-predecessor",
+        created_at="2026-08-12T00:00:00Z",
+    )
+    predecessor_envelope = next((state / "activations").iterdir())
+    predecessor_bytes = predecessor_envelope.read_bytes()
+
+    def interrupt(stage: str) -> None:
+        if stage == "after_authority_commit":
+            raise OSError("simulated restart after Authority commit")
+
+    with pytest.raises(OSError, match="simulated restart"):
+        ActivationStore(
+            state,
+            workspace,
+            profile_id="defaults",
+            authority=authority,
+            catalog=successor_catalog,
+            fault=interrupt,
+        ).reconcile_active(
+            successor,
+            activation_id="activation:defaults-interrupted-successor",
+            created_at="2026-08-12T00:01:00Z",
+        )
+
+    recovered = ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        catalog=successor_catalog,
+    ).load_active_snapshot()
+    assert recovered.resolved == successor
+    assert recovered.activation["activation_id"] == ("activation:defaults-interrupted-successor")
+    assert predecessor_envelope.read_bytes() == predecessor_bytes
+
+
+@pytest.mark.parametrize(
+    "case",
+    ("stale_revision", "missing_successor", "tampered_successor", "unauthorized"),
+)
+def test_artifact_reconfirmation_keeps_hard_denials_fail_closed(
+    tmp_path: Path,
+    case: str,
+) -> None:
+    predecessor_catalog = _packaged_catalog_revision(tmp_path / "predecessor", b"predecessor")
+    successor_catalog = _packaged_catalog_revision(tmp_path / "successor", b"successor")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state = tmp_path / "state"
+    authority = AuthorityStore(tmp_path / "authority.sqlite3")
+    ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        catalog=predecessor_catalog,
+    ).activate(
+        _resolve(predecessor_catalog),
+        activation_id="activation:defaults-hard-denial",
+        created_at="2026-08-12T00:00:00Z",
+    )
+    pointer = json.loads((state / "active.json").read_text(encoding="utf-8"))
+    envelope_path = state / "activations" / pointer["envelope_path"]
+    expected = ""
+    selected_authority = authority
+    if case == "stale_revision":
+        envelope = json.loads(envelope_path.read_text(encoding="utf-8"))
+        envelope["lock"]["profile_revision"] = "sha256:" + "f" * 64
+        envelope_path.write_bytes(canonical_json(envelope) + b"\n")
+        pointer["envelope_digest"] = canonical_digest(envelope)
+        (state / "active.json").write_bytes(canonical_json(pointer) + b"\n")
+        expected = "ProfileLock or ResolvedPlan is stale"
+    elif case in {"missing_successor", "tampered_successor"}:
+        variant = successor_catalog.shells["shell.tauri.default"]["launch"]["variants"][0]
+        artifact = successor_catalog.artifact_root / str(variant["relative_path"])
+        if case == "missing_successor":
+            artifact.unlink()
+        else:
+            artifact.write_bytes(artifact.read_bytes() + b"tamper")
+        expected = "verified successor Shell artifact rejected"
+    else:
+        selected_authority = AuthorityStore(tmp_path / "foreign-authority.sqlite3")
+        expected = "active activation authority"
+    pointer_before = (state / "active.json").read_bytes()
+    envelope_before = envelope_path.read_bytes()
+
+    with pytest.raises(ProfileResolutionDenied, match=expected) as denied:
+        ActivationStore(
+            state,
+            workspace,
+            profile_id="defaults",
+            authority=selected_authority,
+            catalog=successor_catalog,
+        ).load_active_snapshot()
+    assert not isinstance(denied.value, ProfileReconfirmationRequired)
+    assert (state / "active.json").read_bytes() == pointer_before
+    assert envelope_path.read_bytes() == envelope_before
+    assert len(tuple((state / "activations").iterdir())) == 1
 
 
 def test_production_macos_artifact_requires_valid_code_signature(
@@ -677,9 +968,7 @@ def test_capture_flow_reconciles_only_with_exact_explicit_confirmation(
         )
     active = profile_capture.capture_default_profile(confirmation=confirmation)
     assert active.resolved == resolved
-    assert active.activation["activation_id"].startswith(
-        "activation:defaults-reconcile-"
-    )
+    assert active.activation["activation_id"].startswith("activation:defaults-reconcile-")
     assert profile_capture.capture_default_profile().activation == active.activation
 
 

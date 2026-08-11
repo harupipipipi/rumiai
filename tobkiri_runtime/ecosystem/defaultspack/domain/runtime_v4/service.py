@@ -1080,9 +1080,8 @@ class ActivationStore:
             expected_predecessor_activation_id,
         )
         active: ActiveDefaultProfile | None = None
-        if (
-            any(value is not None for value in expected_predecessor)
-            and self._state.exists("active.json")
+        if any(value is not None for value in expected_predecessor) and self._state.exists(
+            "active.json"
         ):
             active = self._load_active_snapshot_locked()
             if active.activation["activation_id"] == activation_id:
@@ -1687,7 +1686,10 @@ class ActivationStore:
             raise ProfileResolutionDenied(
                 "active activation authority, fence, or SecurityEpoch is stale"
             )
-        self._verify_selected_artifact(profile)
+        self._verify_selected_artifact(
+            profile,
+            allow_verified_successor_reconfirmation=True,
+        )
         return ActiveDefaultProfile(
             resolved=ResolvedDefaultProfile(profile=profile, lock=lock, plan=plan),
             activation=activation,
@@ -1917,7 +1919,75 @@ class ActivationStore:
             expected_predecessor_activation_id=None,
         )
 
-    def _verify_selected_artifact(self, profile: Mapping[str, Any]) -> None:
+    def _verified_shell_successor_is_available(
+        self,
+        profile: Mapping[str, Any],
+        definition: Mapping[str, Any],
+    ) -> bool:
+        """Return whether the catalog has one verified successor for this Shell.
+
+        This classification is intentionally narrower than normal resolution.  It
+        never activates or selects the successor.  It only permits the caller to
+        surface an explicit reconfirmation transaction after the persisted record
+        graph and Authority reservation have already been validated.
+        """
+
+        if self._catalog is None or self._catalog.artifact_root is None:
+            return False
+        shell = profile.get("shell")
+        source_profile = self._catalog.profiles.get(self.profile_id)
+        source_shell = source_profile.get("shell") if isinstance(source_profile, Mapping) else None
+        if not isinstance(shell, Mapping) or not isinstance(source_shell, Mapping):
+            return False
+        stable_fields = (
+            "provider_id",
+            "pack_id",
+            "contract_id",
+            "platform",
+            "architecture",
+        )
+        if any(shell.get(field) != source_shell.get(field) for field in stable_fields):
+            return False
+        if (
+            definition.get("provider_id") != shell.get("provider_id")
+            or definition.get("pack_id") != shell.get("pack_id")
+            or definition.get("contract_id") != shell.get("contract_id")
+            or definition.get("definition_revision") == shell.get("definition_revision")
+        ):
+            return False
+        variants = [
+            item
+            for item in definition["launch"]["variants"]
+            if item["platform"] == shell.get("platform")
+            and item["architecture"] == shell.get("architecture")
+        ]
+        if len(variants) != 1:
+            return False
+        successor = variants[0]
+        shell_manifest = self._catalog.packs.get(str(definition.get("pack_id")))
+        if (
+            not isinstance(shell_manifest, Mapping)
+            or shell_manifest["pack"].get("kind") != "shell"
+            or source_shell.get("artifact_digest") != successor["artifact_digest"]
+            or source_shell.get("executable_artifact_digest") != successor["entrypoint_digest"]
+            or source_shell.get("definition_revision") != definition.get("definition_revision")
+            or definition.get("artifact_digest") != successor["artifact_digest"]
+        ):
+            return False
+        try:
+            verify_platform_artifact(self._catalog.artifact_root, successor)
+        except ProtocolError as exc:
+            raise ProfileResolutionDenied(
+                f"verified successor Shell artifact rejected: {exc}"
+            ) from exc
+        return True
+
+    def _verify_selected_artifact(
+        self,
+        profile: Mapping[str, Any],
+        *,
+        allow_verified_successor_reconfirmation: bool = False,
+    ) -> None:
         """Reverify the exact selected Shell/Application bytes when catalogued."""
 
         if self._catalog is None:
@@ -1935,7 +2005,36 @@ class ActivationStore:
             and item["architecture"] == shell.get("architecture")
             and item["entrypoint_digest"] == shell.get("executable_artifact_digest")
         ]
-        if len(variants) != 1 or self._catalog.artifact_root is None:
+        source_profile = self._catalog.profiles.get(self.profile_id)
+        source_shell = source_profile.get("shell") if isinstance(source_profile, Mapping) else None
+        shell_manifest = self._catalog.packs.get(str(shell.get("pack_id")))
+        stable_fields = (
+            "provider_id",
+            "pack_id",
+            "contract_id",
+            "platform",
+            "architecture",
+        )
+        exact_current_binding = (
+            len(variants) == 1
+            and isinstance(source_shell, Mapping)
+            and isinstance(shell_manifest, Mapping)
+            and all(shell.get(field) == source_shell.get(field) for field in stable_fields)
+            and shell.get("artifact_digest") == shell_manifest["pack"]["artifact_digest"]
+            and shell.get("executable_artifact_digest")
+            == source_shell.get("executable_artifact_digest")
+            and shell.get("definition_revision") == definition.get("definition_revision")
+        )
+        if (
+            not exact_current_binding
+            and allow_verified_successor_reconfirmation
+            and self._verified_shell_successor_is_available(profile, definition)
+        ):
+            raise ProfileReconfirmationRequired(
+                "active Profile Shell artifact identity was superseded by the "
+                "verified packaged release; explicit reconfirmation is required"
+            )
+        if not exact_current_binding or self._catalog.artifact_root is None:
             raise ProfileResolutionDenied("active Profile Shell artifact is unavailable")
         try:
             verify_platform_artifact(self._catalog.artifact_root, variants[0])
