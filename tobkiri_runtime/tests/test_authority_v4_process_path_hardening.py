@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+from typing import Any
 
 import pytest
 
@@ -14,6 +15,23 @@ import core_runtime.process_identity as process_identity
 import core_runtime.secure_sqlite_path as secure_paths
 from core_runtime.authority.v4_store import AuthorityStore, AuthorityStoreError
 from core_runtime.process_identity import ProcessIdentityEvidence
+
+
+class _StaticRows:
+    def __init__(self, rows: list[tuple[int, str, str]]) -> None:
+        self._rows = rows
+
+    def fetchall(self) -> list[tuple[int, str, str]]:
+        return self._rows
+
+
+class _MisreportedPathConnection(sqlite3.Connection):
+    reported_path: Path
+
+    def execute(self, sql: str, *args: Any, **kwargs: Any) -> Any:
+        if sql.strip().upper() == "PRAGMA DATABASE_LIST":
+            return _StaticRows([(0, "main", str(self.reported_path))])
+        return super().execute(sql, *args, **kwargs)
 
 
 class _FakeWindowsProcessAPI:
@@ -356,3 +374,95 @@ def test_authority_detects_database_replacement_during_sqlite_connect(
     monkeypatch.setattr(sqlite3, "connect", original_connect)
     assert store.security_epoch == 1
     store.close()
+
+
+def test_authority_rejects_connector_opening_a_different_database(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "authority" / "authority.sqlite3"
+    wrong_path = tmp_path / "wrong.sqlite3"
+
+    def wrong_connector(*_args: object, **kwargs: object) -> sqlite3.Connection:
+        return sqlite3.connect(wrong_path, **kwargs)
+
+    with pytest.raises(AuthorityStoreError, match="handle identity"):
+        AuthorityStore(path, connection_connector=wrong_connector)
+
+    assert path.read_bytes() == b""
+    assert wrong_path.read_bytes() == b""
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor identity invariant")
+def test_authority_rejects_mismatched_handle_when_reported_path_is_unchanged(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "authority" / "authority.sqlite3"
+    store = AuthorityStore(path)
+    store.close()
+    wrong_path = tmp_path / "wrong.sqlite3"
+    keeper = sqlite3.connect(path, isolation_level=None)
+    keeper.execute("PRAGMA journal_mode=WAL")
+    keeper.execute("BEGIN IMMEDIATE")
+    _MisreportedPathConnection.reported_path = path
+
+    def mismatched_connector(*_args: object, **kwargs: object) -> sqlite3.Connection:
+        return sqlite3.connect(
+            wrong_path,
+            factory=_MisreportedPathConnection,
+            **kwargs,
+        )
+
+    try:
+        with pytest.raises(AuthorityStoreError, match="handle identity"):
+            AuthorityStore(path, connection_connector=mismatched_connector)
+    finally:
+        keeper.rollback()
+        keeper.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor identity invariant")
+@pytest.mark.parametrize("failure", ["missing", "permission"])
+def test_authority_denies_descriptor_identity_uncertainty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    def unavailable() -> dict[int, secure_paths.FileIdentity]:
+        error: OSError
+        if failure == "missing":
+            error = FileNotFoundError("descriptor directory is missing")
+        else:
+            error = PermissionError("descriptor directory is unreadable")
+        raise AuthorityStoreError("authority database handle identity is unavailable") from error
+
+    monkeypatch.setattr(
+        AuthorityStore,
+        "_open_descriptor_identities",
+        staticmethod(unavailable),
+    )
+    with pytest.raises(AuthorityStoreError, match="identity is unavailable"):
+        AuthorityStore(tmp_path / f"{failure}.sqlite3")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission invariant")
+def test_authority_rejects_broad_sidecar_permissions_before_query(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "authority.sqlite3"
+    original_pin = AuthorityStore._pin_opened_database_files
+
+    def broaden_wal(
+        store: AuthorityStore,
+        connection: sqlite3.Connection,
+        descriptors_before: set[int],
+        suffixes: tuple[str, ...] = ("", "-wal", "-shm"),
+    ) -> dict[str, object]:
+        pinned = original_pin(store, connection, descriptors_before, suffixes)
+        if "-wal" in suffixes:
+            Path(f"{path}-wal").chmod(0o644)
+        return pinned
+
+    monkeypatch.setattr(AuthorityStore, "_pin_opened_database_files", broaden_wal)
+    with pytest.raises(AuthorityStoreError, match="permissions"):
+        AuthorityStore(path)

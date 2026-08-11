@@ -21,8 +21,9 @@ import time
 import weakref
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
+from types import TracebackType
 from typing import Any, Concatenate, Iterator, ParamSpec, TypeAlias, TypeVar
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -73,6 +74,64 @@ _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
 
+@dataclass(frozen=True)
+class _OpenedDatabaseIdentity:
+    """Pinned pathname and native descriptor identity for one SQLite file."""
+
+    identity: FileIdentity
+    descriptors: tuple[int, ...]
+
+
+class _IdentityBoundConnection:
+    """Validate SQLite's live persistence handles before every operation."""
+
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        validator: Callable[[], None],
+    ) -> None:
+        self._connection = connection
+        self._validator = validator
+
+    def __enter__(self) -> "_IdentityBoundConnection":
+        self._validator()
+        self._connection.__enter__()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        if exc_type is None:
+            self._validator()
+        return bool(self._connection.__exit__(exc_type, exc_value, traceback))
+
+    def execute(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
+        """Execute SQL only while all persistence identities remain pinned."""
+
+        self._validator()
+        return self._connection.execute(*args, **kwargs)
+
+    def executescript(self, script: str) -> sqlite3.Cursor:
+        """Execute a SQL script only while persistence identities remain pinned."""
+
+        self._validator()
+        return self._connection.executescript(script)
+
+    def commit(self) -> None:
+        """Commit only to the previously attested database handles."""
+
+        self._validator()
+        self._connection.commit()
+
+    def close(self) -> None:
+        """Close the underlying native SQLite connection."""
+
+        self._connection.close()
+
+
 def _process_owned(
     method: Callable[Concatenate[Any, _P], _R],
 ) -> Callable[Concatenate[Any, _P], _R]:
@@ -94,6 +153,7 @@ class AuthorityStore:
         key_path: Optional encryption/MAC key path.  Defaults next to the DB.
         clock: Injectable wall-clock function for deterministic tests.
         audit_fault: Optional fault-injection hook called before audit appends.
+        connection_connector: Optional injectable SQLite connector for tests.
     """
 
     def __init__(
@@ -104,6 +164,7 @@ class AuthorityStore:
         clock: Callable[[], float] = time.time,
         audit_fault: Callable[[], None] | None = None,
         process_start_reader: Callable[[int], ProcessIdentityEvidence] | None = None,
+        connection_connector: Callable[..., sqlite3.Connection] | None = None,
     ) -> None:
         self.path = canonical_platform_path(Path(path))
         self.key_path = canonical_platform_path(
@@ -116,11 +177,11 @@ class AuthorityStore:
             raise AuthorityStoreError("authority process identity is unavailable")
         self._owner_process_start = evidence.identity
         self._refresh_process_identity = (
-            process_start_reader is not None
-            or self._owner_process_start.startswith("windows:")
+            process_start_reader is not None or self._owner_process_start.startswith("windows:")
         )
         self._clock = clock
         self._audit_fault = audit_fault
+        self._connection_connector = connection_connector
         self._lock = threading.RLock()
         self._closed = False
         self._fork_fenced = False
@@ -317,6 +378,123 @@ class AuthorityStore:
         except (OSError, SecurePathError) as exc:
             raise AuthorityStoreError("authority database path is unsafe") from exc
 
+    @staticmethod
+    def _open_descriptor_identities() -> dict[int, FileIdentity]:
+        """Snapshot open regular-file descriptors on supported POSIX hosts."""
+
+        descriptor_root = Path("/proc/self/fd")
+        if not descriptor_root.is_dir():
+            descriptor_root = Path("/dev/fd")
+        if not descriptor_root.is_dir():
+            raise AuthorityStoreError("authority database handle identity is unavailable")
+        identities: dict[int, FileIdentity] = {}
+        try:
+            names = os.listdir(descriptor_root)
+        except OSError as exc:
+            raise AuthorityStoreError("authority database handle identity is unavailable") from exc
+        for name in names:
+            try:
+                descriptor = int(name)
+                metadata = os.fstat(descriptor)
+            except (OSError, ValueError):
+                continue
+            if stat.S_ISREG(metadata.st_mode):
+                identities[descriptor] = FileIdentity.from_stat(metadata)
+        return identities
+
+    def _reported_database_path(self, connection: sqlite3.Connection) -> Path:
+        rows = connection.execute("PRAGMA database_list").fetchall()
+        main_paths = [str(row[2]) for row in rows if str(row[1]) == "main"]
+        if len(main_paths) != 1 or not main_paths[0]:
+            raise AuthorityStoreError("authority database handle identity is unavailable")
+        return canonical_platform_path(Path(main_paths[0]))
+
+    @staticmethod
+    def _validate_private_storage_mode(parent: SecureParent, name: str) -> None:
+        if os.name == "nt":
+            return
+        metadata = parent.stat_file(name, required=True)
+        assert metadata is not None
+        if stat.S_IMODE(metadata.st_mode) & 0o077:
+            raise AuthorityStoreError("authority database permissions are too broad")
+
+    def _pin_opened_database_files(
+        self,
+        connection: sqlite3.Connection,
+        descriptors_before: set[int],
+        suffixes: tuple[str, ...] = ("", "-wal", "-shm"),
+    ) -> dict[str, _OpenedDatabaseIdentity]:
+        """Tie SQLite's reported destination and live handles to safe paths."""
+
+        if self._reported_database_path(connection) != self.path:
+            raise AuthorityStoreError("authority database handle identity is unsafe")
+        pinned: dict[str, _OpenedDatabaseIdentity] = {}
+        descriptor_identities = {} if os.name == "nt" else self._open_descriptor_identities()
+        try:
+            with self._secure_parent(self.path) as parent:
+                for suffix in suffixes:
+                    name = f"{self.path.name}{suffix}"
+                    identity = parent.validate_open(
+                        name,
+                        required=True,
+                        expected=self._database_identity if not suffix else None,
+                    )
+                    assert identity is not None
+                    self._validate_private_storage_mode(parent, name)
+                    descriptors: tuple[int, ...] = ()
+                    if os.name != "nt":
+                        matches = [
+                            candidate
+                            for candidate, opened_identity in descriptor_identities.items()
+                            if opened_identity == identity
+                        ]
+                        if not matches:
+                            raise SecurePathError(
+                                "SQLite handle does not match the pinned storage file"
+                            )
+                        descriptors = tuple(matches)
+                    pinned[suffix] = _OpenedDatabaseIdentity(identity, descriptors)
+                if os.name != "nt":
+                    allowed_identities = {opened.identity for opened in pinned.values()}
+                    unexpected_new = {
+                        identity
+                        for descriptor, identity in descriptor_identities.items()
+                        if descriptor not in descriptors_before
+                        and identity not in allowed_identities
+                    }
+                    if unexpected_new:
+                        raise SecurePathError("SQLite opened an unpinned persistence handle")
+        except (OSError, SecurePathError) as exc:
+            raise AuthorityStoreError("authority database handle identity is unsafe") from exc
+        return pinned
+
+    def _validate_opened_database_files(
+        self,
+        pinned: Mapping[str, _OpenedDatabaseIdentity],
+    ) -> None:
+        """Revalidate pathname and live-handle identity before SQLite I/O."""
+
+        try:
+            with self._secure_parent(self.path) as parent:
+                for suffix, opened in pinned.items():
+                    name = f"{self.path.name}{suffix}"
+                    parent.validate_open(name, required=True, expected=opened.identity)
+                    self._validate_private_storage_mode(parent, name)
+                    if opened.descriptors and not any(
+                        self._descriptor_matches(descriptor, opened.identity)
+                        for descriptor in opened.descriptors
+                    ):
+                        raise SecurePathError("SQLite descriptor identity changed")
+        except (OSError, SecurePathError) as exc:
+            raise AuthorityStoreError("authority database handle identity is unsafe") from exc
+
+    @staticmethod
+    def _descriptor_matches(descriptor: int, expected: FileIdentity) -> bool:
+        try:
+            return FileIdentity.from_stat(os.fstat(descriptor)) == expected
+        except OSError:
+            return False
+
     def _assert_crypto_material(self) -> None:
         self._assert_current_process()
         try:
@@ -331,26 +509,39 @@ class AuthorityStore:
         if self._fernet is None or not self._fernet_key or not self._mac_key:
             raise AuthorityStoreError("authority cryptographic material is unavailable")
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self) -> _IdentityBoundConnection:
         self._assert_current_process()
         if self._closed:
             raise AuthorityStoreError("authority store is closed")
         connection: sqlite3.Connection | None = None
         try:
             self._validate_storage_files()
-            connection = sqlite3.connect(
+            descriptors_before = (
+                set() if os.name == "nt" else set(self._open_descriptor_identities())
+            )
+            connector = self._connection_connector or sqlite3.connect
+            connection = connector(
                 str(self.path),
                 timeout=30.0,
                 isolation_level=None,
                 check_same_thread=False,
             )
             connection.row_factory = sqlite3.Row
+            if self._reported_database_path(connection) != self.path:
+                raise AuthorityStoreError("authority database handle identity is unsafe")
+            self._pin_opened_database_files(connection, descriptors_before, ("",))
             connection.execute("PRAGMA foreign_keys=ON")
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute("PRAGMA synchronous=FULL")
             connection.execute("PRAGMA trusted_schema=OFF")
+            connection.execute("SELECT count(*) FROM sqlite_schema").fetchone()
+            pinned = self._pin_opened_database_files(connection, descriptors_before)
             self._validate_storage_files()
-            return connection
+            self._validate_opened_database_files(pinned)
+            return _IdentityBoundConnection(
+                connection,
+                lambda: self._validate_opened_database_files(pinned),
+            )
         except AuthorityStoreError:
             if connection is not None:
                 connection.close()
@@ -361,7 +552,7 @@ class AuthorityStore:
             raise AuthorityStoreError("authority database is unavailable") from exc
 
     @contextmanager
-    def _connection(self) -> Iterator[sqlite3.Connection]:
+    def _connection(self) -> Iterator[_IdentityBoundConnection]:
         """Yield one transaction and always release its native file handle."""
 
         connection = self._connect()
@@ -597,7 +788,7 @@ class AuthorityStore:
             if existing_version == "1":
                 connection.commit()
 
-    def _migrate_request_bound_leases(self, connection: sqlite3.Connection) -> None:
+    def _migrate_request_bound_leases(self, connection: _IdentityBoundConnection) -> None:
         """Fail closed when upgrading pre-adapter lease rows.
 
         Old leases lack request, activation-snapshot, and plan bindings. They
@@ -1733,7 +1924,7 @@ class AuthorityStore:
             raise AuthorityStoreError("revocation lookup failed") from exc
 
     @staticmethod
-    def _is_revoked(connection: sqlite3.Connection, target_kind: str, target_id: str) -> bool:
+    def _is_revoked(connection: _IdentityBoundConnection, target_kind: str, target_id: str) -> bool:
         row = connection.execute(
             "SELECT 1 FROM revocations WHERE"
             " (target_kind=? AND target_id=?) OR target_kind='global' LIMIT 1",
@@ -1878,7 +2069,7 @@ class AuthorityStore:
 
     def _append_audit(
         self,
-        connection: sqlite3.Connection,
+        connection: _IdentityBoundConnection,
         *,
         event_id: str,
         event_type: str,
@@ -2306,7 +2497,7 @@ class AuthorityStore:
             raise AuthorityStoreError("audit read failed") from exc
         return self._verify_audit_rows(rows)
 
-    def _verify_audit_connection(self, connection: sqlite3.Connection) -> None:
+    def _verify_audit_connection(self, connection: _IdentityBoundConnection) -> None:
         """Verify the authoritative chain before any schema migration write."""
 
         rows = connection.execute("SELECT * FROM authority_audit ORDER BY sequence").fetchall()
