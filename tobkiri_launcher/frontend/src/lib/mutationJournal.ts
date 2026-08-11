@@ -1,3 +1,10 @@
+import {recordClientDiagnostic} from './clientDiagnostics';
+import {
+  getBrowserStorage,
+  readSafeStorageValue,
+  writeSafeStorageValue,
+} from './safeStorage';
+
 const MUTATION_JOURNAL_STORAGE_KEY = 'tobkiri-launcher-mutation-journal-v1';
 
 export type MutationJournalState = 'pending' | 'unknown' | 'invalid';
@@ -46,14 +53,8 @@ function isUuid(value: unknown): value is string {
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function storageAvailable(): boolean {
-  return typeof localStorage !== 'undefined'
-    && typeof localStorage.getItem === 'function'
-    && typeof localStorage.setItem === 'function';
-}
-
 function currentStorage(): Storage | null {
-  return storageAvailable() ? localStorage : null;
+  return getBrowserStorage('local');
 }
 
 function synchronizeStorageContext(storage: Storage | null): void {
@@ -63,10 +64,12 @@ function synchronizeStorageContext(storage: Storage | null): void {
 }
 
 function readStoredRecords(): MutationJournalRecord[] {
-  if (!storageAvailable()) return [];
+  const raw = readSafeStorageValue(
+    currentStorage(),
+    MUTATION_JOURNAL_STORAGE_KEY,
+  );
+  if (!raw) return [];
   try {
-    const raw = localStorage.getItem(MUTATION_JOURNAL_STORAGE_KEY);
-    if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.flatMap((value): MutationJournalRecord[] => {
@@ -101,7 +104,12 @@ function readStoredRecords(): MutationJournalRecord[] {
         metadata,
       }];
     });
-  } catch {
+  } catch (error) {
+    recordClientDiagnostic({
+      code: 'mutation.journal.parse_failed',
+      operation: 'mutation.journal.hydrate',
+      error,
+    });
     return [{
       key: 'invalid-journal-storage',
       requestId: '',
@@ -143,10 +151,11 @@ function persist(records: MutationJournalRecord[]): void {
   synchronizeStorageContext(storage);
   for (const record of records) memoryJournal.set(record.key, record);
   if (!storage) return;
-  try {
-    storage.setItem(MUTATION_JOURNAL_STORAGE_KEY, JSON.stringify(records));
-  } catch {
-    // A memory journal still prevents duplicate submits in this browsing context.
+  if (!writeSafeStorageValue(storage, MUTATION_JOURNAL_STORAGE_KEY, JSON.stringify(records))) {
+    recordClientDiagnostic({
+      code: 'mutation.journal.memory_fallback',
+      operation: 'mutation.journal.persist',
+    });
   }
 }
 

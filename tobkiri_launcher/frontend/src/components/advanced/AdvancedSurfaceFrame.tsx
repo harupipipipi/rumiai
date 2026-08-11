@@ -104,7 +104,7 @@ function StatusNotice({
       role="alert"
     >
       <div className="flex min-w-0 items-start gap-3">
-        {state.status === 'timeout' ? <Clock3 className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" aria-hidden="true" /> : isBlocked ? <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" aria-hidden="true" /> : <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" aria-hidden="true" />}
+        {state.status === 'timeout' ? <Clock3 className="mt-0.5 size-5 shrink-0 text-amber-600" aria-hidden="true" /> : isBlocked ? <ShieldAlert className="mt-0.5 size-5 shrink-0 text-amber-600" aria-hidden="true" /> : <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" aria-hidden="true" />}
         <div className="min-w-0">
           <p className="text-sm font-semibold text-text-main">{title}</p>
           <p className="mt-1 text-sm leading-6 text-text-muted">{message}</p>

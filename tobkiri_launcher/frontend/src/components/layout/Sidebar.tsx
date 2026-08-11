@@ -224,7 +224,7 @@ export function Sidebar() {
               aria-haspopup="dialog"
               title={!isSidebarOpen ? `${profile.username} profile and settings` : undefined}
             >
-              <Avatar src={profile.avatar} username={profile.username} className="h-7 w-7 text-xs" />
+              <Avatar src={profile.avatar} username={profile.username} className="size-7 text-xs" />
               <span
                 className={cn(
                   "min-w-0 flex-1 overflow-hidden transition-[max-width,opacity,transform]",

@@ -6,6 +6,7 @@ import {JSDOM} from 'jsdom';
 import {MemoryRouter, Route, Routes} from 'react-router';
 
 import {DialogContainer} from '@/src/components/ui/DialogContainer';
+import {ApiContractError} from '@/src/lib/api';
 import {type Pack, useAppStore} from '@/src/store';
 import {Packs} from './Packs';
 
@@ -182,7 +183,9 @@ test('failed Pack approval revocation stays approved and surfaces the typed fail
       if (type === 'error') errors.push(message);
     },
     revokePackApproval: async () => {
-      const error = new Error('HTTP 409 approval_revocation_denied');
+      const error = new ApiContractError('HTTP 409 approval_revocation_denied', {
+        code: 'approval_revocation_denied',
+      });
       useAppStore.getState().addToast(error.message, 'error');
       throw error;
     },
@@ -205,7 +208,10 @@ test('failed Pack approval revocation stays approved and surfaces the typed fail
     assert.ok(container.querySelector('[role="alertdialog"]'));
     assert.ok(container.querySelector('[role="switch"]'));
     assert.match(container.textContent ?? '', /Approved/);
-    assert.match(container.textContent ?? '', /HTTP 409 approval_revocation_denied/);
+    assert.match(container.textContent ?? '', /The confirmation could not be completed/);
+    assert.match(container.textContent ?? '', /API_CONTRACT_REJECTED/);
+    assert.match(container.textContent ?? '', /diagnostic diag-/);
+    assert.doesNotMatch(container.textContent ?? '', /HTTP 409 approval_revocation_denied/);
     assert.doesNotMatch(container.textContent ?? '', /Approval revoked/);
   } finally {
     console.error = previousConsoleError;

@@ -15,6 +15,11 @@ import {
 } from './packvmLifecycle';
 import {preparePackVM} from './api';
 import type {ApiPackVMDoctor} from './apiTypes';
+import {
+  getBrowserStorage,
+  readSafeStorageValue,
+  writeSafeStorageValue,
+} from './safeStorage';
 import {useAppStore} from '@/src/store';
 
 const digest = (character: string) => `sha256:${character.repeat(64)}`;
@@ -68,7 +73,7 @@ beforeEach(() => {
     localStorage: {value: dom.window.localStorage, configurable: true},
     sessionStorage: {value: dom.window.sessionStorage, configurable: true},
   });
-  sessionStorage.setItem('rumi-panel-csrf', 'csrf-test');
+  writeSafeStorageValue(getBrowserStorage('session'), 'rumi-panel-csrf', 'csrf-test');
 });
 
 afterEach(() => {
@@ -147,7 +152,10 @@ test('PackVM consent normalization requires the typed one-shot evidence', () => 
 test('PackVM operation identity uses durable local storage and rehydrates in a fresh browsing context', () => {
   writePackVMOperationId('11111111-1111-4111-8111-111111111111');
   assert.equal(readPackVMOperationId(), '11111111-1111-4111-8111-111111111111');
-  assert.equal(localStorage.getItem('tobkiri-launcher-packvm-operation'), '11111111-1111-4111-8111-111111111111');
+  assert.equal(
+    readSafeStorageValue(getBrowserStorage('local'), 'tobkiri-launcher-packvm-operation'),
+    '11111111-1111-4111-8111-111111111111',
+  );
 
   const restarted = new JSDOM('<!doctype html><html><body></body></html>', {
     url: 'http://localhost/panel/',
@@ -161,7 +169,11 @@ test('PackVM operation identity uses durable local storage and rehydrates in a f
   try {
     // A separate JSDOM context does not share storage; copy the persisted Launcher record
     // to model the same-origin browsing context being recreated by Tauri.
-    localStorage.setItem('tobkiri-launcher-packvm-operation', '11111111-1111-4111-8111-111111111111');
+    writeSafeStorageValue(
+      getBrowserStorage('local'),
+      'tobkiri-launcher-packvm-operation',
+      '11111111-1111-4111-8111-111111111111',
+    );
     assert.equal(readPackVMOperationId(), '11111111-1111-4111-8111-111111111111');
   } finally {
     Object.defineProperties(globalThis, {
@@ -173,9 +185,9 @@ test('PackVM operation identity uses durable local storage and rehydrates in a f
 });
 
 test('PackVM operation storage clears a tampered non-canonical identity', () => {
-  localStorage.setItem('tobkiri-launcher-packvm-operation', 'not-an-operation');
+  writeSafeStorageValue(getBrowserStorage('local'), 'tobkiri-launcher-packvm-operation', 'not-an-operation');
   assert.equal(readPackVMOperationId(), null);
-  assert.equal(localStorage.getItem('tobkiri-launcher-packvm-operation'), null);
+  assert.equal(readSafeStorageValue(getBrowserStorage('local'), 'tobkiri-launcher-packvm-operation'), null);
 });
 
 test('PackVM API prepare uses the exact lifecycle route and request ceremony', async () => {

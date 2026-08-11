@@ -35,6 +35,7 @@ test('a pending request becomes unknown in a fresh storage context', () => {
   const makeStorage = (values: Map<string, string>) => ({
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => { values.set(key, value); },
+    removeItem: (key: string) => { values.delete(key); },
   });
   const key = `test:restart:${Date.now()}:${Math.random()}`;
   try {

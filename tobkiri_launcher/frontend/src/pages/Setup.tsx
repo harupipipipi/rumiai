@@ -23,7 +23,6 @@ import {
 } from '@/src/lib/presentation';
 import {LAUNCHER_DISPLAY_NAME} from '@/src/lib/launcherBrand';
 import {DefaultsReview} from './DefaultsReview';
-import tobkiriIconUrl from '../../../assets/app-icon/tobkiri-launcher-icon.png';
 
 function message(error: unknown, fallback: string): string {
   if (typeof error === 'string' && error.trim()) return error;
@@ -166,7 +165,7 @@ export function Setup() {
 
 function Header() {
   return <div className="mb-8 flex items-center gap-3 text-sm font-semibold text-text-main">
-    <img src={tobkiriIconUrl} alt="Tobkiri" data-asset-trust="bundled" className="h-9 w-9 rounded-lg border border-border" />
+    <img src="/panel/assets/tobkiri-launcher-icon.png" alt="Tobkiri" data-asset-trust="bundled" className="h-9 w-9 rounded-lg border border-border" />
     {LAUNCHER_DISPLAY_NAME}
   </div>;
 }

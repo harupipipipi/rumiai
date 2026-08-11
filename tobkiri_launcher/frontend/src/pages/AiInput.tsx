@@ -82,7 +82,7 @@ export function AiInput() {
                     }}
                   >
                     <span className="text-sm font-medium text-text-main">{operation.label || operation.operation_id}</span>
-                    <span className="break-all font-mono text-[11px] text-text-muted">{operation.contract_id}</span>
+                    <span className="break-all font-mono text-xs text-text-muted">{operation.contract_id}</span>
                   </button>
                 );
               })}
@@ -124,7 +124,7 @@ export function AiInput() {
         </div>
       ) : (
         <EmptySurfacePanel
-          icon={<BrainCircuit className="h-6 w-6" />}
+          icon={<BrainCircuit className="size-6" />}
           title="No invokable operation schema is available"
           message="AI Input does not infer prompts from Pack labels. A Pack must publish exact operation metadata, an input schema, a valid catalog digest, and an invokable binding before this form becomes active."
         />

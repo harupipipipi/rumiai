@@ -90,7 +90,7 @@ export function NodeManager() {
                       {pack.installed ? <Badge variant={pack.enabled ? 'success' : 'secondary'}>{pack.enabled ? 'enabled' : 'disabled'}</Badge> : <Badge variant="outline">not installed</Badge>}
                     </div>
                     <p className="mt-1 break-all font-mono text-xs text-text-muted">{pack.id} · v{pack.version}</p>
-                    <p className="mt-1 break-all font-mono text-[11px] text-text-muted">{shownDigest}</p>
+                    <p className="mt-1 break-all font-mono text-xs text-text-muted">{shownDigest}</p>
                     {joinWarning ? <p className="mt-2 flex items-start gap-1 text-xs text-amber-700 dark:text-amber-300"><ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{joinWarning}</p> : null}
                     {mutationResultUnknown ? <p className="mt-2 text-xs text-amber-700 dark:text-amber-300" role="alert">A mutation result is unknown. Refresh the authoritative catalog before trying again.</p> : null}
                     {activeRow ? <p className="mt-2 text-xs text-text-muted">{activeRow.invokable_operations.length} exact invokable operation binding(s) in the active snapshot.</p> : null}
@@ -117,7 +117,7 @@ export function NodeManager() {
         <div className="rounded-xl border border-border bg-bg-card px-4 py-5 text-sm text-text-muted" role="status">Loading the canonical Pack control catalog…</div>
       ) : (
         <EmptySurfacePanel
-          icon={<Network className="h-6 w-6" />}
+          icon={<Network className="size-6" />}
           title="Exact Pack catalog data is not available"
           message="Node Manager maps only the verified Packs projection and existing Pack lifecycle actions. It does not restore a node registry or synthesize nodes from principals."
         />

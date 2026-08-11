@@ -127,6 +127,7 @@ test('Header avatar is an actionable Profile/Settings entry with focus, Escape, 
     });
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Test User profile and settings"]');
     assert.ok(trigger);
+    assert.match(trigger.className, /min-h-11/);
     trigger.focus();
     assert.ok(dom.window.document.activeElement === trigger);
 

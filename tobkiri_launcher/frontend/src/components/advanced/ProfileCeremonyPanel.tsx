@@ -43,6 +43,7 @@ import {
 } from '@/src/lib/mutationJournal';
 import type {Pack} from '@/src/store';
 import {reconcileMutationStatus} from '@/src/lib/operationStatus';
+import {recordClientDiagnostic} from '@/src/lib/clientDiagnostics';
 
 type CeremonyState = 'idle' | 'resolving' | 'resolved' | 'reviewing' | 'reviewed' | 'approving' | 'approved' | 'activating' | 'active' | 'result_unknown' | 'error';
 
@@ -447,8 +448,12 @@ export function ProfileCeremonyPanel({
           },
           isCurrent: () => requestIsCurrent(operation.request, operation.bindingKey),
         });
-      } catch {
-        // Keep the durable unknown result until a later authoritative refresh.
+      } catch (error) {
+        recordClientDiagnostic({
+          code: 'profile.ceremony.reconciliation_failed',
+          operation: 'profile.ceremony.hydrate',
+          error,
+        });
       }
       if (
         reconciled?.state === 'succeeded'
@@ -524,8 +529,12 @@ export function ProfileCeremonyPanel({
           });
           setCeremonyState('error');
         }
-      } catch {
-        // Keep the durable unknown state and visible fail-closed UI.
+      } catch (error) {
+        recordClientDiagnostic({
+          code: 'profile.ceremony.reconciliation_failed',
+          operation: 'profile.ceremony.unknown_result',
+          error,
+        });
       }
     })();
     return () => {
@@ -768,7 +777,7 @@ export function ProfileCeremonyPanel({
               || (step === 'activation' && ceremonyState === 'active');
             return (
               <div key={step} className="flex min-h-11 items-center gap-2 rounded-lg border border-border bg-bg-main px-3 py-2 text-xs">
-                {complete ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" /> : <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-border text-[10px]">{index + 1}</span>}
+                {complete ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" /> : <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-border text-xs">{index + 1}</span>}
                 <span className={complete ? 'font-medium text-text-main' : 'text-text-muted'}>{step}</span>
                 {index < 3 ? <ArrowRight className="ml-auto hidden h-3 w-3 text-text-muted sm:block" aria-hidden="true" /> : null}
               </div>
@@ -853,7 +862,7 @@ export function ProfileCeremonyPanel({
                       disabled={!eligible || pack.required || ceremonyIsBusy}
                       onClick={() => selectPack(pack)}
                     >
-                      <span className={checked ? 'flex h-5 w-5 shrink-0 items-center justify-center rounded border border-accent bg-accent text-accent-fg' : 'h-5 w-5 shrink-0 rounded border border-border'} aria-hidden="true">
+                      <span className={checked ? 'flex size-5 shrink-0 items-center justify-center rounded border border-accent bg-accent text-accent-fg' : 'size-5 shrink-0 rounded border border-border'} aria-hidden="true">
                         {checked ? <CheckCircle2 className="h-4 w-4" /> : null}
                       </span>
                       <span className="min-w-0 flex-1">
@@ -861,7 +870,7 @@ export function ProfileCeremonyPanel({
                         <span className="block truncate text-xs text-text-muted">{pack.id} · {pack.enabled ? 'enabled' : 'disabled'} · {pack.approved ? 'approved' : 'not approved'} · {pack.installed ? 'installed' : 'not installed'}</span>
                       </span>
                       {pack.required ? <Badge variant="secondary">Required</Badge> : null}
-                      {!pack.required && reason ? <span className="max-w-40 text-right text-[11px] text-text-muted">{reason}</span> : null}
+                      {!pack.required && reason ? <span className="max-w-40 text-right text-xs text-text-muted">{reason}</span> : null}
                     </button>
                   );
                 })}
@@ -891,12 +900,18 @@ export function ProfileCeremonyPanel({
             <div>
               <p className="font-medium text-text-main">Profile ceremony result is unknown</p>
               <p className="mt-1 text-text-muted">{MUTATION_UNKNOWN_MESSAGE}</p>
-              <p className="mt-1 break-all font-mono text-[11px] text-text-muted">Request identity: {unknownMutation.requestId}</p>
+              <p className="mt-1 break-all font-mono text-xs text-text-muted">Request identity: {unknownMutation.requestId}</p>
             </div>
             <Button
               type="button"
               variant="outline"
-              onClick={() => void refreshProfile().catch(() => undefined)}
+              onClick={() => void refreshProfile().catch((error) => {
+                recordClientDiagnostic({
+                  code: 'profile.ceremony.refresh_failed',
+                  operation: 'profile.ceremony.refresh_authoritative_state',
+                  error,
+                });
+              })}
             >
               Refresh authoritative state
             </Button>

@@ -33,14 +33,14 @@ export function ProfileFiles() {
                   <span className="break-all text-xs font-medium text-text-main">{entry.entry_id}</span>
                 </div>
                 <p className="mt-2 break-all font-mono text-xs text-text-muted">{entry.owner_pack_id} / {entry.path}</p>
-                <p className="mt-1 break-all font-mono text-[11px] text-text-muted">{entry.artifact_digest}</p>
+                <p className="mt-1 break-all font-mono text-xs text-text-muted">{entry.artifact_digest}</p>
               </div>
             ))}
           </CardContent>
         </Card>
       ) : (
         <EmptySurfacePanel
-          icon={<Fingerprint className="h-6 w-6" />}
+          icon={<Fingerprint className="size-6" />}
           title="No finite evidence entries are available"
           message="This surface does not browse profile.yaml, a database, or host files. It will expose only backend-declared record digests and finite artifact evidence."
         />

@@ -42,6 +42,7 @@ test('bottom-left avatar opens Profile/Settings with native links and returns fo
     });
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Sidebar User profile and settings"]');
     assert.ok(trigger);
+    assert.match(trigger.className, /min-h-11/);
     trigger.focus();
     await act(async () => { trigger.click(); await nextTick(); });
     const dialog = dom.window.document.querySelector('[role="dialog"][aria-label="Profile menu"]');

@@ -286,7 +286,7 @@ export function ProfileCatalogSelector({
                         setCeremonyMode('catalog');
                       }}
                     >
-                      <span className={selected ? 'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-accent bg-accent text-accent-fg' : 'h-5 w-5 shrink-0 rounded-full border border-border'} aria-hidden="true">
+                      <span className={selected ? 'flex size-5 shrink-0 items-center justify-center rounded-full border border-accent bg-accent text-accent-fg' : 'size-5 shrink-0 rounded-full border border-border'} aria-hidden="true">
                         {selected ? <CheckCircle2 className="h-4 w-4" /> : null}
                       </span>
                       <span className="min-w-0 flex-1">

@@ -141,7 +141,7 @@ export function Header() {
               src={profile.avatar}
               username={profile.username}
               alt={`${profile.username} avatar`}
-              className="h-7 w-7 text-xs"
+              className="size-7 text-xs"
             />
           </PopoverTrigger>
           <PopoverContent align="right" className="w-64" role="dialog" aria-label="Profile menu">

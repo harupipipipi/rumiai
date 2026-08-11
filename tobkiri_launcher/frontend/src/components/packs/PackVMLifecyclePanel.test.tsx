@@ -5,6 +5,11 @@ import {createRoot, type Root} from 'react-dom/client';
 import {JSDOM} from 'jsdom';
 
 import type {ApiPackVMDoctor} from '@/src/lib/apiTypes';
+import {
+  getBrowserStorage,
+  readSafeStorageValue,
+  writeSafeStorageValue,
+} from '@/src/lib/safeStorage';
 import {useAppStore} from '@/src/store';
 import {PackVMLifecyclePanel} from './PackVMLifecyclePanel';
 
@@ -78,7 +83,7 @@ function createSurface(): {dom: JSDOM; container: HTMLElement; root: Root} {
     localStorage: {value: dom.window.localStorage, configurable: true},
     sessionStorage: {value: dom.window.sessionStorage, configurable: true},
   });
-  sessionStorage.setItem('rumi-panel-csrf', 'csrf-test');
+  writeSafeStorageValue(getBrowserStorage('session'), 'rumi-panel-csrf', 'csrf-test');
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const container = dom.window.document.querySelector<HTMLElement>('#root');
   assert.ok(container);
@@ -413,7 +418,7 @@ test('PackVM GUI presents diagnostic severity, owner, and contribution evidence'
 
 test('PackVM GUI resumes a persisted interrupted operation after restart', {concurrency: false}, async () => {
   const doctorControl = configureStore();
-  localStorage.setItem('tobkiri-launcher-packvm-operation', operationId);
+  writeSafeStorageValue(getBrowserStorage('local'), 'tobkiri-launcher-packvm-operation', operationId);
   let progressReads = 0;
   installFetch(async (route) => {
     if (route === `/api/v4/packvm/progress?operation_id=${operationId}`) {
@@ -438,7 +443,7 @@ test('PackVM GUI resumes a persisted interrupted operation after restart', {conc
 test('PackVM GUI clears a tampered durable operation id after server validation rejects it', {concurrency: false}, async () => {
   configureStore();
   const tamperedId = '22222222-2222-4222-8222-222222222222';
-  localStorage.setItem('tobkiri-launcher-packvm-operation', tamperedId);
+  writeSafeStorageValue(getBrowserStorage('local'), 'tobkiri-launcher-packvm-operation', tamperedId);
   installFetch(async (route) => {
     assert.equal(route, `/api/v4/packvm/progress?operation_id=${tamperedId}`);
     return new Response(JSON.stringify({
@@ -450,6 +455,6 @@ test('PackVM GUI clears a tampered durable operation id after server validation 
   assert.ok(surface);
   await renderPanel(surface.root);
   await settle();
-  assert.equal(localStorage.getItem('tobkiri-launcher-packvm-operation'), null);
+  assert.equal(readSafeStorageValue(getBrowserStorage('local'), 'tobkiri-launcher-packvm-operation'), null);
   assert.match(surface.container.textContent ?? '', /could not be resumed|packvm_operation_unknown/i);
 });

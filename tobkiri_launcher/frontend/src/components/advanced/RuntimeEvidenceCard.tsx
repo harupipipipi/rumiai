@@ -43,7 +43,7 @@ export function RuntimeEvidenceCard<T>({
           <div key={kind} className="min-w-0 rounded-lg border border-border/70 bg-bg-main px-3 py-2">
             <div className="text-xs font-medium text-text-main">{recordLabels[kind]}</div>
             <div className="mt-1 break-all font-mono text-xs text-text-main">{record.digest}</div>
-            <div className="mt-1 break-all text-[11px] text-text-muted">{record.source_ref}</div>
+            <div className="mt-1 break-all text-xs text-text-muted">{record.source_ref}</div>
           </div>
         ))}
       </div>

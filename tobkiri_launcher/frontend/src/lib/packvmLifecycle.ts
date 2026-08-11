@@ -6,6 +6,7 @@ import type {
   ApiPackVMOperationState,
   ApiPackVMProvisioningPlan,
 } from './apiTypes';
+import {getBrowserStorage, readSafeStorageValue, removeSafeStorageValue, writeSafeStorageValue} from './safeStorage';
 
 export const PACKVM_OPERATION_STORAGE_KEY = 'tobkiri-launcher-packvm-operation';
 
@@ -286,17 +287,16 @@ export function stopConfirmationForInstance(instance: string): string {
 
 /** Read only the opaque durable hint; PackVM progress remains server-authoritative. */
 export function readPackVMOperationId(): string | null {
-  try {
-    const localValue = globalThis.localStorage?.getItem(PACKVM_OPERATION_STORAGE_KEY) ?? null;
-    if (localValue === null) return null;
-    if (!isCanonicalPackVMOperationId(localValue)) {
-      clearPackVMOperationId();
-      return null;
-    }
-    return localValue;
-  } catch {
+  const localValue = readSafeStorageValue(
+    getBrowserStorage('local'),
+    PACKVM_OPERATION_STORAGE_KEY,
+  );
+  if (localValue === null) return null;
+  if (!isCanonicalPackVMOperationId(localValue)) {
+    clearPackVMOperationId();
     return null;
   }
+  return localValue;
 }
 
 export function writePackVMOperationId(operationId: string): void {
@@ -304,19 +304,15 @@ export function writePackVMOperationId(operationId: string): void {
     clearPackVMOperationId();
     return;
   }
-  try {
-    globalThis.localStorage?.setItem(PACKVM_OPERATION_STORAGE_KEY, operationId);
-  } catch {
-    // A storage failure must not change the server-owned lifecycle state.
-  }
+  writeSafeStorageValue(
+    getBrowserStorage('local'),
+    PACKVM_OPERATION_STORAGE_KEY,
+    operationId,
+  );
 }
 
 export function clearPackVMOperationId(): void {
-  try {
-    globalThis.localStorage?.removeItem(PACKVM_OPERATION_STORAGE_KEY);
-  } catch {
-    // Ignore unavailable browser storage.
-  }
+  removeSafeStorageValue(getBrowserStorage('local'), PACKVM_OPERATION_STORAGE_KEY);
 }
 
 export function userSafePackVMError(error: unknown): string {

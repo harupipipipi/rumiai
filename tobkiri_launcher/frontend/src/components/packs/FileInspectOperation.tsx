@@ -3,6 +3,7 @@ import {useRef, useState, type FormEvent} from 'react';
 import {Button} from '@/src/components/ui/Button';
 import {Card, CardContent, CardHeader, CardTitle} from '@/src/components/ui/Card';
 import type {Pack, PackOperation} from '@/src/store';
+import {formatUserFacingError} from '@/src/lib/userFacingError';
 
 const FILE_INSPECT_OPERATION_ID = 'rumi_file_inspect_pack.file-inspect';
 const FILE_INSPECT_NAMES = ['stat', 'read', 'list', 'search'] as const;
@@ -106,7 +107,11 @@ export function FileInspectOperation({
       const response = await onInvoke(payload);
       setResult(response);
     } catch (invokeError) {
-      setError(invokeError instanceof Error ? invokeError.message : 'Tobkiri could not inspect that file.');
+      setError(formatUserFacingError(
+        invokeError,
+        'Tobkiri could not inspect that file.',
+        'file.inspect.invoke',
+      ));
     } finally {
       submittingRef.current = false;
       setSubmitting(false);

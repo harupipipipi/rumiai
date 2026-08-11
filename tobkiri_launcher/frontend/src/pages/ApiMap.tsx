@@ -52,7 +52,7 @@ export function ApiMap() {
         </Card>
       ) : (
         <EmptySurfacePanel
-          icon={<RouteIcon className="h-6 w-6" />}
+          icon={<RouteIcon className="size-6" />}
           title="Exact route metadata is not available"
           message="The API Map waits for generated Contract Map route, operation, and security metadata. It never composes a route from a row id or calls a retired HTTP endpoint."
         />

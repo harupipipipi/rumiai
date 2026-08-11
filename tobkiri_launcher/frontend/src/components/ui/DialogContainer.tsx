@@ -4,6 +4,7 @@ import { useT } from '@/src/lib/i18n';
 import { viewerLayers } from '@/src/lib/layers';
 import { cn } from '@/src/lib/utils';
 import { Button } from './Button';
+import { formatUserFacingError } from '@/src/lib/userFacingError';
 
 export function DialogContainer() {
   const t = useT();
@@ -87,7 +88,11 @@ export function DialogContainer() {
       closeDialog();
     } catch (error) {
       setConfirmationError(
-        error instanceof Error ? error.message : 'The confirmation could not be completed.',
+        formatUserFacingError(
+          error,
+          'The confirmation could not be completed.',
+          'dialog.confirm',
+        ),
       );
     } finally {
       isConfirmingRef.current = false;

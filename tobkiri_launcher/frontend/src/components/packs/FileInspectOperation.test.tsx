@@ -160,7 +160,9 @@ test('typed capability failure is shown without a false success result', async (
   try {
     await setInput(dom, container, 'file-inspect-path', 'docs/example.txt');
     await submitForm(dom, container);
-    assert.match(container.querySelector('[role="alert"]')?.textContent ?? '', /capability_denied/);
+    assert.match(container.querySelector('[role="alert"]')?.textContent ?? '', /could not inspect that file/i);
+    assert.match(container.querySelector('[role="alert"]')?.textContent ?? '', /UNEXPECTED_ERROR/);
+    assert.doesNotMatch(container.querySelector('[role="alert"]')?.textContent ?? '', /capability_denied/);
     assert.equal(container.querySelector('pre[aria-live="polite"]'), null);
   } finally {
     act(() => root.unmount());

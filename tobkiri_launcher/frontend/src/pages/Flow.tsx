@@ -176,7 +176,7 @@ export function Flow() {
             </Card>
           ) : (
             <EmptySurfacePanel
-              icon={<PlayCircle className="h-6 w-6" />}
+              icon={<PlayCircle className="size-6" />}
               title="No invokable operation binding is available"
               message="The operations surface has no fresh lifecycle/grant and catalog-bound invokable state for this Flow workspace."
             />
@@ -184,7 +184,7 @@ export function Flow() {
         </div>
       ) : (
         <EmptySurfacePanel
-          icon={<PlayCircle className="h-6 w-6" />}
+          icon={<PlayCircle className="size-6" />}
           title="No Pack-declared Flow composition is available"
           message="No authoritative Contract operation is available for this declared Flow composition. Pack inventory is never promoted into a wildcard Flow."
         />

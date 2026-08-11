@@ -38,7 +38,7 @@ export function ProfileWiring() {
               <div key={binding.binding_id} className="grid gap-2 rounded-lg border border-border bg-bg-main p-4 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-center">
                 <div className="min-w-0">
                   <Badge variant="outline">{binding.binding_id}</Badge>
-                  {binding.edge_digest ? <p className="mt-1 break-all font-mono text-[11px] text-text-muted">{binding.edge_digest}</p> : null}
+                  {binding.edge_digest ? <p className="mt-1 break-all font-mono text-xs text-text-muted">{binding.edge_digest}</p> : null}
                 </div>
                 <div className="min-w-0 text-xs text-text-muted"><span className="font-medium text-text-main">Principal</span><span className="ml-2 break-all font-mono">{binding.source_principal_id}</span></div>
                 <div className="min-w-0 text-xs text-text-muted"><span className="font-medium text-text-main">Contract / operation</span><span className="ml-2 break-all font-mono">{binding.target_contract_id} / {binding.operation_id}</span></div>
@@ -48,7 +48,7 @@ export function ProfileWiring() {
         </Card>
       ) : (
         <EmptySurfacePanel
-          icon={<Link2 className="h-6 w-6" />}
+          icon={<Link2 className="size-6" />}
           title="Exact wiring is not published"
           message="The four inventory projections cannot supply wiring. This v4 operation is not provided until the accepted Profile projection contains complete ResolvedPlan binding identities. Profile closure changes remain available through the Profile ceremony when its exact operation is published."
         />

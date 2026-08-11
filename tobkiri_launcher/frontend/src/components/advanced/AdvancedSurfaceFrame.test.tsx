@@ -46,6 +46,7 @@ test('stale surface frame keeps accepted evidence visible and exposes a retry co
     assert.match(container.textContent ?? '', /Accepted Profile evidence/);
     assert.match(container.textContent ?? '', /Showing the last accepted snapshot/);
     assert.match(container.textContent ?? '', /Actions are disabled until the authoritative surface is fresh/);
+    assert.ok(container.querySelector('[role="alert"] [aria-hidden="true"]'));
     const retry = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Retry'));
     assert.ok(retry);
     await act(async () => { retry.click(); });

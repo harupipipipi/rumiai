@@ -44,30 +44,22 @@ import {
   type OperationStatus,
   type OperationStatusState,
 } from './lib/operationStatus';
+import {recordClientDiagnostic} from './lib/clientDiagnostics';
+import {
+  getBrowserStorage,
+  readSafeStorageValue,
+  writeSafeStorageValue,
+} from './lib/safeStorage';
 
 export type {ColorMode, Theme} from './lib/appearance';
 export {AVATAR_OPTIONS} from './lib/avatar';
 
 function readLocalStorage(key: string): string | null {
-  try {
-    if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') {
-      return null;
-    }
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
+  return readSafeStorageValue(getBrowserStorage('local'), key);
 }
 
 function writeLocalStorage(key: string, value: string): void {
-  try {
-    if (typeof localStorage === 'undefined' || typeof localStorage.setItem !== 'function') {
-      return;
-    }
-    localStorage.setItem(key, value);
-  } catch {
-    // Ignore storage failures in non-browser contexts.
-  }
+  writeSafeStorageValue(getBrowserStorage('local'), key, value);
 }
 
 export interface Toast {
@@ -500,8 +492,12 @@ function scheduleHydratedPackStatusReconciliation(
         if (reconciled.state === 'succeeded' || reconciled.state === 'failed') {
           clearPackUnknownState(set, record);
         }
-      } catch {
-        // Keep the durable record blocked on unknown, stale, or tampered status.
+      } catch (error) {
+        recordClientDiagnostic({
+          code: 'pack.mutation.reconciliation_failed',
+          operation: 'hydrate.pack.mutation',
+          error,
+        });
       }
     })().finally(() => {
       if (hydratedPackStatusRequests.get(record.key) === task) {
@@ -916,8 +912,12 @@ export const useAppStore = create<AppState>((set, get) => ({
             () => true,
             {contractId: contribution.action_contract},
           );
-        } catch {
-          // The unknown state remains journaled until an authoritative refresh succeeds.
+        } catch (error) {
+          recordClientDiagnostic({
+            code: 'pack.mutation.reconciliation_failed',
+            operation: 'invoke.pack.operation',
+            error,
+          });
         }
         if (reconciled?.state === 'succeeded') {
           set((current) => {
@@ -1008,8 +1008,12 @@ export const useAppStore = create<AppState>((set, get) => ({
             'pack.install',
             (status) => status.state === 'succeeded' && packMutationSuccess(unknown, get),
           );
-        } catch {
-          // Keep the durable unknown result until a later authoritative refresh.
+        } catch (error) {
+          recordClientDiagnostic({
+            code: 'pack.mutation.reconciliation_failed',
+            operation: 'install.pack',
+            error,
+          });
         }
         if (reconciled?.state === 'succeeded') {
           set((current) => {
@@ -1117,8 +1121,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         let reconciled: Awaited<ReturnType<typeof reconcilePackApprovalStatus>> | null = null;
         try {
           reconciled = await reconcilePackApprovalStatus(unknown, get);
-        } catch {
-          // Keep the durable unknown result until a later authoritative refresh.
+        } catch (error) {
+          recordClientDiagnostic({
+            code: 'pack.mutation.reconciliation_failed',
+            operation: 'approve.pack',
+            error,
+          });
         }
         if (reconciled?.state === 'succeeded') {
           set((current) => {
@@ -1232,8 +1240,12 @@ export const useAppStore = create<AppState>((set, get) => ({
             'approval.revoke',
             (status) => status.state === 'succeeded' && packMutationSuccess(unknown, get),
           );
-        } catch {
-          // Keep the durable unknown result until a later authoritative refresh.
+        } catch (error) {
+          recordClientDiagnostic({
+            code: 'pack.mutation.reconciliation_failed',
+            operation: 'revoke.pack.approval',
+            error,
+          });
         }
         if (reconciled?.state === 'succeeded') {
           set((current) => {
@@ -1338,8 +1350,12 @@ export const useAppStore = create<AppState>((set, get) => ({
             pack.enabled ? 'pack.disable' : 'pack.enable',
             (status) => status.state === 'succeeded' && packMutationSuccess(unknown, get),
           );
-        } catch {
-          // Keep the durable unknown result until a later authoritative refresh.
+        } catch (error) {
+          recordClientDiagnostic({
+            code: 'pack.mutation.reconciliation_failed',
+            operation: 'toggle.pack',
+            error,
+          });
         }
         if (reconciled?.state === 'succeeded') {
           set((current) => {

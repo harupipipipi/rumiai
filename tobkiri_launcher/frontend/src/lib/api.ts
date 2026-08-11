@@ -36,6 +36,13 @@ import {
   generatedRouteFor,
   VERIFIED_GENERATED_FRONTEND_CONTRACT_MAP,
 } from './generatedFrontendContractMap';
+import {recordClientDiagnostic} from './clientDiagnostics';
+import {
+  getBrowserStorage,
+  readSafeStorageValue,
+  removeSafeStorageValue,
+  writeSafeStorageValue,
+} from './safeStorage';
 
 const API_BASE_URL =
   (import.meta as ImportMeta & {env?: Record<string, string>}).env?.VITE_API_BASE_URL ?? '';
@@ -103,15 +110,18 @@ type TauriWindow = Window & {
 };
 
 function getStoredPanelCsrfToken(): string {
-  return sessionStorage.getItem(PANEL_CSRF_STORAGE_KEY) || '';
+  return readSafeStorageValue(
+    getBrowserStorage('session'),
+    PANEL_CSRF_STORAGE_KEY,
+  ) || '';
 }
 
 function setStoredPanelCsrfToken(token: string): void {
   if (!token) {
-    sessionStorage.removeItem(PANEL_CSRF_STORAGE_KEY);
+    removeSafeStorageValue(getBrowserStorage('session'), PANEL_CSRF_STORAGE_KEY);
     return;
   }
-  sessionStorage.setItem(PANEL_CSRF_STORAGE_KEY, token);
+  writeSafeStorageValue(getBrowserStorage('session'), PANEL_CSRF_STORAGE_KEY, token);
 }
 
 function isUnsafeMethod(method: string): boolean {
@@ -315,8 +325,12 @@ async function exchangePanelBootstrapCode(
     try {
       const errorBody: ApiResponse<unknown> = await response.json();
       if (errorBody.error) errorMessage = errorBody.error;
-    } catch {
-      // Use the HTTP status when the server did not return an error envelope.
+    } catch (error) {
+      recordClientDiagnostic({
+        code: 'panel.bootstrap.error_envelope_unavailable',
+        operation: 'panel.bootstrap.exchange',
+        error,
+      });
     }
     throw new Error(errorMessage);
   }
@@ -548,8 +562,12 @@ export async function apiFetch<T>(
         const errorBody: ApiResponse<unknown> = await response.json();
         if (errorBody.error) errorMessage = errorBody.error;
         errorData = errorBody.data;
-      } catch {
-        // Use the default HTTP error.
+      } catch (error) {
+        recordClientDiagnostic({
+          code: 'api.error_envelope_unavailable',
+          operation: `${method} ${path}`,
+          error,
+        });
       }
       if (
         allowPanelRecovery &&

@@ -52,7 +52,7 @@ export function Graph() {
         </Card>
       ) : (
         <EmptySurfacePanel
-          icon={<GitBranch className="h-6 w-6" />}
+          icon={<GitBranch className="size-6" />}
           title="Exact Plan bindings are not available"
           message="The generic inventory cannot produce graph edges. This v4 operation is not provided until the Profile projection returns complete exact binding identities; no graph save, compile, or editor operation is implied."
         />

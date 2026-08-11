@@ -81,7 +81,7 @@ export function Profile() {
                     >
                       <Avatar src={option} username={username} className="h-11 w-11" />
                       {avatar === option ? (
-                        <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-accent text-accent-fg" aria-hidden="true">
+                        <span className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-accent text-accent-fg" aria-hidden="true">
                           <Check className="h-3 w-3" />
                         </span>
                       ) : null}
