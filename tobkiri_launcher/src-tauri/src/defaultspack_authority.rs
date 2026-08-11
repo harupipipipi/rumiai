@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -719,6 +718,7 @@ fn verify_pack_artifact_index(pack_root: &Path, bundle_root: &Path) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     const RELOCATION_LAYOUTS: &[(&str, &[&str])] = &[

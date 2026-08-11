@@ -29,9 +29,6 @@ struct GitHubRelease {
 /// The only repository from which Launcher release updates may be read.
 pub const RELEASE_REPOSITORY: &str = "harupipipipi/tobkiri";
 
-/// The GitHub API endpoint for the latest release.
-const RELEASES_API: &str = "https://api.github.com/repos/harupipipipi/tobkiri/releases/latest";
-
 /// HTTP request timeout in seconds.
 const TIMEOUT_SECS: u64 = 10;
 
@@ -74,6 +71,7 @@ pub fn open_release_page(info: &UpdateInfo) -> Result<()> {
 /// Fetch the latest release metadata from the GitHub API.
 fn fetch_latest_release() -> Result<GitHubRelease> {
     let version = env!("CARGO_PKG_VERSION");
+    let releases_api = format!("https://api.github.com/repos/{RELEASE_REPOSITORY}/releases/latest");
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(TIMEOUT_SECS))
         .user_agent(format!("tobkiri-launcher/{version}"))
@@ -81,7 +79,7 @@ fn fetch_latest_release() -> Result<GitHubRelease> {
         .context("failed to build HTTP client")?;
 
     let resp = client
-        .get(RELEASES_API)
+        .get(releases_api)
         .header("Accept", "application/vnd.github+json")
         .send()
         .context("GitHub API request failed")?;
@@ -144,9 +142,9 @@ mod tests {
     fn release_origin_is_bound_to_the_tobkiri_repository() {
         assert_eq!(RELEASE_REPOSITORY, "harupipipipi/tobkiri");
         assert_eq!(
-            RELEASES_API,
+            format!("https://api.github.com/repos/{RELEASE_REPOSITORY}/releases/latest"),
             "https://api.github.com/repos/harupipipipi/tobkiri/releases/latest"
         );
-        assert!(!RELEASES_API.contains("rumiai"));
+        assert!(!RELEASE_REPOSITORY.contains("rumiai"));
     }
 }

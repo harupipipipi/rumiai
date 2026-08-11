@@ -143,7 +143,7 @@ fn consume_shell_handoff_from_root(
     fs::rename(path, &claimed).context("failed to claim Shell handoff")?;
 
     let result = (|| {
-        validate_claimed_file(&claimed, &expected_root)?;
+        validate_claimed_file(&claimed, expected_root)?;
         let file = File::open(&claimed).context("failed to open claimed Shell handoff")?;
         let mut body = Vec::new();
         file.take(HANDOFF_MAX_BYTES + 1)
