@@ -571,10 +571,6 @@ class RuntimeProfileChangeService:
                 expected_catalog_digest=candidate.profile_catalog_digest,
                 expected_bundle_lock_digest=candidate.bundle_lock_digest,
             )
-            self._surface().read_profile(
-                expected_profile_revision=candidate.expected_profile_revision,
-                expected_plan_digest=candidate.expected_plan_digest,
-            )
             _verify_authority_profile_approval(approval)
             try:
                 from .pack_control_v4 import activate_resolved_profile_pack_set

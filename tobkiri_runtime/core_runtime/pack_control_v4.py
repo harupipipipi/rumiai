@@ -1108,11 +1108,6 @@ def activate_resolved_profile_pack_set(
     from .bootstrap.profile_capture import _bundle_root
     from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 
-    binding = _capture_binding()
-    if not hmac.compare_digest(
-        binding.profile_revision, expected_profile_revision
-    ) or not hmac.compare_digest(binding.plan_digest, expected_plan_digest):
-        raise PackControlStaleRevision("reviewed Profile predecessor is stale")
     user_data = _user_data_root()
     profile_id = str(resolved.profile["profile_id"])
     workspace = user_data / "workspaces" / "defaults"
@@ -1124,6 +1119,20 @@ def activate_resolved_profile_pack_set(
             authority=authority,
             catalog=BundledCatalog.load(_bundle_root()),
         )
+        active = store.load_active_snapshot()
+        if hmac.compare_digest(
+            str(active.activation["activation_id"]), activation_id
+        ):
+            if active.resolved != resolved:
+                raise PackControlConflict(
+                    "activation identity is bound to another resolved Profile"
+                )
+            return dict(active.activation)
+        binding = _capture_binding()
+        if not hmac.compare_digest(
+            binding.profile_revision, expected_profile_revision
+        ) or not hmac.compare_digest(binding.plan_digest, expected_plan_digest):
+            raise PackControlStaleRevision("reviewed Profile predecessor is stale")
         created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         activation = store.activate(
             resolved,

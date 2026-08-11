@@ -28,6 +28,8 @@ from core_runtime.runtime_surface_v4 import (
 )
 import core_runtime.runtime_surface_v4 as runtime_surface
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+from ecosystem.defaultspack.domain.runtime_v4 import ProfileResolutionDenied
+from ecosystem.defaultspack.domain.runtime_v4 import ResolvedDefaultProfile
 from tobkiri_protocol.canonical import canonical_digest
 
 
@@ -1012,6 +1014,116 @@ def test_profile_ceremony_continues_across_restart_at_every_stage(
 
     assert activated == replay
     assert activations == [active_runtime.resolved]
+
+
+def test_profile_activation_recovers_commit_before_receipt_across_restart(
+    active_runtime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "core_runtime.pack_control_v4.resolve_profile_pack_set",
+        lambda _pack_ids: active_runtime.resolved,
+    )
+    ceremony = RuntimeProfileChangeService(surface_service=_service(active_runtime))
+    resolved = ceremony.resolve(
+        {
+            "profile_id": "defaults",
+            "expected_profile_revision": active_runtime.resolved.plan["profile_revision"],
+            "expected_plan_digest": active_runtime.resolved.plan["plan_digest"],
+            "desired_pack_ids": ["defaultspack"],
+        },
+        session_id="session-commit-recovery",
+    )
+    reviewed = ceremony.review(
+        {
+            "candidate_id": resolved["candidate_id"],
+            "candidate_digest": resolved["candidate_digest"],
+        },
+        session_id="session-commit-recovery",
+    )
+    approved = ceremony.approve(
+        {
+            "candidate_id": reviewed["candidate_id"],
+            "candidate_digest": reviewed["candidate_digest"],
+        },
+        session_id="session-commit-recovery",
+    )
+    request = {
+        "approval_id": approved["approval_id"],
+        "approval_digest": approved["approval_digest"],
+    }
+
+    def lose_activation_receipt(*_args, **_kwargs):
+        raise OSError("simulated crash after activation commit")
+
+    monkeypatch.setattr(ceremony._store, "mark_activated", lose_activation_receipt)
+    with pytest.raises(RuntimeSurfaceError) as lost:
+        ceremony.activate(request, session_id="session-commit-recovery")
+    assert lost.value.code is RuntimeSurfaceErrorCode.UNAPPROVED
+
+    committed = capture_default_profile()
+    assert committed.activation["activation_id"].startswith(
+        "activation:defaults-profile-change-"
+    )
+    restarted = RuntimeProfileChangeService()
+
+    def retry(_index: int) -> dict[str, object]:
+        return restarted.activate(request, session_id="session-commit-recovery")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        receipts = list(executor.map(retry, range(2)))
+
+    assert receipts[0] == receipts[1]
+    assert receipts[0]["activation_id"] == committed.activation["activation_id"]
+    durable = RuntimeProfileChangeService().activate(
+        request,
+        session_id="session-commit-recovery",
+    )
+    assert durable == receipts[0]
+
+    from core_runtime.pack_control_v4 import (
+        PackControlConflict,
+        activate_resolved_profile_pack_set,
+    )
+
+    tampered_lock = dict(active_runtime.resolved.lock)
+    tampered_lock["plan_digest"] = "sha256:" + "0" * 64
+    tampered = ResolvedDefaultProfile(
+        profile=active_runtime.resolved.profile,
+        lock=tampered_lock,
+        plan=active_runtime.resolved.plan,
+    )
+    with pytest.raises(PackControlConflict):
+        activate_resolved_profile_pack_set(
+            tampered,
+            activation_id=str(committed.activation["activation_id"]),
+            expected_profile_revision=str(
+                active_runtime.resolved.plan["profile_revision"]
+            ),
+            expected_plan_digest=str(active_runtime.resolved.plan["plan_digest"]),
+            expected_activation_id=str(active_runtime.activation["activation_id"]),
+        )
+    with pytest.raises(ProfileResolutionDenied, match="predecessor is stale"):
+        activate_resolved_profile_pack_set(
+            active_runtime.resolved,
+            activation_id="activation:defaults-profile-change-different",
+            expected_profile_revision=str(
+                active_runtime.resolved.plan["profile_revision"]
+            ),
+            expected_plan_digest=str(active_runtime.resolved.plan["plan_digest"]),
+            expected_activation_id=str(active_runtime.activation["activation_id"]),
+        )
+    with AuthorityStore(runtime_user_data_root() / "authority" / "v4.sqlite3") as authority:
+        authority.advance_security_epoch("test exact replay security evidence")
+    with pytest.raises(ProfileResolutionDenied, match="SecurityEpoch is stale"):
+        activate_resolved_profile_pack_set(
+            active_runtime.resolved,
+            activation_id=str(committed.activation["activation_id"]),
+            expected_profile_revision=str(
+                active_runtime.resolved.plan["profile_revision"]
+            ),
+            expected_plan_digest=str(active_runtime.resolved.plan["plan_digest"]),
+            expected_activation_id=str(active_runtime.activation["activation_id"]),
+        )
 
 
 def test_profile_approval_response_loss_retries_exact_authority_receipt(
