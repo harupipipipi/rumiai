@@ -51,6 +51,17 @@ def test_core_generator_transaction_rolls_back_every_output(
     assert _snapshot(copied) == before
 
 
+def test_checked_in_bundle_matches_canonical_render() -> None:
+    generator = _load_generator()
+    rendered = generator._render()
+    expected = {
+        path.relative_to(generator.BUNDLE).as_posix(): raw
+        for path, raw in rendered.items()
+    }
+
+    assert _snapshot(generator.BUNDLE) == expected
+
+
 def test_core_generator_transaction_rejects_destination_symlink(
     tmp_path: Path,
 ) -> None:
