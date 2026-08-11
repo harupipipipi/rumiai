@@ -1066,7 +1066,7 @@ def test_contract_server_rejects_empty_and_wrong_backend_registry_before_bind(
         dispatch_session=session,
         contract_bindings=bindings,
     )
-    with pytest.raises(RuntimeError, match="metadata is stale or wrong"):
+    with pytest.raises(BackendUnavailableError, match="not installed"):
         wrong.start()
     assert wrong.server is None
 

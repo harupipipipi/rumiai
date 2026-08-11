@@ -33,7 +33,7 @@ def _bundle_root() -> Path:
     return packaged_profile_bundle_root()
 
 PACK_ID = "tobkiri_workflow_pack"
-SESSION_ID = "workflow-v4-integration"
+SESSION_ID = f"{'a' * 64}.{'b' * 24}.1"
 
 
 def _invoke(session, contract: str, operation: str, payload: dict | None = None):
