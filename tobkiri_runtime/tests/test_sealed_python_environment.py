@@ -45,6 +45,31 @@ def _load_builder():
 
 BUILDER = _load_builder()
 
+_SEALED_TEST_ENV_ALLOWLIST = frozenset(
+    {
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "PATH",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "USERPROFILE",
+        "WINDIR",
+    }
+)
+
+
+def _clean_sealed_test_environment() -> dict[str, str]:
+    """Keep subprocess fixtures free of host loader and Python injection state."""
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key in _SEALED_TEST_ENV_ALLOWLIST
+    }
+
 
 def _make_test_mutable(path: Path) -> None:
     """Temporarily grant a fixture path write access for tamper tests."""
@@ -295,6 +320,9 @@ def test_bootstrap_wire_dispatches_all_roles_and_publishes_attestation(
     old_stdin = sys.stdin
     old_stdout = sys.stdout
     old_env = os.environ.copy()
+    clean_env = _clean_sealed_test_environment()
+    os.environ.clear()
+    os.environ.update(clean_env)
     sys.path = [
         str(output / "venv/lib/python3.13/site-packages"),
         str(output / "runtime/lib/python3.13"),
@@ -600,18 +628,8 @@ result = bootstrap.main(
 )
 print(json.dumps({"result": result, "sys_path": list(sys.path)}))
 """
-    base_env = os.environ.copy()
-    for key in (
-        "REPO",
-        "RUMI_CORE_DIR",
-        "PYTHONPATH",
-        "PYTHONHOME",
-        "DYLD_LIBRARY_PATH",
-        "LD_LIBRARY_PATH",
-    ):
-        base_env.pop(key, None)
+    base_env = _clean_sealed_test_environment()
     base_env["ROLE_MARKER"] = str(tmp_path / "roles.jsonl")
-    base_env["PYTHONUSERBASE"] = str(external / "user-site")
     base_env["TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256"] = BUILDER._sha256_file(
         output / BUILDER.MANIFEST_FILENAME
     )
@@ -682,6 +700,7 @@ print(json.dumps({"result": result, "sys_path": list(sys.path)}))
             stderr=subprocess.PIPE,
         )
         assert result.returncode != 0
+        assert "forbidden injection keys" in result.stderr
         assert not attestation.exists()
         assert not Path(environment["METADATA_MARKER"]).exists()
 

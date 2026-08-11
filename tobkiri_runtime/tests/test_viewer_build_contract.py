@@ -110,9 +110,33 @@ def test_installer_targets_are_selected_by_tauri_platform_overrides():
 def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
     for workflow in VIEWER_BUILD_WORKFLOWS:
         contents = workflow.read_text(encoding="utf-8")
-        assert "cargo tauri build" in contents
-        assert "Prepare bundled Rumi runtime" not in contents
-        assert "python .github/scripts/prepare_tauri_resources.py" not in contents
+        build_contents = contents.split("\n  gather:", 1)[0]
+        assert "cargo tauri build" in build_contents
+        assert "Prepare bundled Rumi runtime" not in build_contents
+        assert "python .github/scripts/prepare_tauri_resources.py" not in build_contents
+        prepare_at = build_contents.index(
+            "Prepare sealed Python environment and export manifest binding"
+        )
+        cargo_positions = [
+            match.start() for match in re.finditer(r"cargo tauri build", build_contents)
+        ]
+        assert cargo_positions and all(position > prepare_at for position in cargo_positions)
+        assert "TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256" in build_contents
+        assert ".github/scripts/prepare_tauri_resources.py" in build_contents
+        assert "--check" in build_contents
+        assert "--env-output" in build_contents
+        assert "aarch64-apple-darwin" in build_contents
+        assert "x86_64-apple-darwin" in build_contents
+        for forbidden in (
+            "windows-latest",
+            "ubuntu-latest",
+            "x86_64-pc-windows-msvc",
+            "x86_64-unknown-linux-gnu",
+            "Upload Windows",
+            "Upload Linux",
+            "Sign and verify Windows installer",
+        ):
+            assert forbidden not in build_contents
 
 
 def test_macos_installer_uses_finder_free_verified_dmg_packager():
@@ -147,9 +171,7 @@ def test_macos_installer_uses_finder_free_verified_dmg_packager():
         ROOT / ".github" / "workflows" / "desktop-installers.yml"
     ).read_text(encoding="utf-8")
     desktop_macos = desktop_workflow[
-        desktop_workflow.index("Build local macOS application (ad-hoc)") : desktop_workflow.index(
-            "Build desktop installer\n        if: runner.os == 'Windows'"
-        )
+        desktop_workflow.index("Build local macOS application (ad-hoc)") :
     ]
     assert "--bundles app" in desktop_macos
     assert "scripts/package_macos_dmg.sh" in desktop_macos
@@ -160,9 +182,7 @@ def test_macos_installer_uses_finder_free_verified_dmg_packager():
         encoding="utf-8"
     )
     release_macos = release_workflow[
-        release_workflow.index("Build signed macOS application") : release_workflow.index(
-            "Build with cargo tauri\n        if: runner.os != 'macOS'"
-        )
+        release_workflow.index("Build signed macOS application") :
     ]
     assert "--bundles app" in release_macos
     assert "scripts/package_macos_dmg.sh" in release_macos
@@ -255,7 +275,11 @@ def test_build_and_sign_rebuilds_canonical_defaultspack_before_staging():
     build_at = helper.index("npm run build")
     check_at = helper.index("npm run check:shell-bundle")
     stage_at = helper.index("prepare_viewer_runtime.py")
+    tauri_builds = [
+        match.start() for match in re.finditer(r"cargo tauri build", helper)
+    ]
     assert build_at < check_at < stage_at
+    assert tauri_builds and all(position > stage_at for position in tauri_builds)
     assert "DEFAULTSPACK_WEBAPP_ROOT" in helper
 
 
@@ -273,8 +297,6 @@ def test_release_platform_signing_is_fail_closed_and_ad_hoc_is_dev_only():
         "APPLE_ID",
         "APPLE_APP_SPECIFIC_PASSWORD",
         "APPLE_TEAM_ID",
-        "WINDOWS_CERTIFICATE_BASE64",
-        "WINDOWS_CERTIFICATE_PASSWORD",
         "scripts/release_gate.py sign-artifacts",
     ):
         assert required in workflow
@@ -312,10 +334,15 @@ def test_release_platform_signing_is_fail_closed_and_ad_hoc_is_dev_only():
     verify_at = workflow.index("Verify Developer ID signed macOS application")
     dmg_at = workflow.index("Build macOS DMG installer")
     notarize_at = workflow.index("Notarize and staple macOS release DMG")
-    windows_sign_at = workflow.index("Sign and verify Windows installer")
     upload_at = workflow.index("Upload one reviewable draft release")
     assert verify_at < dmg_at < notarize_at < upload_at
-    assert windows_sign_at < upload_at
+    assert "WINDOWS_CERTIFICATE_BASE64" not in workflow
+    assert "WINDOWS_CERTIFICATE_PASSWORD" not in workflow
+    assert "Sign and verify Windows installer" not in workflow
+    assert "Linux" not in workflow
+    assert {"aarch64-apple-darwin", "x86_64-apple-darwin"} <= set(
+        re.findall(r"(?:aarch64|x86_64)-apple-darwin", workflow)
+    )
 
 
 def test_pack_shell_profile_is_a_single_safe_path_component():
