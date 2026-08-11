@@ -307,10 +307,17 @@ def capture_default_profile(
     if state_root.is_symlink() or active_pointer.is_symlink():
         raise ProfileResolutionDenied("Defaults activation state must not be symlinked")
     if active_pointer.is_file():
-        if confirmation is not None:
-            raise ProfileResolutionDenied("Defaults activation confirmation was replayed")
         workspace = user_data / "workspaces" / "defaults"
         catalog = BundledCatalog.load(_bundle_root(base_dir))
+        resolved_reconciliation: ResolvedDefaultProfile | None = None
+        if confirmation is not None:
+            resolved_reconciliation, expected_confirmation = _resolve_candidate(
+                base_dir=base_dir
+            )
+            if dict(confirmation) != expected_confirmation:
+                raise ProfileResolutionDenied(
+                    "Defaults activation confirmation is stale or tampered"
+                )
         with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
             store = ActivationStore(
                 state_root,
@@ -319,6 +326,21 @@ def capture_default_profile(
                 authority=authority,
                 catalog=catalog,
             )
+            if resolved_reconciliation is not None:
+                activation_id = (
+                    "activation:defaults-reconcile-"
+                    + resolved_reconciliation.plan["plan_digest"].removeprefix(
+                        "sha256:"
+                    )[:16]
+                )
+                created_at = datetime.now(timezone.utc).isoformat().replace(
+                    "+00:00", "Z"
+                )
+                store.reconcile_active(
+                    resolved_reconciliation,
+                    activation_id=activation_id,
+                    created_at=created_at,
+                )
             return store.load_active_snapshot()
     if active_pointer.exists():
         raise ProfileResolutionDenied("active activation pointer is not a regular file")

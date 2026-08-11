@@ -75,14 +75,31 @@ class SetupHandlersMixin:
     def _setup_list_packs(self) -> Dict[str, Any]:
         """Return the sole canonical setup candidate and its typed state."""
 
-        from ..bootstrap.profile_capture import active_default_profile_exists
+        from ..bootstrap.profile_capture import (
+            active_default_profile_exists,
+            capture_default_profile,
+        )
+        from ecosystem.defaultspack.domain.runtime_v4 import (
+            ProfileReconfirmationRequired,
+            ProfileResolutionDenied,
+        )
 
         preview = self._recommended_default_profile_preview()
+        state = "review_required"
+        denial_diagnostic: str | None = None
+        if active_default_profile_exists():
+            try:
+                capture_default_profile()
+                state = "active"
+            except ProfileReconfirmationRequired as error:
+                denial_diagnostic = str(error)
+            except ProfileResolutionDenied as error:
+                state = "activation_denied"
+                denial_diagnostic = str(error)
         return {
             "setup_api_version": "io.tobkiri.setup-state.v4",
-            "state": (
-                "active" if active_default_profile_exists() else "review_required"
-            ),
+            "state": state,
+            "denial_diagnostic": denial_diagnostic,
             "packs": preview["packs"],
             "recommended_default_profile": preview,
             "required_transaction": [

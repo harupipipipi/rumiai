@@ -21,6 +21,7 @@ from core_runtime.bootstrap.profile_capture import (
 from ecosystem.defaultspack.domain.runtime_v4 import (
     ActivationStore,
     BundledCatalog,
+    ProfileReconfirmationRequired,
     ProfileResolutionDenied,
     resolve_default_profile,
 )
@@ -378,7 +379,10 @@ def test_packaged_artifact_path_digest_and_symlink_rejection(tmp_path: Path, cas
 def test_requested_scope_normalization_denies_expansion_and_is_canonical() -> None:
     semantics = "sha256:" + "1" * 64
     normalized = normalize_requested_scope_template(
-        {}, contract_id="example.echo.v1", operation_id="echo", semantics_digest=semantics
+        {},
+        contract_id="example.echo.v1",
+        operation_id="echo",
+        semantics_digest=semantics,
     )
     assert normalized["dimensions"] == {
         "contract": ["example.echo.v1"],
@@ -543,6 +547,28 @@ def _retarget_legacy_artifact(fixture: dict[str, Any], role: str) -> None:
     _redigest_legacy_fixture(fixture)
 
 
+def _remove_legacy_authority_edge(fixture: dict[str, Any]) -> None:
+    """Model an older, narrower activation without inventing authority."""
+
+    profile = fixture["profile"]
+    plan = fixture["plan"]
+    removed = profile["requested_edges"].pop()
+    removed_reference = removed["authority_reference"]
+    profile["authority_references"] = [
+        reference for reference in profile["authority_references"] if reference != removed_reference
+    ]
+    plan["bindings"] = [
+        binding
+        for binding in plan["bindings"]
+        if not (
+            binding["function_principal"]["function_id"] == removed["caller_function_id"]
+            and binding["contract_id"] == removed["contract_id"]
+            and binding["operation_id"] == removed["operation_id"]
+        )
+    ]
+    _redigest_legacy_fixture(fixture)
+
+
 def test_exact_legacy_activation_migrates_once_without_drift(tmp_path: Path) -> None:
     catalog = _packaged_catalog(tmp_path)
     resolved = _resolve(catalog)
@@ -567,6 +593,191 @@ def test_exact_legacy_activation_migrates_once_without_drift(tmp_path: Path) -> 
     assert migrated.resolved.plan == resolved.plan
     assert migrated.activation["activation_api_version"] == ("io.tobkiri.activation-record.v2")
     assert store.load_active_snapshot().activation == migrated.activation
+
+
+def test_valid_narrower_activation_requires_confirmed_reconciliation(
+    tmp_path: Path,
+) -> None:
+    catalog = _packaged_catalog(tmp_path)
+    resolved = _resolve(catalog)
+    fixture = _compatible_legacy_fixture(resolved)
+    _remove_legacy_authority_edge(fixture)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state = tmp_path / "state"
+    authority = AuthorityStore(tmp_path / "authority.sqlite3")
+    _write_frozen_activation(state, workspace, authority, fixture)
+    old_pointer = (state / "active.json").read_bytes()
+    old_envelope = next((state / "activations").iterdir())
+    old_envelope_bytes = old_envelope.read_bytes()
+    store = ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        catalog=catalog,
+    )
+
+    with pytest.raises(
+        ProfileReconfirmationRequired,
+        match="Authority Kernel reference is missing",
+    ):
+        store.load_active_snapshot()
+    assert (state / "active.json").read_bytes() == old_pointer
+    assert old_envelope.read_bytes() == old_envelope_bytes
+
+    store.reconcile_active(
+        resolved,
+        activation_id="activation:defaults-confirmed-reconcile",
+        created_at="2026-08-11T00:00:00Z",
+    )
+    restarted = ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        catalog=catalog,
+    ).load_active_snapshot()
+    assert restarted.resolved == resolved
+    assert restarted.activation["activation_api_version"] == ("io.tobkiri.activation-record.v2")
+    assert old_envelope.read_bytes() == old_envelope_bytes
+
+
+def test_capture_flow_reconciles_only_with_exact_explicit_confirmation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core_runtime.bootstrap import profile_capture
+
+    catalog = _packaged_catalog(tmp_path / "catalog")
+    resolved = _resolve(catalog)
+    fixture = _compatible_legacy_fixture(resolved)
+    _remove_legacy_authority_edge(fixture)
+    user_data = tmp_path / "user-data"
+    workspace = user_data / "workspaces" / "defaults"
+    workspace.mkdir(parents=True)
+    state = workspace / "activation"
+    with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
+        _write_frozen_activation(state, workspace, authority, fixture)
+    confirmation = {
+        "operation_id": "defaults.activate",
+        "confirmation_digest": "sha256:" + "a" * 64,
+    }
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    monkeypatch.setattr(profile_capture, "_bundle_root", lambda _base=None: catalog.root)
+    monkeypatch.setattr(
+        profile_capture,
+        "_resolve_candidate",
+        lambda **_kwargs: (resolved, confirmation),
+    )
+
+    with pytest.raises(ProfileResolutionDenied, match="stale or tampered"):
+        profile_capture.capture_default_profile(
+            confirmation={**confirmation, "operation_id": "attacker.activate"}
+        )
+    active = profile_capture.capture_default_profile(confirmation=confirmation)
+    assert active.resolved == resolved
+    assert active.activation["activation_id"].startswith(
+        "activation:defaults-reconcile-"
+    )
+    assert profile_capture.capture_default_profile().activation == active.activation
+
+
+def test_reconfirmation_hard_denials_do_not_replace_predecessor(
+    tmp_path: Path,
+) -> None:
+    catalog = _packaged_catalog(tmp_path)
+    resolved = _resolve(catalog)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    for case in ("stale_revision", "envelope_digest", "unauthorized"):
+        case_root = tmp_path / case
+        state = case_root / "state"
+        authority = AuthorityStore(case_root / "authority.sqlite3")
+        fixture = _compatible_legacy_fixture(resolved)
+        _remove_legacy_authority_edge(fixture)
+        _write_frozen_activation(state, workspace, authority, fixture)
+        pointer = json.loads((state / "active.json").read_text(encoding="utf-8"))
+        envelope_path = state / "activations" / pointer["envelope_path"]
+        if case == "stale_revision":
+            envelope = json.loads(envelope_path.read_text(encoding="utf-8"))
+            envelope["lock"]["profile_revision"] = "sha256:" + "f" * 64
+            envelope_path.write_bytes(canonical_json(envelope) + b"\n")
+            pointer["envelope_digest"] = canonical_digest(envelope)
+            (state / "active.json").write_bytes(canonical_json(pointer) + b"\n")
+            expected = "predecessor is stale"
+            candidate_authority = authority
+        elif case == "envelope_digest":
+            envelope = json.loads(envelope_path.read_text(encoding="utf-8"))
+            envelope["plan"]["security_epoch"] = 2
+            envelope_path.write_bytes(canonical_json(envelope) + b"\n")
+            expected = "activation envelope digest changed"
+            candidate_authority = authority
+        else:
+            candidate_authority = AuthorityStore(case_root / "foreign-authority.sqlite3")
+            expected = "Authority record is unavailable"
+        pointer_before = (state / "active.json").read_bytes()
+        store = ActivationStore(
+            state,
+            workspace,
+            profile_id="defaults",
+            authority=candidate_authority,
+            catalog=catalog,
+        )
+        with pytest.raises(ProfileResolutionDenied, match=expected) as denied:
+            store.reconcile_active(
+                resolved,
+                activation_id=f"activation:defaults-{case}-denied",
+                created_at="2026-08-11T00:00:00Z",
+            )
+        assert not isinstance(denied.value, ProfileReconfirmationRequired)
+        assert (state / "active.json").read_bytes() == pointer_before
+
+
+def test_confirmed_reconciliation_recovers_commit_across_restart(
+    tmp_path: Path,
+) -> None:
+    catalog = _packaged_catalog(tmp_path)
+    resolved = _resolve(catalog)
+    fixture = _compatible_legacy_fixture(resolved)
+    _remove_legacy_authority_edge(fixture)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state = tmp_path / "state"
+    authority = AuthorityStore(tmp_path / "authority.sqlite3")
+    _write_frozen_activation(state, workspace, authority, fixture)
+    predecessor = next((state / "activations").iterdir())
+    predecessor_bytes = predecessor.read_bytes()
+
+    def interrupt(stage: str) -> None:
+        if stage == "after_authority_commit":
+            raise OSError("simulated restart after Authority commit")
+
+    with pytest.raises(OSError, match="simulated restart"):
+        ActivationStore(
+            state,
+            workspace,
+            profile_id="defaults",
+            authority=authority,
+            catalog=catalog,
+            fault=interrupt,
+        ).reconcile_active(
+            resolved,
+            activation_id="activation:defaults-restart-reconcile",
+            created_at="2026-08-11T00:00:00Z",
+        )
+
+    recovered = ActivationStore(
+        state,
+        workspace,
+        profile_id="defaults",
+        authority=authority,
+        catalog=catalog,
+    ).load_active_snapshot()
+    assert recovered.resolved == resolved
+    assert recovered.activation["activation_id"] == ("activation:defaults-restart-reconcile")
+    assert predecessor.read_bytes() == predecessor_bytes
 
 
 @pytest.mark.parametrize("role", ("base", "shell", "pack"))

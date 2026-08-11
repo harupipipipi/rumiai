@@ -71,6 +71,20 @@ def mark_runtime_failed(error: str) -> None:
         )
 
 
+def mark_profile_reconfirmation_required(error: str) -> None:
+    """Publish a UI-ready state without treating stale authority as active."""
+
+    with _RUNTIME_READINESS_LOCK:
+        _RUNTIME_READINESS_STATE.update(
+            {
+                "panel_ready": True,
+                "runtime_ready": False,
+                "runtime_status": "profile_reconfirmation_required",
+                "runtime_error": error,
+            }
+        )
+
+
 def get_runtime_readiness() -> Dict[str, Any]:
     with _RUNTIME_READINESS_LOCK:
         return dict(_RUNTIME_READINESS_STATE)
@@ -122,13 +136,27 @@ class AppLifecycleManager:
                 "activation_id": active.activation["activation_id"],
             }
         except Exception as error:
+            from ecosystem.defaultspack.domain.runtime_v4 import (
+                ProfileReconfirmationRequired,
+            )
+
             logger.error("canonical v4 setup status failed: %s", error)
-            result = {
-                "needs_setup": True,
-                "reason": "canonical_v4_profile_unavailable",
-                "setup_state": "profile_transaction_required",
-                "error_type": type(error).__name__,
-            }
+            if isinstance(error, ProfileReconfirmationRequired):
+                result = {
+                    "needs_setup": True,
+                    "reason": "profile_reconfirmation_required",
+                    "setup_state": "profile_reconfirmation_required",
+                    "error_type": type(error).__name__,
+                    "denial_diagnostic": str(error),
+                }
+            else:
+                result = {
+                    "needs_setup": True,
+                    "reason": "canonical_v4_profile_unavailable",
+                    "setup_state": "profile_transaction_required",
+                    "error_type": type(error).__name__,
+                    "denial_diagnostic": str(error),
+                }
 
         result.update(get_runtime_readiness())
         return result

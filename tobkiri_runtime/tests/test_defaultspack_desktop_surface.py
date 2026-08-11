@@ -287,6 +287,92 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
         self.assertTrue(fake_server.started)
         self.assertTrue(fake_server.stopped)
 
+    def test_valid_stale_profile_starts_ui_ready_reconfirmation_surface(self):
+        from core_runtime.app_lifecycle_manager import (
+            get_runtime_readiness,
+            reset_runtime_readiness,
+        )
+        from defaultspack import desktop_app
+        from ecosystem.defaultspack.domain.runtime_v4 import (
+            ProfileReconfirmationRequired,
+        )
+
+        captured: dict[str, object] = {}
+        events: list[tuple[str, dict[str, object]]] = []
+
+        class FakeServer:
+            def __init__(self, *_args, **kwargs):
+                captured.update(kwargs)
+
+            def start(self):
+                return None
+
+            def stop(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as tmp:
+            user_data = Path(tmp) / "user_data"
+            self._activate_defaults(user_data)
+            reset_runtime_readiness()
+            env = {
+                "RUMI_DEFAULTSPACK_OPEN_BROWSER": "1",
+                "RUMI_DEFAULTSPACK_SURFACE": "webview",
+                "TOBKIRI_USER_DATA": str(user_data),
+                "RUMI_USER_DATA": str(user_data),
+                "TOBKIRI_HOST_CONTRACT_PATH": str(
+                    user_data / "host_contract.json"
+                ),
+            }
+            denial = (
+                "legacy activation requires explicit reconfirmation: "
+                "Authority Kernel reference is missing for edge test"
+            )
+            with patch.dict(os.environ, env, clear=True):
+                with patch.object(
+                    desktop_app,
+                    "_restore_active_profile_contracts",
+                    side_effect=ProfileReconfirmationRequired(denial),
+                ):
+                    with patch.object(
+                        desktop_app,
+                        "_write_launch_event",
+                        side_effect=lambda event, **fields: events.append(
+                            (event, fields)
+                        ),
+                    ):
+                        with patch(
+                            "core_runtime.pack_api_server.PackAPIServer",
+                            FakeServer,
+                        ):
+                            with patch.object(
+                                desktop_app, "_wait_until_ready", return_value=True
+                            ):
+                                with patch.object(
+                                    desktop_app,
+                                    "_wait_until_chat_ready",
+                                    return_value=True,
+                                ):
+                                    with patch(
+                                        "defaultspack.native_webview.open_desktop_surface",
+                                        return_value="webview",
+                                    ):
+                                        result = desktop_app.main()
+
+        self.assertEqual(result, 0)
+        self.assertIsNone(captured["dispatch_session"])
+        self.assertEqual(captured["contract_bindings"], ())
+        readiness = get_runtime_readiness()
+        self.assertTrue(readiness["panel_ready"])
+        self.assertFalse(readiness["runtime_ready"])
+        self.assertEqual(
+            readiness["runtime_status"], "profile_reconfirmation_required"
+        )
+        self.assertEqual(readiness["runtime_error"], denial)
+        event = next(
+            item for item in events if item[0] == "profile_reconfirmation_required"
+        )
+        self.assertEqual(event[1]["denial_diagnostic"], denial)
+
     def test_desktop_app_main_fails_closed_when_server_bind_is_busy(self):
         from defaultspack import desktop_app
 

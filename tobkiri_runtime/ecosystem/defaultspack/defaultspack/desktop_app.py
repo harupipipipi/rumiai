@@ -210,6 +210,7 @@ def _restore_active_profile_contracts():
     from core_runtime.authority.v4 import AuthorityStore
     from core_runtime.bootstrap.production_v4 import capture_production_dispatch
     from core_runtime.bootstrap.profile_capture import (
+        _bundle_root,
         active_default_profile_exists,
         capture_default_profile,
         runtime_user_data_root,
@@ -223,7 +224,7 @@ def _restore_active_profile_contracts():
 
     if not active_default_profile_exists():
         raise RuntimeError("Defaults v4 activation is not committed")
-    bundle_root = _pack_root() / "v4"
+    bundle_root = _bundle_root()
     ecosystem_root = _pack_root().parent
     active = capture_default_profile()
     catalog = BundledCatalog.load(bundle_root)
@@ -395,7 +396,28 @@ def main(argv: list[str] | None = None) -> int:
         port=port,
         url=url,
     )
-    dispatch_session, contract_bindings = _restore_active_profile_contracts()
+    from core_runtime.app_lifecycle_manager import (
+        AppLifecycleManager,
+        mark_panel_ready,
+        mark_profile_reconfirmation_required,
+    )
+    from ecosystem.defaultspack.domain.runtime_v4 import (
+        ProfileReconfirmationRequired,
+    )
+
+    lifecycle = AppLifecycleManager()
+    reconfirmation_error: str | None = None
+    try:
+        dispatch_session, contract_bindings = _restore_active_profile_contracts()
+    except ProfileReconfirmationRequired as error:
+        dispatch_session, contract_bindings = None, ()
+        reconfirmation_error = str(error)
+        _write_launch_event(
+            "profile_reconfirmation_required",
+            denial_diagnostic=reconfirmation_error,
+            port=port,
+            url=url,
+        )
     try:
         from domain.integrations.secrets import load_integration_secrets_into_env
 
@@ -428,6 +450,7 @@ def main(argv: list[str] | None = None) -> int:
         port=int(port),
         panel_auth_manager=auth,
         dispatch_session=dispatch_session,
+        app_lifecycle_manager=lifecycle,
         contract_bindings=contract_bindings,
         web_mounts=web_mounts,
     )
@@ -446,6 +469,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         raise
     _write_launch_event("server_started", port=port, url=url)
+    if reconfirmation_error is None:
+        mark_panel_ready()
+    else:
+        mark_profile_reconfirmation_required(reconfirmation_error)
 
     health_ready = _wait_until_ready(url)
     chat_ready = _wait_until_chat_ready(url)

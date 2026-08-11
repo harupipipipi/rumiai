@@ -15,6 +15,7 @@ from typing import Any
 from ..app_lifecycle_manager import (
     AppLifecycleManager,
     mark_panel_ready,
+    mark_profile_reconfirmation_required,
     mark_runtime_ready,
     reset_runtime_readiness,
 )
@@ -33,7 +34,10 @@ from .profile_capture import (
     capture_default_profile,
     runtime_user_data_root,
 )
-from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+from ecosystem.defaultspack.domain.runtime_v4 import (
+    BundledCatalog,
+    ProfileReconfirmationRequired,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -70,32 +74,38 @@ class Kernel:
             user_data = runtime_user_data_root()
             dispatch_session = None
             contract_bindings: tuple[FrontendContractBinding, ...] = ()
+            reconfirmation_error: str | None = None
             if active_default_profile_exists():
-                active = capture_default_profile()
-                authority_store = AuthorityStore(user_data / "authority" / "v4.sqlite3")
-                bundle_root = _bundle_root()
-                catalog = BundledCatalog.load(bundle_root)
-                contract_bindings = load_frontend_contract_bindings(
-                    runtime_root
-                    / "ecosystem"
-                    / "defaultspack"
-                    / "defaultspack"
-                    / "frontend_contract_map.v4.json",
-                    catalog.packs["runtime.tauri.application.default"],
-                )
                 try:
-                    dispatch_session = capture_production_dispatch(
-                        active,
-                        bundle_root=bundle_root,
-                        ecosystem_root=runtime_root / "ecosystem",
-                        authority_store=authority_store,
-                        frontend_contract_bindings=contract_bindings,
+                    active = capture_default_profile()
+                    authority_store = AuthorityStore(
+                        user_data / "authority" / "v4.sqlite3"
                     )
-                except Exception:
-                    authority_store.close()
-                    raise
-                install_dispatch_session(get_container(), dispatch_session)
-                self._dispatch_session = dispatch_session
+                    bundle_root = _bundle_root()
+                    catalog = BundledCatalog.load(bundle_root)
+                    contract_bindings = load_frontend_contract_bindings(
+                        runtime_root
+                        / "ecosystem"
+                        / "defaultspack"
+                        / "defaultspack"
+                        / "frontend_contract_map.v4.json",
+                        catalog.packs["runtime.tauri.application.default"],
+                    )
+                    try:
+                        dispatch_session = capture_production_dispatch(
+                            active,
+                            bundle_root=bundle_root,
+                            ecosystem_root=runtime_root / "ecosystem",
+                            authority_store=authority_store,
+                            frontend_contract_bindings=contract_bindings,
+                        )
+                    except Exception:
+                        authority_store.close()
+                        raise
+                    install_dispatch_session(get_container(), dispatch_session)
+                    self._dispatch_session = dispatch_session
+                except ProfileReconfirmationRequired as error:
+                    reconfirmation_error = str(error)
             port = resolve_runtime_port()
             self._server = initialize_pack_api_server(
                 host="127.0.0.1",
@@ -104,7 +114,10 @@ class Kernel:
                 app_lifecycle_manager=self._lifecycle,
                 contract_bindings=contract_bindings,
             )
-            mark_panel_ready()
+            if reconfirmation_error is None:
+                mark_panel_ready()
+            else:
+                mark_profile_reconfirmation_required(reconfirmation_error)
             return {"status": "ok", "step_id": step_id, "port": port}
 
     def run_startup_remaining(self) -> dict[str, Any]:

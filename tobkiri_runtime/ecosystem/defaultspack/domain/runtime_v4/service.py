@@ -53,6 +53,10 @@ class ProfileResolutionDenied(DefaultProfileV4Error):
     """Raised when an exact, approved v4 composition cannot be produced."""
 
 
+class ProfileReconfirmationRequired(ProfileResolutionDenied):
+    """Raised when a valid predecessor cannot authorize a changed Profile."""
+
+
 class ActivationLockTimeout(ProfileResolutionDenied):
     """Raised when the activation process lock is unavailable by its deadline."""
 
@@ -1534,6 +1538,47 @@ class ActivationStore:
         with self._activation_lock():
             return self._load_active_snapshot_locked()
 
+    def reconcile_active(
+        self,
+        resolved: ResolvedDefaultProfile,
+        *,
+        activation_id: str,
+        created_at: str,
+    ) -> Mapping[str, Any]:
+        """Replace only a valid predecessor after an explicit confirmation.
+
+        A normal restart is attempted first.  Reconciliation is permitted only
+        when that attempt proves the persisted activation and its Authority
+        reservation are valid, but the verified bundle requests a changed
+        authority surface.  Hard denials (including stale internal revisions,
+        digest changes, and missing Authority state) are never converted into a
+        migration candidate.
+        """
+
+        if _ACTIVATION_RE.fullmatch(activation_id) is None:
+            raise ProfileResolutionDenied("activation_id is not canonical")
+        profile = validate_document(resolved.profile, "profile")
+        lock = validate_document(resolved.lock, "profile_lock")
+        plan = validate_document(resolved.plan, "resolved_plan")
+        self._validate_record_graph(profile, lock, plan)
+        if profile["profile_id"] != self.profile_id:
+            raise ProfileResolutionDenied("activation Profile identity does not match store")
+        with self._activation_lock():
+            try:
+                self._load_active_snapshot_locked()
+            except ProfileReconfirmationRequired:
+                pass
+            else:
+                raise ProfileResolutionDenied("activation confirmation was replayed")
+            return self._activate_locked(
+                ResolvedDefaultProfile(profile=profile, lock=lock, plan=plan),
+                activation_id=activation_id,
+                created_at=created_at,
+                expected_predecessor_profile_revision=None,
+                expected_predecessor_plan_digest=None,
+                expected_predecessor_activation_id=None,
+            )
+
     def _load_active_snapshot_locked(self) -> ActiveDefaultProfile:
         """Load one snapshot while holding the profile's process lock."""
         self._recover_locked()
@@ -1754,14 +1799,21 @@ class ActivationStore:
         approved = {
             str(manifest["pack"]["artifact_digest"]) for manifest in self._catalog.packs.values()
         }
-        successor = resolve_default_profile(
-            self._catalog,
-            self.profile_id,
-            approved_artifact_digests=approved,
-            authority_snapshot_digest=str(activation["profile_authority_snapshot_digest"]),
-            authority_bindings=bindings,
-            security_epoch=int(activation["security_epoch"]),
-        )
+        try:
+            successor = resolve_default_profile(
+                self._catalog,
+                self.profile_id,
+                approved_artifact_digests=approved,
+                authority_snapshot_digest=str(activation["profile_authority_snapshot_digest"]),
+                authority_bindings=bindings,
+                security_epoch=int(activation["security_epoch"]),
+            )
+        except ProfileResolutionDenied as exc:
+            if str(exc).startswith("Authority Kernel reference is missing for edge "):
+                raise ProfileReconfirmationRequired(
+                    f"legacy activation requires explicit reconfirmation: {exc}"
+                ) from exc
+            raise
         if (
             legacy_effective != successor.plan["effective_set"]
             or canonical_digest(legacy_effective) != successor.plan["closure_digest"]
