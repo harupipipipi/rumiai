@@ -176,18 +176,25 @@ def test_windows_absolute_artifact_path_packages_native_manifest() -> None:
         prefix="tobkiri-windows-output-"
     ) as output_temp:
         source = Path(source_temp) / "tobkiri-shell.exe"
-        source.write_bytes(b"MZ-stub-windows\r\n")
+        pe_stub = bytearray(88)
+        pe_stub[:2] = b"MZ"
+        pe_stub[60:64] = (64).to_bytes(4, "little")
+        pe_stub[64:68] = b"PE\0\0"
+        pe_stub[68:70] = (0x8664).to_bytes(2, "little")
+        source.write_bytes(pe_stub)
         source.chmod(0o755)
 
         root = Path(output_temp)
-        catalog = root / "presentation_catalog.json"
-        catalog.write_text(json.dumps(_windows_catalog()), encoding="utf-8")
+        catalog = (
+            repository_root
+            / "tobkiri_launcher/src-tauri/bundled/presentation_catalog.json"
+        )
         manifest = root / "shell_build_output.v4.json"
         manifest.write_text(
             json.dumps(
                 {
                     "schema": "io.tobkiri.shell.build-output.v4",
-                    "artifact_id": "shell.cli.default.windows-x86_64",
+                    "artifact_id": "shell.tauri.default.windows-x86_64",
                     "artifact_path": os.fspath(source.resolve()),
                     "platform": "windows",
                     "architecture": "x86_64",
@@ -437,10 +444,15 @@ def test_package_binds_exact_build_output_to_signed_index_and_lock() -> None:
             subprocess.run([entrypoint], check=True)
 
         catalog = json.loads((output / "presentation_catalog.json").read_text())
-        variant = catalog["shell_providers"][0]["artifact_variants"][0]
+        _, variant = MODULE._find_variant(catalog, str(report["artifact_id"]))
+        assert variant["platform"] == report["platform"]
+        assert variant["architecture"] == report["architecture"]
+        assert isinstance(variant["path"], str)
+        assert isinstance(variant["size"], int)
         assert variant["path"] == report["path"]
         assert variant["sha256"] == report["sha256"]
         assert variant["entrypoint_sha256"] == report["entrypoint_sha256"]
+        assert variant["size"] == report["size"]
         assert variant["source_revision"] == report["source_revision"]
         index = json.loads(
             (output / "bundled/shell_artifact_index.v4.json").read_text()

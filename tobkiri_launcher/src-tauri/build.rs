@@ -1074,8 +1074,31 @@ fn reject_release_hardlink(metadata: &fs::Metadata, path: &Path) -> io::Result<(
 
 #[cfg(windows)]
 fn reject_release_hardlink(metadata: &fs::Metadata, path: &Path) -> io::Result<()> {
-    use std::os::windows::fs::MetadataExt;
-    if metadata.is_file() && metadata.number_of_links() != Some(1) {
+    use std::mem::MaybeUninit;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+    };
+
+    if !metadata.is_file() {
+        return Ok(());
+    }
+    let file = File::open(path).map_err(|error| {
+        invalid_release(format!(
+            "failed to inspect presentation release file links at {}: {error}",
+            path.display()
+        ))
+    })?;
+    let mut information = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::zeroed();
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), information.as_mut_ptr()) } == 0 {
+        return Err(invalid_release(format!(
+            "failed to inspect presentation release file links at {}: {}",
+            path.display(),
+            io::Error::last_os_error()
+        )));
+    }
+    let information = unsafe { information.assume_init() };
+    if information.nNumberOfLinks != 1 {
         return Err(invalid_release(format!(
             "presentation release file must have one link: {}",
             path.display()
@@ -1417,9 +1440,17 @@ fn stage_presentation_release_from_snapshot(
         ));
     }
     if bundle_root.is_dir() {
-        let generator = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tobkiri_runtime/scripts/generate_packaged_defaultspack_v4_bundle.py");
-        let repository_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let repository_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .ok_or_else(|| invalid_release("Launcher manifest has no repository root"))?
+            .canonicalize()
+            .map_err(|error| {
+                invalid_release(format!("failed to resolve repository root: {error}"))
+            })?;
+        let generator = repository_root
+            .join("tobkiri_runtime/scripts/generate_packaged_defaultspack_v4_bundle.py");
+        require_regular_file(&generator, "packaged Profile generator")?;
         let source_revision = current_source_revision(&repository_root)?;
         let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
         let status = Command::new(python)
@@ -3133,7 +3164,7 @@ mod tests {
         assert!(error.to_string().contains("extra artifact entry"));
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn snapshot_rejects_hardlinked_release_files() {
         let tree = TestTree::new("snapshot-hardlink");
@@ -3197,6 +3228,50 @@ mod tests {
             verify_presentation_release_at(&staged, &staged_catalog)
                 .expect_err("every staged signed identity must be rechecked");
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn packager_output_is_accepted_by_complete_build_staging() {
+        let tree = TestTree::new("packager-build-staging");
+        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("Launcher should live under the repository")
+            .canonicalize()
+            .expect("repository root should resolve");
+        let package_root = tree.path().join("package-input");
+        fs::create_dir_all(&package_root).expect("package fixture root should be creatable");
+        let package_test = repository_root
+            .join("tobkiri_launcher/scripts/tests/test_package_presentation_artifact.py");
+        let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
+        let status = Command::new(python)
+            .args([
+                "-c",
+                "import runpy,sys; from pathlib import Path; runpy.run_path(sys.argv[1])['_package'](Path(sys.argv[2]))",
+            ])
+            .arg(&package_test)
+            .arg(&package_root)
+            .current_dir(&repository_root)
+            .status()
+            .expect("official packager fixture should run");
+        assert!(status.success(), "official packager fixture should succeed");
+
+        let staged_root = tree.path().join("staged");
+        copy_dir_recursive(
+            &repository_root.join("tobkiri_runtime/ecosystem/defaultspack/v4"),
+            &staged_root.join("ecosystem/defaultspack/v4"),
+        )
+        .expect("canonical Defaults bundle should stage");
+        fs::create_dir_all(staged_root.join("bundled"))
+            .expect("staged bundled directory should be creatable");
+
+        let staged_catalog =
+            stage_presentation_release_at(&staged_root, &package_root.join("release"))
+                .expect("build staging must accept the packager's exact output")
+                .expect("packager output should return its staged catalog");
+        verify_presentation_release_at(&staged_root, &staged_catalog)
+            .expect("complete staged output should remain verified");
     }
 
     #[test]

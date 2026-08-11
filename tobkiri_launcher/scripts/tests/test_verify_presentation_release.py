@@ -31,6 +31,31 @@ VERIFY = _load("verify_presentation_release")
 PACKAGE = _load("package_presentation_artifact")
 
 
+def _resign_catalog_revision(resource_root: Path, catalog: dict[str, object]) -> None:
+    """Keep higher-level v4 bindings valid after an intentional catalog mutation."""
+    catalog_without_binding = {
+        key: value for key, value in catalog.items() if key != "release_binding"
+    }
+    binding = catalog["release_binding"]
+    assert isinstance(binding, dict)
+    binding["catalog_revision"] = VERIFY._canonical_digest(catalog_without_binding)
+
+    catalog_path = resource_root / "bundled/presentation_catalog.json"
+    catalog_path.write_text(
+        json.dumps(catalog, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    release_path = resource_root / "bundled/presentation_release.v4.json"
+    release = json.loads(release_path.read_text())
+    signing_key = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
+    release["catalog_sha256"] = PACKAGE.file_digest(catalog_path)
+    release["signature"] = base64.b64encode(
+        signing_key.sign(PACKAGE._signature_message(release))
+    ).decode("ascii")
+    release_path.write_text(
+        json.dumps(release, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+
 def _release(root: Path) -> tuple[Path, dict[str, object]]:
     repository_root = Path(__file__).resolve().parents[3]
     source_catalog_path = (
@@ -172,6 +197,27 @@ def test_release_scanner_rejects_stale_tampered_reordered_and_mixed_profile_iden
             VERIFY.verify_catalog(catalog, resource_root)
 
 
+def test_release_scanner_rejects_profile_and_whole_lock_digest_domain_swap() -> None:
+    with TemporaryDirectory(prefix="tobkiri-presentation-domain-swap-") as temp:
+        resource_root, _ = _release(Path(temp))
+        catalog_path = resource_root / "bundled/presentation_catalog.json"
+        catalog = VERIFY.load_catalog(catalog_path)
+        release_path = resource_root / "bundled/presentation_release.v4.json"
+        release = json.loads(release_path.read_text())
+        assert release["default_profile_sha256"] != release["defaultspack_lock_sha256"]
+        release["defaultspack_lock_sha256"] = release["default_profile_sha256"]
+        signing_key = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
+        release["signature"] = base64.b64encode(
+            signing_key.sign(PACKAGE._signature_message(release))
+        ).decode("ascii")
+        release_path.write_text(json.dumps(release, indent=2, sort_keys=True) + "\n")
+
+        with pytest.raises(
+            RuntimeError, match="signed Defaults bundle lock digest mismatch"
+        ):
+            VERIFY.verify_catalog(catalog, resource_root)
+
+
 def test_release_scanner_rejects_catalog_index_lock_and_signature_tampering() -> None:
     targets = (
         ("bundled/presentation_catalog.json", "signed catalog digest mismatch"),
@@ -214,10 +260,13 @@ def test_release_scanner_rejects_null_metadata_wrong_size_and_path_escape() -> N
             VERIFY.verify_catalog(source_catalog, root, require_production=True)
 
     with TemporaryDirectory(prefix="tobkiri-presentation-size-negative-") as temp:
-        resource_root, _ = _release(Path(temp))
+        resource_root, report = _release(Path(temp))
         catalog_path = resource_root / "bundled/presentation_catalog.json"
         catalog = VERIFY.load_catalog(catalog_path)
-        variant = catalog["shell_providers"][0]["artifact_variants"][0]
+        _, variant = PACKAGE._find_variant(catalog, str(report["artifact_id"]))
+        assert variant["platform"] == report["platform"]
+        assert variant["architecture"] == report["architecture"]
+        assert isinstance(variant["size"], int)
         variant["size"] += 1
         with pytest.raises(RuntimeError, match="size mismatch"):
             VERIFY.verify_catalog(catalog, resource_root)
@@ -238,12 +287,13 @@ def test_release_scanner_rejects_null_metadata_wrong_size_and_path_escape() -> N
             VERIFY.verify_catalog(catalog, resource_root)
 
     with TemporaryDirectory(prefix="tobkiri-presentation-relative-escape-negative-") as temp:
-        resource_root, _ = _release(Path(temp))
+        resource_root, report = _release(Path(temp))
         catalog_path = resource_root / "bundled/presentation_catalog.json"
         catalog = VERIFY.load_catalog(catalog_path)
-        catalog["shell_providers"][0]["artifact_variants"][0][
-            "path"
-        ] = "bundled/presentation-artifacts/../outside-shell"
+        _, variant = PACKAGE._find_variant(catalog, str(report["artifact_id"]))
+        assert variant["platform"] == report["platform"]
+        assert variant["architecture"] == report["architecture"]
+        variant["path"] = "bundled/presentation-artifacts/../outside-shell"
         with pytest.raises(RuntimeError, match="unsafe"):
             VERIFY.verify_catalog(catalog, resource_root)
 
@@ -258,12 +308,15 @@ def test_release_scanner_rejects_cross_document_identity_and_target_mismatch() -
             VERIFY.verify_catalog(catalog, resource_root)
 
     with TemporaryDirectory(prefix="tobkiri-presentation-target-negative-") as temp:
-        resource_root, _ = _release(Path(temp))
+        resource_root, report = _release(Path(temp))
         catalog_path = resource_root / "bundled/presentation_catalog.json"
         catalog = VERIFY.load_catalog(catalog_path)
-        variant = catalog["shell_providers"][0]["artifact_variants"][0]
+        _, variant = PACKAGE._find_variant(catalog, str(report["artifact_id"]))
+        assert variant["platform"] == report["platform"]
+        assert variant["architecture"] == report["architecture"]
         variant["architecture"] = (
             "x86_64" if variant["architecture"] == "arm64" else "arm64"
         )
+        _resign_catalog_revision(resource_root, catalog)
         with pytest.raises(RuntimeError, match="identity does not match its target"):
             VERIFY.verify_catalog(catalog, resource_root)
