@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import heapq
 import hmac
 import logging
 import re
 import threading
 import time
 import uuid
-from collections import OrderedDict
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -444,8 +444,7 @@ class _RequestReplayCapacityError(RuntimeError):
 
 @dataclass
 class _ReplaySession:
-    expires_at: float
-    request_ids: set[str]
+    request_ids: dict[str, float]
 
 
 class _RequestReplayGuard:
@@ -473,7 +472,8 @@ class _RequestReplayGuard:
         self._capacity = capacity
         self._clock = clock
         self._max_session_ttl_seconds = max_session_ttl_seconds
-        self._sessions: OrderedDict[str, _ReplaySession] = OrderedDict()
+        self._sessions: dict[str, _ReplaySession] = {}
+        self._expirations: list[tuple[float, str, str]] = []
         self._size = 0
 
     def consume(
@@ -501,54 +501,36 @@ class _RequestReplayGuard:
             self._purge_expired_locked(now)
             session = self._sessions.get(session_id)
             if session is None:
-                session = _ReplaySession(expires_at=now + ttl, request_ids=set())
+                session = _ReplaySession(request_ids={})
                 self._sessions[session_id] = session
-            else:
-                session.expires_at = now + ttl
-                self._sessions.move_to_end(session_id)
             if request_id in session.request_ids:
                 return False
             if self._size >= self._capacity:
                 if not session.request_ids:
                     del self._sessions[session_id]
                 raise _RequestReplayCapacityError("request replay capacity exhausted")
-            session.request_ids.add(request_id)
+            expires_at = now + ttl
+            session.request_ids[request_id] = expires_at
+            heapq.heappush(self._expirations, (expires_at, session_id, request_id))
             self._size += 1
         return True
 
     def _purge_expired_locked(self, now: float) -> None:
-        while self._sessions:
-            session_id, session = next(iter(self._sessions.items()))
-            if session.expires_at > now:
-                break
-            self._size -= len(session.request_ids)
-            del self._sessions[session_id]
-        if self._size < self._capacity:
-            return
-        expired = [
-            session_id
-            for session_id, session in self._sessions.items()
-            if session.expires_at <= now
-        ]
-        for session_id in expired:
-            self._size -= len(self._sessions[session_id].request_ids)
-            del self._sessions[session_id]
+        while self._expirations and self._expirations[0][0] <= now:
+            expires_at, session_id, request_id = heapq.heappop(self._expirations)
+            session = self._sessions.get(session_id)
+            if session is None or session.request_ids.get(request_id) != expires_at:
+                continue
+            del session.request_ids[request_id]
+            self._size -= 1
+            if not session.request_ids:
+                del self._sessions[session_id]
 
     def renew_session(self, session_id: str, *, session_ttl_seconds: float) -> None:
-        """Extend all identities when panel authentication slides a session."""
+        """Purge elapsed identities without extending their absolute horizons."""
 
         with self._lock:
-            now = self._clock()
-            self._purge_expired_locked(now)
-            session = self._sessions.get(session_id)
-            if session is None:
-                return
-            ttl = min(
-                self._max_session_ttl_seconds,
-                max(0.0, float(session_ttl_seconds)),
-            )
-            session.expires_at = now + ttl
-            self._sessions.move_to_end(session_id)
+            self._purge_expired_locked(self._clock())
 
     def snapshot(self) -> Mapping[str, int]:
         """Return non-sensitive bounded-state counters for tests and diagnostics."""

@@ -35,6 +35,7 @@ pytestmark = pytest.mark.contract
 
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_MUTATION_TIMEOUT_SECONDS = 10
+EVENTUAL_RECONCILIATION_TIMEOUT_SECONDS = 30
 BUNDLE_ROOT = RUNTIME_ROOT / "ecosystem" / "defaultspack" / "v4"
 MAP_PATH = (
     RUNTIME_ROOT / "ecosystem" / "defaultspack" / "defaultspack" / "frontend_contract_map.v4.json"
@@ -700,7 +701,7 @@ def test_mutation_status_reconciles_lost_response_and_exact_approval_retry(
     lost_response.close()
 
     status_path = _contract("GET", "/api/runtime-surface/operation-status")
-    deadline = time.monotonic() + FRONTEND_MUTATION_TIMEOUT_SECONDS
+    deadline = time.monotonic() + EVENTUAL_RECONCILIATION_TIMEOUT_SECONDS
     while True:
         status, reconciled, _ = _request(
             server,
@@ -708,8 +709,13 @@ def test_mutation_status_reconciles_lost_response_and_exact_approval_retry(
             f"{status_path}?request_id={request_id}",
             headers={"Cookie": cookie, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
         )
-        if status == 200 and reconciled["data"]["state"] == "succeeded":
-            break
+        if status == 200:
+            reconciliation_state = reconciled["data"]["state"]
+            assert reconciliation_state in {"pending", "succeeded"}, reconciled
+            if reconciliation_state == "succeeded":
+                break
+        else:
+            assert status == 409, reconciled
         assert time.monotonic() < deadline, reconciled
         time.sleep(0.02)
     assert status == 200, reconciled

@@ -83,7 +83,7 @@ def test_replay_guard_same_session_different_session_and_capacity_fail_closed() 
     assert guard.snapshot()["entries"] == 2
 
 
-def test_replay_guard_authentication_renewal_extends_duplicate_fence() -> None:
+def test_replay_guard_authentication_renewal_does_not_extend_identity_horizon() -> None:
     clock = _Clock()
     guard = _RequestReplayGuard(capacity=2, clock=clock, max_session_ttl_seconds=10.0)
     request_id = _request_id(1)
@@ -92,7 +92,23 @@ def test_replay_guard_authentication_renewal_extends_duplicate_fence() -> None:
     guard.renew_session("session-a", session_ttl_seconds=5.0)
     clock.advance(2.0)
 
-    assert not guard.consume("session-a", request_id, session_ttl_seconds=5.0)
+    assert guard.consume("session-a", request_id, session_ttl_seconds=5.0)
+
+
+def test_replay_guard_rejects_reuse_within_window_then_recovers_capacity() -> None:
+    clock = _Clock()
+    guard = _RequestReplayGuard(capacity=2, clock=clock, max_session_ttl_seconds=5.0)
+    first = _request_id(1)
+
+    assert guard.consume("session-a", first, session_ttl_seconds=5.0)
+    assert not guard.consume("session-a", first, session_ttl_seconds=5.0)
+    assert guard.consume("session-a", _request_id(2), session_ttl_seconds=5.0)
+    with pytest.raises(_RequestReplayCapacityError, match="capacity"):
+        guard.consume("session-a", _request_id(3), session_ttl_seconds=5.0)
+
+    clock.advance(5.01)
+    assert guard.consume("session-a", first, session_ttl_seconds=5.0)
+    assert guard.snapshot()["entries"] == 1
 
 
 def test_replay_guard_concurrent_admission_never_exceeds_capacity() -> None:
@@ -110,6 +126,70 @@ def test_replay_guard_concurrent_admission_never_exceeds_capacity() -> None:
     assert outcomes.count("fresh") == 7
     assert outcomes.count("full") == 93
     assert guard.snapshot()["entries"] == 7
+
+
+def test_session_renewal_debounces_sliding_expiry_writes(tmp_path: Path) -> None:
+    clock = _Clock()
+    path = tmp_path / "reconciliation.sqlite3"
+    store = ControlReconciliationStore(
+        path,
+        clock=clock,
+        session_renewal_debounce_seconds=30.0,
+    )
+    _begin(store, 1, session_expires_at=2_000.0)
+
+    store.renew_session("session-a", expires_at=3_000.0)
+    store.renew_session("session-a", expires_at=3_020.0)
+    with sqlite3.connect(path) as connection:
+        first_expiry = float(
+            connection.execute("SELECT expires_at FROM control_replay_sessions").fetchone()[0]
+        )
+    assert first_expiry == 3_000.0
+
+    store.renew_session("session-a", expires_at=3_031.0)
+    with sqlite3.connect(path) as connection:
+        renewed_expiry = float(
+            connection.execute("SELECT expires_at FROM control_replay_sessions").fetchone()[0]
+        )
+    assert renewed_expiry == 3_031.0
+    store.close()
+
+
+def test_near_capacity_status_reads_do_not_copy_journal_during_completion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ControlReconciliationStore(
+        tmp_path / "reconciliation.sqlite3",
+        max_operation_records=32,
+    )
+    for index in range(32):
+        _begin(store, index)
+
+    def reject_snapshot_copy(_snapshot: Path) -> None:
+        raise AssertionError("operation status copied the journal")
+
+    monkeypatch.setattr(store, "_copy_stable_snapshot", reject_snapshot_copy)
+
+    def finish(index: int) -> str:
+        record = store.finish_operation(
+            _request_id(index),
+            session_id="session-a",
+            state="succeeded",
+            result={"state": "succeeded", "index": index},
+        )
+        return str(record["state"])
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        outcomes = list(executor.map(finish, range(32)))
+
+    assert outcomes == ["succeeded"] * 32
+    assert all(
+        store.operation_status(_request_id(index), session_id="session-a")["state"]
+        == "succeeded"
+        for index in range(32)
+    )
+    store.close()
 
 
 def test_operation_capacity_preserves_pending_and_terminal_replay(tmp_path: Path) -> None:

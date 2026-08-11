@@ -7,6 +7,7 @@ import multiprocessing
 import os
 from pathlib import Path
 import sqlite3
+import stat
 import subprocess
 import threading
 import time
@@ -819,7 +820,7 @@ def test_bounded_open_retry_uses_one_small_total_deadline(
     assert attempts <= 6
 
 
-def test_valid_wal_without_shm_is_read_from_immutable_private_snapshot(
+def test_valid_wal_live_read_preserves_sources_and_secures_created_sidecar(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "control" / "reconciliation-v4.sqlite3"
@@ -868,7 +869,8 @@ def test_valid_wal_without_shm_is_read_from_immutable_private_snapshot(
     path.write_bytes(database_bytes)
     Path(f"{path}-wal").write_bytes(wal_bytes)
     Path(f"{path}-shm").unlink(missing_ok=True)
-    before = _tree_bytes(tmp_path)
+    before_database = path.read_bytes()
+    before_wal = Path(f"{path}-wal").read_bytes()
 
     status = ControlReconciliationStore(path).operation_status(
         request_id,
@@ -876,7 +878,12 @@ def test_valid_wal_without_shm_is_read_from_immutable_private_snapshot(
     )
 
     assert status["state"] == "pending"
-    assert _tree_bytes(tmp_path) == before
+    assert path.read_bytes() == before_database
+    assert Path(f"{path}-wal").read_bytes() == before_wal
+    shm_metadata = Path(f"{path}-shm").stat()
+    assert stat.S_ISREG(shm_metadata.st_mode)
+    assert shm_metadata.st_nlink == 1
+    assert shm_metadata.st_uid == os.getuid()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX directory permissions")

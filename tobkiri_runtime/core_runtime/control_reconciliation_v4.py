@@ -109,6 +109,7 @@ class ControlReconciliationStore:
         max_ceremony_bytes: int | None = None,
         ceremony_retention_seconds: float = 60 * 60,
         operation_database_reserve_bytes: int | None = None,
+        session_renewal_debounce_seconds: float = 30.0,
     ) -> None:
         if lease_timeout_seconds <= 0:
             raise ValueError("lease_timeout_seconds must be positive")
@@ -129,6 +130,8 @@ class ControlReconciliationStore:
             raise ValueError("max_operation_result_bytes must be positive")
         if max_ceremony_records <= 0 or ceremony_retention_seconds < 0:
             raise ValueError("ceremony retention limits are invalid")
+        if session_renewal_debounce_seconds < 0:
+            raise ValueError("session renewal debounce must not be negative")
         operation_reserve = (
             max(256 * 1024, max_database_bytes // 4)
             if operation_database_reserve_bytes is None
@@ -166,10 +169,15 @@ class ControlReconciliationStore:
         self._max_ceremony_bytes = ceremony_bytes
         self._ceremony_retention_seconds = ceremony_retention_seconds
         self._operation_database_reserve_bytes = operation_reserve
+        self._session_renewal_debounce_seconds = session_renewal_debounce_seconds
+        self._session_renewal_cache: dict[str, float] = {}
+        self._session_renewal_retry_after: dict[str, float] = {}
+        self._session_renewal_lock = threading.Lock()
         process_evidence = self._process_start_reader(self._process_id)
         self._process_start = process_evidence.identity if process_evidence.state == "live" else ""
         self._initialization_lock = threading.RLock()
         self._initialized = False
+        self._next_recovery_scan_at = 0.0
         self._heartbeat_lock = threading.RLock()
         self._heartbeat_stop = threading.Event()
         self._heartbeat_thread: threading.Thread | None = None
@@ -616,6 +624,55 @@ class ControlReconciliationStore:
         except (OSError, sqlite3.Error) as error:
             raise ControlReconciliationUnavailableError("control journal read failed") from error
 
+    @contextmanager
+    def _connect_live_existing(self) -> Iterator[sqlite3.Connection]:
+        """Yield a validated, read-only transaction against the live journal."""
+
+        connection: sqlite3.Connection | None = None
+        try:
+            with self._secure_parent() as parent:
+                database_identity = parent.validate_open(
+                    self.path.name,
+                    required=True,
+                    expected=self._database_identity,
+                )
+                if self._database_identity is None:
+                    self._database_identity = database_identity
+            self._validate_storage_files()
+            connection = sqlite3.connect(
+                f"{self.path.as_uri()}?mode=ro",
+                uri=True,
+                timeout=self._open_retry_seconds,
+                isolation_level=None,
+            )
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA query_only=ON")
+            connection.execute("PRAGMA trusted_schema=OFF")
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("BEGIN")
+            self._validate_storage_files()
+            yield connection
+            connection.execute("COMMIT")
+            self._validate_storage_files()
+        except ControlReconciliationError:
+            raise
+        except (OSError, sqlite3.Error) as error:
+            raise ControlReconciliationUnavailableError(
+                "control journal live read failed"
+            ) from error
+        finally:
+            if connection is not None:
+                connection.close()
+
+    def _read_live_operation(self, request_id: str) -> sqlite3.Row | None:
+        """Read one request through the primary-key index without snapshot copying."""
+
+        with self._connect_live_existing() as connection:
+            return connection.execute(
+                "SELECT * FROM control_operations WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+
     def _initialize(self) -> None:
         self._assert_current_process()
         if self._initialized:
@@ -766,9 +823,22 @@ class ControlReconciliationStore:
     def prepare_for_operation(self) -> None:
         """Initialize and recover only provably expired operation leases."""
 
+        if self._initialized and self._monotonic_clock() < self._next_recovery_scan_at:
+            return
         with self._initialization_lock:
+            if self._initialized and self._monotonic_clock() < self._next_recovery_scan_at:
+                return
             self._initialize()
-            self.recover_abandoned_operations()
+            try:
+                self.recover_abandoned_operations()
+            except ControlReconciliationError:
+                self._next_recovery_scan_at = self._monotonic_clock() + min(
+                    1.0, self._heartbeat_interval_seconds
+                )
+                raise
+            self._next_recovery_scan_at = (
+                self._monotonic_clock() + self._heartbeat_interval_seconds
+            )
 
     def close(self) -> None:
         """Stop this store's lease heartbeat without altering durable state."""
@@ -958,13 +1028,18 @@ class ControlReconciliationStore:
         *,
         now: float,
     ) -> int:
-        """Delete one bounded batch of expired, never-reviewed ceremonies."""
+        """Delete one bounded batch of ceremonies past their replay horizon.
+
+        Unexpired ceremonies remain available regardless of lifecycle state. Once
+        both expiry and retention have elapsed, unsafe request outcomes remain in
+        ``control_operations`` without retaining the larger ceremony payload.
+        """
 
         cutoff = now - self._ceremony_retention_seconds
         rows = connection.execute(
             """
             SELECT candidate_id FROM profile_ceremonies
-            WHERE state='resolved' AND expires_at <= ?
+            WHERE expires_at <= ?
             ORDER BY expires_at, candidate_id LIMIT ?
             """,
             (cutoff, self._compaction_batch_size),
@@ -975,7 +1050,7 @@ class ControlReconciliationStore:
             """
             DELETE FROM profile_ceremonies WHERE candidate_id IN (
                 SELECT candidate_id FROM profile_ceremonies
-                WHERE state='resolved' AND expires_at <= ?
+                WHERE expires_at <= ?
                 ORDER BY expires_at, candidate_id LIMIT ?
             )
             """,
@@ -1303,7 +1378,7 @@ class ControlReconciliationStore:
         return self.operation_status(request_id, session_id=session_id), True
 
     def renew_session(self, session_id: str, *, expires_at: float) -> None:
-        """Extend replay retention for operations owned by an authenticated session."""
+        """Extend replay retention, coalescing nearby sliding-session writes."""
 
         try:
             if not self.path.exists():
@@ -1313,18 +1388,44 @@ class ControlReconciliationStore:
                 "control journal path is unavailable"
             ) from error
         session_digest = self.session_digest(session_id)
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
-                """
-                UPDATE control_replay_sessions
-                SET expires_at=MAX(expires_at, ?)
-                WHERE session_digest=?
-                """,
-                (float(expires_at), session_digest),
-            )
-            self._compact_locked(connection, now=self._clock())
-            connection.commit()
+        requested_expiry = float(expires_at)
+        with self._session_renewal_lock:
+            if self._session_renewal_retry_after.get(session_digest, 0.0) > (
+                self._monotonic_clock()
+            ):
+                return
+            cached_expiry = self._session_renewal_cache.get(session_digest)
+            if cached_expiry is not None and requested_expiry <= (
+                cached_expiry + self._session_renewal_debounce_seconds
+            ):
+                return
+            try:
+                with self._connect() as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    connection.execute(
+                        """
+                        UPDATE control_replay_sessions
+                        SET expires_at=MAX(expires_at, ?)
+                        WHERE session_digest=?
+                        """,
+                        (requested_expiry, session_digest),
+                    )
+                    self._compact_locked(connection, now=self._clock())
+                    connection.commit()
+            except ControlReconciliationError:
+                if len(self._session_renewal_retry_after) >= 4_096:
+                    self._session_renewal_retry_after.pop(
+                        next(iter(self._session_renewal_retry_after))
+                    )
+                self._session_renewal_retry_after[session_digest] = (
+                    self._monotonic_clock()
+                    + min(1.0, self._session_renewal_debounce_seconds)
+                )
+                raise
+            if len(self._session_renewal_cache) >= 4_096:
+                self._session_renewal_cache.pop(next(iter(self._session_renewal_cache)))
+            self._session_renewal_cache[session_digest] = requested_expiry
+            self._session_renewal_retry_after.pop(session_digest, None)
 
     def _compact_locked(self, connection: sqlite3.Connection, *, now: float) -> int:
         """Delete only terminal records whose session and replay windows ended."""
@@ -1549,10 +1650,7 @@ class ControlReconciliationStore:
     def operation_status(self, request_id: str, *, session_id: str) -> Mapping[str, Any]:
         """Read one durable operation outcome for its originating session."""
 
-        row = self._read_existing_one(
-            "SELECT * FROM control_operations WHERE request_id = ?",
-            (request_id,),
-        )
+        row = self._read_live_operation(request_id)
         record = _operation_record(row)
         if record is None:
             raise ControlReconciliationConflictError("operation request is unknown")
@@ -1578,10 +1676,7 @@ class ControlReconciliationStore:
             raise ControlReconciliationUnavailableError(
                 "control journal path is unavailable"
             ) from error
-        row = self._read_existing_one(
-            "SELECT * FROM control_operations WHERE request_id = ?",
-            (request_id,),
-        )
+        row = self._read_live_operation(request_id)
         record = _operation_record(row)
         if record is None:
             return None

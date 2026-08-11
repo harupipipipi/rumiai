@@ -329,8 +329,8 @@ def _seed_ceremonies(
     for index, state in enumerate(states):
         rows.append(
             (
-                f"retained-{state}",
-                f"digest-retained-{state}",
+                f"expired-{state}",
+                f"digest-expired-{state}",
                 "session",
                 state,
                 "revision",
@@ -343,6 +343,25 @@ def _seed_ceremonies(
                 "retained",
                 1.0,
                 1.0 + index,
+            )
+        )
+    for index, state in enumerate(("resolved", *states)):
+        rows.append(
+            (
+                f"active-{state}",
+                f"digest-active-{state}",
+                "session",
+                state,
+                "revision",
+                "plan",
+                "definition",
+                "catalog",
+                "bundle",
+                "authority",
+                1,
+                "active",
+                2_000.0,
+                2.0 + index,
             )
         )
     with sqlite3.connect(path) as connection:
@@ -373,6 +392,7 @@ def test_one_mib_ceremony_compaction_is_bounded_and_operations_keep_reserve(
         operation_database_reserve_bytes=256 * 1024,
         ceremony_retention_seconds=10.0,
         compaction_batch_size=11,
+        session_renewal_debounce_seconds=0.0,
     )
     store.prepare_for_operation()
     store.close()
@@ -385,7 +405,7 @@ def test_one_mib_ceremony_compaction_is_bounded_and_operations_keep_reserve(
                 "SELECT COUNT(*) FROM profile_ceremonies WHERE state='resolved'"
             ).fetchone()[0]
         )
-    assert expired_after_one_batch == 109
+    assert expired_after_one_batch == 110
 
     for index in range(20):
         store.renew_session("session-a", expires_at=10_000.0 + index)
@@ -399,8 +419,8 @@ def test_one_mib_ceremony_compaction_is_bounded_and_operations_keep_reserve(
                 0
             ]
         )
-    assert retained == {"reviewed", "approval_prepared", "approved", "activated"}
-    assert compacted == 120
+    assert retained == {"resolved", "reviewed", "approval_prepared", "approved", "activated"}
+    assert compacted == 124
 
     expected = store.finish_operation(
         first_request,
@@ -419,7 +439,7 @@ def test_one_mib_ceremony_compaction_is_bounded_and_operations_keep_reserve(
     assert restarted.operation_status(first_request, session_id="session-a") == expected
     snapshot = restarted.journal_snapshot()
     assert snapshot["operation_database_reserve_bytes"] == 256 * 1024
-    assert snapshot["ceremony_records"] == 4
+    assert snapshot["ceremony_records"] == 5
     restarted.close()
 
 
