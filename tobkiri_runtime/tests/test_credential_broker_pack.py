@@ -213,6 +213,56 @@ def test_transport_rejects_invalid_deadline_before_consumption_or_material_acces
     assert touched == []
 
 
+@pytest.mark.parametrize(
+    ("resolved_at", "opens_request"),
+    [
+        pytest.param(10.999, True, id="just-before-deadline"),
+        pytest.param(11.0, False, id="at-deadline"),
+        pytest.param(11.001, False, id="past-deadline"),
+        pytest.param(float("nan"), False, id="nan-clock"),
+        pytest.param(float("inf"), False, id="infinite-clock"),
+    ],
+)
+def test_transport_rechecks_deadline_after_secret_resolution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    resolved_at: float,
+    opens_request: bool,
+) -> None:
+    transport, arguments = _https_transport(tmp_path, secret="deadline-canary")
+    clock = [10.0]
+    opened: list[tuple[str | None, float]] = []
+    material = {"api_key": "deadline-canary"}
+
+    def resolve(*args: object, **kwargs: object) -> dict[str, Any]:
+        del args, kwargs
+        clock[0] = resolved_at
+        return material
+
+    def open_request(request: urllib.request.Request, *, timeout: float) -> _Response:
+        opened.append((request.get_header("Authorization"), timeout))
+        return _Response({})
+
+    monkeypatch.setattr(transport._store, "resolve", resolve)
+    monkeypatch.setattr(transport, "_monotonic_clock", lambda: clock[0])
+    monkeypatch.setattr(transport, "_clock", lambda: 100.0)
+    monkeypatch.setattr(transport, "_opener", open_request)
+    arguments["deadline"] = 101.0
+
+    if opens_request:
+        assert transport.post_json(**arguments) == {}
+        assert opened[0][0] == "Bearer deadline-canary"
+        assert opened[0][1] == pytest.approx(0.001)
+    else:
+        with pytest.raises(CredentialTransportDenied) as denied:
+            transport.post_json(**arguments)
+
+        assert denied.value.code == "binding_invalid"
+        assert opened == []
+        assert "deadline-canary" not in str(denied.value)
+        assert "deadline-canary" not in repr(material)
+
+
 def _pin_test_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[list[str], list[tuple[str, int]]]:

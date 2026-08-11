@@ -212,6 +212,7 @@ class HostBoundCredentialTransport:
         current_security_epoch: Callable[[], int],
         audit_sink: Callable[[Mapping[str, Any]], None] | None = None,
         clock: Callable[[], float] = time.time,
+        monotonic_clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._store = store
         self._authority_store = authority_store
@@ -221,6 +222,7 @@ class HostBoundCredentialTransport:
         self._opener = _open_pinned_request
         self._audit_sink = audit_sink
         self._clock = clock
+        self._monotonic_clock = monotonic_clock
         self._consumed = False
         self._lock = RLock()
 
@@ -242,6 +244,7 @@ class HostBoundCredentialTransport:
         consumer_pack_id: str = "rumi_provider_adapters_pack",
         audit_sink: Callable[[Mapping[str, Any]], None] | None = None,
         clock: Callable[[], float] = time.time,
+        monotonic_clock: Callable[[], float] = time.monotonic,
     ) -> "HostBoundCredentialTransport":
         """Capture a transport lease from the Broker-authenticated envelope."""
         bound_origin = _credential_origin(endpoint_origin)
@@ -297,6 +300,7 @@ class HostBoundCredentialTransport:
             current_security_epoch=current_security_epoch,
             audit_sink=audit_sink,
             clock=clock,
+            monotonic_clock=monotonic_clock,
         )
 
     @property
@@ -356,6 +360,13 @@ class HostBoundCredentialTransport:
             raise CredentialTransportDenied("binding_invalid") from None
         if not math.isfinite(remaining) or remaining <= 0:
             raise CredentialTransportDenied("binding_invalid")
+        initial_remaining = remaining
+        try:
+            deadline_started = float(self._monotonic_clock())
+        except (TypeError, ValueError, OverflowError):
+            raise CredentialTransportDenied("binding_invalid") from None
+        if not math.isfinite(deadline_started):
+            raise CredentialTransportDenied("binding_invalid")
         self._consume_once(
             endpoint=endpoint,
             credential_handle=credential_handle,
@@ -384,6 +395,12 @@ class HostBoundCredentialTransport:
             value = material.get("api_key") or material.get("token")
             if not isinstance(value, str) or not value:
                 raise CredentialTransportDenied("material_invalid")
+            encoded_body = json.dumps(body, ensure_ascii=False).encode("utf-8")
+            _remaining_deadline_budget(
+                initial_remaining=initial_remaining,
+                started=deadline_started,
+                clock=self._monotonic_clock,
+            )
             secret_bytes = bytearray(value.encode("utf-8"))
             secret_text = secret_bytes.decode("utf-8")
             outbound_headers = {
@@ -397,13 +414,18 @@ class HostBoundCredentialTransport:
                 outbound_headers["x-api-key"] = secret_text
             else:
                 raise CredentialTransportDenied("credential transport denied")
-            timeout = min(60.0, remaining)
             request = urllib.request.Request(
                 endpoint,
-                data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+                data=encoded_body,
                 headers=outbound_headers,
                 method="POST",
             )
+            remaining = _remaining_deadline_budget(
+                initial_remaining=initial_remaining,
+                started=deadline_started,
+                clock=self._monotonic_clock,
+            )
+            timeout = min(60.0, remaining)
             with self._opener(request, timeout=timeout) as response:
                 response_bytes = response.read(_MAX_RESPONSE_BYTES + 1)
                 if len(response_bytes) > _MAX_RESPONSE_BYTES:
@@ -540,6 +562,7 @@ class AuthorizedEnvelopeCredentialTransport:
         consumer_pack_id: str,
         audit_sink: Callable[[Mapping[str, Any]], None] | None = None,
         clock: Callable[[], float] = time.time,
+        monotonic_clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._envelope = envelope
         self._provider_principal = provider_principal
@@ -550,6 +573,7 @@ class AuthorizedEnvelopeCredentialTransport:
         self._consumer_pack_id = consumer_pack_id
         self._audit_sink = audit_sink
         self._clock = clock
+        self._monotonic_clock = monotonic_clock
         self._used = False
         self._lock = RLock()
 
@@ -585,6 +609,7 @@ class AuthorizedEnvelopeCredentialTransport:
             consumer_pack_id=self._consumer_pack_id,
             audit_sink=self._audit_sink,
             clock=self._clock,
+            monotonic_clock=self._monotonic_clock,
         )
         return transport.post_json(
             endpoint=endpoint,
@@ -596,6 +621,28 @@ class AuthorizedEnvelopeCredentialTransport:
             credential_scheme=credential_scheme,
             deadline=deadline,
         )
+
+
+def _remaining_deadline_budget(
+    *,
+    initial_remaining: float,
+    started: float,
+    clock: Callable[[], float],
+) -> float:
+    """Return a finite positive budget after monotonic elapsed time."""
+    try:
+        elapsed = float(clock()) - started
+        remaining = initial_remaining - elapsed
+    except (TypeError, ValueError, OverflowError):
+        raise CredentialTransportDenied("binding_invalid") from None
+    if (
+        not math.isfinite(elapsed)
+        or elapsed < 0
+        or not math.isfinite(remaining)
+        or remaining <= 0
+    ):
+        raise CredentialTransportDenied("binding_invalid")
+    return remaining
 
 
 def _safe_text(value: object) -> bool:
