@@ -15,6 +15,7 @@ from email.message import Message
 import http.client
 import ipaddress
 import json
+import math
 import socket
 import ssl
 from threading import RLock
@@ -321,6 +322,13 @@ class HostBoundCredentialTransport:
         deadline: float,
     ) -> dict[str, Any]:
         """Consume the sealed lease and perform one credentialed HTTP request."""
+        now = self._clock()
+        try:
+            remaining = float(deadline) - now
+        except (TypeError, ValueError, OverflowError):
+            raise CredentialTransportDenied("binding_invalid") from None
+        if not math.isfinite(remaining) or remaining <= 0:
+            raise CredentialTransportDenied("binding_invalid")
         self._consume_once(
             endpoint=endpoint,
             credential_handle=credential_handle,
@@ -362,7 +370,7 @@ class HostBoundCredentialTransport:
                 outbound_headers["x-api-key"] = secret_text
             else:
                 raise CredentialTransportDenied("credential transport denied")
-            timeout = min(60.0, max(0.1, float(deadline) - self._clock()))
+            timeout = min(60.0, remaining)
             request = urllib.request.Request(
                 endpoint,
                 data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
@@ -488,6 +496,79 @@ class HostBoundCredentialTransport:
             )
         except Exception:
             return
+
+
+class AuthorizedEnvelopeCredentialTransport:
+    """Create at most one credential transport from one authorized envelope."""
+
+    def __init__(
+        self,
+        *,
+        envelope: RequestEnvelope,
+        provider_principal: FunctionPrincipal,
+        store: CredentialMaterialStore,
+        authority_store: AuthorityStore,
+        current_security_epoch: Callable[[], int],
+        credential_key_version: str,
+        consumer_pack_id: str,
+        audit_sink: Callable[[Mapping[str, Any]], None] | None = None,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        self._envelope = envelope
+        self._provider_principal = provider_principal
+        self._store = store
+        self._authority_store = authority_store
+        self._current_security_epoch = current_security_epoch
+        self._credential_key_version = credential_key_version
+        self._consumer_pack_id = consumer_pack_id
+        self._audit_sink = audit_sink
+        self._clock = clock
+        self._used = False
+        self._lock = RLock()
+
+    def post_json(
+        self,
+        *,
+        endpoint: str,
+        headers: Mapping[str, str],
+        body: Mapping[str, Any],
+        credential_handle: str,
+        provider_instance_id: str,
+        credential_scope: str,
+        credential_scheme: str,
+        deadline: float,
+    ) -> dict[str, Any]:
+        """Construct and consume exactly one envelope-bound transport."""
+        with self._lock:
+            if self._used:
+                raise CredentialTransportDenied("binding_invalid")
+            self._used = True
+        transport = HostBoundCredentialTransport.from_authorized_envelope(
+            self._envelope,
+            provider_principal=self._provider_principal,
+            store=self._store,
+            authority_store=self._authority_store,
+            credential_handle=credential_handle,
+            credential_key_version=self._credential_key_version,
+            provider_instance_id=provider_instance_id,
+            credential_scope=credential_scope,
+            credential_purpose="provider.invoke",
+            endpoint_origin=_credential_origin(endpoint),
+            current_security_epoch=self._current_security_epoch,
+            consumer_pack_id=self._consumer_pack_id,
+            audit_sink=self._audit_sink,
+            clock=self._clock,
+        )
+        return transport.post_json(
+            endpoint=endpoint,
+            headers=headers,
+            body=body,
+            credential_handle=credential_handle,
+            provider_instance_id=provider_instance_id,
+            credential_scope=credential_scope,
+            credential_scheme=credential_scheme,
+            deadline=deadline,
+        )
 
 
 def _safe_text(value: object) -> bool:
@@ -686,6 +767,7 @@ def _clear_material(material: dict[str, Any] | None) -> None:
 
 
 __all__ = [
+    "AuthorizedEnvelopeCredentialTransport",
     "CredentialTransportBinding",
     "CredentialTransportDenied",
     "HostBoundCredentialTransport",

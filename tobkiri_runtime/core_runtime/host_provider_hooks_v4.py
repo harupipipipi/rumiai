@@ -67,7 +67,12 @@ def load_host_provider_factory(
     if captured_after.materialization_digest != captured_before.materialization_digest:
         sys.modules.pop(module_name, None)
         raise AuthorizationError("Host Provider executable changed during import")
-    factory = getattr(module, "HOST_PROVIDER_FACTORY", None)
+    exported_factory = getattr(module, "HOST_PROVIDER_FACTORY", None)
+    factory = (
+        exported_factory.get(binding.function.function_id)
+        if isinstance(exported_factory, dict)
+        else exported_factory
+    )
     if (
         factory is None
         or not isinstance(getattr(factory, "function_id", None), str)

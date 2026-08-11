@@ -10558,7 +10558,7 @@
             {
               "entrypoint_id": "provider-embedding",
               "id": "rumi_provider_adapters_pack.provider-embedding",
-              "implementation_digest": "sha256:385b53d916de6e9e2c151a6f31c5dbd3b9df6075be7c97ece3850e84b2645539"
+              "implementation_digest": "sha256:7b1b003017a5646e3285f7dcb17cc7d997eb1ed1e631f7a0a12b3b5c587ae90e"
             }
           ],
           "owner": "rumi_provider_adapters_pack",
@@ -10594,7 +10594,7 @@
             {
               "entrypoint_id": "provider-generate",
               "id": "rumi_provider_adapters_pack.provider-generate",
-              "implementation_digest": "sha256:385b53d916de6e9e2c151a6f31c5dbd3b9df6075be7c97ece3850e84b2645539"
+              "implementation_digest": "sha256:7b1b003017a5646e3285f7dcb17cc7d997eb1ed1e631f7a0a12b3b5c587ae90e"
             }
           ],
           "owner": "rumi_human_operator_provider_pack",
@@ -10630,7 +10630,7 @@
             {
               "entrypoint_id": "provider-image",
               "id": "rumi_provider_adapters_pack.provider-image",
-              "implementation_digest": "sha256:385b53d916de6e9e2c151a6f31c5dbd3b9df6075be7c97ece3850e84b2645539"
+              "implementation_digest": "sha256:7b1b003017a5646e3285f7dcb17cc7d997eb1ed1e631f7a0a12b3b5c587ae90e"
             }
           ],
           "owner": "rumi_provider_adapters_pack",
@@ -10666,7 +10666,7 @@
             {
               "entrypoint_id": "provider-stream",
               "id": "rumi_provider_adapters_pack.provider-stream",
-              "implementation_digest": "sha256:385b53d916de6e9e2c151a6f31c5dbd3b9df6075be7c97ece3850e84b2645539"
+              "implementation_digest": "sha256:7b1b003017a5646e3285f7dcb17cc7d997eb1ed1e631f7a0a12b3b5c587ae90e"
             }
           ],
           "owner": "rumi_human_operator_provider_pack",
@@ -10704,7 +10704,7 @@
           "path": "runtime/__init__.py"
         },
         {
-          "digest": "sha256:385b53d916de6e9e2c151a6f31c5dbd3b9df6075be7c97ece3850e84b2645539",
+          "digest": "sha256:7b1b003017a5646e3285f7dcb17cc7d997eb1ed1e631f7a0a12b3b5c587ae90e",
           "kind": "executable",
           "path": "runtime/adapter.py"
         }
@@ -10778,7 +10778,7 @@
             {
               "entrypoint_id": "provider-registry-manage",
               "id": "rumi_provider_registry_pack.provider-registry-manage",
-              "implementation_digest": "sha256:0b1c688720b296ac8c48f7b43b491a210fbfbf0eac7c13f7d77e6c81e76f8d3f"
+              "implementation_digest": "sha256:740c36b4d83fd920b1dccf6f3848f942838db624add1fae4e136e122c8fff286"
             }
           ],
           "owner": "rumi_provider_registry_pack",
@@ -10856,17 +10856,17 @@
             {
               "entrypoint_id": "provider-registry-resource",
               "id": "rumi_provider_registry_pack.provider-registry-resource",
-              "implementation_digest": "sha256:0b1c688720b296ac8c48f7b43b491a210fbfbf0eac7c13f7d77e6c81e76f8d3f"
+              "implementation_digest": "sha256:740c36b4d83fd920b1dccf6f3848f942838db624add1fae4e136e122c8fff286"
             },
             {
               "entrypoint_id": "provider-registry-resource.generate",
               "id": "rumi_provider_registry_pack.provider-registry-resource.generate",
-              "implementation_digest": "sha256:0b1c688720b296ac8c48f7b43b491a210fbfbf0eac7c13f7d77e6c81e76f8d3f"
+              "implementation_digest": "sha256:740c36b4d83fd920b1dccf6f3848f942838db624add1fae4e136e122c8fff286"
             },
             {
               "entrypoint_id": "provider-registry-resource.stream",
               "id": "rumi_provider_registry_pack.provider-registry-resource.stream",
-              "implementation_digest": "sha256:0b1c688720b296ac8c48f7b43b491a210fbfbf0eac7c13f7d77e6c81e76f8d3f"
+              "implementation_digest": "sha256:740c36b4d83fd920b1dccf6f3848f942838db624add1fae4e136e122c8fff286"
             }
           ],
           "owner": "rumi_provider_registry_pack",
@@ -10899,7 +10899,7 @@
           "path": "runtime/health_process.py"
         },
         {
-          "digest": "sha256:0b1c688720b296ac8c48f7b43b491a210fbfbf0eac7c13f7d77e6c81e76f8d3f",
+          "digest": "sha256:740c36b4d83fd920b1dccf6f3848f942838db624add1fae4e136e122c8fff286",
           "kind": "executable",
           "path": "runtime/process.py"
         },

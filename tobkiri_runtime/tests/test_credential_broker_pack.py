@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import socket
 import sys
+import time
 from threading import Thread
 from typing import Any, Mapping
 import urllib.request
@@ -173,6 +174,43 @@ def _test_http_request(
         headers=headers or {},
         method="POST",
     )
+
+
+@pytest.mark.parametrize(
+    "deadline",
+    [
+        pytest.param(time.time() - 60.0, id="past"),
+        pytest.param(float("nan"), id="nan"),
+        pytest.param(float("inf"), id="positive-infinity"),
+        pytest.param(float("-inf"), id="negative-infinity"),
+    ],
+)
+def test_transport_rejects_invalid_deadline_before_consumption_or_material_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    deadline: float,
+) -> None:
+    transport, arguments = _https_transport(tmp_path)
+    touched: list[str] = []
+
+    def resolve(*_args: object, **_kwargs: object) -> dict[str, Any]:
+        touched.append("store")
+        raise AssertionError("invalid deadline must not resolve credential material")
+
+    def open_request(*_args: object, **_kwargs: object) -> _Response:
+        touched.append("opener")
+        raise AssertionError("invalid deadline must not open a provider request")
+
+    monkeypatch.setattr(transport._store, "resolve", resolve)
+    monkeypatch.setattr(transport, "_opener", open_request)
+    arguments["deadline"] = deadline
+
+    with pytest.raises(CredentialTransportDenied) as denied:
+        transport.post_json(**arguments)
+
+    assert denied.value.code == "binding_invalid"
+    assert transport._consumed is False
+    assert touched == []
 
 
 def _pin_test_network(

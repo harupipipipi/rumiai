@@ -11,6 +11,7 @@ from core_runtime.host_provider_backend_v4 import (
     CapturedHostProviderV4,
     HostProviderCaptureContextV4,
     HostProviderContributionV4,
+    HostProviderInvocationContextV4,
 )
 from tobkiri_protocol.canonical import canonical_digest
 
@@ -164,6 +165,15 @@ class WorkflowHostProviderFactoryV4:
             )
         )
         contributions: list[HostProviderContributionV4] = []
+
+        def invoke(
+            operation_id: str,
+            payload: Mapping[str, Any],
+            invocation: HostProviderInvocationContextV4,
+        ) -> Mapping[str, Any]:
+            del invocation
+            return provider.invoke(operation_id, payload)
+
         for binding in context.provider_bindings:
             domain_id = context.domain_ids.get(
                 (
@@ -184,7 +194,7 @@ class WorkflowHostProviderFactoryV4:
                     artifact_digest=binding.artifact.digest,
                     implementation_digest=binding.function.implementation_digest,
                     domain_id=domain_id,
-                    invoke=provider.invoke,
+                    invoke=invoke,
                 )
             )
         return CapturedHostProviderV4(tuple(contributions), store.close)

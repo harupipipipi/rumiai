@@ -67,9 +67,12 @@ from ..pack_control_v4 import (
     capture_valid_pack_approval,
 )
 from ..external_pack_catalog_v4 import resolve_admitted_pack_roots
+from ..credential_transport import AuthorizedEnvelopeCredentialTransport
+from ..global_contract_dispatch import GlobalContractClient
 from ..host_provider_backend_v4 import (
     ExactHostProviderBackendV4,
     HostProviderCaptureContextV4,
+    HostProviderInvocationContextV4,
 )
 from ..host_provider_hooks_v4 import load_host_provider_factory
 
@@ -767,6 +770,45 @@ def capture_production_dispatch(
         dynamic_domain_ids[(contract_id, operation_id, target.principal_id)] = (
             target_domain.domain_id
         )
+
+    built_in_host_pack_ids = {
+        "rumi_provider_adapters_pack",
+        "rumi_provider_registry_pack",
+    }
+    for key, host_binding in sorted(binding_by_key.items()):
+        if (
+            key in approved_host_binding_keys
+            or str(host_binding["pack_id"]) not in built_in_host_pack_ids
+        ):
+            continue
+        target = FunctionPrincipal.from_dict(host_binding["function_principal"])
+        target_suffix = target.principal_id.removeprefix("sha256:")[:24]
+        target_domain = _execution_domain(
+            domain_id=f"domain.provider.{target_suffix}.{activation_suffix}",
+            principal=target,
+            active=active,
+            boundary=DomainBoundary.DEDICATED_PROCESS,
+            channel_seed=f"built-in-host-provider:{key[0]}:{key[1]}",
+        )
+        _register_exact_domain(
+            authority_store,
+            authority_control,
+            target_domain,
+            session_id=f"session.provider.built-in.{target_suffix}.{activation_suffix}",
+            principal=target,
+        )
+        _commit_pack_control_authority(
+            authority_store,
+            authority_control,
+            active=active,
+            caller=caller_by_operation[key],
+            target=target,
+            target_domain=target_domain,
+            scope=scope_by_operation[key],
+            authority_label=f"built-in-{host_binding['pack_id']}",
+        )
+        approved_host_binding_keys.add(key)
+        dynamic_domain_ids[(key[0], key[1], target.principal_id)] = target_domain.domain_id
     registered_backends = tuple((backends or BackendRegistry(())).registered)
     if backends is None:
         authenticated_backend = _authenticated_packvm_backend(packvm_provisioner)
@@ -807,6 +849,114 @@ def capture_production_dispatch(
             ).append(resolved_binding)
     host_contributions_by_backend: dict[str, list[Any]] = {}
     close_callbacks: list[Callable[[], None]] = []
+    dispatch_holder: list[V4DispatchSession] = []
+    principal_by_id = {
+        principal.principal_id: principal
+        for binding in plan["bindings"]
+        for principal in (FunctionPrincipal.from_dict(binding["function_principal"]),)
+    }
+    pack_by_principal = {
+        FunctionPrincipal.from_dict(binding["function_principal"]).principal_id: str(
+            binding["pack_id"]
+        )
+        for binding in plan["bindings"]
+    }
+
+    class _InvocationSession:
+        """Bind nested dispatch to the authenticated provider invocation."""
+
+        def __init__(self, envelope: Any) -> None:
+            self._envelope = envelope
+            self.profile_id = str(profile["profile_id"])
+            self.plan_digest = str(plan["plan_digest"])
+
+        def provider_metadata(
+            self, contract_id: str
+        ) -> tuple[Mapping[str, Any], ...]:
+            if not dispatch_holder:
+                raise AuthorityDenied("Host Provider dispatch is not initialized")
+            return dispatch_holder[0].provider_metadata(contract_id)
+
+        def invoke(
+            self,
+            contract_id: str,
+            operation_id: str,
+            payload: Mapping[str, Any],
+            *,
+            version_range: str | None = None,
+        ) -> Mapping[str, Any]:
+            if not dispatch_holder:
+                raise AuthorityDenied("Host Provider dispatch is not initialized")
+            nested_session_id = (
+                f"session.host-provider.{self._envelope.context.request_id}."
+                f"{self._envelope.target_principal.value.removeprefix('sha256:')[:24]}"
+            )
+            return dispatch_holder[0].invoke(
+                contract_id,
+                operation_id,
+                {**dict(payload), "_session_id": nested_session_id},
+                version_range=version_range,
+            )
+
+    class _HostInvocation(HostProviderInvocationContextV4):
+        """Expose only declared nested dispatch and one credential transport."""
+
+        def __init__(self, envelope: Any) -> None:
+            self._envelope = envelope
+            self._client: GlobalContractClient | None = None
+            self._client_binding: tuple[frozenset[str], str] | None = None
+
+        @property
+        def envelope(self) -> Any:
+            return self._envelope
+
+        def contract_client(
+            self,
+            *,
+            allowed_contract_ids: frozenset[str],
+            consumer_pack_id: str,
+        ) -> GlobalContractClient:
+            expected_pack_id = pack_by_principal.get(
+                self._envelope.target_principal.value
+            )
+            binding = (allowed_contract_ids, consumer_pack_id)
+            if expected_pack_id != consumer_pack_id:
+                raise AuthorityDenied("Host Provider consumer identity is invalid")
+            if self._client is not None:
+                if binding != self._client_binding:
+                    raise AuthorityDenied("Host Provider client binding changed")
+                return self._client
+            provider_principal = principal_by_id.get(
+                self._envelope.target_principal.value
+            )
+            if provider_principal is None:
+                raise AuthorityDenied("Host Provider principal is unavailable")
+            from ecosystem.rumi_credential_broker_pack.runtime.store import (
+                CredentialBrokerStore,
+                KEY_VERSION,
+            )
+
+            transport = AuthorizedEnvelopeCredentialTransport(
+                envelope=self._envelope,
+                provider_principal=provider_principal,
+                store=CredentialBrokerStore(user_data_root=authority_user_data),
+                authority_store=authority_store,
+                current_security_epoch=lambda: authority_store.security_epoch,
+                credential_key_version=KEY_VERSION,
+                consumer_pack_id=consumer_pack_id,
+            )
+            self._client = GlobalContractClient(
+                session=_InvocationSession(self._envelope),
+                allowed_contract_ids=allowed_contract_ids,
+                consumer_pack_id=consumer_pack_id,
+                host_credential_transport=transport,
+            )
+            self._client_binding = binding
+            return self._client
+
+    def invocation_context(envelope: Any) -> HostProviderInvocationContextV4:
+        return _HostInvocation(envelope)
+
     for function_id, provider_bindings in sorted(binding_by_function.items()):
         factory = load_host_provider_factory(
             pack_roots[provider_bindings[0].artifact.pack_id],
@@ -832,6 +982,7 @@ def capture_production_dispatch(
                 provider_bindings=tuple(provider_bindings),
                 catalog_bindings=catalog_bindings,
                 domain_ids=dynamic_domain_ids,
+                user_data_root=authority_user_data,
             )
         )
         expected_keys = {
@@ -858,6 +1009,7 @@ def capture_production_dispatch(
                 profile_id=str(profile["profile_id"]),
                 plan_digest=str(plan["plan_digest"]),
                 security_epoch=int(active.activation["security_epoch"]),
+                invocation_context=invocation_context,
             ),
         )
     backend_registry = BackendRegistry(registered_backends)
@@ -1055,6 +1207,7 @@ def capture_production_dispatch(
             (control_session.cancel_pending_reads,) if control_session is not None else ()
         ),
     )
+    dispatch_holder.append(dispatch)
     if control_session is not None and frontend_contract_bindings:
         capability_bindings = tuple(
             binding

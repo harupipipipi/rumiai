@@ -19,6 +19,22 @@ from tobkiri_host.models import (
 from tobkiri_protocol.canonical import canonical_digest
 
 
+class HostProviderInvocationContextV4(Protocol):
+    """Restricted Host capabilities bound to one authenticated invocation."""
+
+    @property
+    def envelope(self) -> RequestEnvelope:
+        """Return the Broker-authenticated envelope for this invocation."""
+
+    def contract_client(
+        self,
+        *,
+        allowed_contract_ids: frozenset[str],
+        consumer_pack_id: str,
+    ) -> Any:
+        """Build a client restricted to declared contracts and this envelope."""
+
+
 @dataclass(frozen=True)
 class HostProviderContributionV4:
     """One callable bound to an exact resolved Function operation."""
@@ -30,7 +46,10 @@ class HostProviderContributionV4:
     artifact_digest: str
     implementation_digest: str
     domain_id: str
-    invoke: Callable[[str, Mapping[str, Any]], Mapping[str, Any]]
+    invoke: Callable[
+        [str, Mapping[str, Any], HostProviderInvocationContextV4],
+        Mapping[str, Any],
+    ]
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -50,6 +69,7 @@ class HostProviderCaptureContextV4:
     provider_bindings: tuple[ResolvedOperationBinding, ...]
     catalog_bindings: tuple[ResolvedOperationBinding, ...]
     domain_ids: Mapping[tuple[str, str, str], str]
+    user_data_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -83,12 +103,16 @@ class ExactHostProviderBackendV4:
         profile_id: str,
         plan_digest: str,
         security_epoch: int,
+        invocation_context: Callable[
+            [RequestEnvelope], HostProviderInvocationContextV4
+        ],
     ) -> None:
         if not contributions:
             raise ValueError("Host Provider backend requires contributions")
         self._contributions = {item.key: item for item in contributions}
         if len(self._contributions) != len(contributions):
             raise ValueError("duplicate Host Provider contribution")
+        self._invocation_context = invocation_context
         backend_digest = canonical_digest(
             {
                 "backend": "tobkiri.exact-host-provider.v4",
@@ -159,7 +183,13 @@ class ExactHostProviderBackendV4:
         ):
             raise AuthorizationError("Host Provider envelope binding is invalid")
         return ProviderOutcome(
-            dict(contribution.invoke(request.operation_id, request.payload))
+            dict(
+                contribution.invoke(
+                    request.operation_id,
+                    request.payload,
+                    self._invocation_context(request),
+                )
+            )
         )
 
     def cancel(self, request_id: str) -> None:
@@ -201,4 +231,5 @@ __all__ = [
     "HostProviderCaptureContextV4",
     "HostProviderContributionV4",
     "HostProviderFactoryV4",
+    "HostProviderInvocationContextV4",
 ]

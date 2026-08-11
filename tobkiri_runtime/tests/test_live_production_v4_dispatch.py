@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -23,11 +24,16 @@ from core_runtime.authority.v4 import (
     authority_digest,
 )
 from core_runtime.bootstrap.production_v4 import capture_production_dispatch
+from core_runtime import credential_transport as credential_transport_module
 from core_runtime.bootstrap.profile_capture import (
     capture_default_profile,
     prepare_default_profile_confirmation,
 )
 from ecosystem.defaultspack.domain.runtime_v4 import ProfileResolutionDenied
+from ecosystem.rumi_credential_broker_pack.runtime.service import (
+    CredentialBrokerService,
+)
+from ecosystem.rumi_provider_registry_pack.runtime.registry import ProviderRegistry
 from tobkiri_host.backends import (
     REQUIRED_PRODUCTION_GATES,
     BackendRegistry,
@@ -97,6 +103,97 @@ class _CapturedBackend:
 
     def terminate(self, domain_id: str) -> None:
         assert domain_id
+
+
+class _ProviderResponse:
+    def __enter__(self) -> "_ProviderResponse":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def read(self, amount: int | None = None) -> bytes:
+        value = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {"content": "production-ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {},
+            }
+        ).encode("utf-8")
+        return value[:amount]
+
+
+def test_production_dispatch_executes_credentialed_provider_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exercise registry lookup and one envelope-bound transport end to end."""
+    user_data = tmp_path / "provider-production"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
+    credential_service = CredentialBrokerService(user_data_root=user_data)
+    credential = credential_service.invoke(
+        "create",
+        {
+            "secret_material": {"api_key": "production-secret-sentinel"},
+            "profile_id": "defaults",
+            "consumer_pack_id": "rumi_provider_adapters_pack",
+            "provider_instance_id": "provider.production-test",
+            "scopes": ["ai.generate"],
+        },
+    )
+    registry = ProviderRegistry("defaults", user_data_root=user_data)
+    registry.save(
+        {
+            "provider_instance_id": "provider.production-test",
+            "adapter_id": "openai-compatible",
+            "credential_handle": credential["handle"],
+            "endpoint": "https://provider.example/v1",
+            "enabled": True,
+        },
+        expected_revision=0,
+    )
+    observed: list[tuple[str | None, float]] = []
+
+    def open_request(request, *, timeout: float) -> _ProviderResponse:
+        observed.append((request.headers.get("Authorization"), timeout))
+        return _ProviderResponse()
+
+    monkeypatch.setattr(
+        credential_transport_module,
+        "_open_pinned_request",
+        open_request,
+    )
+    session = capture_production_dispatch(
+        active,
+        bundle_root=_bundle_root(),
+        ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
+        authority_store=AuthorityStore(user_data / "authority" / "v4.sqlite3"),
+    )
+    try:
+        result = session.invoke(
+            "tobkiri.service.ai.provider.generate.v1",
+            "rumi_provider_adapters_pack.provider-generate",
+            {
+                "_session_id": "session.panel.provider-production",
+                "profile_id": "defaults",
+                "provider_id": "production-test",
+                "model_id": "production-test/model",
+                "messages": [{"role": "user", "content": "hello"}],
+                "deadline": time.time() + 30.0,
+            },
+        )
+    finally:
+        session.close()
+
+    assert result["output"] == "production-ok"
+    assert observed and observed[0][0] == "Bearer production-secret-sentinel"
+    assert 0 < observed[0][1] <= 30.0
+    assert "production-secret-sentinel" not in json.dumps(result)
 
 
 def _domain(

@@ -10,6 +10,12 @@ from core_runtime.global_contract_dispatch import (
     GlobalContractClient,
     GlobalContractInvocationError,
 )
+from core_runtime.host_provider_backend_v4 import (
+    CapturedHostProviderV4,
+    HostProviderCaptureContextV4,
+    HostProviderContributionV4,
+    HostProviderInvocationContextV4,
+)
 
 REGISTRY_CONTRACT = "tobkiri.resource.ai.provider.registry.v1"
 REGISTRY_GENERATE_OPERATION = (
@@ -415,3 +421,83 @@ def _post(
             "invalid_response", "provider returned a non-object response"
         )
     return value
+
+
+_PROVIDER_OPERATIONS = {
+    "rumi_provider_adapters_pack.provider.compatibility.embedding": (
+        "embed",
+        create_embedding_operation,
+    ),
+    "rumi_provider_adapters_pack.provider.compatibility.generate": (
+        "generate",
+        create_generate_operation,
+    ),
+    "rumi_provider_adapters_pack.provider.compatibility.image": (
+        "generate",
+        create_image_operation,
+    ),
+    "rumi_provider_adapters_pack.provider.compatibility.stream": (
+        "stream",
+        create_stream_operation,
+    ),
+}
+
+
+class ProviderAdapterHostFactoryV4:
+    """Capture one adapter Function behind authenticated Host capabilities."""
+
+    def __init__(self, function_id: str) -> None:
+        self.function_id = function_id
+
+    def capture(
+        self,
+        context: HostProviderCaptureContextV4,
+    ) -> CapturedHostProviderV4:
+        """Bind adapter execution to its exact resolved operation."""
+        if not context.provider_bindings or any(
+            binding.function.function_id != self.function_id
+            for binding in context.provider_bindings
+        ):
+            raise PermissionError("provider adapter bindings are incomplete")
+        operation_name, operation_factory = _PROVIDER_OPERATIONS[self.function_id]
+
+        def invoke(
+            _operation_id: str,
+            payload: Mapping[str, Any],
+            invocation: HostProviderInvocationContextV4,
+        ) -> Mapping[str, Any]:
+            client = invocation.contract_client(
+                allowed_contract_ids=frozenset({REGISTRY_CONTRACT}),
+                consumer_pack_id="rumi_provider_adapters_pack",
+            )
+            return operation_factory(client)(operation_name, payload)
+
+        contributions = []
+        for binding in context.provider_bindings:
+            key = (
+                binding.operation.contract_id,
+                binding.operation.operation_id,
+                binding.principal_ref.value,
+            )
+            domain_id = context.domain_ids.get(key)
+            if domain_id is None:
+                raise PermissionError("provider adapter domain binding is unavailable")
+            contributions.append(
+                HostProviderContributionV4(
+                    contract_id=binding.operation.contract_id,
+                    contract_version=binding.operation.contract_version,
+                    operation_id=binding.operation.operation_id,
+                    principal_id=binding.principal_ref.value,
+                    artifact_digest=binding.artifact.digest,
+                    implementation_digest=binding.function.implementation_digest,
+                    domain_id=domain_id,
+                    invoke=invoke,
+                )
+            )
+        return CapturedHostProviderV4(tuple(contributions), lambda: None)
+
+
+HOST_PROVIDER_FACTORY = {
+    function_id: ProviderAdapterHostFactoryV4(function_id)
+    for function_id in _PROVIDER_OPERATIONS
+}
