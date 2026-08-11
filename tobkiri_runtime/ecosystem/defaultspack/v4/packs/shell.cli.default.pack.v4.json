@@ -22,7 +22,7 @@
     }
   ],
   "integrity": {
-    "source_identity": "sha256:83ce7a26031e6fdf73f539b7206f31f710e02b7d37c985dba2588cf5d34db6cc",
+    "source_identity": "sha256:4f1fb5f0e59237fb69d9cff6ea05ebe0628b4c2874913552cc058e0127413277",
     "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     "contract_catalog_digest": "sha256:ba36ee3e7bb8d0a8cce3ceed290a5a68fd604bf7edb3be684bd4da0ed889b135"
   },
@@ -55,7 +55,7 @@
     "source_kind": "generated",
     "source_path": "ecosystem/defaultspack/v4/packs/shell.cli.default.pack.v4.json",
     "source_digest": "sha256:cf31300861b05724a360c8dd778393f2ae67094c548d008d09e0c65f6743db8a",
-    "repository_commit": "working-tree",
+    "repository_commit": "010db3220263d7cb495289598a21c040d7c52c27",
     "repository_commit_trusted": false,
     "content_root_digest": "sha256:938371cf6e1c7bbfef22127e44669bad70efce5a4c37ed9eb925cca848fb74b0",
     "generator": "defaultspack-v4-core",
