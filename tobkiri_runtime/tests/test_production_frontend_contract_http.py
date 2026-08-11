@@ -209,7 +209,12 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
     assert capability_result["data"]["pack_id"] == "defaultspack"
     assert len(authority.audit_events()) == audit_before_capability + 3
 
-    def post(target: str, body: dict[str, object]) -> tuple[int, dict[str, object]]:
+    def post(
+        target: str,
+        body: dict[str, object],
+        *,
+        request_id: str | None = None,
+    ) -> tuple[int, dict[str, object]]:
         status_code, payload, _ = _request(
             server,
             "POST",
@@ -217,13 +222,28 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
             body=body,
             headers={
                 **mutation_headers,
-                "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+                "X-Tobkiri-Request-ID": request_id or str(uuid.uuid4()),
             },
         )
         return status_code, payload
 
     target_pack = "rumi_git_read_pack"
     assert post("/api/pack-control/install", {"pack_id": target_pack})[0] == 200
+    never_approved_request = str(uuid.uuid4())
+    denied_status, denied = post(
+        "/api/pack-control/approval-revoke",
+        {"pack_id": target_pack},
+        request_id=never_approved_request,
+    )
+    replay_status, replayed_denial = post(
+        "/api/pack-control/approval-revoke",
+        {"pack_id": target_pack},
+        request_id=never_approved_request,
+    )
+    assert denied_status == replay_status == 403
+    assert denied == replayed_denial
+    assert denied["data"]["code"] == "UNAPPROVED"
+    assert denied["data"]["retryable"] is False
     candidate_status, candidate = post(
         "/api/pack-control/approval-candidate", {"pack_id": target_pack}
     )

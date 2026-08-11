@@ -1494,14 +1494,11 @@ def _load_valid_approval(
     binding: _Binding,
 ) -> dict[str, Any]:
     relative = _approval_relative(binding.profile_id, pack_id)
-    try:
-        raw = _approval_store(binding.profile_id).read_bytes(relative)
-    except (OSError, SecurePersistenceError) as error:
-        raise PackControlUnavailable("Pack approval is unreadable") from error
     approved, reason = _approval_status(pack_id, record, binding)
     if not approved:
         _raise_approval_failure(reason)
     try:
+        raw = _approval_store(binding.profile_id).read_bytes(relative)
         if not hmac.compare_digest(
             raw,
             _approval_store(binding.profile_id).read_bytes(relative),

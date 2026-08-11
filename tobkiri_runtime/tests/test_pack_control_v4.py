@@ -15,6 +15,8 @@ import pytest
 from core_runtime.pack_control_v4 import (
     PACK_CONTROL_CONTRACT,
     PackControlDenied,
+    PackControlUnavailable,
+    PackControlUnapproved,
     capture_pack_control_session,
 )
 from core_runtime.authority.v4 import AuditUnavailable, AuthorityStore
@@ -42,7 +44,9 @@ def captured_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     yield session, state_path, user_data
 
 
-def _invoke(session, operation: str, payload: dict | None = None, session_id: str = "session-a"):
+def _invoke(
+    session, operation: str, payload: dict | None = None, session_id: str = "session-a"
+):
     return session.invoke(
         PACK_CONTROL_CONTRACT,
         operation,
@@ -93,13 +97,11 @@ def test_catalog_install_approve_enable_and_restart_read_back(captured_session) 
 
     first_activation = capture_default_profile().activation["activation_id"]
     assert (
-        _invoke(restarted, "pack.disable", {"pack_id": TARGET_PACK})["enabled"]
-        is False
+        _invoke(restarted, "pack.disable", {"pack_id": TARGET_PACK})["enabled"] is False
     )
     recaptured = capture_pack_control_session()
     assert (
-        _invoke(recaptured, "pack.status", {"pack_id": TARGET_PACK})["enabled"]
-        is False
+        _invoke(recaptured, "pack.status", {"pack_id": TARGET_PACK})["enabled"] is False
     )
     assert capture_default_profile().activation["activation_id"] != first_activation
 
@@ -121,8 +123,7 @@ def test_enable_does_not_require_unrelated_pack_install_or_approval(
     assert _invoke(session, "pack.enable", {"pack_id": TARGET_PACK})["enabled"] is True
     restarted = capture_pack_control_session()
     assert (
-        _invoke(restarted, "pack.status", {"pack_id": unrelated})["approved"]
-        is False
+        _invoke(restarted, "pack.status", {"pack_id": unrelated})["approved"] is False
     )
 
 
@@ -145,18 +146,16 @@ def test_required_pack_rejects_disable_and_revoke_before_side_effects(
         {"pack_id": REQUIRED_PACK, "candidate_id": candidate["candidate_id"]},
     )
     approval_path = (
-        user_data
-        / "pack_control"
-        / "approvals"
-        / "defaults"
-        / f"{REQUIRED_PACK}.json"
+        user_data / "pack_control" / "approvals" / "defaults" / f"{REQUIRED_PACK}.json"
     )
     approval_before = approval_path.read_bytes()
     activation_before = capture_default_profile().activation["activation_id"]
 
     with pytest.raises(PackControlDenied, match="required Pack cannot be disabled"):
         _invoke(session, "pack.disable", {"pack_id": REQUIRED_PACK})
-    with pytest.raises(PackControlDenied, match="required Pack approval cannot be revoked"):
+    with pytest.raises(
+        PackControlDenied, match="required Pack approval cannot be revoked"
+    ):
         _invoke(session, "approval.revoke", {"pack_id": REQUIRED_PACK})
 
     assert approval_path.read_bytes() == approval_before
@@ -195,6 +194,30 @@ def test_approval_is_session_bound_one_shot_and_not_implicit(captured_session) -
         )
 
 
+def test_never_approved_revoke_is_unapproved_not_unavailable(captured_session) -> None:
+    """A normal missing approval leaf is authoritative absence, not an outage."""
+
+    session, _state_path, _user_data = captured_session
+    _invoke(session, "pack.install", {"pack_id": TARGET_PACK})
+
+    with pytest.raises(PackControlUnapproved, match="approval_required"):
+        _invoke(session, "approval.revoke", {"pack_id": TARGET_PACK})
+
+
+def test_corrupt_approval_revoke_remains_unavailable(captured_session) -> None:
+    """Unreadable approval state must not be normalized into unapproved."""
+
+    session, _state_path, user_data = captured_session
+    _approve_target(session)
+    approval_path = (
+        user_data / "pack_control" / "approvals" / "defaults" / f"{TARGET_PACK}.json"
+    )
+    approval_path.write_text("{not-json", encoding="utf-8")
+
+    with pytest.raises(PackControlUnavailable, match="approval_unreadable"):
+        _invoke(session, "approval.revoke", {"pack_id": TARGET_PACK})
+
+
 def test_revoke_persists_audit_and_rejects_revision_replay_after_restart(
     captured_session,
 ) -> None:
@@ -206,15 +229,9 @@ def test_revoke_persists_audit_and_rejects_revision_replay_after_restart(
 
     restarted = capture_pack_control_session()
     assert _invoke(restarted, "pack.status", {"pack_id": TARGET_PACK})["enabled"]
-    assert not _invoke(
-        restarted, "pack.disable", {"pack_id": TARGET_PACK}
-    )["enabled"]
+    assert not _invoke(restarted, "pack.disable", {"pack_id": TARGET_PACK})["enabled"]
     approval_path = (
-        user_data
-        / "pack_control"
-        / "approvals"
-        / "defaults"
-        / f"{TARGET_PACK}.json"
+        user_data / "pack_control" / "approvals" / "defaults" / f"{TARGET_PACK}.json"
     )
     approved_payload = approval_path.read_bytes()
     revoked = _invoke(restarted, "approval.revoke", {"pack_id": TARGET_PACK})
@@ -233,9 +250,7 @@ def test_revoke_persists_audit_and_rejects_revision_replay_after_restart(
     approval_path.write_bytes(approved_payload)
     replayed = capture_pack_control_session()
     assert (
-        _invoke(replayed, "pack.status", {"pack_id": TARGET_PACK})[
-            "approval_reason"
-        ]
+        _invoke(replayed, "pack.status", {"pack_id": TARGET_PACK})["approval_reason"]
         == "approval_revoked"
     )
     with pytest.raises(PackControlDenied, match="approval_revoked"):
@@ -256,9 +271,7 @@ def test_revoke_persists_audit_and_rejects_revision_replay_after_restart(
     )
     replacement_payload = json.loads(approval_path.read_text(encoding="utf-8"))
     assert replacement_payload["approval_revision"] != revoked["approval_revision"]
-    assert _invoke(replayed, "pack.status", {"pack_id": TARGET_PACK})[
-        "approved"
-    ]
+    assert _invoke(replayed, "pack.status", {"pack_id": TARGET_PACK})["approved"]
 
     with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
         event = next(
@@ -281,11 +294,7 @@ def test_revoke_audit_failure_rolls_back_and_leaves_approval_usable(
     _approve_target(session)
     assert _invoke(session, "pack.enable", {"pack_id": TARGET_PACK})["enabled"]
     approval_path = (
-        user_data
-        / "pack_control"
-        / "approvals"
-        / "defaults"
-        / f"{TARGET_PACK}.json"
+        user_data / "pack_control" / "approvals" / "defaults" / f"{TARGET_PACK}.json"
     )
     approval_before = approval_path.read_bytes()
     original_append = AuthorityStore._append_audit
@@ -310,7 +319,9 @@ def test_revoke_audit_failure_rolls_back_and_leaves_approval_usable(
 
 
 @pytest.mark.parametrize("pack_id", ["unknown-pack", "../defaultspack", "a/b"])
-def test_unknown_and_traversal_pack_ids_fail_closed(captured_session, pack_id: str) -> None:
+def test_unknown_and_traversal_pack_ids_fail_closed(
+    captured_session, pack_id: str
+) -> None:
     """Only an exact canonical catalog identity may cross the boundary."""
     session, _state_path, _user_data = captured_session
     with pytest.raises(PackControlDenied, match="canonical"):
@@ -354,7 +365,9 @@ def test_tampered_approval_and_symlinked_pack_fail_closed(
     """Approval signatures and Pack filesystem boundaries are authoritative."""
     session, _state_path, user_data = captured_session
     _approve_target(session)
-    approval_path = user_data / "pack_control" / "approvals" / "defaults" / f"{TARGET_PACK}.json"
+    approval_path = (
+        user_data / "pack_control" / "approvals" / "defaults" / f"{TARGET_PACK}.json"
+    )
     approval = json.loads(approval_path.read_text(encoding="utf-8"))
     approval["workspace_id"] = "forged-workspace"
     approval_path.write_text(json.dumps(approval), encoding="utf-8")
@@ -423,6 +436,7 @@ def test_generic_dispatch_is_retired_without_client_selected_execution(
     opener = urllib.request.build_opener(
         urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
     )
+
     def post(path: str, body: dict, headers: dict | None = None) -> dict:
         request = urllib.request.Request(
             origin + path,
@@ -499,8 +513,7 @@ def test_pack_control_state_hardlink_fails_closed(captured_session) -> None:
     state.parent.mkdir(parents=True, exist_ok=True)
     outside = user_data / "outside-state"
     outside.write_text(
-        '{"version":"io.tobkiri.pack-control-state.v4",'
-        '"profile_id":"defaults","installed":{}}\n',
+        '{"version":"io.tobkiri.pack-control-state.v4","profile_id":"defaults","installed":{}}\n',
         encoding="utf-8",
     )
     os.link(outside, state)
@@ -513,11 +526,7 @@ def test_pack_approval_hardlink_fails_closed(captured_session) -> None:
     session, _state_path, user_data = captured_session
     _approve_target(session)
     approval = (
-        user_data
-        / "pack_control"
-        / "approvals"
-        / "defaults"
-        / f"{TARGET_PACK}.json"
+        user_data / "pack_control" / "approvals" / "defaults" / f"{TARGET_PACK}.json"
     )
     outside = user_data / "outside-approval"
     shutil.copyfile(approval, outside)
