@@ -1819,6 +1819,33 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    fn presentation_catalog_capability() -> serde_json::Value {
+        serde_json::from_str(include_str!("../capabilities/presentation-catalog.json")).unwrap()
+    }
+
+    fn catalog_capability_allows_origin(window_label: &str, origin: &str) -> bool {
+        let capability = presentation_catalog_capability();
+        let window_allowed = capability["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|label| label.as_str() == Some(window_label));
+        let origin = Url::parse(origin).unwrap();
+        let origin_allowed = capability["remote"]["urls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|pattern| {
+                pattern
+                    .as_str()
+                    .unwrap()
+                    .parse::<tauri::utils::acl::RemoteUrlPattern>()
+                    .unwrap()
+            })
+            .any(|pattern| pattern.test(&origin));
+        window_allowed && origin_allowed
+    }
+
     fn capability_permissions(value: &serde_json::Value) -> Vec<&str> {
         value["permissions"]
             .as_array()
@@ -1834,9 +1861,8 @@ mod tests {
             serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
         assert_eq!(capability_permissions(&default), vec!["core:default"]);
 
-        let catalog: serde_json::Value =
-            serde_json::from_str(include_str!("../capabilities/presentation-catalog.json"))
-                .unwrap();
+        let catalog = presentation_catalog_capability();
+        assert_eq!(catalog["local"], false);
         assert_eq!(catalog["windows"], serde_json::json!(["main"]));
         assert_eq!(
             capability_permissions(&catalog),
@@ -1855,14 +1881,90 @@ mod tests {
             ]
         );
 
-        let expected_urls = serde_json::json!([
-            "http://127.0.0.1:8765/panel",
-            "http://127.0.0.1:8765/panel/*",
-            "http://localhost:8765/panel",
-            "http://localhost:8765/panel/*"
-        ]);
-        assert_eq!(catalog["remote"]["urls"], expected_urls);
-        assert_eq!(control["remote"]["urls"], expected_urls);
+        assert_eq!(
+            catalog["remote"]["urls"],
+            serde_json::json!(["http://127.0.0.1:8765", "http://localhost:8765"])
+        );
+        assert_eq!(
+            control["remote"]["urls"],
+            serde_json::json!([
+                "http://127.0.0.1:8765/panel",
+                "http://127.0.0.1:8765/panel/*",
+                "http://localhost:8765/panel",
+                "http://localhost:8765/panel/*"
+            ])
+        );
+    }
+
+    #[test]
+    fn presentation_catalog_acl_allows_first_start_and_restart_origins() {
+        // Tauri authorizes remote IPC with the browser's origin-only Origin
+        // header. The path is deliberately enforced below by the live-Webview
+        // caller check, not represented as a misleading ACL URL pattern.
+        for origin in ["http://127.0.0.1:8765/", "http://localhost:8765/"] {
+            assert!(catalog_capability_allows_origin("main", origin));
+        }
+
+        for live_url in [
+            "http://127.0.0.1:8765/panel/?code=first-start",
+            "http://127.0.0.1:8765/panel/setup",
+            "http://localhost:8765/panel/setup?code=restart",
+        ] {
+            validate_presentation_caller_context(
+                "main",
+                &Url::parse(live_url).unwrap(),
+                LAUNCHER_PANEL_PORT,
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn presentation_catalog_acl_rejects_wrong_labels_and_untrusted_origins() {
+        for label in [
+            "panel",
+            "defaultspack-main",
+            "authority-approval",
+            "defaults-console",
+            "host-permissions",
+        ] {
+            assert!(!catalog_capability_allows_origin(
+                label,
+                "http://127.0.0.1:8765/"
+            ));
+        }
+
+        for origin in [
+            "tauri://localhost/",
+            "https://127.0.0.1:8765/",
+            "http://example.invalid:8765/",
+            "http://127.0.0.1:8764/",
+            "http://127.0.0.1:8766/",
+        ] {
+            assert!(!catalog_capability_allows_origin("main", origin));
+        }
+    }
+
+    #[test]
+    fn forged_allowed_origin_cannot_bypass_live_webview_route_check() {
+        assert!(catalog_capability_allows_origin(
+            "main",
+            "http://127.0.0.1:8765/"
+        ));
+
+        for live_url in [
+            "http://127.0.0.1:8765/console",
+            "http://127.0.0.1:8765/approval",
+            "http://127.0.0.1:8765/panel-legacy",
+            "http://example.invalid:8765/panel/setup",
+        ] {
+            assert!(validate_presentation_caller_context(
+                "main",
+                &Url::parse(live_url).unwrap(),
+                LAUNCHER_PANEL_PORT,
+            )
+            .is_err());
+        }
     }
 
     #[test]
