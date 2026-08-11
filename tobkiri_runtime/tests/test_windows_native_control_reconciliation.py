@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import http.client
 import json
+import multiprocessing
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -14,6 +16,7 @@ import uuid
 import pytest
 
 import core_runtime.secure_sqlite_path as secure_paths
+import core_runtime.process_identity as process_identity
 from core_runtime.control_reconciliation_v4 import (
     ControlReconciliationStore,
     ControlReconciliationUnavailableError,
@@ -25,6 +28,7 @@ from core_runtime.frontend_contract_routes import (
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
 from core_runtime.secure_sqlite_path import SecurePathError, secure_parent
+from tobkiri_protocol.canonical import canonical_digest
 
 
 pytestmark = pytest.mark.skipif(
@@ -90,6 +94,24 @@ def _binding() -> FrontendContractBinding:
             ),
         ),
     )
+
+
+def _pending_owner(path_value: str, ready: object, release: object) -> None:
+    store = ControlReconciliationStore(
+        Path(path_value),
+        instance_id="windows-child",
+        heartbeat_interval_seconds=0.05,
+    )
+    store.begin_operation(
+        request_id="99999999-9999-4999-8999-999999999999",
+        session_id="session-a",
+        operation_id="test.write",
+        contract_id="test.contract.v1",
+        request_digest=canonical_digest({"request": "windows-child"}),
+    )
+    ready.set()  # type: ignore[attr-defined]
+    release.wait(30.0)  # type: ignore[attr-defined]
+    store.close()
 
 
 def _request(
@@ -222,20 +244,48 @@ def test_native_windows_prepare_post_status_and_replays(
 def test_native_windows_junction_ancestor_is_rejected(tmp_path: Path) -> None:
     """A caller-controlled directory junction never reaches SQLite."""
 
-    target = tmp_path / "target"
-    target.mkdir()
-    junction = tmp_path / "junction"
-    result = subprocess.run(
-        ["cmd.exe", "/d", "/c", "mklink", "/J", str(junction), str(target)],
-        capture_output=True,
-        text=True,
-        check=False,
+    for index in range(20):
+        target = tmp_path / f"target-{index}"
+        target.mkdir()
+        junction = tmp_path / f"junction-{index}"
+        result = subprocess.run(
+            ["cmd.exe", "/d", "/c", "mklink", "/J", str(junction), str(target)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr or result.stdout
+        path = junction / "reconciliation-v4.sqlite3"
+        with pytest.raises(ControlReconciliationUnavailableError, match="unsafe"):
+            ControlReconciliationStore(path).prepare_for_operation()
+        assert not (target / path.name).exists()
+
+
+def test_native_windows_killed_owner_recovers_pending_after_restart(
+    tmp_path: Path,
+) -> None:
+    """A killed child is dead evidence and its pending result becomes replayable."""
+
+    path = tmp_path / "control" / "reconciliation-v4.sqlite3"
+    context = multiprocessing.get_context("spawn")
+    ready = context.Event()
+    release = context.Event()
+    process = context.Process(target=_pending_owner, args=(str(path), ready, release))
+    process.start()
+    assert ready.wait(20.0)
+    process.terminate()
+    process.join(20.0)
+    assert process.exitcode is not None
+
+    restarted = ControlReconciliationStore(path, instance_id="windows-restarted")
+    assert restarted.recover_abandoned_operations() == 1
+    status = restarted.operation_status(
+        "99999999-9999-4999-8999-999999999999",
+        session_id="session-a",
     )
-    assert result.returncode == 0, result.stderr or result.stdout
-    path = junction / "reconciliation-v4.sqlite3"
-    with pytest.raises(ControlReconciliationUnavailableError, match="unsafe"):
-        ControlReconciliationStore(path).prepare_for_operation()
-    assert not (target / path.name).exists()
+    assert status["state"] == "indeterminate"
+    assert status["safe_error_code"] == "PROCESS_RESTART"
+    restarted.close()
 
 
 def test_native_windows_file_race_is_rejected(
@@ -295,29 +345,76 @@ def test_native_windows_parent_race_and_pinned_identity_fail_closed(
             opened_parent.validate_open(path.name, required=True, expected=wrong)
 
     original_open = secure_paths._open_windows_no_follow
-    moved = tmp_path / "control-original"
-    raced = False
+    for index in range(20):
+        raced_parent = tmp_path / f"race-{index}"
+        raced_parent.mkdir()
+        raced_path = raced_parent / "reconciliation-v4.sqlite3"
+        raced_path.write_bytes(b"journal")
+        moved = tmp_path / f"race-original-{index}"
+        raced = False
 
-    def replace_parent_then_open(
-        opened_path: Path,
-        flags: int,
-        mode: int = 0o600,
-        *,
-        directory: bool = False,
-    ) -> int:
-        nonlocal raced
-        if directory and opened_path == parent and not raced:
-            raced = True
-            parent.rename(moved)
-            parent.mkdir()
-        return original_open(opened_path, flags, mode, directory=directory)
+        def replace_parent_then_open(
+            opened_path: Path,
+            flags: int,
+            mode: int = 0o600,
+            *,
+            directory: bool = False,
+        ) -> int:
+            nonlocal raced
+            if directory and opened_path == raced_parent and not raced:
+                raced = True
+                raced_parent.rename(moved)
+                raced_parent.mkdir()
+            return original_open(opened_path, flags, mode, directory=directory)
 
-    monkeypatch.setattr(
-        secure_paths,
-        "_open_windows_no_follow",
-        replace_parent_then_open,
-    )
-    with pytest.raises(SecurePathError, match="identity changed"):
-        with secure_parent(path):
-            pass
-    assert raced
+        with monkeypatch.context() as patcher:
+            patcher.setattr(
+                secure_paths,
+                "_open_windows_no_follow",
+                replace_parent_then_open,
+            )
+            with pytest.raises(SecurePathError, match="identity changed"):
+                with secure_parent(raced_path):
+                    pass
+        assert raced
+
+
+def test_native_windows_process_queries_close_handles_and_denials_are_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated native FILETIME queries leak no handles; denial is not death."""
+
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.GetProcessHandleCount.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel32.GetProcessHandleCount.restype = wintypes.BOOL
+
+    def handle_count() -> int:
+        count = wintypes.DWORD()
+        assert kernel32.GetProcessHandleCount(kernel32.GetCurrentProcess(), ctypes.byref(count))
+        return int(count.value)
+
+    before = handle_count()
+    for _ in range(200):
+        assert process_identity.process_start_identity(os.getpid()).state == "live"
+    after = handle_count()
+    assert after <= before + 2
+
+    class DeniedAPI:
+        def open_process(self, process_id: int) -> int | None:
+            raise PermissionError("access denied")
+
+        def process_creation_time(self, handle: int) -> int | None:
+            raise AssertionError("unreachable")
+
+        def close_handle(self, handle: int) -> None:
+            raise AssertionError("unreachable")
+
+    monkeypatch.setattr(process_identity, "_load_windows_process_api", lambda: DeniedAPI())
+    assert process_identity.process_start_identity(424242).state == "unknown"

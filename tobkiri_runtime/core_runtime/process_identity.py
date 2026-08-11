@@ -30,7 +30,7 @@ class WindowsProcessAPI(Protocol):
     """Minimal WinAPI adapter used to obtain a process creation FILETIME."""
 
     def open_process(self, process_id: int) -> int | None:
-        """Open a query-only process handle, or return ``None`` on failure."""
+        """Open a query-only handle, distinguishing absence from API failure."""
 
     def process_creation_time(self, handle: int) -> int | None:
         """Return the stable creation FILETIME ticks for an opened process."""
@@ -73,6 +73,7 @@ class _Kernel32ProcessAPI:
         self._ctypes = ctypes
         self._kernel32 = kernel32
         self._file_time = FileTime
+        self._get_last_error = getattr(ctypes, "get_last_error")
 
     def open_process(self, process_id: int) -> int | None:
         """Open a process with the least privilege needed for creation time."""
@@ -82,7 +83,14 @@ class _Kernel32ProcessAPI:
             False,
             process_id,
         )
-        return int(handle) if handle else None
+        if handle:
+            return int(handle)
+        error_code = int(self._get_last_error())
+        if error_code in {87, 1168}:
+            raise ProcessLookupError(error_code, "Windows process does not exist")
+        if error_code == 5:
+            raise PermissionError(error_code, "Windows process query was denied")
+        raise OSError(error_code, "OpenProcess failed")
 
     def process_creation_time(self, handle: int) -> int | None:
         """Read one process creation FILETIME without using a wall clock."""
@@ -117,12 +125,7 @@ def _load_windows_process_api() -> WindowsProcessAPI | None:
 
 
 def _windows_current_process_identity(process_id: int) -> ProcessIdentityEvidence:
-    """Return current-process PID plus creation FILETIME, closing every handle."""
-
-    if process_id != os.getpid():
-        # This primitive intentionally does not turn arbitrary Windows PID
-        # query failures into death evidence for reconciliation.
-        return ProcessIdentityEvidence("unknown")
+    """Return any Windows PID's creation FILETIME, closing every handle."""
     api = _load_windows_process_api()
     if api is None:
         return ProcessIdentityEvidence("unknown")
@@ -138,6 +141,8 @@ def _windows_current_process_identity(process_id: int) -> ProcessIdentityEvidenc
                 "live",
                 f"windows:{process_id}:{creation_time:016x}",
             )
+    except ProcessLookupError:
+        evidence = ProcessIdentityEvidence("dead")
     except (OSError, TypeError, ValueError):
         evidence = ProcessIdentityEvidence("unknown")
     finally:

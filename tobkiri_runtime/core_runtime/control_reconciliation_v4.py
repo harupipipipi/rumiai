@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import secrets
@@ -104,6 +105,10 @@ class ControlReconciliationStore:
         max_recovery_audit_records: int = 1_000,
         max_database_bytes: int = 256 * 1024 * 1024,
         max_operation_result_bytes: int = 1024 * 1024,
+        max_ceremony_records: int = 10_000,
+        max_ceremony_bytes: int | None = None,
+        ceremony_retention_seconds: float = 60 * 60,
+        operation_database_reserve_bytes: int | None = None,
     ) -> None:
         if lease_timeout_seconds <= 0:
             raise ValueError("lease_timeout_seconds must be positive")
@@ -122,6 +127,22 @@ class ControlReconciliationStore:
             raise ValueError("max_database_bytes must be at least one MiB")
         if max_operation_result_bytes <= 0:
             raise ValueError("max_operation_result_bytes must be positive")
+        if max_ceremony_records <= 0 or ceremony_retention_seconds < 0:
+            raise ValueError("ceremony retention limits are invalid")
+        operation_reserve = (
+            max(256 * 1024, max_database_bytes // 4)
+            if operation_database_reserve_bytes is None
+            else operation_database_reserve_bytes
+        )
+        if operation_reserve <= 0 or operation_reserve >= max_database_bytes:
+            raise ValueError("operation database reserve is invalid")
+        ceremony_bytes = (
+            min(64 * 1024 * 1024, max_database_bytes - operation_reserve)
+            if max_ceremony_bytes is None
+            else max_ceremony_bytes
+        )
+        if ceremony_bytes <= 0 or ceremony_bytes > max_database_bytes - operation_reserve:
+            raise ValueError("ceremony byte capacity exceeds the unreserved database space")
         self.path = canonical_platform_path(Path(path))
         self.instance_id = instance_id or f"store-{secrets.token_hex(16)}"
         self._process_id = os.getpid()
@@ -141,6 +162,10 @@ class ControlReconciliationStore:
         self._max_recovery_audit_records = max_recovery_audit_records
         self._max_database_bytes = max_database_bytes
         self._max_operation_result_bytes = max_operation_result_bytes
+        self._max_ceremony_records = max_ceremony_records
+        self._max_ceremony_bytes = ceremony_bytes
+        self._ceremony_retention_seconds = ceremony_retention_seconds
+        self._operation_database_reserve_bytes = operation_reserve
         process_evidence = self._process_start_reader(self._process_id)
         self._process_start = process_evidence.identity if process_evidence.state == "live" else ""
         self._initialization_lock = threading.RLock()
@@ -267,7 +292,7 @@ class ControlReconciliationStore:
                 os.close(descriptor)
 
     @contextmanager
-    def _journal_file_lock(self) -> Iterator[None]:
+    def _journal_file_lock(self, *, deadline: float | None = None) -> Iterator[None]:
         """Serialize POSIX journal transactions using the pinned DB file."""
 
         if os.name == "nt":
@@ -289,8 +314,27 @@ class ControlReconciliationStore:
                 if self._lock_identity is None:
                     self._lock_identity = lock_identity
                 descriptor = parent.open_file(lock_name, os.O_RDWR)
+                acquired = False
                 try:
-                    fcntl.flock(descriptor, fcntl.LOCK_EX)
+                    lock_deadline = (
+                        self._monotonic_clock() + self._open_retry_seconds
+                        if deadline is None
+                        else deadline
+                    )
+                    while True:
+                        try:
+                            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            acquired = True
+                            break
+                        except OSError as error:
+                            if error.errno not in {errno.EACCES, errno.EAGAIN}:
+                                raise
+                            remaining = lock_deadline - self._monotonic_clock()
+                            if remaining <= 0:
+                                raise ControlReconciliationUnavailableError(
+                                    "control journal lock deadline exceeded"
+                                ) from error
+                            self._retry_sleep(min(0.01, remaining))
                     parent.validate_open(
                         lock_name,
                         required=True,
@@ -298,7 +342,8 @@ class ControlReconciliationStore:
                     )
                     yield
                 finally:
-                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                    if acquired:
+                        fcntl.flock(descriptor, fcntl.LOCK_UN)
                     os.close(descriptor)
         except ControlReconciliationError:
             raise
@@ -324,12 +369,14 @@ class ControlReconciliationStore:
                 "control journal file identity is unsafe"
             ) from error
 
-    def _open_connection(self) -> sqlite3.Connection:
+    def _open_connection(self, *, deadline: float | None = None) -> sqlite3.Connection:
         self._assert_current_process()
-        deadline = self._monotonic_clock() + self._open_retry_seconds
+        open_deadline = (
+            self._monotonic_clock() + self._open_retry_seconds if deadline is None else deadline
+        )
         while True:
             connection: sqlite3.Connection | None = None
-            remaining = deadline - self._monotonic_clock()
+            remaining = open_deadline - self._monotonic_clock()
             if remaining <= 0:
                 raise ControlReconciliationUnavailableError(
                     "control journal open deadline exceeded"
@@ -359,7 +406,7 @@ class ControlReconciliationStore:
             except sqlite3.OperationalError as error:
                 if connection is not None:
                     connection.close()
-                remaining = deadline - self._monotonic_clock()
+                remaining = open_deadline - self._monotonic_clock()
                 if "locked" not in str(error).lower() or remaining <= 0:
                     raise ControlReconciliationUnavailableError(
                         "control journal is unavailable"
@@ -400,9 +447,10 @@ class ControlReconciliationStore:
 
         self._initialize()
         connection: sqlite3.Connection | None = None
+        deadline = self._monotonic_clock() + self._open_retry_seconds
         try:
-            with self._journal_file_lock():
-                connection = self._open_connection()
+            with self._journal_file_lock(deadline=deadline):
+                connection = self._open_connection(deadline=deadline)
                 try:
                     with connection:
                         yield connection
@@ -576,12 +624,13 @@ class ControlReconciliationStore:
             if self._initialized:
                 return
             self._prepare_parent_directory()
+            deadline = self._monotonic_clock() + self._open_retry_seconds
             try:
-                with self._journal_file_lock():
+                with self._journal_file_lock(deadline=deadline):
                     # WAL/SHM validation must be serialized with connection
                     # close, which can unlink those sidecars on POSIX.
                     self._prepare_path()
-                    with self._open_connection() as connection:
+                    with self._open_connection(deadline=deadline) as connection:
                         connection.executescript(
                             """
                 BEGIN EXCLUSIVE;
@@ -653,6 +702,7 @@ class ControlReconciliationStore:
                     compacted_failed INTEGER NOT NULL,
                     compacted_indeterminate INTEGER NOT NULL,
                     compacted_recovery_audits INTEGER NOT NULL,
+                    compacted_ceremonies INTEGER NOT NULL DEFAULT 0,
                     first_compacted_at REAL,
                     last_compacted_at REAL
                 );
@@ -681,6 +731,17 @@ class ControlReconciliationStore:
                                     "ALTER TABLE control_operations ADD COLUMN "
                                     f"{column} {declaration}"
                                 )
+                        audit_columns = {
+                            str(row[1])
+                            for row in connection.execute(
+                                "PRAGMA table_info(control_journal_audit)"
+                            )
+                        }
+                        if "compacted_ceremonies" not in audit_columns:
+                            connection.execute(
+                                "ALTER TABLE control_journal_audit ADD COLUMN "
+                                "compacted_ceremonies INTEGER NOT NULL DEFAULT 0"
+                            )
                         connection.execute(
                             """
                         INSERT OR IGNORE INTO control_replay_sessions(
@@ -712,10 +773,15 @@ class ControlReconciliationStore:
     def close(self) -> None:
         """Stop this store's lease heartbeat without altering durable state."""
 
-        self._heartbeat_stop.set()
-        thread = self._heartbeat_thread
+        with self._heartbeat_lock:
+            stop_event = self._heartbeat_stop
+            thread = self._heartbeat_thread
+            stop_event.set()
         if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=max(1.0, self._heartbeat_interval_seconds * 2.0))
+            thread.join(timeout=self._heartbeat_join_timeout())
+        with self._heartbeat_lock:
+            if thread is self._heartbeat_thread and (thread is None or not thread.is_alive()):
+                self._heartbeat_thread = None
 
     def _ensure_heartbeat(self) -> None:
         self._assert_current_process()
@@ -723,21 +789,30 @@ class ControlReconciliationStore:
             if self._heartbeat_thread is not None and self._heartbeat_thread.is_alive():
                 if not self._heartbeat_stop.is_set():
                     return
-                self._heartbeat_thread.join(
-                    timeout=max(0.1, self._heartbeat_interval_seconds * 2.0)
-                )
-            self._heartbeat_stop.clear()
+                self._heartbeat_thread.join(timeout=self._heartbeat_join_timeout())
+                if self._heartbeat_thread.is_alive():
+                    raise ControlReconciliationUnavailableError(
+                        "prior control reconciliation heartbeat did not stop"
+                    )
+            stop_event = threading.Event()
+            self._heartbeat_stop = stop_event
             thread = threading.Thread(
                 target=self._heartbeat_loop,
+                args=(stop_event,),
                 name=f"control-reconciliation-{self.instance_id}",
                 daemon=True,
             )
             self._heartbeat_thread = thread
             thread.start()
 
-    def _heartbeat_loop(self) -> None:
+    def _heartbeat_join_timeout(self) -> float:
+        """Cover one bounded lock/open attempt plus event observation."""
+
+        return self._open_retry_seconds + self._heartbeat_interval_seconds + 0.25
+
+    def _heartbeat_loop(self, stop_event: threading.Event) -> None:
         self._assert_current_process()
-        while not self._heartbeat_stop.wait(self._heartbeat_interval_seconds):
+        while not stop_event.wait(self._heartbeat_interval_seconds):
             try:
                 with self._connect() as connection:
                     connection.execute("BEGIN IMMEDIATE")
@@ -784,7 +859,8 @@ class ControlReconciliationStore:
         profile = _mapping(review.get("profile"), "Profile")
         binding = _mapping(review.get("catalog_binding"), "catalog binding")
         predecessor = _mapping(review.get("predecessor"), "predecessor")
-        now = time.time()
+        now = self._clock()
+        encoded_review = _json(review)
         values = (
             candidate_id,
             candidate_digest,
@@ -797,13 +873,41 @@ class ControlReconciliationStore:
             _required(binding.get("bundle_lock_digest"), "bundle lock digest"),
             _required(profile.get("profile_authority_snapshot_digest"), "Authority digest"),
             _integer(plan.get("security_epoch"), "SecurityEpoch"),
-            _json(review),
+            encoded_review,
             float(expires_at),
             now,
         )
         try:
             with self._connect() as connection:
                 connection.execute("BEGIN IMMEDIATE")
+                existing_row = connection.execute(
+                    """
+                    SELECT * FROM profile_ceremonies
+                    WHERE candidate_id=? OR candidate_digest=?
+                    """,
+                    (candidate_id, candidate_digest),
+                ).fetchone()
+                existing = _ceremony_record(existing_row)
+                if existing is not None:
+                    if existing["candidate_digest"] != candidate_digest or existing[
+                        "session_digest"
+                    ] != self.session_digest(session_id):
+                        raise ControlReconciliationError(
+                            "candidate digest is already bound to another ceremony"
+                        )
+                    connection.commit()
+                    return existing
+                self._compact_ceremonies_locked(connection, now=now)
+                ceremony_count, ceremony_bytes = self._ceremony_usage_locked(connection)
+                incoming_bytes = sum(len(str(value).encode("utf-8")) for value in values) + 1024
+                if ceremony_count >= self._max_ceremony_records:
+                    raise ControlReconciliationCapacityError(
+                        "profile ceremony record capacity is exhausted"
+                    )
+                if ceremony_bytes + incoming_bytes > self._max_ceremony_bytes:
+                    raise ControlReconciliationCapacityError(
+                        "profile ceremony byte capacity is exhausted"
+                    )
                 connection.execute(
                     """
                     INSERT INTO profile_ceremonies(
@@ -825,6 +929,68 @@ class ControlReconciliationStore:
                 )
             return existing
         return self.require_candidate(candidate_id, candidate_digest, session_id=session_id)
+
+    @staticmethod
+    def _ceremony_usage_locked(connection: sqlite3.Connection) -> tuple[int, int]:
+        """Return a conservative count/byte estimate for ceremony records."""
+
+        row = connection.execute(
+            """
+            SELECT COUNT(*) AS records,
+                   COALESCE(SUM(
+                       LENGTH(CAST(candidate_id AS BLOB))
+                       + LENGTH(CAST(candidate_digest AS BLOB))
+                       + LENGTH(CAST(session_digest AS BLOB))
+                       + LENGTH(CAST(state AS BLOB))
+                       + LENGTH(CAST(review_json AS BLOB))
+                       + LENGTH(CAST(COALESCE(authority_record_json, '') AS BLOB))
+                       + LENGTH(CAST(COALESCE(activation_json, '') AS BLOB))
+                       + 1024
+                   ), 0) AS bytes
+            FROM profile_ceremonies
+            """
+        ).fetchone()
+        return int(row["records"]), int(row["bytes"])
+
+    def _compact_ceremonies_locked(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        now: float,
+    ) -> int:
+        """Delete one bounded batch of expired, never-reviewed ceremonies."""
+
+        cutoff = now - self._ceremony_retention_seconds
+        rows = connection.execute(
+            """
+            SELECT candidate_id FROM profile_ceremonies
+            WHERE state='resolved' AND expires_at <= ?
+            ORDER BY expires_at, candidate_id LIMIT ?
+            """,
+            (cutoff, self._compaction_batch_size),
+        ).fetchall()
+        if not rows:
+            return 0
+        connection.execute(
+            """
+            DELETE FROM profile_ceremonies WHERE candidate_id IN (
+                SELECT candidate_id FROM profile_ceremonies
+                WHERE state='resolved' AND expires_at <= ?
+                ORDER BY expires_at, candidate_id LIMIT ?
+            )
+            """,
+            (cutoff, self._compaction_batch_size),
+        )
+        connection.execute(
+            """
+            UPDATE control_journal_audit
+            SET compacted_ceremonies=compacted_ceremonies+?,
+                first_compacted_at=COALESCE(first_compacted_at, ?),
+                last_compacted_at=? WHERE singleton_id=1
+            """,
+            (len(rows), now, now),
+        )
+        return len(rows)
 
     def require_candidate(
         self,
@@ -1163,6 +1329,7 @@ class ControlReconciliationStore:
     def _compact_locked(self, connection: sqlite3.Connection, *, now: float) -> int:
         """Delete only terminal records whose session and replay windows ended."""
 
+        compacted_ceremonies = self._compact_ceremonies_locked(connection, now=now)
         cutoff = now - self._terminal_retention_seconds
         rows = connection.execute(
             """
@@ -1225,7 +1392,7 @@ class ControlReconciliationStore:
                 """
             )
         self._compact_recovery_audit_locked(connection, now=now)
-        return len(rows)
+        return len(rows) + compacted_ceremonies
 
     def _compact_recovery_audit_locked(
         self,
@@ -1268,11 +1435,17 @@ class ControlReconciliationStore:
                 FROM control_operations
                 """
             ).fetchone()
+            ceremony_count, ceremony_bytes = self._ceremony_usage_locked(connection)
             return {
                 "records": int(row["records"]),
                 "pending": int(row["pending"] or 0),
                 "capacity": self._max_operation_records,
                 "max_database_bytes": self._max_database_bytes,
+                "ceremony_records": ceremony_count,
+                "ceremony_bytes": ceremony_bytes,
+                "ceremony_record_capacity": self._max_ceremony_records,
+                "ceremony_byte_capacity": self._max_ceremony_bytes,
+                "operation_database_reserve_bytes": (self._operation_database_reserve_bytes),
             }
 
     def finish_operation(

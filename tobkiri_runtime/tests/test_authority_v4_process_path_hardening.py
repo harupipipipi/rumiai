@@ -22,10 +22,13 @@ class _FakeWindowsProcessAPI:
         self.opened: list[int] = []
         self.closed: list[int] = []
         self.open_failure = False
+        self.open_error: BaseException | None = None
         self.close_failure = False
 
     def open_process(self, process_id: int) -> int | None:
         self.opened.append(process_id)
+        if self.open_error is not None:
+            raise self.open_error
         return None if self.open_failure else 73
 
     def process_creation_time(self, handle: int) -> int | None:
@@ -138,9 +141,35 @@ def test_windows_current_process_identity_uses_stable_filetime_and_closes_handle
             f"windows:{os.getpid()}:123456789abcdef0",
         )
     )
-    assert adapter.opened == [os.getpid(), os.getpid()]
-    assert adapter.closed == [73, 73]
-    assert process_identity.process_start_identity(os.getpid() + 1).state == "unknown"
+    other = process_identity.process_start_identity(os.getpid() + 1)
+    assert other == ProcessIdentityEvidence(
+        "live",
+        f"windows:{os.getpid() + 1}:123456789abcdef0",
+    )
+    assert adapter.opened == [os.getpid(), os.getpid(), os.getpid() + 1]
+    assert adapter.closed == [73, 73, 73]
+
+
+@pytest.mark.parametrize(
+    ("error", "state"),
+    [
+        (ProcessLookupError("gone"), "dead"),
+        (PermissionError("denied"), "unknown"),
+        (OSError("api failure"), "unknown"),
+    ],
+)
+def test_windows_other_pid_distinguishes_absence_from_query_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    error: BaseException,
+    state: str,
+) -> None:
+    adapter = _FakeWindowsProcessAPI()
+    adapter.open_error = error
+    monkeypatch.setattr(process_identity, "_is_windows", lambda: True)
+    monkeypatch.setattr(process_identity, "_load_windows_process_api", lambda: adapter)
+
+    assert process_identity.process_start_identity(424242).state == state
+    assert adapter.closed == []
 
 
 @pytest.mark.parametrize("failure", ["unavailable", "open", "times", "close"])
