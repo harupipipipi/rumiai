@@ -84,6 +84,21 @@ def _exercise_inherited_store(
     connection.close()  # type: ignore[attr-defined]
 
 
+def _race_authority_construction(
+    path_value: str,
+    barrier: object,
+    results: object,
+) -> None:
+    try:
+        barrier.wait(timeout=15)  # type: ignore[attr-defined]
+        for _ in range(10):
+            with AuthorityStore(Path(path_value)) as store:
+                assert store.security_epoch == 1
+        results.put(("ok", ""))  # type: ignore[attr-defined]
+    except BaseException as exc:
+        results.put(("error", repr(exc)))  # type: ignore[attr-defined]
+
+
 @pytest.mark.skipif(not hasattr(os, "fork"), reason="requires POSIX fork")
 def test_fork_child_rejects_all_inherited_authority_and_reconstructs(
     tmp_path: Path,
@@ -256,7 +271,7 @@ def test_windows_authority_construction_fails_when_creation_identity_is_unavaila
         AuthorityStore(tmp_path / "unavailable-windows.sqlite3")
 
 
-@pytest.mark.parametrize("target", ["database", "key", "-wal", "-shm"])
+@pytest.mark.parametrize("target", ["database", "key", "guard", "-wal", "-shm"])
 def test_authority_files_reject_hardlinks_without_mutating_victim(
     tmp_path: Path,
     target: str,
@@ -283,6 +298,13 @@ def test_authority_files_reject_hardlinks_without_mutating_victim(
         victim.write_bytes(key_path.read_bytes())
         key_path.unlink()
         os.link(victim, key_path)
+        operation = construct_store
+    elif target == "guard":
+        store.close()
+        guard_path = path.with_name(f".{path.name}.lifecycle.lock")
+        victim.write_bytes(guard_path.read_bytes())
+        guard_path.unlink()
+        os.link(victim, guard_path)
         operation = construct_store
     else:
         victim.write_bytes(b"outside sidecar victim")
@@ -494,6 +516,70 @@ def test_authority_operations_survive_unrelated_descriptor_churn(
     assert not opener.is_alive()
 
 
+def test_spawned_authority_construction_serializes_sqlite_sidecar_lifecycle(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "authority.sqlite3"
+    AuthorityStore(path).close()
+    context = multiprocessing.get_context("spawn")
+    barrier = context.Barrier(4)
+    results = context.Queue()
+    processes = [
+        context.Process(
+            target=_race_authority_construction,
+            args=(str(path), barrier, results),
+        )
+        for _ in range(4)
+    ]
+
+    for process in processes:
+        process.start()
+    outcomes = [results.get(timeout=30) for _ in processes]
+    for process in processes:
+        process.join(30)
+
+    assert outcomes == [("ok", "")] * 4
+    assert [process.exitcode for process in processes] == [0] * 4
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor identity invariant")
+@pytest.mark.parametrize("suffix", ["-wal", "-shm"])
+def test_authority_rejects_live_sidecar_replacement_after_pinning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    suffix: str,
+) -> None:
+    path = tmp_path / "authority.sqlite3"
+    store = AuthorityStore(path)
+    original_validate = AuthorityStore._validate_opened_database_files
+    armed = True
+    replaced = path.with_name(f"original{suffix}")
+
+    def replace_sidecar(
+        current: AuthorityStore,
+        pinned: dict[str, object],
+    ) -> None:
+        nonlocal armed
+        if armed and suffix in pinned:
+            armed = False
+            sidecar = Path(f"{path}{suffix}")
+            sidecar.rename(replaced)
+            shutil.copyfile(replaced, sidecar)
+            sidecar.chmod(0o600)
+        original_validate(current, pinned)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        AuthorityStore,
+        "_validate_opened_database_files",
+        replace_sidecar,
+    )
+    with pytest.raises(AuthorityStoreError, match="handle identity"):
+        _ = store.security_epoch
+    store.close()
+
+    assert replaced.exists()
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor identity invariant")
 @pytest.mark.parametrize("failure", ["missing", "permission"])
 def test_authority_denies_descriptor_identity_uncertainty(
@@ -529,9 +615,10 @@ def test_authority_rejects_broad_sidecar_permissions_before_query(
     def broaden_wal(
         store: AuthorityStore,
         connection: sqlite3.Connection,
+        descriptors_before: dict[int, secure_paths.FileIdentity],
         suffixes: tuple[str, ...] = ("", "-wal", "-shm"),
     ) -> dict[str, object]:
-        pinned = original_pin(store, connection, suffixes)
+        pinned = original_pin(store, connection, descriptors_before, suffixes)
         if "-wal" in suffixes:
             Path(f"{path}-wal").chmod(0o644)
         return pinned

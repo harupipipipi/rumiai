@@ -72,6 +72,28 @@ Record: TypeAlias = (
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+_DATABASE_THREAD_LOCKS: dict[FileIdentity, threading.RLock] = {}
+_DATABASE_THREAD_LOCKS_GUARD = threading.Lock()
+_ACTIVE_DATABASE_GUARDS: set[int] = set()
+
+
+def _reset_database_thread_locks() -> None:
+    """Drop inherited thread locks and lifecycle-lock descriptors after fork."""
+
+    global _ACTIVE_DATABASE_GUARDS
+    global _DATABASE_THREAD_LOCKS, _DATABASE_THREAD_LOCKS_GUARD
+    for descriptor in _ACTIVE_DATABASE_GUARDS:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+    _ACTIVE_DATABASE_GUARDS = set()
+    _DATABASE_THREAD_LOCKS = {}
+    _DATABASE_THREAD_LOCKS_GUARD = threading.Lock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_database_thread_locks)
 
 
 @dataclass(frozen=True)
@@ -89,9 +111,17 @@ class _IdentityBoundConnection:
         self,
         connection: sqlite3.Connection,
         validator: Callable[[], None],
+        close_validator: Callable[[], None],
+        guard_descriptor: int,
+        guard_locked: bool,
+        thread_lock: threading.RLock,
     ) -> None:
         self._connection = connection
         self._validator = validator
+        self._close_validator = close_validator
+        self._guard_descriptor = guard_descriptor
+        self._guard_locked = guard_locked
+        self._thread_lock = thread_lock
 
     def __enter__(self) -> "_IdentityBoundConnection":
         self._validator()
@@ -127,9 +157,42 @@ class _IdentityBoundConnection:
         self._connection.commit()
 
     def close(self) -> None:
-        """Close the underlying native SQLite connection."""
+        """Close SQLite, revalidate storage, then release its lifecycle lock."""
 
-        self._connection.close()
+        try:
+            self._validator()
+        finally:
+            try:
+                self._connection.close()
+            finally:
+                try:
+                    self._close_validator()
+                finally:
+                    try:
+                        if self._guard_locked:
+                            self._release_guard(self._guard_descriptor)
+                    finally:
+                        try:
+                            os.close(self._guard_descriptor)
+                        finally:
+                            self._thread_lock.release()
+
+    @staticmethod
+    def _release_guard(descriptor: int) -> None:
+        _ACTIVE_DATABASE_GUARDS.discard(descriptor)
+        if os.name == "nt":
+            import msvcrt
+
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            getattr(msvcrt, "locking")(
+                descriptor,
+                getattr(msvcrt, "LK_UNLCK"),
+                1,
+            )
+            return
+        import fcntl
+
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
 
 
 def _process_owned(
@@ -170,6 +233,9 @@ class AuthorityStore:
         self.key_path = canonical_platform_path(
             Path(key_path) if key_path is not None else self.path.with_suffix(".key")
         )
+        self._guard_path = canonical_platform_path(
+            self.path.with_name(f".{self.path.name}.lifecycle.lock")
+        )
         self._owner_pid = os.getpid()
         self._process_start_reader = process_start_reader or process_start_identity
         evidence = self._process_start_reader(self._owner_pid)
@@ -187,6 +253,7 @@ class AuthorityStore:
         self._fork_fenced = False
         self._database_identity: FileIdentity | None = None
         self._key_identity: FileIdentity | None = None
+        self._guard_identity: FileIdentity | None = None
         self._database_parent_identity: FileIdentity | None = None
         self._key_parent_identity: FileIdentity | None = None
         self._fernet_key = b""
@@ -198,6 +265,7 @@ class AuthorityStore:
         self._fernet = Fernet(self._fernet_key)
         self._mac_key = hashlib.sha256(self._fernet_key + b":lease-mac:v1").digest()
         self._ensure_database_file()
+        self._ensure_lifecycle_guard()
         self._initialize()
         if os.name != "nt":
             self._secure_chmod(self.path, self._database_identity)
@@ -244,8 +312,6 @@ class AuthorityStore:
                     if target == self.path:
                         self._database_parent_identity = parent.identity
                         self._database_identity = identity
-                        for suffix in ("-wal", "-shm"):
-                            parent.validate_open(f"{target.name}{suffix}", required=False)
                     else:
                         self._key_parent_identity = parent.identity
                         self._key_identity = identity
@@ -255,7 +321,9 @@ class AuthorityStore:
     @contextmanager
     def _secure_parent(self, path: Path) -> Iterator[SecureParent]:
         expected = (
-            self._database_parent_identity if path == self.path else self._key_parent_identity
+            self._key_parent_identity
+            if path == self.key_path
+            else self._database_parent_identity
         )
         with open_secure_parent(path) as parent:
             if expected is None or parent.identity != expected:
@@ -295,6 +363,38 @@ class AuthorityStore:
                 parent.validate_open(path.name, required=True, expected=expected)
         except (OSError, SecurePathError) as exc:
             raise AuthorityStoreError("authority state path is unsafe") from exc
+
+    def _ensure_lifecycle_guard(self) -> None:
+        """Create or attest the stable file used to serialize SQLite sidecars."""
+
+        try:
+            with self._secure_parent(self._guard_path) as parent:
+                try:
+                    self._guard_identity = parent.create_empty_file(
+                        self._guard_path.name,
+                    )
+                except FileExistsError:
+                    self._guard_identity = parent.validate_open(
+                        self._guard_path.name,
+                        required=True,
+                    )
+                self._validate_private_storage_mode(parent, self._guard_path.name)
+                descriptor = parent.open_file(self._guard_path.name, os.O_RDWR)
+                try:
+                    if FileIdentity.from_stat(os.fstat(descriptor)) != self._guard_identity:
+                        raise SecurePathError("lifecycle guard identity changed")
+                    if os.fstat(descriptor).st_size == 0:
+                        os.write(descriptor, b"\0")
+                        os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+                parent.validate_open(
+                    self._guard_path.name,
+                    required=True,
+                    expected=self._guard_identity,
+                )
+        except (OSError, SecurePathError) as exc:
+            raise AuthorityStoreError("authority lifecycle guard path is unsafe") from exc
 
     def _load_or_create_key(self) -> bytes:
         try:
@@ -421,9 +521,10 @@ class AuthorityStore:
     def _pin_opened_database_files(
         self,
         connection: sqlite3.Connection,
+        descriptors_before: Mapping[int, FileIdentity],
         suffixes: tuple[str, ...] = ("", "-wal", "-shm"),
     ) -> dict[str, _OpenedDatabaseIdentity]:
-        """Tie SQLite's native-reported destination and handles to safe paths."""
+        """Tie SQLite's destination to handles opened by this connection."""
 
         if self._reported_database_path(connection) != self.path:
             raise AuthorityStoreError("authority database handle identity is unsafe")
@@ -442,11 +543,22 @@ class AuthorityStore:
                     self._validate_private_storage_mode(parent, name)
                     descriptors: tuple[int, ...] = ()
                     if os.name != "nt":
-                        matches = [
+                        all_matches = [
                             candidate
                             for candidate, opened_identity in descriptor_identities.items()
                             if opened_identity == identity
                         ]
+                        new_matches = [
+                            candidate
+                            for candidate in all_matches
+                            if descriptors_before.get(candidate) != identity
+                        ]
+                        # A concurrently finalized connection can close a descriptor
+                        # and SQLite can reuse that same number for the same inode.
+                        # Native database_list still binds this connection to the
+                        # securely pinned path, so retain matching live handles when
+                        # descriptor-number attribution encounters that ABA case.
+                        matches = new_matches or all_matches
                         if not matches:
                             raise SecurePathError(
                                 "SQLite handle does not match the pinned storage file"
@@ -484,6 +596,62 @@ class AuthorityStore:
         except OSError:
             return False
 
+    @staticmethod
+    def _database_thread_lock(identity: FileIdentity) -> threading.RLock:
+        with _DATABASE_THREAD_LOCKS_GUARD:
+            return _DATABASE_THREAD_LOCKS.setdefault(identity, threading.RLock())
+
+    def _open_database_guard(self) -> tuple[int, bool, threading.RLock]:
+        """Lock the stable guard across one identity-pinned SQLite connection."""
+
+        descriptor: int | None = None
+        guard_locked = False
+        thread_lock: threading.RLock | None = None
+        try:
+            with self._secure_parent(self._guard_path) as parent:
+                descriptor = parent.open_file(self._guard_path.name, os.O_RDWR)
+                identity = FileIdentity.from_stat(os.fstat(descriptor))
+                parent.validate_open(
+                    self._guard_path.name,
+                    required=True,
+                    expected=self._guard_identity,
+                )
+                if identity != self._guard_identity:
+                    raise SecurePathError("lifecycle guard identity changed")
+                os.set_inheritable(descriptor, False)
+                thread_lock = self._database_thread_lock(identity)
+                already_owned = bool(getattr(thread_lock, "_is_owned")())
+                thread_lock.acquire()
+                if not already_owned:
+                    _ACTIVE_DATABASE_GUARDS.add(descriptor)
+                    if os.name == "nt":
+                        import msvcrt
+
+                        os.lseek(descriptor, 0, os.SEEK_SET)
+                        getattr(msvcrt, "locking")(
+                            descriptor,
+                            getattr(msvcrt, "LK_LOCK"),
+                            1,
+                        )
+                    else:
+                        import fcntl
+
+                        fcntl.flock(descriptor, fcntl.LOCK_EX)
+                    guard_locked = True
+                parent.validate_open(
+                    self._guard_path.name,
+                    required=True,
+                    expected=identity,
+                )
+            return descriptor, guard_locked, thread_lock
+        except (OSError, SecurePathError) as exc:
+            if descriptor is not None:
+                _ACTIVE_DATABASE_GUARDS.discard(descriptor)
+                os.close(descriptor)
+            if thread_lock is not None:
+                thread_lock.release()
+            raise AuthorityStoreError("authority database handle identity is unsafe") from exc
+
     def _assert_crypto_material(self) -> None:
         self._assert_current_process()
         try:
@@ -503,8 +671,15 @@ class AuthorityStore:
         if self._closed:
             raise AuthorityStoreError("authority store is closed")
         connection: sqlite3.Connection | None = None
+        guard_descriptor: int | None = None
+        guard_locked = False
+        thread_lock: threading.RLock | None = None
         try:
+            guard_descriptor, guard_locked, thread_lock = self._open_database_guard()
             self._validate_storage_files()
+            descriptors_before_connection = (
+                {} if os.name == "nt" else self._open_descriptor_identities()
+            )
             connector = self._connection_connector or sqlite3.connect
             connection = connector(
                 str(self.path),
@@ -515,27 +690,72 @@ class AuthorityStore:
             connection.row_factory = sqlite3.Row
             if self._reported_database_path(connection) != self.path:
                 raise AuthorityStoreError("authority database handle identity is unsafe")
-            self._pin_opened_database_files(connection, ("",))
+            main_pinned = self._pin_opened_database_files(
+                connection,
+                descriptors_before_connection,
+                ("",),
+            )
             connection.execute("PRAGMA foreign_keys=ON")
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute("PRAGMA synchronous=FULL")
             connection.execute("PRAGMA trusted_schema=OFF")
             connection.execute("SELECT count(*) FROM sqlite_schema").fetchone()
-            pinned = self._pin_opened_database_files(connection)
+            sidecars_pinned = self._pin_opened_database_files(
+                connection,
+                {},
+                ("-wal", "-shm"),
+            )
+            pinned = {**main_pinned, **sidecars_pinned}
             self._validate_storage_files()
             self._validate_opened_database_files(pinned)
             return _IdentityBoundConnection(
                 connection,
                 lambda: self._validate_opened_database_files(pinned),
+                self._validate_storage_files,
+                guard_descriptor,
+                guard_locked,
+                thread_lock,
             )
         except AuthorityStoreError:
-            if connection is not None:
-                connection.close()
+            self._discard_failed_connection(
+                connection,
+                guard_descriptor,
+                guard_locked,
+                thread_lock,
+            )
             raise
         except (OSError, sqlite3.Error) as exc:
+            self._discard_failed_connection(
+                connection,
+                guard_descriptor,
+                guard_locked,
+                thread_lock,
+            )
+            raise AuthorityStoreError("authority database is unavailable") from exc
+
+    @staticmethod
+    def _discard_failed_connection(
+        connection: sqlite3.Connection | None,
+        guard_descriptor: int | None,
+        guard_locked: bool,
+        thread_lock: threading.RLock | None,
+    ) -> None:
+        """Release every native resource after connection setup fails."""
+
+        try:
             if connection is not None:
                 connection.close()
-            raise AuthorityStoreError("authority database is unavailable") from exc
+        finally:
+            try:
+                if guard_descriptor is not None:
+                    try:
+                        if guard_locked:
+                            _IdentityBoundConnection._release_guard(guard_descriptor)
+                    finally:
+                        os.close(guard_descriptor)
+            finally:
+                if thread_lock is not None:
+                    thread_lock.release()
 
     @contextmanager
     def _connection(self) -> Iterator[_IdentityBoundConnection]:
@@ -546,11 +766,7 @@ class AuthorityStore:
             with connection:
                 yield connection
         finally:
-            try:
-                self._validate_storage_files()
-            finally:
-                connection.close()
-            self._validate_storage_files()
+            connection.close()
 
     def close(self) -> None:
         """Idempotently prevent new work after all active transactions finish."""
