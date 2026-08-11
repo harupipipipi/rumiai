@@ -62,8 +62,9 @@ expanded later.
 The tracked source catalog deliberately marks Tauri and CLI Shell artifacts as
 `build_required`; it contains no launch variants or placeholder executable
 digests and cannot be activated. A packaging build stages its actual
-Application/Shell bytes and then runs
-`scripts/generate_packaged_defaultspack_v4_bundle.py`. The outer Launcher
+Application/Shell bytes and then runs the formal source-package command
+`python -m scripts.generate_packaged_defaultspack_v4_bundle` from the
+`tobkiri_runtime` source root. The outer Launcher
 release staging path is the sole owner of this step: after it verifies the
 signed Presentation release, it passes that exact selected artifact to the
 generator, which copies it under `platform-artifacts`, writes the packaged

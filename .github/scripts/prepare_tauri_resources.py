@@ -21,10 +21,18 @@ from collections.abc import Mapping
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
-
-from packaging_cleanup import remove_owned_path  # noqa: E402
+REPOSITORY_ROOT = SCRIPT_DIR.parents[1]
+_CLEANUP_HELPER = REPOSITORY_ROOT / "tobkiri_runtime/scripts/packaging_cleanup.py"
+_CLEANUP_SPEC = importlib.util.spec_from_file_location(
+    "tobkiri_packaging_cleanup",
+    _CLEANUP_HELPER,
+)
+if _CLEANUP_SPEC is None or _CLEANUP_SPEC.loader is None:
+    raise RuntimeError(f"packaging cleanup helper is unavailable: {_CLEANUP_HELPER}")
+_CLEANUP_MODULE = importlib.util.module_from_spec(_CLEANUP_SPEC)
+sys.modules[_CLEANUP_SPEC.name] = _CLEANUP_MODULE
+_CLEANUP_SPEC.loader.exec_module(_CLEANUP_MODULE)
+remove_owned_path = _CLEANUP_MODULE.remove_owned_path
 
 
 APP_SOURCE_DIR = "tobkiri_runtime"

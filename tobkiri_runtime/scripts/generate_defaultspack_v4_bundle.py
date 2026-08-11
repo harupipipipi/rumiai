@@ -9,27 +9,24 @@ import json
 import os
 from pathlib import Path
 import shutil
-import sys
 import tempfile
 from typing import Any
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from tobkiri_protocol.canonical import canonical_digest  # noqa: E402
-from tobkiri_protocol.profile_scope import (  # noqa: E402
+from tobkiri_protocol.canonical import canonical_digest
+from tobkiri_protocol.profile_scope import (
     normalize_requested_scope_template,
 )
-from tobkiri_protocol.provenance import (  # noqa: E402
+from tobkiri_protocol.provenance import (
     informational_source_commit,
     normative_generated_provenance,
 )
-from tobkiri_protocol.validation import validate_document  # noqa: E402
-from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog  # noqa: E402
+from tobkiri_protocol.validation import validate_document
+from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"

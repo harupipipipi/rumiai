@@ -10,39 +10,25 @@ import os
 import shutil
 import stat
 import subprocess
-import sys
 import tempfile
 from pathlib import Path, PureWindowsPath
 from typing import Any, Mapping, TypedDict
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-GITHUB_SCRIPTS = ROOT.parent / ".github/scripts"
-if str(GITHUB_SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(GITHUB_SCRIPTS))
-
-from packaging_cleanup import remove_owned_path  # noqa: E402
-
-try:
-    from scripts.generate_defaultspack_v4_bundle import (
-        _generated_provenance,
-        _normalize_pack,
-        _pretty,
-    )
-except ImportError:  # Executed directly from the scripts directory.
-    from generate_defaultspack_v4_bundle import (  # type: ignore[no-redef]
-        _generated_provenance,
-        _normalize_pack,
-        _pretty,
-    )
-from tobkiri_protocol.canonical import canonical_digest  # noqa: E402
-from tobkiri_protocol.platform_artifact import (  # noqa: E402
+from .generate_defaultspack_v4_bundle import (
+    _generated_provenance,
+    _normalize_pack,
+    _pretty,
+)
+from .packaging_cleanup import remove_owned_path
+from tobkiri_protocol.canonical import canonical_digest
+from tobkiri_protocol.platform_artifact import (
     artifact_digest,
     verify_platform_artifact,
 )
-from tobkiri_protocol.provenance import informational_source_commit  # noqa: E402
-from tobkiri_protocol.validation import validate_document  # noqa: E402
+from tobkiri_protocol.provenance import informational_source_commit
+from tobkiri_protocol.validation import validate_document
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class _PublishRecord(TypedDict):

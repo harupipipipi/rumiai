@@ -16,7 +16,10 @@ import pytest
 
 
 def _load_cleanup_module() -> ModuleType:
-    helper_path = Path(__file__).resolve().parents[1] / "packaging_cleanup.py"
+    helper_path = (
+        Path(__file__).resolve().parents[3]
+        / "tobkiri_runtime/scripts/packaging_cleanup.py"
+    )
     spec = importlib.util.spec_from_file_location(
         "packaging_cleanup_test_module", helper_path
     )

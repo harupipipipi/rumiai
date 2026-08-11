@@ -6,13 +6,14 @@ on:
     branches: [master, soon]
     paths:
       - ".github/scripts/install_locked_python_test_dependencies.py"
-      - ".github/scripts/packaging_cleanup.py"
+      - "tobkiri_runtime/scripts/packaging_cleanup.py"
       - ".github/scripts/prepare_tauri_resources.py"
       - ".github/scripts/build_sealed_python_environment.py"
       - ".github/scripts/sealed_python_sources/**"
       - ".github/schemas/sealed-python-*.json"
       - "tobkiri_launcher/docs/sealed-python-environment.md"
       - ".github/scripts/tests/test_packaging_cleanup.py"
+      - ".github/scripts/tests/test_packaged_defaultspack_generator_relocation.py"
       - ".github/workflows/desktop-installers.yml"
       - "pack-shell/**"
       - "tobkiri_runtime/**"
@@ -22,13 +23,14 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - ".github/scripts/install_locked_python_test_dependencies.py"
-      - ".github/scripts/packaging_cleanup.py"
+      - "tobkiri_runtime/scripts/packaging_cleanup.py"
       - ".github/scripts/prepare_tauri_resources.py"
       - ".github/scripts/build_sealed_python_environment.py"
       - ".github/scripts/sealed_python_sources/**"
       - ".github/schemas/sealed-python-*.json"
       - "tobkiri_launcher/docs/sealed-python-environment.md"
       - ".github/scripts/tests/test_packaging_cleanup.py"
+      - ".github/scripts/tests/test_packaged_defaultspack_generator_relocation.py"
       - ".github/workflows/desktop-installers.yml"
       - "pack-shell/**"
       - "tobkiri_runtime/**"

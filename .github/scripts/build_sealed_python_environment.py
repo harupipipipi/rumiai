@@ -1085,11 +1085,12 @@ def _source_files(root: Path) -> Iterable[tuple[str, Path]]:
 
 
 def _load_cleanup_remove():
-    path = SCRIPT_DIR / "packaging_cleanup.py"
+    path = REPOSITORY_ROOT / "tobkiri_runtime/scripts/packaging_cleanup.py"
     spec = importlib.util.spec_from_file_location("tobkiri_packaging_cleanup", path)
     if spec is None or spec.loader is None:
         raise SealedEnvironmentError(f"cannot load cleanup helper: {path}")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module.remove_owned_path
 

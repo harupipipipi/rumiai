@@ -14,6 +14,7 @@ import argparse
 import base64
 import binascii
 import hashlib
+import importlib.util
 import json
 import os
 import plistlib
@@ -37,11 +38,23 @@ except ModuleNotFoundError:
     from artifact_integrity import artifact_digest_and_size  # type: ignore[no-redef]
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-GITHUB_SCRIPTS = REPOSITORY_ROOT / ".github/scripts"
-if str(GITHUB_SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(GITHUB_SCRIPTS))
 
-from packaging_cleanup import remove_owned_path, run_process_and_wait  # noqa: E402
+
+def _load_packaging_cleanup():
+    """Load the canonical cleanup module without mutating import search paths."""
+    helper_path = REPOSITORY_ROOT / "tobkiri_runtime/scripts/packaging_cleanup.py"
+    spec = importlib.util.spec_from_file_location("tobkiri_packaging_cleanup", helper_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"packaging cleanup helper is unavailable: {helper_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_PACKAGING_CLEANUP = _load_packaging_cleanup()
+remove_owned_path = _PACKAGING_CLEANUP.remove_owned_path
+run_process_and_wait = _PACKAGING_CLEANUP.run_process_and_wait
 
 
 def artifact_digest(path: Path) -> str:
@@ -898,7 +911,8 @@ def _project_packaged_defaultspack(
     run_process_and_wait(
         [
             sys.executable,
-            os.fspath(generator),
+            "-m",
+            "scripts.generate_packaged_defaultspack_v4_bundle",
             "--source-artifact",
             os.fspath(source_artifact),
             "--bundle-root",
@@ -918,7 +932,7 @@ def _project_packaged_defaultspack(
             "--source-commit",
             source_revision,
         ],
-        cwd=repository_root,
+        cwd=repository_root / "tobkiri_runtime",
     )
     profile = bundle_root / "defaults.profile.v4.json"
     lock_path = bundle_root / "bundle.lock.json"

@@ -738,6 +738,29 @@ mod tests {
             &["Program Files", "Tobkiri Launcher", "resources", "app"],
         ),
     ];
+    const GENERATOR_REQUIRED_FILES: &[&str] = &[
+        "tobkiri_runtime/scripts/__init__.py",
+        "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+        "tobkiri_runtime/scripts/generate_packaged_defaultspack_v4_bundle.py",
+        "tobkiri_runtime/scripts/packaging_cleanup.py",
+        "tobkiri_runtime/ecosystem/defaultspack/pack.v4.json",
+        "tobkiri_runtime/ecosystem/defaultspack/contracts.v4.json",
+        "tobkiri_runtime/ecosystem/defaultspack/artifact-index.v4.json",
+        "tobkiri_runtime/ecosystem/rumi_file_inspect_pack/pack.v4.json",
+        "tobkiri_runtime/ecosystem/rumi_host_authority_bridge_pack/pack.v4.json",
+        "tobkiri_runtime/ecosystem/rumi_workspace_mount_pack/pack.v4.json",
+        "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/pack.v4.json",
+        "tobkiri_runtime/ecosystem/rumi_ai_gateway_pack/pack.v4.json",
+        "tobkiri_runtime/ecosystem/rumi_model_catalog_pack/pack.v4.json",
+        "tobkiri_runtime/ecosystem/rumi_model_registry_pack/pack.v4.json",
+        "tobkiri_runtime/ecosystem/rumi_ai_pipeline_pack/pack.v4.json",
+        "tobkiri_runtime/ecosystem/rumi_provider_adapters_pack/pack.v4.json",
+        "tobkiri_runtime/ecosystem/rumi_ai_routing_pack/pack.v4.json",
+        "tobkiri_runtime/ecosystem/rumi_ai_stream_pack/pack.v4.json",
+        "tobkiri_runtime/ecosystem/rumi_ai_tool_bridge_pack/pack.v4.json",
+        "tobkiri_runtime/ecosystem/rumi_ai_usage_pack/pack.v4.json",
+        "tobkiri_runtime/ecosystem/rumi_provider_registry_pack/pack.v4.json",
+    ];
 
     fn rewrite_locked_document(
         config: &AppConfig,
@@ -797,6 +820,23 @@ mod tests {
                 "tobkiri_runtime/ecosystem/defaultspack/v4",
                 "tobkiri_runtime/ecosystem/defaultspack/runtime",
                 "tobkiri_runtime/ecosystem/defaultspack/defaultspack",
+                "tobkiri_runtime/ecosystem/defaultspack/pack.v4.json",
+                "tobkiri_runtime/ecosystem/defaultspack/contracts.v4.json",
+                "tobkiri_runtime/ecosystem/defaultspack/artifact-index.v4.json",
+                "tobkiri_runtime/ecosystem/rumi_file_inspect_pack/pack.v4.json",
+                "tobkiri_runtime/ecosystem/rumi_host_authority_bridge_pack/pack.v4.json",
+                "tobkiri_runtime/ecosystem/rumi_workspace_mount_pack/pack.v4.json",
+                "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/pack.v4.json",
+                "tobkiri_runtime/ecosystem/rumi_ai_gateway_pack/pack.v4.json",
+                "tobkiri_runtime/ecosystem/rumi_model_catalog_pack/pack.v4.json",
+                "tobkiri_runtime/ecosystem/rumi_model_registry_pack/pack.v4.json",
+                "tobkiri_runtime/ecosystem/rumi_ai_pipeline_pack/pack.v4.json",
+                "tobkiri_runtime/ecosystem/rumi_provider_adapters_pack/pack.v4.json",
+                "tobkiri_runtime/ecosystem/rumi_ai_routing_pack/pack.v4.json",
+                "tobkiri_runtime/ecosystem/rumi_ai_stream_pack/pack.v4.json",
+                "tobkiri_runtime/ecosystem/rumi_ai_tool_bridge_pack/pack.v4.json",
+                "tobkiri_runtime/ecosystem/rumi_ai_usage_pack/pack.v4.json",
+                "tobkiri_runtime/ecosystem/rumi_provider_registry_pack/pack.v4.json",
                 "tobkiri_launcher/src-tauri/bundled",
             ])
             .current_dir(destination)
@@ -851,6 +891,21 @@ mod tests {
             status.stdout.is_empty(),
             "authoritative fixture source must remain clean"
         );
+        assert!(
+            !source_checkout
+                .join(".github/scripts/packaging_cleanup.py")
+                .exists(),
+            "relocated generator must not retain the repository helper fallback"
+        );
+        for relative in GENERATOR_REQUIRED_FILES {
+            let path = source_checkout.join(relative);
+            let metadata = fs::symlink_metadata(&path)
+                .unwrap_or_else(|_| panic!("generator source file is missing: {relative}"));
+            assert!(
+                metadata.is_file() && !metadata.file_type().is_symlink(),
+                "generator source file is not a regular file: {relative}"
+            );
+        }
     }
 
     fn package_fixture_application(
@@ -882,10 +937,7 @@ mod tests {
 
         let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
         let status = std::process::Command::new(python)
-            .arg(
-                source_checkout
-                    .join("tobkiri_runtime/scripts/generate_packaged_defaultspack_v4_bundle.py"),
-            )
+            .args(["-m", "scripts.generate_packaged_defaultspack_v4_bundle"])
             .arg("--source-artifact")
             .arg(&source)
             .arg("--bundle-root")
@@ -908,7 +960,7 @@ mod tests {
             .arg("io.tobkiri.shell.tauri")
             .arg("--source-commit")
             .arg(source_revision)
-            .current_dir(source_checkout)
+            .current_dir(source_checkout.join("tobkiri_runtime"))
             .status()
             .unwrap();
         assert!(

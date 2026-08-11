@@ -1825,7 +1825,7 @@ fn stage_presentation_release_from_snapshot(
         let source_revision = current_source_revision(&repository_root)?;
         let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
         let mut child = Command::new(python)
-            .arg(generator)
+            .args(["-m", "scripts.generate_packaged_defaultspack_v4_bundle"])
             .arg("--source-artifact")
             .arg(&verified.artifact_path)
             .arg("--bundle-root")
@@ -1844,6 +1844,7 @@ fn stage_presentation_release_from_snapshot(
             .arg(&verified.bundle_identity)
             .arg("--source-commit")
             .arg(source_revision)
+            .current_dir(repository_root.join("tobkiri_runtime"))
             .spawn()
             .map_err(|error| {
                 invalid_release(format!("failed to run packaged Profile generator: {error}"))
