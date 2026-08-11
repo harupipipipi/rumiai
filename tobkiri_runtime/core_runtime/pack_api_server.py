@@ -1941,6 +1941,7 @@ class PackAPIServer:
         self.handler_class: type[PackAPIHandler] | None = None
         self._lifecycle_lock = threading.RLock()
         self._lifecycle_generation = 0
+        self._runtime_refresh_sequence = 0
         self._lifecycle_state = "stopped"
         self._stop_complete = threading.Event()
         self._stop_complete.set()
@@ -2073,6 +2074,9 @@ class PackAPIServer:
                 or lifecycle_generation != self._lifecycle_generation
             ):
                 return
+            self._runtime_refresh_sequence += 1
+            refresh_sequence = self._runtime_refresh_sequence
+            base_session = self._dispatch_session
 
         from tobkiri_host.runtime import install_dispatch_session
 
@@ -2084,70 +2088,89 @@ class PackAPIServer:
         )
         from .di_container import get_container
 
-        runtime_root, bundle_root, _catalog, bindings = _load_production_capture_inputs()
         session = activated_session
-        created_session = False
-        if session is None:
-            active = capture_default_profile()
-            authority = AuthorityStore(runtime_user_data_root() / "authority" / "v4.sqlite3")
-            try:
-                session = capture_production_dispatch(
-                    active,
-                    bundle_root=bundle_root,
-                    ecosystem_root=runtime_root / "ecosystem",
-                    authority_store=authority,
-                    packvm_readiness_reader=self._packvm_lifecycle.readiness_snapshot,
-                    frontend_contract_bindings=bindings,
-                )
-                created_session = True
-            except Exception:
-                authority.close()
-                raise
         try:
+            runtime_root, bundle_root, _catalog, bindings = (
+                _load_production_capture_inputs()
+            )
+            if session is None:
+                active = capture_default_profile()
+                authority = AuthorityStore(
+                    runtime_user_data_root() / "authority" / "v4.sqlite3"
+                )
+                try:
+                    session = capture_production_dispatch(
+                        active,
+                        bundle_root=bundle_root,
+                        ecosystem_root=runtime_root / "ecosystem",
+                        authority_store=authority,
+                        packvm_readiness_reader=(
+                            self._packvm_lifecycle.readiness_snapshot
+                        ),
+                        frontend_contract_bindings=bindings,
+                    )
+                except Exception:
+                    authority.close()
+                    raise
             routes = contract_binding_map(bindings)
             self._validate_contract_capture(session, routes)
         except Exception:
-            if created_session and session is not None:
-                close = getattr(session, "close", None)
-                if callable(close):
-                    close()
+            self._close_unpublished_session(session, base_session=base_session)
             raise
 
+        previous: DispatchSession | None = None
         with self._lifecycle_lock:
-            if (
+            stale_refresh = (
                 self._lifecycle_state != "running"
                 or lifecycle_generation != self._lifecycle_generation
-            ):
-                if created_session and session is not None:
-                    close = getattr(session, "close", None)
-                    if callable(close):
-                        close()
-                return
-            previous = self._dispatch_session
-            published_generation = self._lifecycle_generation
-            handler = PackAPIHandler.canonical_v4_server_handler(
-                panel_auth_manager=self._panel_auth_manager,
-                dispatch_session=session,
-                app_lifecycle_manager=self.app_lifecycle_manager,
-                contract_routes=routes,
-                replay_guard=self._replay_guard,
-                operation_journal=self._operation_journal,
-                web_mounts=self._web_mounts,
-                runtime_refresh=self._runtime_refresh_callback(published_generation),
-                workspace_binding_resolver=self._workspace_binding_resolver,
-                packvm_lifecycle=self._packvm_lifecycle,
+                or refresh_sequence != self._runtime_refresh_sequence
             )
-            handler._runtime_port = self.port
-            self._dispatch_session = session
-            self._contract_routes = routes
-            self.handler_class = handler
-            if self.server is not None:
-                self.server.RequestHandlerClass = handler
-            install_dispatch_session(get_container(), session)
+            if not stale_refresh:
+                previous = self._dispatch_session
+                published_generation = self._lifecycle_generation
+                handler = PackAPIHandler.canonical_v4_server_handler(
+                    panel_auth_manager=self._panel_auth_manager,
+                    dispatch_session=session,
+                    app_lifecycle_manager=self.app_lifecycle_manager,
+                    contract_routes=routes,
+                    replay_guard=self._replay_guard,
+                    operation_journal=self._operation_journal,
+                    web_mounts=self._web_mounts,
+                    runtime_refresh=self._runtime_refresh_callback(published_generation),
+                    workspace_binding_resolver=self._workspace_binding_resolver,
+                    packvm_lifecycle=self._packvm_lifecycle,
+                )
+                handler._runtime_port = self.port
+                self._dispatch_session = session
+                self._contract_routes = routes
+                self.handler_class = handler
+                if self.server is not None:
+                    self.server.RequestHandlerClass = handler
+                install_dispatch_session(get_container(), session)
+        if stale_refresh:
+            self._close_unpublished_session(session, base_session=base_session)
+            return
         if previous is not None and previous is not session:
             close = getattr(previous, "close", None)
             if callable(close):
                 close()
+
+    @staticmethod
+    def _close_unpublished_session(
+        session: DispatchSession | None,
+        *,
+        base_session: DispatchSession | None,
+    ) -> None:
+        """Close a discarded candidate without touching the captured base session."""
+
+        if session is None or session is base_session:
+            return
+        close = getattr(session, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                logger.exception("failed to close an unpublished dispatch session")
 
     def stop(self) -> None:
         """Stop the server and discard its captured handler bindings."""

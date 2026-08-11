@@ -61,6 +61,22 @@ class _Dispatch:
         return {"contract_id": contract_id, "operation_id": operation_id}
 
 
+class _RefreshDispatch(_Dispatch):
+    def __init__(self, name: str) -> None:
+        super().__init__()
+        self.name = name
+        self.profile_id = "defaults"
+        self.plan_digest = "sha256:" + "a" * 64
+        self.close_calls = 0
+        self.read_fences = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+    def cancel_pending_reads(self) -> None:
+        self.read_fences += 1
+
+
 class _Lifecycle:
     def check_setup_status(self) -> dict[str, object]:
         return {"needs_setup": False, "setup_state": "complete"}
@@ -714,6 +730,317 @@ def test_stopped_handler_generation_cannot_publish_runtime_capture() -> None:
 
     assert server.handler_class is None
     assert server.server is None
+
+
+def _prepare_refresh_race(
+    server: PackAPIServer,
+    monkeypatch: pytest.MonkeyPatch,
+) -> int:
+    import core_runtime.di_container as di_container_module
+    import core_runtime.pack_api_server as pack_api_server_module
+    import tobkiri_host.runtime as host_runtime_module
+
+    monkeypatch.setattr(
+        pack_api_server_module,
+        "_load_production_capture_inputs",
+        lambda: (Path("/runtime"), Path("/bundle"), object(), ()),
+    )
+    monkeypatch.setattr(di_container_module, "get_container", object)
+    monkeypatch.setattr(
+        host_runtime_module,
+        "install_dispatch_session",
+        lambda _container, _session: None,
+    )
+    with server._lifecycle_lock:
+        server._lifecycle_state = "running"
+        server._lifecycle_generation = 41
+    return 41
+
+
+def test_older_same_generation_refresh_cannot_replace_newer_publish(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial = _RefreshDispatch("initial")
+    older = _RefreshDispatch("older")
+    newer = _RefreshDispatch("newer")
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+        dispatch_session=initial,  # type: ignore[arg-type]
+    )
+    generation = _prepare_refresh_race(server, monkeypatch)
+    older_entered = threading.Event()
+    release_older = threading.Event()
+
+    def validate(session: object, _routes: object) -> None:
+        if session is older:
+            older_entered.set()
+            assert release_older.wait(2.0)
+
+    monkeypatch.setattr(server, "_validate_contract_capture", validate)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(
+                server._refresh_runtime_capture,
+                older,
+                lifecycle_generation=generation,
+            )
+            assert older_entered.wait(2.0)
+            server._refresh_runtime_capture(
+                newer,
+                lifecycle_generation=generation,
+            )
+            published_handler = server.handler_class
+            published_routes = server._contract_routes
+            release_older.set()
+            pending.result(timeout=2.0)
+
+        assert server._dispatch_session is newer
+        assert server.handler_class is published_handler
+        assert server._contract_routes is published_routes
+        assert initial.close_calls == 1
+        assert older.close_calls == 1
+        assert newer.close_calls == 0
+    finally:
+        release_older.set()
+        server.stop()
+
+
+def test_only_latest_of_three_unordered_refreshes_can_publish(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial = _RefreshDispatch("initial")
+    older = _RefreshDispatch("older")
+    middle = _RefreshDispatch("middle")
+    latest = _RefreshDispatch("latest")
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+        dispatch_session=initial,  # type: ignore[arg-type]
+    )
+    generation = _prepare_refresh_race(server, monkeypatch)
+    entered = {candidate: threading.Event() for candidate in (older, middle)}
+    release = {candidate: threading.Event() for candidate in (older, middle)}
+
+    def validate(session: object, _routes: object) -> None:
+        if session in entered:
+            entered[session].set()
+            assert release[session].wait(2.0)
+
+    monkeypatch.setattr(server, "_validate_contract_capture", validate)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            oldest_pending = executor.submit(
+                server._refresh_runtime_capture,
+                older,
+                lifecycle_generation=generation,
+            )
+            assert entered[older].wait(2.0)
+            middle_pending = executor.submit(
+                server._refresh_runtime_capture,
+                middle,
+                lifecycle_generation=generation,
+            )
+            assert entered[middle].wait(2.0)
+            server._refresh_runtime_capture(
+                latest,
+                lifecycle_generation=generation,
+            )
+            published_handler = server.handler_class
+            published_routes = server._contract_routes
+            release[middle].set()
+            release[older].set()
+            middle_pending.result(timeout=2.0)
+            oldest_pending.result(timeout=2.0)
+
+        assert server._dispatch_session is latest
+        assert server.handler_class is published_handler
+        assert server._contract_routes is published_routes
+        assert initial.close_calls == 1
+        assert older.close_calls == 1
+        assert middle.close_calls == 1
+        assert latest.close_calls == 0
+    finally:
+        release[older].set()
+        release[middle].set()
+        server.stop()
+
+
+def test_failed_latest_refresh_invalidates_older_pending_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial = _RefreshDispatch("initial")
+    older = _RefreshDispatch("older")
+    failed = _RefreshDispatch("failed")
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+        dispatch_session=initial,  # type: ignore[arg-type]
+    )
+    generation = _prepare_refresh_race(server, monkeypatch)
+    older_entered = threading.Event()
+    release_older = threading.Event()
+
+    def validate(session: object, _routes: object) -> None:
+        if session is older:
+            older_entered.set()
+            assert release_older.wait(2.0)
+        if session is failed:
+            raise RuntimeError("capture failed")
+
+    monkeypatch.setattr(server, "_validate_contract_capture", validate)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(
+                server._refresh_runtime_capture,
+                older,
+                lifecycle_generation=generation,
+            )
+            assert older_entered.wait(2.0)
+            with pytest.raises(RuntimeError, match="capture failed"):
+                server._refresh_runtime_capture(
+                    failed,
+                    lifecycle_generation=generation,
+                )
+            release_older.set()
+            pending.result(timeout=2.0)
+
+        assert server._dispatch_session is initial
+        assert initial.close_calls == 0
+        assert older.close_calls == 1
+        assert failed.close_calls == 1
+    finally:
+        release_older.set()
+        server.stop()
+
+
+def test_capture_input_failure_closes_unpublished_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import core_runtime.pack_api_server as pack_api_server_module
+
+    initial = _RefreshDispatch("initial")
+    failed = _RefreshDispatch("failed")
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+        dispatch_session=initial,  # type: ignore[arg-type]
+    )
+    generation = _prepare_refresh_race(server, monkeypatch)
+
+    def fail_capture_inputs() -> object:
+        raise RuntimeError("capture inputs failed")
+
+    monkeypatch.setattr(
+        pack_api_server_module,
+        "_load_production_capture_inputs",
+        fail_capture_inputs,
+    )
+    try:
+        with pytest.raises(RuntimeError, match="capture inputs failed"):
+            server._refresh_runtime_capture(
+                failed,
+                lifecycle_generation=generation,
+            )
+
+        assert server._dispatch_session is initial
+        assert initial.close_calls == 0
+        assert failed.close_calls == 1
+    finally:
+        server.stop()
+
+
+def test_generation_change_immediately_before_publish_discards_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial = _RefreshDispatch("initial")
+    candidate = _RefreshDispatch("candidate")
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+        dispatch_session=initial,  # type: ignore[arg-type]
+    )
+    generation = _prepare_refresh_race(server, monkeypatch)
+    validation_complete = threading.Event()
+    allow_publish = threading.Event()
+
+    def validate(_session: object, _routes: object) -> None:
+        validation_complete.set()
+        assert allow_publish.wait(2.0)
+
+    monkeypatch.setattr(server, "_validate_contract_capture", validate)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(
+                server._refresh_runtime_capture,
+                candidate,
+                lifecycle_generation=generation,
+            )
+            assert validation_complete.wait(2.0)
+            with server._lifecycle_lock:
+                server._lifecycle_generation += 1
+            allow_publish.set()
+            pending.result(timeout=2.0)
+
+        assert server._dispatch_session is initial
+        assert initial.close_calls == 0
+        assert candidate.close_calls == 1
+    finally:
+        allow_publish.set()
+        server.stop()
+
+
+def test_refresh_finishing_after_stop_restart_cannot_replace_new_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial = _RefreshDispatch("initial")
+    stale = _RefreshDispatch("stale")
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+        dispatch_session=initial,  # type: ignore[arg-type]
+    )
+    import core_runtime.pack_api_server as pack_api_server_module
+
+    monkeypatch.setattr(
+        pack_api_server_module,
+        "_load_production_capture_inputs",
+        lambda: (Path("/runtime"), Path("/bundle"), object(), ()),
+    )
+    stale_entered = threading.Event()
+    release_stale = threading.Event()
+
+    def validate(session: object, _routes: object) -> None:
+        if session is stale:
+            stale_entered.set()
+            assert release_stale.wait(2.0)
+
+    server.start()
+    monkeypatch.setattr(server, "_validate_contract_capture", validate)
+    generation = server._lifecycle_generation
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(
+                server._refresh_runtime_capture,
+                stale,
+                lifecycle_generation=generation,
+            )
+            assert stale_entered.wait(2.0)
+            server.stop()
+            server.start()
+            restarted_handler = server.handler_class
+            restarted_routes = server._contract_routes
+            release_stale.set()
+            pending.result(timeout=2.0)
+
+        assert server._dispatch_session is initial
+        assert server.handler_class is restarted_handler
+        assert server._contract_routes is restarted_routes
+        assert stale.close_calls == 1
+        assert initial.close_calls == 0
+    finally:
+        release_stale.set()
+        server.stop()
 
 
 def test_double_stop_and_restart_remain_bounded() -> None:
