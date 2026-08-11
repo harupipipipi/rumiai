@@ -16,6 +16,7 @@ import http.client
 import ipaddress
 import json
 import math
+from pathlib import Path
 import socket
 import ssl
 from threading import RLock
@@ -117,6 +118,32 @@ class CredentialMaterialStore(Protocol):
         purpose: str = "provider.invoke",
     ) -> dict[str, Any]:
         """Resolve material only inside the Host transport boundary."""
+
+
+@dataclass(frozen=True)
+class CredentialMaterialStoreBinding:
+    """One Host credential store and its exact opaque key-version binding."""
+
+    store: CredentialMaterialStore
+    key_version: str
+
+    def __post_init__(self) -> None:
+        """Reject an incomplete factory result before provider dispatch."""
+        if not callable(getattr(self.store, "resolve", None)) or not _safe_text(
+            self.key_version
+        ):
+            raise ValueError("credential material store binding is invalid")
+
+
+class CredentialMaterialStoreFactory(Protocol):
+    """Typed composition-root factory for one Host credential store."""
+
+    def __call__(
+        self,
+        *,
+        user_data_root: Path,
+    ) -> CredentialMaterialStoreBinding:
+        """Create a store binding for the captured Host user-data root."""
 
 
 @dataclass(frozen=True)
@@ -768,6 +795,8 @@ def _clear_material(material: dict[str, Any] | None) -> None:
 
 __all__ = [
     "AuthorizedEnvelopeCredentialTransport",
+    "CredentialMaterialStoreBinding",
+    "CredentialMaterialStoreFactory",
     "CredentialTransportBinding",
     "CredentialTransportDenied",
     "HostBoundCredentialTransport",

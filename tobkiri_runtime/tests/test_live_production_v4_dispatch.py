@@ -25,6 +25,7 @@ from core_runtime.authority.v4 import (
 )
 from core_runtime.bootstrap.production_v4 import capture_production_dispatch
 from core_runtime import credential_transport as credential_transport_module
+from core_runtime.credential_transport import CredentialMaterialStoreBinding
 from core_runtime.bootstrap.profile_capture import (
     capture_default_profile,
     prepare_default_profile_confirmation,
@@ -32,6 +33,10 @@ from core_runtime.bootstrap.profile_capture import (
 from ecosystem.defaultspack.domain.runtime_v4 import ProfileResolutionDenied
 from ecosystem.rumi_credential_broker_pack.runtime.service import (
     CredentialBrokerService,
+)
+from ecosystem.rumi_credential_broker_pack.runtime.store import (
+    CredentialBrokerStore,
+    KEY_VERSION,
 )
 from ecosystem.rumi_provider_registry_pack.runtime.registry import ProviderRegistry
 from tobkiri_host.backends import (
@@ -58,6 +63,13 @@ def _bundle_root() -> Path:
 
 def _digest(seed: str) -> str:
     return authority_digest({"seed": seed})
+
+
+def _credential_store_factory(*, user_data_root: Path) -> CredentialMaterialStoreBinding:
+    return CredentialMaterialStoreBinding(
+        store=CredentialBrokerStore(user_data_root=user_data_root),
+        key_version=KEY_VERSION,
+    )
 
 
 class _CapturedBackend:
@@ -173,6 +185,7 @@ def test_production_dispatch_executes_credentialed_provider_request(
         bundle_root=_bundle_root(),
         ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
         authority_store=AuthorityStore(user_data / "authority" / "v4.sqlite3"),
+        credential_store_factory=_credential_store_factory,
     )
     try:
         result = session.invoke(

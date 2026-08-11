@@ -67,7 +67,10 @@ from ..pack_control_v4 import (
     capture_valid_pack_approval,
 )
 from ..external_pack_catalog_v4 import resolve_admitted_pack_roots
-from ..credential_transport import AuthorizedEnvelopeCredentialTransport
+from ..credential_transport import (
+    AuthorizedEnvelopeCredentialTransport,
+    CredentialMaterialStoreFactory,
+)
 from ..global_contract_dispatch import GlobalContractClient
 from ..host_provider_backend_v4 import (
     ExactHostProviderBackendV4,
@@ -508,6 +511,7 @@ def capture_production_dispatch(
     packvm_provisioner: Any | None = None,
     packvm_readiness_reader: Callable[[], Mapping[str, Any]] | None = None,
     frontend_contract_bindings: tuple[Any, ...] = (),
+    credential_store_factory: CredentialMaterialStoreFactory | None = None,
 ) -> V4DispatchSession:
     """Capture ProductionRuntimeV4 and its RequestBroker from verified records."""
 
@@ -850,6 +854,11 @@ def capture_production_dispatch(
     host_contributions_by_backend: dict[str, list[Any]] = {}
     close_callbacks: list[Callable[[], None]] = []
     dispatch_holder: list[V4DispatchSession] = []
+    credential_store_binding = (
+        credential_store_factory(user_data_root=authority_user_data)
+        if credential_store_factory is not None
+        else None
+    )
     principal_by_id = {
         principal.principal_id: principal
         for binding in plan["bindings"]
@@ -931,19 +940,18 @@ def capture_production_dispatch(
             )
             if provider_principal is None:
                 raise AuthorityDenied("Host Provider principal is unavailable")
-            from ecosystem.rumi_credential_broker_pack.runtime.store import (
-                CredentialBrokerStore,
-                KEY_VERSION,
-            )
-
-            transport = AuthorizedEnvelopeCredentialTransport(
-                envelope=self._envelope,
-                provider_principal=provider_principal,
-                store=CredentialBrokerStore(user_data_root=authority_user_data),
-                authority_store=authority_store,
-                current_security_epoch=lambda: authority_store.security_epoch,
-                credential_key_version=KEY_VERSION,
-                consumer_pack_id=consumer_pack_id,
+            transport = (
+                AuthorizedEnvelopeCredentialTransport(
+                    envelope=self._envelope,
+                    provider_principal=provider_principal,
+                    store=credential_store_binding.store,
+                    authority_store=authority_store,
+                    current_security_epoch=lambda: authority_store.security_epoch,
+                    credential_key_version=credential_store_binding.key_version,
+                    consumer_pack_id=consumer_pack_id,
+                )
+                if credential_store_binding is not None
+                else None
             )
             self._client = GlobalContractClient(
                 session=_InvocationSession(self._envelope),
