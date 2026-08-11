@@ -403,7 +403,7 @@ class AuthorityStore:
         return identities
 
     def _reported_database_path(self, connection: sqlite3.Connection) -> Path:
-        rows = connection.execute("PRAGMA database_list").fetchall()
+        rows = sqlite3.Connection.execute(connection, "PRAGMA database_list").fetchall()
         main_paths = [str(row[2]) for row in rows if str(row[1]) == "main"]
         if len(main_paths) != 1 or not main_paths[0]:
             raise AuthorityStoreError("authority database handle identity is unavailable")
@@ -421,10 +421,9 @@ class AuthorityStore:
     def _pin_opened_database_files(
         self,
         connection: sqlite3.Connection,
-        descriptors_before: set[int],
         suffixes: tuple[str, ...] = ("", "-wal", "-shm"),
     ) -> dict[str, _OpenedDatabaseIdentity]:
-        """Tie SQLite's reported destination and live handles to safe paths."""
+        """Tie SQLite's native-reported destination and handles to safe paths."""
 
         if self._reported_database_path(connection) != self.path:
             raise AuthorityStoreError("authority database handle identity is unsafe")
@@ -454,16 +453,6 @@ class AuthorityStore:
                             )
                         descriptors = tuple(matches)
                     pinned[suffix] = _OpenedDatabaseIdentity(identity, descriptors)
-                if os.name != "nt":
-                    allowed_identities = {opened.identity for opened in pinned.values()}
-                    unexpected_new = {
-                        identity
-                        for descriptor, identity in descriptor_identities.items()
-                        if descriptor not in descriptors_before
-                        and identity not in allowed_identities
-                    }
-                    if unexpected_new:
-                        raise SecurePathError("SQLite opened an unpinned persistence handle")
         except (OSError, SecurePathError) as exc:
             raise AuthorityStoreError("authority database handle identity is unsafe") from exc
         return pinned
@@ -516,9 +505,6 @@ class AuthorityStore:
         connection: sqlite3.Connection | None = None
         try:
             self._validate_storage_files()
-            descriptors_before = (
-                set() if os.name == "nt" else set(self._open_descriptor_identities())
-            )
             connector = self._connection_connector or sqlite3.connect
             connection = connector(
                 str(self.path),
@@ -529,13 +515,13 @@ class AuthorityStore:
             connection.row_factory = sqlite3.Row
             if self._reported_database_path(connection) != self.path:
                 raise AuthorityStoreError("authority database handle identity is unsafe")
-            self._pin_opened_database_files(connection, descriptors_before, ("",))
+            self._pin_opened_database_files(connection, ("",))
             connection.execute("PRAGMA foreign_keys=ON")
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute("PRAGMA synchronous=FULL")
             connection.execute("PRAGMA trusted_schema=OFF")
             connection.execute("SELECT count(*) FROM sqlite_schema").fetchone()
-            pinned = self._pin_opened_database_files(connection, descriptors_before)
+            pinned = self._pin_opened_database_files(connection)
             self._validate_storage_files()
             self._validate_opened_database_files(pinned)
             return _IdentityBoundConnection(

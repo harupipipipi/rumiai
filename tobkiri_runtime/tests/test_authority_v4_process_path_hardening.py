@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import threading
 from typing import Any
 
 import pytest
@@ -421,6 +422,79 @@ def test_authority_rejects_mismatched_handle_when_reported_path_is_unchanged(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor identity invariant")
+def test_authority_ignores_unrelated_file_opened_concurrently_with_sqlite(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "authority" / "authority.sqlite3"
+    unrelated_path = tmp_path / "unrelated.txt"
+    unrelated_path.write_text("not SQLite persistence", encoding="utf-8")
+    start_open = threading.Event()
+    unrelated_opened = threading.Event()
+    opened_handle: list[Any] = []
+
+    def open_unrelated_file() -> None:
+        assert start_open.wait(5.0)
+        handle = unrelated_path.open("rb")
+        opened_handle.append(handle)
+        unrelated_opened.set()
+
+    opener = threading.Thread(target=open_unrelated_file)
+    opener.start()
+    first_connection = True
+
+    def concurrent_connector(*args: object, **kwargs: object) -> sqlite3.Connection:
+        nonlocal first_connection
+        if first_connection:
+            first_connection = False
+            start_open.set()
+            assert unrelated_opened.wait(5.0)
+        return sqlite3.connect(*args, **kwargs)
+
+    try:
+        store = AuthorityStore(path, connection_connector=concurrent_connector)
+        assert store.security_epoch == 1
+        store.close()
+    finally:
+        start_open.set()
+        opener.join(5.0)
+        for handle in opened_handle:
+            handle.close()
+
+    assert not opener.is_alive()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor identity invariant")
+def test_authority_operations_survive_unrelated_descriptor_churn(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "authority.sqlite3"
+    unrelated_path = tmp_path / "unrelated.txt"
+    unrelated_path.write_text("descriptor churn", encoding="utf-8")
+    stop = threading.Event()
+    started = threading.Event()
+
+    def churn_unrelated_file() -> None:
+        started.set()
+        while not stop.is_set():
+            with unrelated_path.open("rb") as handle:
+                handle.read(1)
+
+    opener = threading.Thread(target=churn_unrelated_file)
+    opener.start()
+    assert started.wait(5.0)
+    try:
+        store = AuthorityStore(path)
+        for _ in range(100):
+            assert store.security_epoch == 1
+        store.close()
+    finally:
+        stop.set()
+        opener.join(5.0)
+
+    assert not opener.is_alive()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor identity invariant")
 @pytest.mark.parametrize("failure", ["missing", "permission"])
 def test_authority_denies_descriptor_identity_uncertainty(
     tmp_path: Path,
@@ -455,10 +529,9 @@ def test_authority_rejects_broad_sidecar_permissions_before_query(
     def broaden_wal(
         store: AuthorityStore,
         connection: sqlite3.Connection,
-        descriptors_before: set[int],
         suffixes: tuple[str, ...] = ("", "-wal", "-shm"),
     ) -> dict[str, object]:
-        pinned = original_pin(store, connection, descriptors_before, suffixes)
+        pinned = original_pin(store, connection, suffixes)
         if "-wal" in suffixes:
             Path(f"{path}-wal").chmod(0o644)
         return pinned
