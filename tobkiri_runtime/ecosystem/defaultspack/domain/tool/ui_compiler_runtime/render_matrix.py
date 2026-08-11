@@ -456,6 +456,7 @@ def _system_browser_candidates() -> list[str]:
 
     system = platform.system().lower()
     candidates: list[str] = []
+    path_names: tuple[str, ...]
     if system == "darwin":
         app_bundles = (
             ("Google Chrome.app", "Google Chrome"),
