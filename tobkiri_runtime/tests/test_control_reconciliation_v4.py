@@ -14,6 +14,7 @@ import time
 import pytest
 
 import core_runtime.control_reconciliation_v4 as reconciliation
+import core_runtime.process_identity as process_identity
 from core_runtime.control_reconciliation_v4 import (
     ControlReconciliationError,
     ControlReconciliationStore,
@@ -560,6 +561,7 @@ def test_process_probe_errors_are_unknown_not_dead(
     monkeypatch: pytest.MonkeyPatch,
     probe_error: BaseException,
 ) -> None:
+    monkeypatch.setattr(process_identity, "_is_darwin", lambda: False)
     monkeypatch.setattr(
         reconciliation.os, "kill", lambda _pid, _signal: (_ for _ in ()).throw(PermissionError())
     )
