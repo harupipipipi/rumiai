@@ -349,7 +349,9 @@ jobs:
             tobkiri_runtime/tests/test_phase_a_setup_api.py::TestCompleteSetup::test_setup_complete_is_typed_retired_route_without_writes \
             scripts/quality/test_launcher_frontend_routes.py \
             scripts/quality/test_presentation_catalog_v4.py \
+            scripts/quality/test_release_controls.py \
             tobkiri_launcher/scripts/tests/test_package_presentation_artifact.py \
+            tobkiri_launcher/scripts/tests/test_package_macos_dmg.py \
             tobkiri_launcher/scripts/tests/test_verify_presentation_release.py \
             tobkiri_runtime/tests/test_defaultspack_integrity_scan.py \
             tobkiri_runtime/tests/test_tobkiri_host_v4_composition.py \

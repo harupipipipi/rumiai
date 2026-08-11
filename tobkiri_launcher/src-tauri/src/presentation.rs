@@ -11,8 +11,9 @@ use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Child, Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result as AnyResult};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -34,6 +35,12 @@ const SELECTION_SCHEMA: &str = "io.tobkiri.launcher.profile-selection.v4";
 const RELEASE_SCHEMA: &str = "io.tobkiri.shell.release.v4";
 const RELEASE_FILE: &str = "presentation_release.v4.json";
 const LAUNCHER_PANEL_PORT: u16 = 8765;
+// Both macOS waits stay below the Shell handoff's 60-second validity window.
+// A suspended or unresponsive Shell therefore cannot turn an expired handoff
+// into a successful Launcher response.
+const MACOS_LAUNCH_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
+const MACOS_HANDOFF_ACK_TIMEOUT: Duration = Duration::from_secs(15);
+const LAUNCH_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const PRESENTATION_CALLER_DENIED: &str =
     "presentation access is unavailable from this Launcher window";
 
@@ -532,9 +539,130 @@ fn verified_launch_spec(
     }
 }
 
+trait LaunchProcess {
+    fn try_wait_success(&mut self) -> io::Result<Option<bool>>;
+
+    fn terminate(&mut self) -> io::Result<()>;
+}
+
+impl LaunchProcess for Child {
+    fn try_wait_success(&mut self) -> io::Result<Option<bool>> {
+        self.try_wait()
+            .map(|status| status.map(|exit_status| exit_status.success()))
+    }
+
+    fn terminate(&mut self) -> io::Result<()> {
+        if self.try_wait()?.is_some() {
+            return Ok(());
+        }
+        if let Err(error) = self.kill() {
+            if self.try_wait()?.is_none() {
+                return Err(error);
+            }
+        }
+        self.wait().map(|_| ())
+    }
+}
+
+fn wait_for_launch_success<P: LaunchProcess>(process: &mut P) -> AnyResult<()> {
+    let started = Instant::now();
+    wait_for_launch_success_with(
+        process,
+        MACOS_LAUNCH_COMMAND_TIMEOUT,
+        || started.elapsed(),
+        thread::sleep,
+    )
+}
+
+fn wait_for_launch_success_with<P, C, S>(
+    process: &mut P,
+    timeout: Duration,
+    mut elapsed: C,
+    mut sleep: S,
+) -> AnyResult<()>
+where
+    P: LaunchProcess,
+    C: FnMut() -> Duration,
+    S: FnMut(Duration),
+{
+    loop {
+        if let Some(success) = process
+            .try_wait_success()
+            .context("failed to inspect verified Shell launch command")?
+        {
+            if success {
+                return Ok(());
+            }
+            bail!("verified Shell launch command exited unsuccessfully");
+        }
+
+        if elapsed() >= timeout {
+            process
+                .terminate()
+                .context("failed to terminate timed-out verified Shell launch command")?;
+            bail!(
+                "verified Shell launch command timed out after {} ms",
+                timeout.as_millis()
+            );
+        }
+        sleep(LAUNCH_POLL_INTERVAL);
+    }
+}
+
+fn handoff_was_consumed(path: &Path) -> io::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(false),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(error),
+    }
+}
+
+fn wait_for_handoff_consumed(path: &Path) -> AnyResult<()> {
+    let started = Instant::now();
+    wait_for_handoff_consumed_with(
+        path,
+        MACOS_HANDOFF_ACK_TIMEOUT,
+        handoff_was_consumed,
+        || started.elapsed(),
+        thread::sleep,
+    )
+}
+
+fn wait_for_handoff_consumed_with<A, C, S>(
+    path: &Path,
+    timeout: Duration,
+    mut acknowledged: A,
+    mut elapsed: C,
+    mut sleep: S,
+) -> AnyResult<()>
+where
+    A: FnMut(&Path) -> io::Result<bool>,
+    C: FnMut() -> Duration,
+    S: FnMut(Duration),
+{
+    loop {
+        if acknowledged(path).with_context(|| {
+            format!(
+                "failed to inspect verified Shell handoff acknowledgement at {}",
+                path.display()
+            )
+        })? {
+            return Ok(());
+        }
+
+        if elapsed() >= timeout {
+            bail!(
+                "timed out waiting for verified Shell to consume handoff after {} ms",
+                timeout.as_millis()
+            );
+        }
+        sleep(LAUNCH_POLL_INTERVAL);
+    }
+}
+
 fn launch_verified_artifact(artifact_path: &Path, handoff_path: &Path) -> AnyResult<()> {
     let spec = verified_launch_spec(current_platform(), artifact_path, handoff_path)?;
-    Command::new(&spec.program)
+    let mut process = Command::new(&spec.program)
         .args(&spec.args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -546,6 +674,15 @@ fn launch_verified_artifact(artifact_path: &Path, handoff_path: &Path) -> AnyRes
                 artifact_path.display()
             )
         })?;
+
+    if current_platform() == "macos" {
+        // `/usr/bin/open` is only a LaunchServices request. Its spawn result
+        // does not say whether the request itself succeeded or whether the
+        // Shell ever consumed the authenticated handoff.
+        wait_for_launch_success(&mut process)?;
+        wait_for_handoff_consumed(handoff_path)?;
+    }
+
     Ok(())
 }
 
@@ -2426,6 +2563,77 @@ mod tests {
             .args
             .iter()
             .all(|arg| !arg.to_string_lossy().contains("rumi_local_auth")));
+    }
+
+    #[derive(Default)]
+    struct FakeLaunchProcess {
+        observations: Vec<Option<bool>>,
+        terminated: bool,
+    }
+
+    impl LaunchProcess for FakeLaunchProcess {
+        fn try_wait_success(&mut self) -> io::Result<Option<bool>> {
+            Ok(if self.observations.is_empty() {
+                None
+            } else {
+                self.observations.remove(0)
+            })
+        }
+
+        fn terminate(&mut self) -> io::Result<()> {
+            self.terminated = true;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn injected_macos_launch_failure_is_not_reported_as_success() {
+        let mut process = FakeLaunchProcess {
+            observations: vec![Some(false)],
+            ..Default::default()
+        };
+        let error = wait_for_launch_success_with(
+            &mut process,
+            Duration::from_secs(1),
+            || Duration::ZERO,
+            |_| {},
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("exited unsuccessfully"));
+        assert!(!process.terminated);
+    }
+
+    #[test]
+    fn injected_macos_launch_timeout_terminates_the_child() {
+        let mut process = FakeLaunchProcess {
+            observations: vec![None],
+            ..Default::default()
+        };
+        let error = wait_for_launch_success_with(
+            &mut process,
+            Duration::from_secs(1),
+            || Duration::from_secs(1),
+            |_| {},
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("timed out"));
+        assert!(process.terminated);
+    }
+
+    #[test]
+    fn injected_macos_handoff_without_ack_fails_closed() {
+        let error = wait_for_handoff_consumed_with(
+            Path::new("handoff-test.json"),
+            Duration::from_secs(1),
+            |_| Ok(false),
+            || Duration::from_secs(1),
+            |_| {},
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("consume handoff"));
     }
 
     #[test]

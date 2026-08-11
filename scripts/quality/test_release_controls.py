@@ -4,6 +4,7 @@ import base64
 import hashlib
 import importlib.util
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -327,8 +328,40 @@ def test_release_workflow_has_one_gather_attestation_and_no_matrix_draft_upload(
     workflow = yaml.safe_load(workflow_text)
     permissions = workflow["permissions"]
     assert permissions == {"contents": "read"}
-    assert workflow_text.count("actions/attest-build-provenance@v2") == 1
-    assert workflow_text.count("softprops/action-gh-release@v2") == 1
+    gather_job = workflow["jobs"]["gather"]
+    assert gather_job["permissions"] == {
+        "actions": "read",
+        "attestations": "write",
+        "contents": "write",
+        "id-token": "write",
+    }
+    gather_block = re.search(
+        r"(?ms)^  gather:\n.*?(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+        workflow_text,
+    )
+    assert gather_block is not None
+    pinned_actions = {
+        "actions/checkout": "v4.2.2",
+        "actions/setup-python": "v5.6.0",
+        "actions/download-artifact": "v4.3.0",
+        "actions/attest-build-provenance": "v2.2.2",
+        "softprops/action-gh-release": "v2.3.2",
+    }
+    gather_uses = [
+        step["uses"]
+        for step in gather_job["steps"]
+        if isinstance(step, dict) and "uses" in step
+    ]
+    assert len(gather_uses) == len(pinned_actions)
+    for uses in gather_uses:
+        action, sha = uses.rsplit("@", 1)
+        assert action in pinned_actions
+        assert re.fullmatch(r"[0-9a-f]{40}", sha)
+        version = pinned_actions[action]
+        assert re.search(
+            rf"(?m)^\s+uses:\s+{re.escape(action)}@{sha}\s+#\s+{re.escape(version)}\s*$",
+            gather_block.group(0),
+        )
     assert "github.sha" not in workflow_text
     assert workflow_text.count("fetch-depth: 0") == 2
     assert workflow_text.count('"git", "rev-parse", "--verify", "HEAD"') == 2
