@@ -59,10 +59,10 @@ export function Header() {
       <div className="flex min-w-0 items-center gap-3">
         <div className="md:hidden">
           <Popover>
-            <PopoverTrigger className="rounded-md p-2 text-text-muted transition hover:bg-bg-hover hover:text-text-main" aria-label={t('nav.open_menu')} aria-haspopup="menu">
+            <PopoverTrigger className="rounded-md p-2 text-text-muted transition hover:bg-bg-hover hover:text-text-main" aria-label={t('nav.open_menu')} aria-haspopup="dialog">
               <Menu className="h-4 w-4" />
             </PopoverTrigger>
-            <PopoverContent align="left" className="w-64" role="menu" aria-label={t('nav.mobile_navigation')}>
+            <PopoverContent align="left" className="w-64" role="dialog" aria-label={t('nav.mobile_navigation')}>
               <nav aria-label={t('nav.mobile_navigation')} className="max-h-[70vh] overflow-y-auto p-1">
                 {viewerNavGroups.map((group) => (
                   <div key={group.id} className="py-1">
@@ -77,10 +77,9 @@ export function Header() {
                           <Link
                             key={route}
                             to={meta.path}
-                            role="menuitem"
                             aria-current={isActive ? 'page' : undefined}
                             className={cn(
-                              "rounded-md px-3 py-2 text-sm transition-colors",
+                              "min-h-11 rounded-md px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]",
                               isActive ? "bg-accent/8 text-accent" : "text-text-muted hover:bg-bg-hover hover:text-text-main",
                             )}
                           >

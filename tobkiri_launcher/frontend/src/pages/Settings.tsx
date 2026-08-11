@@ -28,7 +28,7 @@ export function Settings() {
     <AdvancedSurfaceFrame
       descriptor={descriptor}
       state={{status: surface.status, stale: surface.stale, error: surface.error}}
-      onRetry={() => void surface.refresh()}
+      onRetry={() => void surface.refresh(true)}
     >
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>

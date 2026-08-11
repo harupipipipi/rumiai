@@ -17,7 +17,7 @@ export function ApiMap() {
     <AdvancedSurfaceFrame
       descriptor={descriptor}
       state={{status: surface.status, stale: surface.stale, error: surface.error}}
-      onRetry={() => void surface.refresh()}
+      onRetry={() => void surface.refresh(true)}
     >
       {surface.data ? <RuntimeEvidenceCard envelope={surface.data} title="Contract map provenance" /> : null}
       {surface.status === 'ready' && routes && routes.length > 0 ? (

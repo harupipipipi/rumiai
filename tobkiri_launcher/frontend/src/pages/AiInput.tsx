@@ -47,7 +47,7 @@ export function AiInput() {
     selectedOperation,
   );
   const refreshAiInput = async () => {
-    await surface.refresh();
+    await surface.refresh(true);
     await invocation.reconcileUnknown();
   };
 

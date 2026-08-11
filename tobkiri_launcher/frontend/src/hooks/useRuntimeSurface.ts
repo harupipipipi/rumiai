@@ -99,6 +99,12 @@ export function useRuntimeSurface<T>(
     } catch (error) {
       if (requestVersion.current !== currentRequest) return;
       const code = classifyRuntimeSurfaceError(error);
+      if (code === 'STALE' || code === 'DIGEST_MISMATCH') {
+        // The captured guard is no longer authoritative. Keep the accepted
+        // envelope visible and read-only, but let the next explicit retry
+        // perform an unguarded authoritative read.
+        acceptedSnapshot.current = null;
+      }
       setState((current) => ({
         ...current,
         status: statusForError(code),

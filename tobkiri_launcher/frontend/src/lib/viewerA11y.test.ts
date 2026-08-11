@@ -30,11 +30,10 @@ test('viewer shell has a mobile navigation fallback and persistent desktop sideb
 
   assert.match(sidebar, /hidden[\s\S]*md:flex/);
   assert.match(header, /aria-label=\{t\('nav.open_menu'\)\}/);
-  assert.match(header, /aria-haspopup="menu"/);
   assert.match(header, /aria-haspopup="dialog"/);
-  assert.match(header, /role="menu"/);
-  assert.match(header, /role="menuitem"/);
   assert.match(header, /role="dialog"/);
+  assert.doesNotMatch(header, /aria-haspopup="menu"/);
+  assert.doesNotMatch(header, /role="menu(item)?"/);
   assert.match(header, /aria-label="Profile menu"/);
   assert.match(header, /viewerNavGroups\.map/);
   assert.match(header, /aria-label=\{t\('nav.mobile_navigation'\)\}/);

@@ -111,10 +111,10 @@ test('Profile ceremony sends exact staged payloads and requires the authoritativ
       runtime_surface_api_version: RUNTIME_SURFACE_API_VERSION,
       state: 'active',
       profile_id: 'defaults',
-      activation_id: 'activation-two',
+      activation_id: 'activation:defaults-one',
       plan_digest: digest('b'),
       security_epoch: 4,
-      fencing_token: 8,
+      fencing_token: 7,
       authoritative_snapshot: snapshot,
     },
   ], calls));
@@ -352,6 +352,33 @@ test('Profile approval and activate snapshots remain digest-bound to the Kernel 
     mismatchedSnapshotClient.activate({approval_id: 'approval-one', approval_digest: digest('3')}),
     (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'DIGEST_MISMATCH',
   );
+});
+
+test('Profile activation rejects top-level metadata that disagrees with the authoritative activation record', async () => {
+  const mismatches = [
+    ['activation_id', 'activation:defaults-two'],
+    ['security_epoch', 5],
+    ['fencing_token', 8],
+  ] as const;
+
+  for (const [field, value] of mismatches) {
+    const client = createProfileCeremonyClient(undefined, queuedTransport([{
+      runtime_surface_api_version: RUNTIME_SURFACE_API_VERSION,
+      state: 'active',
+      profile_id: 'defaults',
+      activation_id: field === 'activation_id' ? value : 'activation:defaults-one',
+      plan_digest: digest('b'),
+      security_epoch: field === 'security_epoch' ? value : 4,
+      fencing_token: field === 'fencing_token' ? value : 7,
+      authoritative_snapshot: profileSnapshot(),
+    }], []));
+
+    await assert.rejects(
+      client.activate({approval_id: 'approval-one', approval_digest: digest('3')}),
+      (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'DIGEST_MISMATCH',
+      `expected ${field} mismatch to fail closed`,
+    );
+  }
 });
 
 test('Profile ceremony rejects client approval flags and non-digest guards before transport', async () => {

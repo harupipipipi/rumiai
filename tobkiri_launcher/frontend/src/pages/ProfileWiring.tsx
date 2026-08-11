@@ -19,7 +19,7 @@ export function ProfileWiring() {
     <AdvancedSurfaceFrame
       descriptor={descriptor}
       state={{status: surface.status, stale: surface.stale, error: surface.error}}
-      onRetry={() => void surface.refresh()}
+      onRetry={() => void surface.refresh(true)}
     >
       {surface.data ? <RuntimeEvidenceCard envelope={surface.data} title="Profile wiring provenance" /> : null}
       {surface.status === 'ready' && bindings && bindings.length > 0 ? (

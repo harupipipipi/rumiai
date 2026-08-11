@@ -83,7 +83,7 @@ export function Flow() {
     selectedOperation,
   );
   const refreshFlow = async () => {
-    await surface.refresh();
+    await surface.refresh(true);
     await invocation.reconcileUnknown();
   };
 

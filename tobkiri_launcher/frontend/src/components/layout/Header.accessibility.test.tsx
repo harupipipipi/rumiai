@@ -155,7 +155,7 @@ test('Header avatar is an actionable Profile/Settings entry with focus, Escape, 
   }
 });
 
-test('mobile navigation exposes a named menu, moves focus, and closes on Escape or selection', {concurrency: false}, async () => {
+test('mobile navigation exposes ordinary named links, moves focus, and closes on Escape or selection', {concurrency: false}, async () => {
   const release = await acquireDomTestLock();
   const globalSurfaceSnapshot = captureGlobalSurface();
   let surface: Surface | undefined;
@@ -171,30 +171,37 @@ test('mobile navigation exposes a named menu, moves focus, and closes on Escape 
     });
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Open navigation"]');
     assert.ok(trigger);
-    assert.equal(trigger.getAttribute('aria-haspopup'), 'menu');
+    assert.equal(trigger.getAttribute('aria-haspopup'), 'dialog');
     assert.equal(trigger.getAttribute('aria-expanded'), 'false');
 
     await act(async () => { trigger.click(); await nextTick(); });
-    const menu = dom.window.document.querySelector<HTMLElement>('[role="menu"][aria-label="Mobile navigation"]');
-    assert.ok(menu);
+    const navigationDialog = dom.window.document.querySelector<HTMLElement>('[role="dialog"][aria-label="Mobile navigation"]');
+    assert.ok(navigationDialog);
+    assert.equal(dom.window.document.querySelector('[role="menu"][aria-label="Mobile navigation"]'), null);
+    assert.equal(navigationDialog.querySelector('[role="menuitem"]'), null);
+    const navigation = navigationDialog.querySelector<HTMLElement>('nav[aria-label="Mobile navigation"]');
+    assert.ok(navigation);
     assert.equal(trigger.getAttribute('aria-expanded'), 'true');
-    assert.equal(trigger.getAttribute('aria-controls'), menu.id);
-    const firstItem = menu.querySelector<HTMLElement>('[role="menuitem"]');
-    assert.ok(firstItem);
-    await waitForFocus(dom, firstItem);
+    assert.equal(trigger.getAttribute('aria-controls'), navigationDialog.id);
+    const firstLink = navigation.querySelector<HTMLAnchorElement>('a[href]');
+    assert.ok(firstLink);
+    assert.equal(firstLink.getAttribute('role'), null);
+    await waitForFocus(dom, firstLink);
 
     await act(async () => {
       dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', {key: 'Escape'}));
       await nextTick();
     });
-    assert.equal(dom.window.document.querySelector('[role="menu"][aria-label="Mobile navigation"]'), null);
+    assert.equal(dom.window.document.querySelector('[role="dialog"][aria-label="Mobile navigation"]'), null);
     assert.ok(dom.window.document.activeElement === trigger);
 
     await act(async () => { trigger.click(); await nextTick(); });
-    const packsLink = dom.window.document.querySelector<HTMLAnchorElement>('[role="menuitem"][href="/packs"]');
+    const packsLink = dom.window.document.querySelector<HTMLAnchorElement>('[role="dialog"][aria-label="Mobile navigation"] a[href="/packs"]');
     assert.ok(packsLink);
+    packsLink.focus();
+    assert.equal(dom.window.document.activeElement, packsLink);
     await act(async () => { packsLink.click(); await nextTick(); });
-    assert.equal(dom.window.document.querySelector('[role="menu"][aria-label="Mobile navigation"]'), null);
+    assert.equal(dom.window.document.querySelector('[role="dialog"][aria-label="Mobile navigation"]'), null);
   } finally {
     await cleanupSurface(surface, globalSurfaceSnapshot, release);
   }

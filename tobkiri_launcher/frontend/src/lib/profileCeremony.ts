@@ -426,13 +426,23 @@ export function validateProfileActivateResult(value: unknown): ProfileActivateRe
     'profile',
     result.authoritative_snapshot,
   );
+  const authoritativeData = isRecord(authoritativeSnapshot.data)
+    ? authoritativeSnapshot.data
+    : null;
+  const authoritativeActivationRecord = authoritativeData && isRecord(authoritativeData.activation_record)
+    ? authoritativeData.activation_record
+    : null;
   if (
     authoritativeSnapshot.profile_id !== profileId
     || authoritativeSnapshot.plan_digest !== planDigest
+    || !authoritativeActivationRecord
+    || authoritativeActivationRecord.activation_id !== activationId
+    || authoritativeActivationRecord.security_epoch !== securityEpoch
+    || authoritativeActivationRecord.fencing_token !== fencingToken
   ) {
     throw new RuntimeSurfaceError(
       'DIGEST_MISMATCH',
-      'Profile activation snapshot does not match the activated Profile and Plan.',
+      'Profile activation metadata does not match the authoritative activation record.',
     );
   }
   return {
