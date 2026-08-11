@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import {useNavigate} from 'react-router';
 import {CheckCircle2} from 'lucide-react';
 import {useAppStore} from '@/src/store';
@@ -27,6 +27,7 @@ import {
   normalizePresentationSelection,
 } from '@/src/lib/presentation';
 import {LAUNCHER_DISPLAY_NAME} from '@/src/lib/launcherBrand';
+import {formatPackVMRecoveryError} from '@/src/lib/packvmLifecycle';
 import {DefaultsReview} from './DefaultsReview';
 
 function message(error: unknown, fallback: string): string {
@@ -56,6 +57,7 @@ export function Setup() {
   const [presentationLaunching, setPresentationLaunching] = useState(false);
   const [presentationError, setPresentationError] = useState<string | null>(null);
   const [complete, setComplete] = useState(false);
+  const activationInFlightRef = useRef(false);
   const profileReconfirmationRequired = runtimeStatus === 'profile_reconfirmation_required';
 
   const loadPresentation = useCallback(async () => {
@@ -91,27 +93,47 @@ export function Setup() {
   }, [loadPresentation]);
 
   const reconcileActiveRuntime = useCallback(async () => {
-      await refreshRuntimeHealth();
-      if (useAppStore.getState().runtimeStatus !== 'runtime_ready') {
-        throw new Error(
-          'Defaults activation completed without a verified runtime dispatch map. Retry after the Host is ready.',
-        );
-      }
-      const packVmDoctor = await refreshPackVMDoctor();
-      if (!packVmDoctor?.ready) {
-        throw new Error(
-          'Defaults activation completed, but PackVM readiness could not be verified.',
-        );
-      }
-      await Promise.all([
-        loadPacks(true, {skipMutationReconciliation: true}),
-        loadFrontendCatalog(true),
-      ]);
-      const refreshedState = useAppStore.getState();
-      if (refreshedState.packsError || refreshedState.frontendCatalogError) {
-        throw new Error('Authoritative Pack projections could not be reconciled.');
-      }
+    await refreshRuntimeHealth();
+    const runtimeState = useAppStore.getState();
+    if (runtimeState.runtimeStatus !== 'runtime_ready') {
+      throw new Error(formatPackVMRecoveryError(
+        runtimeState.runtimeError,
+        'Defaults activation completed without a verified runtime dispatch map.',
+      ));
+    }
+
+    // Setup owns the authoritative sequence below. The store's normal doctor
+    // refresh may hydrate projections for PackVM pages, but doing that here
+    // would issue a second load before this reconciliation has verified health.
+    const packVmDoctor = await refreshPackVMDoctor({reconcile: false});
+    if (!packVmDoctor?.ready) {
+      const currentState = useAppStore.getState();
+      throw new Error(formatPackVMRecoveryError(
+        currentState.packVmError ?? packVmDoctor?.reason,
+        'PackVM readiness could not be verified.',
+      ));
+    }
+
+    await Promise.all([
+      loadPacks(true, {skipMutationReconciliation: true}),
+      loadFrontendCatalog(true),
+    ]);
+    const refreshedState = useAppStore.getState();
+    const projectionError = refreshedState.packsError || refreshedState.frontendCatalogError;
+    if (projectionError) {
+      throw new Error(formatPackVMRecoveryError(
+        projectionError,
+        'Authoritative Pack projections could not be reconciled.',
+      ));
+    }
+    try {
       await refreshMountedRuntimeSurfaces();
+    } catch (error) {
+      throw new Error(formatPackVMRecoveryError(
+        error,
+        'Mounted runtime surfaces could not be reconciled.',
+      ));
+    }
   }, [loadFrontendCatalog, loadPacks, refreshMountedRuntimeSurfaces, refreshPackVMDoctor, refreshRuntimeHealth]);
 
   const applyRecoveryResult = useCallback(async (
@@ -139,32 +161,37 @@ export function Setup() {
   }, [addToast, loadPresentation]);
 
   const recoverActivation = useCallback(async () => {
-    if (activating) return;
+    if (activationInFlightRef.current) return;
+    activationInFlightRef.current = true;
     setActivating(true);
     setSetupError(null);
-    const result = await recoverDefaultsActivation({
-      fetchAuthoritativeSetup: fetchDefaultsSetupState,
-      reconcileActiveRuntime,
-    });
     try {
+      const result = await recoverDefaultsActivation({
+        fetchAuthoritativeSetup: fetchDefaultsSetupState,
+        reconcileActiveRuntime,
+      });
       await applyRecoveryResult(result);
     } finally {
+      activationInFlightRef.current = false;
       setActivating(false);
     }
-  }, [activating, applyRecoveryResult, reconcileActiveRuntime]);
+  }, [applyRecoveryResult, reconcileActiveRuntime]);
 
   const activate = async () => {
     if (activationCommitted || !setup || setup.state !== 'review_required' || !reviewed) return;
+    if (activationInFlightRef.current) return;
+    activationInFlightRef.current = true;
     setActivating(true);
     setSetupError(null);
-    const result = await activateDefaultsWithRecovery({
-      submitActivation: () => activateDefaultsProfile(setup.recommended_default_profile.confirmation),
-      fetchAuthoritativeSetup: fetchDefaultsSetupState,
-      reconcileActiveRuntime,
-    });
     try {
+      const result = await activateDefaultsWithRecovery({
+        submitActivation: () => activateDefaultsProfile(setup.recommended_default_profile.confirmation),
+        fetchAuthoritativeSetup: fetchDefaultsSetupState,
+        reconcileActiveRuntime,
+      });
       await applyRecoveryResult(result);
     } finally {
+      activationInFlightRef.current = false;
       setActivating(false);
     }
   };

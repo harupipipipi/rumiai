@@ -29,6 +29,92 @@ export class PackVMLifecycleProtocolError extends Error {
   }
 }
 
+/** Stable, safe diagnostics used when Setup reconciles an active PackVM. */
+export const PACKVM_RECOVERY_CODES = [
+  'PROFILE_NOT_ACTIVE',
+  'STALE_REVISION',
+  'DIGEST_MISMATCH',
+  'UNAPPROVED',
+  'TIMEOUT',
+  'API_FAILURE',
+] as const;
+
+export type PackVMRecoveryCode = typeof PACKVM_RECOVERY_CODES[number];
+
+const PACKVM_RECOVERY_MESSAGES: Record<PackVMRecoveryCode, string> = {
+  PROFILE_NOT_ACTIVE: 'The active Defaults Profile is unavailable; PackVM remains blocked.',
+  STALE_REVISION: 'The verified Profile revision is stale; refresh authoritative state before retrying.',
+  DIGEST_MISMATCH: 'Integrity verification failed: the Profile, Pack v4 lock, and presentation catalog do not agree.',
+  UNAPPROVED: 'Host approval is required; no PackVM operation was replayed.',
+  TIMEOUT: 'PackVM reconciliation timed out; no PackVM operation was replayed.',
+  API_FAILURE: 'PackVM reconciliation could not be verified; retry only after the Host is healthy.',
+};
+
+function isRecoveryRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function recoveryCodeFromString(value: string): PackVMRecoveryCode | null {
+  const candidate = value.trim().toUpperCase().replace(/[\s.-]+/g, '_');
+  if (candidate === 'INTEGRITY_MISMATCH' || candidate.endsWith('DIGEST_MISMATCH')) {
+    return 'DIGEST_MISMATCH';
+  }
+  if (candidate === 'STALE' || candidate.endsWith('STALE_REVISION')) return 'STALE_REVISION';
+  if (candidate === 'PROFILE_NOT_ACTIVE' || candidate.endsWith('PROFILE_NOT_ACTIVE')) {
+    return 'PROFILE_NOT_ACTIVE';
+  }
+  if (candidate === 'UNAPPROVED' || candidate.endsWith('UNAPPROVED')) return 'UNAPPROVED';
+  if (candidate === 'TIMEOUT' || candidate.endsWith('TIMEOUT')) return 'TIMEOUT';
+  if (candidate === 'API_FAILURE' || candidate.endsWith('API_FAILURE')) return 'API_FAILURE';
+  return null;
+}
+
+/** Classify a Host/API failure without exposing private backend diagnostics. */
+export function classifyPackVMRecoveryCode(error: unknown): PackVMRecoveryCode {
+  const errorRecord = isRecoveryRecord(error) ? error : null;
+  const data = errorRecord && isRecoveryRecord(errorRecord.data) ? errorRecord.data : null;
+  const typedCode = [
+    data?.code,
+    errorRecord?.code,
+  ].find((value): value is string => typeof value === 'string');
+  const structuredCode = typedCode ? recoveryCodeFromString(typedCode) : null;
+  if (structuredCode) return structuredCode;
+
+  const errorName = errorRecord?.name;
+  if (errorName === 'ApiRequestTimeoutError' || errorName === 'AbortError') return 'TIMEOUT';
+  const text = error instanceof Error
+    ? error.message.toLowerCase()
+    : typeof error === 'string'
+      ? error.toLowerCase()
+      : '';
+  if (
+    text.includes('digest')
+    || text.includes('integrity')
+    || (text.includes('catalog') && text.includes('lock'))
+  ) return 'DIGEST_MISMATCH';
+  if (text.includes('stale') || text.includes('revision')) return 'STALE_REVISION';
+  if (text.includes('not active') || text.includes('profile_not_active')) {
+    return 'PROFILE_NOT_ACTIVE';
+  }
+  if (text.includes('approval') || text.includes('unapproved') || text.includes('denied')) {
+    return 'UNAPPROVED';
+  }
+  if (text.includes('timeout') || text.includes('timed out') || text.includes('aborted')) {
+    return 'TIMEOUT';
+  }
+  return 'API_FAILURE';
+}
+
+/** Return a typed, non-sensitive recovery message for Setup and toasts. */
+export function formatPackVMRecoveryError(
+  error: unknown,
+  fallback = PACKVM_RECOVERY_MESSAGES.API_FAILURE,
+): string {
+  const code = classifyPackVMRecoveryCode(error);
+  const detail = code === 'API_FAILURE' ? fallback : PACKVM_RECOVERY_MESSAGES[code];
+  return `${code}: ${detail}`;
+}
+
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new PackVMLifecycleProtocolError('Tobkiri returned an invalid PackVM lifecycle response.');

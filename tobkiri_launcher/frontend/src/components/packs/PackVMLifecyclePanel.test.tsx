@@ -61,13 +61,17 @@ const consent = {
   image_download_approved: true,
 };
 
-function operation(state: 'queued' | 'cancelled' | 'interrupted' | 'succeeded', overrides = {}) {
+function operation(
+  state: 'queued' | 'cancelled' | 'interrupted' | 'succeeded' | 'failed',
+  overrides = {},
+) {
   return {
     operation_id: operationId,
     operation_kind: 'provision',
     state,
     plan_digest: plan.plan_digest,
     updated_unix: 1,
+    ...(state === 'failed' ? {error: 'PackVM doctor failed'} : {}),
     ...(state === 'succeeded' ? {doctor: healthyDoctor} : {}),
     ...overrides,
   };
@@ -290,6 +294,32 @@ test('PackVM GUI clears a timeout and keeps the ceremony retryable', {concurrenc
   await settle();
   assert.match(surface.container.textContent ?? '', /timed out after 10000ms/);
   assert.equal(buttonWithText(surface.container, 'Prepare plan').disabled, false);
+});
+
+test('PackVM GUI displays typed failure diagnostics from authoritative progress', {concurrency: false}, async () => {
+  configureStore();
+  writeSafeStorageValue(getBrowserStorage('local'), 'tobkiri-launcher-packvm-operation', operationId);
+  installFetch(async (route) => {
+    assert.equal(route, `/api/v4/packvm/progress?operation_id=${operationId}`);
+    return jsonResponse(operation('failed', {
+      error_type: 'PackVMReconciliationRequired',
+      diagnostic: {
+        code: 'packvm_lima_process_failed',
+        stage: 'doctor',
+        kind: 'exit',
+        exit_code: 23,
+        stderr: 'catalog/profile digest mismatch',
+      },
+    }));
+  });
+  assert.ok(surface);
+  await renderPanel(surface.root);
+  await settle();
+  assert.match(surface.container.textContent ?? '', /PackVMReconciliationRequired/);
+  assert.match(surface.container.textContent ?? '', /packvm_lima_process_failed/);
+  assert.match(surface.container.textContent ?? '', /doctor/);
+  assert.match(surface.container.textContent ?? '', /catalog\/profile digest mismatch/);
+  assert.ok(surface.container.querySelector('[aria-label="Typed PackVM failure diagnostic"]'));
 });
 
 test('PackVM GUI cancels only a queued operation', {concurrency: false}, async () => {

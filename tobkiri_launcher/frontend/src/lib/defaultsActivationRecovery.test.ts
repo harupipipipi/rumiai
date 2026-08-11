@@ -125,3 +125,38 @@ test('verification retry converges after an authoritative GET failure without PO
   assert.equal(second.state?.state, 'active');
   assert.equal(second.error, null);
 });
+
+test('persistent integrity drift stays blocked until a later authoritative retry is healthy', async () => {
+  let fetchCount = 0;
+  let reconcileCount = 0;
+  let corrected = false;
+
+  const dependencies = {
+    fetchAuthoritativeSetup: async () => {
+      fetchCount += 1;
+      return setupState('active');
+    },
+    reconcileActiveRuntime: async () => {
+      reconcileCount += 1;
+      if (!corrected) {
+        throw new Error(
+          'DIGEST_MISMATCH: the Profile, Pack v4 lock, and presentation catalog disagree',
+        );
+      }
+    },
+  };
+
+  const blocked = await recoverDefaultsActivation(dependencies);
+  assert.equal(blocked.state?.state, 'active');
+  assert.equal(blocked.activationCommitted, true);
+  assert.match(String(blocked.error), /DIGEST_MISMATCH/);
+  assert.equal(fetchCount, 1);
+  assert.equal(reconcileCount, 1);
+
+  corrected = true;
+  const recovered = await recoverDefaultsActivation(dependencies);
+  assert.equal(recovered.state?.state, 'active');
+  assert.equal(recovered.error, null);
+  assert.equal(fetchCount, 2);
+  assert.equal(reconcileCount, 2);
+});

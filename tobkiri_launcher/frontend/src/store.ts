@@ -30,6 +30,7 @@ import type {ColorMode, Theme} from './lib/appearance';
 import {AVATAR_OPTIONS, DEFAULT_AVATAR} from './lib/avatar';
 import {refreshMountedRuntimeSurfaces} from './lib/runtimeSurfaceRefresh';
 import {PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST} from './lib/generatedFrontendContractMap';
+import {formatPackVMRecoveryError} from './lib/packvmLifecycle';
 import {
   beginMutation,
   completeMutation,
@@ -117,6 +118,11 @@ export interface Pack {
   dependencies: string[];
 }
 
+export interface PackVMDoctorRefreshOptions {
+  /** Skip projection loads when the caller owns the authoritative sequence. */
+  reconcile?: boolean;
+}
+
 export interface Activity {
   id: number;
   timestamp: string;
@@ -193,7 +199,9 @@ interface AppState {
     options?: {skipMutationReconciliation?: boolean},
   ) => Promise<void>;
   loadFrontendCatalog: (force?: boolean) => Promise<void>;
-  refreshPackVMDoctor: () => Promise<ApiPackVMDoctor | null>;
+  refreshPackVMDoctor: (
+    options?: PackVMDoctorRefreshOptions,
+  ) => Promise<ApiPackVMDoctor | null>;
   setPackVMDoctor: (doctor: ApiPackVMDoctor | null) => void;
   invokePackOperation: (
     packId: string,
@@ -792,7 +800,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
-  refreshPackVMDoctor: () => {
+  refreshPackVMDoctor: (options = {}) => {
     if (packVmDoctorLoadPromise) return packVmDoctorLoadPromise;
     set({packVmDoctorLoading: true, packVmError: null});
     packVmDoctorLoadPromise = (async () => {
@@ -804,7 +812,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             ? null
             : (doctor.reason || 'PackVM is not ready for Pack operations.'),
         });
-        if (doctor.ready) {
+        if (doctor.ready && options.reconcile !== false) {
           await Promise.all([get().loadPacks(), get().loadFrontendCatalog()]);
         } else {
           set({
@@ -814,9 +822,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
         return doctor;
       } catch (error) {
-        const message = error instanceof Error
-          ? error.message
-          : 'PackVM readiness could not be verified.';
+        const message = formatPackVMRecoveryError(
+          error,
+          'PackVM readiness could not be verified.',
+        );
         set({
           packVmDoctor: null,
           packVmError: message,

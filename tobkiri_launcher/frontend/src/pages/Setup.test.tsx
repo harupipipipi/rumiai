@@ -60,6 +60,9 @@ test('setup activation is explicit and followed by selected presentation materia
   assert.match(setupSource, /typeof error === 'string' && error\.trim\(\)/);
   assert.match(setupSource, /refreshRuntimeHealth/);
   assert.match(setupSource, /refreshMountedRuntimeSurfaces/);
+  assert.match(setupSource, /refreshPackVMDoctor\(\{reconcile: false\}\)/);
+  assert.match(setupSource, /formatPackVMRecoveryError/);
+  assert.match(setupSource, /activationInFlightRef/);
   assert.match(setupSource, /runtimeStatus.*runtime_ready/);
   assert.match(setupSource, /activateDefaultsWithRecovery/);
   assert.match(setupSource, /recoverDefaultsActivation/);

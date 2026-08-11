@@ -18,6 +18,7 @@ import {
   cleanupConfirmationForInstance,
   clearPackVMOperationId,
   formatPackVMBytes,
+  formatPackVMRecoveryError,
   isCanonicalPackVMOperationId,
   operationIsPolling,
   operationStatusLabel,
@@ -52,6 +53,49 @@ function digestRow(label: string, value: string): ReactNode {
       <dt className="font-medium text-text-main">{label}</dt>
       <dd className="mt-1 break-all font-mono">{value}</dd>
     </div>
+  );
+}
+
+function failureDiagnostic(operation: ApiPackVMOperation): ReactNode {
+  const diagnostic = operation.diagnostic;
+  if (!operation.error_type && !diagnostic) return null;
+  return (
+    <dl
+      className="mt-3 grid gap-2 rounded-lg border border-red-300/50 bg-red-500/5 p-3 text-xs text-text-muted sm:grid-cols-2"
+      aria-label="Typed PackVM failure diagnostic"
+    >
+      {operation.error_type ? (
+        <div>
+          <dt className="font-medium text-text-main">Failure type</dt>
+          <dd className="mt-1 break-all font-mono">{userSafePackVMError(operation.error_type)}</dd>
+        </div>
+      ) : null}
+      {diagnostic ? (
+        <>
+          <div>
+            <dt className="font-medium text-text-main">Diagnostic code</dt>
+            <dd className="mt-1 break-all font-mono">{userSafePackVMError(diagnostic.code)}</dd>
+          </div>
+          <div>
+            <dt className="font-medium text-text-main">Stage</dt>
+            <dd className="mt-1 break-all font-mono">{userSafePackVMError(diagnostic.stage)}</dd>
+          </div>
+          <div>
+            <dt className="font-medium text-text-main">Process result</dt>
+            <dd className="mt-1 break-all font-mono">
+              {userSafePackVMError(diagnostic.kind)}
+              {diagnostic.exit_code === null ? '' : ` (${diagnostic.exit_code})`}
+            </dd>
+          </div>
+          {diagnostic.stderr ? (
+            <div className="sm:col-span-2">
+              <dt className="font-medium text-text-main">Host diagnostic</dt>
+              <dd className="mt-1 whitespace-pre-wrap break-words">{userSafePackVMError(diagnostic.stderr)}</dd>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </dl>
   );
 }
 
@@ -340,7 +384,10 @@ export function PackVMLifecyclePanel() {
           ) : null}
           {packVmError ? (
             <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200" role="alert">
-              {safeUserError(packVmError, 'PackVM readiness could not be verified.')}
+              {formatPackVMRecoveryError(
+                packVmError,
+                safeUserError(packVmError, 'PackVM readiness could not be verified.'),
+              )}
             </p>
           ) : null}
           {lifecycleError ? (
@@ -358,7 +405,10 @@ export function PackVMLifecyclePanel() {
                     {doctor.ready
                       ? 'The authenticated PackVM supervisor answered the readiness check.'
                       : doctor.reason
-                        ? userSafePackVMError(doctor.reason)
+                        ? formatPackVMRecoveryError(
+                          doctor.reason,
+                          userSafePackVMError(doctor.reason),
+                        )
                         : 'The authenticated PackVM supervisor is not ready.'}
                   </p>
                 </div>
@@ -524,6 +574,7 @@ export function PackVMLifecyclePanel() {
                   {userSafePackVMError(operation.error)}
                 </p>
               ) : null}
+              {operation.state === 'failed' ? failureDiagnostic(operation) : null}
               {operation.state === 'queued' ? (
                 <Button
                   className="mt-4"
