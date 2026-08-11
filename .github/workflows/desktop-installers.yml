@@ -181,6 +181,8 @@ jobs:
 
       - name: Build panel frontend
         working-directory: tobkiri_launcher/frontend
+        env:
+          TOBKIRI_PANEL_BUILD_DIR: ${{ runner.temp }}/tobkiri-panel-build
         run: npm run build
       - name: Build defaultspack frontend
         working-directory: tobkiri_runtime/ecosystem/defaultspack/webapp
@@ -295,6 +297,7 @@ jobs:
         working-directory: tobkiri_launcher
         env:
           TOBKIRI_PRESENTATION_RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
+          TOBKIRI_PANEL_BUILD_DIR: ${{ runner.temp }}/tobkiri-panel-build
         run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.macos.dev.conf.json --bundles app --ci ${{ matrix.signing_args }}
 
       - name: Build macOS DMG installer
@@ -318,6 +321,7 @@ jobs:
         shell: pwsh
         env:
           TOBKIRI_PRESENTATION_RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
+          TOBKIRI_PANEL_BUILD_DIR: ${{ runner.temp }}/tobkiri-panel-build
         run: |
           $ErrorActionPreference = "Continue"
           $PSNativeCommandUseErrorActionPreference = $false
@@ -339,6 +343,7 @@ jobs:
         shell: bash
         env:
           TOBKIRI_PRESENTATION_RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
+          TOBKIRI_PANEL_BUILD_DIR: ${{ runner.temp }}/tobkiri-panel-build
         run: |
           for attempt in 1 2 3; do
             if cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --ci ${{ matrix.signing_args }}; then

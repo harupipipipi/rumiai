@@ -21,11 +21,10 @@ const PRESENTATION_LOCK_FILENAME: &str = "shell_profile_lock.v4.json";
 const RUNTIME_RESOURCE_MANIFEST: &str = "runtime-resource-manifest.v1.json";
 const RUNTIME_RESOURCE_SCHEMA: &str = "io.tobkiri.runtime-resource-manifest.v1";
 const CARGO_TARGET_DIR_ENV: &str = "CARGO_TARGET_DIR";
-const GENERATED_RESOURCE_DIRS: &[&str] = &[
-    "core_runtime/core_pack/core_control_panel/web",
-    "ecosystem/defaultspack/ui",
-    "bundled",
-];
+const PANEL_BUILD_DIR_ENV: &str = "TOBKIRI_PANEL_BUILD_DIR";
+const PANEL_RESOURCE_DIR: &str = "core_runtime/core_pack/core_control_panel/web";
+const GENERATED_RESOURCE_DIRS: &[&str] =
+    &[PANEL_RESOURCE_DIR, "ecosystem/defaultspack/ui", "bundled"];
 const CANONICAL_HOST_INVENTORY: &str = "canonical-files.v1.json";
 const CANONICAL_HOST_INVENTORY_SCHEMA: &str = "io.tobkiri.host-file-inventory.v1";
 const PRESENTATION_CATALOG_SCHEMA: &str = "io.tobkiri.launcher.presentation-catalog.v1";
@@ -50,7 +49,13 @@ fn main() {
     println!("cargo:rerun-if-changed=bundled");
     println!("cargo:rerun-if-changed=bundled/presentation_catalog.json");
     println!("cargo:rerun-if-env-changed={PRESENTATION_RELEASE_ROOT_ENV}");
+    println!("cargo:rerun-if-env-changed={PANEL_BUILD_DIR_ENV}");
     println!("cargo:rerun-if-changed=capabilities");
+
+    if let Some(panel_dir) = configured_panel_build_dir(&PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+    {
+        println!("cargo:rerun-if-changed={}", panel_dir.display());
+    }
 
     warn_legacy_defaultspack_app_bundle();
     stage_runtime_bundle().expect("failed to stage runtime bundle");
@@ -128,7 +133,7 @@ fn stage_runtime_bundle() -> io::Result<()> {
     }
     verify_canonical_host_package(&staged_root, &runtime_root)
         .map_err(|error| stage_error("verify canonical Host package", error))?;
-    copy_generated_resource_dirs(&runtime_root, &staged_root)
+    copy_generated_resource_dirs(&project_dir, &runtime_root, &staged_root)
         .map_err(|error| stage_error("copy generated resources", error))?;
     stage_setup_brand_icon(repo_root, &staged_root)
         .map_err(|error| stage_error("stage setup brand icon", error))?;
@@ -1686,11 +1691,56 @@ fn copy_tracked_runtime_tree(repo_root: &Path, staged_root: &Path) -> io::Result
     Ok(true)
 }
 
-fn copy_generated_resource_dirs(runtime_root: &Path, staged_root: &Path) -> io::Result<()> {
+fn configured_panel_build_dir(project_dir: &Path) -> Option<PathBuf> {
+    let raw = std::env::var_os(PANEL_BUILD_DIR_ENV)?;
+    let configured = PathBuf::from(raw);
+    if configured.as_os_str().is_empty() {
+        return None;
+    }
+    Some(if configured.is_absolute() {
+        configured
+    } else {
+        project_dir
+            .parent()
+            .map(|launcher_root| launcher_root.join("frontend").join(&configured))
+            .unwrap_or(configured)
+    })
+}
+
+fn copy_generated_resource_dirs(
+    project_dir: &Path,
+    runtime_root: &Path,
+    staged_root: &Path,
+) -> io::Result<()> {
+    let configured_panel_dir = configured_panel_build_dir(project_dir);
     for rel_dir in GENERATED_RESOURCE_DIRS {
-        let source_dir = runtime_root.join(rel_dir);
+        let source_dir = if *rel_dir == PANEL_RESOURCE_DIR {
+            configured_panel_dir
+                .clone()
+                .unwrap_or_else(|| runtime_root.join(rel_dir))
+        } else {
+            runtime_root.join(rel_dir)
+        };
         if !source_dir.exists() {
+            if *rel_dir == PANEL_RESOURCE_DIR && configured_panel_dir.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!(
+                        "configured panel build directory is missing: {}",
+                        source_dir.display()
+                    ),
+                ));
+            }
             continue;
+        }
+        if fs::symlink_metadata(&source_dir)?.file_type().is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "generated runtime resource may not be a symlink: {}",
+                    source_dir.display()
+                ),
+            ));
         }
         copy_dir_recursive_filtered(&source_dir, &staged_root.join(rel_dir), runtime_root)?;
     }
@@ -2276,6 +2326,55 @@ mod tests {
             .expect_err("production source-build fallback must remain disabled");
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
         assert!(error.to_string().contains("may not build source"));
+    }
+
+    #[test]
+    fn isolated_panel_build_overlays_tracked_bundle_without_mutating_source() {
+        let _environment_lock = environment_lock();
+        let tree = TestTree::new("isolated-panel-build");
+        let project_dir = tree.path().join("tobkiri_launcher/src-tauri");
+        let runtime_root = tree.path().join(APP_SOURCE_DIR);
+        let tracked_panel = runtime_root.join(PANEL_RESOURCE_DIR);
+        let isolated_panel = tree.path().join("runner-temp/tobkiri-panel-build");
+        let staged_root = tree.path().join("staged");
+        fs::create_dir_all(&tracked_panel).expect("tracked panel should be creatable");
+        fs::create_dir_all(&isolated_panel).expect("isolated panel should be creatable");
+        fs::write(tracked_panel.join("index.html"), b"checked-in\n")
+            .expect("tracked panel should be writable");
+        fs::write(isolated_panel.join("index.html"), b"regenerated\n")
+            .expect("isolated panel should be writable");
+        let _panel_dir = EnvironmentGuard::set_path(PANEL_BUILD_DIR_ENV, &isolated_panel);
+
+        copy_generated_resource_dirs(&project_dir, &runtime_root, &staged_root)
+            .expect("isolated panel should be staged");
+
+        assert_eq!(
+            fs::read_to_string(runtime_root.join(PANEL_RESOURCE_DIR).join("index.html"))
+                .expect("tracked panel should remain readable"),
+            "checked-in\n"
+        );
+        assert_eq!(
+            fs::read_to_string(staged_root.join(PANEL_RESOURCE_DIR).join("index.html"))
+                .expect("staged panel should be readable"),
+            "regenerated\n"
+        );
+    }
+
+    #[test]
+    fn configured_panel_build_must_exist_instead_of_falling_back_to_tracked_output() {
+        let _environment_lock = environment_lock();
+        let tree = TestTree::new("missing-isolated-panel-build");
+        let project_dir = tree.path().join("tobkiri_launcher/src-tauri");
+        let runtime_root = tree.path().join(APP_SOURCE_DIR);
+        let staged_root = tree.path().join("staged");
+        fs::create_dir_all(runtime_root.join(PANEL_RESOURCE_DIR))
+            .expect("tracked panel should be creatable");
+        let missing_panel = tree.path().join("runner-temp/missing-panel");
+        let _panel_dir = EnvironmentGuard::set_path(PANEL_BUILD_DIR_ENV, &missing_panel);
+
+        let error = copy_generated_resource_dirs(&project_dir, &runtime_root, &staged_root)
+            .expect_err("missing configured panel must fail closed");
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
     }
 
     #[test]

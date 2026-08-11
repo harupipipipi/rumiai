@@ -5,6 +5,8 @@ Tobkiri のコントロールパネル用フロントエンドアプリケーシ
 
 `npm run build` は Vite の成果物を `../../tobkiri_runtime/core_runtime/core_pack/core_control_panel/web` にコピーします。viewer と browser はどちらも kernel が配信する同じ `/panel/` artifact を使用します。Tauri の `splash` は kernel 起動前の viewer 専用画面で、panel frontend とは別です。
 
+リリースまたは Tauri の CI ビルドでは `TOBKIRI_PANEL_BUILD_DIR` に隔離された出力先を指定できます。この場合、ビルド成果物は tracked runtime source を変更せず、Tauri の staging が同じ `/panel/` runtime path にコピーします。指定された出力先が存在しない場合、Tauri staging は checked-in bundle への fallback を拒否します。
+
 ## 技術スタック
 
 - React 19 + TypeScript

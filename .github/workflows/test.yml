@@ -327,8 +327,10 @@ jobs:
           cache: npm
           cache-dependency-path: tobkiri_launcher/frontend/package-lock.json
 
-      - name: Test, typecheck, build, and copy Launcher panel
+      - name: Test, typecheck, and build Launcher panel
         working-directory: tobkiri_launcher/frontend
+        env:
+          TOBKIRI_PANEL_BUILD_DIR: ${{ runner.temp }}/tobkiri-panel-build
         run: |
           npm ci
           npm test
@@ -661,6 +663,8 @@ jobs:
 
       - name: Build panel frontend
         working-directory: tobkiri_launcher/frontend
+        env:
+          TOBKIRI_PANEL_BUILD_DIR: ${{ runner.temp }}/tobkiri-panel-build
         run: npm run build
 
       - name: Install Rust toolchain
@@ -876,4 +880,6 @@ jobs:
 
       - name: Build panel frontend
         working-directory: tobkiri_launcher/frontend
+        env:
+          TOBKIRI_PANEL_BUILD_DIR: ${{ runner.temp }}/tobkiri-panel-build
         run: npm run build

@@ -205,6 +205,8 @@ jobs:
 
       - name: Build panel frontend
         working-directory: tobkiri_launcher/frontend
+        env:
+          TOBKIRI_PANEL_BUILD_DIR: ${{ runner.temp }}/tobkiri-panel-build
         run: npm run build
       - name: Build defaultspack frontend
         working-directory: tobkiri_runtime/ecosystem/defaultspack/webapp
@@ -356,6 +358,7 @@ jobs:
         working-directory: tobkiri_launcher
         env:
           TOBKIRI_PRESENTATION_RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
+          TOBKIRI_PANEL_BUILD_DIR: ${{ runner.temp }}/tobkiri-panel-build
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -420,6 +423,7 @@ jobs:
         working-directory: tobkiri_launcher
         env:
           TOBKIRI_PRESENTATION_RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
+          TOBKIRI_PANEL_BUILD_DIR: ${{ runner.temp }}/tobkiri-panel-build
         run: cargo tauri build --target ${{ matrix.target }} --ci
 
       - name: Sign and verify Windows installer

@@ -76,3 +76,61 @@ test("copyPanelBuild keeps the release checkout clean after measurement", async 
   assert.equal(status, "");
   await assert.rejects(readFile(join(panelDir, "build-metrics.json"), "utf8"));
 });
+
+test("copyPanelBuild isolates regenerated tracked panel output when configured", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tobkiri-panel-isolated-"));
+  const distDir = join(root, "dist");
+  const trackedPanelDir = join(root, "runtime", "core_control_panel", "web");
+  const isolatedPanelDir = join(root, "runner-temp", "tobkiri-panel-build");
+
+  await mkdir(distDir, { recursive: true });
+  await mkdir(trackedPanelDir, { recursive: true });
+  await writeFile(join(distDir, "index.html"), "<main>regenerated</main>\n", "utf8");
+  await writeFile(join(trackedPanelDir, "index.html"), "<main>checked-in</main>\n", "utf8");
+  await writeFile(join(root, ".gitignore"), "runner-temp/\n", "utf8");
+  execFileSync("git", ["init", "--quiet"], { cwd: root });
+  execFileSync("git", ["add", "."], { cwd: root });
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=Tobkiri Test",
+      "-c",
+      "user.email=test@invalid",
+      "commit",
+      "--quiet",
+      "-m",
+      "fixture",
+    ],
+    { cwd: root },
+  );
+
+  const previousPanelDir = process.env.TOBKIRI_PANEL_BUILD_DIR;
+  process.env.TOBKIRI_PANEL_BUILD_DIR = isolatedPanelDir;
+  try {
+    await copyPanelBuild({ distDir });
+
+    assert.equal(
+      await readFile(join(trackedPanelDir, "index.html"), "utf8"),
+      "<main>checked-in</main>\n",
+    );
+    assert.equal(
+      await readFile(join(isolatedPanelDir, "index.html"), "utf8"),
+      "<main>regenerated</main>\n",
+    );
+    assert.equal(
+      execFileSync(
+        "git",
+        ["status", "--porcelain=v1", "--untracked-files=all"],
+        { cwd: root, encoding: "utf8" },
+      ),
+      "",
+    );
+  } finally {
+    if (previousPanelDir === undefined) {
+      delete process.env.TOBKIRI_PANEL_BUILD_DIR;
+    } else {
+      process.env.TOBKIRI_PANEL_BUILD_DIR = previousPanelDir;
+    }
+  }
+});

@@ -7,11 +7,17 @@ import { canonicalBuildBytes } from "./canonical-build-output.mjs";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const FRONTEND_ROOT = resolve(SCRIPT_DIR, "..");
 const DEFAULT_DIST_DIR = resolve(FRONTEND_ROOT, "dist");
+const PANEL_BUILD_DIR_ENV = "TOBKIRI_PANEL_BUILD_DIR";
 const DEFAULT_PANEL_DIR = resolve(
   FRONTEND_ROOT,
   "../../tobkiri_runtime/core_runtime/core_pack/core_control_panel/web",
 );
 const BUILD_ONLY_FILES = new Set(["build-metrics.json"]);
+
+export function resolvePanelBuildDir(environ = process.env) {
+  const configured = environ[PANEL_BUILD_DIR_ENV]?.trim();
+  return configured ? resolve(FRONTEND_ROOT, configured) : DEFAULT_PANEL_DIR;
+}
 
 function compareNames(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -45,8 +51,9 @@ async function copyCanonicalFile(sourcePath, distDir, panelDir) {
 
 export async function copyPanelBuild({
   distDir = DEFAULT_DIST_DIR,
-  panelDir = DEFAULT_PANEL_DIR,
+  panelDir,
 } = {}) {
+  panelDir = panelDir ? resolve(panelDir) : resolvePanelBuildDir();
   await rm(panelDir, { recursive: true, force: true });
   await mkdir(panelDir, { recursive: true });
   const files = (await listFiles(distDir)).filter((sourcePath) => {

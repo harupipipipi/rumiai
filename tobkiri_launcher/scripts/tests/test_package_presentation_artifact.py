@@ -612,6 +612,90 @@ def test_package_rejects_dirty_release_checkout() -> None:
         assert not (root / "dirty-output").exists()
 
 
+def test_package_accepts_isolated_panel_regeneration_but_rejects_unrelated_dirt() -> None:
+    with TemporaryDirectory(prefix="tobkiri-presentation-isolated-panel-") as temp:
+        root = Path(temp)
+        repository_root = root / "source"
+        panel = repository_root / (
+            "tobkiri_runtime/core_runtime/core_pack/core_control_panel/web"
+        )
+        panel.mkdir(parents=True)
+        marker = repository_root / "unrelated.txt"
+        marker.write_text("clean\n", encoding="utf-8")
+        (panel / "index.html").write_text("checked-in\n", encoding="utf-8")
+        subprocess.run(["git", "init", "--quiet"], cwd=repository_root, check=True)
+        subprocess.run(["git", "add", "."], cwd=repository_root, check=True)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=Tobkiri Test",
+                "-c",
+                "user.email=test@invalid",
+                "commit",
+                "--quiet",
+                "-m",
+                "fixture",
+            ],
+            cwd=repository_root,
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/example/tobkiri.git",
+            ],
+            cwd=repository_root,
+            check=True,
+        )
+
+        fixture_root = root / "fixture"
+        fixture_root.mkdir()
+        catalog, manifest, key = _fixture(fixture_root)
+        build = json.loads(manifest.read_text())
+        build["source_identity"] = MODULE.source_identity_for_repository(
+            repository_root
+        )
+        build["source_revision"] = MODULE.source_revision_for_repository(
+            repository_root
+        )
+        manifest.write_text(json.dumps(build), encoding="utf-8")
+
+        isolated_panel = root / "runner-temp" / "tobkiri-panel-build"
+        isolated_panel.mkdir(parents=True)
+        (isolated_panel / "index.html").write_text("regenerated\n", encoding="utf-8")
+        package_artifact(
+            catalog,
+            manifest,
+            key,
+            "key",
+            root / "isolated-output",
+            repository_root,
+        )
+        assert (
+            (panel / "index.html").read_text(encoding="utf-8") == "checked-in\n"
+        )
+        assert (
+            (isolated_panel / "index.html").read_text(encoding="utf-8")
+            == "regenerated\n"
+        )
+
+        marker.write_text("tampered\n", encoding="utf-8")
+        with pytest.raises(RuntimeError, match="dirty source checkout"):
+            package_artifact(
+                catalog,
+                manifest,
+                key,
+                "key",
+                root / "tampered-output",
+                repository_root,
+            )
+        assert not (root / "tampered-output").exists()
+
+
 def _file_bytes(root: Path) -> dict[str, bytes]:
     """Return a deterministic byte snapshot for transaction assertions."""
     return {
