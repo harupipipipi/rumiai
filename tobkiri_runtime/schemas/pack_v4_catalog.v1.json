@@ -10717,7 +10717,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-      "digest": "sha256:b1ac91a1e6a2d129b7334d69cddece76bdd32f701cdf5084d8c7749ffb5bee51",
+          "digest": "sha256:b1ac91a1e6a2d129b7334d69cddece76bdd32f701cdf5084d8c7749ffb5bee51",
           "path": "ecosystem/rumi_provider_adapters_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -10922,7 +10922,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-      "digest": "sha256:9da5b4c30ee0c6ae49dc4b12bc4833df5ad4806350919593b54caed63ec3103c",
+          "digest": "sha256:9da5b4c30ee0c6ae49dc4b12bc4833df5ad4806350919593b54caed63ec3103c",
           "path": "ecosystem/rumi_provider_registry_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -15428,6 +15428,35 @@
               "oneOf": [
                 {
                   "additionalProperties": false,
+                  "allOf": [
+                    {
+                      "if": {
+                        "properties": {
+                          "surface": {
+                            "const": "profiles"
+                          }
+                        },
+                        "required": [
+                          "surface"
+                        ]
+                      },
+                      "then": {
+                        "properties": {
+                          "data": {
+                            "required": [
+                              "catalog_api_version",
+                              "catalog_digest",
+                              "bundle_lock_digest",
+                              "catalog_ref",
+                              "active_profile_id",
+                              "count",
+                              "profiles"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ],
                   "properties": {
                     "catalog_revision": {
                       "pattern": "^sha256:[0-9a-f]{64}$",
@@ -15435,6 +15464,14 @@
                     },
                     "data": {
                       "properties": {
+                        "active_profile_id": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "bundle_lock_digest": {
+                          "pattern": "^sha256:[0-9a-f]{64}$",
+                          "type": "string"
+                        },
                         "catalog_api_version": {
                           "const": "io.tobkiri.profile-catalog-presentation.v4"
                         },
@@ -15442,16 +15479,8 @@
                           "pattern": "^sha256:[0-9a-f]{64}$",
                           "type": "string"
                         },
-                        "bundle_lock_digest": {
-                          "pattern": "^sha256:[0-9a-f]{64}$",
-                          "type": "string"
-                        },
                         "catalog_ref": {
                           "pattern": "^profile-catalog-v4://",
-                          "type": "string"
-                        },
-                        "active_profile_id": {
-                          "minLength": 1,
                           "type": "string"
                         },
                         "count": {
@@ -15462,39 +15491,87 @@
                           "items": {
                             "additionalProperties": false,
                             "properties": {
-                              "profile_id": {"minLength": 1, "type": "string"},
-                              "display_name": {"minLength": 1, "type": "string"},
-                              "active": {"type": "boolean"},
-                              "lifecycle_state": {
-                                "enum": ["active", "available"]
+                              "active": {
+                                "type": "boolean"
                               },
-                              "available": {"type": "boolean"},
-                              "diagnostics": {"type": "array"},
-                              "definition": {
-                                "additionalProperties": true,
-                                "required": ["digest", "ref", "provenance"],
+                              "authority_snapshot": {
                                 "type": "object"
+                              },
+                              "available": {
+                                "type": "boolean"
                               },
                               "bindings": {
                                 "additionalProperties": false,
                                 "properties": {
-                                  "base": {"type": "object"},
-                                  "shell": {"type": "object"},
-                                  "application": {"type": ["object", "null"]}
+                                  "application": {
+                                    "type": [
+                                      "object",
+                                      "null"
+                                    ]
+                                  },
+                                  "base": {
+                                    "type": "object"
+                                  },
+                                  "shell": {
+                                    "type": "object"
+                                  }
                                 },
-                                "required": ["base", "shell", "application"],
+                                "required": [
+                                  "base",
+                                  "shell",
+                                  "application"
+                                ],
                                 "type": "object"
                               },
-                              "pack_closure": {"type": "array"},
-                              "records": {"type": "object"},
-                              "authority_snapshot": {"type": "object"},
-                              "candidate": {"type": "object"}
+                              "candidate": {
+                                "type": "object"
+                              },
+                              "definition": {
+                                "additionalProperties": true,
+                                "required": [
+                                  "digest",
+                                  "ref",
+                                  "provenance"
+                                ],
+                                "type": "object"
+                              },
+                              "diagnostics": {
+                                "type": "array"
+                              },
+                              "display_name": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "lifecycle_state": {
+                                "enum": [
+                                  "active",
+                                  "available"
+                                ]
+                              },
+                              "pack_closure": {
+                                "type": "array"
+                              },
+                              "profile_id": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "records": {
+                                "type": "object"
+                              }
                             },
                             "required": [
-                              "profile_id", "display_name", "active",
-                              "lifecycle_state", "available", "diagnostics",
-                              "definition", "bindings", "pack_closure", "records",
-                              "authority_snapshot", "candidate"
+                              "profile_id",
+                              "display_name",
+                              "active",
+                              "lifecycle_state",
+                              "available",
+                              "diagnostics",
+                              "definition",
+                              "bindings",
+                              "pack_closure",
+                              "records",
+                              "authority_snapshot",
+                              "candidate"
                             ],
                             "type": "object"
                           },
@@ -15567,25 +15644,6 @@
                     "catalog_revision",
                     "records",
                     "data"
-                  ],
-                  "allOf": [
-                    {
-                      "if": {
-                        "properties": {"surface": {"const": "profiles"}},
-                        "required": ["surface"]
-                      },
-                      "then": {
-                        "properties": {
-                          "data": {
-                            "required": [
-                              "catalog_api_version", "catalog_digest",
-                              "bundle_lock_digest", "catalog_ref",
-                              "active_profile_id", "count", "profiles"
-                            ]
-                          }
-                        }
-                      }
-                    }
                   ],
                   "type": "object"
                 },
@@ -15870,7 +15928,7 @@
           "path": "frontend_contract_map.v4.json"
         },
         {
-          "digest": "sha256:8adffdea48b03eaf76d1a6f7d06c230731e058338180a73cd6e7e92b8199e1bf",
+          "digest": "sha256:975fc9cc3122ec8e08abc08dc873dc97309dae6a02c0e39a3d6f25f99a9f127b",
           "index_role": "asset",
           "kind": "asset",
           "path": "backend-integrity.v4.json"
@@ -15894,7 +15952,7 @@
           "rule_id": "workflow-v4-canonical-source"
         },
         {
-          "digest": "sha256:98290d3c4ae825fa4d3643dadd042665954b2d2c6b1d836d0ec9baf4d69dcda4",
+          "digest": "sha256:19f1da94324333fa4291aa738b30e2651df361a07638a82ce49393e88469dffc",
           "path": "core_runtime/workflow_v4/integration.py",
           "rule_id": "workflow-v4-canonical-source"
         },
@@ -15949,7 +16007,7 @@
           "rule_id": "workflow-v4-canonical-source"
         },
         {
-          "digest": "sha256:8adffdea48b03eaf76d1a6f7d06c230731e058338180a73cd6e7e92b8199e1bf",
+          "digest": "sha256:975fc9cc3122ec8e08abc08dc873dc97309dae6a02c0e39a3d6f25f99a9f127b",
           "path": "ecosystem/tobkiri_workflow_pack/backend-integrity.v4.json",
           "rule_id": "workflow-v4-canonical-source"
         }

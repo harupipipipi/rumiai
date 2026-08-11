@@ -129,6 +129,7 @@ def production_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     finally:
         server.stop()
         session.broker.close()
+        authority.close()
 
 
 def test_home_and_pack_workflow_use_only_real_broker_contracts(
@@ -1049,29 +1050,36 @@ def test_contract_server_rejects_empty_and_wrong_backend_registry_before_bind(
         empty.start()
     assert empty.server is None
 
-    selected = selected_backends.registered[0]
-    original_status = selected.status
-    selected.status = type(original_status)(
-        backend_id=original_status.backend_id,
-        execution_kind=original_status.execution_kind,
-        platform=original_status.platform,
-        backend_digest="sha256:" + "0" * 64,
-        production_enabled=True,
-        conformance_only=False,
-        satisfied_gates=original_status.satisfied_gates,
-    )
-    session.broker._backends = BackendRegistry((selected,))
-    wrong = PackAPIServer(
-        port=0,
-        dispatch_session=session,
-        contract_bindings=bindings,
-    )
-    with pytest.raises(BackendUnavailableError, match="not installed"):
-        wrong.start()
-    assert wrong.server is None
+    original_statuses = [
+        (backend, backend.status) for backend in selected_backends.registered
+    ]
+    try:
+        for backend, original_status in original_statuses:
+            backend.status = type(original_status)(
+                backend_id=original_status.backend_id,
+                execution_kind=original_status.execution_kind,
+                platform=original_status.platform,
+                backend_digest="sha256:" + "0" * 64,
+                production_enabled=True,
+                conformance_only=False,
+                satisfied_gates=original_status.satisfied_gates,
+            )
+        session.broker._backends = BackendRegistry(
+            backend for backend, _status in original_statuses
+        )
+        wrong = PackAPIServer(
+            port=0,
+            dispatch_session=session,
+            contract_bindings=bindings,
+        )
+        with pytest.raises(RuntimeError, match="metadata is stale or wrong"):
+            wrong.start()
+        assert wrong.server is None
+    finally:
+        for backend, original_status in original_statuses:
+            backend.status = original_status
+        session.broker._backends = selected_backends
 
-    selected.status = original_status
-    session.broker._backends = selected_backends
     exact = PackAPIServer(
         port=0,
         dispatch_session=session,

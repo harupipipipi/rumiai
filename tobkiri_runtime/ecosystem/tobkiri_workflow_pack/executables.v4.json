@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:c205ae628991eacdb2e2127b6b4be4205bc5a8b3858b86729de5f620bb289dce",
+  "catalog_digest": "sha256:649554cbb32a631a0c1c72075f9c1d8825e9f72868411568c390f2fd8901c975",
   "pack_id": "tobkiri_workflow_pack",
-  "source_identity": "sha256:db703d0a99038a5b1f9dccd0258f444a6c6f9516f6f802c25baacd9e56a515e0",
+  "source_identity": "sha256:818e4a82c2e7a3732b691920051617b1328ba3182cbda11add788f0b05837f39",
   "variants": [
     {
       "architecture": "any",
