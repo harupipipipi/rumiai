@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any, cast
+
 def test_pack_api_handler_excludes_router_table_mixin_from_dispatch():
     from core_runtime.pack_api_server import PackAPIHandler
 
@@ -13,10 +15,46 @@ def test_pack_api_handler_uses_response_writer_mixin():
     assert PackAPIHandler._send_response.__module__ == "core_runtime.api.http_response"
 
 
-def test_pack_api_handler_uses_auth_gate_mixin():
+def test_pack_api_handler_uses_auth_gate_mixin(monkeypatch):
+    from core_runtime.api.auth_gate import AuthGateMixin
     from core_runtime.pack_api_server import PackAPIHandler
 
-    assert PackAPIHandler._check_auth.__module__ == "core_runtime.api.auth_gate"
+    assert AuthGateMixin in PackAPIHandler.__mro__
+    handler = object.__new__(PackAPIHandler)
+    handler._panel_session = None
+
+    class ReplayGuard:
+        def __init__(self):
+            self.renewals = []
+
+        def renew_session(self, session_id, *, session_ttl_seconds):
+            self.renewals.append((session_id, session_ttl_seconds))
+
+    replay_guard = ReplayGuard()
+    cast(Any, handler)._contract_replay_guard = replay_guard
+    delegated = []
+
+    def deny(_handler, method, path):
+        delegated.append((method, path))
+        return False
+
+    monkeypatch.setattr(AuthGateMixin, "_check_auth", deny)
+    assert handler._check_auth("POST", "/api/contracts/example") is False
+    assert delegated == [("POST", "/api/contracts/example")]
+    assert replay_guard.renewals == []
+
+    def authenticate(bound_handler, method, path):
+        delegated.append((method, path))
+        bound_handler._panel_session = {
+            "session_id": "verified-session",
+            "expires_in": 60,
+        }
+        return True
+
+    monkeypatch.setattr(AuthGateMixin, "_check_auth", authenticate)
+    assert handler._check_auth("GET", "/api/contracts/example") is True
+    assert delegated[-1] == ("GET", "/api/contracts/example")
+    assert replay_guard.renewals == [("verified-session", 60.0)]
 
 
 def test_pack_api_handler_uses_web_mount_mixin():
