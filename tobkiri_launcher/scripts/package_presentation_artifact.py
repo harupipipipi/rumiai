@@ -53,6 +53,8 @@ def _load_packaging_cleanup():
 
 
 _PACKAGING_CLEANUP = _load_packaging_cleanup()
+isolated_packaging_environment = _PACKAGING_CLEANUP.isolated_packaging_environment
+isolated_python_module_command = _PACKAGING_CLEANUP.isolated_python_module_command
 remove_owned_path = _PACKAGING_CLEANUP.remove_owned_path
 run_process_and_wait = _PACKAGING_CLEANUP.run_process_and_wait
 
@@ -908,31 +910,35 @@ def _project_packaged_defaultspack(
     bundle_root = transaction_root / "v4"
     artifact_root = transaction_root / "platform-artifacts"
     shutil.copytree(source_bundle, bundle_root)
+    source_root = repository_root / "tobkiri_runtime"
     run_process_and_wait(
-        [
+        isolated_python_module_command(
             sys.executable,
-            "-m",
             "scripts.generate_packaged_defaultspack_v4_bundle",
-            "--source-artifact",
-            os.fspath(source_artifact),
-            "--bundle-root",
-            os.fspath(bundle_root),
-            "--artifact-root",
-            os.fspath(artifact_root),
-            "--relative-path",
-            artifact_ref,
-            "--entrypoint",
-            entrypoint,
-            "--platform",
-            platform,
-            "--architecture",
-            architecture,
-            "--bundle-identity",
-            bundle_identity,
-            "--source-commit",
-            source_revision,
-        ],
-        cwd=repository_root / "tobkiri_runtime",
+            source_root,
+            [
+                "--source-artifact",
+                os.fspath(source_artifact),
+                "--bundle-root",
+                os.fspath(bundle_root),
+                "--artifact-root",
+                os.fspath(artifact_root),
+                "--relative-path",
+                artifact_ref,
+                "--entrypoint",
+                entrypoint,
+                "--platform",
+                platform,
+                "--architecture",
+                architecture,
+                "--bundle-identity",
+                bundle_identity,
+                "--source-commit",
+                source_revision,
+            ],
+        ),
+        cwd=source_root,
+        env=isolated_packaging_environment(),
     )
     profile = bundle_root / "defaults.profile.v4.json"
     lock_path = bundle_root / "bundle.lock.json"

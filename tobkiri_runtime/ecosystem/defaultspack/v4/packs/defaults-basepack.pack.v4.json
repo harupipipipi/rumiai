@@ -3,7 +3,7 @@
   "contracts": [],
   "functions": [],
   "integrity": {
-    "source_identity": "sha256:0a87ec3af530ec05c31e66a0efcc3d337a9ea2bcd9b4708f26ed7d15c0feaad8",
+    "source_identity": "sha256:f09c6074e4ec26f3187f612903d495d96e8c7facdef056c7304749a313ec4efb",
     "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     "contract_catalog_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
@@ -29,18 +29,18 @@
     "source_digest": "sha256:6ad7096abeb77f606c29c0c00d597f9eb5c60e22c23bf54006f940119c61ccd0",
     "repository_commit": "working-tree",
     "repository_commit_trusted": false,
-    "content_root_digest": "sha256:c0d753487ff8e74664a5e9c6ed874e9c5d67c71bc94c7210d69692eed387700a",
+    "content_root_digest": "sha256:e611ea86371dc2b990770038d38d9df6e360abc0596688a456ff5bc67e6bc0ef",
     "generator": "defaultspack-v4-core",
     "generator_version": "2.0.0",
     "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
-    "generator_digest": "sha256:d9a20222e04b64f716bec6008a0055b5618af210b27bb6baa7466e8213355da8",
+    "generator_digest": "sha256:05b88e9aa4212aab0f9358fb4c185250eb8369f8a9cdb5ca7edf1c368db98404",
     "input_inventory_digest": "sha256:ed6ec930bbd37b07114bb7db66c7b374e8ff1c7e7f1d4dc29d7beab64bc61b84",
     "normative": true,
     "evidence": [
       {
         "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
         "rule_id": "normative-generator-bytes",
-        "digest": "sha256:d9a20222e04b64f716bec6008a0055b5618af210b27bb6baa7466e8213355da8"
+        "digest": "sha256:05b88e9aa4212aab0f9358fb4c185250eb8369f8a9cdb5ca7edf1c368db98404"
       },
       {
         "path": "ecosystem/defaultspack/v4/packs/defaults-basepack.pack.v4.json",

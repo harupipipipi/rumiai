@@ -1,0 +1,832 @@
+{
+  "schema": "io.tobkiri.packaged-defaultspack-source.v1",
+  "roots": [
+    "scripts",
+    "tobkiri_protocol",
+    "ecosystem/defaultspack/domain/runtime_v4",
+    "ecosystem/defaultspack/v4",
+    "ecosystem/defaultspack/runtime",
+    "ecosystem/defaultspack/defaultspack"
+  ],
+  "files": [
+    {
+      "path": "ecosystem/defaultspack/artifact-index.v4.json",
+      "type": "regular-file",
+      "size": 981,
+      "sha256": "49f807abebc9a3bb0f9ef3189db05a000bc982c3e0cf85094ca92f147088596c",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/contracts.v4.json",
+      "type": "regular-file",
+      "size": 3794,
+      "sha256": "daa27722ca8cfebe70429bae20ab068b85c6132305b80a4e12eaa2e3a30b4da5",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/defaultspack/__init__.py",
+      "type": "regular-file",
+      "size": 45,
+      "sha256": "a42fb884c06d0c91173549a112bf8fd2c6311def89ca6219e42ecede908840f3",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/defaultspack/cli.py",
+      "type": "regular-file",
+      "size": 832,
+      "sha256": "b7185f6e50796eaaf21803fc3ce77d9085a2aa058860c5f8be35ac482ce1d3d3",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/defaultspack/desktop_app.py",
+      "type": "regular-file",
+      "size": 18675,
+      "sha256": "23a6736d6b20b1e896c1370c6fe6f54ab7e74321fbdf64d0219d16341b565849",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/defaultspack/frontend_contract_map.v4.json",
+      "type": "regular-file",
+      "size": 13831,
+      "sha256": "dbcab518d649644dad62218147eac7d99c3c2b071250ef7bfcd9ba4c9a069d15",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/defaultspack/native_webview.py",
+      "type": "regular-file",
+      "size": 1116,
+      "sha256": "eb052310033253fb29b76b027dc4b732cf4cedd2085ccbf7230239d1ea8921f9",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/domain/runtime_v4/__init__.py",
+      "type": "regular-file",
+      "size": 720,
+      "sha256": "aef01e5ad38ab7ad39ac200466a6edd17113cca84ee2c5cae9a6ecf970a20bc8",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/domain/runtime_v4/service.py",
+      "type": "regular-file",
+      "size": 96335,
+      "sha256": "86f409ab20c77f4ac6ef1c55c783cca2c3d883f78537de945c0e515dc74cf8dd",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/pack.v4.json",
+      "type": "regular-file",
+      "size": 3512,
+      "sha256": "7a5620c8b54904f68abecd8ab8156c17a19779ff2b13c07e11acd290e56ec560",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/runtime/conversation.py",
+      "type": "regular-file",
+      "size": 6313,
+      "sha256": "c53100d459dbf91774dddfe3a266fa33543a1a4f8bc122414343e9bf76a99820",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/bundle.lock.json",
+      "type": "regular-file",
+      "size": 4447,
+      "sha256": "04cb4f6b778e902038bdee05fbefce8c5ea4600cc4264749dd9e4e8e5be894fc",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/defaults-basepack.base.v1.json",
+      "type": "regular-file",
+      "size": 2348,
+      "sha256": "0f9ac8304694ee80ce6d8e0a951eb4593b908a5cd69b4bad535f57cf17621f10",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/defaults.profile.v4.json",
+      "type": "regular-file",
+      "size": 42539,
+      "sha256": "b7d9ea1a1976b4028d61acf4e706243f33cff15345bcbad6a32d2d8944769cc3",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/defaults-basepack.pack.v4.json",
+      "type": "regular-file",
+      "size": 2509,
+      "sha256": "d811d4b798793246db703305e6bdaa870483913c00ea07961a08bd642945762d",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/defaultspack.pack.v4.json",
+      "type": "regular-file",
+      "size": 3512,
+      "sha256": "7a5620c8b54904f68abecd8ab8156c17a19779ff2b13c07e11acd290e56ec560",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/dev.tauri.toolchain.default.pack.v4.json",
+      "type": "regular-file",
+      "size": 3872,
+      "sha256": "f1a506d943bd8ce910447f113e6af233352a6e9748758112e7c13c288cd5ca64",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/rumi-file-inspect.pack.v4.json",
+      "type": "regular-file",
+      "size": 4491,
+      "sha256": "a9eb4dbb60bf3932c6b35ae4c23e56891ac4f586b876f3fd3f949a43996d2c31",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/rumi-host-authority-bridge.pack.v4.json",
+      "type": "regular-file",
+      "size": 3822,
+      "sha256": "148a26429d5125a9757677f8ff618394377b48cbcd15a8d8cefc37f6bce79529",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/rumi-workspace-mount.pack.v4.json",
+      "type": "regular-file",
+      "size": 5506,
+      "sha256": "fcb628044fe218f1feb6b04b7d260dfc51ec6c973ddfbe475e944ba3a0ea81b9",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/rumi_ai_gateway_pack.pack.v4.json",
+      "type": "regular-file",
+      "size": 8764,
+      "sha256": "f32154fce60df91869f98c5067f0136f5d8e00bef73e8bc7cef6021af6838407",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/rumi_ai_pipeline_pack.pack.v4.json",
+      "type": "regular-file",
+      "size": 7708,
+      "sha256": "1ebd3a5bbcdc462a9aa9875d69b83029232b1cabd84c7f50ca2dd4bee66ec8fa",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/rumi_ai_routing_pack.pack.v4.json",
+      "type": "regular-file",
+      "size": 4802,
+      "sha256": "274c874afe15bf8f650a3c1e68c01ded644daf5492dcc9afd66c60d085e53634",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/rumi_ai_stream_pack.pack.v4.json",
+      "type": "regular-file",
+      "size": 3845,
+      "sha256": "ebe1c89a5f06cb567ed725a0e12d43d6846a3ce769ddd51d0b0bef508c4d36a0",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/rumi_ai_tool_bridge_pack.pack.v4.json",
+      "type": "regular-file",
+      "size": 5288,
+      "sha256": "23eed1a81a0974419b992c31659ca422f46c497a6a95acb39db71d59d3840b06",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/rumi_ai_usage_pack.pack.v4.json",
+      "type": "regular-file",
+      "size": 6185,
+      "sha256": "185326dae6d1105e3a2a1ea61bde85e1bfbe13e4f3f4ff0e5f7b3f50fb8deaa5",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/rumi_model_catalog_pack.pack.v4.json",
+      "type": "regular-file",
+      "size": 5155,
+      "sha256": "c987a194a7d49f0e70428cc3128dbf6c602f5b617e88f5af1b0c3309b52a25d8",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/rumi_model_registry_pack.pack.v4.json",
+      "type": "regular-file",
+      "size": 8611,
+      "sha256": "66aec234e86b1041838510fb54419db5bdeca61309ee32e9cb8e4f58e3b3ce65",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/rumi_provider_adapters_pack.pack.v4.json",
+      "type": "regular-file",
+      "size": 8779,
+      "sha256": "72c72798bfa00f9cecbab7839919354c91ed3340a081a419c35cc0cbbd60b2da",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/rumi_provider_registry_pack.pack.v4.json",
+      "type": "regular-file",
+      "size": 10402,
+      "sha256": "5b02d892da489dbbe091c29c1a5e1fbc54747638dc1e9988cab75812eec854a6",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/runtime.tauri.application.default.pack.v4.json",
+      "type": "regular-file",
+      "size": 3909,
+      "sha256": "6f2cf18e246141d83dd2ecff39b08fbcfa35e00f17944e715e5ef81cc5a5a1ad",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/shell.cli.default.pack.v4.json",
+      "type": "regular-file",
+      "size": 3508,
+      "sha256": "dd7d616ddef81913482e71edd4432f7b2eb8a2a3e0e91df9a5eb4d28f29c0ec7",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/shell.tauri.default.pack.v4.json",
+      "type": "regular-file",
+      "size": 4587,
+      "sha256": "40f0d809c13dfeb093f1137806dd91959e9cbac281751955c84dba4889fe273d",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/packs/tobkiri-host-pack-control.pack.v4.json",
+      "type": "regular-file",
+      "size": 18914,
+      "sha256": "10b40e205e7e4a594f5eac04f08e553561a388d86212f2d6c2bcdcef5c10ee0f",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/shell.cli.default.shell.v1.json",
+      "type": "regular-file",
+      "size": 2463,
+      "sha256": "c4523212b64724881edd787cfd9565ede237532d29c33b82ecf8a237572c2511",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/shell.tauri.default.shell.v1.json",
+      "type": "regular-file",
+      "size": 3340,
+      "sha256": "705b60bb8c7c64526bb995227fcc0d8deb351b6ac58754a13fa9e46bdc22dea0",
+      "executable": false
+    },
+    {
+      "path": "scripts/__init__.py",
+      "type": "regular-file",
+      "size": 79,
+      "sha256": "93df3cc78b5e9d5def95ea4deb231efdd8c208f3dccbebf3850bbe4ca3db57a6",
+      "executable": false
+    },
+    {
+      "path": "scripts/eval_rumi_human_tasks.py",
+      "type": "regular-file",
+      "size": 22396,
+      "sha256": "f1f79175350a36ce15b722041518c55aa98204891796bad2a57f18dfffed34a1",
+      "executable": false
+    },
+    {
+      "path": "scripts/generate_defaultspack_v4_bundle.py",
+      "type": "regular-file",
+      "size": 32343,
+      "sha256": "05b88e9aa4212aab0f9358fb4c185250eb8369f8a9cdb5ca7edf1c368db98404",
+      "executable": false
+    },
+    {
+      "path": "scripts/generate_executable_catalogs_v4.py",
+      "type": "regular-file",
+      "size": 6831,
+      "sha256": "d4f77a87b5a2985378da8479997aa7d4a8b39639ab1efef8eea54c136de8a73e",
+      "executable": false
+    },
+    {
+      "path": "scripts/generate_global_contract_bindings.py",
+      "type": "regular-file",
+      "size": 3066,
+      "sha256": "4ef14f42e3d3b44c69e50952f7016f5913b49b2c3e383fb1c3e6b347e0e7e237",
+      "executable": false
+    },
+    {
+      "path": "scripts/generate_packaged_defaultspack_v4_bundle.py",
+      "type": "regular-file",
+      "size": 33365,
+      "sha256": "d30bd14e4a3c5d5d3a256cb0589756aee68cc1b334cb97129433530a7d0f11e3",
+      "executable": false
+    },
+    {
+      "path": "scripts/generator_source_manifest.py",
+      "type": "regular-file",
+      "size": 10513,
+      "sha256": "f326e3b97cfd584fcfb5dc622ebaca80dd8788ae690ad84f6e7eafdc60d9381e",
+      "executable": false
+    },
+    {
+      "path": "scripts/migrate_manifest_authority.py",
+      "type": "regular-file",
+      "size": 19780,
+      "sha256": "855a358696ff075be42c369d417666176542884f7b82a84ffeac36bb32c5f2fb",
+      "executable": false
+    },
+    {
+      "path": "scripts/migrate_pack_artifacts_v4.py",
+      "type": "regular-file",
+      "size": 44000,
+      "sha256": "e5e65f29ca92536023e3b205e2253dffb2afd9b9096955c4bf680056d89a456f",
+      "executable": false
+    },
+    {
+      "path": "scripts/migrate_settings_control_center.py",
+      "type": "regular-file",
+      "size": 2644,
+      "sha256": "6339f75212122aeb01c59d60711ce458192583fbcaf50f882d9eff52f6745317",
+      "executable": false
+    },
+    {
+      "path": "scripts/offline_legacy_projection.py",
+      "type": "regular-file",
+      "size": 8570,
+      "sha256": "cc83153ea12f970969a825d4545351d0693d50ee629daf368faf1b861331c6af",
+      "executable": false
+    },
+    {
+      "path": "scripts/packaging_cleanup.py",
+      "type": "regular-file",
+      "size": 62992,
+      "sha256": "3dfe13166a70503dc4929dc4ae8b47e53c1159e04498a726b70352cf04324685",
+      "executable": false
+    },
+    {
+      "path": "scripts/quality/check_defaultspack_http_fallbacks.py",
+      "type": "regular-file",
+      "size": 1293,
+      "sha256": "f9ccbe7233a14a52d702140732e6bb6798d26f269bd9d27bf01886dd04b56845",
+      "executable": false
+    },
+    {
+      "path": "scripts/quality/check_template_contracts.py",
+      "type": "regular-file",
+      "size": 8576,
+      "sha256": "d02586c8a6306de9ac0729ca7faf0e87930407d5f6e2d469c1a8a1f2d63e4e59",
+      "executable": false
+    },
+    {
+      "path": "scripts/quality/evidence/complete_v4_migration_red_64b2240e.json",
+      "type": "regular-file",
+      "size": 72493,
+      "sha256": "36b8f232fc2e717408ecd525e23ad7c516ee73c79cdbfb46999b203a76fa1380",
+      "executable": false
+    },
+    {
+      "path": "scripts/quality/legacy_manifest_v3.py",
+      "type": "regular-file",
+      "size": 5461,
+      "sha256": "61b0a49a2f678e018b0bf8cb0d78bf3cb482a595519293080dbfddac8d0a452b",
+      "executable": false
+    },
+    {
+      "path": "scripts/quality/legacy_selection_migration.py",
+      "type": "regular-file",
+      "size": 4126,
+      "sha256": "768fcb7a13ebb870d1acbd2f7b1ba3e2d3dd2050797c75193a3f185cabd98634",
+      "executable": false
+    },
+    {
+      "path": "scripts/quality/migrate_legacy_profile.py",
+      "type": "regular-file",
+      "size": 1399,
+      "sha256": "854b3b35804d25f148360aded1b905a9b79d7b9ec77da0993eff4b9b6ca8e453",
+      "executable": false
+    },
+    {
+      "path": "scripts/quality/render_defaultspack_compat_alias_docs.py",
+      "type": "regular-file",
+      "size": 700,
+      "sha256": "488e95db8d2e7ac3443713c9318c9201f9bb4498d5ed1b5163fadafef4136c69",
+      "executable": false
+    },
+    {
+      "path": "scripts/quality/scan_command_protocol.py",
+      "type": "regular-file",
+      "size": 4387,
+      "sha256": "e143a3d9e37ad27ca8d4cbb27bdefb449c4456ac73f4dd84a71de91fe9f1e25a",
+      "executable": false
+    },
+    {
+      "path": "scripts/quality/scan_complete_v4_migration.py",
+      "type": "regular-file",
+      "size": 10449,
+      "sha256": "ad1b4e673184d0e8109ca993cbbb6b0feb450a7a6b1d48cca4f3baf8e828948b",
+      "executable": false
+    },
+    {
+      "path": "scripts/quality/scan_defaultspack_boundaries.py",
+      "type": "regular-file",
+      "size": 14124,
+      "sha256": "e72974323527339267a0909e2c13be71bde428e52f73e8c9f595a59329165d2f",
+      "executable": false
+    },
+    {
+      "path": "scripts/quality/scan_defaultspack_integrity.py",
+      "type": "regular-file",
+      "size": 21838,
+      "sha256": "1cf86c496543cd25a4f40ac9a5cf8646952aa2aeff535f8e27a192be579fd63e",
+      "executable": false
+    },
+    {
+      "path": "scripts/quality/scan_pack_architecture.py",
+      "type": "regular-file",
+      "size": 26180,
+      "sha256": "b7cb9c1d9bfa43ca79ade57537dd22ef0d9bc2081c6a00dc5a8a9adbd45178df",
+      "executable": false
+    },
+    {
+      "path": "scripts/quality/validate_pack_architecture.py",
+      "type": "regular-file",
+      "size": 10125,
+      "sha256": "a628c21b9c699dacb7c621316800e757eb0a83a641b9626acd5b61ab82d2aa9a",
+      "executable": false
+    },
+    {
+      "path": "scripts/quality/verify_recursive_ui_dogfood_build.py",
+      "type": "regular-file",
+      "size": 11909,
+      "sha256": "2b231feffdc6914e58cd2a6f3bfb46a6adf9f0bcb99ab42dc093528a2a8e913f",
+      "executable": false
+    },
+    {
+      "path": "scripts/quality_pack/run_claude_quality_pack.sh",
+      "type": "regular-file",
+      "size": 1027,
+      "sha256": "777ea904aef97aff0baf9d5f98e4eba21d8b9381d9ff741fa8b199d5cb5bbbdc",
+      "executable": false
+    },
+    {
+      "path": "scripts/setup_local_whisper.py",
+      "type": "regular-file",
+      "size": 4296,
+      "sha256": "c869d816de183154184b7b3d09cfd48c043abb5cefd6534f294d6b6b60ad41dc",
+      "executable": false
+    },
+    {
+      "path": "scripts/tobkiri_pack.py",
+      "type": "regular-file",
+      "size": 12211,
+      "sha256": "ea8e52337b6a37784d6372b066bfd85351a48a63addd9557a07b5090daf15d0d",
+      "executable": false
+    },
+    {
+      "path": "scripts/validate_settings_manifests.py",
+      "type": "regular-file",
+      "size": 3501,
+      "sha256": "e03dcb036d2b99b5c8142e4f7cddefcc692340e577627e38422c09e501c85b3f",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/README.md",
+      "type": "regular-file",
+      "size": 2878,
+      "sha256": "2c38aec99ab602348cde026c4d1c41cd048554b112aaed623a4b3959ea111fd0",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/__init__.py",
+      "type": "regular-file",
+      "size": 1919,
+      "sha256": "1d43814ec10f4c1ac262fc0f744f31399068cb6218668e3c589815326745194a",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/canonical.py",
+      "type": "regular-file",
+      "size": 5164,
+      "sha256": "27fa2ce73fbc40668f56e664e3bbb2008ccbf569cb49044e02dbf1949304af7b",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/composition.py",
+      "type": "regular-file",
+      "size": 17464,
+      "sha256": "d58b1921105a0ee67895a1c08b532e591cc8d4c69e5d1ce65d17eeb6e0fb1d6b",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/durability.py",
+      "type": "regular-file",
+      "size": 4619,
+      "sha256": "600627fb8d8be1738c45282de0cd338a7aae9624f4014e7a500eb9f736fa56ad",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/errors.py",
+      "type": "regular-file",
+      "size": 1047,
+      "sha256": "2292de2b3fd27e3fe644979d7aee20a40e4b77b2366dd4c5ac3ad3a449acbddf",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/fixtures/ambiguous_profile.v3.json",
+      "type": "regular-file",
+      "size": 153,
+      "sha256": "7646adbf8b299181807c40508b5f2014809c47b05a441c8e1113fbc331fae683",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/fixtures/duplicate_request.json",
+      "type": "regular-file",
+      "size": 88,
+      "sha256": "54a9c179b170f12457dd7043f14f30dc57d7e15df1d5daf7ba672ea33bc4214f",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/fixtures/legacy_profile.v3.json",
+      "type": "regular-file",
+      "size": 365,
+      "sha256": "bfd7d950f8f42de52ca52629909274766096f9d35e15b1fe767fbc67b4ffa24a",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/fixtures/legacy_profile.yaml",
+      "type": "regular-file",
+      "size": 103,
+      "sha256": "ad1edf430214c06d634b6b5f5e59033f68fd70c90a5b33f621b1a846d75eb41f",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/fixtures/pack_manifest.v4.json",
+      "type": "regular-file",
+      "size": 2741,
+      "sha256": "fe29246b2176396a989feb7dca8f55d2e4041550930db568afe5187ced9629c1",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/fixtures/request_frame.v1.json",
+      "type": "regular-file",
+      "size": 249,
+      "sha256": "29837e5be78ea4168d17a0dafbc20768646d634121163c429743ef3784493715",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/ids.py",
+      "type": "regular-file",
+      "size": 2968,
+      "sha256": "833ff21e644c69e6693244d81331e5afc8f6ed5e15f8a1cdda866274c05eb15c",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/inventory.py",
+      "type": "regular-file",
+      "size": 9979,
+      "sha256": "3220a1670204071e1aff653d2738efcb3039b4b616c1d1ef4988c2b8d7535932",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/migration.py",
+      "type": "regular-file",
+      "size": 16782,
+      "sha256": "69703eebbf1f29b33e4e41c04d501fd48efd2bd785e522da1856cf3f7a6a0292",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/platform_artifact.py",
+      "type": "regular-file",
+      "size": 8611,
+      "sha256": "e52050130574521145aa6320bd7def2f4075118c27fc1a6ee1cd94a85edbf331",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/platform_paths.py",
+      "type": "regular-file",
+      "size": 1443,
+      "sha256": "cf49e5a12e8b2ebdc8a0f900b47922244655b53bc54da77daa2cbbdb4ceb608b",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/profile_scope.py",
+      "type": "regular-file",
+      "size": 3891,
+      "sha256": "1ade83af2666f6db934652b6b10070bffc8f89145b2b5711b7dcb9d960f925fa",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/provenance.py",
+      "type": "regular-file",
+      "size": 10901,
+      "sha256": "9598187b7a80a22505ee7eb7de391f1886c289da2d87e9e89d7a86d563571a31",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/scanners.py",
+      "type": "regular-file",
+      "size": 10046,
+      "sha256": "420d189f6271e17d19e35fdc66f9be282233d479850e1a7b4fc434d4183bf195",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schema_hashes.json",
+      "type": "regular-file",
+      "size": 3147,
+      "sha256": "3ce8713cdd9d0d3ff1bc7772ee577b6f8c7daa6c672de120ede49fc13e2a57e7",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/activation_record_v1.schema.json",
+      "type": "regular-file",
+      "size": 1330,
+      "sha256": "1cb4d94739cf37f62234001ba618baa25708c72357bb0cf334fd83bf075fb3ed",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/activation_record_v2.schema.json",
+      "type": "regular-file",
+      "size": 1801,
+      "sha256": "769bc251efc4655bca294dba54b8926a6712a61f4c132abfba446cfcaa5b21d0",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/base_definition_v4.schema.json",
+      "type": "regular-file",
+      "size": 3155,
+      "sha256": "ecf1dd9e8e3db61accdf02fc7f400f113062a883b87dee958f48a4f041fa0fac",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/cli_io_v1.schema.json",
+      "type": "regular-file",
+      "size": 2095,
+      "sha256": "158d24717c24b04b066acc21d5284eca322931c9ce125466a8bdd2be78c1a982",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/common_v1.schema.json",
+      "type": "regular-file",
+      "size": 4435,
+      "sha256": "680b3846db12054e2099ff8e58a04b57b0cd30b66ffaefe7442549ba67b7d143",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/composition_catalog_v4.schema.json",
+      "type": "regular-file",
+      "size": 3050,
+      "sha256": "bc951d53190f337fdb258cb211b0b688f3e61a1b0d79c73b5b920de1d10f6ba1",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/contract_v4.schema.json",
+      "type": "regular-file",
+      "size": 4217,
+      "sha256": "88762c00128d0aa861cae38cc5d6f686ac5e5c73b9d8a0ea790f8b3e529c14c8",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/distribution_v1.schema.json",
+      "type": "regular-file",
+      "size": 2438,
+      "sha256": "be0fac251168c9454defda8a28f95a4920343db9b08a3255971fdd77b469e6da",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/executable_catalog_v4.schema.json",
+      "type": "regular-file",
+      "size": 3634,
+      "sha256": "80daa4c77f30e7d5865a72d708492bfbe08eb2ef9325d020e998173bf279c01d",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/external_normal_pack_catalog_v4.schema.json",
+      "type": "regular-file",
+      "size": 6239,
+      "sha256": "e5787b92c70d644f04a7a6b80ed466f5e76dcc2756d39c223c925ff953378c6b",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/function_principal_v1.schema.json",
+      "type": "regular-file",
+      "size": 997,
+      "sha256": "3a6f763c358fd6581fe0be35d5e9917869b068c25cfee4adfdfa06fa327ad33b",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/inventory_v1.schema.json",
+      "type": "regular-file",
+      "size": 4997,
+      "sha256": "2cd124a405d451cd0858ee10a72e031cd34a5cfa5787ba93ed3b5e29123e1156",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/pack_artifact_index_v4.schema.json",
+      "type": "regular-file",
+      "size": 1504,
+      "sha256": "861c30621208af2aac98c2e8c678171c6aba493d8fcec4d37b6ed00d769af305",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/pack_contract_catalog_v4.schema.json",
+      "type": "regular-file",
+      "size": 726,
+      "sha256": "132c18aeb94952853a914a3bb962150898dd2f8f9d24ec245b7252012603eebf",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/pack_manifest_v4.schema.json",
+      "type": "regular-file",
+      "size": 7822,
+      "sha256": "38ea3d19e207003bf4a8e07b08610c9ab3fd4e547113f74b1c9afcc282538900",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/profile_lock_v4.schema.json",
+      "type": "regular-file",
+      "size": 3156,
+      "sha256": "879f2e8b975b9877a59f057e686b785ab4dd81357df688e6efa07927ec89e45e",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/profile_lock_v5.schema.json",
+      "type": "regular-file",
+      "size": 5125,
+      "sha256": "ca9bf711182486d9e8aea29a84e980f9f28b1e960893da3568427fd493ee6f50",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/profile_v4.schema.json",
+      "type": "regular-file",
+      "size": 5920,
+      "sha256": "b8e026f38d7477903f6ccbd04a0e855123491652c86c5bed6ae62c54cf146e85",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/profile_v5.schema.json",
+      "type": "regular-file",
+      "size": 7412,
+      "sha256": "8b31667b1e6e5ba80a62b625ad560a1423b8fa31712791cfbed2520deb4299e8",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/provenance_v1.schema.json",
+      "type": "regular-file",
+      "size": 1699,
+      "sha256": "34e1d1104613a7764e627bba147086381fb70f8b4d184bdb1d8f47ba024899da",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/provenance_v2.schema.json",
+      "type": "regular-file",
+      "size": 299,
+      "sha256": "309e0e2a6d2f27b774a1a7d9d1347fc41ad69ba6f3e4d1a8c8bac8e6dafe2665",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/request_envelope_v1.schema.json",
+      "type": "regular-file",
+      "size": 2872,
+      "sha256": "b1e73e73b803b183dced2ae6565518ce95e1cdf11efed996149f0eb5eab9760b",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/request_frame_v1.schema.json",
+      "type": "regular-file",
+      "size": 1125,
+      "sha256": "c8f54f0453faeb682103611a4b11e5996dd6f81d526588b7a2e7aebf8c7cba90",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/resolved_plan_v1.schema.json",
+      "type": "regular-file",
+      "size": 2607,
+      "sha256": "c02a20f1c851ffd0957ee88bf0e1da914f45fef033cdc1f472a93ffbe41fde16",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/resolved_plan_v2.schema.json",
+      "type": "regular-file",
+      "size": 4929,
+      "sha256": "8bbfff98ad91a8b119a5bcc07043c4eb4e28e3d4edb48e27a93fbca60c022fd5",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/shell_definition_v4.schema.json",
+      "type": "regular-file",
+      "size": 3340,
+      "sha256": "c1e4b4005b4c3267f33a72b9348b9777a3386279283390c4a12e9d9da55f2e81",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/shell_definition_v5.schema.json",
+      "type": "regular-file",
+      "size": 4945,
+      "sha256": "24ab2058a7dbe24018481a9ce06fc951211ebe9a84525da3a23aeed1df12daf6",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/secure_persistence.py",
+      "type": "regular-file",
+      "size": 35315,
+      "sha256": "aace8722dcb8b6824f3ddad6a51f0a9f1f7a94aa0a1e8a19464ad7cb5cd261a4",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/serialization.py",
+      "type": "regular-file",
+      "size": 1098,
+      "sha256": "1a19689f5d64e3f42a4933df3d37d8b83a88dc6c47f10191e0541920e0f0e876",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/validation.py",
+      "type": "regular-file",
+      "size": 19148,
+      "sha256": "6ce1febfb8d5d4db5bb091044a81475446403c0006da4204cb7fcb8230ff0b4f",
+      "executable": false
+    }
+  ]
+}

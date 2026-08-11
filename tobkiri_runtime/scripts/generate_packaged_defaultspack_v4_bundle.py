@@ -14,21 +14,24 @@ import tempfile
 from pathlib import Path, PureWindowsPath
 from typing import Any, Mapping, TypedDict
 
-from .generate_defaultspack_v4_bundle import (
+from .generator_source_manifest import verify_source_closure
+
+ROOT = Path(__file__).resolve().parents[1]
+verify_source_closure(ROOT)
+
+from .generate_defaultspack_v4_bundle import (  # noqa: E402
     _generated_provenance,
     _normalize_pack,
     _pretty,
 )
-from .packaging_cleanup import remove_owned_path
-from tobkiri_protocol.canonical import canonical_digest
-from tobkiri_protocol.platform_artifact import (
+from .packaging_cleanup import remove_owned_path  # noqa: E402
+from tobkiri_protocol.canonical import canonical_digest  # noqa: E402
+from tobkiri_protocol.platform_artifact import (  # noqa: E402
     artifact_digest,
     verify_platform_artifact,
 )
-from tobkiri_protocol.provenance import informational_source_commit
-from tobkiri_protocol.validation import validate_document
-
-ROOT = Path(__file__).resolve().parents[1]
+from tobkiri_protocol.provenance import informational_source_commit  # noqa: E402
+from tobkiri_protocol.validation import validate_document  # noqa: E402
 
 
 class _PublishRecord(TypedDict):

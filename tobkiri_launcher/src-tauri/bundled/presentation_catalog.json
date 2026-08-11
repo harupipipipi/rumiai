@@ -223,7 +223,7 @@
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi-host-authority-bridge.pack.v4.json"
     }
   ],
-  "default_profile_digest": "sha256:7b2adc5d3d0ec8b949f8eaff48c47a07927d7dc896991948ddcb7fea71fa9960",
+  "default_profile_digest": "sha256:b7d9ea1a1976b4028d61acf4e706243f33cff15345bcbad6a32d2d8944769cc3",
   "default_profile_id": "defaults",
   "default_profile_source": "tobkiri_runtime/ecosystem/defaultspack/v4/defaults.profile.v4.json",
   "default_selection": {
@@ -349,7 +349,7 @@
     }
   ],
   "source_manifest_digests": {
-    "defaults-basepack": "sha256:fa9fa769847e544367ec84192273a698876ad7b83de4126b3edf75d9188916e4",
+    "defaults-basepack": "sha256:d811d4b798793246db703305e6bdaa870483913c00ea07961a08bd642945762d",
     "defaultspack": "sha256:7a5620c8b54904f68abecd8ab8156c17a19779ff2b13c07e11acd290e56ec560",
     "rumi_ai_gateway_pack": "sha256:f32154fce60df91869f98c5067f0136f5d8e00bef73e8bc7cef6021af6838407",
     "rumi_ai_pipeline_pack": "sha256:1ebd3a5bbcdc462a9aa9875d69b83029232b1cabd84c7f50ca2dd4bee66ec8fa",

@@ -20,7 +20,7 @@ import uuid
 from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional, Sequence, Union
+from typing import Callable, Mapping, Optional, Sequence, Union
 
 
 _IS_WINDOWS = os.name == "nt"
@@ -1594,12 +1594,87 @@ def _close_child_streams(child: object) -> None:
             stream.close()
 
 
+_ISOLATED_ENVIRONMENT_KEYS = frozenset(
+    {
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "PATH",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "USERPROFILE",
+        "WINDIR",
+    }
+)
+_ISOLATED_MODULE_CODE = (
+    "import runpy,sys;"
+    "source_root=sys.argv[1];"
+    "module_name=sys.argv[2];"
+    "sys.path.insert(0,source_root);"
+    "sys.argv=[module_name,*sys.argv[3:]];"
+    "runpy.run_module(module_name,run_name='__main__',alter_sys=True)"
+)
+
+
+def isolated_packaging_environment(
+    source: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Rebuild a neutral environment for an official source generator child."""
+    inherited = os.environ if source is None else source
+    environment = {
+        key: value for key, value in inherited.items() if key in _ISOLATED_ENVIRONMENT_KEYS
+    }
+    environment["GIT_CONFIG_GLOBAL"] = os.devnull
+    environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    return environment
+
+
+def isolated_python_module_command(
+    python: Union[str, os.PathLike[str]],
+    module: str,
+    source_root: Path,
+    arguments: Sequence[Union[str, os.PathLike[str]]] = (),
+) -> list[Union[str, os.PathLike[str]]]:
+    """Build the canonical ``-I -B -c`` module launcher command.
+
+    Python isolated mode removes the working directory and all ``PYTHON*``
+    environment influence.  The only application path explicitly added is
+    the caller-verified canonical source root, then ``runpy`` loads the named
+    module with normal module semantics.
+    """
+    if source_root.is_symlink() or not source_root.is_dir():
+        raise ValueError(f"isolated module source root is unavailable: {source_root}")
+    canonical_root = source_root.resolve(strict=True)
+    if not canonical_root.is_dir():
+        raise ValueError(f"isolated module source root is not a directory: {source_root}")
+    if not module or any(character.isspace() for character in module):
+        raise ValueError(f"isolated module name is invalid: {module!r}")
+    return [
+        python,
+        "-I",
+        "-B",
+        "-c",
+        _ISOLATED_MODULE_CODE,
+        os.fspath(canonical_root),
+        module,
+        *arguments,
+    ]
+
+
 def run_process_and_wait(
-    command: Sequence[Union[str, os.PathLike[str]]], *, cwd: Path
+    command: Sequence[Union[str, os.PathLike[str]]],
+    *,
+    cwd: Path,
+    env: Mapping[str, str] | None = None,
 ) -> None:
     """Run a packaging child to completion and close its process handles."""
 
-    with subprocess.Popen(command, cwd=os.fspath(cwd)) as child:
+    popen_kwargs: dict[str, object] = {"cwd": os.fspath(cwd)}
+    if env is not None:
+        popen_kwargs["env"] = dict(env)
+    with subprocess.Popen(command, **popen_kwargs) as child:
         return_code = child.wait()
         _close_child_streams(child)
     if return_code:

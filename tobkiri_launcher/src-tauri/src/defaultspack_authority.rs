@@ -738,28 +738,21 @@ mod tests {
             &["Program Files", "Tobkiri Launcher", "resources", "app"],
         ),
     ];
-    const GENERATOR_REQUIRED_FILES: &[&str] = &[
-        "tobkiri_runtime/scripts/__init__.py",
-        "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
-        "tobkiri_runtime/scripts/generate_packaged_defaultspack_v4_bundle.py",
-        "tobkiri_runtime/scripts/packaging_cleanup.py",
-        "tobkiri_runtime/ecosystem/defaultspack/pack.v4.json",
-        "tobkiri_runtime/ecosystem/defaultspack/contracts.v4.json",
-        "tobkiri_runtime/ecosystem/defaultspack/artifact-index.v4.json",
-        "tobkiri_runtime/ecosystem/rumi_file_inspect_pack/pack.v4.json",
-        "tobkiri_runtime/ecosystem/rumi_host_authority_bridge_pack/pack.v4.json",
-        "tobkiri_runtime/ecosystem/rumi_workspace_mount_pack/pack.v4.json",
-        "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/pack.v4.json",
-        "tobkiri_runtime/ecosystem/rumi_ai_gateway_pack/pack.v4.json",
-        "tobkiri_runtime/ecosystem/rumi_model_catalog_pack/pack.v4.json",
-        "tobkiri_runtime/ecosystem/rumi_model_registry_pack/pack.v4.json",
-        "tobkiri_runtime/ecosystem/rumi_ai_pipeline_pack/pack.v4.json",
-        "tobkiri_runtime/ecosystem/rumi_provider_adapters_pack/pack.v4.json",
-        "tobkiri_runtime/ecosystem/rumi_ai_routing_pack/pack.v4.json",
-        "tobkiri_runtime/ecosystem/rumi_ai_stream_pack/pack.v4.json",
-        "tobkiri_runtime/ecosystem/rumi_ai_tool_bridge_pack/pack.v4.json",
-        "tobkiri_runtime/ecosystem/rumi_ai_usage_pack/pack.v4.json",
-        "tobkiri_runtime/ecosystem/rumi_provider_registry_pack/pack.v4.json",
+    const SOURCE_MANIFEST_RELATIVE: &str =
+        "tobkiri_runtime/packaged_defaultspack_source_manifest.v1.json";
+    const SOURCE_MANIFEST_SCHEMA: &str = "io.tobkiri.packaged-defaultspack-source.v1";
+    const ISOLATED_MODULE_CODE: &str = "import runpy,sys;source_root=sys.argv[1];module_name=sys.argv[2];sys.path.insert(0,source_root);sys.argv=[module_name,*sys.argv[3:]];runpy.run_module(module_name,run_name='__main__',alter_sys=True)";
+    const ISOLATED_ENVIRONMENT_KEYS: &[&str] = &[
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "PATH",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "USERPROFILE",
+        "WINDIR",
     ];
 
     fn rewrite_locked_document(
@@ -799,6 +792,208 @@ mod tests {
         rewrite_locked_document(config, RUNTIME_PACK_PATH, mutate);
     }
 
+    fn source_manifest_entries(source_checkout: &Path) -> BTreeMap<String, Value> {
+        let manifest_path = source_checkout.join(SOURCE_MANIFEST_RELATIVE);
+        let manifest = read_json(&manifest_path, "packaged Defaults source manifest").unwrap();
+        let object = manifest
+            .as_object()
+            .expect("source manifest must be an object");
+        let actual_fields = object.keys().map(String::as_str).collect::<BTreeSet<_>>();
+        let expected_fields = ["schema", "roots", "files"]
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            actual_fields, expected_fields,
+            "source manifest fields drifted"
+        );
+        assert_eq!(
+            object.get("schema").and_then(Value::as_str),
+            Some(SOURCE_MANIFEST_SCHEMA),
+            "source manifest schema drifted"
+        );
+        assert_eq!(
+            object.get("roots"),
+            Some(&serde_json::json!([
+                "scripts",
+                "tobkiri_protocol",
+                "ecosystem/defaultspack/domain/runtime_v4",
+                "ecosystem/defaultspack/v4",
+                "ecosystem/defaultspack/runtime",
+                "ecosystem/defaultspack/defaultspack",
+            ])),
+            "source manifest roots drifted"
+        );
+        let files = object
+            .get("files")
+            .and_then(Value::as_array)
+            .expect("source manifest files must be an array");
+        let mut entries = BTreeMap::new();
+        let mut previous: Option<&str> = None;
+        for entry in files {
+            let entry_object = entry
+                .as_object()
+                .expect("source manifest entry must be an object");
+            let fields = entry_object
+                .keys()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>();
+            let expected = ["path", "type", "size", "sha256", "executable"]
+                .into_iter()
+                .collect::<BTreeSet<_>>();
+            assert_eq!(fields, expected, "source manifest file fields drifted");
+            let relative = entry_object
+                .get("path")
+                .and_then(Value::as_str)
+                .expect("source manifest path must be a string");
+            if let Some(value) = previous {
+                assert!(value < relative, "source manifest paths must be sorted");
+            }
+            previous = Some(relative);
+            assert!(
+                !relative.is_empty()
+                    && !relative.contains('\\')
+                    && !Path::new(relative).is_absolute()
+                    && Path::new(relative)
+                        .components()
+                        .all(|component| matches!(component, Component::Normal(_))),
+                "source manifest path is unsafe: {relative}"
+            );
+            assert_eq!(
+                entry_object.get("type").and_then(Value::as_str),
+                Some("regular-file"),
+                "source manifest entry type drifted: {relative}"
+            );
+            let digest = entry_object
+                .get("sha256")
+                .and_then(Value::as_str)
+                .expect("source manifest digest must be a string");
+            assert!(
+                digest.len() == 64
+                    && digest.bytes().all(|character| character.is_ascii_hexdigit()
+                        && !character.is_ascii_uppercase()),
+                "source manifest digest must be lowercase raw SHA-256: {relative}"
+            );
+            assert!(
+                entries.insert(relative.to_owned(), entry.clone()).is_none(),
+                "source manifest contains duplicate path: {relative}"
+            );
+        }
+        assert!(!entries.is_empty(), "source manifest must contain files");
+        entries
+    }
+
+    fn source_file_digest(path: &Path) -> String {
+        format!(
+            "{:x}",
+            Sha256::digest(&fs::read(path).expect("source file should be readable"))
+        )
+    }
+
+    #[cfg(unix)]
+    fn source_file_executable(metadata: &fs::Metadata) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+
+        metadata.permissions().mode() & 0o111 != 0
+    }
+
+    #[cfg(not(unix))]
+    fn source_file_executable(_metadata: &fs::Metadata) -> bool {
+        false
+    }
+
+    fn collect_source_files(root: &Path, current: &Path, actual: &mut BTreeMap<String, Value>) {
+        let entries = fs::read_dir(current).expect("source closure directory should be readable");
+        for entry in entries {
+            let entry = entry.expect("source closure entry should be readable");
+            let path = entry.path();
+            let metadata =
+                fs::symlink_metadata(&path).expect("source closure metadata should exist");
+            assert!(
+                !metadata.file_type().is_symlink(),
+                "source closure contains a symlink: {}",
+                path.display()
+            );
+            if metadata.is_dir() {
+                collect_source_files(root, &path, actual);
+            } else {
+                assert!(
+                    metadata.is_file(),
+                    "source closure contains a special entry: {}",
+                    path.display()
+                );
+                assert!(
+                    !has_multiple_links(&path, &metadata)
+                        .expect("source links should be inspectable"),
+                    "source closure contains a hardlink: {}",
+                    path.display()
+                );
+                let relative = path
+                    .strip_prefix(root)
+                    .expect("source file should remain under closure root")
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let record = serde_json::json!({
+                    "path": relative,
+                    "type": "regular-file",
+                    "size": metadata.len(),
+                    "sha256": source_file_digest(&path),
+                    "executable": source_file_executable(&metadata),
+                });
+                assert!(
+                    actual.insert(relative, record).is_none(),
+                    "duplicate source path"
+                );
+            }
+        }
+    }
+
+    fn assert_source_manifest_exact(source_checkout: &Path) {
+        let expected = source_manifest_entries(source_checkout);
+        let runtime_root = source_checkout.join("tobkiri_runtime");
+        let manifest = runtime_root.join("packaged_defaultspack_source_manifest.v1.json");
+        let mut actual = BTreeMap::new();
+        let roots = [
+            "scripts",
+            "tobkiri_protocol",
+            "ecosystem/defaultspack/domain/runtime_v4",
+            "ecosystem/defaultspack/v4",
+            "ecosystem/defaultspack/runtime",
+            "ecosystem/defaultspack/defaultspack",
+        ];
+        for root in roots {
+            collect_source_files(&runtime_root, &runtime_root.join(root), &mut actual);
+        }
+        for relative in [
+            "ecosystem/defaultspack/pack.v4.json",
+            "ecosystem/defaultspack/contracts.v4.json",
+            "ecosystem/defaultspack/artifact-index.v4.json",
+        ] {
+            let path = runtime_root.join(relative);
+            let metadata = fs::symlink_metadata(&path).expect("source file should exist");
+            assert!(!metadata.file_type().is_symlink() && metadata.is_file());
+            assert!(!has_multiple_links(&path, &metadata).unwrap());
+            actual.insert(
+                relative.to_owned(),
+                serde_json::json!({
+                    "path": relative,
+                    "type": "regular-file",
+                    "size": metadata.len(),
+                    "sha256": source_file_digest(&path),
+                    "executable": source_file_executable(&metadata),
+                }),
+            );
+        }
+        assert!(!actual.contains_key("packaged_defaultspack_source_manifest.v1.json"));
+        assert_eq!(
+            actual, expected,
+            "source closure differs from shared manifest"
+        );
+        assert!(
+            !manifest.is_symlink(),
+            "source manifest itself may not be a symlink"
+        );
+    }
+
     fn clone_authoritative_fixture_source(repository: &Path, destination: &Path) -> String {
         let status = Command::new("git")
             .args(["clone", "--quiet", "--shared", "--no-checkout", "--no-tags"])
@@ -810,35 +1005,15 @@ mod tests {
             status.success(),
             "authoritative fixture source clone failed"
         );
+        let manifest = source_manifest_entries(repository);
+        let mut sparse_paths = vec!["sparse-checkout".to_owned(), "set".to_owned()];
+        for relative in manifest.keys() {
+            sparse_paths.push(format!("tobkiri_runtime/{relative}"));
+        }
+        sparse_paths.push(SOURCE_MANIFEST_RELATIVE.to_owned());
+        sparse_paths.push("tobkiri_launcher/src-tauri/bundled".to_owned());
         let status = Command::new("git")
-            .args([
-                "sparse-checkout",
-                "set",
-                "tobkiri_runtime/scripts",
-                "tobkiri_runtime/tobkiri_protocol",
-                "tobkiri_runtime/ecosystem/defaultspack/domain/runtime_v4",
-                "tobkiri_runtime/ecosystem/defaultspack/v4",
-                "tobkiri_runtime/ecosystem/defaultspack/runtime",
-                "tobkiri_runtime/ecosystem/defaultspack/defaultspack",
-                "tobkiri_runtime/ecosystem/defaultspack/pack.v4.json",
-                "tobkiri_runtime/ecosystem/defaultspack/contracts.v4.json",
-                "tobkiri_runtime/ecosystem/defaultspack/artifact-index.v4.json",
-                "tobkiri_runtime/ecosystem/rumi_file_inspect_pack/pack.v4.json",
-                "tobkiri_runtime/ecosystem/rumi_host_authority_bridge_pack/pack.v4.json",
-                "tobkiri_runtime/ecosystem/rumi_workspace_mount_pack/pack.v4.json",
-                "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/pack.v4.json",
-                "tobkiri_runtime/ecosystem/rumi_ai_gateway_pack/pack.v4.json",
-                "tobkiri_runtime/ecosystem/rumi_model_catalog_pack/pack.v4.json",
-                "tobkiri_runtime/ecosystem/rumi_model_registry_pack/pack.v4.json",
-                "tobkiri_runtime/ecosystem/rumi_ai_pipeline_pack/pack.v4.json",
-                "tobkiri_runtime/ecosystem/rumi_provider_adapters_pack/pack.v4.json",
-                "tobkiri_runtime/ecosystem/rumi_ai_routing_pack/pack.v4.json",
-                "tobkiri_runtime/ecosystem/rumi_ai_stream_pack/pack.v4.json",
-                "tobkiri_runtime/ecosystem/rumi_ai_tool_bridge_pack/pack.v4.json",
-                "tobkiri_runtime/ecosystem/rumi_ai_usage_pack/pack.v4.json",
-                "tobkiri_runtime/ecosystem/rumi_provider_registry_pack/pack.v4.json",
-                "tobkiri_launcher/src-tauri/bundled",
-            ])
+            .args(&sparse_paths)
             .current_dir(destination)
             .status()
             .expect("authoritative fixture sparse checkout should run");
@@ -897,15 +1072,7 @@ mod tests {
                 .exists(),
             "relocated generator must not retain the repository helper fallback"
         );
-        for relative in GENERATOR_REQUIRED_FILES {
-            let path = source_checkout.join(relative);
-            let metadata = fs::symlink_metadata(&path)
-                .unwrap_or_else(|_| panic!("generator source file is missing: {relative}"));
-            assert!(
-                metadata.is_file() && !metadata.file_type().is_symlink(),
-                "generator source file is not a regular file: {relative}"
-            );
-        }
+        assert_source_manifest_exact(source_checkout);
     }
 
     fn package_fixture_application(
@@ -936,8 +1103,58 @@ mod tests {
         .unwrap();
 
         let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
-        let status = std::process::Command::new(python)
-            .args(["-m", "scripts.generate_packaged_defaultspack_v4_bundle"])
+        let hostile = config.app_dir.join("hostile-generator-input");
+        fs::create_dir_all(hostile.join("scripts")).unwrap();
+        let marker = hostile.join("executed.marker");
+        let marker_literal = format!("{:?}", marker.to_string_lossy());
+        fs::write(
+            hostile.join("sitecustomize.py"),
+            format!(
+                "from pathlib import Path; Path({marker_literal}).write_text('sitecustomize')\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            hostile.join("usercustomize.py"),
+            format!(
+                "from pathlib import Path; Path({marker_literal}).write_text('usercustomize')\n"
+            ),
+        )
+        .unwrap();
+        fs::write(hostile.join("scripts/__init__.py"), "\n").unwrap();
+        fs::write(
+            hostile.join("scripts/generate_packaged_defaultspack_v4_bundle.py"),
+            format!("from pathlib import Path; Path({marker_literal}).write_text('fake-module')\n"),
+        )
+        .unwrap();
+        let unsafe_status = Command::new(&python)
+            .args([
+                "-B",
+                "-m",
+                "scripts.generate_packaged_defaultspack_v4_bundle",
+                "--help",
+            ])
+            .env("PYTHONPATH", &hostile)
+            .current_dir(&hostile)
+            .status()
+            .unwrap();
+        assert!(unsafe_status.success());
+        assert!(
+            marker.exists(),
+            "unsafe fixture launch should execute its marker"
+        );
+        fs::remove_file(&marker).unwrap();
+
+        let source_root = source_checkout
+            .join("tobkiri_runtime")
+            .canonicalize()
+            .unwrap();
+        let mut isolated = Command::new(&python);
+        isolated
+            .env_clear()
+            .args(["-I", "-B", "-c", ISOLATED_MODULE_CODE])
+            .arg(&source_root)
+            .arg("scripts.generate_packaged_defaultspack_v4_bundle")
             .arg("--source-artifact")
             .arg(&source)
             .arg("--bundle-root")
@@ -960,12 +1177,24 @@ mod tests {
             .arg("io.tobkiri.shell.tauri")
             .arg("--source-commit")
             .arg(source_revision)
-            .current_dir(source_checkout.join("tobkiri_runtime"))
-            .status()
-            .unwrap();
+            .env(
+                "GIT_CONFIG_GLOBAL",
+                if cfg!(windows) { "NUL" } else { "/dev/null" },
+            )
+            .env("GIT_CONFIG_NOSYSTEM", "1");
+        for key in ISOLATED_ENVIRONMENT_KEYS {
+            if let Some(value) = std::env::var_os(key) {
+                isolated.env(key, value);
+            }
+        }
+        let status = isolated.current_dir(&hostile).status().unwrap();
         assert!(
             status.success(),
             "official packaged Profile generator failed"
+        );
+        assert!(
+            !marker.exists(),
+            "isolated fixture launch executed hostile input"
         );
         assert_clean_fixture_source(source_checkout);
         let bundle_root = config.app_dir.join("ecosystem/defaultspack/v4");

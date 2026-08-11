@@ -3,75 +3,59 @@
 from __future__ import annotations
 
 import os
+import importlib.util
+import json
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-_SOURCE_DIRECTORIES = (
-    "tobkiri_runtime/scripts",
-    "tobkiri_runtime/tobkiri_protocol",
-    "tobkiri_runtime/ecosystem/defaultspack/domain/runtime_v4",
-    "tobkiri_runtime/ecosystem/defaultspack/v4",
-    "tobkiri_runtime/ecosystem/defaultspack/runtime",
-    "tobkiri_runtime/ecosystem/defaultspack/defaultspack",
-)
-_SOURCE_FILES = (
-    "tobkiri_runtime/ecosystem/defaultspack/pack.v4.json",
-    "tobkiri_runtime/ecosystem/defaultspack/contracts.v4.json",
-    "tobkiri_runtime/ecosystem/defaultspack/artifact-index.v4.json",
-    "tobkiri_runtime/ecosystem/rumi_file_inspect_pack/pack.v4.json",
-    "tobkiri_runtime/ecosystem/rumi_host_authority_bridge_pack/pack.v4.json",
-    "tobkiri_runtime/ecosystem/rumi_workspace_mount_pack/pack.v4.json",
-    "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/pack.v4.json",
-    "tobkiri_runtime/ecosystem/rumi_ai_gateway_pack/pack.v4.json",
-    "tobkiri_runtime/ecosystem/rumi_model_catalog_pack/pack.v4.json",
-    "tobkiri_runtime/ecosystem/rumi_model_registry_pack/pack.v4.json",
-    "tobkiri_runtime/ecosystem/rumi_ai_pipeline_pack/pack.v4.json",
-    "tobkiri_runtime/ecosystem/rumi_provider_adapters_pack/pack.v4.json",
-    "tobkiri_runtime/ecosystem/rumi_ai_routing_pack/pack.v4.json",
-    "tobkiri_runtime/ecosystem/rumi_ai_stream_pack/pack.v4.json",
-    "tobkiri_runtime/ecosystem/rumi_ai_tool_bridge_pack/pack.v4.json",
-    "tobkiri_runtime/ecosystem/rumi_ai_usage_pack/pack.v4.json",
-    "tobkiri_runtime/ecosystem/rumi_provider_registry_pack/pack.v4.json",
-)
-_ENVIRONMENT_ALLOWLIST = frozenset(
-    {
-        "HOME",
-        "LANG",
-        "LC_ALL",
-        "LC_CTYPE",
-        "PATH",
-        "SystemRoot",
-        "TEMP",
-        "TMP",
-        "TMPDIR",
-        "USERPROFILE",
-        "WINDIR",
-    }
-)
 
 
-def _clean_environment() -> dict[str, str]:
-    """Return only neutral process state for the relocated generator."""
-    return {
-        key: value for key, value in os.environ.items() if key in _ENVIRONMENT_ALLOWLIST
-    }
+def _load_packaging_helpers() -> ModuleType:
+    """Load the canonical isolated launcher helpers from the source tree."""
+    helper_path = REPOSITORY_ROOT / "tobkiri_runtime/scripts/packaging_cleanup.py"
+    spec = importlib.util.spec_from_file_location("relocation_packaging_cleanup", helper_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"packaging helper is unavailable: {helper_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_PACKAGING_HELPERS = _load_packaging_helpers()
+
+
+def _clean_environment(source: dict[str, str] | None = None) -> dict[str, str]:
+    """Return the canonical isolated environment, including no Python hooks."""
+    return _PACKAGING_HELPERS.isolated_packaging_environment(source)
+
+
+def _source_manifest() -> dict[str, object]:
+    """Load the one checked-in source closure manifest."""
+    path = REPOSITORY_ROOT / "tobkiri_runtime/packaged_defaultspack_source_manifest.v1.json"
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _copy_source_checkout(destination: Path) -> None:
     """Copy exactly the source closure required by the official generator."""
-    ignored = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
-    for relative in _SOURCE_DIRECTORIES:
-        source = REPOSITORY_ROOT / relative
-        if source.is_symlink() or not source.is_dir():
-            raise AssertionError(f"source closure directory is unsafe: {relative}")
-        target = destination / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(source, target, ignore=ignored)
-    for relative in _SOURCE_FILES:
+    manifest_path = (
+        REPOSITORY_ROOT / "tobkiri_runtime/packaged_defaultspack_source_manifest.v1.json"
+    )
+    manifest_target = destination / "tobkiri_runtime/packaged_defaultspack_source_manifest.v1.json"
+    manifest_target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(manifest_path, manifest_target)
+    files = _source_manifest().get("files")
+    if not isinstance(files, list):
+        raise AssertionError("source closure manifest files are missing")
+    for entry in files:
+        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+            raise AssertionError("source closure manifest entry is malformed")
+        relative = f"tobkiri_runtime/{entry['path']}"
         source = REPOSITORY_ROOT / relative
         if source.is_symlink() or not source.is_file():
             raise AssertionError(f"source closure file is unsafe: {relative}")
@@ -97,33 +81,41 @@ def _fixture(root: Path) -> tuple[Path, Path, Path]:
 
 
 def _generator_process(
-    checkout: Path, bundle: Path, artifact: Path
+    checkout: Path,
+    bundle: Path,
+    artifact: Path,
+    *,
+    environment: dict[str, str] | None = None,
+    cwd: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run the official generator from the relocated runtime package root."""
+    source_root = checkout / "tobkiri_runtime"
     return subprocess.run(
-        [
+        _PACKAGING_HELPERS.isolated_python_module_command(
             sys.executable,
-            "-m",
             "scripts.generate_packaged_defaultspack_v4_bundle",
-            "--source-artifact",
-            os.fspath(artifact),
-            "--bundle-root",
-            os.fspath(bundle),
-            "--artifact-root",
-            os.fspath(bundle.parent / "platform-artifacts"),
-            "--relative-path",
-            "Tobkiri.AppImage",
-            "--entrypoint",
-            "Tobkiri.AppImage",
-            "--platform",
-            "linux",
-            "--architecture",
-            "x86_64",
-            "--bundle-identity",
-            "io.tobkiri.shell.tauri",
-        ],
-        cwd=checkout / "tobkiri_runtime",
-        env=_clean_environment(),
+            source_root,
+            [
+                "--source-artifact",
+                os.fspath(artifact),
+                "--bundle-root",
+                os.fspath(bundle),
+                "--artifact-root",
+                os.fspath(bundle.parent / "platform-artifacts"),
+                "--relative-path",
+                "Tobkiri.AppImage",
+                "--entrypoint",
+                "Tobkiri.AppImage",
+                "--platform",
+                "linux",
+                "--architecture",
+                "x86_64",
+                "--bundle-identity",
+                "io.tobkiri.shell.tauri",
+            ],
+        ),
+        cwd=source_root if cwd is None else cwd,
+        env=_clean_environment() if environment is None else _clean_environment(environment),
         capture_output=True,
         text=True,
         check=False,
@@ -148,14 +140,14 @@ def _output_bytes(root: Path) -> dict[str, bytes]:
 def _run_help(checkout: Path, environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
     """Run module help and return its process result for negative tests."""
     return subprocess.run(
-        [
+        _PACKAGING_HELPERS.isolated_python_module_command(
             sys.executable,
-            "-m",
             "scripts.generate_packaged_defaultspack_v4_bundle",
-            "--help",
-        ],
+            checkout / "tobkiri_runtime",
+            ["--help"],
+        ),
         cwd=checkout / "tobkiri_runtime",
-        env=environment,
+        env=_clean_environment(environment),
         capture_output=True,
         text=True,
         check=False,
@@ -176,6 +168,83 @@ def test_relocated_generator_is_deterministic_without_repository_imports(tmp_pat
     assert not list(tmp_path.rglob(".tobkiri-defaultspack-transaction-*"))
 
 
+def test_isolated_launcher_rejects_hostile_hooks_packages_and_cwd(
+    tmp_path: Path,
+) -> None:
+    """Only the canonical root can affect a generator module launch."""
+    checkout, bundle, artifact = _fixture(tmp_path / "hostile")
+    hostile = tmp_path / "hostile-input"
+    hostile.mkdir()
+    marker = hostile / "executed.marker"
+    marker_literal = repr(os.fspath(marker))
+    (hostile / "sitecustomize.py").write_text(
+        f"from pathlib import Path; Path({marker_literal}).write_text('sitecustomize')\n",
+        encoding="utf-8",
+    )
+    (hostile / "usercustomize.py").write_text(
+        f"from pathlib import Path; Path({marker_literal}).write_text('usercustomize')\n",
+        encoding="utf-8",
+    )
+    (hostile / "startup.py").write_text(
+        f"from pathlib import Path; Path({marker_literal}).write_text('startup')\n",
+        encoding="utf-8",
+    )
+    fake_scripts = hostile / "scripts"
+    fake_scripts.mkdir()
+    (fake_scripts / "__init__.py").write_text("\n", encoding="utf-8")
+    (fake_scripts / "generate_packaged_defaultspack_v4_bundle.py").write_text(
+        f"from pathlib import Path; Path({marker_literal}).write_text('fake-module')\n",
+        encoding="utf-8",
+    )
+    fake_protocol = hostile / "tobkiri_protocol"
+    fake_protocol.mkdir()
+    (fake_protocol / "__init__.py").write_text(
+        f"from pathlib import Path; Path({marker_literal}).write_text('fake-package')\n",
+        encoding="utf-8",
+    )
+    poisoned = dict(os.environ)
+    poisoned.update(
+        {
+            "PYTHONPATH": os.fspath(hostile),
+            "PYTHONHOME": os.fspath(hostile / "not-python"),
+            "PYTHONSTARTUP": os.fspath(hostile / "startup.py"),
+            "REPO": os.fspath(hostile),
+            "RUMI_CORE_DIR": os.fspath(hostile),
+            "LD_LIBRARY_PATH": os.fspath(hostile),
+            "DYLD_INSERT_LIBRARIES": os.fspath(hostile / "fake.dylib"),
+        }
+    )
+    unsafe_environment = dict(os.environ)
+    unsafe_environment["PYTHONPATH"] = os.fspath(hostile)
+    unsafe = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-m",
+            "scripts.generate_packaged_defaultspack_v4_bundle",
+            "--help",
+        ],
+        cwd=hostile,
+        env=unsafe_environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert unsafe.returncode == 0
+    assert marker.exists(), "control launch should demonstrate the hostile import"
+    marker.unlink()
+
+    safe = _generator_process(
+        checkout,
+        bundle,
+        artifact,
+        environment=poisoned,
+        cwd=hostile,
+    )
+    assert safe.returncode == 0, safe.stderr
+    assert not marker.exists(), "isolated launch executed hostile Python input"
+
+
 def test_relocated_generator_rejects_missing_tampered_or_external_cleanup(tmp_path: Path) -> None:
     """A missing or changed sibling cannot be replaced by an external helper."""
     missing_checkout, _, _ = _fixture(tmp_path / "missing")
@@ -188,14 +257,43 @@ def test_relocated_generator_rejects_missing_tampered_or_external_cleanup(tmp_pa
     environment["PYTHONPATH"] = os.fspath(external)
     missing = _run_help(missing_checkout, environment)
     assert missing.returncode != 0
-    assert "packaging_cleanup" in missing.stderr
+    assert "source closure" in missing.stderr or "packaging_cleanup" in missing.stderr
 
     tampered_checkout, _, _ = _fixture(tmp_path / "tampered")
     tampered_helper = tampered_checkout / "tobkiri_runtime/scripts/packaging_cleanup.py"
     tampered_helper.write_text("this is not valid Python\n")
     tampered = _run_help(tampered_checkout, _clean_environment())
     assert tampered.returncode != 0
-    assert "SyntaxError" in tampered.stderr
+    assert "source closure" in tampered.stderr or "SyntaxError" in tampered.stderr
+
+
+def test_relocated_generator_rejects_manifest_missing_tamper_extra_and_symlink(
+    tmp_path: Path,
+) -> None:
+    """The shared source manifest fails closed for every closure mutation."""
+    cases = ("missing", "tampered", "extra", "symlink")
+    for case in cases:
+        checkout, _, _ = _fixture(tmp_path / case)
+        manifest = _source_manifest()
+        entries = manifest["files"]
+        assert isinstance(entries, list) and entries
+        relative = entries[0]["path"]
+        target = checkout / "tobkiri_runtime" / relative
+        if case == "missing":
+            target.unlink()
+        elif case == "tampered":
+            target.write_bytes(b"tampered source closure")
+        elif case == "extra":
+            extra = checkout / "tobkiri_runtime/scripts/extra-source.py"
+            extra.write_text("extra = True\n", encoding="utf-8")
+        else:
+            outside = tmp_path / "outside.py"
+            outside.write_text("outside = True\n", encoding="utf-8")
+            target.unlink()
+            target.symlink_to(outside)
+        result = _run_help(checkout, _clean_environment())
+        assert result.returncode != 0, case
+        assert "source closure" in result.stderr.lower() or "symlink" in result.stderr.lower()
 
 
 def test_relocated_generator_rejects_missing_authoritative_input(tmp_path: Path) -> None:

@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -41,6 +42,19 @@ const PRESENTATION_CATALOG_SCHEMA: &str = "io.tobkiri.launcher.presentation-cata
 const PRESENTATION_RELEASE_SCHEMA: &str = "io.tobkiri.shell.release.v4";
 const PRESENTATION_INDEX_SCHEMA: &str = "io.tobkiri.shell.artifact-index.v4";
 const PRESENTATION_LOCK_SCHEMA: &str = "io.tobkiri.shell.profile-lock.v4";
+const ISOLATED_MODULE_CODE: &str = "import runpy,sys;source_root=sys.argv[1];module_name=sys.argv[2];sys.path.insert(0,source_root);sys.argv=[module_name,*sys.argv[3:]];runpy.run_module(module_name,run_name='__main__',alter_sys=True)";
+const ISOLATED_ENVIRONMENT_KEYS: &[&str] = &[
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "PATH",
+    "SystemRoot",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "USERPROFILE",
+    "WINDIR",
+];
 
 #[cfg(not(test))]
 fn main() {
@@ -86,6 +100,40 @@ fn main() {
 
 #[cfg(test)]
 fn main() {}
+
+fn isolated_python_module_command(
+    python: OsString,
+    source_root: &Path,
+    module: &str,
+) -> io::Result<Command> {
+    if source_root.is_symlink() || !source_root.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "isolated Python source root is unavailable: {}",
+                source_root.display()
+            ),
+        ));
+    }
+    let canonical_root = source_root.canonicalize()?;
+    let mut command = Command::new(python);
+    command
+        .env_clear()
+        .args(["-I", "-B", "-c", ISOLATED_MODULE_CODE])
+        .arg(canonical_root)
+        .arg(module)
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            if cfg!(windows) { "NUL" } else { "/dev/null" },
+        )
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+    for key in ISOLATED_ENVIRONMENT_KEYS {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    Ok(command)
+}
 
 fn warn_legacy_defaultspack_app_bundle() {
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
@@ -1822,33 +1870,40 @@ fn stage_presentation_release_from_snapshot(
         let generator = repository_root
             .join("tobkiri_runtime/scripts/generate_packaged_defaultspack_v4_bundle.py");
         require_regular_file(&generator, "packaged Profile generator")?;
+        require_regular_file(
+            &repository_root.join("tobkiri_runtime/packaged_defaultspack_source_manifest.v1.json"),
+            "packaged Profile generator source manifest",
+        )?;
         let source_revision = current_source_revision(&repository_root)?;
         let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
-        let mut child = Command::new(python)
-            .args(["-m", "scripts.generate_packaged_defaultspack_v4_bundle"])
-            .arg("--source-artifact")
-            .arg(&verified.artifact_path)
-            .arg("--bundle-root")
-            .arg(&bundle_root)
-            .arg("--artifact-root")
-            .arg(staged_root.join("ecosystem/defaultspack/platform-artifacts"))
-            .arg("--relative-path")
-            .arg(&verified.artifact_ref)
-            .arg("--entrypoint")
-            .arg(&verified.entrypoint)
-            .arg("--platform")
-            .arg(&verified.platform)
-            .arg("--architecture")
-            .arg(&verified.architecture)
-            .arg("--bundle-identity")
-            .arg(&verified.bundle_identity)
-            .arg("--source-commit")
-            .arg(source_revision)
-            .current_dir(repository_root.join("tobkiri_runtime"))
-            .spawn()
-            .map_err(|error| {
-                invalid_release(format!("failed to run packaged Profile generator: {error}"))
-            })?;
+        let mut child = isolated_python_module_command(
+            python,
+            &repository_root.join("tobkiri_runtime"),
+            "scripts.generate_packaged_defaultspack_v4_bundle",
+        )?
+        .arg("--source-artifact")
+        .arg(&verified.artifact_path)
+        .arg("--bundle-root")
+        .arg(&bundle_root)
+        .arg("--artifact-root")
+        .arg(staged_root.join("ecosystem/defaultspack/platform-artifacts"))
+        .arg("--relative-path")
+        .arg(&verified.artifact_ref)
+        .arg("--entrypoint")
+        .arg(&verified.entrypoint)
+        .arg("--platform")
+        .arg(&verified.platform)
+        .arg("--architecture")
+        .arg(&verified.architecture)
+        .arg("--bundle-identity")
+        .arg(&verified.bundle_identity)
+        .arg("--source-commit")
+        .arg(source_revision)
+        .current_dir(repository_root.join("tobkiri_runtime"))
+        .spawn()
+        .map_err(|error| {
+            invalid_release(format!("failed to run packaged Profile generator: {error}"))
+        })?;
         let status = child.wait().map_err(|error| {
             invalid_release(format!(
                 "failed waiting for packaged Profile generator: {error}"

@@ -86,6 +86,15 @@ and independently verify both bindings. Production capture consumes the
 selected definition variant rather than synthesizing one from Function
 metadata.
 
+Production callers launch the generator through the shared isolated launcher:
+the child environment is rebuilt from a small neutral allowlist, Python is
+started with `-I -B -c`, and only the canonical `tobkiri_runtime` root is
+added before `runpy.run_module`. `PYTHON*`, `LD_*`, and `DYLD_*` inputs are not
+inherited. The exact source closure is recorded in
+`tobkiri_runtime/packaged_defaultspack_source_manifest.v1.json`; missing,
+extra, changed, linked, or special entries fail closed in both Python and the
+Rust sparse authoritative-source fixture.
+
 ## Transactions and settings
 
 Named Profile selection is the four-step server ceremony:
