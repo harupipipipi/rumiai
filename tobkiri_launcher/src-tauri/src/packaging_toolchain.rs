@@ -258,6 +258,13 @@ pub enum VerifiedChild {
     Darwin(DarwinChild),
 }
 
+pub enum VerifiedSpawnOutcome {
+    NoChild(io::Error),
+    ReapedFailure(io::Error),
+    Running(VerifiedChild),
+    Uncontained(io::Error),
+}
+
 impl VerifiedChild {
     pub fn wait(&mut self) -> io::Result<ExitStatus> {
         match self {
@@ -477,22 +484,57 @@ impl<'a> VerifiedCommand<'a> {
     }
 
     #[cfg(target_os = "macos")]
-    fn spawn_darwin(&self, capture: bool) -> io::Result<DarwinChild> {
-        if macos_code_identity(&self.tool.original_path)? != self.tool.macos_cdhash {
-            return Err(invalid(
+    fn spawn_darwin(&self, capture: bool) -> VerifiedSpawnOutcome {
+        let identity = match macos_code_identity(&self.tool.original_path) {
+            Ok(identity) => identity,
+            Err(error) => return VerifiedSpawnOutcome::NoChild(error),
+        };
+        if identity != self.tool.macos_cdhash {
+            return VerifiedSpawnOutcome::NoChild(invalid(
                 "macOS packaging tool identity changed before spawn",
             ));
         }
         if self.current_dir.is_some() && self.current_dir_handle.is_none() {
-            return Err(invalid("Darwin verified command cwd could not be anchored"));
+            return VerifiedSpawnOutcome::NoChild(invalid(
+                "Darwin verified command cwd could not be anchored",
+            ));
         }
-        let child = spawn_suspended_darwin(
+        let mut child = match spawn_suspended_darwin(
             &self.tool.original_path,
             &self.args,
             &self.environment(),
             self.current_dir_handle.as_ref(),
             capture,
-        )?;
+        ) {
+            Ok(child) => child,
+            Err(error) => return VerifiedSpawnOutcome::NoChild(error),
+        };
+        let capture_fds = [
+            child.stdout.as_ref().map(std::os::fd::AsRawFd::as_raw_fd),
+            child.stderr.as_ref().map(std::os::fd::AsRawFd::as_raw_fd),
+        ];
+        for fd in capture_fds.into_iter().flatten() {
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+            if flags == -1
+                || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1
+            {
+                let primary = io::Error::last_os_error();
+                let containment = child.kill().and_then(|()| {
+                    child
+                        .wait_nonblocking_until(
+                            std::time::Instant::now() + std::time::Duration::from_secs(2),
+                        )?
+                        .ok_or_else(|| invalid("timed out reaping Darwin child after pipe failure"))
+                        .map(|_| ())
+                });
+                return match containment {
+                    Ok(()) => VerifiedSpawnOutcome::ReapedFailure(primary),
+                    Err(containment) => VerifiedSpawnOutcome::Uncontained(invalid(format!(
+                        "{primary}; Darwin child containment also failed: {containment}"
+                    ))),
+                };
+            }
+        }
         let pid = child.pid;
         let result = (|| {
             if macos_guest_code_identity(pid)? != self.tool.macos_cdhash {
@@ -514,25 +556,38 @@ impl<'a> VerifiedCommand<'a> {
                     .map(|_| ())
             });
             return match containment {
-                Ok(()) => Err(error),
-                Err(containment) => Err(invalid(format!(
+                Ok(()) => VerifiedSpawnOutcome::ReapedFailure(error),
+                Err(containment) => VerifiedSpawnOutcome::Uncontained(invalid(format!(
                     "{error}; rejected Darwin child containment also failed: {containment}"
                 ))),
             };
         }
-        Ok(child)
+        VerifiedSpawnOutcome::Running(VerifiedChild::Darwin(child))
     }
 
-    pub fn spawn(&mut self) -> io::Result<VerifiedChild> {
+    pub fn spawn_outcome(&mut self) -> VerifiedSpawnOutcome {
         #[cfg(target_os = "macos")]
         {
-            return self.spawn_darwin(false).map(VerifiedChild::Darwin);
+            return self.spawn_darwin(false);
         }
         #[cfg(not(target_os = "macos"))]
         {
-            self.command_with_stdio(false)?
-                .spawn()
-                .map(VerifiedChild::Standard)
+            match self
+                .command_with_stdio(false)
+                .and_then(|mut command| command.spawn())
+            {
+                Ok(child) => VerifiedSpawnOutcome::Running(VerifiedChild::Standard(child)),
+                Err(error) => VerifiedSpawnOutcome::NoChild(error),
+            }
+        }
+    }
+
+    pub fn spawn(&mut self) -> io::Result<VerifiedChild> {
+        match self.spawn_outcome() {
+            VerifiedSpawnOutcome::Running(child) => Ok(child),
+            VerifiedSpawnOutcome::NoChild(error)
+            | VerifiedSpawnOutcome::ReapedFailure(error)
+            | VerifiedSpawnOutcome::Uncontained(error) => Err(error),
         }
     }
 
@@ -543,7 +598,15 @@ impl<'a> VerifiedCommand<'a> {
     pub fn output(&mut self) -> io::Result<Output> {
         #[cfg(target_os = "macos")]
         {
-            return self.spawn_darwin(true)?.wait_with_output();
+            return match self.spawn_darwin(true) {
+                VerifiedSpawnOutcome::Running(VerifiedChild::Darwin(child)) => {
+                    child.wait_with_output()
+                }
+                VerifiedSpawnOutcome::NoChild(error)
+                | VerifiedSpawnOutcome::ReapedFailure(error)
+                | VerifiedSpawnOutcome::Uncontained(error) => Err(error),
+                VerifiedSpawnOutcome::Running(VerifiedChild::Standard(_)) => unreachable!(),
+            };
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -739,38 +802,13 @@ fn spawn_suspended_darwin(
     if result != 0 {
         return Err(io::Error::from_raw_os_error(result));
     }
-    let mut child = DarwinChild {
+    let child = DarwinChild {
         pid,
         stdout: stdout_read,
         stderr: stderr_read,
         status: None,
         state: DarwinChildState::Running,
     };
-    let capture_fds = [
-        child.stdout.as_ref().map(AsRawFd::as_raw_fd),
-        child.stderr.as_ref().map(AsRawFd::as_raw_fd),
-    ];
-    for fd in capture_fds.into_iter().flatten() {
-        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-        if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1
-        {
-            let primary = io::Error::last_os_error();
-            let containment = child.kill().and_then(|()| {
-                child
-                    .wait_nonblocking_until(
-                        std::time::Instant::now() + std::time::Duration::from_secs(2),
-                    )?
-                    .ok_or_else(|| invalid("timed out reaping Darwin child after pipe failure"))
-                    .map(|_| ())
-            });
-            return match containment {
-                Ok(()) => Err(primary),
-                Err(containment) => Err(invalid(format!(
-                    "{primary}; Darwin child containment also failed: {containment}"
-                ))),
-            };
-        }
-    }
     Ok(child)
 }
 

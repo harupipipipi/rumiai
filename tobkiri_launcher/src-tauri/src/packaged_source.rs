@@ -1990,8 +1990,13 @@ mod tests {
             .unwrap()
             .join("tobkiri_runtime");
         let mut snapshot = verify_and_snapshot(&runtime_root, &tree.0).unwrap();
-        let provenance = br#"{"schema":"io.tobkiri.packaging-source-provenance.v1","source_commit":"fixture","source_tree":"fixture","source_clean":true}"#;
-        let provenance_path = snapshot.bind_provenance(provenance).unwrap();
+        let manifest =
+            fs::read(runtime_root.join("packaged_defaultspack_source_manifest.v1.json")).unwrap();
+        let provenance = format!(
+            "{{\"schema\":\"io.tobkiri.packaging-source-provenance.v1\",\"source_commit\":\"fixture\",\"source_tree\":\"fixture\",\"source_clean\":true,\"source_manifest_sha256\":\"{:x}\"}}",
+            Sha256::digest(&manifest)
+        );
+        snapshot.bind_provenance(provenance.as_bytes()).unwrap();
         let python = super::super::packaging_toolchain::verified_tool("python").unwrap();
         let fixture_root = tree.0.join("generator-fixture");
         let source_artifact = fixture_root.join("verified-release/Tobkiri.AppImage");
@@ -2013,7 +2018,6 @@ mod tests {
             "scripts.generate_packaged_defaultspack_v4_bundle",
         )
         .unwrap();
-        super::super::bind_source_provenance_command(&mut command, &provenance_path);
         command
             .arg("--source-artifact")
             .arg(&source_artifact)
@@ -2026,6 +2030,9 @@ mod tests {
             .args(["--platform", "linux"])
             .args(["--architecture", "x86_64"])
             .args(["--bundle-identity", "io.tobkiri.shell.tauri"]);
+        command
+            .arg("--source-provenance-file")
+            .arg(PROVENANCE_FILENAME);
         let output = command.output().unwrap();
         assert!(
             output.status.success(),

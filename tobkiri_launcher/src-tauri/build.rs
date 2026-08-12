@@ -252,7 +252,13 @@ fn run_formal_defaults_packaging(
             "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: trusted Rust source verification failed: {error}"
         ))
     })?;
-    let mut cleanup_authorized = true;
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum LeaseState {
+        NoChild,
+        RunningUncontained,
+        Reaped,
+    }
+    let mut lease_state = LeaseState::NoChild;
     let execution = (|| -> io::Result<DefaultsPackagingOutput> {
         let provenance = serde_json::to_vec(&serde_json::json!({
             "schema": "io.tobkiri.packaging-source-provenance.v1",
@@ -271,16 +277,31 @@ fn run_formal_defaults_packaging(
             "scripts.generate_packaged_defaultspack_v4_bundle",
         )?;
         request.projection.append_argv(&mut command);
-        let mut child = command.spawn().map_err(|error| {
-            invalid_release(format!(
-                "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: generator spawn failed: {error}"
-            ))
-        })?;
-        cleanup_authorized = false;
+        lease_state = LeaseState::RunningUncontained;
+        let mut child = match command.spawn_outcome() {
+            packaging_toolchain::VerifiedSpawnOutcome::NoChild(error) => {
+                lease_state = LeaseState::NoChild;
+                return Err(invalid_release(format!(
+                    "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: generator spawn failed before child creation: {error}"
+                )));
+            }
+            packaging_toolchain::VerifiedSpawnOutcome::ReapedFailure(error) => {
+                lease_state = LeaseState::Reaped;
+                return Err(invalid_release(format!(
+                    "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: generator was rejected and reaped: {error}"
+                )));
+            }
+            packaging_toolchain::VerifiedSpawnOutcome::Running(child) => child,
+            packaging_toolchain::VerifiedSpawnOutcome::Uncontained(error) => {
+                return Err(invalid_release(format!(
+                    "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: generator spawn left an uncontained child: {error}"
+                )));
+            }
+        };
         let deadline = std::time::Instant::now() + FORMAL_DEFAULTS_PACKAGING_TIMEOUT;
         let status = match child.wait_until(deadline) {
             Ok(Some(status)) => {
-                cleanup_authorized = true;
+                lease_state = LeaseState::Reaped;
                 status
             }
             Ok(None) => {
@@ -288,7 +309,7 @@ fn run_formal_defaults_packaging(
                 let reap =
                     child.wait_until(std::time::Instant::now() + std::time::Duration::from_secs(2));
                 if matches!(reap, Ok(Some(_))) {
-                    cleanup_authorized = true;
+                    lease_state = LeaseState::Reaped;
                 }
                 return Err(invalid_release(format!(
                     "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: generator timed out; kill={kill:?}; reap={reap:?}"
@@ -336,7 +357,7 @@ fn run_formal_defaults_packaging(
             verified_catalog: request.staged_catalog.to_path_buf(),
         })
     })();
-    if !cleanup_authorized {
+    if lease_state == LeaseState::RunningUncontained {
         std::mem::forget(source);
         return Err(match execution {
             Ok(_) => invalid_release(format!(
@@ -3133,18 +3154,15 @@ mod tests {
     #[test]
     fn formal_defaults_packaging_cleanup_requires_confirmed_reap() {
         #[derive(Clone, Copy)]
-        enum WaitResult {
+        enum Lifecycle {
+            NoChild,
             Reaped,
-            TimedOutThenReaped,
-            TimedOutUncontained,
-            IdentityLost,
+            RunningUncontained,
         }
-        let cleanup_authorized =
-            |result| matches!(result, WaitResult::Reaped | WaitResult::TimedOutThenReaped);
-        assert!(cleanup_authorized(WaitResult::Reaped));
-        assert!(cleanup_authorized(WaitResult::TimedOutThenReaped));
-        assert!(!cleanup_authorized(WaitResult::TimedOutUncontained));
-        assert!(!cleanup_authorized(WaitResult::IdentityLost));
+        let cleanup_authorized = |result| matches!(result, Lifecycle::NoChild | Lifecycle::Reaped);
+        assert!(cleanup_authorized(Lifecycle::NoChild));
+        assert!(cleanup_authorized(Lifecycle::Reaped));
+        assert!(!cleanup_authorized(Lifecycle::RunningUncontained));
     }
 
     #[test]
