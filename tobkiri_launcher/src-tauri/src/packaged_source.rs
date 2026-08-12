@@ -611,6 +611,7 @@ struct OwnerCreationGuard {
     name: std::ffi::OsString,
     identity: Option<(u64, u64, u64, i64, i64)>,
     root: Option<(File, (u64, u64, u64, i64, i64))>,
+    root_created: bool,
     armed: bool,
 }
 
@@ -626,17 +627,15 @@ impl OwnerCreationGuard {
             use std::os::unix::fs::PermissionsExt;
             root.set_permissions(fs::Permissions::from_mode(0o700))?;
             unlinkat_name(owner, std::ffi::OsStr::new("source"), libc::AT_REMOVEDIR)?;
+        } else if self.root_created {
+            return Err(invalid(
+                "snapshot root identity is unavailable; leaving fail-closed residue",
+            ));
         }
         if self.identity.is_none() {
-            use std::os::unix::fs::MetadataExt;
-            let owner =
-                openat_nofollow(&self.parent, &self.name, libc::O_RDONLY | libc::O_DIRECTORY)?;
-            let metadata = owner.metadata()?;
-            if metadata.uid() != unsafe { libc::geteuid() } {
-                return Err(invalid("refusing cleanup of unowned snapshot directory"));
-            }
-            self.identity = Some(identity(&metadata));
-            self.owner = Some(owner);
+            return Err(invalid(
+                "snapshot owner identity is unavailable; leaving fail-closed residue",
+            ));
         }
         let identity = self
             .identity
@@ -645,6 +644,58 @@ impl OwnerCreationGuard {
         unlinkat_name(&self.parent, &self.name, libc::AT_REMOVEDIR)?;
         self.armed = false;
         Ok(())
+    }
+}
+
+#[cfg(unix)]
+struct CreatedDirectoryGuard<'a> {
+    parent: &'a File,
+    name: &'a std::ffi::OsStr,
+    identity: Option<(u64, u64, u64, i64, i64)>,
+    armed: bool,
+}
+
+#[cfg(unix)]
+impl CreatedDirectoryGuard<'_> {
+    fn cleanup_inner(&mut self) -> io::Result<()> {
+        if let Some(expected) = self.identity {
+            verify_named_identity(self.parent, self.name, expected)?;
+        } else {
+            return Err(invalid(
+                "created directory identity is unavailable; leaving fail-closed residue",
+            ));
+        }
+        unlinkat_name(self.parent, self.name, libc::AT_REMOVEDIR)?;
+        self.armed = false;
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+impl Drop for CreatedDirectoryGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self.cleanup_inner();
+        }
+    }
+}
+
+#[cfg(not(unix))]
+struct OwnerPathGuard {
+    owner: PathBuf,
+    root_created: bool,
+    armed: bool,
+}
+
+#[cfg(not(unix))]
+impl Drop for OwnerPathGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            if self.root_created {
+                let _ = fs::remove_dir(self.owner.join("source"));
+            }
+            let _ = fs::remove_dir(&self.owner);
+        }
     }
 }
 
@@ -749,27 +800,48 @@ fn create_snapshot(parent: &Path) -> io::Result<SnapshotCreation> {
                     name: owner_name.clone(),
                     identity: None,
                     root: None,
+                    root_created: false,
+                    armed: true,
+                };
+                #[cfg(not(unix))]
+                let mut owner_guard = OwnerPathGuard {
+                    owner: owner.clone(),
+                    root_created: false,
                     armed: true,
                 };
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::MetadataExt;
                     use std::os::unix::fs::PermissionsExt;
-                    let owner_handle = openat_nofollow(
-                        &owner_guard.parent,
-                        &owner_name,
-                        libc::O_RDONLY | libc::O_DIRECTORY,
-                    )?;
-                    owner_handle.set_permissions(fs::Permissions::from_mode(0o700))?;
-                    if owner_handle.metadata()?.uid() != unsafe { libc::geteuid() } {
-                        return Err(invalid("source snapshot owner has the wrong user"));
+                    let initialized = (|| -> io::Result<File> {
+                        let owner_handle = openat_nofollow(
+                            &owner_guard.parent,
+                            &owner_name,
+                            libc::O_RDONLY | libc::O_DIRECTORY,
+                        )?;
+                        owner_handle.set_permissions(fs::Permissions::from_mode(0o700))?;
+                        let metadata = owner_handle.metadata()?;
+                        if metadata.uid() != unsafe { libc::geteuid() } {
+                            return Err(invalid("source snapshot owner has the wrong user"));
+                        }
+                        owner_guard.identity = Some(identity(&metadata));
+                        Ok(owner_handle)
+                    })();
+                    match initialized {
+                        Ok(owner_handle) => owner_guard.owner = Some(owner_handle),
+                        Err(primary) => {
+                            return match owner_guard.cleanup_inner() {
+                                Ok(()) => Err(primary),
+                                Err(cleanup) => Err(invalid(format!(
+                                    "{primary}; snapshot owner cleanup also failed: {cleanup}"
+                                ))),
+                            };
+                        }
                     }
-                    owner_guard.identity = Some(identity(&owner_handle.metadata()?));
-                    owner_guard.owner = Some(owner_handle);
                 }
                 let root = owner.join("source");
                 #[cfg(unix)]
-                let (owner_handle, root_handle) = {
+                let root_result = (|| -> io::Result<(File, File)> {
                     use std::os::fd::AsRawFd;
                     let owner_handle = owner_guard
                         .owner
@@ -783,6 +855,7 @@ fn create_snapshot(parent: &Path) -> io::Result<SnapshotCreation> {
                     {
                         return Err(io::Error::last_os_error());
                     }
+                    owner_guard.root_created = true;
                     let root_handle = openat_nofollow(
                         &owner_handle,
                         std::ffi::OsStr::new("source"),
@@ -790,41 +863,68 @@ fn create_snapshot(parent: &Path) -> io::Result<SnapshotCreation> {
                     )?;
                     owner_guard.root =
                         Some((root_handle.try_clone()?, identity(&root_handle.metadata()?)));
-                    (owner_handle, root_handle)
+                    Ok((owner_handle, root_handle))
+                })();
+                #[cfg(unix)]
+                let (owner_handle, root_handle) = match root_result {
+                    Ok(handles) => handles,
+                    Err(primary) => {
+                        return match owner_guard.cleanup_inner() {
+                            Ok(()) => Err(primary),
+                            Err(cleanup) => Err(invalid(format!(
+                                "{primary}; snapshot root cleanup also failed: {cleanup}"
+                            ))),
+                        };
+                    }
                 };
                 #[cfg(not(unix))]
-                fs::create_dir(&root)?;
-                #[cfg(unix)]
                 {
-                    use std::os::unix::fs::PermissionsExt;
-                    root_handle.set_permissions(fs::Permissions::from_mode(0o700))?;
+                    fs::create_dir(&root)?;
+                    owner_guard.root_created = true;
                 }
                 #[cfg(unix)]
-                let owner_identity = identity(&owner_handle.metadata()?);
+                let creation_result = (|| -> io::Result<SnapshotCreation> {
+                    use std::os::unix::fs::PermissionsExt;
+                    root_handle.set_permissions(fs::Permissions::from_mode(0o700))?;
+                    let owner_identity = identity(&owner_handle.metadata()?);
+                    let root_identity = identity(&root_handle.metadata()?);
+                    let parent_handle = owner_guard.parent.try_clone()?;
+                    Ok(SnapshotCreation {
+                        owner,
+                        root,
+                        parent_handle,
+                        owner_handle,
+                        root_handle,
+                        owner_name,
+                        owner_identity,
+                        root_identity,
+                        created_entries: BTreeMap::from([(String::new(), root_identity)]),
+                        armed: true,
+                    })
+                })();
                 #[cfg(unix)]
-                let root_identity = identity(&root_handle.metadata()?);
-                #[cfg(unix)]
-                let parent_handle = owner_guard.parent.try_clone()?;
+                let creation = match creation_result {
+                    Ok(creation) => creation,
+                    Err(primary) => {
+                        return match owner_guard.cleanup_inner() {
+                            Ok(()) => Err(primary),
+                            Err(cleanup) => Err(invalid(format!(
+                                "{primary}; snapshot handoff cleanup also failed: {cleanup}"
+                            ))),
+                        };
+                    }
+                };
+                #[cfg(not(unix))]
                 let creation = SnapshotCreation {
                     owner,
                     root,
-                    #[cfg(unix)]
-                    parent_handle,
-                    #[cfg(unix)]
-                    owner_handle,
-                    #[cfg(unix)]
-                    root_handle,
-                    #[cfg(unix)]
-                    owner_name,
-                    #[cfg(unix)]
-                    owner_identity,
-                    #[cfg(unix)]
-                    root_identity,
-                    #[cfg(unix)]
-                    created_entries: BTreeMap::from([(String::new(), root_identity)]),
                     armed: true,
                 };
                 #[cfg(unix)]
+                {
+                    owner_guard.armed = false;
+                }
+                #[cfg(not(unix))]
                 {
                     owner_guard.armed = false;
                 }
@@ -996,20 +1096,26 @@ fn ensure_relative_directory(
         match openat_nofollow(&current, name, libc::O_RDONLY | libc::O_DIRECTORY) {
             Ok(child) => current = child,
             Err(error) if error.raw_os_error() == Some(libc::ENOENT) => {
+                let parent = current.try_clone()?;
                 let name_c = CString::new(name.as_bytes())
                     .map_err(|_| invalid("snapshot directory contains NUL"))?;
-                if unsafe { libc::mkdirat(current.as_raw_fd(), name_c.as_ptr(), 0o700) } == -1 {
+                if unsafe { libc::mkdirat(parent.as_raw_fd(), name_c.as_ptr(), 0o700) } == -1 {
                     return Err(io::Error::last_os_error());
                 }
-                let parent = current.try_clone()?;
+                let mut guard = CreatedDirectoryGuard {
+                    parent: &parent,
+                    name,
+                    identity: None,
+                    armed: true,
+                };
                 current = match openat_nofollow(&parent, name, libc::O_RDONLY | libc::O_DIRECTORY) {
                     Ok(child) => child,
                     Err(primary) => {
-                        let cleanup = unlinkat_name(&parent, name, libc::AT_REMOVEDIR);
+                        let cleanup = guard.cleanup_inner();
                         return match cleanup {
                             Ok(()) => Err(primary),
                             Err(cleanup) => Err(invalid(format!(
-                                "{primary}; newly-created directory cleanup also failed: {cleanup}"
+                                "{primary}; provisional directory cleanup also failed: {cleanup}"
                             ))),
                         };
                     }
@@ -1018,7 +1124,7 @@ fn ensure_relative_directory(
                     match current.metadata().map(|metadata| identity(&metadata)) {
                         Ok(identity) => identity,
                         Err(primary) => {
-                            let cleanup = unlinkat_name(&parent, name, libc::AT_REMOVEDIR);
+                            let cleanup = guard.cleanup_inner();
                             return match cleanup {
                                 Ok(()) => Err(primary),
                                 Err(cleanup) => Err(invalid(format!(
@@ -1027,10 +1133,12 @@ fn ensure_relative_directory(
                             };
                         }
                     };
+                guard.identity = Some(directory_identity);
                 created.insert(
                     current_relative.to_string_lossy().replace('\\', "/"),
                     directory_identity,
                 );
+                guard.armed = false;
             }
             Err(error) => return Err(error),
         }

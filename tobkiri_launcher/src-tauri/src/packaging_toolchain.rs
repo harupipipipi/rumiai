@@ -732,11 +732,13 @@ fn spawn_suspended_darwin(
         status: None,
         state: DarwinChildState::Running,
     };
-    for file in [&child.stdout, &child.stderr].into_iter().flatten() {
-        let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) };
-        if flags == -1
-            || unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) }
-                == -1
+    let capture_fds = [
+        child.stdout.as_ref().map(AsRawFd::as_raw_fd),
+        child.stderr.as_ref().map(AsRawFd::as_raw_fd),
+    ];
+    for fd in capture_fds.into_iter().flatten() {
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1
         {
             let primary = io::Error::last_os_error();
             let containment = child.kill().and_then(|()| {
@@ -870,6 +872,7 @@ enum DarwinChildState {
     Running,
     KillSent,
     Reaped,
+    ExternalReaped,
     Lost,
 }
 
@@ -895,7 +898,12 @@ impl DarwinChild {
             }
             if result == -1 {
                 let error = io::Error::last_os_error();
+                if matches!(error.raw_os_error(), Some(libc::ECHILD)) {
+                    self.state = DarwinChildState::ExternalReaped;
+                    return Err(invalid("Darwin child was already reaped externally"));
+                }
                 if error.raw_os_error() != Some(libc::EINTR) {
+                    self.state = DarwinChildState::Lost;
                     return Err(error);
                 }
             }
@@ -914,13 +922,21 @@ impl DarwinChild {
         if self.state == DarwinChildState::Lost {
             return Err(invalid("refusing to wait on a lost Darwin child PID"));
         }
+        if self.state == DarwinChildState::ExternalReaped {
+            return Err(invalid("Darwin child was already reaped externally"));
+        }
         let mut raw = 0;
         loop {
             if unsafe { libc::waitpid(self.pid, &mut raw, 0) } != -1 {
                 break;
             }
             let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ECHILD) {
+                self.state = DarwinChildState::ExternalReaped;
+                return Err(invalid("Darwin child was already reaped externally"));
+            }
             if error.raw_os_error() != Some(libc::EINTR) {
+                self.state = DarwinChildState::Lost;
                 return Err(error);
             }
         }
@@ -939,9 +955,16 @@ impl DarwinChild {
         if self.state == DarwinChildState::Lost {
             return Err(invalid("refusing to signal a lost Darwin child PID"));
         }
+        if self.state == DarwinChildState::ExternalReaped {
+            return Err(invalid("Darwin child was already reaped externally"));
+        }
         if unsafe { libc::kill(self.pid, libc::SIGKILL) } == -1 {
             let error = io::Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ESRCH) {
+            if matches!(error.raw_os_error(), Some(libc::ESRCH) | Some(libc::ECHILD)) {
+                if error.raw_os_error() == Some(libc::ECHILD) {
+                    self.state = DarwinChildState::ExternalReaped;
+                    return Err(invalid("Darwin child was already reaped externally"));
+                }
                 match self.wait_nonblocking_until(
                     std::time::Instant::now() + std::time::Duration::from_secs(2),
                 )? {
@@ -962,42 +985,74 @@ impl DarwinChild {
     }
 
     fn wait_with_output(mut self) -> io::Result<Output> {
+        use std::sync::{atomic::AtomicUsize, Arc};
+        const MAX_CAPTURE_BYTES: usize = 64 * 1024 * 1024;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let budget = Arc::new(AtomicUsize::new(MAX_CAPTURE_BYTES));
+        let stdout_budget = Arc::clone(&budget);
         let stdout = self.stdout.take().map(|mut file| {
             std::thread::spawn(move || {
                 let mut bytes = Vec::new();
-                read_nonblocking_to_end(&mut file, &mut bytes).map(|()| bytes)
+                read_nonblocking_to_end(&mut file, &mut bytes, deadline, &stdout_budget)
+                    .map(|()| bytes)
             })
         });
+        let stderr_budget = Arc::clone(&budget);
         let stderr = self.stderr.take().map(|mut file| {
             std::thread::spawn(move || {
                 let mut bytes = Vec::new();
-                read_nonblocking_to_end(&mut file, &mut bytes).map(|()| bytes)
+                read_nonblocking_to_end(&mut file, &mut bytes, deadline, &stderr_budget)
+                    .map(|()| bytes)
             })
         });
-        let status_result = self.wait();
-        if status_result.is_err() {
-            let _ = self.kill();
-            let _ = self.wait_nonblocking_until(
-                std::time::Instant::now() + std::time::Duration::from_secs(2),
-            );
-        }
-        let stdout = stdout
-            .map(|thread| {
-                thread
-                    .join()
-                    .map_err(|_| invalid("stdout reader panicked"))?
-            })
-            .transpose()?
-            .unwrap_or_default();
-        let status = status_result?;
-        let stderr = stderr
-            .map(|thread| {
-                thread
-                    .join()
-                    .map_err(|_| invalid("stderr reader panicked"))?
-            })
-            .transpose()?
-            .unwrap_or_default();
+        let status_result = match self.wait_nonblocking_until(deadline) {
+            Ok(Some(status)) => Ok(status),
+            Ok(None) => {
+                let primary = invalid("timed out waiting for Darwin child");
+                match self.kill().and_then(|()| {
+                    self.wait_nonblocking_until(
+                        std::time::Instant::now() + std::time::Duration::from_secs(2),
+                    )?
+                    .ok_or_else(|| invalid("timed out reaping Darwin child"))
+                }) {
+                    Ok(_) => Err(primary),
+                    Err(cleanup) => Err(invalid(format!(
+                        "{primary}; Darwin child containment also failed: {cleanup}"
+                    ))),
+                }
+            }
+            Err(primary) if self.state == DarwinChildState::ExternalReaped => Err(primary),
+            Err(primary) => {
+                self.state = DarwinChildState::Running;
+                match self.kill().and_then(|()| {
+                    self.wait_nonblocking_until(
+                        std::time::Instant::now() + std::time::Duration::from_secs(2),
+                    )?
+                    .ok_or_else(|| invalid("timed out reaping Darwin child after wait failure"))
+                }) {
+                    Ok(_) => Err(primary),
+                    Err(cleanup) => Err(invalid(format!(
+                        "{primary}; Darwin child containment also failed: {cleanup}"
+                    ))),
+                }
+            }
+        };
+        let stdout_result = join_reader(stdout, "stdout");
+        let stderr_result = join_reader(stderr, "stderr");
+        let (status, stdout, stderr) = match (status_result, stdout_result, stderr_result) {
+            (Ok(status), Ok(stdout), Ok(stderr)) => (status, stdout, stderr),
+            (status, stdout, stderr) => {
+                let errors = [status.err(), stdout.err(), stderr.err()]
+                    .into_iter()
+                    .flatten()
+                    .map(|error| error.to_string())
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                return Err(invalid(format!(
+                    "Darwin child output collection failed: {errors}"
+                )));
+            }
+        };
         Ok(Output {
             status,
             stdout,
@@ -1007,13 +1062,31 @@ impl DarwinChild {
 }
 
 #[cfg(target_os = "macos")]
-fn read_nonblocking_to_end(file: &mut File, bytes: &mut Vec<u8>) -> io::Result<()> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+fn read_nonblocking_to_end(
+    file: &mut File,
+    bytes: &mut Vec<u8>,
+    deadline: std::time::Instant,
+    budget: &std::sync::atomic::AtomicUsize,
+) -> io::Result<()> {
+    use std::sync::atomic::Ordering;
     let mut buffer = [0_u8; 64 * 1024];
     loop {
+        if std::time::Instant::now() >= deadline {
+            return Err(invalid("timed out draining Darwin child output"));
+        }
         match file.read(&mut buffer) {
             Ok(0) => return Ok(()),
-            Ok(count) => bytes.extend_from_slice(&buffer[..count]),
+            Ok(count) => {
+                if budget
+                    .fetch_update(Ordering::AcqRel, Ordering::Acquire, |remaining| {
+                        remaining.checked_sub(count)
+                    })
+                    .is_err()
+                {
+                    return Err(invalid("Darwin child output exceeded capture limit"));
+                }
+                bytes.extend_from_slice(&buffer[..count]);
+            }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 if std::time::Instant::now() >= deadline {
@@ -1027,9 +1100,29 @@ fn read_nonblocking_to_end(file: &mut File, bytes: &mut Vec<u8>) -> io::Result<(
 }
 
 #[cfg(target_os = "macos")]
+fn join_reader(
+    reader: Option<std::thread::JoinHandle<io::Result<Vec<u8>>>>,
+    stream: &str,
+) -> io::Result<Vec<u8>> {
+    reader
+        .map(|thread| {
+            thread
+                .join()
+                .map_err(|_| invalid(format!("{stream} reader panicked")))?
+        })
+        .transpose()
+        .map(|value| value.unwrap_or_default())
+}
+
+#[cfg(target_os = "macos")]
 impl Drop for DarwinChild {
     fn drop(&mut self) {
-        if self.status.is_none() {
+        if self.status.is_none()
+            && !matches!(
+                self.state,
+                DarwinChildState::ExternalReaped | DarwinChildState::Lost
+            )
+        {
             let _ = self.kill();
             let _ = self.wait_nonblocking_until(
                 std::time::Instant::now() + std::time::Duration::from_secs(2),
