@@ -669,18 +669,29 @@ try:
             raise SystemExit('unsafe pkgutil tree root: path=%s uid=%d gid=%d mode=%04o acl=%d device=%d parent_device=%d' %
                              (root_path,info.st_uid,info.st_gid,stat.S_IMODE(info.st_mode),
                               int(root_acl),info.st_dev,parent_info.st_dev))
+        root_xattrs=stable_xattrs_fd(root,'<root>')
+        if barrier:
+            ready=barrier+'.ready'; release=barrier+'.release'
+            with open(ready,'xb') as output: output.write(b'ready'); output.flush(); os.fsync(output.fileno())
+            deadline=time.monotonic()+10
+            while not os.path.exists(release):
+                if time.monotonic()>=deadline: raise SystemExit('seal test barrier timed out')
+                time.sleep(0.01)
+            barrier=''
         os.fchmod(root,0o700); os.fsync(root); os.fsync(parent)
         normalized=os.fstat(root)
         if (normalized.st_dev,normalized.st_ino,normalized.st_uid,normalized.st_gid,
             stat.S_IMODE(normalized.st_mode)) != \
            (info.st_dev,info.st_ino,owner,root_group,0o700) or acl(root):
             raise SystemExit('pkgutil tree root changed during normalization')
+        if stable_xattrs_fd(root,'<root>')!=root_xattrs:
+            raise SystemExit('pkgutil tree root xattrs changed during normalization')
         info=normalized
     elif info.st_uid!=owner or stat.S_IMODE(info.st_mode)!=0o700 or root_acl:
         raise SystemExit('unsafe sealed tree root: uid=%d gid=%d mode=%04o acl=%d' %
                          (info.st_uid,info.st_gid,stat.S_IMODE(info.st_mode),
                           int(root_acl)))
-    root_xattrs=stable_xattrs_fd(root,'<root>')
+    else: root_xattrs=stable_xattrs_fd(root,'<root>')
     first=walk(root,'',False,info.st_dev,normalize_ownership); check_cycles(first)
     if barrier:
         ready=barrier+'.ready'; release=barrier+'.release'

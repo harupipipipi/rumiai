@@ -152,6 +152,59 @@ def test_fd_sealer_rejects_pkgutil_root_under_writable_parent(tmp_path: Path) ->
         _restore_test_tree_permissions(root)
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS xattr contract")
+@pytest.mark.parametrize("mutation", ["added", "removed", "changed"])
+def test_pkgutil_root_normalization_rejects_xattr_mutation(
+    tmp_path: Path, mutation: str
+) -> None:
+    """The pre-fchmod root xattr baseline is immutable across normalization."""
+    tmp_path.chmod(0o700)
+    root = tmp_path / "metadata"
+    root.mkdir(mode=0o755)
+    attribute = "com.tobkiri.pkgutil-root-test"
+    if mutation != "added":
+        subprocess.run(["/usr/bin/xattr", "-w", attribute, "before", root], check=True)
+    barrier = tmp_path / "pkgutil-root-xattr-barrier"
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            _MODULE.ROOT_SEAL_TREE_CODE,
+            root,
+            str(os.geteuid()),
+            "0555",
+            "1",
+            barrier,
+            "1",
+            str(os.getegid()),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not barrier.with_suffix(".ready").exists():
+            if time.monotonic() >= deadline:
+                pytest.fail("tree sealer did not reach root xattr barrier")
+            time.sleep(0.01)
+        if mutation == "removed":
+            command = ["/usr/bin/xattr", "-d", attribute, root]
+        else:
+            command = ["/usr/bin/xattr", "-w", attribute, "after", root]
+        subprocess.run(command, check=True)
+        barrier.with_suffix(".release").write_bytes(b"release")
+        _stdout, stderr = process.communicate(timeout=5)
+        assert process.returncode != 0
+        assert b"root xattrs changed during normalization" in stderr
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        _restore_test_tree_permissions(root)
+
+
 def _executable(path: Path, payload: bytes = b"tool fixture") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(payload)
