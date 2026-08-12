@@ -787,3 +787,17 @@ def test_workflows_require_exact_root_process_tests_without_skips(
     assert '--junitxml="$ROOT_PROCESS_JUNIT"' in step
     assert all(step.count(f"::{nodeid}") == 1 for nodeid in nodeids)
     assert "tests != 4 or skipped != 0" in step
+
+
+def test_desktop_installer_paths_trigger_for_root_process_contract() -> None:
+    """Both push and pull-request filters include the privileged contract tests."""
+    workflow = _SCRIPT.parents[1] / "workflows" / "desktop-installers.yml"
+    payload = workflow.read_text(encoding="utf-8")
+    exact = '- ".github/scripts/tests/test_packaging_toolchain_identity.py"'
+    assert payload.count(exact) == 2
+    push = payload[payload.index("  push:") : payload.index("  pull_request:")]
+    pull_request = payload[
+        payload.index("  pull_request:") : payload.index("\nconcurrency:")
+    ]
+    assert exact in push
+    assert exact in pull_request
