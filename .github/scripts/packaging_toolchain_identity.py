@@ -404,6 +404,8 @@ import ctypes, errno, hashlib, json, os, posixpath, stat, sys, time
 root_path=sys.argv[1]; owner=int(sys.argv[2]); root_mode=int(sys.argv[3],8)
 normalize_ownership=sys.argv[4]=='1'
 barrier=sys.argv[5] if len(sys.argv)>5 else ''
+normalize_pkgutil_root=sys.argv[6]=='1' if len(sys.argv)>6 else False
+root_group=int(sys.argv[7]) if len(sys.argv)>7 else None
 MAX_XATTR_COUNT=256; MAX_XATTR_NAMES=65536
 MAX_XATTR_VALUE=16*1024*1024; MAX_XATTR_TOTAL=64*1024*1024
 def acl(fd):
@@ -640,11 +642,44 @@ def sealed_records(records):
                                   separators=(',',':'))
         result[name]=tuple(updated)
     return result
-root=os.open(root_path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+parent=None
+if normalize_pkgutil_root:
+    if not os.path.isabs(root_path) or os.path.basename(root_path) in ('','.','..'):
+        raise SystemExit('invalid pkgutil tree root path')
+    parent_path=os.path.dirname(root_path); root_name=os.path.basename(root_path)
+    parent=os.open(parent_path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    parent_info=os.fstat(parent)
+    parent_acl=acl(parent)
+    if root_group is None or parent_info.st_uid!=owner or \
+       parent_info.st_gid!=root_group or stat.S_IMODE(parent_info.st_mode)!=0o700 or \
+       parent_acl:
+        raise SystemExit('unsafe pkgutil tree parent: path=%s uid=%d gid=%d mode=%04o acl=%d' %
+                         (parent_path,parent_info.st_uid,parent_info.st_gid,
+                          stat.S_IMODE(parent_info.st_mode),int(parent_acl)))
+    root=os.open(root_name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent)
+else:
+    root=os.open(root_path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
 try:
     info=os.fstat(root)
-    if info.st_uid!=owner or stat.S_IMODE(info.st_mode)!=0o700 or acl(root):
-        raise SystemExit('unsafe sealed tree root')
+    root_acl=acl(root)
+    if normalize_pkgutil_root:
+        if info.st_uid!=owner or info.st_gid!=root_group or \
+           stat.S_IMODE(info.st_mode)!=0o755 or root_acl or \
+           info.st_dev!=parent_info.st_dev:
+            raise SystemExit('unsafe pkgutil tree root: path=%s uid=%d gid=%d mode=%04o acl=%d device=%d parent_device=%d' %
+                             (root_path,info.st_uid,info.st_gid,stat.S_IMODE(info.st_mode),
+                              int(root_acl),info.st_dev,parent_info.st_dev))
+        os.fchmod(root,0o700); os.fsync(root); os.fsync(parent)
+        normalized=os.fstat(root)
+        if (normalized.st_dev,normalized.st_ino,normalized.st_uid,normalized.st_gid,
+            stat.S_IMODE(normalized.st_mode)) != \
+           (info.st_dev,info.st_ino,owner,root_group,0o700) or acl(root):
+            raise SystemExit('pkgutil tree root changed during normalization')
+        info=normalized
+    elif info.st_uid!=owner or stat.S_IMODE(info.st_mode)!=0o700 or root_acl:
+        raise SystemExit('unsafe sealed tree root: uid=%d gid=%d mode=%04o acl=%d' %
+                         (info.st_uid,info.st_gid,stat.S_IMODE(info.st_mode),
+                          int(root_acl)))
     root_xattrs=stable_xattrs_fd(root,'<root>')
     first=walk(root,'',False,info.st_dev,normalize_ownership); check_cycles(first)
     if barrier:
@@ -672,12 +707,18 @@ try:
     if (final.st_dev,final.st_ino)!=(info.st_dev,info.st_ino) or \
        stat.S_IMODE(final.st_mode)!=root_mode or acl(root):
         raise SystemExit('sealed tree root changed')
-finally: os.close(root)
+finally:
+    os.close(root)
+    if parent is not None: os.close(parent)
 """
 
 
 def _seal_root_tree(
-    root: Path, label: str, *, normalize_ownership: bool = False
+    root: Path,
+    label: str,
+    *,
+    normalize_ownership: bool = False,
+    normalize_pkgutil_root: bool = False,
 ) -> None:
     """Seal a root-owned tree by inode without following or chmodding symlinks."""
     result = subprocess.run(
@@ -693,6 +734,9 @@ def _seal_root_tree(
             "0",
             "0555",
             "1" if normalize_ownership else "0",
+            "",
+            "1" if normalize_pkgutil_root else "0",
+            "0",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -3101,6 +3145,7 @@ def _prepare_macos_installation_locked(
             metadata_root,
             "expanded official installer metadata",
             normalize_ownership=True,
+            normalize_pkgutil_root=True,
         )
         component = _select_framework_component(metadata_root, provenance)
         if _sha256_file(component.package / "Payload") != component.payload_sha256:

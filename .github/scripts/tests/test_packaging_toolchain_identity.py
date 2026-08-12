@@ -57,8 +57,10 @@ def _seal_tree_helper(
     *,
     hide_o_symlink: bool = False,
     normalize_ownership: bool = False,
+    normalize_pkgutil_root: bool = False,
 ) -> subprocess.CompletedProcess[bytes]:
-    root.chmod(0o700)
+    if not normalize_pkgutil_root:
+        root.chmod(0o700)
     code = _MODULE.ROOT_SEAL_TREE_CODE
     if hide_o_symlink:
         code = (
@@ -76,9 +78,10 @@ def _seal_tree_helper(
         str(os.geteuid()),
         "0555",
         "1" if normalize_ownership else "0",
+        os.fspath(barrier) if barrier is not None else "",
+        "1" if normalize_pkgutil_root else "0",
+        str(os.getegid()),
     ]
-    if barrier is not None:
-        arguments.append(barrier)
     return subprocess.run(
         arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False
     )
@@ -92,6 +95,61 @@ def _restore_test_tree_permissions(root: Path) -> None:
         if path.is_symlink():
             continue
         path.chmod(0o700 if path.is_dir() else 0o600)
+
+
+def test_fd_sealer_normalizes_only_pkgutil_root_from_protected_parent(
+    tmp_path: Path,
+) -> None:
+    """pkgutil's exact 0755 output root is normalized through its held parent."""
+    tmp_path.chmod(0o700)
+    root = tmp_path / "metadata"
+    root.mkdir(mode=0o755)
+    payload = root / "Distribution"
+    payload.write_bytes(b"signed installer metadata")
+    try:
+        result = _seal_tree_helper(
+            root,
+            normalize_ownership=True,
+            normalize_pkgutil_root=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert stat.S_IMODE(root.stat().st_mode) == 0o555
+        assert payload.read_bytes() == b"signed installer metadata"
+    finally:
+        _restore_test_tree_permissions(root)
+
+
+@pytest.mark.parametrize("root_mode", [0o700, 0o775, 0o777])
+def test_fd_sealer_rejects_noncanonical_pkgutil_root_mode(
+    tmp_path: Path, root_mode: int
+) -> None:
+    """Root normalization is not a general writable-tree adoption mechanism."""
+    tmp_path.chmod(0o700)
+    root = tmp_path / "metadata"
+    root.mkdir(mode=root_mode)
+    root.chmod(root_mode)
+    try:
+        result = _seal_tree_helper(root, normalize_pkgutil_root=True)
+        assert result.returncode != 0
+        assert b"unsafe pkgutil tree root" in result.stderr
+        assert stat.S_IMODE(root.stat().st_mode) == root_mode
+    finally:
+        _restore_test_tree_permissions(root)
+
+
+def test_fd_sealer_rejects_pkgutil_root_under_writable_parent(tmp_path: Path) -> None:
+    """A same-UID writable parent cannot authorize root-name replacement."""
+    tmp_path.chmod(0o755)
+    root = tmp_path / "metadata"
+    root.mkdir(mode=0o755)
+    try:
+        result = _seal_tree_helper(root, normalize_pkgutil_root=True)
+        assert result.returncode != 0
+        assert b"unsafe pkgutil tree parent" in result.stderr
+        assert stat.S_IMODE(root.stat().st_mode) == 0o755
+    finally:
+        tmp_path.chmod(0o700)
+        _restore_test_tree_permissions(root)
 
 
 def _executable(path: Path, payload: bytes = b"tool fixture") -> Path:
@@ -2877,6 +2935,12 @@ def test_prefix_journal_precedes_ditto_and_cancellation_cleanup_is_persistent() 
     assert "_remove_root_tree(staging)" in prepare
     assert prepare.count("_seal_root_tree(") == 3
     assert prepare.count("normalize_ownership=True") == 2
+    assert prepare.count("normalize_pkgutil_root=True") == 1
+    assert (
+        prepare.index('"--expand"')
+        < prepare.index("normalize_pkgutil_root=True")
+        < prepare.index("_select_framework_component(")
+    )
     assert prepare.rindex("normalize_ownership=True") < prepare.index(
         '"packaging Python installation"'
     )
