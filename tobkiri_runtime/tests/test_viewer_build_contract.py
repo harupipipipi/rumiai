@@ -151,13 +151,28 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
         assert 'exec 9< "$identity_launcher"' in build_contents
         assert 'python3 -I -B "/dev/fd/9"' in build_contents
         assert 'exec 9<&-' in build_contents
+        assert "formal_identity" not in build_contents
         assert "exec {identity_fd}" not in build_contents
         assert "/dev/fd/$identity_fd" not in build_contents
-        assert build_contents.count('exec 9< "$identity_launcher"') == 1
-        assert build_contents.count("exec 9<&-") == 1
-        assert build_contents.index("exec 9<&-") > build_contents.rfind(
-            "formal_identity \\\n"
-        )
+        assert build_contents.count('exec 9< "$identity_launcher"') == 4
+        assert build_contents.count('python3 -I -B "/dev/fd/9"') == 4
+        assert build_contents.count("exec 9<&-") == 4
+        lines = build_contents.splitlines()
+        invocation_lines = [
+            index
+            for index, line in enumerate(lines)
+            if 'python3 -I -B "/dev/fd/9"' in line
+        ]
+        assert len(invocation_lines) == 4
+        for invocation_line in invocation_lines:
+            assert (
+                lines[invocation_line - 1].strip()
+                == 'exec 9< "$identity_launcher"'
+            )
+            end_line = invocation_line
+            while lines[end_line].rstrip().endswith("\\"):
+                end_line += 1
+            assert lines[end_line + 1].strip() == "exec 9<&-"
         assert "source_revision=" in build_contents
         assert "source_tree=" in build_contents
         assert "TOBKIRI_PACKAGING_SOURCE_PROVENANCE_FILE" not in build_contents

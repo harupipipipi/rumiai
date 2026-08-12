@@ -282,34 +282,72 @@ def test_workflow_uses_snapshot_builder_and_has_no_sudo(workflow_name: str) -> N
     assert 'exec 9< "$identity_launcher"' in source
     assert 'python3 -I -B "/dev/fd/9"' in source
     assert 'exec 9<&-' in source
+    assert "formal_identity" not in source
     assert "exec {identity_fd}" not in source
     assert "/dev/fd/$identity_fd" not in source
-    assert source.count('exec 9< "$identity_launcher"') == 1
-    assert source.count("exec 9<&-") == 1
-    assert source.index('exec 9<&-') > source.rfind('formal_identity \\\n')
+    assert source.count('exec 9< "$identity_launcher"') == 4
+    assert source.count('python3 -I -B "/dev/fd/9"') == 4
+    assert source.count("exec 9<&-") == 4
+    lines = source.splitlines()
+    invocation_lines = [
+        index
+        for index, line in enumerate(lines)
+        if 'python3 -I -B "/dev/fd/9"' in line
+    ]
+    assert len(invocation_lines) == 4
+    for invocation_line in invocation_lines:
+        assert lines[invocation_line - 1].strip() == 'exec 9< "$identity_launcher"'
+        end_line = invocation_line
+        while lines[end_line].rstrip().endswith("\\"):
+            end_line += 1
+        assert lines[end_line + 1].strip() == "exec 9<&-"
     assert "/usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py" not in source
 
 
-def test_fixed_identity_fd_is_bash_3_2_compatible(tmp_path: Path) -> None:
-    """Bash 3.2 can inherit fixed FD 9 and closes it after the child runs."""
+def test_fixed_identity_fd_reopens_for_each_bash_3_2_invocation(
+    tmp_path: Path,
+) -> None:
+    """Bash 3.2 reopens fixed FD 9 for each child and closes it afterward."""
     launcher = tmp_path / "identity launcher.py"
+    first_output = tmp_path / "first env output"
+    second_output = tmp_path / "second env output"
     launcher.write_text(
-        "import sys\nsys.stdout.write('trusted')\n", encoding="utf-8"
+        "from pathlib import Path\n"
+        "import sys\n"
+        "output = Path(sys.argv[sys.argv.index('--env-output') + 1])\n"
+        "output.write_text(f'output={output.name}\\n', encoding='utf-8')\n",
+        encoding="utf-8",
     )
     script = r"""
 set -euo pipefail
 identity_launcher="$1"
 python="$2"
+first_output="$3"
+second_output="$4"
 exec 9< "$identity_launcher"
-output="$("$python" -I -B /dev/fd/9)"
-test "$output" = trusted
+"$python" -I -B /dev/fd/9 --env-output "$first_output"
 exec 9<&-
-if "$python" -I -B /dev/fd/9 >/dev/null 2>&1; then
+exec 9< "$identity_launcher"
+"$python" -I -B /dev/fd/9 --env-output "$second_output"
+exec 9<&-
+test -s "$first_output"
+test -s "$second_output"
+test "$(cat "$first_output")" != "$(cat "$second_output")"
+if "$python" -I -B /dev/fd/9 --env-output "$first_output"; then
   exit 1
 fi
 """
     result = subprocess.run(
-        ["/bin/bash", "-c", script, "fixed-fd-test", str(launcher), sys.executable],
+        [
+            "/bin/bash",
+            "-c",
+            script,
+            "fixed-fd-test",
+            str(launcher),
+            sys.executable,
+            str(first_output),
+            str(second_output),
+        ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

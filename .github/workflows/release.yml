@@ -82,26 +82,28 @@ jobs:
           test "$("$formal_git" -C "$GITHUB_WORKSPACE" hash-object "$identity_launcher")" = "$identity_oid"
           /bin/chmod 0400 "$identity_launcher"
           exec 9< "$identity_launcher"
-          formal_identity() {
-            PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I -B "/dev/fd/9" "$@"
-          }
-          formal_identity \
+          PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I -B "/dev/fd/9" \
             --bind-git-env --env-output "$pre_git_env"
+          exec 9<&-
           while IFS='=' read -r key value; do
             case "$key" in
               TOBKIRI_PACKAGING_GIT|TOBKIRI_PACKAGING_GIT_SHA256) export "$key=$value" ;;
               *) exit 1 ;;
             esac
           done < "$pre_git_env"
-          formal_identity \
+          exec 9< "$identity_launcher"
+          PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I -B "/dev/fd/9" \
             --repository-root "$GITHUB_WORKSPACE" \
             --provenance .github/toolchains/packaging-python-macos.v1.json \
             --source-commit "$GITHUB_SHA" --git "$TOBKIRI_PACKAGING_GIT" \
             --git-sha256 "$TOBKIRI_PACKAGING_GIT_SHA256" --smoke-git-authority
-          formal_identity \
+          exec 9<&-
+          exec 9< "$identity_launcher"
+          PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I -B "/dev/fd/9" \
             --repository-root "$GITHUB_WORKSPACE" --source-commit "$GITHUB_SHA" \
             --git "$TOBKIRI_PACKAGING_GIT" --git-sha256 "$TOBKIRI_PACKAGING_GIT_SHA256" \
             --snapshot-source --snapshot-root "$source_snapshot" --env-output "$source_env"
+          exec 9<&-
           while IFS='=' read -r key value; do
             case "$key" in
               TOBKIRI_PACKAGING_SOURCE_SNAPSHOT|TOBKIRI_PACKAGING_SOURCE_TREE|TOBKIRI_PACKAGING_SOURCE_INVENTORY_SHA256|TOBKIRI_PACKAGING_RELEASE_DIGEST) export "$key=$value" ;;
@@ -119,7 +121,8 @@ jobs:
             --source-tree "$TOBKIRI_PACKAGING_SOURCE_TREE" \
             --source-inventory-sha256 "$TOBKIRI_PACKAGING_SOURCE_INVENTORY_SHA256" \
             --env-output "$TOOLCHAIN_ENV"
-          formal_identity \
+          exec 9< "$identity_launcher"
+          PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I -B "/dev/fd/9" \
             --bind-git-env --env-output "$TOOLCHAIN_ENV"
           exec 9<&-
           for marker in \
