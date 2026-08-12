@@ -32,7 +32,9 @@ STAGING_PARENT = Path("/private/var/tmp")
 STAGING_PREFIX = "tobkiri-python-installer-"
 SEALED_PROVENANCE_NAME = "authority-provenance.json"
 SEALED_REQUIREMENTS_NAME = "authority-requirements.lock"
-INSTALLATION_JOURNAL_NAME = "installation-journal.json"
+INSTALLATION_JOURNAL_NAME = ".tobkiri-packaging-transaction.v1.json"
+INSTALLATION_JOURNAL_SCHEMA = "tobkiri.packaging-python-transaction.v1"
+PROVISIONAL_PREFIX = ".tobkiri-packaging-python-"
 
 PROVENANCE_FIELDS = frozenset(
     {
@@ -462,16 +464,21 @@ def load_sealed_authority(token: str) -> tuple[InstallerProvenance, Path]:
 ROOT_REMOVE_CODE = r"""
 import os, stat, sys
 target = os.path.normpath(sys.argv[1])
-expected = None if len(sys.argv) == 2 else (int(sys.argv[2]), int(sys.argv[3]))
+owner = int(sys.argv[2])
+expected = None if len(sys.argv) == 3 else (int(sys.argv[3]), int(sys.argv[4]))
 if not target.startswith('/') or target == '/': raise SystemExit('unsafe removal target')
 parts = [part for part in target.split('/') if part]
 parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
 try:
+    root_info = os.fstat(parent)
+    if root_info.st_uid != 0 or root_info.st_mode & 0o022: raise SystemExit('unsafe root')
     for part in parts[:-1]:
         child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        info = os.fstat(child)
+        sticky_root = info.st_uid == 0 and info.st_mode & stat.S_ISVTX
+        if info.st_uid not in (0, owner) or (info.st_mode & 0o022 and not sticky_root):
+            raise SystemExit('unsafe removal ancestor')
         os.close(parent); parent = child
-    os.fchown(parent, 0, 0)
-    if not (os.fstat(parent).st_mode & stat.S_ISVTX): os.fchmod(parent, 0o755)
     name = parts[-1]
     try: root = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
     except FileNotFoundError: raise SystemExit(0)
@@ -479,7 +486,7 @@ try:
     if expected is not None and (before.st_dev, before.st_ino) != expected:
         raise SystemExit('removal target does not match transaction journal')
     def empty(fd):
-        os.fchown(fd, 0, 0); os.fchmod(fd, 0o700)
+        os.fchown(fd, owner, -1); os.fchmod(fd, 0o700)
         for entry in os.listdir(fd):
             info = os.stat(entry, dir_fd=fd, follow_symlinks=False)
             if stat.S_ISDIR(info.st_mode):
@@ -504,6 +511,7 @@ def _remove_root_tree(path: Path, identity: tuple[int, int] | None = None) -> No
         "-c",
         ROOT_REMOVE_CODE,
         path,
+        "0",
     ]
     if identity is not None:
         arguments.extend(str(value) for value in identity)
@@ -521,39 +529,150 @@ def _remove_root_tree(path: Path, identity: tuple[int, int] | None = None) -> No
 
 
 ROOT_CREATE_INSTALLATION_CODE = r"""
-import json, os, stat, sys
-target, journal, token = map(os.path.normpath, sys.argv[1:])
-if not target.startswith('/') or not journal.startswith('/'): raise SystemExit('unsafe path')
-parts = [part for part in target.split('/') if part]
-parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+import ctypes, errno, json, os, signal, stat, sys
+parent_path, fixed, token, journal_name, schema = sys.argv[1:6]
+owner = int(sys.argv[6]); failpoint = sys.argv[7] if len(sys.argv) > 7 else ''
+provisional = '.tobkiri-packaging-python-' + token
+if len(token) != 32 or any(c not in '0123456789abcdef' for c in token):
+    raise SystemExit('invalid transaction token')
+parent = os.open(parent_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 try:
-    for part in parts[:-1]:
-        child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
-        info = os.fstat(child)
-        if info.st_uid != 0 or info.st_mode & 0o022: raise SystemExit('unsafe target parent')
-        os.close(parent); parent = child
-    os.mkdir(parts[-1], 0o700, dir_fd=parent)
-    root = os.open(parts[-1], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
-    info = os.fstat(root); os.close(root)
-    payload = json.dumps({'dev': info.st_dev, 'ino': info.st_ino, 'target': target,
-                          'token': token}, sort_keys=True, separators=(',', ':')).encode() + b'\n'
-    fd = os.open(journal, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+    parent_info = os.fstat(parent)
+    if parent_info.st_uid != owner or parent_info.st_mode & 0o022:
+        raise SystemExit('unsafe target parent')
+    os.mkdir(provisional, 0o700, dir_fd=parent)
+    if failpoint == 'after_mkdir': os.kill(os.getpid(), signal.SIGKILL)
+    root = os.open(provisional, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+    info = os.fstat(root)
+    if info.st_uid != owner or stat.S_IMODE(info.st_mode) != 0o700:
+        raise SystemExit('unsafe provisional directory')
+    target = os.path.join(parent_path, fixed)
+    payload = json.dumps({'dev': info.st_dev, 'ino': info.st_ino, 'schema': schema,
+                          'target': target, 'token': token},
+                         sort_keys=True, separators=(',', ':')).encode() + b'\n'
+    fd = os.open(journal_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                 0o400, dir_fd=root)
     try:
+        if failpoint == 'partial_journal':
+            os.write(fd, payload[:len(payload) // 2]); os.fsync(fd)
+            os.kill(os.getpid(), signal.SIGKILL)
         offset = 0
         while offset < len(payload): offset += os.write(fd, payload[offset:])
         os.fsync(fd)
     finally: os.close(fd)
-except Exception:
-    try: os.rmdir(parts[-1], dir_fd=parent)
-    except Exception: pass
-    raise
+    os.fsync(root); os.fsync(parent)
+    if sys.platform == 'darwin':
+        renameatx_np = ctypes.CDLL(None, use_errno=True).renameatx_np
+        renameatx_np.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                                 ctypes.c_char_p, ctypes.c_uint]
+        if renameatx_np(parent, os.fsencode(provisional), parent, os.fsencode(fixed), 4):
+            raise OSError(ctypes.get_errno(), 'exclusive rename failed')
+    else:
+        try: os.stat(fixed, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError: pass
+        else: raise FileExistsError(errno.EEXIST, 'fixed target exists')
+        os.rename(provisional, fixed, src_dir_fd=parent, dst_dir_fd=parent)
+    os.fsync(parent)
+    if failpoint == 'after_rename': os.kill(os.getpid(), signal.SIGKILL)
+    os.close(root)
+finally:
+    os.close(parent)
+"""
+
+
+ROOT_RECOVER_INSTALLATIONS_CODE = r"""
+import json, os, stat, sys
+parent_path, fixed, token_filter, journal_name, schema = sys.argv[1:6]
+owner = int(sys.argv[6]); prefix = '.tobkiri-packaging-python-'
+parent = os.open(parent_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+def canonical(payload):
+    return json.dumps(payload, sort_keys=True, separators=(',', ':')).encode() + b'\n'
+def journal(directory, expected_token):
+    info = os.stat(journal_name, dir_fd=directory, follow_symlinks=False)
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != owner or \
+       stat.S_IMODE(info.st_mode) != 0o400 or info.st_nlink != 1:
+        raise SystemExit('invalid transaction journal metadata')
+    fd = os.open(journal_name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+    try: encoded = os.read(fd, 8193)
+    finally: os.close(fd)
+    if len(encoded) > 8192: raise SystemExit('oversized transaction journal')
+    try:
+        pairs = json.loads(encoded, object_pairs_hook=lambda value: value)
+        if not isinstance(pairs, list): raise ValueError()
+        keys = [key for key, _ in pairs]
+        if len(keys) != len(set(keys)): raise ValueError()
+        payload = dict(pairs)
+    except Exception: raise SystemExit('partial or invalid transaction journal')
+    if canonical(payload) != encoded or set(payload) != {'dev','ino','schema','target','token'}:
+        raise SystemExit('noncanonical transaction journal')
+    if payload['schema'] != schema or (expected_token and payload['token'] != expected_token):
+        raise SystemExit('transaction journal authority mismatch')
+    return payload
+def empty(directory):
+    os.fchmod(directory, 0o700)
+    for name in os.listdir(directory):
+        info = os.stat(name, dir_fd=directory, follow_symlinks=False)
+        if stat.S_ISDIR(info.st_mode):
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                            dir_fd=directory)
+            empty(child); os.close(child); os.rmdir(name, dir_fd=directory)
+        else: os.unlink(name, dir_fd=directory)
+def remove_named(name, expected, exact_mode=None):
+    directory = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+    info = os.fstat(directory)
+    if info.st_uid != owner or (exact_mode is not None and stat.S_IMODE(info.st_mode) != exact_mode):
+        raise SystemExit('stale transaction metadata mismatch')
+    if expected is not None and (info.st_dev, info.st_ino) != expected:
+        raise SystemExit('stale transaction identity mismatch')
+    empty(directory); os.close(directory)
+    current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+    if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
+        raise SystemExit('stale transaction name changed')
+    os.rmdir(name, dir_fd=parent); os.fsync(parent)
+try:
+    parent_info = os.fstat(parent)
+    if parent_info.st_uid != owner or parent_info.st_mode & 0o022:
+        raise SystemExit('unsafe transaction parent')
+    for name in sorted(os.listdir(parent)):
+        if not name.startswith(prefix): continue
+        token = name[len(prefix):]
+        if len(token) != 32 or any(c not in '0123456789abcdef' for c in token):
+            raise SystemExit('invalid stale provisional name')
+        if token_filter and token != token_filter: continue
+        directory = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        info = os.fstat(directory)
+        entries = os.listdir(directory)
+        if journal_name not in entries:
+            os.close(directory)
+            if entries: raise SystemExit('unjournaled nonempty provisional transaction')
+            remove_named(name, (info.st_dev, info.st_ino), 0o700); continue
+        payload = journal(directory, token); os.close(directory)
+        if payload['target'] != os.path.join(parent_path, fixed) or \
+           (payload['dev'], payload['ino']) != (info.st_dev, info.st_ino):
+            raise SystemExit('provisional transaction journal mismatch')
+        remove_named(name, (payload['dev'], payload['ino']), 0o700)
+    try: fixed_dir = os.open(fixed, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+    except FileNotFoundError: fixed_dir = None
+    if fixed_dir is not None:
+        entries = os.listdir(fixed_dir)
+        if '.tobkiri-packaging-python.v1.json' not in entries:
+            if journal_name not in entries:
+                raise SystemExit('fixed prefix lacks a transaction journal')
+            payload = journal(fixed_dir, token_filter)
+            info = os.fstat(fixed_dir); os.close(fixed_dir)
+            if token_filter and payload['token'] != token_filter:
+                raise SystemExit('fixed prefix belongs to another transaction')
+            if payload['target'] != os.path.join(parent_path, fixed) or \
+               (payload['dev'], payload['ino']) != (info.st_dev, info.st_ino):
+                raise SystemExit('fixed transaction journal mismatch')
+            remove_named(fixed, (payload['dev'], payload['ino']))
+        else: os.close(fixed_dir)
 finally: os.close(parent)
 """
 
 
-def _create_installation_root(
-    provenance: InstallerProvenance, staging: Path, token: str
-) -> None:
+def _create_installation_root(provenance: InstallerProvenance, token: str) -> None:
+    parent = provenance.install_root.parent
     subprocess.run(
         [
             "/usr/bin/sudo",
@@ -562,9 +681,35 @@ def _create_installation_root(
             "-B",
             "-c",
             ROOT_CREATE_INSTALLATION_CODE,
-            provenance.install_root,
-            staging / INSTALLATION_JOURNAL_NAME,
+            parent,
+            provenance.install_root.name,
             token,
+            INSTALLATION_JOURNAL_NAME,
+            INSTALLATION_JOURNAL_SCHEMA,
+            "0",
+        ],
+        check=True,
+        env={"PATH": "/usr/bin:/bin"},
+    )
+
+
+def recover_stale_installations(
+    provenance: InstallerProvenance, token: str = ""
+) -> None:
+    subprocess.run(
+        [
+            "/usr/bin/sudo",
+            "/usr/bin/python3",
+            "-I",
+            "-B",
+            "-c",
+            ROOT_RECOVER_INSTALLATIONS_CODE,
+            provenance.install_root.parent,
+            provenance.install_root.name,
+            token,
+            INSTALLATION_JOURNAL_NAME,
+            INSTALLATION_JOURNAL_SCHEMA,
+            "0",
         ],
         check=True,
         env={"PATH": "/usr/bin:/bin"},
@@ -578,20 +723,17 @@ def cleanup_transaction(token: str) -> None:
         _root_owned_path(staging, "packaging transaction", sticky=STAGING_PARENT)
     except FileNotFoundError:
         return
-    journal = staging / INSTALLATION_JOURNAL_NAME
-    if journal.exists():
-        payload = _strict_json(journal)
-        if (
-            set(payload) != {"dev", "ino", "target", "token"}
-            or payload.get("token") != token
-        ):
-            raise ToolIdentityError("packaging transaction journal mismatch")
-        target = Path(payload["target"])
-        if target != Path("/Library/Frameworks/Python.framework/Versions/3.13"):
-            raise ToolIdentityError("packaging transaction target is not authorized")
-        if not isinstance(payload["dev"], int) or not isinstance(payload["ino"], int):
-            raise ToolIdentityError("packaging transaction identity is invalid")
-        _remove_root_tree(target, (payload["dev"], payload["ino"]))
+    provenance_path = staging / SEALED_PROVENANCE_NAME
+    requirements_path = staging / SEALED_REQUIREMENTS_NAME
+    if not provenance_path.exists() or not requirements_path.exists():
+        _remove_root_tree(staging)
+        return
+    provenance_bytes = provenance_path.read_bytes()
+    requirements_bytes = requirements_path.read_bytes()
+    provenance = _parse_provenance(
+        provenance_bytes, requirements_bytes, "sealed trusted Git provenance"
+    )
+    recover_stale_installations(provenance, token)
     _remove_root_tree(staging)
 
 
@@ -863,6 +1005,7 @@ def prepare_macos_installation(
     """Install official Python and hash-locked dependencies into root authority."""
     package = staging / f"python-{provenance.version}.pkg"
     try:
+        recover_stale_installations(provenance)
         subprocess.run(["/usr/bin/sudo", "/bin/chmod", "0700", staging], check=True)
         subprocess.run(
             [
@@ -930,7 +1073,7 @@ def prepare_macos_installation(
             label="official installer Python payload",
         )
         _remove_previous_installation(provenance)
-        _create_installation_root(provenance, staging, token)
+        _create_installation_root(provenance, token)
         subprocess.run(
             [
                 "/usr/bin/sudo",

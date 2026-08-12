@@ -259,55 +259,142 @@ def test_production_authority_reads_exact_head_blobs_not_checkout(
     )
 
 
-def test_transaction_cleanup_rejects_another_prefix(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def _installation_helper(
+    code: str, parent: Path, token: str, failpoint: str = ""
+) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            code,
+            parent,
+            "3.13",
+            token,
+            _MODULE.INSTALLATION_JOURNAL_NAME,
+            _MODULE.INSTALLATION_JOURNAL_SCHEMA,
+            str(os.getuid()),
+            failpoint,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
+def _recovery_helper(
+    parent: Path, token: str = ""
+) -> subprocess.CompletedProcess[bytes]:
+    return _installation_helper(_MODULE.ROOT_RECOVER_INSTALLATIONS_CODE, parent, token)
+
+
+def test_process_recovers_kill_immediately_after_provisional_mkdir(
+    tmp_path: Path,
 ) -> None:
-    """A transaction token cannot authorize deletion of a different prefix."""
+    """An empty provisional inode is recoverable after an immediate SIGKILL."""
+    parent = tmp_path / "versions"
+    parent.mkdir(mode=0o700)
     token = "a" * 32
-    monkeypatch.setattr(_MODULE, "STAGING_PARENT", tmp_path)
-    monkeypatch.setattr(_MODULE, "_root_owned_path", lambda *_args, **_kwargs: None)
-    staging = _MODULE._transaction_path(token)
-    staging.mkdir()
-    (staging / _MODULE.INSTALLATION_JOURNAL_NAME).write_text(
-        json.dumps(
-            {"dev": 1, "ino": 2, "target": "/Library/Frameworks/Other", "token": token}
-        ),
-        encoding="utf-8",
+    created = _installation_helper(
+        _MODULE.ROOT_CREATE_INSTALLATION_CODE, parent, token, "after_mkdir"
     )
-    with pytest.raises(ToolIdentityError, match="target is not authorized"):
-        _MODULE.cleanup_transaction(token)
+    assert created.returncode < 0
+    assert (parent / f"{_MODULE.PROVISIONAL_PREFIX}{token}").is_dir()
+    assert _recovery_helper(parent).returncode == 0
+    assert list(parent.iterdir()) == []
 
 
-def test_transaction_cleanup_retains_residue_on_identity_replacement(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_process_preserves_partial_journal_as_diagnostic_residue(
+    tmp_path: Path,
 ) -> None:
-    """A replaced fixed-prefix name is never deleted under journal authority."""
+    """A partially fsynced journal is never interpreted as deletion authority."""
+    parent = tmp_path / "versions"
+    parent.mkdir(mode=0o700)
     token = "b" * 32
-    monkeypatch.setattr(_MODULE, "STAGING_PARENT", tmp_path)
-    monkeypatch.setattr(_MODULE, "_root_owned_path", lambda *_args, **_kwargs: None)
-    staging = _MODULE._transaction_path(token)
-    staging.mkdir()
-    (staging / _MODULE.INSTALLATION_JOURNAL_NAME).write_text(
-        json.dumps(
-            {
-                "dev": 11,
-                "ino": 22,
-                "target": "/Library/Frameworks/Python.framework/Versions/3.13",
-                "token": token,
-            }
-        ),
-        encoding="utf-8",
+    created = _installation_helper(
+        _MODULE.ROOT_CREATE_INSTALLATION_CODE, parent, token, "partial_journal"
     )
+    assert created.returncode < 0
+    recovered = _recovery_helper(parent)
+    assert recovered.returncode != 0
+    assert b"partial or invalid transaction journal" in recovered.stderr
+    assert (parent / f"{_MODULE.PROVISIONAL_PREFIX}{token}").is_dir()
 
-    def reject_replacement(path: Path, identity: tuple[int, int] | None = None) -> None:
-        assert path == Path("/Library/Frameworks/Python.framework/Versions/3.13")
-        assert identity == (11, 22)
-        raise ToolIdentityError("removal target does not match transaction journal")
 
-    monkeypatch.setattr(_MODULE, "_remove_root_tree", reject_replacement)
-    with pytest.raises(ToolIdentityError, match="does not match"):
-        _MODULE.cleanup_transaction(token)
-    assert staging.exists()
+@pytest.mark.parametrize("partial_copy", [False, True])
+def test_process_recovers_renamed_or_partially_copied_prefix(
+    tmp_path: Path, partial_copy: bool
+) -> None:
+    """A journaled fixed inode is recoverable before or during ditto."""
+    parent = tmp_path / "versions"
+    parent.mkdir(mode=0o700)
+    token = ("c" if partial_copy else "d") * 32
+    failpoint = "" if partial_copy else "after_rename"
+    created = _installation_helper(
+        _MODULE.ROOT_CREATE_INSTALLATION_CODE, parent, token, failpoint
+    )
+    assert created.returncode == 0 if partial_copy else created.returncode < 0
+    fixed = parent / "3.13"
+    if partial_copy:
+        (fixed / "ditto-partial").write_bytes(b"partial")
+    assert _recovery_helper(parent).returncode == 0
+    assert not fixed.exists()
+
+
+def test_process_cleanup_does_not_mutate_ancestors_and_rejects_path_swap(
+    tmp_path: Path,
+) -> None:
+    """Cleanup changes only the bound inode tree and rejects a replacement name."""
+    parent = tmp_path / "parent"
+    parent.mkdir(mode=0o700)
+    target = parent / "target"
+    target.mkdir(mode=0o700)
+    identity = (target.stat().st_dev, target.stat().st_ino)
+    parent_before = (parent.stat().st_uid, parent.stat().st_mode & 0o7777)
+    displaced = parent / "displaced"
+    target.rename(displaced)
+    target.mkdir(mode=0o700)
+    removed = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            _MODULE.ROOT_REMOVE_CODE,
+            target,
+            str(os.getuid()),
+            str(identity[0]),
+            str(identity[1]),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert removed.returncode != 0
+    assert target.is_dir() and displaced.is_dir()
+    assert (parent.stat().st_uid, parent.stat().st_mode & 0o7777) == parent_before
+
+    owned = parent / "owned"
+    owned.mkdir(mode=0o700)
+    (owned / "payload").write_bytes(b"owned")
+    owned_identity = (owned.stat().st_dev, owned.stat().st_ino)
+    removed = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            _MODULE.ROOT_REMOVE_CODE,
+            owned,
+            str(os.getuid()),
+            str(owned_identity[0]),
+            str(owned_identity[1]),
+        ],
+        check=False,
+    )
+    assert removed.returncode == 0 and not owned.exists()
+    assert (parent.stat().st_uid, parent.stat().st_mode & 0o7777) == parent_before
 
 
 def test_prefix_journal_precedes_ditto_and_cancellation_cleanup_is_persistent() -> None:
@@ -320,6 +407,9 @@ def test_prefix_journal_precedes_ditto_and_cancellation_cleanup_is_persistent() 
     ]
     assert prepare.index("_create_installation_root(") < prepare.index(
         '"/usr/bin/ditto"'
+    )
+    assert prepare.index("recover_stale_installations(") < prepare.index(
+        "_remove_previous_installation("
     )
     assert "cleanup_transaction(token)" in prepare
     assert "_remove_root_tree(staging)" not in prepare
