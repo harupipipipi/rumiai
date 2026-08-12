@@ -302,12 +302,22 @@ def _regular_executable(path: Path, label: str) -> ToolIdentity:
     return ToolIdentity(path, digest)
 
 
+def _caller_identity() -> tuple[int, frozenset[int]]:
+    """Return the effective caller and every group that grants mode authority."""
+    return os.geteuid(), frozenset((os.getegid(), *os.getgroups()))
+
+
+def _caller_identity_arguments() -> tuple[str, str]:
+    caller_uid, caller_groups = _caller_identity()
+    return str(caller_uid), ",".join(str(group) for group in sorted(caller_groups))
+
+
 def _caller_can_write(metadata: os.stat_result) -> bool:
     mode = stat.S_IMODE(metadata.st_mode)
-    if metadata.st_uid == os.geteuid():
+    caller_uid, caller_groups = _caller_identity()
+    if metadata.st_uid == caller_uid:
         return bool(mode & stat.S_IWUSR)
-    groups = {os.getegid(), *os.getgroups()}
-    if metadata.st_gid in groups:
+    if metadata.st_gid in caller_groups:
         return bool(mode & stat.S_IWGRP)
     return bool(mode & stat.S_IWOTH)
 
@@ -747,6 +757,7 @@ finally: os.close(parent)
 
 
 def _remove_root_tree(path: Path, identity: tuple[int, int] | None = None) -> None:
+    caller_uid, caller_groups = _caller_identity_arguments()
     arguments: list[object] = [
         "/usr/bin/sudo",
         "/usr/bin/python3",
@@ -756,8 +767,8 @@ def _remove_root_tree(path: Path, identity: tuple[int, int] | None = None) -> No
         ROOT_REMOVE_CODE,
         path,
         "0",
-        str(os.getuid()),
-        ",".join(str(group) for group in os.getgroups()),
+        caller_uid,
+        caller_groups,
     ]
     if identity is not None:
         arguments.extend(str(value) for value in identity)
@@ -1041,6 +1052,7 @@ def ensure_installation_parent(
     provenance: InstallerProvenance, staging: Path, token: str
 ) -> None:
     relative = provenance.install_root.parent.relative_to("/")
+    caller_uid, caller_groups = _caller_identity_arguments()
     subprocess.run(
         [
             "/usr/bin/sudo",
@@ -1057,8 +1069,8 @@ def ensure_installation_parent(
             ANCESTOR_PROVISIONAL_PREFIX,
             "0",
             "0",
-            str(os.getuid()),
-            ",".join(str(group) for group in os.getgroups()),
+            caller_uid,
+            caller_groups,
         ],
         check=True,
         env={"PATH": "/usr/bin:/bin"},
@@ -1068,6 +1080,7 @@ def ensure_installation_parent(
 def cleanup_created_ancestors(
     provenance: InstallerProvenance, staging: Path, token: str
 ) -> None:
+    caller_uid, caller_groups = _caller_identity_arguments()
     subprocess.run(
         [
             "/usr/bin/sudo",
@@ -1083,8 +1096,8 @@ def cleanup_created_ancestors(
             ANCESTOR_JOURNAL_SCHEMA,
             "0",
             "0",
-            str(os.getuid()),
-            ",".join(str(group) for group in os.getgroups()),
+            caller_uid,
+            caller_groups,
         ],
         check=True,
         env={"PATH": "/usr/bin:/bin"},
@@ -1272,6 +1285,7 @@ finally: os.close(parent)
 
 def _create_installation_root(provenance: InstallerProvenance, token: str) -> None:
     parent = provenance.install_root.parent
+    caller_uid, caller_groups = _caller_identity_arguments()
     subprocess.run(
         [
             "/usr/bin/sudo",
@@ -1286,8 +1300,8 @@ def _create_installation_root(provenance: InstallerProvenance, token: str) -> No
             INSTALLATION_JOURNAL_NAME,
             INSTALLATION_JOURNAL_SCHEMA,
             "0",
-            str(os.getuid()),
-            ",".join(str(group) for group in os.getgroups()),
+            caller_uid,
+            caller_groups,
         ],
         check=True,
         env={"PATH": "/usr/bin:/bin"},
@@ -1297,6 +1311,7 @@ def _create_installation_root(provenance: InstallerProvenance, token: str) -> No
 def recover_stale_installations(
     provenance: InstallerProvenance, token: str = ""
 ) -> None:
+    caller_uid, caller_groups = _caller_identity_arguments()
     subprocess.run(
         [
             "/usr/bin/sudo",
@@ -1311,8 +1326,8 @@ def recover_stale_installations(
             INSTALLATION_JOURNAL_NAME,
             INSTALLATION_JOURNAL_SCHEMA,
             "0",
-            str(os.getuid()),
-            ",".join(str(group) for group in os.getgroups()),
+            caller_uid,
+            caller_groups,
         ],
         check=True,
         env={"PATH": "/usr/bin:/bin"},
@@ -1653,9 +1668,27 @@ _MACHO_MAGICS = frozenset(
 )
 
 
-def _macho_command(path: Path, architecture: str, option: str) -> str:
+@dataclass(frozen=True)
+class _MachOSliceCommands:
+    identifier: str | None
+    dependencies: tuple[str, ...]
+    rpaths: tuple[str, ...]
+
+
+_DYLIB_LOAD_COMMANDS = frozenset(
+    {
+        "LC_LAZY_LOAD_DYLIB",
+        "LC_LOAD_DYLIB",
+        "LC_LOAD_UPWARD_DYLIB",
+        "LC_LOAD_WEAK_DYLIB",
+        "LC_REEXPORT_DYLIB",
+    }
+)
+
+
+def _macho_load_commands(path: Path, architecture: str) -> str:
     result = subprocess.run(
-        ["/usr/bin/otool", "-arch", architecture, option, path],
+        ["/usr/bin/otool", "-arch", architecture, "-l", path],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -1664,7 +1697,7 @@ def _macho_command(path: Path, architecture: str, option: str) -> str:
     )
     if result.returncode != 0:
         raise ToolIdentityError(
-            f"otool {option} rejected packaging Mach-O {path} ({architecture})"
+            f"otool -l rejected packaging Mach-O {path} ({architecture})"
         )
     return result.stdout
 
@@ -1689,33 +1722,61 @@ def _macho_architectures(path: Path) -> tuple[str, ...]:
     return architectures
 
 
-def _macho_dependencies(output: str) -> tuple[str, ...]:
-    dependencies = tuple(
-        line.strip().split(" (", 1)[0]
-        for line in output.splitlines()
-        if line.startswith(("\t", " ")) and " (" in line
-    )
-    if not dependencies or len(dependencies) != len(set(dependencies)):
-        raise ToolIdentityError("Mach-O dependencies are empty or ambiguous")
-    return dependencies
+def _load_command_value(block: tuple[str, ...], field: str) -> str:
+    prefix = f"{field} "
+    values = [
+        line.strip()[len(prefix) :].split(" (offset ", 1)[0]
+        for line in block
+        if line.strip().startswith(prefix) and " (offset " in line.strip()
+    ]
+    if len(values) != 1 or not values[0] or "\x00" in values[0]:
+        raise ToolIdentityError(f"Mach-O load command has invalid {field}")
+    return values[0]
 
 
-def _macho_rpaths(output: str) -> tuple[str, ...]:
+def _parse_macho_load_commands(output: str) -> _MachOSliceCommands:
+    """Parse one architecture's ordered otool load-command records."""
     lines = output.splitlines()
-    values: list[str] = []
-    for index, line in enumerate(lines):
-        if line.strip() != "cmd LC_RPATH":
-            continue
-        for candidate in lines[index + 1 : index + 5]:
-            stripped = candidate.strip()
-            if stripped.startswith("path ") and " (offset " in stripped:
-                values.append(stripped[5:].split(" (offset ", 1)[0])
-                break
-        else:
-            raise ToolIdentityError("LC_RPATH lacks a canonical path command")
-    if len(values) != len(set(values)):
+    starts = [
+        index for index, line in enumerate(lines) if line.startswith("Load command ")
+    ]
+    if not starts:
+        raise ToolIdentityError("Mach-O has no structured load commands")
+    dependencies: list[str] = []
+    rpaths: list[str] = []
+    identifiers: list[str] = []
+    for ordinal, start in enumerate(starts):
+        if lines[start] != f"Load command {ordinal}":
+            raise ToolIdentityError("Mach-O load command numbering is not canonical")
+        end = starts[ordinal + 1] if ordinal + 1 < len(starts) else len(lines)
+        block = tuple(lines[start + 1 : end])
+        commands = [
+            line.strip().removeprefix("cmd ")
+            for line in block
+            if line.strip().startswith("cmd ")
+        ]
+        if len(commands) != 1:
+            raise ToolIdentityError("Mach-O load command lacks one command type")
+        command = commands[0]
+        if command == "LC_RPATH":
+            rpaths.append(_load_command_value(block, "path"))
+        elif command == "LC_ID_DYLIB":
+            identifiers.append(_load_command_value(block, "name"))
+        elif command in _DYLIB_LOAD_COMMANDS:
+            dependencies.append(_load_command_value(block, "name"))
+        elif "DYLIB" in command and command.startswith("LC_"):
+            raise ToolIdentityError(f"unsupported Mach-O dylib command: {command}")
+    if len(identifiers) > 1:
+        raise ToolIdentityError("Mach-O has multiple LC_ID_DYLIB commands")
+    if len(dependencies) != len(set(dependencies)):
+        raise ToolIdentityError("Mach-O dependency commands are duplicated")
+    if len(rpaths) != len(set(rpaths)):
         raise ToolIdentityError("Mach-O LC_RPATH entries are duplicated")
-    return tuple(values)
+    return _MachOSliceCommands(
+        identifiers[0] if identifiers else None,
+        tuple(dependencies),
+        tuple(rpaths),
+    )
 
 
 def _system_dyld_path(path: Path) -> bool:
@@ -1758,23 +1819,20 @@ def _require_dyld_candidate(candidate: Path, root: Path, dependency: str) -> Pat
 
 def _resolve_macho_dependency(
     dependency: str,
-    rpaths: tuple[str, ...],
+    run_path_stack: tuple[Path, ...],
     image: Path,
     executable: Path,
     root: Path,
 ) -> Path:
     if dependency.startswith("@rpath/"):
-        if not rpaths:
+        if not run_path_stack:
             raise ToolIdentityError(f"@rpath dependency has no LC_RPATH: {dependency}")
         suffix = dependency.removeprefix("@rpath/")
         if not suffix or suffix.startswith("/"):
             raise ToolIdentityError(f"unsafe @rpath dependency: {dependency}")
         candidates: list[Path] = []
-        for raw_rpath in rpaths:
-            expanded_rpath = _expand_dyld_path(raw_rpath, image, executable)
-            if not (_system_dyld_path(expanded_rpath) or _inside(expanded_rpath, root)):
-                raise ToolIdentityError(f"external LC_RPATH: {raw_rpath}")
-            candidate = expanded_rpath / suffix
+        for run_path in run_path_stack:
+            candidate = run_path / suffix
             if candidate.exists():
                 candidates.append(_require_dyld_candidate(candidate, root, dependency))
         unique = tuple(dict.fromkeys(candidates))
@@ -1787,10 +1845,27 @@ def _resolve_macho_dependency(
     return _require_dyld_candidate(expanded, root, dependency)
 
 
+def _extend_run_path_stack(
+    inherited: tuple[Path, ...],
+    commands: _MachOSliceCommands,
+    image: Path,
+    executable: Path,
+    root: Path,
+) -> tuple[Path, ...]:
+    expanded: list[Path] = []
+    for raw_rpath in commands.rpaths:
+        candidate = _expand_dyld_path(raw_rpath, image, executable)
+        if not (_system_dyld_path(candidate) or _inside(candidate, root)):
+            raise ToolIdentityError(f"external LC_RPATH: {raw_rpath}")
+        expanded.append(candidate)
+    return (*inherited, *expanded)
+
+
 def _verify_macho_dependency_closure(installation: MacOSPythonInstallation) -> None:
     """Resolve every architecture's dependencies with exact dyld semantics."""
     base_python = installation.root / "bin" / f"python{installation.root.name}"
     executables = (base_python, installation.executable)
+    macho_paths: list[Path] = []
     for path in sorted(installation.root.rglob("*")):
         metadata = path.lstat()
         if not stat.S_ISREG(metadata.st_mode):
@@ -1798,20 +1873,77 @@ def _verify_macho_dependency_closure(installation: MacOSPythonInstallation) -> N
         with path.open("rb") as source:
             if source.read(4) not in _MACHO_MAGICS:
                 continue
-        for architecture in _macho_architectures(path):
-            dependencies = _macho_dependencies(_macho_command(path, architecture, "-L"))
-            rpaths = _macho_rpaths(_macho_command(path, architecture, "-l"))
-            for dependency in dependencies:
-                resolutions = {
-                    _resolve_macho_dependency(
-                        dependency, rpaths, path, executable, installation.root
-                    )
-                    for executable in executables
-                }
-                if len(resolutions) != 1:
+        macho_paths.append(path)
+    architecture_cache: dict[Path, tuple[str, ...]] = {}
+    command_cache: dict[tuple[Path, str], _MachOSliceCommands] = {}
+
+    def architectures(path: Path) -> tuple[str, ...]:
+        if path not in architecture_cache:
+            architecture_cache[path] = _macho_architectures(path)
+        return architecture_cache[path]
+
+    def commands(path: Path, architecture: str) -> _MachOSliceCommands:
+        key = (path, architecture)
+        if key not in command_cache:
+            if architecture not in architectures(path):
+                raise ToolIdentityError(
+                    f"Mach-O dependency lacks {architecture} slice: {path}"
+                )
+            command_cache[key] = _parse_macho_load_commands(
+                _macho_load_commands(path, architecture)
+            )
+        return command_cache[key]
+
+    def verify_image(
+        path: Path,
+        architecture: str,
+        executable: Path,
+        inherited: tuple[Path, ...],
+        active: frozenset[Path],
+    ) -> None:
+        if path in active:
+            return
+        image_commands = commands(path, architecture)
+        run_paths = _extend_run_path_stack(
+            inherited, image_commands, path, executable, installation.root
+        )
+        for dependency in image_commands.dependencies:
+            resolved = _resolve_macho_dependency(
+                dependency, run_paths, path, executable, installation.root
+            )
+            if _system_dyld_path(resolved):
+                continue
+            with resolved.open("rb") as source:
+                if source.read(4) not in _MACHO_MAGICS:
                     raise ToolIdentityError(
-                        f"Mach-O dependency differs by executable: {dependency}"
+                        f"Mach-O dependency is not a Mach-O image: {resolved}"
                     )
+            verify_image(
+                resolved,
+                architecture,
+                executable,
+                run_paths,
+                active | {path},
+            )
+
+    for path in macho_paths:
+        for architecture in architectures(path):
+            for executable in executables:
+                if architecture not in architectures(executable):
+                    raise ToolIdentityError(
+                        f"Mach-O executable lacks {architecture} slice: {executable}"
+                    )
+                executable_commands = commands(executable, architecture)
+                inherited = ()
+                if path != executable:
+                    inherited = _extend_run_path_stack(
+                        (),
+                        executable_commands,
+                        executable,
+                        executable,
+                        installation.root,
+                    )
+                verify_image(path, architecture, executable, inherited, frozenset())
 
 
 def smoke_macos_installation(installation: MacOSPythonInstallation) -> None:

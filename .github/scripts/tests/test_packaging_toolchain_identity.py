@@ -46,9 +46,20 @@ _REQUIRE_ROOT_PROCESS_TESTS = (
 
 
 def _executable(path: Path, payload: bytes = b"tool fixture") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(payload)
     path.chmod(0o555)
     return path
+
+
+def _otool_load_commands(*commands: tuple[str, str | None]) -> str:
+    lines = ["fixture:"]
+    for index, (command, value) in enumerate(commands):
+        lines.extend((f"Load command {index}", f"          cmd {command}"))
+        if value is not None:
+            field = "path" if command == "LC_RPATH" else "name"
+            lines.append(f"         {field} {value} (offset 24)")
+    return "\n".join(lines) + "\n"
 
 
 def test_explicit_tool_identities_are_absolute_and_digest_bound(tmp_path: Path) -> None:
@@ -185,7 +196,13 @@ def test_ancestor_write_authority_uses_effective_group_membership(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A mode bit grants authority only to the real caller's ownership class."""
-    monkeypatch.setattr(_MODULE.os, "getuid", lambda: 501)
+    monkeypatch.setattr(
+        _MODULE.os,
+        "getuid",
+        lambda: (_ for _ in ()).throw(AssertionError("real uid is not authority")),
+    )
+    monkeypatch.setattr(_MODULE.os, "geteuid", lambda: 501)
+    monkeypatch.setattr(_MODULE.os, "getegid", lambda: 20)
     monkeypatch.setattr(_MODULE.os, "getgroups", lambda: [20, 80])
     root_wheel = SimpleNamespace(st_mode=0o040775, st_uid=0, st_gid=0)
     root_admin = SimpleNamespace(st_mode=0o040775, st_uid=0, st_gid=80)
@@ -193,6 +210,39 @@ def test_ancestor_write_authority_uses_effective_group_membership(
     assert not _MODULE._caller_can_write(root_wheel)
     assert _MODULE._caller_can_write(root_admin)
     assert _MODULE._caller_can_write(world_writable)
+
+
+def test_all_root_helpers_receive_one_effective_caller_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Every production root-helper argv uses euid and egid plus supplements."""
+    calls: list[list[object]] = []
+
+    def capture(arguments: list[object], **_kwargs: object) -> object:
+        calls.append(arguments)
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(_MODULE.subprocess, "run", capture)
+    monkeypatch.setattr(
+        _MODULE.os,
+        "getuid",
+        lambda: (_ for _ in ()).throw(AssertionError("real uid is not authority")),
+    )
+    monkeypatch.setattr(_MODULE.os, "geteuid", lambda: 4242)
+    monkeypatch.setattr(_MODULE.os, "getegid", lambda: 8)
+    monkeypatch.setattr(_MODULE.os, "getgroups", lambda: [9, 7, 8])
+    provenance = SimpleNamespace(install_root=tmp_path / "Library/Frameworks/3.13")
+    staging = tmp_path / "staging"
+    token = "a" * 32
+
+    _MODULE._remove_root_tree(tmp_path / "remove")
+    _MODULE.ensure_installation_parent(provenance, staging, token)
+    _MODULE.cleanup_created_ancestors(provenance, staging, token)
+    _MODULE._create_installation_root(provenance, token)
+    _MODULE.recover_stale_installations(provenance, token)
+
+    assert len(calls) == 5
+    assert all(call[-2:] == ["4242", "7,8,9"] for call in calls)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS extended ACL contract")
@@ -590,22 +640,22 @@ def test_macho_dependency_closure_rejects_external_authority(
 ) -> None:
     """Static Mach-O inspection permits the leaf and rejects external dylibs."""
     root = tmp_path / "3.13"
-    root.mkdir()
-    executable = _executable(root / "python", b"\xcf\xfa\xed\xfe" + b"fixture")
-    dependency = _executable(root / "libPython", b"library")
+    executable = _executable(root / "bin/python3.13", b"\xcf\xfa\xed\xfe" + b"fixture")
+    dependency = _executable(
+        root / "bin/libPython.dylib", b"\xcf\xfa\xed\xfe" + b"library"
+    )
     installation = _MODULE.MacOSPythonInstallation(root, executable, "0" * 64)
 
     def otool_result(arguments: list[object], **_kwargs: object) -> object:
         if arguments[:2] == ["/usr/bin/lipo", "-archs"]:
             return subprocess.CompletedProcess(arguments, 0, "arm64 x86_64\n", "")
-        if "-L" in arguments:
-            return subprocess.CompletedProcess(
-                arguments,
-                0,
-                f"{executable}:\n\t@loader_path/libPython (compatibility version 1.0.0)\n",
-                "",
-            )
-        return subprocess.CompletedProcess(arguments, 0, f"{executable}:\n", "")
+        path = Path(arguments[-1])
+        output = (
+            _otool_load_commands(("LC_LOAD_DYLIB", "@loader_path/libPython.dylib"))
+            if path == executable
+            else _otool_load_commands(("LC_ID_DYLIB", "@rpath/libPython.dylib"))
+        )
+        return subprocess.CompletedProcess(arguments, 0, output, "")
 
     monkeypatch.setattr(_MODULE.subprocess, "run", otool_result)
     _MODULE._verify_macho_dependency_closure(installation)
@@ -615,25 +665,85 @@ def test_macho_dependency_closure_rejects_external_authority(
     def escaped_result(arguments: list[object], **_kwargs: object) -> object:
         if arguments[:2] == ["/usr/bin/lipo", "-archs"]:
             return subprocess.CompletedProcess(arguments, 0, "arm64 x86_64\n", "")
-        if "-L" in arguments:
+        path = Path(arguments[-1])
+        if path == executable:
             dependency_path = dependency if "arm64" in arguments else outside
-            return subprocess.CompletedProcess(
-                arguments,
-                0,
-                f"{executable}:\n\t{dependency_path} (compatibility version 1.0.0)\n",
-                "",
-            )
-        return subprocess.CompletedProcess(arguments, 0, f"{executable}:\n", "")
+            output = _otool_load_commands(("LC_LOAD_DYLIB", os.fspath(dependency_path)))
+        else:
+            output = _otool_load_commands(("LC_ID_DYLIB", "@rpath/libPython.dylib"))
+        return subprocess.CompletedProcess(arguments, 0, output, "")
 
     monkeypatch.setattr(_MODULE.subprocess, "run", escaped_result)
     with pytest.raises(ToolIdentityError, match="dependency escapes closure"):
         _MODULE._verify_macho_dependency_closure(installation)
 
 
-def test_dyld_rpath_resolution_rejects_missing_external_ambiguous_and_suffix_fake(
+def test_structured_load_commands_exclude_id_and_include_all_dylib_loads() -> None:
+    """LC_ID_DYLIB is metadata; weak/reexport/upward loads remain dependencies."""
+    commands = _MODULE._parse_macho_load_commands(
+        _otool_load_commands(
+            ("LC_ID_DYLIB", "@rpath/libself.dylib"),
+            ("LC_RPATH", "@loader_path/first"),
+            ("LC_RPATH", "@executable_path/second"),
+            ("LC_LOAD_WEAK_DYLIB", "@rpath/libweak.dylib"),
+            ("LC_REEXPORT_DYLIB", "@rpath/libreexport.dylib"),
+            ("LC_LOAD_UPWARD_DYLIB", "@rpath/libupward.dylib"),
+        )
+    )
+    assert commands.identifier == "@rpath/libself.dylib"
+    assert commands.rpaths == ("@loader_path/first", "@executable_path/second")
+    assert commands.dependencies == (
+        "@rpath/libweak.dylib",
+        "@rpath/libreexport.dylib",
+        "@rpath/libupward.dylib",
+    )
+
+
+def test_dyld_loader_chain_rpaths_resolve_inherited_weak_and_reexport(
     tmp_path: Path,
 ) -> None:
-    """LC_RPATH order and exact expansion replace unsafe basename searching."""
+    """The executable's ordered run paths remain active for loader dependencies."""
+    root = tmp_path / "3.13"
+    (root / "bin").mkdir(parents=True)
+    image = _executable(root / "extension.so", b"\xcf\xfa\xed\xfeextension")
+    executable = _executable(root / "bin/python3.13")
+    inside = root / "lib"
+    inside.mkdir()
+    weak = _executable(inside / "libweak.dylib")
+    reexport = _executable(inside / "libreexport.dylib")
+    executable_commands = _MODULE._parse_macho_load_commands(
+        _otool_load_commands(("LC_RPATH", "@loader_path/../lib"))
+    )
+    loader_commands = _MODULE._parse_macho_load_commands(
+        _otool_load_commands(
+            ("LC_LOAD_WEAK_DYLIB", "@rpath/libweak.dylib"),
+            ("LC_REEXPORT_DYLIB", "@rpath/libreexport.dylib"),
+        )
+    )
+    stack = _MODULE._extend_run_path_stack(
+        (), executable_commands, executable, executable, root
+    )
+    stack = _MODULE._extend_run_path_stack(
+        stack, loader_commands, image, executable, root
+    )
+    assert (
+        _MODULE._resolve_macho_dependency(
+            loader_commands.dependencies[0], stack, image, executable, root
+        )
+        == weak
+    )
+    assert (
+        _MODULE._resolve_macho_dependency(
+            loader_commands.dependencies[1], stack, image, executable, root
+        )
+        == reexport
+    )
+
+
+def test_dyld_rpath_rejects_missing_external_ambiguous_and_suffix_fake(
+    tmp_path: Path,
+) -> None:
+    """Ordered exact run paths reject external, missing, and alias candidates."""
     root = tmp_path / "3.13"
     (root / "bin").mkdir(parents=True)
     image = _executable(root / "extension.so")
@@ -646,9 +756,11 @@ def test_dyld_rpath_resolution_rejects_missing_external_ambiguous_and_suffix_fak
     inside.mkdir()
     _executable(inside / "libcrypto.dylib")
     with pytest.raises(ToolIdentityError, match="external LC_RPATH"):
-        _MODULE._resolve_macho_dependency(
-            dependency,
-            (os.fspath(tmp_path / "attacker"), os.fspath(inside)),
+        _MODULE._extend_run_path_stack(
+            (),
+            _MODULE._MachOSliceCommands(
+                None, (), (os.fspath(tmp_path / "attacker"), os.fspath(inside))
+            ),
             image,
             executable,
             root,
@@ -659,7 +771,7 @@ def test_dyld_rpath_resolution_rejects_missing_external_ambiguous_and_suffix_fak
     _executable(fake)
     with pytest.raises(ToolIdentityError, match="unresolved or ambiguous"):
         _MODULE._resolve_macho_dependency(
-            dependency, (os.fspath(root / "empty"),), image, executable, root
+            dependency, (root / "empty",), image, executable, root
         )
 
     second = root / "second"
@@ -668,7 +780,7 @@ def test_dyld_rpath_resolution_rejects_missing_external_ambiguous_and_suffix_fak
     with pytest.raises(ToolIdentityError, match="unresolved or ambiguous"):
         _MODULE._resolve_macho_dependency(
             dependency,
-            (os.fspath(inside), os.fspath(second)),
+            (inside, second),
             image,
             executable,
             root,
@@ -677,6 +789,33 @@ def test_dyld_rpath_resolution_rejects_missing_external_ambiguous_and_suffix_fak
         _MODULE._resolve_macho_dependency(
             "libcrypto.dylib", (), image, executable, root
         )
+
+
+def test_fat_macho_slice_mismatch_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Every inspected fat slice must exist in the executable load context."""
+    root = tmp_path / "3.13"
+    executable = _executable(root / "bin/python3.13", b"\xcf\xfa\xed\xfepython")
+    _executable(root / "extension.so", b"\xcf\xfa\xed\xfeextension")
+    installation = _MODULE.MacOSPythonInstallation(root, executable, "0" * 64)
+
+    def tool_result(arguments: list[object], **_kwargs: object) -> object:
+        if arguments[:2] == ["/usr/bin/lipo", "-archs"]:
+            architectures = (
+                "arm64\n" if Path(arguments[-1]) == executable else "arm64 x86_64\n"
+            )
+            return subprocess.CompletedProcess(arguments, 0, architectures, "")
+        return subprocess.CompletedProcess(
+            arguments,
+            0,
+            _otool_load_commands(("LC_ID_DYLIB", "@rpath/fixture.dylib")),
+            "",
+        )
+
+    monkeypatch.setattr(_MODULE.subprocess, "run", tool_result)
+    with pytest.raises(ToolIdentityError, match="executable lacks x86_64 slice"):
+        _MODULE._verify_macho_dependency_closure(installation)
 
 
 def test_closure_smoke_executes_base_and_venv_in_isolated_modes(
@@ -1514,7 +1653,7 @@ def test_workflows_run_real_installation_e2e_and_cleanup(workflow_name: str) -> 
     assert '--transaction-token "$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"' in payload
     assert "if: always() && env.TOBKIRI_PACKAGING_TRANSACTION_TOKEN != ''" in payload
     source = _SCRIPT.read_text(encoding="utf-8")
-    assert '["/usr/bin/otool", "-arch", architecture, option, path]' in source
+    assert '["/usr/bin/otool", "-arch", architecture, "-l", path]' in source
     assert '["/usr/bin/lipo", "-archs", path]' in source
     assert "(base_python, False)" in source
     assert "(installation.executable, False)" in source
