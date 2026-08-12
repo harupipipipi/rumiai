@@ -1993,7 +1993,7 @@ mod tests {
         let manifest =
             fs::read(runtime_root.join("packaged_defaultspack_source_manifest.v1.json")).unwrap();
         let provenance = format!(
-            "{{\"schema\":\"io.tobkiri.packaging-source-provenance.v1\",\"source_commit\":\"fixture\",\"source_tree\":\"fixture\",\"source_clean\":true,\"source_manifest_sha256\":\"{:x}\"}}",
+            "{{\"schema\":\"io.tobkiri.packaging-source-provenance.v1\",\"source_commit\":\"0123456789abcdef0123456789abcdef01234567\",\"source_tree\":\"89abcdef0123456789abcdef0123456789abcdef\",\"source_clean\":true,\"source_manifest_sha256\":\"{:x}\"}}",
             Sha256::digest(&manifest)
         );
         snapshot.bind_provenance(provenance.as_bytes()).unwrap();

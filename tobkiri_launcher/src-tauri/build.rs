@@ -1413,6 +1413,7 @@ fn verify_presentation_release_at(
             "release packaged Defaults bytes differ from signed identities",
         ));
     }
+    verify_catalog_source_manifest_digests(&catalog, &release_defaultspack_lock)?;
 
     let binding = object_field(catalog_object, "release_binding", "presentation catalog")?
         .as_object()
@@ -1746,55 +1747,95 @@ struct ShellArtifactAuthority {
 #[cfg(target_os = "macos")]
 struct CoreTransactionGuard {
     path: PathBuf,
+    parent: File,
+    root: File,
+    name: std::ffi::OsString,
     identity: (u64, u64),
+    inventory: Option<std::collections::BTreeMap<String, (u64, u64, bool)>>,
     armed: bool,
 }
 
 #[cfg(target_os = "macos")]
 impl CoreTransactionGuard {
     fn create(parent: &Path) -> io::Result<Self> {
-        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        use std::ffi::CString;
+        use std::os::fd::{AsRawFd, FromRawFd};
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::MetadataExt;
+        let canonical_parent = parent.canonicalize()?;
+        let parent_bytes = CString::new(canonical_parent.as_os_str().as_bytes())
+            .map_err(|_| invalid_release("Core transaction parent contains NUL"))?;
+        let parent_fd = unsafe {
+            libc::open(
+                parent_bytes.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if parent_fd == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        let parent = unsafe { File::from_raw_fd(parent_fd) };
         let mut nonce = [0_u8; 16];
         rand::rngs::OsRng.fill_bytes(&mut nonce);
         let name = format!(".tobkiri-core-presentation-{}", hex_bytes(&nonce));
-        let path = parent.join(name);
-        fs::create_dir(&path)?;
-        let initialized = (|| {
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o700))?;
-            let metadata = fs::symlink_metadata(&path)?;
-            if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                return Err(invalid_release("Core transaction is not a real directory"));
-            }
-            Ok((metadata.dev(), metadata.ino()))
-        })();
-        match initialized {
-            Ok(identity) => Ok(Self {
-                path,
-                identity,
-                armed: true,
-            }),
-            Err(error) => Err(invalid_release(format!(
-                "{error}; Core transaction initialization failed and residue was retained fail-closed"
-            ))),
+        let encoded = CString::new(name.as_bytes())
+            .map_err(|_| invalid_release("Core transaction name contains NUL"))?;
+        if unsafe { libc::mkdirat(parent.as_raw_fd(), encoded.as_ptr(), 0o700) } == -1 {
+            return Err(io::Error::last_os_error());
         }
+        let root_fd = unsafe {
+            libc::openat(
+                parent.as_raw_fd(),
+                encoded.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if root_fd == -1 {
+            return Err(invalid_release(format!(
+                "{}; Core transaction residue retained because its identity is unavailable",
+                io::Error::last_os_error()
+            )));
+        }
+        let root = unsafe { File::from_raw_fd(root_fd) };
+        let metadata = root.metadata().map_err(|error| {
+            invalid_release(format!(
+                "{error}; Core transaction residue retained because root identity is unavailable"
+            ))
+        })?;
+        if metadata.mode() & 0o777 != 0o700 || metadata.uid() != unsafe { libc::geteuid() } {
+            return Err(invalid_release(
+                "Core transaction owner/mode is invalid; residue retained fail-closed",
+            ));
+        }
+        Ok(Self {
+            path: canonical_parent.join(&name),
+            parent,
+            root,
+            name: name.into(),
+            identity: (metadata.dev(), metadata.ino()),
+            inventory: None,
+            armed: true,
+        })
     }
 
     fn path(&self) -> &Path {
         &self.path
     }
 
+    fn seal_inventory(&mut self) -> io::Result<()> {
+        self.inventory = Some(core_transaction_inventory(&self.root)?);
+        Ok(())
+    }
+
     fn cleanup(mut self) -> io::Result<()> {
-        use std::os::unix::fs::MetadataExt;
-        let metadata = fs::symlink_metadata(&self.path)?;
-        if metadata.file_type().is_symlink()
-            || !metadata.is_dir()
-            || (metadata.dev(), metadata.ino()) != self.identity
-        {
-            return Err(invalid_release(
-                "Core transaction identity changed; residue retained fail-closed",
-            ));
-        }
-        fs::remove_dir_all(&self.path)?;
+        let inventory = self.inventory.as_ref().ok_or_else(|| {
+            invalid_release(
+                "Core transaction ownership is incomplete; residue retained fail-closed",
+            )
+        })?;
+        core_transaction_remove(&self.root, "", inventory)?;
+        verify_core_transaction_name(&self.parent, &self.name, self.identity)?;
+        unlinkat_core(&self.parent, &self.name, libc::AT_REMOVEDIR)?;
         self.armed = false;
         Ok(())
     }
@@ -1808,11 +1849,220 @@ impl Drop for CoreTransactionGuard {
     }
 }
 
-fn resolve_core_shell_artifact(repository_root: &Path) -> io::Result<ShellArtifactAuthority> {
+#[cfg(target_os = "macos")]
+fn core_openat(directory: &File, name: &std::ffi::OsStr, directory_only: bool) -> io::Result<File> {
+    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    let encoded = CString::new(name.as_bytes())
+        .map_err(|_| invalid_release("Core transaction entry contains NUL"))?;
+    let mut flags = libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+    if directory_only {
+        flags |= libc::O_DIRECTORY;
+    }
+    let fd = unsafe { libc::openat(directory.as_raw_fd(), encoded.as_ptr(), flags) };
+    if fd == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(unsafe { File::from_raw_fd(fd) })
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn core_directory_entries(directory: &File) -> io::Result<Vec<std::ffi::OsString>> {
+    use std::ffi::CStr;
+    use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd};
+    use std::os::unix::ffi::OsStringExt;
+    let independent = core_openat(directory, std::ffi::OsStr::new("."), true)?;
+    let stream = unsafe { libc::fdopendir(independent.into_raw_fd()) };
+    if stream.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let mut names = Vec::new();
+    loop {
+        unsafe { *libc::__error() = 0 };
+        let entry = unsafe { libc::readdir(stream) };
+        if entry.is_null() {
+            let error = io::Error::last_os_error();
+            unsafe { libc::closedir(stream) };
+            return if error.raw_os_error() == Some(0) {
+                names.sort();
+                Ok(names)
+            } else {
+                Err(error)
+            };
+        }
+        let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) }.to_bytes();
+        if name != b"." && name != b".." {
+            names.push(std::ffi::OsString::from_vec(name.to_vec()));
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn core_transaction_inventory(
+    root: &File,
+) -> io::Result<std::collections::BTreeMap<String, (u64, u64, bool)>> {
+    use std::os::unix::fs::MetadataExt;
+    fn visit(
+        directory: &File,
+        relative: &str,
+        output: &mut std::collections::BTreeMap<String, (u64, u64, bool)>,
+    ) -> io::Result<()> {
+        let metadata = directory.metadata()?;
+        output.insert(relative.to_owned(), (metadata.dev(), metadata.ino(), true));
+        for name in core_directory_entries(directory)? {
+            let component = name
+                .to_str()
+                .ok_or_else(|| invalid_release("Core transaction name is not UTF-8"))?;
+            let child_relative = if relative.is_empty() {
+                component.to_owned()
+            } else {
+                format!("{relative}/{component}")
+            };
+            match core_openat(directory, &name, true) {
+                Ok(child) => visit(&child, &child_relative, output)?,
+                Err(error) if error.raw_os_error() == Some(libc::ENOTDIR) => {
+                    let child = core_openat(directory, &name, false)?;
+                    let metadata = child.metadata()?;
+                    if !metadata.is_file() || metadata.nlink() != 1 {
+                        return Err(invalid_release(
+                            "Core transaction contains a special or linked file",
+                        ));
+                    }
+                    output.insert(child_relative, (metadata.dev(), metadata.ino(), false));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+    let mut inventory = std::collections::BTreeMap::new();
+    visit(root, "", &mut inventory)?;
+    Ok(inventory)
+}
+
+#[cfg(target_os = "macos")]
+fn unlinkat_core(directory: &File, name: &std::ffi::OsStr, flags: i32) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+    let encoded = CString::new(name.as_bytes())
+        .map_err(|_| invalid_release("Core cleanup name contains NUL"))?;
+    if unsafe { libc::unlinkat(directory.as_raw_fd(), encoded.as_ptr(), flags) } == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn verify_core_transaction_name(
+    parent: &File,
+    name: &std::ffi::OsStr,
+    expected: (u64, u64),
+) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let opened = core_openat(parent, name, true)?;
+    let metadata = opened.metadata()?;
+    if (metadata.dev(), metadata.ino()) != expected {
+        return Err(invalid_release(
+            "Core transaction name was replaced; residue retained",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn core_transaction_remove(
+    directory: &File,
+    relative: &str,
+    expected: &std::collections::BTreeMap<String, (u64, u64, bool)>,
+) -> io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let metadata = directory.metadata()?;
+    if expected.get(relative) != Some(&(metadata.dev(), metadata.ino(), true)) {
+        return Err(invalid_release(
+            "Core transaction directory identity changed; residue retained",
+        ));
+    }
+    directory.set_permissions(fs::Permissions::from_mode(0o700))?;
+    for name in core_directory_entries(directory)? {
+        let component = name
+            .to_str()
+            .ok_or_else(|| invalid_release("Core cleanup name is not UTF-8"))?;
+        let child_relative = if relative.is_empty() {
+            component.to_owned()
+        } else {
+            format!("{relative}/{component}")
+        };
+        let expected_identity = *expected.get(&child_relative).ok_or_else(|| {
+            invalid_release("Core transaction has an unowned extra; residue retained")
+        })?;
+        let (child, flags) = if expected_identity.2 {
+            (core_openat(directory, &name, true)?, libc::AT_REMOVEDIR)
+        } else {
+            (core_openat(directory, &name, false)?, 0)
+        };
+        let metadata = child.metadata()?;
+        if (metadata.dev(), metadata.ino(), metadata.is_dir()) != expected_identity {
+            return Err(invalid_release(
+                "Core transaction entry was replaced; residue retained",
+            ));
+        }
+        if expected_identity.2 {
+            core_transaction_remove(&child, &child_relative, expected)?;
+        }
+        let current = core_openat(directory, &name, expected_identity.2)?;
+        let current_metadata = current.metadata()?;
+        if (
+            current_metadata.dev(),
+            current_metadata.ino(),
+            current_metadata.is_dir(),
+        ) != expected_identity
+        {
+            return Err(invalid_release(
+                "Core transaction entry changed before unlink; residue retained",
+            ));
+        }
+        unlinkat_core(directory, &name, flags)?;
+    }
+    Ok(())
+}
+
+fn resolve_tauri_shell_target_dir(project_dir: &Path) -> io::Result<PathBuf> {
+    let project_dir = project_dir.canonicalize()?;
+    let configured = std::env::var_os(CARGO_TARGET_DIR_ENV);
+    let target = match configured {
+        Some(value) if !value.is_empty() => {
+            let value = PathBuf::from(value);
+            reject_parent_traversal(&value, CARGO_TARGET_DIR_ENV)?;
+            if value.is_absolute() {
+                value
+            } else {
+                project_dir.join(value)
+            }
+        }
+        _ => project_dir.join("target"),
+    };
+    let target = normalize_absolute_path(&target)?;
+    for ancestor in target.ancestors() {
+        if let Ok(metadata) = fs::symlink_metadata(ancestor) {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(invalid_release(
+                    "Tauri Shell target root has an invalid component",
+                ));
+            }
+        }
+    }
+    Ok(target)
+}
+
+fn resolve_core_shell_artifact(project_dir: &Path) -> io::Result<ShellArtifactAuthority> {
     let (platform, architecture) = expected_target()?;
     let target = std::env::var("TARGET")
         .map_err(|_| invalid_release("Cargo TARGET is missing for Shell resolution"))?;
-    let target_root = resolve_cargo_target_dir(repository_root)?;
+    let target_root = resolve_tauri_shell_target_dir(project_dir)?;
     let (bundle_dir, filename, artifact_ref, entrypoint) = match platform.as_str() {
         "macos" => (
             "macos",
@@ -2008,7 +2258,8 @@ fn verify_release_source_shape(entries: &[ReleaseTreeEntry]) -> io::Result<()> {
     for entry in entries {
         let allowed = required_files.contains(&entry.path.as_str())
             || required_directories.contains(&entry.path.as_str())
-            || entry.path.starts_with("bundled/presentation-artifacts/");
+            || entry.path.starts_with("bundled/presentation-artifacts/")
+            || entry.path.starts_with("ecosystem/defaultspack/v4/packs");
         if !allowed {
             return Err(invalid_release(format!(
                 "presentation release contains an extra entry: {}",
@@ -2172,6 +2423,91 @@ fn write_canonical_json(path: &Path, value: &serde_json::Value) -> io::Result<()
     fs::write(path, bytes)
 }
 
+fn source_manifest_digests_from_lock(
+    lock_path: &Path,
+) -> io::Result<serde_json::Map<String, serde_json::Value>> {
+    let lock: serde_json::Value = serde_json::from_slice(&read_regular_file(
+        lock_path,
+        "generated Defaults bundle lock",
+    )?)
+    .map_err(|error| invalid_release(format!("Defaults lock is malformed: {error}")))?;
+    let entries = lock
+        .get("entries")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| invalid_release("Defaults lock entries are missing"))?;
+    let mut digests = serde_json::Map::new();
+    for entry in entries {
+        let object = entry
+            .as_object()
+            .ok_or_else(|| invalid_release("Defaults lock entry is not an object"))?;
+        if object.get("kind").and_then(serde_json::Value::as_str) != Some("pack") {
+            continue;
+        }
+        let path = object
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| invalid_release("Defaults lock Pack path is missing"))?;
+        let digest = object
+            .get("digest")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| invalid_release("Defaults lock Pack digest is missing"))?;
+        if digest.len() != 71
+            || !digest.starts_with("sha256:")
+            || !digest[7..]
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err(invalid_release("Defaults lock Pack digest is invalid"));
+        }
+        let relative = safe_release_relative_path(path, "Defaults lock Pack path")?;
+        if !path.starts_with("packs/") || !path.ends_with(".pack.v4.json") {
+            return Err(invalid_release("Defaults lock Pack path is not canonical"));
+        }
+        let pack: serde_json::Value = serde_json::from_slice(&read_regular_file(
+            &lock_path
+                .parent()
+                .ok_or_else(|| invalid_release("Defaults lock has no bundle root"))?
+                .join(relative),
+            "generated Defaults Pack",
+        )?)
+        .map_err(|error| {
+            invalid_release(format!("generated Defaults Pack is malformed: {error}"))
+        })?;
+        let pack_id = pack
+            .get("pack_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| invalid_release("generated Defaults Pack has no pack_id"))?
+            .to_owned();
+        if digests
+            .insert(pack_id, serde_json::Value::String(digest.to_owned()))
+            .is_some()
+        {
+            return Err(invalid_release("Defaults lock contains a duplicate Pack"));
+        }
+    }
+    if digests.is_empty() {
+        return Err(invalid_release("Defaults lock contains no Pack entries"));
+    }
+    Ok(digests)
+}
+
+fn verify_catalog_source_manifest_digests(
+    catalog: &serde_json::Value,
+    lock_path: &Path,
+) -> io::Result<()> {
+    let actual = catalog
+        .get("source_manifest_digests")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| invalid_release("catalog source_manifest_digests are missing"))?;
+    let expected = source_manifest_digests_from_lock(lock_path)?;
+    if actual != &expected {
+        return Err(invalid_release(
+            "catalog selected Pack set differs from the exact Defaults lock Pack entries",
+        ));
+    }
+    Ok(())
+}
+
 fn produce_and_stage_core_presentation_release(staged_root: &Path) -> io::Result<Option<PathBuf>> {
     if core_build_stage() != CoreBuildStage::FinalApplication {
         return Err(invalid_release(
@@ -2191,7 +2527,7 @@ fn produce_and_stage_core_presentation_release(staged_root: &Path) -> io::Result
             .and_then(Path::parent)
             .ok_or_else(|| invalid_release("Launcher manifest has no repository root"))?
             .canonicalize()?;
-        let shell = resolve_core_shell_artifact(&repository_root)?;
+        let shell = resolve_core_shell_artifact(&project_dir)?;
         let (source_identity, source_revision) = current_source_provenance()?;
         let source_tree = current_source_tree(&repository_root, &source_revision)?;
         let trusted_manifest = committed_source_manifest(&repository_root, &source_revision)?;
@@ -2254,6 +2590,9 @@ fn produce_and_stage_core_presentation_release(staged_root: &Path) -> io::Result
                         )?)?;
                     catalog["default_profile_digest"] =
                         serde_json::Value::String(projection.default_profile_sha256.clone());
+                    catalog["source_manifest_digests"] = serde_json::Value::Object(
+                        source_manifest_digests_from_lock(&bundle_root.join("bundle.lock.json"))?,
+                    );
                     let variants = catalog["shell_providers"]
                         .as_array_mut()
                         .and_then(|providers| {
@@ -2364,16 +2703,21 @@ fn produce_and_stage_core_presentation_release(staged_root: &Path) -> io::Result
                 },
             );
         })();
-        let cleanup = transaction.cleanup();
-        match (result, cleanup) {
-            (Ok(output), Ok(())) => Ok(output),
-            (Err(error), Ok(())) => Err(error),
-            (Ok(_), Err(cleanup)) => Err(invalid_release(format!(
-                "Core presentation cleanup failed: {cleanup}"
+        match result {
+            Err(error) => Err(invalid_release(format!(
+                "{error}; Core transaction did not reach verified ownership, so residue was retained fail-closed"
             ))),
-            (Err(error), Err(cleanup)) => Err(invalid_release(format!(
-                "{error}; Core presentation cleanup also failed: {cleanup}"
-            ))),
+            Ok(output) => {
+                transaction.seal_inventory().map_err(|error| {
+                    invalid_release(format!(
+                        "{error}; Core transaction inventory is incomplete, so verified residue was retained fail-closed"
+                    ))
+                })?;
+                transaction.cleanup().map_err(|cleanup| {
+                    invalid_release(format!("Core presentation cleanup failed: {cleanup}"))
+                })?;
+                Ok(output)
+            }
         }
     }
 }
@@ -3965,6 +4309,42 @@ mod tests {
         }
     }
 
+    #[test]
+    fn tauri_shell_target_uses_launcher_layout_and_validated_override() {
+        let _environment_lock = environment_lock();
+        let tree = TestTree::new("tauri-shell-target-layout");
+        let project = tree.path().join("tobkiri_launcher/src-tauri");
+        fs::create_dir_all(&project).expect("project fixture should exist");
+        {
+            let _target_dir = EnvironmentGuard::clear(CARGO_TARGET_DIR_ENV);
+            assert_eq!(
+                resolve_tauri_shell_target_dir(&project).expect("default target should resolve"),
+                project
+                    .canonicalize()
+                    .expect("project should canonicalize")
+                    .join("target")
+            );
+        }
+        let target = "aarch64-apple-darwin";
+        let override_root = tree.path().join("workflow-target");
+        fs::create_dir_all(
+            override_root
+                .join(target)
+                .join("release/bundle/macos/Tobkiri.app"),
+        )
+        .expect("workflow Shell layout should exist");
+        let _target_dir = EnvironmentGuard::set_path(CARGO_TARGET_DIR_ENV, &override_root);
+        assert_eq!(
+            resolve_tauri_shell_target_dir(&project)
+                .expect("validated target override should resolve")
+                .join(target)
+                .join("release/bundle/macos/Tobkiri.app"),
+            override_root
+                .join(target)
+                .join("release/bundle/macos/Tobkiri.app")
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn cargo_target_dir_rejects_symlinked_root() {
@@ -4147,16 +4527,17 @@ mod tests {
     }
 
     #[test]
-    fn package_never_falls_back_without_an_explicit_dev_build() {
-        let _environment_lock = environment_lock();
-        let _release_root = EnvironmentGuard::clear(PRESENTATION_RELEASE_ROOT_ENV);
-        let _dev = EnvironmentGuard::clear("DEP_TAURI_DEV");
-        let _profile = EnvironmentGuard::set_value("PROFILE", "debug");
-        let tree = TestTree::new("presentation-no-fallback");
-        let error = stage_presentation_release(&tree.path().join("staged"))
-            .expect_err("packaging without a sealed root must fail even when Cargo selects debug");
-        assert_eq!(error.kind(), io::ErrorKind::NotFound);
-        assert!(error.to_string().contains(PRESENTATION_RELEASE_ROOT_ENV));
+    fn final_package_uses_core_producer_without_external_release_root() {
+        let source = include_str!("build.rs");
+        let stage = source
+            .split("fn stage_presentation_release(")
+            .nth(1)
+            .expect("stage function should exist")
+            .split("fn write_canonical_json")
+            .next()
+            .expect("stage function should terminate");
+        assert!(stage.contains("produce_and_stage_core_presentation_release"));
+        assert!(!stage.contains("production package requires"));
     }
 
     fn release_fixture(tree: &TestTree) -> (PathBuf, PathBuf, PathBuf) {
@@ -4187,8 +4568,30 @@ mod tests {
             .expect("Defaults fixture should be creatable");
         fs::write(&default_profile_path, b"{\"profile_id\":\"defaults\"}\n")
             .expect("Profile fixture should be writable");
-        fs::write(&defaultspack_lock_path, b"{\"entries\":[]}\n")
-            .expect("Defaults lock fixture should be writable");
+        let pack_path = defaultspack_lock_path
+            .parent()
+            .expect("lock has a parent")
+            .join("packs/fixture-base.pack.v4.json");
+        fs::create_dir_all(pack_path.parent().expect("Pack has a parent"))
+            .expect("Pack fixture directory should exist");
+        fs::write(&pack_path, b"{\"pack_id\":\"fixture-base\"}\n")
+            .expect("Pack fixture should be writable");
+        let pack_digest = format!(
+            "sha256:{}",
+            byte_digest(&fs::read(&pack_path).expect("Pack should be readable"))
+        );
+        fs::write(
+            &defaultspack_lock_path,
+            serde_json::to_vec(&serde_json::json!({
+                "entries": [{
+                    "path": "packs/fixture-base.pack.v4.json",
+                    "kind": "pack",
+                    "digest": pack_digest,
+                }]
+            }))
+            .expect("lock should encode"),
+        )
+        .expect("Defaults lock fixture should be writable");
         let default_profile_sha256 =
             byte_digest(&fs::read(&default_profile_path).expect("Profile should exist"));
         let defaultspack_lock_sha256 =
@@ -4210,6 +4613,7 @@ mod tests {
         let mut catalog = serde_json::json!({
             "schema": PRESENTATION_CATALOG_SCHEMA,
             "default_profile_digest": default_profile_sha256,
+            "source_manifest_digests": { "fixture-base": pack_digest },
             "default_selection": {
                 "base_pack_id": "fixture-base",
                 "shell_provider_id": "shell.tauri.default",
@@ -4497,6 +4901,86 @@ mod tests {
         let error = verify_presentation_release(&release_root)
             .expect_err("an unsigned artifact sibling must fail closed");
         assert!(error.to_string().contains("extra artifact entry"));
+    }
+
+    #[test]
+    fn verification_rejects_stale_missing_extra_and_wrong_pack_bindings() {
+        for mutation in ["stale", "missing", "extra", "wrong"] {
+            let tree = TestTree::new(&format!("pack-binding-{mutation}"));
+            let (release_root, _, catalog_path) = release_fixture(&tree);
+            let mut catalog: serde_json::Value = serde_json::from_slice(
+                &fs::read(&catalog_path).expect("catalog fixture should be readable"),
+            )
+            .expect("catalog fixture should parse");
+            let bindings = catalog["source_manifest_digests"]
+                .as_object_mut()
+                .expect("fixture bindings should be an object");
+            match mutation {
+                "stale" | "wrong" => {
+                    bindings.insert(
+                        "fixture-base".into(),
+                        serde_json::Value::String(format!("sha256:{}", "0".repeat(64))),
+                    );
+                }
+                "missing" => {
+                    bindings.remove("fixture-base");
+                }
+                "extra" => {
+                    bindings.insert(
+                        "unselected".into(),
+                        serde_json::Value::String(format!("sha256:{}", "1".repeat(64))),
+                    );
+                }
+                _ => unreachable!(),
+            }
+            write_canonical_json(&catalog_path, &catalog).expect("mutated catalog should write");
+            let error = verify_catalog_source_manifest_digests(
+                &catalog,
+                &release_root.join("ecosystem/defaultspack/v4/bundle.lock.json"),
+            )
+            .expect_err("Pack binding mismatch must fail closed");
+            assert!(error.to_string().contains("Pack set"));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn core_transaction_cleanup_refuses_name_swap() {
+        let tree = TestTree::new("core-transaction-name-swap");
+        let mut guard =
+            CoreTransactionGuard::create(tree.path()).expect("transaction should be created");
+        fs::write(guard.path().join("owned"), b"owned").expect("owned file should write");
+        guard.seal_inventory().expect("inventory should seal");
+        let original = guard.path().with_extension("original");
+        fs::rename(guard.path(), &original).expect("transaction should move");
+        fs::create_dir(guard.path()).expect("replacement should be created");
+        fs::write(guard.path().join("victim"), b"victim").expect("victim should write");
+        let error = guard
+            .cleanup()
+            .expect_err("replacement cleanup must fail closed");
+        assert!(error.to_string().contains("replaced"));
+        assert!(guard_path_victim_exists(tree.path()));
+
+        fn guard_path_victim_exists(parent: &Path) -> bool {
+            fs::read_dir(parent)
+                .expect("parent should read")
+                .filter_map(Result::ok)
+                .any(|entry| entry.path().join("victim").is_file())
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn core_transaction_without_complete_inventory_leaves_residue() {
+        let tree = TestTree::new("core-transaction-incomplete");
+        let guard =
+            CoreTransactionGuard::create(tree.path()).expect("transaction should be created");
+        let path = guard.path().to_owned();
+        let error = guard
+            .cleanup()
+            .expect_err("unknown ownership must retain residue");
+        assert!(error.to_string().contains("incomplete"));
+        assert!(path.is_dir());
     }
 
     #[cfg(any(unix, windows))]
