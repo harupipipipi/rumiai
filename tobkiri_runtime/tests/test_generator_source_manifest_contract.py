@@ -10,6 +10,8 @@ import pytest
 
 from scripts import generator_source_manifest
 
+pytestmark = pytest.mark.contract
+
 
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 TREE = "89abcdef0123456789abcdef0123456789abcdef"
