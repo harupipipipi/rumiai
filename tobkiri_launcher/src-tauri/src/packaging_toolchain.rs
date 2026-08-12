@@ -13,6 +13,20 @@ use std::process::{Child, Command, ExitStatus, Output, Stdio};
 
 use sha2::{Digest, Sha256};
 
+#[cfg(target_os = "macos")]
+const SEC_CS_NO_NETWORK_ACCESS: u32 = 1 << 29;
+#[cfg(target_os = "macos")]
+const SEC_CS_STRICT_VALIDATE: u32 = 1 << 4;
+#[cfg(target_os = "macos")]
+const SEC_CS_CHECK_ALL_ARCHITECTURES: u32 = 1;
+#[cfg(target_os = "macos")]
+const SEC_CODE_SIGNATURE_ADHOC: i64 = 0x2;
+
+#[cfg(target_os = "macos")]
+fn accepted_macos_signature_flags(flags: i64) -> bool {
+    flags & SEC_CODE_SIGNATURE_ADHOC == 0
+}
+
 pub const PYTHON_PATH_ENV: &str = "TOBKIRI_PACKAGING_PYTHON";
 pub const PYTHON_SHA256_ENV: &str = "TOBKIRI_PACKAGING_PYTHON_SHA256";
 pub const GIT_PATH_ENV: &str = "TOBKIRI_PACKAGING_GIT";
@@ -476,12 +490,21 @@ impl<'a> VerifiedCommand<'a> {
             Ok(())
         })();
         if let Err(error) = result {
-            unsafe {
-                libc::kill(pid, libc::SIGKILL);
-            }
             let mut child = child;
-            let _ = child.wait();
-            return Err(error);
+            let containment = child.kill().and_then(|()| {
+                child
+                    .wait_nonblocking_until(
+                        std::time::Instant::now() + std::time::Duration::from_secs(2),
+                    )?
+                    .ok_or_else(|| invalid("timed out reaping rejected Darwin child"))
+                    .map(|_| ())
+            });
+            return match containment {
+                Ok(()) => Err(error),
+                Err(containment) => Err(invalid(format!(
+                    "{error}; rejected Darwin child containment also failed: {containment}"
+                ))),
+            };
         }
         Ok(child)
     }
@@ -558,6 +581,15 @@ fn spawn_suspended_darwin(
         let mut fds = [-1; 2];
         if unsafe { libc::pipe(fds.as_mut_ptr()) } == -1 {
             return Err(io::Error::last_os_error());
+        }
+        for fd in fds {
+            if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } == -1 {
+                unsafe {
+                    libc::close(fds[0]);
+                    libc::close(fds[1]);
+                }
+                return Err(io::Error::last_os_error());
+            }
         }
         Ok(unsafe { (File::from_raw_fd(fds[0]), File::from_raw_fd(fds[1])) })
     }
@@ -659,6 +691,17 @@ fn spawn_suspended_darwin(
                 code = posix_spawn_file_actions_addclose(&mut actions, file.as_raw_fd());
             }
         }
+        for file in [&null_input, &stdout_write, &stderr_write]
+            .into_iter()
+            .flatten()
+        {
+            if code == 0
+                && ![libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO]
+                    .contains(&file.as_raw_fd())
+            {
+                code = posix_spawn_file_actions_addclose(&mut actions, file.as_raw_fd());
+            }
+        }
         if code == 0 {
             code = posix_spawn(
                 &mut pid,
@@ -682,12 +725,37 @@ fn spawn_suspended_darwin(
     if result != 0 {
         return Err(io::Error::from_raw_os_error(result));
     }
-    Ok(DarwinChild {
+    let mut child = DarwinChild {
         pid,
         stdout: stdout_read,
         stderr: stderr_read,
         status: None,
-    })
+        state: DarwinChildState::Running,
+    };
+    for file in [&child.stdout, &child.stderr].into_iter().flatten() {
+        let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) };
+        if flags == -1
+            || unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) }
+                == -1
+        {
+            let primary = io::Error::last_os_error();
+            let containment = child.kill().and_then(|()| {
+                child
+                    .wait_nonblocking_until(
+                        std::time::Instant::now() + std::time::Duration::from_secs(2),
+                    )?
+                    .ok_or_else(|| invalid("timed out reaping Darwin child after pipe failure"))
+                    .map(|_| ())
+            });
+            return match containment {
+                Ok(()) => Err(primary),
+                Err(containment) => Err(invalid(format!(
+                    "{primary}; Darwin child containment also failed: {containment}"
+                ))),
+            };
+        }
+    }
+    Ok(child)
 }
 
 #[cfg(target_os = "macos")]
@@ -793,13 +861,58 @@ pub struct DarwinChild {
     stdout: Option<File>,
     stderr: Option<File>,
     status: Option<ExitStatus>,
+    state: DarwinChildState,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DarwinChildState {
+    Running,
+    KillSent,
+    Reaped,
+    Lost,
 }
 
 #[cfg(target_os = "macos")]
 impl DarwinChild {
+    fn wait_nonblocking_until(
+        &mut self,
+        deadline: std::time::Instant,
+    ) -> io::Result<Option<ExitStatus>> {
+        if let Some(status) = self.status {
+            self.state = DarwinChildState::Reaped;
+            return Ok(Some(status));
+        }
+        loop {
+            let mut raw = 0;
+            let result = unsafe { libc::waitpid(self.pid, &mut raw, libc::WNOHANG) };
+            if result == self.pid {
+                use std::os::unix::process::ExitStatusExt;
+                let status = ExitStatus::from_raw(raw);
+                self.status = Some(status);
+                self.state = DarwinChildState::Reaped;
+                return Ok(Some(status));
+            }
+            if result == -1 {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() != Some(libc::EINTR) {
+                    return Err(error);
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                return Ok(None);
+            }
+            std::thread::yield_now();
+        }
+    }
+
     fn wait(&mut self) -> io::Result<ExitStatus> {
         if let Some(status) = self.status {
+            self.state = DarwinChildState::Reaped;
             return Ok(status);
+        }
+        if self.state == DarwinChildState::Lost {
+            return Err(invalid("refusing to wait on a lost Darwin child PID"));
         }
         let mut raw = 0;
         loop {
@@ -814,22 +927,36 @@ impl DarwinChild {
         use std::os::unix::process::ExitStatusExt;
         let status = ExitStatus::from_raw(raw);
         self.status = Some(status);
+        self.state = DarwinChildState::Reaped;
         Ok(status)
     }
 
     fn kill(&mut self) -> io::Result<()> {
         if self.status.is_some() {
+            self.state = DarwinChildState::Reaped;
             return Ok(());
+        }
+        if self.state == DarwinChildState::Lost {
+            return Err(invalid("refusing to signal a lost Darwin child PID"));
         }
         if unsafe { libc::kill(self.pid, libc::SIGKILL) } == -1 {
             let error = io::Error::last_os_error();
             if error.raw_os_error() == Some(libc::ESRCH) {
-                let _ = self.wait();
-                Ok(())
+                match self.wait_nonblocking_until(
+                    std::time::Instant::now() + std::time::Duration::from_secs(2),
+                )? {
+                    Some(_) => Ok(()),
+                    None => {
+                        self.state = DarwinChildState::Lost;
+                        Err(invalid("Darwin child was lost before reap"))
+                    }
+                }
             } else {
+                self.state = DarwinChildState::Lost;
                 Err(error)
             }
         } else {
+            self.state = DarwinChildState::KillSent;
             Ok(())
         }
     }
@@ -838,16 +965,22 @@ impl DarwinChild {
         let stdout = self.stdout.take().map(|mut file| {
             std::thread::spawn(move || {
                 let mut bytes = Vec::new();
-                file.read_to_end(&mut bytes).map(|_| bytes)
+                read_nonblocking_to_end(&mut file, &mut bytes).map(|()| bytes)
             })
         });
         let stderr = self.stderr.take().map(|mut file| {
             std::thread::spawn(move || {
                 let mut bytes = Vec::new();
-                file.read_to_end(&mut bytes).map(|_| bytes)
+                read_nonblocking_to_end(&mut file, &mut bytes).map(|()| bytes)
             })
         });
-        let status = self.wait()?;
+        let status_result = self.wait();
+        if status_result.is_err() {
+            let _ = self.kill();
+            let _ = self.wait_nonblocking_until(
+                std::time::Instant::now() + std::time::Duration::from_secs(2),
+            );
+        }
         let stdout = stdout
             .map(|thread| {
                 thread
@@ -856,6 +989,7 @@ impl DarwinChild {
             })
             .transpose()?
             .unwrap_or_default();
+        let status = status_result?;
         let stderr = stderr
             .map(|thread| {
                 thread
@@ -873,11 +1007,33 @@ impl DarwinChild {
 }
 
 #[cfg(target_os = "macos")]
+fn read_nonblocking_to_end(file: &mut File, bytes: &mut Vec<u8>) -> io::Result<()> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        match file.read(&mut buffer) {
+            Ok(0) => return Ok(()),
+            Ok(count) => bytes.extend_from_slice(&buffer[..count]),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                if std::time::Instant::now() >= deadline {
+                    return Err(invalid("timed out draining Darwin child output"));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
 impl Drop for DarwinChild {
     fn drop(&mut self) {
         if self.status.is_none() {
             let _ = self.kill();
-            let _ = self.wait();
+            let _ = self.wait_nonblocking_until(
+                std::time::Instant::now() + std::time::Duration::from_secs(2),
+            );
         }
     }
 }
@@ -997,9 +1153,6 @@ fn macos_code_identity(path: &Path) -> io::Result<Vec<u8>> {
     if create != 0 || code.is_null() {
         return Err(invalid("macOS packaging tool is unsigned"));
     }
-    const SEC_CS_NO_NETWORK_ACCESS: u32 = 1 << 29;
-    const SEC_CS_STRICT_VALIDATE: u32 = 1 << 3;
-    const SEC_CS_CHECK_ALL_ARCHITECTURES: u32 = 1;
     const STRICT_VALIDITY: u32 =
         SEC_CS_NO_NETWORK_ACCESS | SEC_CS_STRICT_VALIDATE | SEC_CS_CHECK_ALL_ARCHITECTURES;
     let validity = unsafe { SecStaticCodeCheckValidity(code, STRICT_VALIDITY, ptr::null()) };
@@ -1019,10 +1172,10 @@ fn macos_code_identity(path: &Path) -> io::Result<Vec<u8>> {
                 (&mut flags as *mut i64).cast::<std::ffi::c_void>(),
             )
         } != 0;
-    if !flags_ok {
+    if !flags_ok || !accepted_macos_signature_flags(flags) {
         unsafe { CFRelease(information) };
         return Err(invalid(
-            "macOS packaging tool signature flags are unavailable",
+            "macOS packaging tool is ad-hoc or has unavailable signature flags",
         ));
     }
     let unique = unsafe { CFDictionaryGetValue(information, kSecCodeInfoUnique) };
@@ -1236,6 +1389,17 @@ fn verify_tool_binding_guard(kind: &str, path: &Path, expected: &str) -> io::Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn darwin_security_constants_and_adhoc_policy_are_fixed() {
+        assert_eq!(SEC_CS_NO_NETWORK_ACCESS, 1 << 29);
+        assert_eq!(SEC_CS_STRICT_VALIDATE, 1 << 4);
+        assert_eq!(SEC_CS_CHECK_ALL_ARCHITECTURES, 1);
+        assert_eq!(SEC_CODE_SIGNATURE_ADHOC, 0x2);
+        assert!(!accepted_macos_signature_flags(SEC_CODE_SIGNATURE_ADHOC));
+        assert!(accepted_macos_signature_flags(0));
+    }
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TestFile {

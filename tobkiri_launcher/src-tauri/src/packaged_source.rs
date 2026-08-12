@@ -31,6 +31,51 @@ const MAX_SOURCE_BYTES: u64 = 256 * 1024 * 1024;
 const PROVENANCE_FILENAME: &str = "packaging-source-provenance.v1.json";
 const MAX_PROVENANCE_BYTES: usize = 64 * 1024;
 
+#[cfg(unix)]
+struct ProvisionalFileGuard<'a> {
+    root: &'a File,
+    file: File,
+    name: &'static str,
+    armed: bool,
+}
+
+#[cfg(unix)]
+impl ProvisionalFileGuard<'_> {
+    fn cleanup_inner(&mut self) -> io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        self.root
+            .set_permissions(fs::Permissions::from_mode(0o700))?;
+        let unlink = (|| {
+            let current =
+                openat_nofollow(self.root, std::ffi::OsStr::new(self.name), libc::O_RDONLY)?;
+            if !same_object(&current.metadata()?, identity(&self.file.metadata()?)) {
+                return Err(invalid("refusing to unlink replaced provisional file"));
+            }
+            unlinkat_name(self.root, std::ffi::OsStr::new(self.name), 0)
+        })();
+        let reseal = self.root.set_permissions(fs::Permissions::from_mode(0o500));
+        match (unlink, reseal) {
+            (Ok(()), Ok(())) => {
+                self.armed = false;
+                Ok(())
+            }
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+            (Err(unlink), Err(reseal)) => Err(invalid(format!(
+                "provisional unlink failed: {unlink}; reseal also failed: {reseal}"
+            ))),
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ProvisionalFileGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self.cleanup_inner();
+        }
+    }
+}
+
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
@@ -123,29 +168,56 @@ impl VerifiedSourceSnapshot {
             return Err(invalid("source provenance binding is invalid"));
         }
         #[cfg(unix)]
-        {
+        let result = (|| -> io::Result<ProvisionalFileGuard<'_>> {
             use std::os::unix::fs::PermissionsExt;
             self.root_handle
                 .set_permissions(fs::Permissions::from_mode(0o700))?;
-        }
+            let file = create_root_file(
+                &self.root_handle,
+                std::ffi::OsStr::new(PROVENANCE_FILENAME),
+                0o400,
+            )?;
+            let guard = ProvisionalFileGuard {
+                root: &self.root_handle,
+                file,
+                name: PROVENANCE_FILENAME,
+                armed: true,
+            };
+            Ok(guard)
+        })();
         let path = self.root.join(PROVENANCE_FILENAME);
         #[cfg(unix)]
-        let mut output =
-            create_relative_file(&self.root_handle, Path::new(PROVENANCE_FILENAME), 0o400)?;
-        #[cfg(unix)]
-        let provisional_identity = identity(&output.metadata()?);
-        let result = (|| {
+        let mut provisional = match result {
+            Ok(value) => value,
+            Err(primary) => {
+                use std::os::unix::fs::PermissionsExt;
+                return match self
+                    .root_handle
+                    .set_permissions(fs::Permissions::from_mode(0o500))
+                {
+                    Ok(()) => Err(primary),
+                    Err(cleanup) => Err(invalid(format!(
+                        "{primary}; provenance root reseal also failed: {cleanup}"
+                    ))),
+                };
+            }
+        };
+        let result = (|| -> io::Result<()> {
             #[cfg(not(unix))]
             let mut output = OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(&path)?;
+            #[cfg(unix)]
+            let output = &mut provisional.file;
             output.write_all(bytes)?;
             output.sync_all()?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                output.set_permissions(fs::Permissions::from_mode(0o400))?;
+                provisional
+                    .file
+                    .set_permissions(fs::Permissions::from_mode(0o400))?;
                 self.root_handle
                     .set_permissions(fs::Permissions::from_mode(0o500))?;
             }
@@ -153,58 +225,78 @@ impl VerifiedSourceSnapshot {
         })();
         if let Err(primary) = result {
             #[cfg(unix)]
-            let cleanup = {
-                use std::os::unix::fs::PermissionsExt;
-                drop(output);
-                let unlink = verify_named_identity(
-                    &self.root_handle,
-                    std::ffi::OsStr::new(PROVENANCE_FILENAME),
-                    provisional_identity,
-                )
-                .and_then(|()| {
-                    unlinkat_name(
-                        &self.root_handle,
-                        std::ffi::OsStr::new(PROVENANCE_FILENAME),
-                        0,
-                    )
-                });
-                let reseal = self
-                    .root_handle
-                    .set_permissions(fs::Permissions::from_mode(0o500));
-                match (unlink, reseal) {
-                    (Ok(()), Ok(())) => Ok(()),
-                    (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
-                    (Err(unlink), Err(reseal)) => Err(invalid(format!(
-                        "provenance unlink failed: {unlink}; root reseal also failed: {reseal}"
-                    ))),
-                }
-            };
+            let cleanup = provisional.cleanup_inner();
             #[cfg(not(unix))]
             let cleanup = fs::remove_file(&path);
             return match cleanup {
-                Ok(()) => Err(primary),
+                Ok(()) => {
+                    #[cfg(unix)]
+                    {
+                        self.root_identity = identity(&self.root_handle.metadata()?);
+                        self.directory_identities
+                            .insert(String::new(), self.root_identity);
+                    }
+                    Err(primary)
+                }
                 Err(cleanup) => Err(invalid(format!(
                     "{primary}; provisional provenance cleanup also failed: {cleanup}"
                 ))),
             };
         }
-        self.provenance = Some(bytes.to_vec());
-        self.root_identity = identity(&self.root_handle.metadata()?);
         #[cfg(unix)]
-        {
-            self.directory_identities
-                .insert(String::new(), self.root_identity);
+        let finalized = (|| -> io::Result<(
+            (u64, u64, u64, i64, i64),
+            BTreeMap<String, (u64, u64, u64, i64, i64)>,
+        )> {
+            let new_root_identity = identity(&self.root_handle.metadata()?);
             let provenance = openat_nofollow(
                 &self.root_handle,
                 std::ffi::OsStr::new(PROVENANCE_FILENAME),
                 libc::O_RDONLY,
             )?;
-            self.directory_identities.insert(
-                PROVENANCE_FILENAME.to_owned(),
-                identity(&provenance.metadata()?),
-            );
+            let provenance_identity = identity(&provenance.metadata()?);
+            let mut candidate_inventory = self.directory_identities.clone();
+            candidate_inventory.insert(String::new(), new_root_identity);
+            candidate_inventory.insert(PROVENANCE_FILENAME.to_owned(), provenance_identity);
+            verify_snapshot_at(
+                &self.root_handle,
+                &self.trusted_manifest,
+                Some(bytes),
+                &candidate_inventory,
+            )?;
+            Ok((new_root_identity, candidate_inventory))
+        })();
+        #[cfg(unix)]
+        let (new_root_identity, candidate_inventory) = match finalized {
+            Ok(value) => value,
+            Err(primary) => {
+                let cleanup = provisional.cleanup_inner();
+                return match cleanup {
+                    Ok(()) => {
+                        let restored_identity = identity(&self.root_handle.metadata()?);
+                        self.root_identity = restored_identity;
+                        self.directory_identities
+                            .insert(String::new(), restored_identity);
+                        Err(primary)
+                    }
+                    Err(cleanup) => Err(invalid(format!(
+                        "{primary}; finalized provenance rollback also failed: {cleanup}"
+                    ))),
+                };
+            }
+        };
+        #[cfg(not(unix))]
+        let new_root_identity = identity(&self.root_handle.metadata()?);
+        #[cfg(unix)]
+        {
+            self.directory_identities = candidate_inventory;
         }
-        self.verify_unchanged()?;
+        self.root_identity = new_root_identity;
+        self.provenance = Some(bytes.to_vec());
+        #[cfg(unix)]
+        {
+            provisional.armed = false;
+        }
         Ok(path)
     }
 
@@ -507,37 +599,49 @@ struct SnapshotCreation {
     owner_identity: (u64, u64, u64, i64, i64),
     #[cfg(unix)]
     root_identity: (u64, u64, u64, i64, i64),
+    #[cfg(unix)]
+    created_entries: BTreeMap<String, (u64, u64, u64, i64, i64)>,
     armed: bool,
 }
 
 #[cfg(unix)]
 struct OwnerCreationGuard {
     parent: File,
-    owner: File,
+    owner: Option<File>,
     name: std::ffi::OsString,
-    identity: (u64, u64, u64, i64, i64),
+    identity: Option<(u64, u64, u64, i64, i64)>,
+    root: Option<(File, (u64, u64, u64, i64, i64))>,
     armed: bool,
 }
 
 #[cfg(unix)]
 impl OwnerCreationGuard {
     fn cleanup_inner(&mut self) -> io::Result<()> {
-        if let Ok(root) = openat_nofollow(
-            &self.owner,
-            std::ffi::OsStr::new("source"),
-            libc::O_RDONLY | libc::O_DIRECTORY,
-        ) {
-            let mut files = BTreeMap::new();
-            let mut identities = BTreeMap::new();
-            walk_snapshot_at(&root, "", &mut files, &mut identities)?;
-            remove_snapshot_at(&root, &identities)?;
-            unlinkat_name(
-                &self.owner,
-                std::ffi::OsStr::new("source"),
-                libc::AT_REMOVEDIR,
-            )?;
+        if let Some((root, root_identity)) = &self.root {
+            let owner = self
+                .owner
+                .as_ref()
+                .ok_or_else(|| invalid("snapshot owner handle is unavailable"))?;
+            verify_named_identity(owner, std::ffi::OsStr::new("source"), *root_identity)?;
+            use std::os::unix::fs::PermissionsExt;
+            root.set_permissions(fs::Permissions::from_mode(0o700))?;
+            unlinkat_name(owner, std::ffi::OsStr::new("source"), libc::AT_REMOVEDIR)?;
         }
-        verify_named_identity(&self.parent, &self.name, self.identity)?;
+        if self.identity.is_none() {
+            use std::os::unix::fs::MetadataExt;
+            let owner =
+                openat_nofollow(&self.parent, &self.name, libc::O_RDONLY | libc::O_DIRECTORY)?;
+            let metadata = owner.metadata()?;
+            if metadata.uid() != unsafe { libc::geteuid() } {
+                return Err(invalid("refusing cleanup of unowned snapshot directory"));
+            }
+            self.identity = Some(identity(&metadata));
+            self.owner = Some(owner);
+        }
+        let identity = self
+            .identity
+            .expect("snapshot owner identity was populated");
+        verify_named_identity(&self.parent, &self.name, identity)?;
         unlinkat_name(&self.parent, &self.name, libc::AT_REMOVEDIR)?;
         self.armed = false;
         Ok(())
@@ -557,10 +661,7 @@ impl SnapshotCreation {
     fn cleanup_inner(&mut self) -> io::Result<()> {
         #[cfg(unix)]
         {
-            let mut files = BTreeMap::new();
-            let mut identities = BTreeMap::new();
-            walk_snapshot_at(&self.root_handle, "", &mut files, &mut identities)?;
-            remove_snapshot_at(&self.root_handle, &identities)?;
+            remove_snapshot_at(&self.root_handle, &self.created_entries)?;
             verify_named_identity(
                 &self.owner_handle,
                 std::ffi::OsStr::new("source"),
@@ -642,11 +743,20 @@ fn create_snapshot(parent: &Path) -> io::Result<SnapshotCreation> {
         match creation {
             Ok(()) => {
                 #[cfg(unix)]
-                let mut owner_guard = {
+                let mut owner_guard = OwnerCreationGuard {
+                    parent: parent_handle,
+                    owner: None,
+                    name: owner_name.clone(),
+                    identity: None,
+                    root: None,
+                    armed: true,
+                };
+                #[cfg(unix)]
+                {
                     use std::os::unix::fs::MetadataExt;
                     use std::os::unix::fs::PermissionsExt;
                     let owner_handle = openat_nofollow(
-                        &parent_handle,
+                        &owner_guard.parent,
                         &owner_name,
                         libc::O_RDONLY | libc::O_DIRECTORY,
                     )?;
@@ -654,19 +764,18 @@ fn create_snapshot(parent: &Path) -> io::Result<SnapshotCreation> {
                     if owner_handle.metadata()?.uid() != unsafe { libc::geteuid() } {
                         return Err(invalid("source snapshot owner has the wrong user"));
                     }
-                    OwnerCreationGuard {
-                        parent: parent_handle.try_clone()?,
-                        identity: identity(&owner_handle.metadata()?),
-                        owner: owner_handle,
-                        name: owner_name.clone(),
-                        armed: true,
-                    }
-                };
+                    owner_guard.identity = Some(identity(&owner_handle.metadata()?));
+                    owner_guard.owner = Some(owner_handle);
+                }
                 let root = owner.join("source");
                 #[cfg(unix)]
                 let (owner_handle, root_handle) = {
                     use std::os::fd::AsRawFd;
-                    let owner_handle = owner_guard.owner.try_clone()?;
+                    let owner_handle = owner_guard
+                        .owner
+                        .as_ref()
+                        .ok_or_else(|| invalid("snapshot owner handle is unavailable"))?
+                        .try_clone()?;
                     let name = b"source\0";
                     if unsafe {
                         libc::mkdirat(owner_handle.as_raw_fd(), name.as_ptr().cast(), 0o700)
@@ -679,6 +788,8 @@ fn create_snapshot(parent: &Path) -> io::Result<SnapshotCreation> {
                         std::ffi::OsStr::new("source"),
                         libc::O_RDONLY | libc::O_DIRECTORY,
                     )?;
+                    owner_guard.root =
+                        Some((root_handle.try_clone()?, identity(&root_handle.metadata()?)));
                     (owner_handle, root_handle)
                 };
                 #[cfg(not(unix))]
@@ -686,8 +797,14 @@ fn create_snapshot(parent: &Path) -> io::Result<SnapshotCreation> {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    fs::set_permissions(&root, fs::Permissions::from_mode(0o700))?;
+                    root_handle.set_permissions(fs::Permissions::from_mode(0o700))?;
                 }
+                #[cfg(unix)]
+                let owner_identity = identity(&owner_handle.metadata()?);
+                #[cfg(unix)]
+                let root_identity = identity(&root_handle.metadata()?);
+                #[cfg(unix)]
+                let parent_handle = owner_guard.parent.try_clone()?;
                 let creation = SnapshotCreation {
                     owner,
                     root,
@@ -700,9 +817,11 @@ fn create_snapshot(parent: &Path) -> io::Result<SnapshotCreation> {
                     #[cfg(unix)]
                     owner_name,
                     #[cfg(unix)]
-                    owner_identity: identity(&owner_handle.metadata()?),
+                    owner_identity,
                     #[cfg(unix)]
-                    root_identity: identity(&root_handle.metadata()?),
+                    root_identity,
+                    #[cfg(unix)]
+                    created_entries: BTreeMap::from([(String::new(), root_identity)]),
                     armed: true,
                 };
                 #[cfg(unix)]
@@ -735,12 +854,13 @@ fn write_trusted_manifest(root: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 #[cfg(unix)]
-fn write_trusted_manifest_at(root: &File, bytes: &[u8]) -> io::Result<()> {
-    let mut output = create_relative_file(
-        root,
-        Path::new("packaged_defaultspack_source_manifest.v1.json"),
-        0o400,
-    )?;
+fn write_trusted_manifest_at(
+    root: &File,
+    bytes: &[u8],
+    created: &mut BTreeMap<String, (u64, u64, u64, i64, i64)>,
+) -> io::Result<()> {
+    let name = std::ffi::OsStr::new("packaged_defaultspack_source_manifest.v1.json");
+    let mut output = create_relative_file(root, Path::new(name), 0o400, created)?;
     output.write_all(bytes)?;
     output.sync_all()
 }
@@ -858,15 +978,21 @@ fn open_relative_directory(root: &File, relative: &str) -> io::Result<File> {
 }
 
 #[cfg(unix)]
-fn ensure_relative_directory(root: &File, relative: &Path) -> io::Result<File> {
+fn ensure_relative_directory(
+    root: &File,
+    relative: &Path,
+    created: &mut BTreeMap<String, (u64, u64, u64, i64, i64)>,
+) -> io::Result<File> {
     use std::ffi::CString;
     use std::os::fd::AsRawFd;
     use std::os::unix::ffi::OsStrExt;
     let mut current = root.try_clone()?;
+    let mut current_relative = PathBuf::new();
     for component in relative.components() {
         let Component::Normal(name) = component else {
             return Err(invalid("snapshot directory path is unsafe"));
         };
+        current_relative.push(name);
         match openat_nofollow(&current, name, libc::O_RDONLY | libc::O_DIRECTORY) {
             Ok(child) => current = child,
             Err(error) if error.raw_os_error() == Some(libc::ENOENT) => {
@@ -875,7 +1001,36 @@ fn ensure_relative_directory(root: &File, relative: &Path) -> io::Result<File> {
                 if unsafe { libc::mkdirat(current.as_raw_fd(), name_c.as_ptr(), 0o700) } == -1 {
                     return Err(io::Error::last_os_error());
                 }
-                current = openat_nofollow(&current, name, libc::O_RDONLY | libc::O_DIRECTORY)?;
+                let parent = current.try_clone()?;
+                current = match openat_nofollow(&parent, name, libc::O_RDONLY | libc::O_DIRECTORY) {
+                    Ok(child) => child,
+                    Err(primary) => {
+                        let cleanup = unlinkat_name(&parent, name, libc::AT_REMOVEDIR);
+                        return match cleanup {
+                            Ok(()) => Err(primary),
+                            Err(cleanup) => Err(invalid(format!(
+                                "{primary}; newly-created directory cleanup also failed: {cleanup}"
+                            ))),
+                        };
+                    }
+                };
+                let directory_identity =
+                    match current.metadata().map(|metadata| identity(&metadata)) {
+                        Ok(identity) => identity,
+                        Err(primary) => {
+                            let cleanup = unlinkat_name(&parent, name, libc::AT_REMOVEDIR);
+                            return match cleanup {
+                                Ok(()) => Err(primary),
+                                Err(cleanup) => Err(invalid(format!(
+                                "{primary}; provisional directory cleanup also failed: {cleanup}"
+                            ))),
+                            };
+                        }
+                    };
+                created.insert(
+                    current_relative.to_string_lossy().replace('\\', "/"),
+                    directory_identity,
+                );
             }
             Err(error) => return Err(error),
         }
@@ -884,12 +1039,17 @@ fn ensure_relative_directory(root: &File, relative: &Path) -> io::Result<File> {
 }
 
 #[cfg(unix)]
-fn create_relative_file(root: &File, relative: &Path, mode: u32) -> io::Result<File> {
+fn create_relative_file(
+    root: &File,
+    relative: &Path,
+    mode: u32,
+    created: &mut BTreeMap<String, (u64, u64, u64, i64, i64)>,
+) -> io::Result<File> {
     use std::ffi::CString;
     use std::os::fd::{AsRawFd, FromRawFd};
     use std::os::unix::ffi::OsStrExt;
     let parent = relative.parent().unwrap_or_else(|| Path::new(""));
-    let directory = ensure_relative_directory(root, parent)?;
+    let directory = ensure_relative_directory(root, parent, created)?;
     let name = relative
         .file_name()
         .ok_or_else(|| invalid("snapshot file has no name"))?;
@@ -898,6 +1058,42 @@ fn create_relative_file(root: &File, relative: &Path, mode: u32) -> io::Result<F
     let fd = unsafe {
         libc::openat(
             directory.as_raw_fd(),
+            encoded.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            mode,
+        )
+    };
+    if fd == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        let file = unsafe { File::from_raw_fd(fd) };
+        let file_identity = match file.metadata().map(|metadata| identity(&metadata)) {
+            Ok(identity) => identity,
+            Err(primary) => {
+                let cleanup = unlinkat_name(&directory, name, 0);
+                return match cleanup {
+                    Ok(()) => Err(primary),
+                    Err(cleanup) => Err(invalid(format!(
+                        "{primary}; newly-created file cleanup also failed: {cleanup}"
+                    ))),
+                };
+            }
+        };
+        created.insert(relative.to_string_lossy().replace('\\', "/"), file_identity);
+        Ok(file)
+    }
+}
+
+#[cfg(unix)]
+fn create_root_file(root: &File, name: &std::ffi::OsStr, mode: u32) -> io::Result<File> {
+    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    let encoded =
+        CString::new(name.as_bytes()).map_err(|_| invalid("snapshot file contains NUL"))?;
+    let fd = unsafe {
+        libc::openat(
+            root.as_raw_fd(),
             encoded.as_ptr(),
             libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
             mode,
@@ -1300,6 +1496,7 @@ fn copy_verified_at(
     target_root: &File,
     relative: &Path,
     expected: &ExpectedFile,
+    created: &mut BTreeMap<String, (u64, u64, u64, i64, i64)>,
 ) -> io::Result<()> {
     use std::os::unix::fs::MetadataExt;
     let source_parent = open_relative_directory(
@@ -1326,6 +1523,7 @@ fn copy_verified_at(
         target_root,
         relative,
         if expected.executable { 0o500 } else { 0o400 },
+        created,
     )?;
     let mut digest = Sha256::new();
     let mut count = 0_u64;
@@ -1453,7 +1651,13 @@ fn verify_and_snapshot_against_manifest_with_hook(
         let root_handle = creation.root_handle.try_clone()?;
         for (relative, expected) in &manifest {
             #[cfg(unix)]
-            copy_verified_at(&runtime_handle, &root_handle, Path::new(relative), expected)?;
+            copy_verified_at(
+                &runtime_handle,
+                &root_handle,
+                Path::new(relative),
+                expected,
+                &mut creation.created_entries,
+            )?;
             #[cfg(not(unix))]
             copy_verified(
                 &runtime_root.join(relative),
@@ -1462,7 +1666,11 @@ fn verify_and_snapshot_against_manifest_with_hook(
             )?;
         }
         #[cfg(unix)]
-        write_trusted_manifest_at(&root_handle, trusted_manifest)?;
+        write_trusted_manifest_at(
+            &root_handle,
+            trusted_manifest,
+            &mut creation.created_entries,
+        )?;
         #[cfg(not(unix))]
         write_trusted_manifest(&snapshot_root, trusted_manifest)?;
         #[cfg(unix)]
@@ -1485,10 +1693,17 @@ fn verify_and_snapshot_against_manifest_with_hook(
         let owner_name = creation.owner_name.clone();
         #[cfg(unix)]
         let directory_identities = {
-            let mut files = BTreeMap::new();
-            let mut directories = BTreeMap::new();
-            walk_snapshot_at(&root_handle, "", &mut files, &mut directories)?;
-            directories
+            let root_identity = identity(&root_handle.metadata()?);
+            creation
+                .created_entries
+                .insert(String::new(), root_identity);
+            verify_snapshot_at(
+                &root_handle,
+                trusted_manifest,
+                None,
+                &creation.created_entries,
+            )?;
+            creation.created_entries.clone()
         };
         let snapshot = VerifiedSourceSnapshot {
             owner_identity: identity(&fs::symlink_metadata(&snapshot_owner)?),
