@@ -231,10 +231,12 @@ class _WindowsApi:
             buffer, ctypes.POINTER(_WindowsFileRenameInfo)
         ).contents
         information.ReplaceIfExists = False
-        # FILE_RENAME_INFO requires NULL when only renaming within the
-        # source directory. The separately held parent handle pins that
-        # directory against rename/delete; it is not a destination root.
-        information.RootDirectory = None
+        # A non-NULL RootDirectory makes FileName relative to the held parent
+        # handle.  Passing NULL with a bare name lets Windows resolve the
+        # destination against the process current directory/volume, which can
+        # turn a same-parent quarantine into a cross-volume rename (WinError
+        # 17) when the checkout and temp directories use different volumes.
+        information.RootDirectory = parent_handle
         information.FileNameLength = len(encoded_name)
         ctypes.memmove(
             ctypes.addressof(buffer) + file_name_offset,

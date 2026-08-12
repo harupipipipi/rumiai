@@ -274,8 +274,8 @@ def test_windows_native_file_cleanup_uses_bound_handles(
     assert not list(scope.glob(".tobkiri-cleanup-*"))
 
 
-def test_windows_rename_info_uses_null_root_terminated_aligned_utf16() -> None:
-    """The Win32 rename buffer matches FILE_RENAME_INFO's exact ABI."""
+def test_windows_rename_info_uses_held_parent_handle_and_relative_utf16() -> None:
+    """The Win32 rename buffer is relative to the held same-parent handle."""
 
     calls: list[tuple[int, int, bytes]] = []
     api = cleanup._WindowsApi.__new__(cleanup._WindowsApi)
@@ -308,12 +308,69 @@ def test_windows_rename_info_uses_null_root_terminated_aligned_utf16() -> None:
     assert len(raw) % ctypes.alignment(cleanup._WindowsFileRenameInfo) == 0
     information = cleanup._WindowsFileRenameInfo.from_buffer_copy(raw)
     assert information.ReplaceIfExists == 0
-    assert information.RootDirectory is None
+    assert information.RootDirectory == 42
     encoded_name = name.encode("utf-16-le")
     assert information.FileNameLength == len(encoded_name)
     offset = cleanup._WindowsFileRenameInfo.FileName.offset
     assert raw[offset : offset + len(encoded_name)] == encoded_name
     assert raw[offset + len(encoded_name) : offset + len(encoded_name) + 2] == b"\0\0"
+
+
+def test_windows_rename_info_accepts_unicode_long_same_parent_name() -> None:
+    """A long Unicode basename remains relative to the held parent handle."""
+
+    calls: list[bytes] = []
+    api = cleanup._WindowsApi.__new__(cleanup._WindowsApi)
+
+    def set_file_information(
+        _handle: Any,
+        _information_class: int,
+        information: Any,
+        buffer_size: int,
+    ) -> bool:
+        address = ctypes.cast(information, ctypes.c_void_p).value
+        assert address is not None
+        calls.append(ctypes.string_at(address, buffer_size))
+        return True
+
+    api._set_file_information = set_file_information
+    name = ".tobkiri-" + "安全" * 96
+    api.rename_relative(41, 42, name)
+
+    information = cleanup._WindowsFileRenameInfo.from_buffer_copy(calls[0])
+    assert information.RootDirectory == 42
+    encoded_name = name.encode("utf-16-le")
+    offset = cleanup._WindowsFileRenameInfo.FileName.offset
+    assert information.FileNameLength == len(encoded_name)
+    assert calls[0][offset : offset + len(encoded_name)] == encoded_name
+
+
+def test_windows_quarantine_collision_retries_in_same_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A colliding quarantine basename never redirects to another volume."""
+
+    scope = tmp_path / "checkout"
+    scope.mkdir()
+    target = scope / "owned.bin"
+    target.write_bytes(b"owned")
+    (scope / ".tobkiri-cleanup-first").write_bytes(b"collision")
+    values = iter(("first", "second"))
+    monkeypatch.setattr(
+        cleanup.uuid,
+        "uuid4",
+        lambda: SimpleNamespace(hex=next(values)),
+    )
+
+    quarantine = cleanup._new_quarantine_path(
+        target,
+        operation="test same-parent quarantine collision",
+    )
+
+    assert quarantine.parent == target.parent
+    assert quarantine.name == ".tobkiri-cleanup-second"
+    assert "/" not in quarantine.name
+    assert "\\" not in quarantine.name
 
 
 @pytest.mark.parametrize("name", ["", ".", "..", "nested/name", "nested\\name", "x\0y"])
