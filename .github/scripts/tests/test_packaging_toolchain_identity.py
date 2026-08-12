@@ -789,6 +789,28 @@ def test_workflows_require_exact_root_process_tests_without_skips(
     assert "tests != 4 or skipped != 0" in step
 
 
+def test_windows_python_smoke_propagates_each_pytest_exit_code() -> None:
+    """PowerShell must not let a later pytest success hide an earlier failure."""
+    workflow = _SCRIPT.parents[1] / "workflows" / "test.yml"
+    payload = workflow.read_text(encoding="utf-8")
+    step = payload[payload.index("  windows-python-smoke:") :]
+    step = step[: step.index("\n  tobkiri-launcher-windows:")]
+
+    guard = "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
+    assert step.count(guard) == 2
+    first_pytest = (
+        "pytest tests/test_windows_driver_skeleton.py tests/test_rumi_capability.py "
+        "tests/test_defaultspack_tool_policy.py tests/test_bounded_process_runner.py "
+        "tests/test_process_contract_runtime.py -v"
+    )
+    second_pytest = (
+        "pytest tests/test_defaultspack_command_protocol.py "
+        "-k windows_host_process_gets_required_curated_environment -v"
+    )
+    assert f"{first_pytest}\n          {guard}" in step
+    assert f"{second_pytest}\n          {guard}" in step
+
+
 def test_desktop_installer_paths_trigger_for_root_process_contract() -> None:
     """Both push and pull-request filters include the privileged contract tests."""
     workflow = _SCRIPT.parents[1] / "workflows" / "desktop-installers.yml"

@@ -854,7 +854,9 @@ jobs:
         working-directory: tobkiri_runtime
         run: |
           pytest tests/test_windows_driver_skeleton.py tests/test_rumi_capability.py tests/test_defaultspack_tool_policy.py tests/test_bounded_process_runner.py tests/test_process_contract_runtime.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pytest tests/test_defaultspack_command_protocol.py -k windows_host_process_gets_required_curated_environment -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   tobkiri-launcher-windows:
     runs-on: windows-latest
