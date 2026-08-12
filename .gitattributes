@@ -1,9 +1,11 @@
 # Keep repository text byte-stable across Git clients and core.autocrlf values.
 * text=auto eol=lf
 
-# Windows command scripts intentionally materialize with native line endings.
-*.bat text eol=crlf
-*.cmd text eol=crlf
+# Formal source verification compares every tracked worktree byte with its Git
+# blob. Command scripts remain valid with LF and must not materialize a second,
+# platform-dependent representation.
+*.bat text eol=lf
+*.cmd text eol=lf
 
 # These pre-existing documentation blobs contain mixed line endings. Preserve
 # them byte-for-byte until a dedicated documentation normalization change.

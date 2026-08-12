@@ -337,6 +337,95 @@ def test_formal_git_commands_do_not_execute_repository_drivers(
     assert not marker.exists()
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS fixed Git authority")
+def test_formal_verifier_requires_canonical_blob_bytes_for_all_text(
+    tmp_path: Path,
+) -> None:
+    """A Git-clean EOL materialization is rejected until canonical reset."""
+    git = _MODULE.bind_git()
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    subprocess.run([git.path, "init", "-q", repository], check=True)
+    subprocess.run(
+        [git.path, "-C", repository, "config", "user.email", "fixture@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        [git.path, "-C", repository, "config", "user.name", "Fixture"], check=True
+    )
+    (repository / ".gitattributes").write_text(
+        "* text=auto eol=lf\n*.bat text eol=lf\n*.cmd text eol=lf\n",
+        encoding="utf-8",
+    )
+    authority = repository / "authority.json"
+    authority.write_bytes(b'{"authority":"fixture"}\n')
+    script = repository / "setup.bat"
+    script.write_bytes(b"@echo off\necho canonical\n")
+    subprocess.run([git.path, "-C", repository, "add", "."], check=True)
+    subprocess.run([git.path, "-C", repository, "commit", "-qm", "fixture"], check=True)
+    commit = subprocess.check_output(
+        [git.path, "-C", repository, "rev-parse", "HEAD"], text=True
+    ).strip()
+
+    script.write_bytes(b"@echo off\r\necho canonical\r\n")
+    clean = subprocess.run(
+        [git.path, "-C", repository, "diff", "--quiet", "HEAD", "--"],
+        check=False,
+    )
+    assert clean.returncode == 0, "Git conversion considers the CRLF tree clean"
+    with pytest.raises(ToolIdentityError, match="tracked file bytes changed"):
+        _MODULE.smoke_git_authority(
+            git, repository, commit, _MODULE.PurePosixPath("authority.json")
+        )
+
+    subprocess.run(
+        [
+            git.path,
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.eol=lf",
+            "-c",
+            "core.safecrlf=true",
+            "-C",
+            repository,
+            "reset",
+            "--hard",
+            commit,
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+    assert b"\r\n" not in script.read_bytes()
+    _MODULE.smoke_git_authority(
+        git, repository, commit, _MODULE.PurePosixPath("authority.json")
+    )
+
+
+def test_missing_cleanup_transaction_is_an_explicit_no_op(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Always-cleanup does not turn an already-absent transaction into failure."""
+    token = "1" * 32
+    monkeypatch.setattr(_MODULE, "STAGING_PARENT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            os.fspath(_SCRIPT),
+            "--repository-root",
+            os.fspath(tmp_path),
+            "--transaction-token",
+            token,
+            "--cleanup-transaction",
+            "--cleanup-macos-installation",
+            os.fspath(tmp_path / "already-absent-installation"),
+        ],
+    )
+    assert _MODULE.main() == 0
+    assert "already absent; cleanup is a no-op" in capsys.readouterr().err
+
+
 def test_git_identity_swap_fails_before_process_creation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -951,6 +1040,19 @@ def test_workflows_smoke_fixed_isolated_git_authority(workflow_name: str) -> Non
     """Both packaging workflows exercise the digest-bound formal Git authority."""
     workflow = _SCRIPT.parents[1] / "workflows" / workflow_name
     payload = workflow.read_text(encoding="utf-8")
+    canonical = payload[
+        payload.index("- name: Canonicalize formal source checkout") : payload.index(
+            "- name: Set up Python"
+        )
+    ]
+    assert "core.autocrlf=false" in canonical
+    assert "core.eol=lf" in canonical
+    assert "core.safecrlf=true" in canonical
+    assert 'reset --hard "$GITHUB_SHA"' in canonical
+    assert "git ls-files --eol" in canonical
+    assert payload.index("- name: Canonicalize formal source checkout") < payload.index(
+        "- name: Bind verified packaging tool identities"
+    )
     step = payload[
         payload.index("- name: Smoke verified system Git authority") : payload.index(
             "- name: Verify closed packaging Python installation"
@@ -974,6 +1076,14 @@ def test_workflows_smoke_fixed_isolated_git_authority(workflow_name: str) -> Non
     assert "exclude-standard" not in source
     assert "exclude-per-directory" not in source
     assert '"status"' not in smoke
+
+
+def test_repository_attributes_require_blob_identical_command_scripts() -> None:
+    """No tracked text extension may request a transformed worktree representation."""
+    attributes = (_SCRIPT.parents[2] / ".gitattributes").read_text(encoding="utf-8")
+    assert "*.bat text eol=lf" in attributes
+    assert "*.cmd text eol=lf" in attributes
+    assert "eol=crlf" not in attributes
 
 
 def test_formal_git_environment_contract_is_identical_across_consumers() -> None:

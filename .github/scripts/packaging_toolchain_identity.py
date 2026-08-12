@@ -1176,6 +1176,15 @@ def cleanup_transaction(token: str) -> None:
     _remove_root_tree(staging)
 
 
+def _transaction_is_absent(token: str) -> bool:
+    """Return true only when the exact transaction name has no directory entry."""
+    try:
+        _transaction_path(token).lstat()
+    except FileNotFoundError:
+        return True
+    return False
+
+
 def _remove_verified_installation(
     root: Path, provenance: InstallerProvenance, inventory_sha256: str
 ) -> None:
@@ -1759,6 +1768,11 @@ def main() -> int:
             return 0
         if args.transaction_token is None:
             raise ToolIdentityError("--transaction-token is required")
+        if args.cleanup_transaction and _transaction_is_absent(args.transaction_token):
+            sys.stderr.write(
+                "packaging transaction is already absent; cleanup is a no-op\n"
+            )
+            return 0
         if args.cleanup_transaction and args.cleanup_macos_installation is None:
             cleanup_transaction(args.transaction_token)
             return 0

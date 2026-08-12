@@ -43,6 +43,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Canonicalize formal source checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/git -c core.autocrlf=false -c core.eol=lf -c core.safecrlf=true \
+            reset --hard "$GITHUB_SHA"
+          test -z "$(/usr/bin/git ls-files --eol | /usr/bin/awk 'substr($1, 3) != substr($2, 3) { print }')"
+
       - name: Verify release repository binding
         shell: bash
         run: |
