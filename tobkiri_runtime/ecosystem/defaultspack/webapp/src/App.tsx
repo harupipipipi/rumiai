@@ -108,7 +108,7 @@ import { openAuthorityApprovalWindow, openFingerRecordingWindow } from "./lib/de
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
 import { normalizeLocale } from "./lib/i18n";
 import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
-import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, shouldForgetPendingAfterPollError, type PendingChatRequest } from "./lib/pendingChat";
+import { PENDING_CHAT_REQUEST_TTL_MS, pendingRequestBelongsToConversation, shouldClearPendingAfterConversationRefresh, shouldForgetPendingAfterPollError, shouldKeepPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
 import { normalizePinnedPlacements, withPinnedPlacements } from "./lib/placement";
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
 import {
@@ -2927,10 +2927,25 @@ function ChatApp() {
       setStoredSelectedToolIds(reconciled.selectedToolIds);
     }
   }, [droppedWidgets, input, isGenerating, selectedToolIds, setStoredSelectedToolIds]);
-  const pendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
+  const storedPendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
+  const storedPendingConversationId = storedPendingRequest?.conversationId ?? "";
+  const pendingRequest = pendingRequestBelongsToConversation(activeConversationId, storedPendingRequest)
+    ? storedPendingRequest
+    : null;
+  const hasMismatchedPendingRequest = Boolean(activeConversationId && storedPendingRequest && !pendingRequest);
   const isConversationPending = Boolean(
-    pendingRequest && Date.now() - pendingRequest.startedAt < PENDING_CHAT_REQUEST_TTL_MS,
+    pendingRequest && shouldKeepPendingAfterConversationRefresh(latestActiveMessage, pendingRequest, Date.now()),
   );
+  const streamingConversationId = streamingConversationIdRef.current;
+  const isGeneratingForActiveConversation = Boolean(
+    isGenerating
+    && (
+      !activeConversationId
+      || isConversationPending
+      || (streamingConversationId !== null && streamingConversationId === activeConversationId)
+    ),
+  );
+  const isChatBusy = isGeneratingForActiveConversation || isConversationPending;
   const rawBrowserApproval = pendingBrowserApproval(messages);
   const rawAuthorityApproval = pendingAuthorityApproval(messages);
   const rawRuntimeApproval = pendingRuntimeApproval(messages);
@@ -2949,7 +2964,7 @@ function ChatApp() {
   const staleRuntimeApprovalNotice = !ultraYoloMode && !rawRuntimeApproval ? staleRuntimeApproval(messages) : null;
   const visibleBrowserApproval = !ultraYoloMode ? browserApproval : null;
   const latestAssistantFinal = useMemo(() => {
-    if (isGenerating || isConversationPending) return null;
+    if (isChatBusy) return null;
     for (const message of [...messages].reverse()) {
       if (message.role === "user") return null;
       if (message.role !== "agent") continue;
@@ -2965,7 +2980,7 @@ function ChatApp() {
       };
     }
     return null;
-  }, [isConversationPending, isGenerating, messages]);
+  }, [isChatBusy, messages]);
 
   useEffect(() => {
     if (!latestAssistantFinal) return;
@@ -3205,6 +3220,13 @@ function ChatApp() {
       return next;
     });
   };
+
+  useEffect(() => {
+    if (!activeConversationId || !hasMismatchedPendingRequest) return;
+    forgetPendingRequest(activeConversationId);
+    replaceChatIdInUrl(activeConversationId, false);
+    setIsGenerating(false);
+  }, [activeConversationId, hasMismatchedPendingRequest, storedPendingConversationId]);
 
   const loadCodingWorkspaces = useCallback(async () => {
     try {
@@ -3637,7 +3659,7 @@ function ChatApp() {
     }
     setActiveConversationId(conversationId);
     setActiveConversation(conversation);
-    if (updateUrl) replaceChatIdInUrl(conversationId);
+    if (updateUrl) replaceChatIdInUrl(conversationId, false);
     void refreshPreview(conversationId);
   }
 
@@ -3869,7 +3891,7 @@ function ChatApp() {
   }, [spotlightFilter, spotlightQuery, spotlightResults.length]);
 
   useEffect(() => {
-    if (!activeConversationId || !isConversationPending) return;
+    if (!activeConversationId || !pendingRequest) return;
     const latestKnown = latestActiveMessage;
     if (shouldClearPendingAfterConversationRefresh(latestKnown, pendingRequest, Date.now())) {
       forgetPendingRequest(activeConversationId);
@@ -3877,6 +3899,7 @@ function ChatApp() {
       setIsGenerating(false);
       return;
     }
+    if (!isConversationPending) return;
     if (streamingConversationIdRef.current === activeConversationId) return;
     setIsGenerating(true);
     const pollPendingConversation = () => {
@@ -4510,18 +4533,18 @@ function ChatApp() {
         auto_send: true,
         metadata: {
           source: "composer_steer",
-          live: isGenerating || isConversationPending,
+          live: isChatBusy,
         },
       });
       setInput("");
-      setModelSteerStatus(isGenerating || isConversationPending ? "ステアを送りました" : "ステアを予約しました");
+      setModelSteerStatus(isChatBusy ? "ステアを送りました" : "ステアを予約しました");
       await refreshSteerQueue();
     } catch (steerError) {
       setModelSteerStatus(steerError instanceof Error ? steerError.message : "Steer queue failed");
     } finally {
       setModelSteerBusy(false);
     }
-  }, [activeConversationId, input, isConversationPending, isGenerating, refreshSteerQueue, setInput]);
+  }, [activeConversationId, input, isChatBusy, refreshSteerQueue, setInput]);
 
   useEffect(() => {
     if (!activeConversationId) return;
@@ -5086,7 +5109,7 @@ function ChatApp() {
       }
     }
     setInput(value);
-    if (isGenerating || isConversationPending) {
+    if (isChatBusy) {
       setComposerCandidateMenu(null);
       return;
     }
@@ -6115,7 +6138,7 @@ function ChatApp() {
     const inputForSubmit = override?.input ?? input;
     const attachmentsForSubmit = override?.attachments ?? attachedFiles;
     const requestedDroppedWidgets = override?.droppedWidgets ?? droppedWidgets;
-    if ((!inputForSubmit.trim() && attachmentsForSubmit.length === 0) || isGenerating) return;
+    if ((!inputForSubmit.trim() && attachmentsForSubmit.length === 0) || isChatBusy) return;
     shouldFollowMessagesRef.current = true;
     if (activeConversationId) {
       conversationScrollState.set(activeConversationId, {
@@ -6937,7 +6960,7 @@ function ChatApp() {
       input={input}
       placeholder={isCentered ? getNewConversationPlaceholder() : placeholder}
       isNewConversation={isCentered}
-      isGenerating={isGenerating || isConversationPending}
+      isGenerating={isChatBusy}
       selectedProfile={activeProfile}
       favoriteProfiles={favoriteProfiles}
       modelProfiles={selectableModelProfiles}
@@ -6974,7 +6997,7 @@ function ChatApp() {
       steerStatus={modelSteerStatus}
       steerBusy={modelSteerBusy}
       steerQueuedCount={steerItems.filter((item) => item.status === "queued").length}
-      steerPreviewItems={isCentered ? [] : activeComposerSteerItems(steerItems, isGenerating || isConversationPending)}
+      steerPreviewItems={isCentered ? [] : activeComposerSteerItems(steerItems, isChatBusy)}
       suppressPopovers={Boolean(visibleBrowserApproval || authorityApproval || runtimeApproval || staleRuntimeApprovalNotice)}
       onOpenModelManager={() => openSettingsSection("models")}
       onOpenToolSettings={() => openSettingsSection("tools")}
@@ -7256,7 +7279,7 @@ function ChatApp() {
                 isMessagesRegionVisible={showRegion("chat_messages")}
                 isLoading={isLoading}
                 isNewConversation={isNewConversation}
-                isGenerating={isGenerating || isConversationPending}
+                isGenerating={isChatBusy}
                 pendingStatus={pendingRequest?.status ?? null}
                 pendingToolNames={pendingRequest?.toolNames ?? []}
                 pendingStartedAt={pendingRequest?.startedAt ?? null}
