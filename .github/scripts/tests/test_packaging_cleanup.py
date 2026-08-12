@@ -167,7 +167,13 @@ class _FakeWindowsApi:
             file_attributes=int(record["attributes"]),
         )
 
-    def rename_relative(self, handle: int, parent_handle: int, name: str) -> None:
+    def rename_same_parent(
+        self,
+        handle: int,
+        parent_handle: int,
+        _parent_path: Path,
+        name: str,
+    ) -> None:
         target = Path(self.handles[handle]["path"])
         parent = Path(self.handles[parent_handle]["path"])
         quarantine = parent / name
@@ -274,8 +280,8 @@ def test_windows_native_file_cleanup_uses_bound_handles(
     assert not list(scope.glob(".tobkiri-cleanup-*"))
 
 
-def test_windows_rename_info_uses_held_parent_handle_and_relative_utf16() -> None:
-    """The Win32 rename buffer is relative to the held same-parent handle."""
+def test_windows_rename_info_uses_absolute_same_parent_utf16(tmp_path: Path) -> None:
+    """The Win32 rename buffer uses an absolute held-parent sibling path."""
 
     calls: list[tuple[int, int, bytes]] = []
     api = cleanup._WindowsApi.__new__(cleanup._WindowsApi)
@@ -288,6 +294,7 @@ def test_windows_rename_info_uses_held_parent_handle_and_relative_utf16() -> Non
     ) -> bool:
         address = ctypes.cast(information, ctypes.c_void_p).value
         assert address is not None
+        assert address % ctypes.alignment(cleanup._WindowsFileRenameInfo) == 0
         calls.append(
             (
                 int(getattr(handle, "value", handle)),
@@ -299,7 +306,7 @@ def test_windows_rename_info_uses_held_parent_handle_and_relative_utf16() -> Non
 
     api._set_file_information = set_file_information
     name = ".tobkiri-cleanup-native"
-    api.rename_relative(41, 42, name)
+    api.rename_same_parent(41, 42, tmp_path, name)
 
     assert len(calls) == 1
     handle, information_class, raw = calls[0]
@@ -307,17 +314,21 @@ def test_windows_rename_info_uses_held_parent_handle_and_relative_utf16() -> Non
     assert information_class == cleanup._WINDOWS_FILE_RENAME_INFO_CLASS
     assert len(raw) % ctypes.alignment(cleanup._WindowsFileRenameInfo) == 0
     information = cleanup._WindowsFileRenameInfo.from_buffer_copy(raw)
-    assert information.ReplaceIfExists == 0
-    assert information.RootDirectory == 42
-    encoded_name = name.encode("utf-16-le")
+    assert information.Flags == 0
+    assert information.RootDirectory is None
+    encoded_name = cleanup._windows_absolute_path(tmp_path / name).encode(
+        "utf-16-le"
+    )
     assert information.FileNameLength == len(encoded_name)
     offset = cleanup._WindowsFileRenameInfo.FileName.offset
     assert raw[offset : offset + len(encoded_name)] == encoded_name
     assert raw[offset + len(encoded_name) : offset + len(encoded_name) + 2] == b"\0\0"
 
 
-def test_windows_rename_info_accepts_unicode_long_same_parent_name() -> None:
-    """A long Unicode basename remains relative to the held parent handle."""
+def test_windows_rename_info_accepts_unicode_long_same_parent_name(
+    tmp_path: Path,
+) -> None:
+    """A long Unicode basename remains an absolute held-parent sibling."""
 
     calls: list[bytes] = []
     api = cleanup._WindowsApi.__new__(cleanup._WindowsApi)
@@ -334,12 +345,16 @@ def test_windows_rename_info_accepts_unicode_long_same_parent_name() -> None:
         return True
 
     api._set_file_information = set_file_information
-    name = ".tobkiri-" + "安全" * 96
-    api.rename_relative(41, 42, name)
+    name = ".tobkiri-" + "安全" * 140
+    api.rename_same_parent(41, 42, tmp_path, name)
 
     information = cleanup._WindowsFileRenameInfo.from_buffer_copy(calls[0])
-    assert information.RootDirectory == 42
-    encoded_name = name.encode("utf-16-le")
+    assert information.Flags == 0
+    assert information.RootDirectory is None
+    encoded_name = cleanup._windows_absolute_path(tmp_path / name).encode(
+        "utf-16-le"
+    )
+    assert len(encoded_name) > 260
     offset = cleanup._WindowsFileRenameInfo.FileName.offset
     assert information.FileNameLength == len(encoded_name)
     assert calls[0][offset : offset + len(encoded_name)] == encoded_name
@@ -373,15 +388,63 @@ def test_windows_quarantine_collision_retries_in_same_parent(
     assert "\\" not in quarantine.name
 
 
+def test_windows_quarantine_rejects_cross_volume_bound_handles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A source/parent volume mismatch fails before native rename."""
+
+    scope = tmp_path / "scope"
+    scope.mkdir()
+    target = scope / "owned.bin"
+    target.write_bytes(b"owned")
+    fake_api = _FakeWindowsApi()
+    original_identity = fake_api.identity
+
+    def cross_volume_identity(handle: int) -> Any:
+        identity = original_identity(handle)
+        if Path(fake_api.handles[handle]["path"]) == target:
+            return cleanup._WindowsFileIdentity(
+                volume_serial=identity.volume_serial + 1,
+                file_index=identity.file_index,
+                file_attributes=identity.file_attributes,
+            )
+        return identity
+
+    fake_api.identity = cross_volume_identity  # type: ignore[assignment]
+    _use_fake_windows_native_api(monkeypatch, fake_api)
+
+    with pytest.raises(cleanup.PackagingCleanupError, match="different volumes"):
+        cleanup.remove_owned_path(
+            target,
+            owner_root=scope,
+            operation="test cross-volume quarantine rejection",
+        )
+
+    assert target.exists()
+    assert fake_api.rename_calls == []
+
+
 @pytest.mark.parametrize("name", ["", ".", "..", "nested/name", "nested\\name", "x\0y"])
-def test_windows_rename_info_rejects_non_simple_names(name: str) -> None:
+def test_windows_rename_info_rejects_non_simple_names(
+    name: str, tmp_path: Path
+) -> None:
     """A quarantine rename cannot smuggle a path into FILE_RENAME_INFO."""
 
     api = cleanup._WindowsApi.__new__(cleanup._WindowsApi)
     api._set_file_information = lambda *_args: True
 
     with pytest.raises(ValueError, match="simple filename"):
-        api.rename_relative(41, 42, name)
+        api.rename_same_parent(41, 42, tmp_path, name)
+
+
+def test_windows_rename_info_rejects_relative_parent() -> None:
+    """A relative parent cannot redirect an absolute quarantine rename."""
+
+    api = cleanup._WindowsApi.__new__(cleanup._WindowsApi)
+    api._set_file_information = lambda *_args: True
+
+    with pytest.raises(ValueError, match="absolute parent"):
+        api.rename_same_parent(41, 42, Path("scope"), "name")
 
 
 def test_windows_directory_open_requests_traverse_and_read_attributes() -> None:

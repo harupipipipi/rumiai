@@ -74,10 +74,16 @@ class _WindowsByHandleFileInformation(ctypes.Structure):
 
 
 class _WindowsFileRenameInfo(ctypes.Structure):
-    """Prefix of the variable-length FILE_RENAME_INFO structure."""
+    """Prefix of the variable-length FILE_RENAME_INFO structure.
+
+    The first member is a four-byte union: ``ReplaceIfExists`` for
+    ``FileRenameInfo`` and ``Flags`` for ``FileRenameInfoEx``.  Keeping the
+    union's ABI width explicit avoids relying on the one-byte BOOLEAN member
+    to supply its padding.
+    """
 
     _fields_ = [
-        ("ReplaceIfExists", ctypes.c_ubyte),
+        ("Flags", ctypes.c_uint32),
         ("RootDirectory", ctypes.c_void_p),
         ("FileNameLength", ctypes.c_uint32),
         ("FileName", ctypes.c_uint16 * 1),
@@ -214,29 +220,54 @@ class _WindowsApi:
             file_attributes=int(information.dwFileAttributes),
         )
 
-    def rename_relative(self, handle: int, parent_handle: int, name: str) -> None:
-        """Rename an open object in place while its parent remains pinned."""
+    def rename_same_parent(
+        self,
+        handle: int,
+        parent_handle: int,
+        parent_path: Path,
+        name: str,
+    ) -> None:
+        """Rename to a validated absolute sibling while the parent is pinned.
+
+        Windows accepts a relative ``FILE_RENAME_INFO`` name with a
+        ``RootDirectory`` handle according to the API documentation, but the
+        supported Windows runner rejects that form with ``ERROR_INVALID_PARAMETER``.
+        Use the other documented form: an absolute destination and a NULL
+        ``RootDirectory``.  The caller still holds every ancestor and the
+        source parent without delete sharing and validates their identities
+        immediately before this call, so path resolution cannot redirect the
+        operation through a swapped ancestor.
+        """
 
         if not parent_handle:
             raise ValueError("Windows quarantine rename requires a held parent")
         if name in ("", ".", "..") or "\\" in name or "/" in name or "\0" in name:
             raise ValueError("Windows quarantine rename requires a simple filename")
-        encoded_name = name.encode("utf-16-le")
+        raw_parent = Path(parent_path)
+        if not raw_parent.is_absolute():
+            raise ValueError("Windows quarantine rename requires an absolute parent")
+        destination = _windows_absolute_path(raw_parent / name)
+        encoded_name = destination.encode("utf-16-le")
         file_name_offset = _WindowsFileRenameInfo.FileName.offset
         required_size = file_name_offset + len(encoded_name) + 2
         alignment = ctypes.alignment(_WindowsFileRenameInfo)
         buffer_size = (required_size + alignment - 1) // alignment * alignment
-        buffer = ctypes.create_string_buffer(buffer_size)
+        storage = ctypes.create_string_buffer(buffer_size + alignment - 1)
+        storage_address = ctypes.addressof(storage)
+        aligned_address = (storage_address + alignment - 1) & ~(alignment - 1)
+        buffer = (ctypes.c_ubyte * buffer_size).from_address(aligned_address)
         information = ctypes.cast(
             buffer, ctypes.POINTER(_WindowsFileRenameInfo)
         ).contents
-        information.ReplaceIfExists = False
-        # A non-NULL RootDirectory makes FileName relative to the held parent
-        # handle.  Passing NULL with a bare name lets Windows resolve the
-        # destination against the process current directory/volume, which can
-        # turn a same-parent quarantine into a cross-volume rename (WinError
-        # 17) when the checkout and temp directories use different volumes.
-        information.RootDirectory = parent_handle
+        # FileRenameInfo (class 3) interprets the union as ReplaceIfExists;
+        # zero means do not replace a colliding destination.  FileRenameInfoEx
+        # would interpret the same four bytes as Flags, so the ABI is shared.
+        information.Flags = 0
+        # The destination is absolute and already bound to the held parent;
+        # NULL is the documented form for an absolute FileName.  A bare name
+        # with NULL would resolve through the process current directory and
+        # can select a different volume.
+        information.RootDirectory = None
         information.FileNameLength = len(encoded_name)
         ctypes.memmove(
             ctypes.addressof(buffer) + file_name_offset,
@@ -251,7 +282,7 @@ class _WindowsApi:
             ctypes.cast(buffer, wintypes.LPVOID),
             buffer_size,
         ):
-            raise self._last_error(Path(name))
+            raise self._last_error(Path(destination))
 
     def mark_delete(self, handle: int) -> None:
         """Mark an open file or empty directory for deletion on close."""
@@ -827,6 +858,22 @@ def _absolute_lexical_path(path: Path) -> Path:
     """Normalize ``..`` without resolving symlinks or reparse points."""
 
     return Path(os.path.abspath(os.fspath(Path(path).expanduser())))
+
+
+def _windows_absolute_path(path: Path) -> str:
+    """Return an absolute Windows rename path without resolving links."""
+
+    lexical = _absolute_lexical_path(path)
+    value = os.fspath(lexical)
+    if not os.path.isabs(value):
+        raise ValueError("Windows rename destination must be absolute")
+    if os.name != "nt" or value.startswith("\\\\?\\"):
+        return value
+    if value.startswith("\\\\"):
+        value = "\\\\?\\UNC\\" + value[2:]
+    elif len(value) >= 248:
+        value = "\\\\?\\" + value
+    return value
 
 
 def _lstat_no_follow(path: Path) -> os.stat_result:
@@ -1889,6 +1936,26 @@ def _remove_windows_with_quarantine(
                     root_device=binding.identities[0].signature[0],
                 )
             quarantine = _new_quarantine_path(path, operation=operation)
+            if _absolute_lexical_path(quarantine.parent) != _absolute_lexical_path(
+                path.parent
+            ):
+                raise _security_error(
+                    operation=operation,
+                    path=quarantine,
+                    reason="quarantine destination escaped the bound parent",
+                    attempts=attempts,
+                )
+            if (
+                native_state.target_identity is None
+                or native_state.parent_identity.volume_serial
+                != native_state.target_identity.volume_serial
+            ):
+                raise _security_error(
+                    operation=operation,
+                    path=quarantine,
+                    reason="quarantine source and parent are on different volumes",
+                    attempts=attempts,
+                )
 
             # This is the final race seam.  The second assertion is
             # intentional: a test or another process may replace an ancestor
@@ -1896,9 +1963,10 @@ def _remove_windows_with_quarantine(
             binding.assert_current(operation=operation, attempts=attempts)
             _run_windows_mutation_hook(path)
             binding.assert_current(operation=operation, attempts=attempts)
-            native_state.api.rename_relative(
+            native_state.api.rename_same_parent(
                 native_state.target_handle,
                 native_state.parent_handle,
+                path.parent,
                 quarantine.name,
             )
             binding.bind_quarantine(quarantine)
