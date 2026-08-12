@@ -139,6 +139,18 @@ jobs:
           done
           /bin/cat "$TOOLCHAIN_ENV" >> "$GITHUB_ENV"
 
+      - name: Smoke verified system Git authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py \
+            --repository-root "$GITHUB_WORKSPACE" \
+            --provenance .github/toolchains/packaging-python-macos.v1.json \
+            --source-commit "$GITHUB_SHA" \
+            --git "$TOBKIRI_PACKAGING_GIT" \
+            --git-sha256 "$TOBKIRI_PACKAGING_GIT_SHA256" \
+            --smoke-git-authority
+
       - name: Verify closed packaging Python installation
         shell: bash
         run: |
@@ -158,13 +170,30 @@ jobs:
 
           git = os.environ["TOBKIRI_PACKAGING_GIT"]
           git_environment = {
-              "GIT_CONFIG_GLOBAL": "NUL" if os.name == "nt" else os.devnull,
+              "GIT_ATTR_NOSYSTEM": "1",
+              "GIT_CONFIG_GLOBAL": os.devnull,
+              "GIT_CONFIG_SYSTEM": os.devnull,
               "GIT_CONFIG_NOSYSTEM": "1",
+              "GIT_EXEC_PATH": "/private/var/empty",
+              "GIT_OPTIONAL_LOCKS": "0",
+              "GIT_TERMINAL_PROMPT": "0",
+              "HOME": "/private/var/empty",
+              "LC_ALL": "C",
+              "PATH": "/usr/bin:/bin",
+              "XDG_CONFIG_HOME": "/private/var/empty",
           }
-          if os.name == "nt" and os.environ.get("SystemRoot"):
-              git_environment["SystemRoot"] = os.environ["SystemRoot"]
+          git_arguments = [
+              git,
+              "--no-optional-locks",
+              "--no-replace-objects",
+              "-c", "core.fsmonitor=false",
+              "-c", "core.untrackedCache=false",
+              "-c", "core.hooksPath=/dev/null",
+              "-c", "core.attributesFile=/dev/null",
+              "-c", "diff.external=",
+          ]
           source_revision = subprocess.check_output(
-              [git, "rev-parse", "--verify", "HEAD"],
+              [*git_arguments, "rev-parse", "--verify", "HEAD"],
               text=True,
               env=git_environment,
           ).strip()
@@ -173,7 +202,7 @@ jobs:
           ):
               raise SystemExit("checked-out source revision is not a full lowercase SHA")
           source_tree = subprocess.check_output(
-              [git, "rev-parse", "--verify", "HEAD^{tree}"],
+              [*git_arguments, "rev-parse", "--verify", "HEAD^{tree}"],
               text=True,
               env=git_environment,
           ).strip()
@@ -182,7 +211,7 @@ jobs:
           ):
               raise SystemExit("checked-out source tree is not a full lowercase SHA")
           source_status = subprocess.check_output(
-              [git, "status", "--porcelain=v1", "--untracked-files=all"],
+              [*git_arguments, "status", "--porcelain=v1", "--untracked-files=all"],
               text=True,
               env=git_environment,
           )

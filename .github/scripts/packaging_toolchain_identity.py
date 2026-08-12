@@ -28,6 +28,22 @@ INVENTORY_SCHEMA = "tobkiri.packaging-python-installation.v1"
 INVENTORY_NAME = ".tobkiri-packaging-python.v1.json"
 APPLE_TEAM_ID = "59GAB85EFG"
 APPLE_GIT_IDENTIFIER = "com.apple.git"
+MACOS_SYSTEM_GIT = Path("/Library/Developer/CommandLineTools/usr/bin/git")
+ISOLATED_GIT_EXEC_PATH = Path("/private/var/empty")
+ISOLATED_GIT_ARGUMENTS = (
+    "--no-optional-locks",
+    "--no-replace-objects",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.untrackedCache=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.attributesFile=/dev/null",
+    "-c",
+    "diff.external=",
+)
 STAGING_PARENT = Path("/private/var/tmp")
 STAGING_PREFIX = "tobkiri-python-installer-"
 SEALED_PROVENANCE_NAME = "authority-provenance.json"
@@ -355,16 +371,42 @@ def _transaction_path(token: str) -> Path:
 
 
 def _git_output(git: ToolIdentity, repository_root: Path, *arguments: str) -> bytes:
+    current = _regular_executable(git.path, "Git")
+    if current != git:
+        raise ToolIdentityError("trusted Git identity changed before execution")
+    if sys.platform == "darwin":
+        if git.path != MACOS_SYSTEM_GIT:
+            raise ToolIdentityError("trusted Git escaped the fixed system authority")
+        _root_owned_path(git.path, "Git")
+        _require_code_authority(
+            git.path,
+            identifier=APPLE_GIT_IDENTIFIER,
+            team_identifier=APPLE_TEAM_ID,
+            label="Git",
+        )
     result = subprocess.run(
-        [git.path, "-C", repository_root, "--no-replace-objects", *arguments],
+        [
+            git.path,
+            *ISOLATED_GIT_ARGUMENTS,
+            "-C",
+            repository_root,
+            *arguments,
+        ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
         env={
+            "GIT_ATTR_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_SYSTEM": os.devnull,
             "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_EXEC_PATH": os.fspath(ISOLATED_GIT_EXEC_PATH),
             "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_TERMINAL_PROMPT": "0",
+            "HOME": os.fspath(ISOLATED_GIT_EXEC_PATH),
+            "LC_ALL": "C",
             "PATH": "/usr/bin:/bin",
+            "XDG_CONFIG_HOME": os.fspath(ISOLATED_GIT_EXEC_PATH),
         },
     )
     if result.returncode != 0:
@@ -383,6 +425,25 @@ def _committed_blob(
     if head != f"{commit}\n".encode():
         raise ToolIdentityError("source commit does not match checked-out HEAD")
     return _git_output(git, repository_root, "show", f"{commit}:{relative.as_posix()}")
+
+
+def smoke_git_authority(
+    git: ToolIdentity,
+    repository_root: Path,
+    commit: str,
+    committed_path: PurePosixPath,
+) -> None:
+    """Exercise only built-in read operations under the isolated Git authority."""
+    head = _git_output(git, repository_root, "rev-parse", "--verify", "HEAD^{commit}")
+    if not _valid_commit(commit) or head != f"{commit}\n".encode():
+        raise ToolIdentityError("trusted Git HEAD smoke mismatch")
+    if not _git_output(git, repository_root, "show", f"{commit}:{committed_path}"):
+        raise ToolIdentityError("trusted Git committed blob smoke returned no bytes")
+    status = _git_output(
+        git, repository_root, "status", "--porcelain=v1", "--untracked-files=all"
+    )
+    if status:
+        raise ToolIdentityError("trusted Git repository is not clean")
 
 
 def _seal_root_bytes(path: Path, encoded: bytes) -> None:
@@ -1469,14 +1530,7 @@ def _resolve_git(value: str | None) -> Path:
     if value:
         return Path(value)
     if sys.platform == "darwin":
-        developer = subprocess.run(
-            ["/usr/bin/xcode-select", "-p"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=True,
-        ).stdout.strip()
-        return Path(developer) / "usr/bin/git"
+        return MACOS_SYSTEM_GIT
     discovered = shutil.which("git")
     if discovered is None:
         raise ToolIdentityError("git is unavailable for explicit binding")
@@ -1486,7 +1540,12 @@ def _resolve_git(value: str | None) -> Path:
 def bind_git(path: str | None = None) -> ToolIdentity:
     git = _canonical_absolute(_resolve_git(path), "Git")
     if sys.platform == "darwin":
+        if git != MACOS_SYSTEM_GIT:
+            raise ToolIdentityError(
+                "formal macOS Git must be the fixed Command Line Tools executable"
+            )
         _root_owned_path(git, "Git")
+        _root_owned_path(ISOLATED_GIT_EXEC_PATH, "isolated Git environment")
         _require_code_authority(
             git,
             identifier=APPLE_GIT_IDENTIFIER,
@@ -1562,6 +1621,8 @@ def main() -> int:
     parser.add_argument("--source-commit")
     parser.add_argument("--transaction-token")
     parser.add_argument("--git")
+    parser.add_argument("--git-sha256")
+    parser.add_argument("--smoke-git-authority", action="store_true")
     parser.add_argument("--env-output", type=Path)
     parser.add_argument("--prepare-macos-installation", action="store_true")
     parser.add_argument("--verify-macos-installation", type=Path)
@@ -1573,6 +1634,25 @@ def main() -> int:
     provenance: InstallerProvenance | None = None
     try:
         repository_root = args.repository_root.resolve(strict=True)
+        if args.smoke_git_authority:
+            if args.git is None or not _valid_sha256(args.git_sha256):
+                raise ToolIdentityError(
+                    "--git and --git-sha256 are required for the Git smoke"
+                )
+            if args.source_commit is None or args.provenance is None:
+                raise ToolIdentityError(
+                    "--source-commit and --provenance are required for the Git smoke"
+                )
+            git_identity = bind_git(args.git)
+            if git_identity.sha256 != args.git_sha256:
+                raise ToolIdentityError("Git smoke digest differs from formal binding")
+            smoke_git_authority(
+                git_identity,
+                repository_root,
+                args.source_commit,
+                _safe_relative(args.provenance.as_posix(), "provenance"),
+            )
+            return 0
         if args.transaction_token is None:
             raise ToolIdentityError("--transaction-token is required")
         if args.cleanup_transaction and args.cleanup_macos_installation is None:
@@ -1587,6 +1667,12 @@ def main() -> int:
                 args.provenance.as_posix(), "provenance"
             )
             git_identity = bind_git(args.git)
+            smoke_git_authority(
+                git_identity,
+                repository_root,
+                args.source_commit,
+                provenance_relative,
+            )
             provenance, staging = seal_committed_authority(
                 git_identity,
                 repository_root,

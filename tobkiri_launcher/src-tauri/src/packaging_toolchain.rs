@@ -206,6 +206,40 @@ impl MacOSPythonInstallationLease {
 }
 
 impl VerifiedTool {
+    fn configure_command<'a>(&'a self, command: &mut VerifiedCommand<'a>) {
+        if self.kind != "git" {
+            return;
+        }
+        #[cfg(target_os = "macos")]
+        command
+            .env_clear()
+            .args([
+                "--no-optional-locks",
+                "--no-replace-objects",
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "core.untrackedCache=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "core.attributesFile=/dev/null",
+                "-c",
+                "diff.external=",
+            ])
+            .env("GIT_ATTR_NOSYSTEM", "1")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("LC_ALL", "C")
+            .env("PATH", "/usr/bin:/bin")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_EXEC_PATH", "/private/var/empty")
+            .env("HOME", "/private/var/empty")
+            .env("XDG_CONFIG_HOME", "/private/var/empty");
+    }
+
     pub fn command(&self) -> io::Result<VerifiedCommand<'_>> {
         #[cfg(not(unix))]
         {
@@ -238,12 +272,16 @@ impl VerifiedTool {
                     return Err(invalid("macOS packaging tool CDHash changed before spawn"));
                 }
             }
-            return Ok(VerifiedCommand::new(self));
+            let mut command = VerifiedCommand::new(self);
+            self.configure_command(&mut command);
+            return Ok(command);
         }
         #[cfg(not(unix))]
         {
             let _ = &self.lock;
-            Ok(VerifiedCommand::new(self))
+            let mut command = VerifiedCommand::new(self);
+            self.configure_command(&mut command);
+            Ok(command)
         }
     }
 
@@ -1573,6 +1611,10 @@ fn verify_tool_binding_guard(kind: &str, path: &Path, expected: &str) -> io::Res
             "{digest_key} must be lowercase raw SHA-256"
         )));
     }
+    #[cfg(target_os = "macos")]
+    if kind == "git" {
+        verify_macos_git_path_authority(path)?;
+    }
     #[allow(unused_mut)]
     let (mut file, metadata, actual) = open_hashed_regular_executable(path)?;
     if actual != expected {
@@ -1645,6 +1687,31 @@ fn verify_tool_binding_guard(kind: &str, path: &Path, expected: &str) -> io::Res
             }
         },
     })
+}
+
+#[cfg(target_os = "macos")]
+fn verify_macos_git_path_authority(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    const FORMAL_GIT: &str = "/Library/Developer/CommandLineTools/usr/bin/git";
+    if path != Path::new(FORMAL_GIT) || path.canonicalize()? != path {
+        return Err(invalid(format!(
+            "formal macOS Git must be the fixed Command Line Tools executable: {FORMAL_GIT}"
+        )));
+    }
+    for component in path.ancestors() {
+        let metadata = fs::symlink_metadata(component)?;
+        if metadata.file_type().is_symlink()
+            || metadata.uid() != 0
+            || metadata.permissions().mode() & 0o022 != 0
+        {
+            return Err(invalid(format!(
+                "formal macOS Git contains writable/non-root authority: {}",
+                component.display()
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -186,6 +186,82 @@ def test_git_hardlinks_are_permitted_by_exact_digest_binding(tmp_path: Path) -> 
     assert identity.sha256 == hashlib.sha256(original.read_bytes()).hexdigest()
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS fixed Git authority")
+def test_macos_git_rejects_xcode_and_binds_command_line_tools() -> None:
+    """Xcode version paths never become the formal Git authority."""
+    if not _MODULE.MACOS_SYSTEM_GIT.exists():
+        pytest.fail("fixed Command Line Tools Git is unavailable")
+    identity = _MODULE.bind_git()
+    assert identity.path == _MODULE.MACOS_SYSTEM_GIT
+    xcode_git = Path("/Applications/Xcode.app/Contents/Developer/usr/bin/git")
+    if xcode_git.exists():
+        with pytest.raises(ToolIdentityError, match="fixed Command Line Tools"):
+            _MODULE.bind_git(os.fspath(xcode_git))
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS fixed Git authority")
+def test_real_system_git_smoke_ignores_helper_and_config_injection(
+    tmp_path: Path,
+) -> None:
+    """Built-in formal reads ignore PATH helpers and repository fsmonitor commands."""
+    git = _MODULE.bind_git()
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    subprocess.run([git.path, "init", "-q", repository], check=True)
+    subprocess.run(
+        [git.path, "-C", repository, "config", "user.email", "fixture@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        [git.path, "-C", repository, "config", "user.name", "Fixture"], check=True
+    )
+    committed = repository / "authority.txt"
+    committed.write_bytes(b"trusted blob\n")
+    subprocess.run([git.path, "-C", repository, "add", "authority.txt"], check=True)
+    subprocess.run([git.path, "-C", repository, "commit", "-qm", "fixture"], check=True)
+    commit = subprocess.check_output(
+        [git.path, "-C", repository, "rev-parse", "HEAD"], text=True
+    ).strip()
+    marker = tmp_path / "helper-ran"
+    helper = tmp_path / "fsmonitor"
+    helper.write_text(f"#!/bin/sh\ntouch '{marker}'\n", encoding="utf-8")
+    helper.chmod(0o755)
+    subprocess.run(
+        [git.path, "-C", repository, "config", "core.fsmonitor", helper], check=True
+    )
+    _MODULE.smoke_git_authority(
+        git, repository, commit, _MODULE.PurePosixPath("authority.txt")
+    )
+    assert not marker.exists()
+
+
+def test_git_identity_swap_fails_before_process_creation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Replacing a bound executable inode cannot execute an attacker marker."""
+    executable = _executable(tmp_path / "git", b"original")
+    identity = _MODULE.ToolIdentity(
+        executable, hashlib.sha256(executable.read_bytes()).hexdigest()
+    )
+    executable.rename(tmp_path / "original")
+    marker = tmp_path / "marker"
+    _executable(executable, f"#!/bin/sh\ntouch '{marker}'\n".encode())
+    monkeypatch.setattr(_MODULE.sys, "platform", "linux")
+    with pytest.raises(ToolIdentityError, match="identity changed"):
+        _MODULE._git_output(identity, tmp_path, "rev-parse", "HEAD")
+    assert not marker.exists()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS root authority")
+def test_macos_git_rejects_same_uid_writable_ancestor(tmp_path: Path) -> None:
+    """A same-UID directory can never become formal Git authority."""
+    directory = tmp_path / "mutable"
+    directory.mkdir(mode=0o700)
+    candidate = _executable(directory / "git")
+    with pytest.raises(ToolIdentityError, match="non-root authority"):
+        _MODULE._root_owned_path(candidate, "Git")
+
+
 def test_same_uid_path_replacement_during_hash_is_rejected(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -225,7 +301,11 @@ def test_production_authority_reads_exact_head_blobs_not_checkout(
     tmp_path: Path,
 ) -> None:
     """A same-UID checkout swap/restore cannot alter committed authority bytes."""
-    git_path = Path(shutil.which("git") or "")
+    git_path = (
+        _MODULE.MACOS_SYSTEM_GIT
+        if sys.platform == "darwin"
+        else Path(shutil.which("git") or "")
+    )
     if not git_path.is_absolute():
         pytest.skip("Git fixture is unavailable")
     subprocess.run([git_path, "init", "-q", tmp_path], check=True)
@@ -762,6 +842,28 @@ def test_workflows_run_real_installation_e2e_and_cleanup(workflow_name: str) -> 
     assert '--source-commit "$GITHUB_SHA"' in payload
     assert '--transaction-token "$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"' in payload
     assert "if: always() && env.TOBKIRI_PACKAGING_TRANSACTION_TOKEN != ''" in payload
+
+
+@pytest.mark.parametrize("workflow_name", ["release.yml", "desktop-installers.yml"])
+def test_workflows_smoke_fixed_isolated_git_authority(workflow_name: str) -> None:
+    """Both packaging workflows exercise the digest-bound formal Git authority."""
+    workflow = _SCRIPT.parents[1] / "workflows" / workflow_name
+    payload = workflow.read_text(encoding="utf-8")
+    step = payload[
+        payload.index("- name: Smoke verified system Git authority") : payload.index(
+            "- name: Verify closed packaging Python installation"
+        )
+    ]
+    assert "--smoke-git-authority" in step
+    assert '--git "$TOBKIRI_PACKAGING_GIT"' in step
+    assert '--git-sha256 "$TOBKIRI_PACKAGING_GIT_SHA256"' in step
+    source = _SCRIPT.read_text(encoding="utf-8")
+    smoke = source[
+        source.index("def smoke_git_authority") : source.index("def _seal_root_bytes")
+    ]
+    assert '"rev-parse", "--verify", "HEAD^{commit}"' in smoke
+    assert '"show", f"{commit}:{committed_path}"' in smoke
+    assert '"status", "--porcelain=v1", "--untracked-files=all"' in smoke
 
 
 @pytest.mark.parametrize("workflow_name", ["release.yml", "desktop-installers.yml"])
