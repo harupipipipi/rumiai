@@ -261,13 +261,13 @@ def _canonical_absolute(path: Path, label: str) -> Path:
 
 def _regular_executable(path: Path, label: str) -> ToolIdentity:
     path = _canonical_absolute(path, label)
-    before = path.stat(follow_symlinks=False)
+    before = path.lstat()
     if path.is_symlink() or not stat.S_ISREG(before.st_mode):
         raise ToolIdentityError(f"{label} is not a regular file: {path}")
     if not os.access(path, os.X_OK) or before.st_mode & 0o022:
         raise ToolIdentityError(f"{label} is not immutable and executable: {path}")
     digest = _sha256_file(path)
-    after = path.stat(follow_symlinks=False)
+    after = path.lstat()
     if path.is_symlink() or _file_identity(before) != _file_identity(after):
         raise ToolIdentityError(f"{label} changed while hashed: {path}")
     return ToolIdentity(path, digest)
@@ -276,7 +276,7 @@ def _regular_executable(path: Path, label: str) -> ToolIdentity:
 def _root_owned_path(path: Path, label: str, *, sticky: Path | None = None) -> None:
     path = _canonical_absolute(path, label)
     for component in (path, *path.parents):
-        metadata = component.stat(follow_symlinks=False)
+        metadata = component.lstat()
         sticky_root = (
             sticky is not None
             and component == sticky
@@ -1156,7 +1156,7 @@ def _write_inventory(
 
 
 def _require_inventory_metadata(manifest: Path) -> None:
-    metadata = manifest.stat(follow_symlinks=False)
+    metadata = manifest.lstat()
     if (
         not stat.S_ISREG(metadata.st_mode)
         or metadata.st_uid != 0
