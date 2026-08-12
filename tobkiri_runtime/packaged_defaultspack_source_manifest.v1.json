@@ -66,6 +66,20 @@
       "executable": false
     },
     {
+      "path": "ecosystem/defaultspack/domain/runtime_v4/__pycache__/__init__.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 761,
+      "sha256": "64a2f8fd668c3134af122447f7bffe4bc955fe432a2fc5096b8ff9a58f0d1ca2",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/domain/runtime_v4/__pycache__/service.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 97858,
+      "sha256": "5ee243a53b921c1a4a7756d47105f447f39108a915ef6cc6392cb893977f6a26",
+      "executable": false
+    },
+    {
       "path": "ecosystem/defaultspack/domain/runtime_v4/service.py",
       "type": "regular-file",
       "size": 96335,
@@ -269,6 +283,41 @@
       "executable": false
     },
     {
+      "path": "scripts/__pycache__/__init__.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 322,
+      "sha256": "351c1228946c5700f238598fcf7844d538be01a453e049545bda58eaa9b6aeaf",
+      "executable": false
+    },
+    {
+      "path": "scripts/__pycache__/generate_defaultspack_v4_bundle.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 35058,
+      "sha256": "23af60a8629fcb61ad83976c0e765a04f07be05da00eba5b68773888208db013",
+      "executable": false
+    },
+    {
+      "path": "scripts/__pycache__/generate_packaged_defaultspack_v4_bundle.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 41023,
+      "sha256": "1feabdb4dcb61aab89a0573d0a54e24f23315e894a979e8044c539d5fec829a5",
+      "executable": false
+    },
+    {
+      "path": "scripts/__pycache__/generator_source_manifest.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 43431,
+      "sha256": "1482313cb5d3b7b8195b1a785dd189dda3e1b33ac2bb95293517d707601f190c",
+      "executable": false
+    },
+    {
+      "path": "scripts/__pycache__/packaging_cleanup.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 94546,
+      "sha256": "96045fa4a89073904e8f7211f983c2005798228f47d7019061b7187d9bbd5493",
+      "executable": false
+    },
+    {
       "path": "scripts/eval_rumi_human_tasks.py",
       "type": "regular-file",
       "size": 22396,
@@ -343,6 +392,13 @@
       "type": "regular-file",
       "size": 96233,
       "sha256": "08e2609f9de17a4f5d13c2f801c3ee36598f659be6e9277e7d51737efdc81e3f",
+      "executable": false
+    },
+    {
+      "path": "scripts/quality/__pycache__/scan_complete_v4_migration.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 14178,
+      "sha256": "ff19af4f7b1af35194ecab87c37afdab8199d246850fac7b6caceca6a995b2f8",
       "executable": false
     },
     {
@@ -483,6 +539,97 @@
       "type": "regular-file",
       "size": 1919,
       "sha256": "1d43814ec10f4c1ac262fc0f744f31399068cb6218668e3c589815326745194a",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/__pycache__/__init__.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 1752,
+      "sha256": "02dc1054c2b2c04bb1193a17564913d348c570b3d0e56133e3c04718eb8d5220",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/__pycache__/canonical.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 6667,
+      "sha256": "425422453cd0fc1010b5a884c16c35036ea45878b385f11a6e2cd972374c8b67",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/__pycache__/composition.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 21222,
+      "sha256": "b31f70f1e46ebb868703fb951b7cf57762c18ef4e00b860eadaffd1860c17376",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/__pycache__/durability.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 6798,
+      "sha256": "72705ae1bc81ed84bd6300e95f31dbacaf822edee3aed988c6724a2080fee5fa",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/__pycache__/errors.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 2274,
+      "sha256": "447735a23a4ee069f720bd0f159f033a786f15c485477114f018ca70dc1e49fa",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/__pycache__/ids.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 4177,
+      "sha256": "a1d2c76836fda0c12acf2b4edc40b893dfd8b700efe0603c749e982326a45cab",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/__pycache__/migration.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 21071,
+      "sha256": "ee56ae5e24dc836130443a537d41d494a8b2d2f8104d12f88d9b1883e73428b2",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/__pycache__/platform_artifact.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 12683,
+      "sha256": "a02850bbe8a9810862ee0ac9d9744b2c3e997d2418d9756c680999b07c243440",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/__pycache__/platform_paths.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 2036,
+      "sha256": "66a1fb66906e6daea6fe18dca0bef9cd9ff36a0b7d5da7dc60d4d321d0d81f8f",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/__pycache__/profile_scope.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 4877,
+      "sha256": "e91425596bf2e6c10efd565ffb75543d7dbe1e4ddcb077ae502aeb1db4cdbf40",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/__pycache__/provenance.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 14912,
+      "sha256": "e7fa3603828c0d393e460f6dd57aa28877a9dee53341904ca7bec3c7177599f3",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/__pycache__/secure_persistence.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 42167,
+      "sha256": "0bc90f23b1feeab67215290ed0bde97af9ad6124433c0ba0d61be1a686593656",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/__pycache__/validation.cpython-313.pyc",
+      "type": "regular-file",
+      "size": 22094,
+      "sha256": "39fbab6e6e9e872c84e20a17c1d51ea50100a04697764a457f15d6994ddc2d83",
       "executable": false
     },
     {
