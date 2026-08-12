@@ -89,31 +89,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Canonicalize formal source checkout
-        shell: bash
-        run: |
-          set -euo pipefail
-          /usr/bin/git -c core.autocrlf=false -c core.eol=lf -c core.safecrlf=true \
-            reset --hard "$GITHUB_SHA"
-          test -z "$(/usr/bin/git ls-files --eol | /usr/bin/awk 'substr($1, 3) != substr($2, 3) { print }')"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: |
-            tobkiri_runtime/requirements.txt
-            tobkiri_runtime/requirements-dev.txt
-
-      - name: Check reviewed packaging Python provenance
-        run: |
-          /usr/bin/python3 -B .github/scripts/update_packaging_python_provenance.py \
-            --version 3.13.13 \
-            --requirements tobkiri_runtime/requirements.txt \
-            --output .github/toolchains/packaging-python-macos.v1.json \
-            --check
-
       - name: Allocate packaging transaction
         shell: bash
         run: |
@@ -146,6 +121,23 @@ jobs:
             /usr/bin/grep -q "^${marker}=" "$TOOLCHAIN_ENV"
           done
           /bin/cat "$TOOLCHAIN_ENV" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            tobkiri_runtime/requirements.txt
+            tobkiri_runtime/requirements-dev.txt
+
+      - name: Check reviewed packaging Python provenance
+        run: |
+          /usr/bin/python3 -B .github/scripts/update_packaging_python_provenance.py \
+            --version 3.13.13 \
+            --requirements tobkiri_runtime/requirements.txt \
+            --output .github/toolchains/packaging-python-macos.v1.json \
+            --check
 
       - name: Smoke verified system Git authority
         shell: bash
@@ -469,11 +461,20 @@ jobs:
 
       - name: Clean packaging Python installation
         if: always() && env.TOBKIRI_PACKAGING_TRANSACTION_TOKEN != ''
+        env:
+          PRIMARY_JOB_STATUS: ${{ job.status }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           args=(--transaction-token "$TOBKIRI_PACKAGING_TRANSACTION_TOKEN" --cleanup-transaction)
           if test -n "${TOBKIRI_PACKAGING_PYTHON_SNAPSHOT:-}"; then
             args+=(--cleanup-macos-installation "$TOBKIRI_PACKAGING_PYTHON_SNAPSHOT")
             args+=(--inventory-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256")
           fi
           /usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py "${args[@]}"
+          cleanup_status=$?
+          if test "$cleanup_status" -ne 0; then
+            if test "$PRIMARY_JOB_STATUS" = success; then
+              exit "$cleanup_status"
+            fi
+            echo "::warning::Packaging cleanup failed after primary job failure; residue retained for diagnosis"
+          fi

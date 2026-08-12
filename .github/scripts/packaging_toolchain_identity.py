@@ -1768,11 +1768,21 @@ def main() -> int:
             return 0
         if args.transaction_token is None:
             raise ToolIdentityError("--transaction-token is required")
-        if args.cleanup_transaction and _transaction_is_absent(args.transaction_token):
+        transaction_absent = _transaction_is_absent(args.transaction_token)
+        if (
+            args.cleanup_transaction
+            and args.cleanup_macos_installation is None
+            and transaction_absent
+        ):
             sys.stderr.write(
                 "packaging transaction is already absent; cleanup is a no-op\n"
             )
             return 0
+        if args.cleanup_macos_installation is not None and transaction_absent:
+            raise ToolIdentityError(
+                "packaging installation authority transaction is absent; "
+                "installation residue retained fail-closed"
+            )
         if args.cleanup_transaction and args.cleanup_macos_installation is None:
             cleanup_transaction(args.transaction_token)
             return 0

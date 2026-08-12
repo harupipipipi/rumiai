@@ -366,6 +366,9 @@ def test_formal_verifier_requires_canonical_blob_bytes_for_all_text(
     commit = subprocess.check_output(
         [git.path, "-C", repository, "rev-parse", "HEAD"], text=True
     ).strip()
+    _MODULE.smoke_git_authority(
+        git, repository, commit, _MODULE.PurePosixPath("authority.json")
+    )
 
     script.write_bytes(b"@echo off\r\necho canonical\r\n")
     clean = subprocess.run(
@@ -377,29 +380,6 @@ def test_formal_verifier_requires_canonical_blob_bytes_for_all_text(
         _MODULE.smoke_git_authority(
             git, repository, commit, _MODULE.PurePosixPath("authority.json")
         )
-
-    subprocess.run(
-        [
-            git.path,
-            "-c",
-            "core.autocrlf=false",
-            "-c",
-            "core.eol=lf",
-            "-c",
-            "core.safecrlf=true",
-            "-C",
-            repository,
-            "reset",
-            "--hard",
-            commit,
-        ],
-        check=True,
-        stdout=subprocess.DEVNULL,
-    )
-    assert b"\r\n" not in script.read_bytes()
-    _MODULE.smoke_git_authority(
-        git, repository, commit, _MODULE.PurePosixPath("authority.json")
-    )
 
 
 def test_missing_cleanup_transaction_is_an_explicit_no_op(
@@ -418,12 +398,45 @@ def test_missing_cleanup_transaction_is_an_explicit_no_op(
             "--transaction-token",
             token,
             "--cleanup-transaction",
-            "--cleanup-macos-installation",
-            os.fspath(tmp_path / "already-absent-installation"),
         ],
     )
     assert _MODULE.main() == 0
     assert "already absent; cleanup is a no-op" in capsys.readouterr().err
+
+
+def test_installation_cleanup_without_authority_retains_residue_fail_closed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An installation name alone cannot authorize cleanup without its journal."""
+    token = "2" * 32
+    installation = tmp_path / "unowned-installation"
+    installation.mkdir()
+    marker = installation / "retain"
+    marker.write_bytes(b"unowned")
+    monkeypatch.setattr(_MODULE, "STAGING_PARENT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            os.fspath(_SCRIPT),
+            "--repository-root",
+            os.fspath(tmp_path),
+            "--transaction-token",
+            token,
+            "--cleanup-transaction",
+            "--cleanup-macos-installation",
+            os.fspath(installation),
+            "--inventory-sha256",
+            "a" * 64,
+        ],
+    )
+    with pytest.raises(SystemExit) as exit_info:
+        _MODULE.main()
+    assert exit_info.value.code == 2
+    assert marker.read_bytes() == b"unowned"
+    diagnostic = capsys.readouterr().err
+    assert "authority transaction is absent" in diagnostic
+    assert "residue retained fail-closed" in diagnostic
 
 
 def test_git_identity_swap_fails_before_process_creation(
@@ -1040,19 +1053,20 @@ def test_workflows_smoke_fixed_isolated_git_authority(workflow_name: str) -> Non
     """Both packaging workflows exercise the digest-bound formal Git authority."""
     workflow = _SCRIPT.parents[1] / "workflows" / workflow_name
     payload = workflow.read_text(encoding="utf-8")
-    canonical = payload[
-        payload.index("- name: Canonicalize formal source checkout") : payload.index(
-            "- name: Set up Python"
+    pre_binder = payload[
+        payload.index("- name: Checkout") : payload.index(
+            "- name: Bind verified packaging tool identities"
         )
     ]
-    assert "core.autocrlf=false" in canonical
-    assert "core.eol=lf" in canonical
-    assert "core.safecrlf=true" in canonical
-    assert 'reset --hard "$GITHUB_SHA"' in canonical
-    assert "git ls-files --eol" in canonical
-    assert payload.index("- name: Canonicalize formal source checkout") < payload.index(
+    assert "Allocate packaging transaction" in pre_binder
+    assert "/usr/bin/git" not in pre_binder
+    assert "reset --hard" not in pre_binder
+    assert "ls-files --eol" not in pre_binder
+    assert "Set up Python" not in pre_binder
+    assert "update_packaging_python_provenance.py" not in pre_binder
+    assert payload.index(
         "- name: Bind verified packaging tool identities"
-    )
+    ) < payload.index("- name: Set up Python")
     step = payload[
         payload.index("- name: Smoke verified system Git authority") : payload.index(
             "- name: Verify closed packaging Python installation"
@@ -1076,6 +1090,19 @@ def test_workflows_smoke_fixed_isolated_git_authority(workflow_name: str) -> Non
     assert "exclude-standard" not in source
     assert "exclude-per-directory" not in source
     assert '"status"' not in smoke
+
+
+@pytest.mark.parametrize("workflow_name", ["release.yml", "desktop-installers.yml"])
+def test_workflow_cleanup_preserves_primary_failure(workflow_name: str) -> None:
+    """Cleanup fails successful jobs but cannot replace an existing primary failure."""
+    payload = (_SCRIPT.parents[1] / "workflows" / workflow_name).read_text(
+        encoding="utf-8"
+    )
+    cleanup = payload[payload.index("- name: Clean packaging Python installation") :]
+    assert "PRIMARY_JOB_STATUS: ${{ job.status }}" in cleanup
+    assert 'if test "$PRIMARY_JOB_STATUS" = success' in cleanup
+    assert 'exit "$cleanup_status"' in cleanup
+    assert "cleanup failed after primary job failure" in cleanup
 
 
 def test_repository_attributes_require_blob_identical_command_scripts() -> None:
