@@ -19,6 +19,7 @@ import errno
 import hashlib
 import json
 import os
+import posixpath
 import selectors
 import shutil
 import stat
@@ -385,6 +386,148 @@ def _root_owned_path(path: Path, label: str, *, sticky: Path | None = None) -> N
             _require_opened_authority(descriptor, component, label, sticky=sticky)
     finally:
         os.close(descriptor)
+
+
+ROOT_SEAL_TREE_CODE = r"""
+import ctypes, errno, json, os, posixpath, stat, sys, time
+root_path=sys.argv[1]; owner=int(sys.argv[2]); root_mode=int(sys.argv[3],8)
+barrier=sys.argv[4] if len(sys.argv)>4 else ''
+def acl(fd):
+    if sys.platform!='darwin': return False
+    lib=ctypes.CDLL(None,use_errno=True); lib.acl_get_fd_np.argtypes=[ctypes.c_int,ctypes.c_int]; lib.acl_get_fd_np.restype=ctypes.c_void_p
+    lib.acl_free.argtypes=[ctypes.c_void_p]; lib.acl_free.restype=ctypes.c_int
+    ctypes.set_errno(0); value=lib.acl_get_fd_np(fd,0x100)
+    if not value:
+        if ctypes.get_errno()==errno.ENOENT: return False
+        raise SystemExit('ACL inspection failed')
+    if lib.acl_free(value)!=0: raise SystemExit('ACL release failed')
+    return True
+def safe_target(relative,target):
+    if not target or '\x00' in target or target.startswith('/'):
+        raise SystemExit('unsafe absolute or empty symlink: '+relative)
+    normalized=posixpath.normpath(posixpath.join(posixpath.dirname(relative),target))
+    if normalized in ('','.') or normalized=='..' or normalized.startswith('../'):
+        raise SystemExit('symlink escapes sealed tree: '+relative)
+    return normalized
+def entry(fd,name,relative,mutate,device):
+    before=os.stat(name,dir_fd=fd,follow_symlinks=False)
+    if before.st_uid!=owner: raise SystemExit('non-owner tree entry: '+relative)
+    if before.st_dev!=device: raise SystemExit('mount boundary in sealed tree: '+relative)
+    if stat.S_ISLNK(before.st_mode):
+        if before.st_nlink!=1: raise SystemExit('hardlinked tree symlink: '+relative)
+        target=os.readlink(name,dir_fd=fd)
+        if sys.platform=='darwin':
+            if not hasattr(os,'O_SYMLINK'): raise SystemExit('symlink descriptor API absent')
+            linkfd=os.open(name,os.O_RDONLY|os.O_SYMLINK,dir_fd=fd)
+            try:
+                opened=os.fstat(linkfd)
+                if (before.st_dev,before.st_ino,before.st_mode)!=(opened.st_dev,opened.st_ino,opened.st_mode) or acl(linkfd):
+                    raise SystemExit('symlink identity or ACL changed: '+relative)
+            finally: os.close(linkfd)
+        after=os.stat(name,dir_fd=fd,follow_symlinks=False)
+        if (before.st_dev,before.st_ino,before.st_mode)!=(after.st_dev,after.st_ino,after.st_mode):
+            raise SystemExit('symlink changed during inventory: '+relative)
+        return ('symlink',before.st_dev,before.st_ino,stat.S_IMODE(before.st_mode),target,
+                safe_target(relative,target))
+    flags=os.O_RDONLY|os.O_NOFOLLOW
+    if stat.S_ISDIR(before.st_mode): flags|=os.O_DIRECTORY
+    opened=os.open(name,flags,dir_fd=fd)
+    try:
+        current=os.fstat(opened)
+        if (before.st_dev,before.st_ino,before.st_mode)!=(current.st_dev,current.st_ino,current.st_mode):
+            raise SystemExit('tree entry changed while opened: '+relative)
+        if acl(opened): raise SystemExit('tree entry has nontrivial ACL: '+relative)
+        if stat.S_ISREG(current.st_mode):
+            if current.st_nlink!=1: raise SystemExit('hardlinked tree file: '+relative)
+            if mutate: os.fchmod(opened,stat.S_IMODE(current.st_mode)&~0o222)
+            sealed=os.fstat(opened)
+            return ('file',sealed.st_dev,sealed.st_ino,stat.S_IMODE(sealed.st_mode),'','')
+        if not stat.S_ISDIR(current.st_mode):
+            raise SystemExit('special file in sealed tree: '+relative)
+        children=walk(opened,relative,mutate,device)
+        if mutate: os.fchmod(opened,stat.S_IMODE(current.st_mode)&~0o222)
+        sealed=os.fstat(opened)
+        return ('directory',sealed.st_dev,sealed.st_ino,stat.S_IMODE(sealed.st_mode),'',
+                json.dumps(children,sort_keys=True,separators=(',',':')))
+    finally: os.close(opened)
+def walk(fd,prefix,mutate,device):
+    result={}
+    for name in sorted(os.listdir(fd)):
+        if not name or name in ('.','..') or '/' in name or '\x00' in name:
+            raise SystemExit('invalid tree entry name')
+        relative=name if not prefix else prefix+'/'+name
+        result[name]=entry(fd,name,relative,mutate,device)
+    return result
+def check_cycles(records,prefix=''):
+    links={}
+    def collect(values,base=''):
+        for name,value in values.items():
+            path=name if not base else base+'/'+name
+            if value[0]=='symlink': links[path]=value[5]
+            elif value[0]=='directory': collect(json.loads(value[5]),path)
+    collect(records)
+    for origin,target in links.items():
+        value=target; seen={origin}
+        for _ in range(129):
+            parts=value.split('/'); found=None
+            for index in range(1,len(parts)+1):
+                candidate='/'.join(parts[:index])
+                if candidate in links: found=(candidate,index); break
+            if found is None: break
+            candidate,index=found
+            if candidate in seen: raise SystemExit('symlink cycle in sealed tree: '+origin)
+            seen.add(candidate)
+            suffix='/'.join(parts[index:])
+            value=posixpath.normpath(posixpath.join(links[candidate],suffix))
+            if value=='..' or value.startswith('../') or value.startswith('/'):
+                raise SystemExit('symlink chain escapes sealed tree: '+origin)
+        else: raise SystemExit('symlink chain exceeds bound: '+origin)
+root=os.open(root_path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+try:
+    info=os.fstat(root)
+    if info.st_uid!=owner or acl(root): raise SystemExit('unsafe sealed tree root')
+    first=walk(root,'',True,info.st_dev); check_cycles(first)
+    os.fchmod(root,root_mode); os.fsync(root)
+    if barrier:
+        ready=barrier+'.ready'; release=barrier+'.release'
+        with open(ready,'xb') as output: output.write(b'ready'); output.flush(); os.fsync(output.fileno())
+        deadline=time.monotonic()+10
+        while not os.path.exists(release):
+            if time.monotonic()>=deadline: raise SystemExit('seal test barrier timed out')
+            time.sleep(0.01)
+    second=walk(root,'',False,info.st_dev); check_cycles(second)
+    if first!=second: raise SystemExit('sealed tree changed during verification')
+    final=os.fstat(root)
+    if (final.st_dev,final.st_ino)!=(info.st_dev,info.st_ino) or \
+       stat.S_IMODE(final.st_mode)!=root_mode or acl(root):
+        raise SystemExit('sealed tree root changed')
+finally: os.close(root)
+"""
+
+
+def _seal_root_tree(root: Path, label: str) -> None:
+    """Seal a root-owned tree by inode without following or chmodding symlinks."""
+    result = subprocess.run(
+        [
+            "/usr/bin/sudo",
+            "-n",
+            "/usr/bin/python3",
+            "-I",
+            "-B",
+            "-c",
+            ROOT_SEAL_TREE_CODE,
+            root,
+            "0",
+            "0555",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+        env={"PATH": "/usr/bin:/bin"},
+    )
+    if result.returncode != 0:
+        raise ToolIdentityError(f"{label} sealing failed: {result.stderr.strip()}")
 
 
 def _codesign_identity(path: Path) -> CodeIdentity:
@@ -1936,11 +2079,17 @@ def _verify_installer(path: Path, provenance: InstallerProvenance) -> None:
 
 def _inventory_entries(root: Path) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
+    symlinks: dict[str, str] = {}
+    root_device = root.lstat().st_dev
     for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
         relative = path.relative_to(root).as_posix()
         if relative == INVENTORY_NAME:
             continue
         metadata = path.lstat()
+        if metadata.st_dev != root_device:
+            raise ToolIdentityError(
+                f"mount boundary in Python installation: {relative}"
+            )
         if stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode):
             flags = os.O_RDONLY | os.O_NOFOLLOW
             if stat.S_ISDIR(metadata.st_mode):
@@ -1969,18 +2118,67 @@ def _inventory_entries(root: Path) -> list[dict[str, Any]]:
         elif stat.S_ISDIR(metadata.st_mode):
             entry["type"] = "directory"
         elif stat.S_ISLNK(metadata.st_mode):
+            if metadata.st_nlink != 1:
+                raise ToolIdentityError(f"hardlinked Python symlink: {relative}")
             target = os.readlink(path)
-            resolved = (path.parent / target).resolve(strict=True)
-            try:
-                resolved.relative_to(root)
-            except ValueError as error:
+            after = path.lstat()
+            if _file_identity(metadata) != _file_identity(after):
+                raise ToolIdentityError(f"Python symlink changed: {relative}")
+            if sys.platform == "darwin":
+                if not hasattr(os, "O_SYMLINK"):
+                    raise ToolIdentityError("macOS symlink descriptor API is absent")
+                descriptor = os.open(path, os.O_RDONLY | os.O_SYMLINK)
+                try:
+                    opened = os.fstat(descriptor)
+                    if _file_identity(metadata) != _file_identity(
+                        opened
+                    ) or _fd_has_nontrivial_acl(descriptor):
+                        raise ToolIdentityError(
+                            f"Python symlink identity changed or has ACL: {relative}"
+                        )
+                finally:
+                    os.close(descriptor)
+            if not target or "\x00" in target or target.startswith("/"):
+                raise ToolIdentityError(
+                    f"Python symlink is absolute or empty: {relative}"
+                )
+            normalized = posixpath.normpath(
+                posixpath.join(posixpath.dirname(relative), target)
+            )
+            if normalized in {"", ".", ".."} or normalized.startswith("../"):
                 raise ToolIdentityError(
                     f"Python symlink escapes installation: {relative}"
-                ) from error
+                )
+            symlinks[relative] = normalized
             entry.update(type="symlink", target=target)
         else:
             raise ToolIdentityError(f"special file in Python installation: {relative}")
         entries.append(entry)
+    for origin, target in symlinks.items():
+        value = target
+        seen = {origin}
+        for _ in range(129):
+            parts = value.split("/")
+            match = next(
+                (
+                    ("/".join(parts[:index]), index)
+                    for index in range(1, len(parts) + 1)
+                    if "/".join(parts[:index]) in symlinks
+                ),
+                None,
+            )
+            if match is None:
+                break
+            candidate, index = match
+            if candidate in seen:
+                raise ToolIdentityError(f"Python symlink cycle: {origin}")
+            seen.add(candidate)
+            suffix = "/".join(parts[index:])
+            value = posixpath.normpath(posixpath.join(symlinks[candidate], suffix))
+            if value == ".." or value.startswith("../") or value.startswith("/"):
+                raise ToolIdentityError(f"Python symlink chain escapes: {origin}")
+        else:
+            raise ToolIdentityError(f"Python symlink chain is too deep: {origin}")
     return entries
 
 
@@ -2504,15 +2702,7 @@ def _prepare_macos_installation_locked(
             check=True,
             env={"PATH": "/usr/bin:/bin"},
         )
-        subprocess.run(
-            ["/usr/bin/sudo", "/usr/sbin/chown", "-R", "root:wheel", staging],
-            check=True,
-        )
-        subprocess.run(["/usr/bin/sudo", "/bin/chmod", "-RN", staging], check=True)
-        subprocess.run(
-            ["/usr/bin/sudo", "/bin/chmod", "-R", "a-w", staging], check=True
-        )
-        subprocess.run(["/usr/bin/sudo", "/bin/chmod", "0555", staging], check=True)
+        _seal_root_tree(staging, "expanded official installer")
         payload_executable_suffix = (
             Path("Payload/Library/Frameworks/Python.framework/Versions")
             / ".".join(provenance.version.split(".")[:2])
@@ -2602,23 +2792,7 @@ def _prepare_macos_installation_locked(
             check=True,
             env={"PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1"},
         )
-        subprocess.run(
-            [
-                "/usr/bin/sudo",
-                "/usr/sbin/chown",
-                "-R",
-                "root:wheel",
-                provenance.install_root,
-            ],
-            check=True,
-        )
-        subprocess.run(
-            ["/usr/bin/sudo", "/bin/chmod", "-RN", provenance.install_root], check=True
-        )
-        subprocess.run(
-            ["/usr/bin/sudo", "/bin/chmod", "-R", "a-w", provenance.install_root],
-            check=True,
-        )
+        _seal_root_tree(provenance.install_root, "packaging Python installation")
         code_identity = _require_code_authority(
             executable,
             identifier=provenance.code_identifier,

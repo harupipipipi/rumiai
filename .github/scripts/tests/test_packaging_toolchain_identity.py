@@ -11,6 +11,7 @@ import secrets
 import signal
 import json
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -48,6 +49,36 @@ _UPDATE_SPEC.loader.exec_module(_UPDATE)
 _REQUIRE_ROOT_PROCESS_TESTS = (
     os.environ.get("TOBKIRI_REQUIRE_ROOT_PROCESS_TESTS") == "1"
 )
+
+
+def _seal_tree_helper(
+    root: Path, barrier: Path | None = None
+) -> subprocess.CompletedProcess[bytes]:
+    arguments = [
+        sys.executable,
+        "-I",
+        "-B",
+        "-c",
+        _MODULE.ROOT_SEAL_TREE_CODE,
+        root,
+        str(os.geteuid()),
+        "0555",
+    ]
+    if barrier is not None:
+        arguments.append(barrier)
+    return subprocess.run(
+        arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False
+    )
+
+
+def _restore_test_tree_permissions(root: Path) -> None:
+    if not root.exists():
+        return
+    root.chmod(0o700)
+    for path in sorted(root.rglob("*"), key=lambda value: len(value.parts)):
+        if path.is_symlink():
+            continue
+        path.chmod(0o700 if path.is_dir() else 0o600)
 
 
 def _executable(path: Path, payload: bytes = b"tool fixture") -> Path:
@@ -258,6 +289,199 @@ def test_opened_inode_without_extended_acl_is_accepted(tmp_path: Path) -> None:
         assert not _MODULE._fd_has_nontrivial_acl(descriptor)
     finally:
         os.close(descriptor)
+
+
+def test_fd_sealer_records_broken_internal_symlink_without_following(
+    tmp_path: Path,
+) -> None:
+    """An inert relative broken link is inventoried, never chmodded or followed."""
+    root = tmp_path / "tree"
+    root.mkdir()
+    link = root / "Python"
+    link.symlink_to("missing-python")
+    link_mode = stat.S_IMODE(link.lstat().st_mode)
+    try:
+        result = _seal_tree_helper(root)
+        assert result.returncode == 0, result.stderr
+        assert link.is_symlink()
+        assert os.readlink(link) == "missing-python"
+        assert root.stat().st_mode & 0o7777 == 0o555
+        assert _MODULE._inventory_entries(root) == [
+            {
+                "gid": link.lstat().st_gid,
+                "mode": link_mode,
+                "nlink": 1,
+                "path": "Python",
+                "target": "missing-python",
+                "type": "symlink",
+                "uid": link.lstat().st_uid,
+            }
+        ]
+    finally:
+        _restore_test_tree_permissions(root)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS xattr contract")
+def test_fd_sealer_preserves_regular_bytes_and_extended_attributes(
+    tmp_path: Path,
+) -> None:
+    """Sealing changes permission bits only, preserving signed payload metadata."""
+    root = tmp_path / "tree"
+    root.mkdir()
+    executable = root / "Python"
+    executable.write_bytes(b"signed payload bytes")
+    executable.chmod(0o755)
+    subprocess.run(
+        [
+            "/usr/bin/xattr",
+            "-w",
+            "com.tobkiri.seal-test",
+            "preserve",
+            executable,
+        ],
+        check=True,
+    )
+    try:
+        result = _seal_tree_helper(root)
+        assert result.returncode == 0, result.stderr
+        assert executable.read_bytes() == b"signed payload bytes"
+        attribute = subprocess.run(
+            ["/usr/bin/xattr", "-p", "com.tobkiri.seal-test", executable],
+            stdout=subprocess.PIPE,
+            check=True,
+        ).stdout
+        assert attribute == b"preserve\n"
+        assert executable.stat().st_mode & 0o7777 == 0o555
+    finally:
+        _restore_test_tree_permissions(root)
+
+
+@pytest.mark.parametrize("target", ["/private/tmp/outside", "../../outside"])
+def test_fd_sealer_rejects_external_symlink_without_touching_target(
+    tmp_path: Path, target: str
+) -> None:
+    """Absolute and lexical-escape links fail without following their targets."""
+    root = tmp_path / "tree"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"preserve")
+    outside.chmod(0o600)
+    (root / "Python").symlink_to(target)
+    try:
+        result = _seal_tree_helper(root)
+        assert result.returncode != 0
+        assert b"symlink" in result.stderr
+        with pytest.raises(ToolIdentityError, match="symlink"):
+            _MODULE._inventory_entries(root)
+        assert outside.read_bytes() == b"preserve"
+        assert outside.stat().st_mode & 0o7777 == 0o600
+    finally:
+        _restore_test_tree_permissions(root)
+
+
+def test_fd_sealer_rejects_symlink_chain_escape_and_cycle(tmp_path: Path) -> None:
+    """An internal alias cannot conceal an external link or a resolution cycle."""
+    for name, first, second in (
+        ("escape", "alias/target", "../../../outside"),
+        ("cycle", "alias/target", "../Python"),
+    ):
+        root = tmp_path / name
+        alias = root / "alias"
+        alias.mkdir(parents=True)
+        (root / "Python").symlink_to(first)
+        (alias / "target").symlink_to(second)
+        try:
+            result = _seal_tree_helper(root)
+            assert result.returncode != 0
+            assert b"symlink" in result.stderr
+        finally:
+            _restore_test_tree_permissions(root)
+
+
+def test_fd_sealer_detects_name_replacement_between_inventories(
+    tmp_path: Path,
+) -> None:
+    """A post-open rename/replacement cannot become the sealed inventory."""
+    root = tmp_path / "tree"
+    root.mkdir()
+    entry = root / "module.py"
+    entry.write_bytes(b"original")
+    barrier = tmp_path / "seal-barrier"
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            _MODULE.ROOT_SEAL_TREE_CODE,
+            root,
+            str(os.geteuid()),
+            "0555",
+            barrier,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not barrier.with_suffix(".ready").exists():
+            if time.monotonic() >= deadline:
+                pytest.fail("tree sealer did not reach inventory barrier")
+            time.sleep(0.01)
+        root.chmod(0o700)
+        saved = root / "saved.py"
+        entry.rename(saved)
+        entry.write_bytes(b"replacement")
+        barrier.with_suffix(".release").write_bytes(b"release")
+        _stdout, stderr = process.communicate(timeout=5)
+        assert process.returncode != 0
+        assert b"sealed tree changed" in stderr
+        assert saved.read_bytes() == b"original"
+        assert entry.read_bytes() == b"replacement"
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        _restore_test_tree_permissions(root)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS ACL contract")
+def test_fd_sealer_rejects_acl_instead_of_mutating_it(tmp_path: Path) -> None:
+    """Payload ACLs fail closed; the sealer never normalizes them away."""
+    root = tmp_path / "tree"
+    root.mkdir()
+    entry = root / "module.py"
+    entry.write_bytes(b"payload")
+    caller_name = subprocess.run(
+        ["/usr/bin/id", "-un"],
+        stdout=subprocess.PIPE,
+        text=True,
+        check=True,
+        env={"PATH": "/usr/bin:/bin"},
+    ).stdout.strip()
+    subprocess.run(
+        [
+            "/bin/chmod",
+            "+a",
+            f"{caller_name} allow read,write",
+            entry,
+        ],
+        check=True,
+    )
+    try:
+        result = _seal_tree_helper(root)
+        assert result.returncode != 0
+        assert b"nontrivial ACL" in result.stderr
+        listing = subprocess.run(
+            ["/bin/ls", "-le", entry],
+            stdout=subprocess.PIPE,
+            text=True,
+            check=True,
+        ).stdout
+        assert caller_name in listing
+    finally:
+        subprocess.run(["/bin/chmod", "-N", entry], check=True)
+        _restore_test_tree_permissions(root)
 
 
 def test_git_hardlinks_are_permitted_by_exact_digest_binding(tmp_path: Path) -> None:
@@ -2131,6 +2355,10 @@ def test_prefix_journal_precedes_ditto_and_cancellation_cleanup_is_persistent() 
     assert "recover_stale_installations(provenance, staging, token)" in prepare
     assert "cleanup_created_ancestors(provenance, staging, token)" in prepare
     assert "_remove_root_tree(staging)" in prepare
+    assert prepare.count("_seal_root_tree(") == 2
+    assert '"/bin/chmod", "-RN"' not in prepare
+    assert '"/bin/chmod", "-R"' not in prepare
+    assert '"/usr/sbin/chown", "-R"' not in prepare
     wrapper = source[
         source.index("def prepare_macos_installation(") : source.index(
             "def cleanup_macos_installation"
