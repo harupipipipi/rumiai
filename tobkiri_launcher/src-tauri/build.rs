@@ -14,9 +14,9 @@ mod packaging_toolchain;
 mod sealed_python_protocol;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-#[cfg(test)]
 use ed25519_dalek::Signer;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use rand::RngCore;
 use sha2::{Digest, Sha256};
 
 const APP_SOURCE_DIR: &str = "tobkiri_runtime";
@@ -145,14 +145,21 @@ struct DefaultsPackagingRequest<'a> {
     trusted_source_manifest: &'a [u8],
     source_revision: &'a str,
     source_tree: &'a str,
-    staged_root: &'a Path,
-    staged_catalog: &'a Path,
-    expected_release: &'a VerifiedPresentationRelease,
     projection: DefaultsPackagingProjection<'a>,
 }
 
 struct DefaultsPackagingOutput {
-    verified_catalog: PathBuf,
+    default_profile_sha256: String,
+    defaultspack_lock_sha256: String,
+}
+
+#[derive(serde::Serialize)]
+struct SourceProvenance<'a> {
+    schema: &'static str,
+    source_commit: &'a str,
+    source_tree: &'a str,
+    source_clean: bool,
+    source_manifest_sha256: String,
 }
 
 #[cfg(not(test))]
@@ -226,15 +233,17 @@ fn isolated_python_module_command<'a>(
     Ok(command)
 }
 
-fn run_formal_defaults_packaging(
+fn run_formal_defaults_packaging<T, F>(
     request: DefaultsPackagingRequest<'_>,
-) -> io::Result<DefaultsPackagingOutput> {
+    finalize: F,
+) -> io::Result<T>
+where
+    F: FnOnce(DefaultsPackagingOutput) -> io::Result<T>,
+{
     request.projection.validate()?;
     for (label, path) in [
         ("repository root", request.repository_root),
         ("snapshot parent", request.snapshot_parent),
-        ("staged root", request.staged_root),
-        ("staged catalog", request.staged_catalog),
     ] {
         if !path.is_absolute() {
             return Err(invalid_release(format!(
@@ -259,14 +268,14 @@ fn run_formal_defaults_packaging(
         Reaped,
     }
     let mut lease_state = LeaseState::NoChild;
-    let execution = (|| -> io::Result<DefaultsPackagingOutput> {
-        let provenance = serde_json::to_vec(&serde_json::json!({
-            "schema": "io.tobkiri.packaging-source-provenance.v1",
-            "source_commit": request.source_revision,
-            "source_tree": request.source_tree,
-            "source_clean": true,
-            "source_manifest_sha256": raw_byte_digest(request.trusted_source_manifest),
-        }))
+    let execution = (|| -> io::Result<T> {
+        let provenance = serde_json::to_vec(&SourceProvenance {
+            schema: "io.tobkiri.packaging-source-provenance.v1",
+            source_commit: request.source_revision,
+            source_tree: request.source_tree,
+            source_clean: true,
+            source_manifest_sha256: raw_byte_digest(request.trusted_source_manifest),
+        })
         .map_err(io::Error::other)?;
         source.bind_provenance(&provenance)?;
         let python = packaging_toolchain::verified_tool("python")?;
@@ -334,27 +343,9 @@ fn run_formal_defaults_packaging(
         let lock = request.projection.bundle_root.join("bundle.lock.json");
         let profile_digest = byte_digest(&fs::read(&profile)?);
         let lock_digest = byte_digest(&fs::read(&lock)?);
-        if profile_digest != request.expected_release.default_profile_sha256
-            || lock_digest != request.expected_release.defaultspack_lock_sha256
-        {
-            return Err(invalid_release(format!(
-                "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: packaged Defaults identity drift: profile={profile_digest}, lock={lock_digest}"
-            )));
-        }
-        let staged_verified =
-            verify_presentation_release_at(request.staged_root, request.staged_catalog)?;
-        if staged_verified.default_profile_sha256 != request.expected_release.default_profile_sha256
-            || staged_verified.defaultspack_lock_sha256
-                != request.expected_release.defaultspack_lock_sha256
-            || staged_verified.artifact_ref != request.expected_release.artifact_ref
-            || staged_verified.entrypoint != request.expected_release.entrypoint
-        {
-            return Err(invalid_release(format!(
-                "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: staged presentation projection differs from its verified snapshot"
-            )));
-        }
-        Ok(DefaultsPackagingOutput {
-            verified_catalog: request.staged_catalog.to_path_buf(),
+        finalize(DefaultsPackagingOutput {
+            default_profile_sha256: profile_digest,
+            defaultspack_lock_sha256: lock_digest,
         })
     })();
     if lease_state == LeaseState::RunningUncontained {
@@ -861,6 +852,15 @@ fn valid_sha256(value: Option<&serde_json::Value>) -> bool {
 
 fn raw_byte_digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        write!(&mut encoded, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    encoded
 }
 
 fn portable_relative_path(path: &Path) -> String {
@@ -1719,6 +1719,147 @@ fn is_intermediate_shell_build() -> bool {
             == Some("tobkiri-shell")
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CoreBuildStage {
+    IntermediateShell,
+    FinalApplication,
+}
+
+fn core_build_stage() -> CoreBuildStage {
+    if is_intermediate_shell_build() {
+        CoreBuildStage::IntermediateShell
+    } else {
+        CoreBuildStage::FinalApplication
+    }
+}
+
+struct ShellArtifactAuthority {
+    path: PathBuf,
+    artifact_id: String,
+    artifact_ref: String,
+    entrypoint: String,
+    bundle_identity: String,
+    platform: String,
+    architecture: String,
+}
+
+#[cfg(target_os = "macos")]
+struct CoreTransactionGuard {
+    path: PathBuf,
+    identity: (u64, u64),
+    armed: bool,
+}
+
+#[cfg(target_os = "macos")]
+impl CoreTransactionGuard {
+    fn create(parent: &Path) -> io::Result<Self> {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let mut nonce = [0_u8; 16];
+        rand::rngs::OsRng.fill_bytes(&mut nonce);
+        let name = format!(".tobkiri-core-presentation-{}", hex_bytes(&nonce));
+        let path = parent.join(name);
+        fs::create_dir(&path)?;
+        let initialized = (|| {
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o700))?;
+            let metadata = fs::symlink_metadata(&path)?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(invalid_release("Core transaction is not a real directory"));
+            }
+            Ok((metadata.dev(), metadata.ino()))
+        })();
+        match initialized {
+            Ok(identity) => Ok(Self {
+                path,
+                identity,
+                armed: true,
+            }),
+            Err(error) => Err(invalid_release(format!(
+                "{error}; Core transaction initialization failed and residue was retained fail-closed"
+            ))),
+        }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn cleanup(mut self) -> io::Result<()> {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = fs::symlink_metadata(&self.path)?;
+        if metadata.file_type().is_symlink()
+            || !metadata.is_dir()
+            || (metadata.dev(), metadata.ino()) != self.identity
+        {
+            return Err(invalid_release(
+                "Core transaction identity changed; residue retained fail-closed",
+            ));
+        }
+        fs::remove_dir_all(&self.path)?;
+        self.armed = false;
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for CoreTransactionGuard {
+    fn drop(&mut self) {
+        // Explicit cleanup composes diagnostics. Drop never performs a path-based retry.
+        if self.armed {}
+    }
+}
+
+fn resolve_core_shell_artifact(repository_root: &Path) -> io::Result<ShellArtifactAuthority> {
+    let (platform, architecture) = expected_target()?;
+    let target = std::env::var("TARGET")
+        .map_err(|_| invalid_release("Cargo TARGET is missing for Shell resolution"))?;
+    let target_root = resolve_cargo_target_dir(repository_root)?;
+    let (bundle_dir, filename, artifact_ref, entrypoint) = match platform.as_str() {
+        "macos" => (
+            "macos",
+            "Tobkiri.app",
+            "Tobkiri.app",
+            "Tobkiri.app/Contents/MacOS/tobkiri-shell",
+        ),
+        "linux" => (
+            "appimage",
+            "Tobkiri.AppImage",
+            "Tobkiri.AppImage",
+            "Tobkiri.AppImage",
+        ),
+        "windows" => (
+            "msi",
+            "tobkiri-shell.exe",
+            "tobkiri-shell.exe",
+            "tobkiri-shell.exe",
+        ),
+        _ => return Err(invalid_release("unsupported Shell platform")),
+    };
+    let bundle_root = target_root
+        .join(&target)
+        .join("release/bundle")
+        .join(bundle_dir);
+    require_directory(&bundle_root, "intermediate Shell bundle directory")?;
+    let path = bundle_root.join(filename);
+    let metadata = fs::symlink_metadata(&path)?;
+    if metadata.file_type().is_symlink()
+        || (platform == "macos" && !metadata.is_dir())
+        || (platform != "macos" && !metadata.is_file())
+    {
+        return Err(invalid_release(format!(
+            "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: intermediate Shell artifact has an invalid type"
+        )));
+    }
+    Ok(ShellArtifactAuthority {
+        path,
+        artifact_id: format!("shell.tauri.default.{platform}-{architecture}"),
+        artifact_ref: artifact_ref.to_owned(),
+        entrypoint: entrypoint.to_owned(),
+        bundle_identity: "io.tobkiri.shell.tauri".to_owned(),
+        platform,
+        architecture,
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReleaseTreeEntry {
     path: String,
@@ -2000,8 +2141,13 @@ fn verify_release_artifact_scope(root: &Path, artifact: &Path) -> io::Result<()>
 }
 
 fn stage_presentation_release(staged_root: &Path) -> io::Result<Option<PathBuf>> {
+    if core_build_stage() == CoreBuildStage::FinalApplication
+        && std::env::var("DEP_TAURI_DEV").ok().as_deref() != Some("true")
+    {
+        return produce_and_stage_core_presentation_release(staged_root);
+    }
     let Some(raw_root) = std::env::var_os(PRESENTATION_RELEASE_ROOT_ENV) else {
-        if is_intermediate_shell_build() {
+        if core_build_stage() == CoreBuildStage::IntermediateShell {
             println!(
                 "cargo:warning=intermediate Tauri Shell build has no Launcher Presentation release; this binary is only an input to the sealed outer package"
             );
@@ -2009,18 +2155,227 @@ fn stage_presentation_release(staged_root: &Path) -> io::Result<Option<PathBuf>>
             println!("cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_ID=");
             return Ok(None);
         }
-        if std::env::var("DEP_TAURI_DEV").ok().as_deref() != Some("true") {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("production package requires {PRESENTATION_RELEASE_ROOT_ENV}; a null-metadata presentation catalog is never a package input"),
-            ));
-        }
         println!("cargo:warning=development build has no sealed Presentation release; the uninstalled catalog is debug-only and cannot be packaged");
         println!("cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_B64=");
         println!("cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_ID=");
         return Ok(None);
     };
     stage_presentation_release_at(staged_root, &PathBuf::from(raw_root))
+}
+
+fn write_canonical_json(path: &Path, value: &serde_json::Value) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut bytes = serde_json::to_vec(value).map_err(io::Error::other)?;
+    bytes.push(b'\n');
+    fs::write(path, bytes)
+}
+
+fn produce_and_stage_core_presentation_release(staged_root: &Path) -> io::Result<Option<PathBuf>> {
+    if core_build_stage() != CoreBuildStage::FinalApplication {
+        return Err(invalid_release(
+            "Core presentation producer may run only for the final application stage",
+        ));
+    }
+    #[cfg(not(target_os = "macos"))]
+    return Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "Core-owned final presentation production currently requires macOS FD-anchored packaging",
+    ));
+    #[cfg(target_os = "macos")]
+    {
+        let project_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repository_root = project_dir
+            .parent()
+            .and_then(Path::parent)
+            .ok_or_else(|| invalid_release("Launcher manifest has no repository root"))?
+            .canonicalize()?;
+        let shell = resolve_core_shell_artifact(&repository_root)?;
+        let (source_identity, source_revision) = current_source_provenance()?;
+        let source_tree = current_source_tree(&repository_root, &source_revision)?;
+        let trusted_manifest = committed_source_manifest(&repository_root, &source_revision)?;
+        let parent = staged_root
+            .parent()
+            .ok_or_else(|| invalid_release("staged root has no Core transaction parent"))?;
+        let transaction = CoreTransactionGuard::create(parent)?;
+        let transaction_path = transaction.path().to_owned();
+        let result = (|| -> io::Result<Option<PathBuf>> {
+            let release_root = transaction_path.join("release");
+            let bundle_root = release_root.join("ecosystem/defaultspack/v4");
+            let artifact_root = release_root.join("bundled/presentation-artifacts");
+            let installed_container = artifact_root.join(&shell.artifact_id);
+            fs::create_dir_all(&installed_container)?;
+            let installed_artifact = installed_container.join(
+                Path::new(&shell.artifact_ref)
+                    .file_name()
+                    .ok_or_else(|| invalid_release("Shell artifact ref has no filename"))?,
+            );
+            if shell.path.is_dir() {
+                copy_dir_recursive(&shell.path, &installed_artifact)?;
+            } else {
+                copy_file(&shell.path, &installed_artifact)?;
+            }
+            let snapshot_parent = transaction_path.join("source-snapshots");
+            return run_formal_defaults_packaging(
+                DefaultsPackagingRequest {
+                    repository_root: &repository_root,
+                    snapshot_parent: &snapshot_parent,
+                    trusted_source_manifest: &trusted_manifest,
+                    source_revision: &source_revision,
+                    source_tree: &source_tree,
+                    projection: DefaultsPackagingProjection {
+                        source_artifact: &installed_artifact,
+                        bundle_root: &bundle_root,
+                        artifact_root: &release_root
+                            .join("ecosystem/defaultspack/platform-artifacts"),
+                        relative_path: &shell.artifact_ref,
+                        entrypoint: &shell.entrypoint,
+                        platform: &shell.platform,
+                        architecture: &shell.architecture,
+                        bundle_identity: &shell.bundle_identity,
+                    },
+                },
+                |projection| {
+                    let (artifact_digest, artifact_size) =
+                        artifact_integrity::digest_and_size(&installed_artifact)?;
+                    let entrypoint_path =
+                        release_entrypoint(&installed_artifact, &shell.entrypoint)?;
+                    let entrypoint_digest = byte_digest(&fs::read(entrypoint_path)?);
+                    let relative = installed_artifact
+                        .strip_prefix(&release_root)
+                        .map_err(|_| invalid_release("Core artifact escaped release root"))?
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    let mut catalog: serde_json::Value =
+                        serde_json::from_slice(&read_regular_file(
+                            &project_dir.join("bundled/presentation_catalog.json"),
+                            "canonical presentation catalog",
+                        )?)?;
+                    catalog["default_profile_digest"] =
+                        serde_json::Value::String(projection.default_profile_sha256.clone());
+                    let variants = catalog["shell_providers"]
+                        .as_array_mut()
+                        .and_then(|providers| {
+                            providers
+                                .iter_mut()
+                                .find(|provider| provider["provider_id"] == "shell.tauri.default")
+                        })
+                        .and_then(|provider| provider["artifact_variants"].as_array_mut())
+                        .ok_or_else(|| {
+                            invalid_release("canonical catalog has no Shell variants")
+                        })?;
+                    let variant = variants
+                        .iter_mut()
+                        .find(|variant| variant["artifact_id"] == shell.artifact_id)
+                        .ok_or_else(|| {
+                            invalid_release("canonical catalog has no target Shell variant")
+                        })?;
+                    variant["path"] = serde_json::Value::String(relative.clone());
+                    variant["sha256"] = serde_json::Value::String(artifact_digest.clone());
+                    variant["entrypoint_sha256"] =
+                        serde_json::Value::String(entrypoint_digest.clone());
+                    variant["size"] = serde_json::Value::from(artifact_size);
+                    variant["source_identity"] = serde_json::Value::String(source_identity.clone());
+                    variant["source_revision"] = serde_json::Value::String(source_revision.clone());
+                    let index = serde_json::json!({
+                        "schema": PRESENTATION_INDEX_SCHEMA, "artifact_id": shell.artifact_id,
+                        "path": relative, "sha256": artifact_digest, "entrypoint_sha256": entrypoint_digest,
+                        "size": artifact_size, "platform": shell.platform, "architecture": shell.architecture,
+                        "source_identity": source_identity, "source_revision": source_revision,
+                    });
+                    let index_digest = canonical_value_digest(&index, "Core artifact index")?;
+                    let catalog_revision = canonical_value_digest(&catalog, "Core catalog")?;
+                    let lock_body = serde_json::json!({
+                        "schema": PRESENTATION_LOCK_SCHEMA, "catalog_revision": catalog_revision,
+                        "artifact_index_sha256": index_digest, "artifact_id": shell.artifact_id,
+                        "artifact_sha256": artifact_digest, "entrypoint_sha256": entrypoint_digest,
+                        "platform": shell.platform, "architecture": shell.architecture,
+                        "source_identity": source_identity, "source_revision": source_revision,
+                    });
+                    let mut lock = lock_body.clone();
+                    lock["lock_revision"] =
+                        serde_json::Value::String(canonical_value_digest(&lock_body, "Core lock")?);
+                    catalog["release_binding"] = serde_json::json!({
+                        "schema": PRESENTATION_RELEASE_SCHEMA,
+                        "artifact_index_path": "bundled/shell_artifact_index.v4.json",
+                        "artifact_index_sha256": index_digest,
+                        "profile_lock_path": "bundled/shell_profile_lock.v4.json",
+                        "profile_lock_sha256": canonical_value_digest(&lock, "Core lock")?,
+                        "catalog_revision": catalog_revision, "artifact_id": shell.artifact_id,
+                        "source_identity": source_identity, "source_revision": source_revision,
+                        "platform": shell.platform, "architecture": shell.architecture,
+                    });
+                    let catalog_path = release_root.join("presentation_catalog.json");
+                    let index_path = release_root
+                        .join("bundled")
+                        .join(PRESENTATION_INDEX_FILENAME);
+                    let lock_path = release_root
+                        .join("bundled")
+                        .join(PRESENTATION_LOCK_FILENAME);
+                    write_canonical_json(&catalog_path, &catalog)?;
+                    write_canonical_json(&index_path, &index)?;
+                    write_canonical_json(&lock_path, &lock)?;
+                    let mut signing_seed = [0_u8; 32];
+                    rand::rngs::OsRng.fill_bytes(&mut signing_seed);
+                    let signing_key = ed25519_dalek::SigningKey::from_bytes(&signing_seed);
+                    let key_id = format!("core:{source_revision}:{}", shell.artifact_id);
+                    let public_key = BASE64.encode(signing_key.verifying_key().to_bytes());
+                    let catalog_digest = byte_digest(&fs::read(&catalog_path)?);
+                    let index_file_digest = byte_digest(&fs::read(&index_path)?);
+                    let lock_file_digest = byte_digest(&fs::read(&lock_path)?);
+                    let message = [
+                        PRESENTATION_RELEASE_SCHEMA,
+                        &catalog_digest,
+                        &index_file_digest,
+                        &lock_file_digest,
+                        &projection.default_profile_sha256,
+                        &projection.defaultspack_lock_sha256,
+                        &source_identity,
+                        &source_revision,
+                        &shell.platform,
+                        &shell.architecture,
+                        &shell.artifact_id,
+                        &key_id,
+                    ]
+                    .join("\0");
+                    let release = serde_json::json!({
+                        "schema": PRESENTATION_RELEASE_SCHEMA, "catalog_path": "bundled/presentation_catalog.json",
+                        "catalog_sha256": catalog_digest, "artifact_index_path": "bundled/shell_artifact_index.v4.json",
+                        "artifact_index_sha256": index_file_digest, "profile_lock_path": "bundled/shell_profile_lock.v4.json",
+                        "profile_lock_sha256": lock_file_digest,
+                        "default_profile_path": "ecosystem/defaultspack/v4/defaults.profile.v4.json",
+                        "default_profile_sha256": projection.default_profile_sha256,
+                        "defaultspack_lock_path": "ecosystem/defaultspack/v4/bundle.lock.json",
+                        "defaultspack_lock_sha256": projection.defaultspack_lock_sha256,
+                        "artifact_id": shell.artifact_id, "platform": shell.platform, "architecture": shell.architecture,
+                        "source_identity": source_identity, "source_revision": source_revision,
+                        "key_id": key_id, "public_key": public_key,
+                        "signature": BASE64.encode(signing_key.sign(message.as_bytes()).to_bytes()),
+                    });
+                    write_canonical_json(
+                        &release_root
+                            .join("bundled")
+                            .join(PRESENTATION_RELEASE_FILENAME),
+                        &release,
+                    )?;
+                    verify_presentation_release(&release_root)?;
+                    stage_core_verified_release(staged_root, &release_root)
+                },
+            );
+        })();
+        let cleanup = transaction.cleanup();
+        match (result, cleanup) {
+            (Ok(output), Ok(())) => Ok(output),
+            (Err(error), Ok(())) => Err(error),
+            (Ok(_), Err(cleanup)) => Err(invalid_release(format!(
+                "Core presentation cleanup failed: {cleanup}"
+            ))),
+            (Err(error), Err(cleanup)) => Err(invalid_release(format!(
+                "{error}; Core presentation cleanup also failed: {cleanup}"
+            ))),
+        }
+    }
 }
 
 fn stage_presentation_release_at(
@@ -2124,33 +2479,101 @@ fn stage_presentation_release_from_snapshot(
             .unwrap_or_else(|| staged_root.join(".verified-source-snapshots"));
         let artifact_root = staged_root.join("ecosystem/defaultspack/platform-artifacts");
         let staged_catalog = staged_bundled.join(PRESENTATION_CATALOG_FILENAME);
-        let output = run_formal_defaults_packaging(DefaultsPackagingRequest {
-            repository_root: &repository_root,
-            snapshot_parent: &snapshot_parent,
-            trusted_source_manifest: &trusted_source_manifest,
-            source_revision: &source_revision,
-            source_tree: &source_tree,
-            staged_root,
-            staged_catalog: &staged_catalog,
-            expected_release: &verified,
-            projection: DefaultsPackagingProjection {
-                source_artifact: &verified.artifact_path,
-                bundle_root: &bundle_root,
-                artifact_root: &artifact_root,
-                relative_path: &verified.artifact_ref,
-                entrypoint: &verified.entrypoint,
-                platform: &verified.platform,
-                architecture: &verified.architecture,
-                bundle_identity: &verified.bundle_identity,
+        return run_formal_defaults_packaging(
+            DefaultsPackagingRequest {
+                repository_root: &repository_root,
+                snapshot_parent: &snapshot_parent,
+                trusted_source_manifest: &trusted_source_manifest,
+                source_revision: &source_revision,
+                source_tree: &source_tree,
+                projection: DefaultsPackagingProjection {
+                    source_artifact: &verified.artifact_path,
+                    bundle_root: &bundle_root,
+                    artifact_root: &artifact_root,
+                    relative_path: &verified.artifact_ref,
+                    entrypoint: &verified.entrypoint,
+                    platform: &verified.platform,
+                    architecture: &verified.architecture,
+                    bundle_identity: &verified.bundle_identity,
+                },
             },
-        })?;
-        if output.verified_catalog != staged_catalog {
-            return Err(invalid_release(format!(
-                "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: verified output path changed"
-            )));
-        }
+            |output| {
+                if output.default_profile_sha256 != verified.default_profile_sha256
+                    || output.defaultspack_lock_sha256 != verified.defaultspack_lock_sha256
+                {
+                    return Err(invalid_release(format!(
+                    "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: projection differs from signed release identities"
+                )));
+                }
+                let staged_verified = verify_presentation_release_at(staged_root, &staged_catalog)?;
+                if staged_verified.artifact_ref != verified.artifact_ref
+                    || staged_verified.entrypoint != verified.entrypoint
+                {
+                    return Err(invalid_release(
+                        "complete staged presentation release differs from its verified snapshot",
+                    ));
+                }
+                Ok(Some(staged_catalog))
+            },
+        );
     }
     let staged_catalog = staged_bundled.join(PRESENTATION_CATALOG_FILENAME);
+    Ok(Some(staged_catalog))
+}
+
+fn stage_core_verified_release(
+    staged_root: &Path,
+    release_root: &Path,
+) -> io::Result<Option<PathBuf>> {
+    let verified = verify_presentation_release(release_root)?;
+    let staged_bundled = staged_root.join("bundled");
+    let release_bundled = release_root.join("bundled");
+    copy_file(
+        &release_root.join(PRESENTATION_CATALOG_FILENAME),
+        &staged_bundled.join(PRESENTATION_CATALOG_FILENAME),
+    )?;
+    copy_dir_recursive(
+        &release_bundled.join("presentation-artifacts"),
+        &staged_bundled.join("presentation-artifacts"),
+    )?;
+    for filename in [
+        PRESENTATION_RELEASE_FILENAME,
+        PRESENTATION_INDEX_FILENAME,
+        PRESENTATION_LOCK_FILENAME,
+    ] {
+        copy_file(
+            &release_bundled.join(filename),
+            &staged_bundled.join(filename),
+        )?;
+    }
+    copy_dir_recursive(
+        &release_root.join("ecosystem/defaultspack/v4"),
+        &staged_root.join("ecosystem/defaultspack/v4"),
+    )?;
+    let platform_artifacts = release_root.join("ecosystem/defaultspack/platform-artifacts");
+    if platform_artifacts.is_dir() {
+        copy_dir_recursive(
+            &platform_artifacts,
+            &staged_root.join("ecosystem/defaultspack/platform-artifacts"),
+        )?;
+    }
+    let staged_catalog = staged_bundled.join(PRESENTATION_CATALOG_FILENAME);
+    let staged_verified = verify_presentation_release_at(staged_root, &staged_catalog)?;
+    if staged_verified.artifact_ref != verified.artifact_ref
+        || staged_verified.entrypoint != verified.entrypoint
+    {
+        return Err(invalid_release(
+            "Core-staged presentation release differs from its verified authority",
+        ));
+    }
+    println!(
+        "cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_B64={}",
+        verified.public_key
+    );
+    println!(
+        "cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_ID={}",
+        verified.key_id
+    );
     Ok(Some(staged_catalog))
 }
 
@@ -3163,6 +3586,40 @@ mod tests {
         assert!(cleanup_authorized(Lifecycle::NoChild));
         assert!(cleanup_authorized(Lifecycle::Reaped));
         assert!(!cleanup_authorized(Lifecycle::RunningUncontained));
+    }
+
+    #[test]
+    fn core_build_stage_distinguishes_shell_from_final_application() {
+        let shell_config = serde_json::json!({
+            "identifier": "io.tobkiri.shell.tauri",
+            "mainBinaryName": "tobkiri-shell",
+        });
+        let final_config = serde_json::json!({
+            "identifier": "io.tobkiri.launcher",
+            "mainBinaryName": "tobkiri-launcher",
+        });
+        let classify = |value: &serde_json::Value| {
+            if value["identifier"] == "io.tobkiri.shell.tauri"
+                && value["mainBinaryName"] == "tobkiri-shell"
+            {
+                CoreBuildStage::IntermediateShell
+            } else {
+                CoreBuildStage::FinalApplication
+            }
+        };
+        assert_eq!(classify(&shell_config), CoreBuildStage::IntermediateShell);
+        assert_eq!(classify(&final_config), CoreBuildStage::FinalApplication);
+    }
+
+    #[test]
+    fn production_stage_does_not_require_external_release_root() {
+        let source = include_str!("build.rs");
+        let production_gate = source
+            .split("fn stage_presentation_release(")
+            .nth(1)
+            .expect("stage function should exist");
+        assert!(production_gate.contains("produce_and_stage_core_presentation_release"));
+        assert!(!production_gate.contains("production package requires"));
     }
 
     #[test]
