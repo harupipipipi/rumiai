@@ -2,10 +2,23 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 from pathlib import Path
 
-from scripts.quality.scan_launcher_frontend_routes import scan_panel
+
+ROOT = Path(__file__).resolve().parents[2]
+SCANNER_PATH = ROOT / "scripts" / "quality" / "scan_launcher_frontend_routes.py"
+SPEC = importlib.util.spec_from_file_location(
+    "scan_launcher_frontend_routes_test_module", SCANNER_PATH
+)
+if SPEC is None or SPEC.loader is None:
+    raise RuntimeError(f"Launcher route scanner is unavailable: {SCANNER_PATH}")
+MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
+SPEC.loader.exec_module(MODULE)
+scan_panel = MODULE.scan_panel
 
 
 def _fixture(tmp_path: Path, source: str) -> tuple[Path, Path]:
