@@ -140,7 +140,17 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
         assert "source_status" in build_contents
         assert "TOBKIRI_PACKAGING_SOURCE_PROVENANCE_FILE" not in build_contents
         assert "--source-provenance-file" not in build_contents
-        assert "--source-commit" not in build_contents
+        assert "/usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py" in build_contents
+        assert (
+            "--provenance .github/toolchains/packaging-python-macos.v1.json"
+            in build_contents
+        )
+        assert build_contents.count('--source-commit "$GITHUB_SHA"') == 1
+        assert (
+            '--transaction-token "$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"'
+            in build_contents
+        )
+        assert "--prepare-macos-installation" in build_contents
         assert "--source-tree" not in build_contents
         assert "--source-clean" not in build_contents
         assert 'PYTHONDONTWRITEBYTECODE: "1"' in contents
