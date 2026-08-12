@@ -1030,15 +1030,26 @@ def _framework_component_fixture(
     ]
     if duplicate:
         references.append((f"{framework_id}.decoy", "Decoy_Framework.pkg"))
-    distribution_refs = "".join(
-        f'<pkg-ref id="{identifier}">#{name}</pkg-ref>'
+    choice_refs = "".join(
+        f'<choice id="{identifier}"><pkg-ref id="{identifier}"/></choice>'
+        for identifier, _name in references
+    )
+    path_refs = "".join(
+        f'<pkg-ref id="{identifier}" version="0" auth="Root" '
+        'onConclusion="none" installKBytes="1" updateKBytes="0">'
+        f"#{name}</pkg-ref>"
         for identifier, name in references
+    )
+    metadata_refs = "".join(
+        f'<pkg-ref id="{identifier}"><bundle-version/></pkg-ref>'
+        for identifier, _name in references
     )
     root.mkdir()
     (root / "Resources").mkdir()
     (root / "Distribution").write_text(
         '<?xml version="1.0"?><installer-gui-script>'
-        f"{distribution_refs}</installer-gui-script>",
+        f'<choice id="default"/>{choice_refs}{path_refs}{metadata_refs}'
+        "</installer-gui-script>",
         encoding="utf-8",
     )
     for identifier, name in references:
@@ -1051,7 +1062,7 @@ def _framework_component_fixture(
             actual_identifier = framework_id
         if name == "Python_Framework.pkg":
             package_info = (
-                f'<pkg-info identifier="{actual_identifier}" auth="root" '
+                f'<pkg-info identifier="{actual_identifier}" version="0" auth="root" '
                 'relocatable="false" '
                 'install-location="/Library/Frameworks/Python.framework">'
                 '<payload numberOfFiles="4018" installKBytes="109549"/>'
@@ -1069,7 +1080,7 @@ def _framework_component_fixture(
                 "#!/bin/sh\ntouch should-never-exist\n", encoding="utf-8"
             )
         else:
-            package_info = f'<pkg-info identifier="{actual_identifier}"/>'
+            package_info = f'<pkg-info identifier="{actual_identifier}" version="0"/>'
             (package / "Payload").write_bytes(b"irrelevant application payload")
         (package / "PackageInfo").write_text(package_info, encoding="utf-8")
     if unknown:
@@ -1127,6 +1138,81 @@ def test_framework_component_selector_rejects_decoy_or_wrong_component(
         wrong_identifier=failure == "wrong_identifier",
     )
     with pytest.raises(ToolIdentityError, match="component|identifier"):
+        _MODULE._select_framework_component(metadata, provenance)
+
+
+@pytest.mark.parametrize(
+    "violation",
+    [
+        "absolute",
+        "duplicate",
+        "href",
+        "inconsistent_choice",
+        "missing_metadata",
+        "traversal",
+        "url",
+    ],
+)
+def test_framework_component_selector_rejects_noncanonical_distribution_refs(
+    tmp_path: Path, violation: str
+) -> None:
+    """Every Distribution pkg-ref has one exact role, attribute set, ID and path."""
+    metadata = tmp_path / "metadata"
+    provenance, _expected = _framework_component_fixture(metadata)
+    distribution_path = metadata / "Distribution"
+    distribution = _MODULE.ET.parse(distribution_path)
+    root = distribution.getroot()
+    framework_id = "org.python.Python.PythonFramework-3.13"
+    path_reference = next(
+        reference
+        for reference in root.findall("pkg-ref")
+        if (reference.text or "").strip() == "#Python_Framework.pkg"
+    )
+    if violation == "absolute":
+        path_reference.text = "#/Python_Framework.pkg"
+    elif violation == "duplicate":
+        root.append(_MODULE.ET.fromstring(_MODULE.ET.tostring(path_reference)))
+    elif violation == "href":
+        path_reference.set("href", "file:///private/tmp/attacker.pkg")
+    elif violation == "inconsistent_choice":
+        choice = next(
+            candidate
+            for candidate in root.findall("choice")
+            if candidate.get("id") == framework_id
+        )
+        choice.find("pkg-ref").set("id", "attacker.component")
+    elif violation == "missing_metadata":
+        metadata_reference = next(
+            reference
+            for reference in root.findall("pkg-ref")
+            if reference.get("id") == framework_id
+            and not (reference.text or "").strip()
+        )
+        root.remove(metadata_reference)
+    elif violation == "traversal":
+        path_reference.text = "#../Python_Framework.pkg"
+    else:
+        path_reference.text = "https://attacker.invalid/Python_Framework.pkg"
+    distribution.write(distribution_path, encoding="utf-8", xml_declaration=True)
+    with pytest.raises(ToolIdentityError, match="component|reference"):
+        _MODULE._select_framework_component(metadata, provenance)
+
+
+@pytest.mark.parametrize("version", [None, "1", "3.13.13"])
+def test_framework_component_selector_requires_actual_package_version(
+    tmp_path: Path, version: str | None
+) -> None:
+    """PackageInfo must carry the exact component version pinned by Distribution."""
+    metadata = tmp_path / "metadata"
+    provenance, package = _framework_component_fixture(metadata)
+    package_info = package / "PackageInfo"
+    document = _MODULE.ET.parse(package_info)
+    if version is None:
+        del document.getroot().attrib["version"]
+    else:
+        document.getroot().set("version", version)
+    document.write(package_info, encoding="utf-8", xml_declaration=True)
+    with pytest.raises(ToolIdentityError, match="version"):
         _MODULE._select_framework_component(metadata, provenance)
 
 

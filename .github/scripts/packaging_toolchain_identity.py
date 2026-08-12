@@ -2290,29 +2290,121 @@ def _select_framework_component(
     )
     if distribution.tag != "installer-gui-script":
         raise ToolIdentityError("unexpected installer Distribution root")
+    path_attributes = {
+        "id",
+        "version",
+        "auth",
+        "onConclusion",
+        "installKBytes",
+        "updateKBytes",
+    }
+    identifier_attributes = {"id"}
     references: dict[str, str] = {}
+    component_versions: dict[str, str] = {}
     referenced_names: set[str] = set()
-    for reference in distribution.iter("pkg-ref"):
+    root_references = distribution.findall("pkg-ref")
+    path_references = [
+        reference for reference in root_references if (reference.text or "").strip()
+    ]
+    metadata_references = [
+        reference for reference in root_references if not (reference.text or "").strip()
+    ]
+    for reference in path_references:
         text = (reference.text or "").strip()
-        if not text:
-            continue
         identifier = reference.get("id")
         name = text[1:] if text.startswith("#") else ""
+        version = reference.get("version")
+        install_kbytes = reference.get("installKBytes") or ""
+        update_kbytes = reference.get("updateKBytes") or ""
         if (
-            not isinstance(identifier, str)
+            set(reference.attrib) != path_attributes
+            or list(reference)
+            or not isinstance(identifier, str)
             or not identifier
+            or len(identifier) > 256
+            or any(
+                character
+                not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+                for character in identifier
+            )
             or not name.endswith(".pkg")
+            or len(name) > 128
+            or any(
+                character
+                not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+                for character in name
+            )
             or PurePosixPath(name).name != name
             or identifier in references
             or name in referenced_names
+            or version != "0"
+            or reference.get("auth") != "Root"
+            or reference.get("onConclusion") != "none"
+            or not install_kbytes.isdigit()
+            or len(install_kbytes) > 10
+            or not 0 <= int(install_kbytes) <= 2_000_000
+            or not update_kbytes.isdigit()
+            or len(update_kbytes) > 10
+            or int(update_kbytes) != 0
         ):
             raise ToolIdentityError("ambiguous or unsafe installer component reference")
         references[identifier] = name
+        component_versions[identifier] = version
         referenced_names.add(name)
     if not references or len(references) > 64:
         raise ToolIdentityError("invalid installer component reference count")
     if references.get(expected_id) != expected_name:
         raise ToolIdentityError("traditional Framework component reference mismatch")
+    metadata_ids: set[str] = set()
+    for reference in metadata_references:
+        children = list(reference)
+        identifier = reference.get("id")
+        if (
+            set(reference.attrib) != identifier_attributes
+            or not isinstance(identifier, str)
+            or identifier not in references
+            or identifier in metadata_ids
+            or len(children) != 1
+            or children[0].tag != "bundle-version"
+            or children[0].attrib
+            or (children[0].text or "").strip()
+        ):
+            raise ToolIdentityError(
+                "inconsistent installer component metadata reference"
+            )
+        metadata_ids.add(identifier)
+    choice_ids: set[str] = set()
+    choice_references: list[ET.Element] = []
+    for choice in distribution.findall("choice"):
+        nested = choice.findall("pkg-ref")
+        if not nested:
+            if choice.get("id") != "default":
+                raise ToolIdentityError("installer choice lacks a component reference")
+            continue
+        if len(nested) != 1:
+            raise ToolIdentityError("installer choice component reference is ambiguous")
+        reference = nested[0]
+        choice_references.append(reference)
+        identifier = reference.get("id")
+        if (
+            set(reference.attrib) != identifier_attributes
+            or not isinstance(identifier, str)
+            or identifier != choice.get("id")
+            or identifier not in references
+            or identifier in choice_ids
+            or (reference.text or "").strip()
+            or list(reference)
+        ):
+            raise ToolIdentityError("inconsistent installer choice component reference")
+        choice_ids.add(identifier)
+    categorized = path_references + metadata_references + choice_references
+    if (
+        metadata_ids != set(references)
+        or choice_ids != set(references)
+        or len(categorized) != len(list(distribution.iter("pkg-ref")))
+        or len({id(reference) for reference in categorized}) != len(categorized)
+    ):
+        raise ToolIdentityError("installer component references are incomplete")
     direct_entries = {entry.name: entry for entry in metadata_root.iterdir()}
     package_names = {name for name in direct_entries if name.endswith(".pkg")}
     if package_names != referenced_names or set(direct_entries) != {
@@ -2346,8 +2438,9 @@ def _select_framework_component(
             info.tag != "pkg-info"
             or actual_identifier != identifier
             or actual_identifier in identifiers
+            or info.get("version") != component_versions[identifier]
         ):
-            raise ToolIdentityError("component PackageInfo identifier mismatch")
+            raise ToolIdentityError("component PackageInfo identity/version mismatch")
         identifiers.add(actual_identifier)
         if identifier == expected_id:
             bundles = info.findall("bundle")
