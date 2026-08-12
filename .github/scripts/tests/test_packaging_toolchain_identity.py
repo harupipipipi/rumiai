@@ -373,6 +373,50 @@ def test_fd_sealer_preserves_regular_bytes_and_extended_attributes(
         _restore_test_tree_permissions(root)
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS xattr contract")
+def test_fd_sealer_preserves_symlink_extended_attributes_without_following(
+    tmp_path: Path,
+) -> None:
+    """Symlink xattrs are inventoried with XATTR_NOFOLLOW and remain unchanged."""
+    root = tmp_path / "tree"
+    root.mkdir()
+    link = root / "Python"
+    link.symlink_to("missing-python")
+    written = subprocess.run(
+        [
+            "/usr/bin/xattr",
+            "-s",
+            "-w",
+            "com.tobkiri.seal-test",
+            "preserve-link",
+            link,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if written.returncode != 0:
+        pytest.skip("test filesystem does not support symlink xattrs")
+    try:
+        result = _seal_tree_helper(root, normalize_ownership=True)
+        assert result.returncode == 0, result.stderr
+        assert link.is_symlink() and os.readlink(link) == "missing-python"
+        attribute = subprocess.run(
+            [
+                "/usr/bin/xattr",
+                "-s",
+                "-p",
+                "com.tobkiri.seal-test",
+                link,
+            ],
+            stdout=subprocess.PIPE,
+            check=True,
+        ).stdout
+        assert attribute == b"preserve-link\n"
+    finally:
+        _restore_test_tree_permissions(root)
+
+
 @pytest.mark.parametrize("target", ["/private/tmp/outside", "../../outside"])
 def test_fd_sealer_rejects_external_symlink_without_touching_target(
     tmp_path: Path, target: str
@@ -529,6 +573,77 @@ def test_fd_sealer_detects_symlink_replacement_between_inventories(
         assert b"changed" in stderr
         assert os.readlink(saved) == "original-missing"
         assert os.readlink(link) == "replacement-missing"
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        _restore_test_tree_permissions(root)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS xattr contract")
+@pytest.mark.parametrize("mutation", ["added", "removed", "changed"])
+def test_fd_sealer_detects_xattr_mutation_between_phases(
+    tmp_path: Path, mutation: str
+) -> None:
+    """An added, removed, or changed xattr cannot enter the normalized snapshot."""
+    root = tmp_path / "tree"
+    root.mkdir()
+    root.chmod(0o700)
+    entry = root / "module.py"
+    entry.write_bytes(b"signed bytes")
+    subprocess.run(
+        [
+            "/usr/bin/xattr",
+            "-w",
+            "com.tobkiri.seal-test",
+            "before",
+            entry,
+        ],
+        check=True,
+    )
+    barrier = tmp_path / "xattr-barrier"
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            _MODULE.ROOT_SEAL_TREE_CODE,
+            root,
+            str(os.geteuid()),
+            "0555",
+            "1",
+            barrier,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not barrier.with_suffix(".ready").exists():
+            if time.monotonic() >= deadline:
+                pytest.fail("tree sealer did not reach xattr inventory barrier")
+            time.sleep(0.01)
+        if mutation == "removed":
+            command = [
+                "/usr/bin/xattr",
+                "-d",
+                "com.tobkiri.seal-test",
+                entry,
+            ]
+        else:
+            attribute = (
+                "com.tobkiri.added-test"
+                if mutation == "added"
+                else "com.tobkiri.seal-test"
+            )
+            command = ["/usr/bin/xattr", "-w", attribute, "after", entry]
+        subprocess.run(command, check=True)
+        barrier.with_suffix(".release").write_bytes(b"release")
+        _stdout, stderr = process.communicate(timeout=5)
+        assert process.returncode != 0
+        assert b"ownership normalization changed" in stderr
+        assert entry.read_bytes() == b"signed bytes"
     finally:
         if process.poll() is None:
             process.kill()

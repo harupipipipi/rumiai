@@ -393,6 +393,8 @@ import ctypes, errno, hashlib, json, os, posixpath, stat, sys, time
 root_path=sys.argv[1]; owner=int(sys.argv[2]); root_mode=int(sys.argv[3],8)
 normalize_ownership=sys.argv[4]=='1'
 barrier=sys.argv[5] if len(sys.argv)>5 else ''
+MAX_XATTR_COUNT=256; MAX_XATTR_NAMES=65536
+MAX_XATTR_VALUE=16*1024*1024; MAX_XATTR_TOTAL=64*1024*1024
 def acl(fd):
     if sys.platform!='darwin': return False
     lib=ctypes.CDLL(None,use_errno=True); lib.acl_get_fd_np.argtypes=[ctypes.c_int,ctypes.c_int]; lib.acl_get_fd_np.restype=ctypes.c_void_p
@@ -418,6 +420,72 @@ def digest(fd):
         hasher.update(block)
     os.lseek(fd,0,os.SEEK_SET)
     return 'sha256:'+hasher.hexdigest()
+def xattr_call(function,*arguments):
+    ctypes.set_errno(0); result=function(*arguments)
+    if result<0:
+        error=ctypes.get_errno()
+        raise SystemExit('xattr inspection failed: errno='+str(error))
+    return result
+def xattr_snapshot(list_function,get_function,subject,label):
+    names_size=xattr_call(list_function,subject,None,0,0)
+    if names_size>MAX_XATTR_NAMES:
+        raise SystemExit('xattr names exceed bound: '+label)
+    if names_size:
+        names_buffer=ctypes.create_string_buffer(names_size)
+        if xattr_call(list_function,subject,names_buffer,names_size,0)!=names_size:
+            raise SystemExit('xattr names changed during inspection: '+label)
+        encoded=names_buffer.raw[:names_size]
+        if not encoded.endswith(b'\0'):
+            raise SystemExit('invalid xattr name list: '+label)
+        names=encoded[:-1].split(b'\0')
+    else: names=[]
+    if len(names)>MAX_XATTR_COUNT or len(names)!=len(set(names)) or \
+       any(not name or len(name)>255 for name in names):
+        raise SystemExit('invalid or excessive xattr names: '+label)
+    result=[]; total=0
+    for name in sorted(names):
+        size=xattr_call(get_function,subject,name,None,0,0,0)
+        if size>MAX_XATTR_VALUE or total+size>MAX_XATTR_TOTAL:
+            raise SystemExit('xattr value exceeds bound: '+label)
+        value=ctypes.create_string_buffer(max(size,1))
+        if xattr_call(get_function,subject,name,value,size,0,0)!=size:
+            raise SystemExit('xattr changed during inspection: '+label)
+        total+=size
+        result.append((name.hex(),size,'sha256:'+hashlib.sha256(value.raw[:size]).hexdigest()))
+    return json.dumps(result,separators=(',',':'))
+def stable_xattrs_fd(fd,label):
+    if sys.platform!='darwin': return '[]'
+    lib=ctypes.CDLL(None,use_errno=True)
+    lib.flistxattr.argtypes=[ctypes.c_int,ctypes.c_void_p,ctypes.c_size_t,ctypes.c_int]
+    lib.flistxattr.restype=ctypes.c_ssize_t
+    lib.fgetxattr.argtypes=[ctypes.c_int,ctypes.c_char_p,ctypes.c_void_p,ctypes.c_size_t,
+                           ctypes.c_uint32,ctypes.c_int]
+    lib.fgetxattr.restype=ctypes.c_ssize_t
+    first=xattr_snapshot(lib.flistxattr,lib.fgetxattr,fd,label)
+    second=xattr_snapshot(lib.flistxattr,lib.fgetxattr,fd,label)
+    if first!=second: raise SystemExit('xattrs changed during inspection: '+label)
+    return first
+def stable_xattrs_symlink(relative,fd,name,before):
+    if sys.platform!='darwin': return '[]'
+    # Darwin SDK <sys/xattr.h> defines XATTR_NOFOLLOW as 0x0001.
+    lib=ctypes.CDLL(None,use_errno=True); nofollow=0x0001
+    lib.listxattr.argtypes=[ctypes.c_char_p,ctypes.c_void_p,ctypes.c_size_t,ctypes.c_int]
+    lib.listxattr.restype=ctypes.c_ssize_t
+    lib.getxattr.argtypes=[ctypes.c_char_p,ctypes.c_char_p,ctypes.c_void_p,ctypes.c_size_t,
+                          ctypes.c_uint32,ctypes.c_int]
+    lib.getxattr.restype=ctypes.c_ssize_t
+    path=os.fsencode(os.path.join(root_path,*relative.split('/')))
+    def listed(path_value,buffer,size,_options):
+        return lib.listxattr(path_value,buffer,size,nofollow)
+    def fetched(path_value,xname,value,size,position,_options):
+        return lib.getxattr(path_value,xname,value,size,position,nofollow)
+    first=xattr_snapshot(listed,fetched,path,relative)
+    second=xattr_snapshot(listed,fetched,path,relative)
+    after=os.stat(name,dir_fd=fd,follow_symlinks=False)
+    if (before.st_dev,before.st_ino,before.st_mode)!=(after.st_dev,after.st_ino,after.st_mode) \
+       or first!=second:
+        raise SystemExit('symlink or xattrs changed during inventory: '+relative)
+    return first
 def entry(fd,name,relative,mutate,device,permit_nonowner=False):
     before=os.stat(name,dir_fd=fd,follow_symlinks=False)
     if before.st_uid!=owner and not permit_nonowner:
@@ -431,11 +499,12 @@ def entry(fd,name,relative,mutate,device,permit_nonowner=False):
         # Name mutation is controlled by the held, root-owned parent directory;
         # symlink permission/ACL bits do not grant rename authority on macOS.
         target=os.readlink(name,dir_fd=fd)
+        xattrs=stable_xattrs_symlink(relative,fd,name,before)
         after=os.stat(name,dir_fd=fd,follow_symlinks=False)
         if (before.st_dev,before.st_ino,before.st_mode)!=(after.st_dev,after.st_ino,after.st_mode):
             raise SystemExit('symlink changed during inventory: '+relative)
         return ('symlink',before.st_dev,before.st_ino,stat.S_IMODE(before.st_mode),
-                before.st_uid,before.st_gid,target,safe_target(relative,target))
+                before.st_uid,before.st_gid,target,safe_target(relative,target),xattrs)
     if not stat.S_ISREG(before.st_mode) and not stat.S_ISDIR(before.st_mode):
         raise SystemExit('special file in sealed tree: '+relative)
     flags=os.O_RDONLY|os.O_NOFOLLOW
@@ -451,7 +520,8 @@ def entry(fd,name,relative,mutate,device,permit_nonowner=False):
             if mutate: os.fchmod(opened,stat.S_IMODE(current.st_mode)&~0o222)
             sealed=os.fstat(opened)
             return ('file',sealed.st_dev,sealed.st_ino,stat.S_IMODE(sealed.st_mode),
-                    sealed.st_uid,sealed.st_gid,digest(opened),'')
+                    sealed.st_uid,sealed.st_gid,digest(opened),'',
+                    stable_xattrs_fd(opened,relative))
         if not stat.S_ISDIR(current.st_mode):
             raise SystemExit('special file in sealed tree: '+relative)
         children=walk(opened,relative,mutate,device,permit_nonowner)
@@ -459,7 +529,8 @@ def entry(fd,name,relative,mutate,device,permit_nonowner=False):
         sealed=os.fstat(opened)
         return ('directory',sealed.st_dev,sealed.st_ino,stat.S_IMODE(sealed.st_mode),
                 sealed.st_uid,sealed.st_gid,'',
-                json.dumps(children,sort_keys=True,separators=(',',':')))
+                json.dumps(children,sort_keys=True,separators=(',',':')),
+                stable_xattrs_fd(opened,relative))
     finally: os.close(opened)
 def walk(fd,prefix,mutate,device,permit_nonowner=False):
     result={}
@@ -548,11 +619,22 @@ def owner_records(records):
                                   separators=(',',':'))
         result[name]=tuple(updated)
     return result
+def sealed_records(records):
+    result={}
+    for name,value in records.items():
+        updated=list(value)
+        if value[0] in ('file','directory'): updated[3]&=~0o222
+        if value[0]=='directory':
+            updated[7]=json.dumps(sealed_records(json.loads(value[7])),sort_keys=True,
+                                  separators=(',',':'))
+        result[name]=tuple(updated)
+    return result
 root=os.open(root_path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
 try:
     info=os.fstat(root)
     if info.st_uid!=owner or stat.S_IMODE(info.st_mode)!=0o700 or acl(root):
         raise SystemExit('unsafe sealed tree root')
+    root_xattrs=stable_xattrs_fd(root,'<root>')
     first=walk(root,'',False,info.st_dev,normalize_ownership); check_cycles(first)
     if barrier:
         ready=barrier+'.ready'; release=barrier+'.release'
@@ -564,12 +646,17 @@ try:
     if normalize_ownership:
         normalize(root,'',first,info.st_dev)
         normalized=walk(root,'',False,info.st_dev); check_cycles(normalized)
-        if normalized!=owner_records(first):
+        authority=owner_records(first)
+        if normalized!=authority or stable_xattrs_fd(root,'<root>')!=root_xattrs:
             raise SystemExit('ownership normalization changed sealed tree metadata')
+    else: authority=first
     sealed=walk(root,'',True,info.st_dev); check_cycles(sealed)
+    if sealed!=sealed_records(authority) or stable_xattrs_fd(root,'<root>')!=root_xattrs:
+        raise SystemExit('permission sealing changed tree content or xattrs')
     os.fchmod(root,root_mode); os.fsync(root)
     second=walk(root,'',False,info.st_dev); check_cycles(second)
-    if sealed!=second: raise SystemExit('sealed tree changed during verification')
+    if sealed!=second or stable_xattrs_fd(root,'<root>')!=root_xattrs:
+        raise SystemExit('sealed tree changed during verification')
     final=os.fstat(root)
     if (final.st_dev,final.st_ino)!=(info.st_dev,info.st_ino) or \
        stat.S_IMODE(final.st_mode)!=root_mode or acl(root):
