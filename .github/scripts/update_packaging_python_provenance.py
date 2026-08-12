@@ -17,7 +17,7 @@ PSF_TEAM_ID = "BMM5U3QVKW"
 PSF_INSTALLER_SIGNER = "Developer ID Installer: Python Software Foundation (BMM5U3QVKW)"
 PSF_CODE_IDENTIFIER = "org.python.python"
 API_ROOT = "https://www.python.org/api/v2/downloads"
-INSTALL_ROOT = "/Library/TobkiriPackaging/Python.framework/Versions"
+INSTALL_ROOT = "/Library/Frameworks/Python.framework/Versions"
 
 
 def _read_json(url: str) -> Any:

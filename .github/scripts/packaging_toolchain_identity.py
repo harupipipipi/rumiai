@@ -3,8 +3,11 @@
 The formal Python is installed from one checked-in, digest-pinned python.org
 installer.  No executable, library, or package is copied from actions/setup-
 python.  Runtime requirements are installed from the repository's hash lock
-into a root-owned environment inside the fixed Framework version.  Only after
-an exact inventory is sealed and reverified is that interpreter executed.
+into a root-owned environment inside the official, non-relocatable canonical
+Framework version.  Only that exclusive version leaf is transaction-owned;
+pre-existing ancestors and sibling versions are validated but never adopted.
+Only after an exact inventory is sealed and reverified is that interpreter
+executed.
 """
 
 from __future__ import annotations
@@ -203,7 +206,7 @@ def _parse_provenance(
         raise ToolIdentityError("release_page does not match the pinned version")
     install_root = Path(payload["install_root"])
     if install_root != Path(
-        f"/Library/TobkiriPackaging/Python.framework/Versions/{'.'.join(version.split('.')[:2])}"
+        f"/Library/Frameworks/Python.framework/Versions/{'.'.join(version.split('.')[:2])}"
     ):
         raise ToolIdentityError("install_root does not match the pinned Python series")
     requirements_relative = _safe_relative(
@@ -297,6 +300,15 @@ def _regular_executable(path: Path, label: str) -> ToolIdentity:
     return ToolIdentity(path, digest)
 
 
+def _caller_can_write(metadata: os.stat_result) -> bool:
+    mode = stat.S_IMODE(metadata.st_mode)
+    if metadata.st_uid == os.getuid():
+        return bool(mode & stat.S_IWUSR)
+    if metadata.st_gid in os.getgroups():
+        return bool(mode & stat.S_IWGRP)
+    return bool(mode & stat.S_IWOTH)
+
+
 def _root_owned_path(path: Path, label: str, *, sticky: Path | None = None) -> None:
     path = _canonical_absolute(path, label)
     for component in (path, *path.parents):
@@ -310,7 +322,7 @@ def _root_owned_path(path: Path, label: str, *, sticky: Path | None = None) -> N
         )
         if component.is_symlink() or metadata.st_uid != 0:
             raise ToolIdentityError(f"{label} contains non-root authority: {component}")
-        if metadata.st_mode & 0o022 and not sticky_root:
+        if _caller_can_write(metadata) and not sticky_root:
             raise ToolIdentityError(f"{label} contains writable authority: {component}")
 
 
@@ -633,18 +645,24 @@ ROOT_REMOVE_CODE = r"""
 import os, stat, sys
 target = os.path.normpath(sys.argv[1])
 owner = int(sys.argv[2])
-expected = None if len(sys.argv) == 3 else (int(sys.argv[3]), int(sys.argv[4]))
+caller_uid = int(sys.argv[3]); caller_groups = {int(value) for value in sys.argv[4].split(',') if value}
+expected = None if len(sys.argv) == 5 else (int(sys.argv[5]), int(sys.argv[6]))
 if not target.startswith('/') or target == '/': raise SystemExit('unsafe removal target')
+def caller_can_write(info):
+    mode = stat.S_IMODE(info.st_mode)
+    if info.st_uid == caller_uid: return bool(mode & 0o200)
+    if info.st_gid in caller_groups: return bool(mode & 0o020)
+    return bool(mode & 0o002)
 parts = [part for part in target.split('/') if part]
 parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
 try:
     root_info = os.fstat(parent)
-    if root_info.st_uid != 0 or root_info.st_mode & 0o022: raise SystemExit('unsafe root')
+    if root_info.st_uid != 0 or caller_can_write(root_info): raise SystemExit('unsafe root')
     for part in parts[:-1]:
         child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
         info = os.fstat(child)
         sticky_root = info.st_uid == 0 and info.st_mode & stat.S_ISVTX
-        if info.st_uid not in (0, owner) or (info.st_mode & 0o022 and not sticky_root):
+        if info.st_uid not in (0, owner) or (caller_can_write(info) and not sticky_root):
             raise SystemExit('unsafe removal ancestor')
         os.close(parent); parent = child
     name = parts[-1]
@@ -680,6 +698,8 @@ def _remove_root_tree(path: Path, identity: tuple[int, int] | None = None) -> No
         ROOT_REMOVE_CODE,
         path,
         "0",
+        str(os.getuid()),
+        ",".join(str(group) for group in os.getgroups()),
     ]
     if identity is not None:
         arguments.extend(str(value) for value in identity)
@@ -700,7 +720,8 @@ ROOT_ENSURE_PARENT_CODE = r"""
 import ctypes, errno, json, os, signal, stat, sys
 anchor_path, relative, staging_path, token, journal_schema, provisional_prefix = sys.argv[1:7]
 owner = int(sys.argv[7]); group = int(sys.argv[8])
-failpoint = sys.argv[9] if len(sys.argv) > 9 else ''
+caller_uid = int(sys.argv[9]); caller_groups = {int(value) for value in sys.argv[10].split(',') if value}
+failpoint = sys.argv[11] if len(sys.argv) > 11 else ''
 parts = relative.split('/')
 if not parts or any(not part or part in ('.', '..') or '/' in part for part in parts):
     raise SystemExit('unsafe ancestor path')
@@ -708,6 +729,11 @@ if len(token) != 32 or any(c not in '0123456789abcdef' for c in token):
     raise SystemExit('invalid transaction token')
 def canonical(payload):
     return json.dumps(payload, sort_keys=True, separators=(',', ':')).encode() + b'\n'
+def caller_can_write(info):
+    mode = stat.S_IMODE(info.st_mode)
+    if info.st_uid == caller_uid: return bool(mode & 0o200)
+    if info.st_gid in caller_groups: return bool(mode & 0o020)
+    return bool(mode & 0o002)
 def exclusive_rename(parent, source, destination):
     if sys.platform == 'darwin':
         function = ctypes.CDLL(None, use_errno=True).renameatx_np
@@ -747,7 +773,7 @@ current = anchor
 try:
     for descriptor in (anchor, staging):
         info = os.fstat(descriptor)
-        if info.st_uid != owner or info.st_gid != group or info.st_mode & 0o022:
+        if info.st_uid != owner or info.st_gid != group or caller_can_write(info):
             raise SystemExit('unsafe ancestor authority: uid=%d gid=%d mode=%#o' %
                              (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)))
     traversed = []
@@ -811,7 +837,7 @@ try:
             child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                             dir_fd=current)
         info = os.fstat(child)
-        if info.st_uid != owner or info.st_mode & 0o022:
+        if info.st_uid != owner or caller_can_write(info):
             raise SystemExit('unsafe existing ancestor: component=%s uid=%d gid=%d mode=%#o' %
                              (target, info.st_uid, info.st_gid,
                               stat.S_IMODE(info.st_mode)))
@@ -831,9 +857,19 @@ ROOT_CLEANUP_ANCESTORS_CODE = r"""
 import errno, json, os, stat, sys
 anchor_path, relative, staging_path, token, journal_schema = sys.argv[1:6]
 owner = int(sys.argv[6]); group = int(sys.argv[7])
+caller_uid = int(sys.argv[8]); caller_groups = {int(value) for value in sys.argv[9].split(',') if value}
 provisional_prefix = '.tobkiri-packaging-parent-'
 def canonical(payload):
     return json.dumps(payload, sort_keys=True, separators=(',', ':')).encode() + b'\n'
+def caller_can_write(info):
+    mode = stat.S_IMODE(info.st_mode)
+    if info.st_uid == caller_uid: return bool(mode & 0o200)
+    if info.st_gid in caller_groups: return bool(mode & 0o020)
+    return bool(mode & 0o002)
+def verify_ancestor(fd):
+    info = os.fstat(fd)
+    if info.st_uid != owner or caller_can_write(info):
+        raise SystemExit('unsafe cleanup ancestor authority')
 staging = os.open(staging_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 try:
     journals = sorted(name for name in os.listdir(staging)
@@ -866,6 +902,7 @@ try:
 finally: os.close(staging)
 parent = os.open(anchor_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 try:
+    verify_ancestor(parent)
     for index, part in enumerate(relative.split('/')):
         provisional = f'{provisional_prefix}{token}-{index:04d}'
         try:
@@ -887,6 +924,7 @@ try:
             child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                             dir_fd=parent)
         except FileNotFoundError: break
+        verify_ancestor(child)
         os.close(parent); parent = child
 finally: os.close(parent)
 for payload in reversed(payloads):
@@ -895,9 +933,11 @@ for payload in reversed(payloads):
         raise SystemExit('unsafe ancestor journal target')
     parent = os.open(anchor_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
+        verify_ancestor(parent)
         for part in parts[:-1]:
             child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                             dir_fd=parent)
+            verify_ancestor(child)
             os.close(parent); parent = child
         try:
             target = os.open(parts[-1], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
@@ -938,6 +978,8 @@ def ensure_installation_parent(
             ANCESTOR_PROVISIONAL_PREFIX,
             "0",
             "0",
+            str(os.getuid()),
+            ",".join(str(group) for group in os.getgroups()),
         ],
         check=True,
         env={"PATH": "/usr/bin:/bin"},
@@ -962,6 +1004,8 @@ def cleanup_created_ancestors(
             ANCESTOR_JOURNAL_SCHEMA,
             "0",
             "0",
+            str(os.getuid()),
+            ",".join(str(group) for group in os.getgroups()),
         ],
         check=True,
         env={"PATH": "/usr/bin:/bin"},
@@ -971,14 +1015,19 @@ def cleanup_created_ancestors(
 ROOT_CREATE_INSTALLATION_CODE = r"""
 import ctypes, errno, json, os, signal, stat, sys
 parent_path, fixed, token, journal_name, schema = sys.argv[1:6]
-owner = int(sys.argv[6]); failpoint = sys.argv[7] if len(sys.argv) > 7 else ''
+owner = int(sys.argv[6]); caller_uid = int(sys.argv[7])
+caller_groups = {int(value) for value in sys.argv[8].split(',') if value}
+failpoint = sys.argv[9] if len(sys.argv) > 9 else ''
 provisional = '.tobkiri-packaging-python-' + token
 if len(token) != 32 or any(c not in '0123456789abcdef' for c in token):
     raise SystemExit('invalid transaction token')
 parent = os.open(parent_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 try:
     parent_info = os.fstat(parent)
-    if parent_info.st_uid != owner or parent_info.st_mode & 0o022:
+    mode = stat.S_IMODE(parent_info.st_mode)
+    caller_writable = (mode & 0o200 if parent_info.st_uid == caller_uid else
+                       mode & 0o020 if parent_info.st_gid in caller_groups else mode & 0o002)
+    if parent_info.st_uid != owner or caller_writable:
         raise SystemExit('unsafe target parent: path=%s uid=%d gid=%d mode=%#o' %
                          (parent_path, parent_info.st_uid, parent_info.st_gid,
                           stat.S_IMODE(parent_info.st_mode)))
@@ -1025,7 +1074,9 @@ finally:
 ROOT_RECOVER_INSTALLATIONS_CODE = r"""
 import json, os, stat, sys
 parent_path, fixed, token_filter, journal_name, schema = sys.argv[1:6]
-owner = int(sys.argv[6]); prefix = '.tobkiri-packaging-python-'
+owner = int(sys.argv[6]); caller_uid = int(sys.argv[7])
+caller_groups = {int(value) for value in sys.argv[8].split(',') if value}
+prefix = '.tobkiri-packaging-python-'
 try: parent = os.open(parent_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 except FileNotFoundError: raise SystemExit(0)
 def canonical(payload):
@@ -1074,7 +1125,10 @@ def remove_named(name, expected, exact_mode=None):
     os.rmdir(name, dir_fd=parent); os.fsync(parent)
 try:
     parent_info = os.fstat(parent)
-    if parent_info.st_uid != owner or parent_info.st_mode & 0o022:
+    mode = stat.S_IMODE(parent_info.st_mode)
+    caller_writable = (mode & 0o200 if parent_info.st_uid == caller_uid else
+                       mode & 0o020 if parent_info.st_gid in caller_groups else mode & 0o002)
+    if parent_info.st_uid != owner or caller_writable:
         raise SystemExit('unsafe transaction parent: path=%s uid=%d gid=%d mode=%#o' %
                          (parent_path, parent_info.st_uid, parent_info.st_gid,
                           stat.S_IMODE(parent_info.st_mode)))
@@ -1132,6 +1186,8 @@ def _create_installation_root(provenance: InstallerProvenance, token: str) -> No
             INSTALLATION_JOURNAL_NAME,
             INSTALLATION_JOURNAL_SCHEMA,
             "0",
+            str(os.getuid()),
+            ",".join(str(group) for group in os.getgroups()),
         ],
         check=True,
         env={"PATH": "/usr/bin:/bin"},
@@ -1155,6 +1211,8 @@ def recover_stale_installations(
             INSTALLATION_JOURNAL_NAME,
             INSTALLATION_JOURNAL_SCHEMA,
             "0",
+            str(os.getuid()),
+            ",".join(str(group) for group in os.getgroups()),
         ],
         check=True,
         env={"PATH": "/usr/bin:/bin"},
@@ -1202,7 +1260,39 @@ def _remove_verified_installation(
         root, root / provenance.executable, inventory_sha256
     )
     verify_macos_installation(installation, provenance)
-    _remove_root_tree(root)
+    identity, _token = _installation_receipt(root, provenance)
+    _remove_root_tree(root, identity)
+
+
+def _installation_receipt(
+    root: Path, provenance: InstallerProvenance
+) -> tuple[tuple[int, int], str]:
+    """Bind the leaf inode to its canonical root-owned transaction receipt."""
+    root_metadata = root.lstat()
+    journal = root / INSTALLATION_JOURNAL_NAME
+    metadata = journal.lstat()
+    payload = _strict_json(journal)
+    encoded = journal.read_bytes()
+    token = payload.get("token")
+    if (
+        not stat.S_ISDIR(root_metadata.st_mode)
+        or root_metadata.st_uid != 0
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != 0
+        or stat.S_IMODE(metadata.st_mode) != 0o400
+        or metadata.st_nlink != 1
+        or _canonical_json(payload) != encoded
+        or set(payload) != {"dev", "ino", "schema", "target", "token"}
+        or payload.get("schema") != INSTALLATION_JOURNAL_SCHEMA
+        or payload.get("target") != os.fspath(provenance.install_root)
+        or (payload.get("dev"), payload.get("ino"))
+        != (root_metadata.st_dev, root_metadata.st_ino)
+        or not isinstance(token, str)
+        or len(token) != 32
+        or any(character not in "0123456789abcdef" for character in token)
+    ):
+        raise ToolIdentityError("existing Python installation receipt is invalid")
+    return (root_metadata.st_dev, root_metadata.st_ino), token
 
 
 def _remove_previous_installation(provenance: InstallerProvenance) -> None:
@@ -1220,7 +1310,23 @@ def _remove_previous_installation(provenance: InstallerProvenance) -> None:
         raise ToolIdentityError(
             "existing fixed Python installation is not a verified prior result"
         ) from error
-    _remove_verified_installation(provenance.install_root, provenance, inventory_sha256)
+    installation = MacOSPythonInstallation(
+        provenance.install_root,
+        provenance.install_root / provenance.executable,
+        inventory_sha256,
+    )
+    verify_macos_installation(installation, provenance)
+    identity, token = _installation_receipt(provenance.install_root, provenance)
+    active_staging = _transaction_path(token)
+    try:
+        _root_owned_path(
+            active_staging, "active packaging transaction", sticky=STAGING_PARENT
+        )
+    except FileNotFoundError:
+        pass
+    else:
+        raise ToolIdentityError("existing Python installation has an active lease")
+    _remove_root_tree(provenance.install_root, identity)
 
 
 def _verify_installer(path: Path, provenance: InstallerProvenance) -> None:
@@ -1304,6 +1410,8 @@ def _write_inventory(
         "entries": _inventory_entries(installation.root),
         "executable": installation.executable.relative_to(installation.root).as_posix(),
         "installer_sha256": provenance.installer_sha256,
+        "installer_signer": provenance.installer_signer,
+        "installer_team_id": provenance.installer_team_id,
         "installer_url": provenance.installer_url,
         "requirements_sha256": provenance.requirements_sha256,
         "schema": INVENTORY_SCHEMA,
@@ -1371,6 +1479,8 @@ def verify_macos_installation(
             raise ToolIdentityError("packaging Python contains writable content")
     expected = {
         "installer_sha256": provenance.installer_sha256,
+        "installer_signer": provenance.installer_signer,
+        "installer_team_id": provenance.installer_team_id,
         "installer_url": provenance.installer_url,
         "requirements_sha256": provenance.requirements_sha256,
         "version": provenance.version,
@@ -1403,14 +1513,89 @@ def _inside(path: Path, root: Path) -> bool:
     return True
 
 
+_MACHO_MAGICS = frozenset(
+    {
+        b"\xca\xfe\xba\xbe",
+        b"\xca\xfe\xba\xbf",
+        b"\xbe\xba\xfe\xca",
+        b"\xbf\xba\xfe\xca",
+        b"\xce\xfa\xed\xfe",
+        b"\xcf\xfa\xed\xfe",
+        b"\xfe\xed\xfa\xce",
+        b"\xfe\xed\xfa\xcf",
+    }
+)
+
+
+def _verify_macho_dependency_closure(installation: MacOSPythonInstallation) -> None:
+    """Require every Mach-O dependency to resolve within the leaf or macOS."""
+    for path in sorted(installation.root.rglob("*")):
+        metadata = path.lstat()
+        if not stat.S_ISREG(metadata.st_mode):
+            continue
+        with path.open("rb") as source:
+            if source.read(4) not in _MACHO_MAGICS:
+                continue
+        result = subprocess.run(
+            ["/usr/bin/otool", "-L", path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        if result.returncode != 0:
+            raise ToolIdentityError(f"otool rejected packaging Mach-O: {path}")
+        for line in result.stdout.splitlines():
+            if not line.startswith(("\t", " ")):
+                continue
+            dependency = line.strip().split(" (", 1)[0]
+            if dependency.startswith(("/usr/lib/", "/System/Library/")):
+                continue
+            if dependency.startswith("/"):
+                candidates = [Path(dependency)]
+            elif dependency.startswith("@loader_path/"):
+                candidates = [path.parent / dependency.removeprefix("@loader_path/")]
+            elif dependency.startswith("@executable_path/"):
+                candidates = [
+                    installation.executable.parent
+                    / dependency.removeprefix("@executable_path/")
+                ]
+            elif dependency.startswith("@rpath/"):
+                suffix = PurePosixPath(dependency.removeprefix("@rpath/"))
+                if any(part in {"", ".", ".."} for part in suffix.parts):
+                    raise ToolIdentityError("unsafe @rpath dependency")
+                candidates = [
+                    candidate
+                    for candidate in installation.root.rglob(suffix.name)
+                    if candidate.as_posix().endswith(suffix.as_posix())
+                ]
+            else:
+                raise ToolIdentityError(f"unsupported Mach-O dependency: {dependency}")
+            if not candidates or not all(
+                candidate.exists() and _inside(candidate, installation.root)
+                for candidate in candidates
+            ):
+                raise ToolIdentityError(
+                    f"packaging Python Mach-O dependency escapes closure: {dependency}"
+                )
+
+
 def smoke_macos_installation(installation: MacOSPythonInstallation) -> None:
     """Execute only the already-verified interpreter and prove its closure."""
+    _verify_macho_dependency_closure(installation)
     probe = (
         "import json,sys;print(json.dumps({'executable':sys.executable,"
         "'prefix':sys.prefix,'base_prefix':sys.base_prefix,'path':sys.path},sort_keys=True))"
     )
-    for include_site in (False, True):
-        arguments = [os.fspath(installation.executable), "-I", "-B"]
+    base_python = installation.root / "bin" / f"python{installation.root.name}"
+    probes = (
+        (base_python, False),
+        (installation.executable, False),
+        (installation.executable, True),
+    )
+    for interpreter, include_site in probes:
+        arguments = [os.fspath(interpreter), "-I", "-B"]
         if not include_site:
             arguments.append("-S")
         code = probe

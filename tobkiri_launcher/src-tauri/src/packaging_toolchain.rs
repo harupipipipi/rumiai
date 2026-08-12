@@ -1425,6 +1425,36 @@ fn macos_code_identity(path: &Path) -> io::Result<Vec<u8>> {
 }
 
 #[cfg(target_os = "macos")]
+fn mode_writable_by_caller(
+    owner: u32,
+    group: u32,
+    mode: u32,
+    caller: u32,
+    caller_groups: &[u32],
+) -> bool {
+    if owner == caller {
+        mode & 0o200 != 0
+    } else if caller_groups.contains(&group) {
+        mode & 0o020 != 0
+    } else {
+        mode & 0o002 != 0
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn current_process_groups() -> io::Result<Vec<u32>> {
+    let count = unsafe { libc::getgroups(0, std::ptr::null_mut()) };
+    if count < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut raw = vec![0 as libc::gid_t; count as usize];
+    if count > 0 && unsafe { libc::getgroups(count, raw.as_mut_ptr()) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(raw.into_iter().map(|group| group as u32).collect())
+}
+
+#[cfg(target_os = "macos")]
 fn macos_python_installation_lease(path: &Path) -> io::Result<MacOSPythonInstallationLease> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
@@ -1434,18 +1464,26 @@ fn macos_python_installation_lease(path: &Path) -> io::Result<MacOSPythonInstall
     if !root.is_absolute() || root.canonicalize()? != root {
         return Err(invalid("macOS Python installation root is not canonical"));
     }
-    let expected_root = Path::new("/Library/TobkiriPackaging/Python.framework/Versions/3.13");
+    let expected_root = Path::new("/Library/Frameworks/Python.framework/Versions/3.13");
     if root != expected_root {
         return Err(invalid(
             "macOS Python installation root is not the fixed authority",
         ));
     }
+    let caller = unsafe { libc::getuid() } as u32;
+    let caller_groups = current_process_groups()?;
     for component in std::iter::once(root.as_path()).chain(root.ancestors().skip(1)) {
         let metadata = fs::symlink_metadata(component)?;
         if metadata.file_type().is_symlink()
             || !metadata.is_dir()
             || metadata.uid() != 0
-            || metadata.permissions().mode() & 0o022 != 0
+            || mode_writable_by_caller(
+                metadata.uid(),
+                metadata.gid(),
+                metadata.permissions().mode(),
+                caller,
+                &caller_groups,
+            )
         {
             return Err(invalid(format!(
                 "macOS Python installation has writable/non-root ancestor: {}",
@@ -1747,6 +1785,15 @@ mod tests {
         assert_eq!(SEC_CODE_SIGNATURE_ADHOC, 0x2);
         assert!(!accepted_macos_signature_flags(SEC_CODE_SIGNATURE_ADHOC));
         assert!(accepted_macos_signature_flags(0));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn darwin_ancestor_write_authority_uses_effective_group_membership() {
+        assert!(!mode_writable_by_caller(0, 0, 0o775, 501, &[20, 80]));
+        assert!(mode_writable_by_caller(0, 0, 0o775, 501, &[0, 20]));
+        assert!(mode_writable_by_caller(501, 0, 0o755, 501, &[20]));
+        assert!(mode_writable_by_caller(0, 0, 0o757, 501, &[20]));
     }
     use std::time::{SystemTime, UNIX_EPOCH};
 

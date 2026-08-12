@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -135,7 +136,7 @@ def test_checked_provenance_matches_python_org_release_metadata(
     )
     assert generated == expected
     assert expected["install_root"] == (
-        "/Library/TobkiriPackaging/Python.framework/Versions/3.13"
+        "/Library/Frameworks/Python.framework/Versions/3.13"
     )
 
 
@@ -178,6 +179,20 @@ def test_arbitrary_valid_signer_is_not_authority(
             team_identifier="BMM5U3QVKW",
             label="Python",
         )
+
+
+def test_ancestor_write_authority_uses_effective_group_membership(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mode bit grants authority only to the real caller's ownership class."""
+    monkeypatch.setattr(_MODULE.os, "getuid", lambda: 501)
+    monkeypatch.setattr(_MODULE.os, "getgroups", lambda: [20, 80])
+    root_wheel = SimpleNamespace(st_mode=0o040775, st_uid=0, st_gid=0)
+    root_admin = SimpleNamespace(st_mode=0o040775, st_uid=0, st_gid=80)
+    world_writable = SimpleNamespace(st_mode=0o040757, st_uid=0, st_gid=0)
+    assert not _MODULE._caller_can_write(root_wheel)
+    assert _MODULE._caller_can_write(root_admin)
+    assert _MODULE._caller_can_write(world_writable)
 
 
 def test_git_hardlinks_are_permitted_by_exact_digest_binding(tmp_path: Path) -> None:
@@ -504,6 +519,123 @@ def test_inventory_digest_swap_is_rejected(
         _MODULE.verify_macos_installation(installation, provenance)
 
 
+def test_inventory_receipt_rejects_installer_signer_mismatch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A self-consistent receipt cannot replace the pinned PSF package signer."""
+    executable = _executable(tmp_path / "python")
+    provenance = _MODULE.InstallerProvenance(
+        code_identifier="org.python.python",
+        executable=_MODULE.PurePosixPath("python"),
+        install_root=tmp_path,
+        installer_sha256="1" * 64,
+        installer_signer="Developer ID Installer: Python Software Foundation (BMM5U3QVKW)",
+        installer_team_id="BMM5U3QVKW",
+        installer_url="https://www.python.org/ftp/python/3.13.13/python-3.13.13-macos11.pkg",
+        release_page="https://www.python.org/downloads/release/python-31313/",
+        requirements_path=_MODULE.PurePosixPath("requirements.lock"),
+        requirements_sha256="2" * 64,
+        requirements_bytes=b"requirements",
+        version="3.13.13",
+    )
+    identity = _MODULE.CodeIdentity("org.python.python", "BMM5U3QVKW", "3" * 40)
+    entries = _MODULE._inventory_entries(tmp_path)
+    for entry in entries:
+        entry["uid"] = 0
+    payload = {
+        "code_identity": {
+            "cdhash": identity.cdhash,
+            "identifier": identity.identifier,
+            "team_identifier": identity.team_identifier,
+        },
+        "entries": entries,
+        "executable": "python",
+        "installer_sha256": provenance.installer_sha256,
+        "installer_signer": "Developer ID Installer: Attacker (ATTACKER00)",
+        "installer_team_id": provenance.installer_team_id,
+        "installer_url": provenance.installer_url,
+        "requirements_sha256": provenance.requirements_sha256,
+        "schema": _MODULE.INVENTORY_SCHEMA,
+        "version": provenance.version,
+    }
+    manifest = tmp_path / _MODULE.INVENTORY_NAME
+    encoded = _MODULE._canonical_json(payload)
+    manifest.write_bytes(encoded)
+    manifest.chmod(0o444)
+    installation = _MODULE.MacOSPythonInstallation(
+        tmp_path, executable, hashlib.sha256(encoded).hexdigest()
+    )
+    monkeypatch.setattr(_MODULE, "_root_owned_path", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(_MODULE, "_require_inventory_metadata", lambda _path: None)
+    monkeypatch.setattr(_MODULE, "_inventory_entries", lambda _root: entries)
+    monkeypatch.setattr(
+        _MODULE, "_require_code_authority", lambda *_args, **_kwargs: identity
+    )
+    with pytest.raises(ToolIdentityError, match="provenance binding mismatch"):
+        _MODULE.verify_macos_installation(installation, provenance)
+
+
+def test_macho_dependency_closure_rejects_external_authority(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Static Mach-O inspection permits the leaf and rejects external dylibs."""
+    root = tmp_path / "3.13"
+    root.mkdir()
+    executable = _executable(root / "python", b"\xcf\xfa\xed\xfe" + b"fixture")
+    dependency = _executable(root / "libPython", b"library")
+    installation = _MODULE.MacOSPythonInstallation(root, executable, "0" * 64)
+
+    def otool_result(_arguments: list[object], **_kwargs: object) -> object:
+        return subprocess.CompletedProcess(
+            [], 0, f"{executable}:\n\t{dependency} (compatibility version 1.0.0)\n", ""
+        )
+
+    monkeypatch.setattr(_MODULE.subprocess, "run", otool_result)
+    _MODULE._verify_macho_dependency_closure(installation)
+
+    outside = _executable(tmp_path / "outside.dylib")
+
+    def escaped_result(_arguments: list[object], **_kwargs: object) -> object:
+        return subprocess.CompletedProcess(
+            [], 0, f"{executable}:\n\t{outside} (compatibility version 1.0.0)\n", ""
+        )
+
+    monkeypatch.setattr(_MODULE.subprocess, "run", escaped_result)
+    with pytest.raises(ToolIdentityError, match="dependency escapes closure"):
+        _MODULE._verify_macho_dependency_closure(installation)
+
+
+def test_closure_smoke_executes_base_and_venv_in_isolated_modes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Both canonical base Python and the locked venv cross the real probe API."""
+    root = tmp_path / "3.13"
+    (root / "bin").mkdir(parents=True)
+    (root / "tobkiri-packaging-venv/bin").mkdir(parents=True)
+    base = _executable(root / "bin/python3.13")
+    venv = _executable(root / "tobkiri-packaging-venv/bin/python3.13")
+    installation = _MODULE.MacOSPythonInstallation(root, venv, "0" * 64)
+    calls: list[list[object]] = []
+
+    def probe(arguments: list[object], **_kwargs: object) -> object:
+        calls.append(arguments)
+        interpreter = Path(arguments[0])
+        prefix = root if interpreter == base else venv.parents[1]
+        report = {
+            "base_prefix": os.fspath(root),
+            "executable": os.fspath(interpreter),
+            "path": [os.fspath(root / "lib/python3.13")],
+            "prefix": os.fspath(prefix),
+        }
+        return subprocess.CompletedProcess(arguments, 0, json.dumps(report), "")
+
+    monkeypatch.setattr(_MODULE.subprocess, "run", probe)
+    _MODULE.smoke_macos_installation(installation)
+    assert [Path(call[0]) for call in calls] == [base, venv, venv]
+    assert all(call[1:3] == ["-I", "-B"] for call in calls)
+    assert "-S" in calls[0] and "-S" in calls[1] and "-S" not in calls[2]
+
+
 def test_production_authority_reads_exact_head_blobs_not_checkout(
     tmp_path: Path,
 ) -> None:
@@ -566,6 +698,8 @@ def _installation_helper(
             _MODULE.INSTALLATION_JOURNAL_NAME,
             _MODULE.INSTALLATION_JOURNAL_SCHEMA,
             str(os.getuid()),
+            str(2**31 - 1),
+            "",
             failpoint,
         ],
         stdout=subprocess.PIPE,
@@ -586,6 +720,8 @@ def _ancestor_helper(
     staging: Path,
     token: str,
     failpoint: str = "",
+    caller_uid: int = 2**31 - 1,
+    caller_groups: tuple[int, ...] = (),
 ) -> subprocess.CompletedProcess[bytes]:
     arguments = [sys.executable, "-I", "-B", "-c", code, anchor]
     if _REQUIRE_ROOT_PROCESS_TESTS:
@@ -593,25 +729,29 @@ def _ancestor_helper(
     if code == _MODULE.ROOT_ENSURE_PARENT_CODE:
         arguments.extend(
             [
-                "Library/TobkiriPackaging/Python.framework/Versions",
+                "Library/Frameworks/Python.framework/Versions",
                 staging,
                 token,
                 _MODULE.ANCESTOR_JOURNAL_SCHEMA,
                 _MODULE.ANCESTOR_PROVISIONAL_PREFIX,
                 str(os.getuid()),
                 str(os.getgid()),
+                str(caller_uid),
+                ",".join(str(group) for group in caller_groups),
                 failpoint,
             ]
         )
     else:
         arguments.extend(
             [
-                "Library/TobkiriPackaging/Python.framework/Versions",
+                "Library/Frameworks/Python.framework/Versions",
                 staging,
                 token,
                 _MODULE.ANCESTOR_JOURNAL_SCHEMA,
                 str(os.getuid()),
                 str(os.getgid()),
+                str(caller_uid),
+                ",".join(str(group) for group in caller_groups),
             ]
         )
     return subprocess.run(
@@ -651,7 +791,7 @@ def test_process_creates_and_rolls_back_clean_framework_ancestors(
     _require_privileged_ancestor_result(
         _ancestor_helper(_MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token)
     )
-    versions = anchor / "Library/TobkiriPackaging/Python.framework/Versions"
+    versions = anchor / "Library/Frameworks/Python.framework/Versions"
     assert versions.is_dir()
     assert len(list(staging.glob("ancestor-*.json"))) == 4
     assert (
@@ -667,14 +807,14 @@ def test_process_preserves_preexisting_ancestor_modes(tmp_path: Path) -> None:
     """Preexisting safe hierarchy is validated but never journaled or modified."""
     anchor = tmp_path / "root"
     staging = tmp_path / "staging"
-    versions = anchor / "Library/TobkiriPackaging/Python.framework/Versions"
+    versions = anchor / "Library/Frameworks/Python.framework/Versions"
     versions.mkdir(parents=True, mode=0o750)
     staging.mkdir(mode=0o700)
     hierarchy = [
         anchor,
         anchor / "Library",
-        anchor / "Library/TobkiriPackaging",
-        anchor / "Library/TobkiriPackaging/Python.framework",
+        anchor / "Library/Frameworks",
+        anchor / "Library/Frameworks/Python.framework",
         versions,
     ]
     for path in hierarchy:
@@ -715,7 +855,7 @@ def test_process_recovers_kill_midway_through_ancestor_creation(
     _require_privileged_ancestor_result(
         _ancestor_helper(_MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token)
     )
-    assert (anchor / "Library/TobkiriPackaging/Python.framework/Versions").is_dir()
+    assert (anchor / "Library/Frameworks/Python.framework/Versions").is_dir()
 
 
 def test_process_cleanup_removes_unjournaled_empty_ancestor_provisional(
@@ -872,26 +1012,36 @@ def test_process_rejects_unsafe_existing_ancestor(tmp_path: Path, unsafe: str) -
         assert b"mode=0o777" in result.stderr
 
 
-def test_unrelated_unsafe_system_frameworks_is_not_install_authority(
+def test_root_owned_group_writable_ancestor_requires_caller_nonmembership(
     tmp_path: Path,
 ) -> None:
-    """The dedicated namespace never traverses an unsafe system Frameworks tree."""
+    """A root-equivalent group bit is safe only when the real caller lacks it."""
     anchor = tmp_path / "root"
     staging = tmp_path / "staging"
     frameworks = anchor / "Library/Frameworks"
     frameworks.mkdir(parents=True, mode=0o755)
-    frameworks.chmod(0o777)
+    frameworks.chmod(0o775)
     staging.mkdir(mode=0o700)
     token = "8" * 32
     result = _ancestor_helper(_MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token)
     _require_privileged_ancestor_result(result)
-    assert frameworks.stat().st_mode & 0o7777 == 0o777
-    assert (anchor / "Library/TobkiriPackaging/Python.framework/Versions").is_dir()
+    assert frameworks.stat().st_mode & 0o7777 == 0o775
+    assert (anchor / "Library/Frameworks/Python.framework/Versions").is_dir()
     cleanup = _ancestor_helper(
-        _MODULE.ROOT_RECOVER_ANCESTORS_CODE, anchor, staging, token
+        _MODULE.ROOT_CLEANUP_ANCESTORS_CODE, anchor, staging, token
     )
     assert cleanup.returncode == 0, cleanup.stderr.decode(errors="replace")
-    assert frameworks.stat().st_mode & 0o7777 == 0o777
+    assert frameworks.stat().st_mode & 0o7777 == 0o775
+
+    rejected = _ancestor_helper(
+        _MODULE.ROOT_ENSURE_PARENT_CODE,
+        anchor,
+        staging,
+        "a" * 32,
+        caller_groups=(os.getgid(),),
+    )
+    assert rejected.returncode != 0
+    assert b"component=Library/Frameworks" in rejected.stderr
 
 
 def test_process_rejects_other_uid_existing_ancestor_when_available(
@@ -957,7 +1107,7 @@ def test_process_retains_created_ancestor_that_becomes_nonempty(
     _require_privileged_ancestor_result(
         _ancestor_helper(_MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token)
     )
-    versions = anchor / "Library/TobkiriPackaging/Python.framework/Versions"
+    versions = anchor / "Library/Frameworks/Python.framework/Versions"
     (versions / "external").write_bytes(b"preserve")
     assert (
         _ancestor_helper(
@@ -1021,6 +1171,42 @@ def test_process_recovers_renamed_or_partially_copied_prefix(
     assert not fixed.exists()
 
 
+def test_existing_unowned_version_leaf_fails_closed(tmp_path: Path) -> None:
+    """An unreceipted canonical 3.13 leaf is never adopted or removed."""
+    parent = tmp_path / "versions"
+    fixed = parent / "3.13"
+    fixed.mkdir(parents=True, mode=0o700)
+    marker = fixed / "external"
+    marker.write_bytes(b"preserve")
+    recovered = _recovery_helper(parent)
+    assert recovered.returncode != 0
+    assert b"fixed prefix lacks a transaction journal" in recovered.stderr
+    assert marker.read_bytes() == b"preserve"
+
+
+def test_version_transaction_preserves_other_versions_and_rejects_concurrency(
+    tmp_path: Path,
+) -> None:
+    """The exclusive 3.13 leaf cannot affect a sibling or admit a second owner."""
+    parent = tmp_path / "versions"
+    sibling = parent / "3.12"
+    sibling.mkdir(parents=True, mode=0o700)
+    marker = sibling / "external"
+    marker.write_bytes(b"preserve")
+    first = _installation_helper(
+        _MODULE.ROOT_CREATE_INSTALLATION_CODE, parent, "e" * 32
+    )
+    assert first.returncode == 0
+    second = _installation_helper(
+        _MODULE.ROOT_CREATE_INSTALLATION_CODE, parent, "f" * 32
+    )
+    assert second.returncode != 0
+    assert marker.read_bytes() == b"preserve"
+    assert _recovery_helper(parent, "e" * 32).returncode == 0
+    assert _recovery_helper(parent, "f" * 32).returncode == 0
+    assert marker.read_bytes() == b"preserve"
+
+
 def test_process_cleanup_does_not_mutate_ancestors_and_rejects_path_swap(
     tmp_path: Path,
 ) -> None:
@@ -1043,6 +1229,8 @@ def test_process_cleanup_does_not_mutate_ancestors_and_rejects_path_swap(
             _MODULE.ROOT_REMOVE_CODE,
             target,
             str(os.getuid()),
+            str(2**31 - 1),
+            "",
             str(identity[0]),
             str(identity[1]),
         ],
@@ -1067,6 +1255,8 @@ def test_process_cleanup_does_not_mutate_ancestors_and_rejects_path_swap(
             _MODULE.ROOT_REMOVE_CODE,
             owned,
             str(os.getuid()),
+            str(2**31 - 1),
+            "",
             str(owned_identity[0]),
             str(owned_identity[1]),
         ],
@@ -1126,6 +1316,13 @@ def test_workflows_run_real_installation_e2e_and_cleanup(workflow_name: str) -> 
     assert '--source-commit "$GITHUB_SHA"' in payload
     assert '--transaction-token "$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"' in payload
     assert "if: always() && env.TOBKIRI_PACKAGING_TRANSACTION_TOKEN != ''" in payload
+    source = _SCRIPT.read_text(encoding="utf-8")
+    assert '["/usr/bin/otool", "-L", path]' in source
+    assert "(base_python, False)" in source
+    assert "(installation.executable, False)" in source
+    assert "(installation.executable, True)" in source
+    assert "existing Python installation has an active lease" in source
+    assert "existing Python installation receipt is invalid" in source
 
 
 @pytest.mark.parametrize("workflow_name", ["release.yml", "desktop-installers.yml"])
@@ -1197,9 +1394,9 @@ def test_repository_attributes_require_blob_identical_command_scripts() -> None:
     assert "eol=crlf" not in attributes
 
 
-def test_private_packaging_install_root_matches_rust_lease() -> None:
-    """Python producer and Rust consumer share the dedicated root-owned namespace."""
-    expected = "/Library/TobkiriPackaging/Python.framework/Versions/3.13"
+def test_canonical_packaging_install_root_matches_rust_lease() -> None:
+    """Python producer and Rust consumer share the canonical framework leaf."""
+    expected = "/Library/Frameworks/Python.framework/Versions/3.13"
     provenance = json.loads(
         (
             _SCRIPT.parents[2] / ".github/toolchains/packaging-python-macos.v1.json"
@@ -1210,7 +1407,6 @@ def test_private_packaging_install_root_matches_rust_lease() -> None:
     ).read_text(encoding="utf-8")
     assert provenance["install_root"] == expected
     assert expected in rust
-    assert "/Library/Frameworks/Python.framework/Versions/3.13" not in rust
 
 
 def test_formal_git_environment_contract_is_identical_across_consumers() -> None:
@@ -1277,7 +1473,7 @@ def test_workflows_require_exact_root_process_tests_without_skips(
         "test_process_creates_and_rolls_back_clean_framework_ancestors",
         "test_process_recovers_kill_midway_through_ancestor_creation",
         "test_process_retains_created_ancestor_that_becomes_nonempty",
-        "test_unrelated_unsafe_system_frameworks_is_not_install_authority",
+        "test_root_owned_group_writable_ancestor_requires_caller_nonmembership",
         "test_process_rejects_other_uid_existing_ancestor_when_available",
         "test_published_ancestor_is_traversable_by_nonroot_process_when_available",
     )
