@@ -2437,6 +2437,7 @@ fn selected_source_manifest_digests_from_lock(
         .and_then(serde_json::Value::as_array)
         .ok_or_else(|| invalid_release("Defaults lock entries are missing"))?;
     let mut digests = serde_json::Map::new();
+    let mut paths = std::collections::BTreeSet::new();
     for entry in entries {
         let object = entry
             .as_object()
@@ -2463,6 +2464,11 @@ fn selected_source_manifest_digests_from_lock(
         let relative = safe_release_relative_path(path, "Defaults lock Pack path")?;
         if !path.starts_with("packs/") || !path.ends_with(".pack.v4.json") {
             return Err(invalid_release("Defaults lock Pack path is not canonical"));
+        }
+        if !paths.insert(path.to_owned()) {
+            return Err(invalid_release(
+                "Defaults lock contains a duplicate Pack path",
+            ));
         }
         let pack_bytes = read_regular_file(
             &lock_path
@@ -2502,11 +2508,6 @@ fn selected_source_manifest_digests_from_lock(
         if pack_id.is_empty() || pack_id.contains('\0') {
             return Err(invalid_release(
                 "generated Defaults Pack pack.id is invalid",
-            ));
-        }
-        if path != format!("packs/{pack_id}.pack.v4.json") {
-            return Err(invalid_release(
-                "Defaults lock Pack path differs from exact pack.id",
             ));
         }
         if selected.contains_key(&pack_id) {
@@ -5017,7 +5018,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_pack_binding_rejects_missing_duplicate_wrong_path_id_and_digest() {
+    fn selected_pack_binding_rejects_missing_duplicate_unsafe_path_wrong_id_and_digest() {
         for mutation in ["missing", "duplicate", "path", "id", "digest"] {
             let tree = TestTree::new(&format!("selected-pack-{mutation}"));
             let (release_root, _, catalog_path) = release_fixture(&tree);
@@ -5033,7 +5034,7 @@ mod tests {
                 }
                 "path" => {
                     lock["entries"][0]["path"] =
-                        serde_json::Value::String("packs/wrong.pack.v4.json".into());
+                        serde_json::Value::String("packs/../wrong.pack.v4.json".into());
                 }
                 "id" => {
                     let pack_path = release_root
@@ -5105,6 +5106,59 @@ mod tests {
             .expect("nonselected Pack extra should be allowed");
         assert_eq!(updated.len(), selected.len());
         assert!(!updated.contains_key("shell.cli.default"));
+    }
+
+    #[test]
+    fn real_lock_twenty_preserves_catalog_eighteen_and_aliases() {
+        let tree = TestTree::new("real-lock-catalog-binding");
+        let bundle = tree.path().join("bundle");
+        fs::create_dir_all(&bundle).expect("bundle fixture should exist");
+        let lock_path = bundle.join("bundle.lock.json");
+        fs::write(
+            &lock_path,
+            include_bytes!("../../tobkiri_runtime/ecosystem/defaultspack/v4/bundle.lock.json"),
+        )
+        .expect("real lock fixture should write");
+        let lock: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../tobkiri_runtime/ecosystem/defaultspack/v4/bundle.lock.json"
+        ))
+        .expect("real lock should parse");
+        for entry in lock["entries"].as_array().expect("real lock entries") {
+            if entry["kind"] != "pack" {
+                continue;
+            }
+            let relative = entry["path"].as_str().expect("real Pack path");
+            let destination = bundle.join(relative);
+            fs::create_dir_all(destination.parent().expect("Pack has parent"))
+                .expect("Pack parent should exist");
+            fs::copy(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../tobkiri_runtime/ecosystem/defaultspack/v4")
+                    .join(relative),
+                destination,
+            )
+            .expect("real Pack fixture should copy");
+        }
+        let catalog: serde_json::Value =
+            serde_json::from_slice(include_bytes!("bundled/presentation_catalog.json"))
+                .expect("canonical catalog should parse");
+        let selected = catalog["source_manifest_digests"]
+            .as_object()
+            .expect("canonical selection should exist");
+        assert_eq!(selected.len(), 18);
+        let updated = selected_source_manifest_digests_from_lock(&lock_path, selected)
+            .expect("real lock aliases must bind by nested pack.id");
+        assert_eq!(updated.len(), 18);
+        for alias in [
+            "rumi_file_inspect_pack",
+            "rumi_host_authority_bridge_pack",
+            "rumi_workspace_mount_pack",
+            "tobkiri_host_pack_control",
+        ] {
+            assert!(updated.contains_key(alias));
+        }
+        assert!(!updated.contains_key("shell.cli.default"));
+        assert!(!updated.contains_key("dev.tauri.toolchain.default"));
     }
 
     #[cfg(target_os = "macos")]
