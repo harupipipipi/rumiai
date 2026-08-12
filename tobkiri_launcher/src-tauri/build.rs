@@ -3086,6 +3086,7 @@ fn verify_allowed_generated_untracked(repository_root: &Path, relative: &str) ->
     const GENERATED_ROOTS: &[(&str, bool)] = &[
         ("pack-shell/target", false),
         ("tobkiri_launcher/src-tauri/target", false),
+        ("tobkiri_launcher/src-tauri/gen", false),
         ("tobkiri_launcher/frontend/node_modules", true),
         (
             "tobkiri_runtime/ecosystem/defaultspack/webapp/node_modules",
@@ -3103,21 +3104,50 @@ fn verify_allowed_generated_untracked(repository_root: &Path, relative: &str) ->
                 "production source revision cannot describe untracked path: {relative}"
             ))
         })?;
-    let root_path = repository_root.join(root);
-    let root_metadata = fs::symlink_metadata(&root_path)?;
-    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+    let root_relative = Path::new(root);
+    let descendant = relative_path.strip_prefix(root_relative).map_err(|_| {
+        invalid_release(format!(
+            "generated untracked path escaped its root: {relative}"
+        ))
+    })?;
+    let mut current = repository_root.join(root_relative);
+    let mut metadata = fs::symlink_metadata(&current)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(invalid_release(format!(
             "generated untracked root has unsafe type: {root}"
         )));
     }
-    let metadata = fs::symlink_metadata(repository_root.join(relative_path))?;
-    if !(metadata.is_file()
-        || metadata.is_dir()
-        || (allow_symlink && metadata.file_type().is_symlink()))
-    {
-        return Err(invalid_release(format!(
-            "generated untracked path has unsafe type: {relative}"
-        )));
+    let components = descendant.components().collect::<Vec<_>>();
+    for (index, component) in components.iter().enumerate() {
+        current.push(component.as_os_str());
+        metadata = fs::symlink_metadata(&current)?;
+        let is_leaf = index + 1 == components.len();
+        if metadata.file_type().is_symlink() {
+            if !(is_leaf && allow_symlink) {
+                return Err(invalid_release(format!(
+                    "generated untracked path contains a symlink: {relative}"
+                )));
+            }
+        } else if is_leaf {
+            if !(metadata.is_file() || metadata.is_dir()) {
+                return Err(invalid_release(format!(
+                    "generated untracked path has unsafe type: {relative}"
+                )));
+            }
+            #[cfg(unix)]
+            if metadata.is_file() {
+                use std::os::unix::fs::MetadataExt;
+                if metadata.nlink() != 1 {
+                    return Err(invalid_release(format!(
+                        "generated untracked regular file is hardlinked: {relative}"
+                    )));
+                }
+            }
+        } else if !metadata.is_dir() {
+            return Err(invalid_release(format!(
+                "generated untracked ancestor is not a directory: {relative}"
+            )));
+        }
     }
     Ok(())
 }
@@ -4498,6 +4528,85 @@ mod tests {
         fs::write(cargo.join("config.toml"), b"[build]\nrustc='attacker'\n").unwrap();
         verify_allowed_generated_untracked(tree.path(), ".cargo/config.toml")
             .expect_err("authority-affecting untracked config must be rejected");
+
+        for forbidden in [".pythonrc.py", "sitecustomize.py", "tool-wrapper"] {
+            fs::write(tree.path().join(forbidden), b"attacker").unwrap();
+            verify_allowed_generated_untracked(tree.path(), forbidden)
+                .expect_err("startup and wrapper injection must be rejected");
+        }
+
+        let gen_root = tree.path().join("tobkiri_launcher/src-tauri/gen/app");
+        fs::create_dir_all(&gen_root).unwrap();
+        fs::write(gen_root.join("runtime.py"), b"generated runtime").unwrap();
+        verify_allowed_generated_untracked(
+            tree.path(),
+            "tobkiri_launcher/src-tauri/gen/app/runtime.py",
+        )
+        .expect("regular generated runtime output should be allowed");
+
+        let sibling = tree.path().join("tobkiri_launcher/src-tauri/gen-evil");
+        fs::create_dir_all(&sibling).unwrap();
+        fs::write(sibling.join("runtime.py"), b"attacker").unwrap();
+        verify_allowed_generated_untracked(
+            tree.path(),
+            "tobkiri_launcher/src-tauri/gen-evil/runtime.py",
+        )
+        .expect_err("generated-root sibling must be rejected");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            use std::os::unix::net::UnixListener;
+
+            symlink("runtime.py", gen_root.join("linked.py")).unwrap();
+            verify_allowed_generated_untracked(
+                tree.path(),
+                "tobkiri_launcher/src-tauri/gen/app/linked.py",
+            )
+            .expect_err("generated symlink must be rejected");
+
+            fs::hard_link(gen_root.join("runtime.py"), gen_root.join("hardlinked.py")).unwrap();
+            verify_allowed_generated_untracked(
+                tree.path(),
+                "tobkiri_launcher/src-tauri/gen/app/hardlinked.py",
+            )
+            .expect_err("generated hardlink must be rejected");
+
+            let special = gen_root.join("device-like");
+            let _listener = UnixListener::bind(&special).unwrap();
+            verify_allowed_generated_untracked(
+                tree.path(),
+                "tobkiri_launcher/src-tauri/gen/app/device-like",
+            )
+            .expect_err("generated special file must be rejected");
+        }
+    }
+
+    #[test]
+    fn staged_gen_is_created_before_production_source_authority_checks() {
+        let source = include_str!("build.rs");
+        let stage = &source[source.find("fn stage_runtime_bundle").unwrap()
+            ..source.find("fn collect_runtime_resource_files").unwrap()];
+        assert!(
+            stage.find("join(\"gen\").join(\"app\")").unwrap()
+                < stage
+                    .find("stage_presentation_release(&staged_root)")
+                    .unwrap()
+        );
+        let dispatcher = &source[source.find("fn stage_presentation_release(").unwrap()
+            ..source.find("fn write_canonical_json(").unwrap()];
+        assert!(dispatcher.contains("produce_and_stage_core_presentation_release"));
+        let producer = &source[source
+            .find("fn produce_and_stage_core_presentation_release")
+            .unwrap()
+            ..source.find("fn stage_presentation_release_at(").unwrap()];
+        assert!(producer.contains("current_source_provenance()"));
+        assert!(producer.contains("run_formal_defaults_packaging"));
+        let verifier = &source[source
+            .find("fn stage_presentation_release_from_snapshot")
+            .unwrap()
+            ..source.find("fn stage_core_verified_release(").unwrap()];
+        assert!(verifier.contains("current_source_revision(&repository_root)"));
     }
 
     fn write_pack_shell_fixture(root: &Path, target: &str, profile: &str) -> PathBuf {

@@ -1005,6 +1005,8 @@ def test_formal_git_environment_contract_is_identical_across_consumers() -> None
     assert '"ls-files", "--others", "-z", "--"' in revision
     assert "exclude-standard" not in build_source
     assert "exclude-per-directory" not in build_source
+    assert '("tobkiri_launcher/src-tauri/gen", false)' in build_source
+    assert "Only build.rs owns the later, type-checked gen allowlist" in python_source
     provenance = build_source[
         build_source.index("fn current_source_provenance") : build_source.index(
             "fn expected_target"
@@ -1024,6 +1026,7 @@ def test_formal_git_environment_contract_is_identical_across_consumers() -> None
         assert '"status", "--porcelain' not in payload
         assert "exclude-standard" not in payload
         assert "exclude-per-directory" not in payload
+        assert "later src-tauri/gen exception is Rust-owned" in payload
 
 
 @pytest.mark.parametrize("workflow_name", ["release.yml", "desktop-installers.yml"])

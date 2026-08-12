@@ -510,6 +510,8 @@ def _verify_clean_checkout(
             raise ToolIdentityError("trusted Git blob object ID length is unsupported")
         if actual.encode() != expected:
             raise ToolIdentityError(f"tracked file bytes changed: {relative}")
+    # This binder runs before Rust creates src-tauri/gen; its contract is zero
+    # untracked paths. Only build.rs owns the later, type-checked gen allowlist.
     untracked = _git_output(
         git,
         repository_root,

@@ -235,6 +235,8 @@ jobs:
           )
           if source_clean.returncode != 0:
               raise SystemExit("checked-out index must match HEAD")
+          # Pre-build workflow authority requires zero untracked paths. The
+          # later src-tauri/gen exception is Rust-owned and type-checked.
           untracked = subprocess.check_output(
               [
                   *git_arguments,
