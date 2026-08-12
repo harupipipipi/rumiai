@@ -2,7 +2,6 @@ import "./search_home_destination_policy.js";
 
 const DEFAULT_SETTINGS = {
   serverUrl: "http://127.0.0.1:8766",
-  pairingToken: "",
   clientLabel: "",
   profileLabel: "",
   pollIntervalMinutes: 1
@@ -13,9 +12,13 @@ const CLIENT_ID_KEY = "rumiBrowserCompanionClientId";
 const INSTALLATION_ID_KEY = "rumiBrowserCompanionInstallationId";
 const BROWSER_PROFILE_ID_KEY = "rumiBrowserCompanionProfileId";
 const LAST_STATUS_KEY = "rumiBrowserCompanionLastStatus";
+const DEVICE_CREDENTIAL_KEY = "rumiBrowserCompanionDeviceCredential";
 const ALARM_NAME = "rumi-browser-companion-poll";
 const BRIDGE_POLL_PATH = "/api/tools/browser-companion/bridge/poll";
 const BRIDGE_RESULT_PATH = "/api/tools/browser-companion/bridge/result";
+const BRIDGE_EXCHANGE_PATH = "/api/tools/browser-companion/bridge/exchange";
+const BRIDGE_REFRESH_PATH = "/api/tools/browser-companion/bridge/refresh";
+const BRIDGE_REVOKE_PATH = "/api/tools/browser-companion/bridge/revoke";
 const SEARCH_HOME_ROUTE_STATE_KEY = "rumiSearchHomeRouteStateByTab";
 const SEARCH_HOME_ROUTE_MAX_AGE_MS = 1000 * 60 * 60 * 6;
 const SEARCH_HOME_MAX_CLOCK_SKEW_MS = 30_000;
@@ -26,6 +29,8 @@ const SEARCH_HOME_TRUSTED_ORIGINS = Object.freeze(
 );
 
 chrome.runtime.onInstalled.addListener(async () => {
+  await lockSessionCredentialAccess();
+  await clearLegacyPersistedCredential();
   const settings = await ensureSettings();
   await ensureClientIdentity();
   chrome.alarms.create(ALARM_NAME, { periodInMinutes: normalizePollInterval(settings.pollIntervalMinutes) });
@@ -34,6 +39,8 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 chrome.runtime.onStartup.addListener(async () => {
+  await lockSessionCredentialAccess();
+  await clearLegacyPersistedCredential();
   const settings = await ensureSettings();
   await ensureClientIdentity();
   chrome.alarms.create(ALARM_NAME, { periodInMinutes: normalizePollInterval(settings.pollIntervalMinutes) });
@@ -73,6 +80,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "rumi:poll-now":
         sendResponse(await pollBridge("manual"));
         return;
+      case "rumi:pair-device":
+        sendResponse(await pairDevice(message.serverUrl, message.pairingCode));
+        return;
+      case "rumi:disconnect-device":
+        sendResponse(await disconnectDevice());
+        return;
       case "rumi:list-tabs":
         sendResponse({ ok: true, tabs: await getTabsSummary() });
         return;
@@ -105,6 +118,7 @@ async function ensureSettings() {
     ...(stored || {})
   };
   merged.pollIntervalMinutes = normalizePollInterval(merged.pollIntervalMinutes);
+  delete merged.pairingToken;
   await chrome.storage.local.set({ [STORAGE_KEY]: merged });
   return merged;
 }
@@ -222,12 +236,13 @@ function normalizePollInterval(value) {
 async function pollBridge(trigger) {
   const settings = await getSettings();
   const identity = await ensureClientIdentity();
-  if (!settings.serverUrl || !settings.pairingToken) {
+  const credential = await getDeviceCredential();
+  if (!settings.serverUrl || !credential) {
     return setStatus({
       ok: false,
       state: "not_configured",
       trigger,
-      message: "Set server URL and pairing token in Options."
+      message: "Pair this browser profile in Options."
     });
   }
 
@@ -235,7 +250,6 @@ async function pollBridge(trigger) {
   const requestBody = {
     event: "poll",
     trigger,
-    pairing_token: settings.pairingToken,
     client: metadata
   };
 
@@ -244,14 +258,18 @@ async function pollBridge(trigger) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${settings.pairingToken}`
+        Authorization: `Bearer ${credential.access_token}`
       },
       body: JSON.stringify(requestBody)
     });
     const envelope = await safeJson(response);
     const payload = unwrapBridgePayload(envelope);
     if (!response.ok || envelope.status === "error") {
-      throw new Error(`Bridge poll failed (${response.status}): ${JSON.stringify(envelope)}`);
+      if (response.status === 401 && credential.refresh_token) {
+        await refreshDeviceCredential(settings.serverUrl, credential, identity);
+        return pollBridge("credentialRotated");
+      }
+      throw new Error(`Bridge poll failed (${response.status})`);
     }
 
     const commands = normalizeCommands(payload);
@@ -269,7 +287,8 @@ async function pollBridge(trigger) {
       state: "connected",
       trigger,
       commandCount: commands.length,
-      serverUrl: settings.serverUrl
+      serverUrl: settings.serverUrl,
+      credential: publicCredentialStatus(credential)
     });
   } catch (error) {
     return setStatus({
@@ -370,15 +389,18 @@ async function getTabsSummary() {
 }
 
 async function postCommandResults(settings, client, results) {
+  const credential = await getDeviceCredential();
+  if (!credential) {
+    throw new Error("Device is not paired");
+  }
   const response = await fetch(joinUrl(settings.serverUrl, BRIDGE_RESULT_PATH), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${settings.pairingToken}`
+      Authorization: `Bearer ${credential.access_token}`
     },
     body: JSON.stringify({
       event: "command_results",
-      pairing_token: settings.pairingToken,
       client_id: client.client_id,
       client,
       results
@@ -386,7 +408,77 @@ async function postCommandResults(settings, client, results) {
   });
   const envelope = await safeJson(response);
   if (!response.ok || envelope.status === "error") {
-    throw new Error(`Bridge result post failed (${response.status}): ${JSON.stringify(envelope)}`);
+    throw new Error(`Bridge result post failed (${response.status})`);
+  }
+}
+
+async function getDeviceCredential() {
+  const stored = await chrome.storage.session.get(DEVICE_CREDENTIAL_KEY);
+  return stored[DEVICE_CREDENTIAL_KEY] || null;
+}
+
+async function lockSessionCredentialAccess() {
+  await chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
+}
+
+async function clearLegacyPersistedCredential() {
+  // Device credentials used to be persisted in chrome.storage.local.  They
+  // are now session-only, so remove any retained credential during upgrade.
+  await chrome.storage.local.remove(DEVICE_CREDENTIAL_KEY);
+}
+
+function publicCredentialStatus(credential) {
+  if (!credential) return null;
+  const fields = ["credential_id", "scopes", "issued_at", "access_expires_at_ts", "refresh_expires_at_ts", "last_used_at"];
+  return Object.fromEntries(fields.map((key) => [key, credential[key] ?? null]));
+}
+
+async function pairDevice(serverUrl, pairingCode) {
+  const identity = await ensureClientIdentity();
+  const response = await fetch(joinUrl(String(serverUrl || ""), BRIDGE_EXCHANGE_PATH), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pairing_code: String(pairingCode || ""), client_id: identity.client_id, installation_id: identity.installation_id })
+  });
+  const envelope = await safeJson(response);
+  if (!response.ok || envelope.status === "error") throw new Error(`Pairing failed (${response.status})`);
+  const credential = unwrapBridgePayload(envelope).credential;
+  await chrome.storage.session.set({ [DEVICE_CREDENTIAL_KEY]: credential });
+  return setStatus({ ok: true, state: "connected", serverUrl, credential: publicCredentialStatus(credential) });
+}
+
+async function refreshDeviceCredential(serverUrl, credential, identity) {
+  const response = await fetch(joinUrl(serverUrl, BRIDGE_REFRESH_PATH), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: credential.refresh_token, client_id: identity.client_id, installation_id: identity.installation_id })
+  });
+  const envelope = await safeJson(response);
+  if (!response.ok || envelope.status === "error") {
+    await chrome.storage.session.remove(DEVICE_CREDENTIAL_KEY);
+    throw new Error(`Credential refresh failed (${response.status}); re-pair required`);
+  }
+  const rotated = { ...credential, ...unwrapBridgePayload(envelope).credential };
+  await chrome.storage.session.set({ [DEVICE_CREDENTIAL_KEY]: rotated });
+  return rotated;
+}
+
+async function disconnectDevice() {
+  const settings = await getSettings();
+  const identity = await ensureClientIdentity();
+  const credential = await getDeviceCredential();
+  if (!credential) return setStatus({ ok: true, state: "disconnected" });
+  try {
+    const response = await fetch(joinUrl(settings.serverUrl, BRIDGE_REVOKE_PATH), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential_id: credential.credential_id, refresh_token: credential.refresh_token, client_id: identity.client_id, installation_id: identity.installation_id })
+    });
+    if (!response.ok) throw new Error(`Server revocation failed (${response.status})`);
+    await chrome.storage.session.remove(DEVICE_CREDENTIAL_KEY);
+    return setStatus({ ok: true, state: "disconnected" });
+  } catch (_error) {
+    return setStatus({ ok: false, state: "revoke_pending", message: "Server revocation could not be confirmed. Retry while Rumi is online." });
   }
 }
 

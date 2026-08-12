@@ -2105,6 +2105,9 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         "/api/tools/browser-companion/bridge/result",
         block_module="blocks.tool.browser_companion_bridge_result",
     ),
+    HttpRouteSpec("POST", "/api/tools/browser-companion/bridge/exchange", block_module="blocks.tool.browser_companion_bridge_exchange"),
+    HttpRouteSpec("POST", "/api/tools/browser-companion/bridge/refresh", block_module="blocks.tool.browser_companion_bridge_refresh"),
+    HttpRouteSpec("POST", "/api/tools/browser-companion/bridge/revoke", block_module="blocks.tool.browser_companion_bridge_revoke"),
     HttpRouteSpec("POST", "/api/tools/create", block_module="blocks.tool.create"),
     HttpRouteSpec("GET", "/api/tools/permissions", block_module="blocks.tool.permissions"),
     HttpRouteSpec(

@@ -1,7 +1,6 @@
 const STORAGE_KEY = "rumiBrowserCompanionSettings";
 const DEFAULT_SETTINGS = {
   serverUrl: "http://127.0.0.1:8766",
-  pairingToken: "",
   clientLabel: "",
   profileLabel: "",
   pollIntervalMinutes: 1
@@ -10,6 +9,7 @@ const DEFAULT_SETTINGS = {
 const form = document.getElementById("settings-form");
 const statusEl = document.getElementById("status");
 const pollNowButton = document.getElementById("poll-now");
+const disconnectButton = document.getElementById("disconnect");
 
 document.addEventListener("DOMContentLoaded", () => {
   void loadSettings();
@@ -23,6 +23,9 @@ form.addEventListener("submit", (event) => {
 pollNowButton.addEventListener("click", () => {
   void pollNow();
 });
+disconnectButton.addEventListener("click", () => {
+  void chrome.runtime.sendMessage({ type: "rumi:disconnect-device" }).then(renderStatus);
+});
 
 async function loadSettings() {
   const stored = await chrome.storage.local.get(STORAGE_KEY);
@@ -31,7 +34,7 @@ async function loadSettings() {
     ...(stored[STORAGE_KEY] || {})
   };
   form.serverUrl.value = settings.serverUrl;
-  form.pairingToken.value = settings.pairingToken;
+  form.pairingCode.value = "";
   form.clientLabel.value = settings.clientLabel;
   form.profileLabel.value = settings.profileLabel;
   form.pollIntervalMinutes.value = settings.pollIntervalMinutes;
@@ -43,13 +46,19 @@ async function loadSettings() {
 async function saveSettings() {
   const settings = {
     serverUrl: String(form.serverUrl.value || "").trim(),
-    pairingToken: String(form.pairingToken.value || "").trim(),
     clientLabel: String(form.clientLabel.value || "").trim(),
     profileLabel: String(form.profileLabel.value || "").trim(),
     pollIntervalMinutes: Math.max(1, Number(form.pollIntervalMinutes.value) || 1)
   };
   await chrome.storage.local.set({ [STORAGE_KEY]: settings });
-  setStatus("Settings saved.", true);
+  const pairingCode = String(form.pairingCode.value || "").trim();
+  if (pairingCode) {
+    const result = await chrome.runtime.sendMessage({ type: "rumi:pair-device", serverUrl: settings.serverUrl, pairingCode });
+    form.pairingCode.value = "";
+    renderStatus(result);
+  } else {
+    setStatus("Settings saved. Enter a one-time code to pair.", true);
+  }
 }
 
 async function pollNow() {
@@ -64,7 +73,7 @@ function renderStatus(status) {
     return;
   }
   const message = status.ok
-    ? `Status: ${status.state || "ok"}${status.commandCount != null ? `, commands: ${status.commandCount}` : ""}`
+    ? `Status: ${status.state || "ok"}${status.commandCount != null ? `, commands: ${status.commandCount}` : ""}${status.credential?.scopes ? `, scopes: ${status.credential.scopes.join(", ")}` : ""}`
     : `Status: ${status.state || "error"}${status.message ? `, ${status.message}` : ""}`;
   setStatus(message, Boolean(status.ok));
 }

@@ -31,6 +31,7 @@ RESERVED_REQUEST_CONTEXT_KEYS = frozenset(
         "_query_params",
         "_raw_body",
         "_raw_body_base64",
+        "_browser_companion_bearer",
     }
 )
 

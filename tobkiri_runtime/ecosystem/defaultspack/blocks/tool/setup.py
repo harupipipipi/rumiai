@@ -86,6 +86,9 @@ def run(context):
         ),
         ("POST", "/api/tools/browser-companion/bridge/poll", _lazy("blocks.tool.browser_companion_bridge", "run_poll"), {}),
         ("POST", "/api/tools/browser-companion/bridge/result", _lazy("blocks.tool.browser_companion_bridge", "run_result"), {}),
+        ("POST", "/api/tools/browser-companion/bridge/exchange", _lazy("blocks.tool.browser_companion_bridge", "run_exchange"), {}),
+        ("POST", "/api/tools/browser-companion/bridge/refresh", _lazy("blocks.tool.browser_companion_bridge", "run_refresh"), {}),
+        ("POST", "/api/tools/browser-companion/bridge/revoke", _lazy("blocks.tool.browser_companion_bridge", "run_revoke"), {}),
         # ---- Capability catalog routes ----
         ("GET", "/api/capabilities", _lazy("blocks.capability.list"), {}),
         ("GET", "/api/capabilities/{id}", _lazy("blocks.capability.manifest"), {"id": "capability_id"}),

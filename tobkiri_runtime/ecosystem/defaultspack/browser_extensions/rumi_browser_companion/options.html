@@ -10,15 +10,15 @@
     <main class="page">
       <section class="card">
         <h1>Rumi Browser Companion</h1>
-        <p class="lede">Configure the local Rumi bridge endpoint and pairing token used by this browser.</p>
+        <p class="lede">Pair this browser profile with a one-time code. Rumi issues a scoped, expiring device credential.</p>
         <form id="settings-form">
           <label class="field">
             <span>Server URL</span>
             <input id="server-url" name="serverUrl" type="url" placeholder="http://127.0.0.1:8766" required>
           </label>
           <label class="field">
-            <span>Pairing Token</span>
-            <input id="pairing-token" name="pairingToken" type="password" placeholder="Paste your bridge pairing token" required>
+            <span>One-time Pairing Code</span>
+            <input id="pairing-code" name="pairingCode" type="password" placeholder="Enter a one-time pairing code">
           </label>
           <label class="field">
             <span>Client Label</span>
@@ -35,6 +35,7 @@
           <div class="actions">
             <button type="submit">Save Settings</button>
             <button id="poll-now" type="button" class="secondary">Poll Bridge Now</button>
+            <button id="disconnect" type="button" class="secondary">Revoke and Disconnect</button>
           </div>
         </form>
         <div id="status" class="status" role="status" aria-live="polite"></div>

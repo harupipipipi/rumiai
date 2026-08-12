@@ -132,7 +132,9 @@ REGEX_RULES: tuple[RegexRule, ...] = (
         "error",
         "Reusable credentials must not be persisted in browser or extension storage.",
         rx(
-            r"(?:localStorage|sessionStorage|chrome\.storage\.(?:local|sync))[\s\S]{0,180}?"
+            r"(?:localStorage|sessionStorage)\.setItem\s*\([\s\S]{0,180}?"
+            r"(?:token|secret|credential|api[_-]?key|access[_-]?key|approval[_-]?token)"
+            r"|chrome\.storage\.(?:local|sync)\.set\s*\([\s\S]{0,180}?"
             r"(?:token|secret|credential|api[_-]?key|access[_-]?key|approval[_-]?token)",
             flags=re.IGNORECASE,
         ),

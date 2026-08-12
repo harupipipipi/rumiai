@@ -22,11 +22,11 @@ This gives Rumi a "computer use + browser use" path where the model can inspect 
 
    `<repo>/tobkiri_runtime/ecosystem/defaultspack/browser_extensions/rumi_browser_companion`
 
-4. In Rumi, call `browser_companion` with `action: "bridge.pairing"` to get the pairing token and candidate server URLs.
+4. In Rumi, call `browser_companion` with `action: "bridge.pairing"` to get a one-time pairing code and candidate server URLs.
 5. Open the extension options page and paste:
 
    - `Server URL` such as `http://127.0.0.1:8766`
-   - `Pairing Token`
+   - `One-time Pairing Code`
    - Optional `Profile Label`, for example `Work` or `Personal`
 
 6. Click `Poll Bridge Now` to confirm the extension can connect.
@@ -37,12 +37,26 @@ The extension talks to these local endpoints:
 
 - `POST {serverUrl}/api/tools/browser-companion/bridge/poll`
 - `POST {serverUrl}/api/tools/browser-companion/bridge/result`
+- `POST {serverUrl}/api/tools/browser-companion/bridge/exchange`
+- `POST {serverUrl}/api/tools/browser-companion/bridge/refresh`
+- `POST {serverUrl}/api/tools/browser-companion/bridge/revoke`
+
+The exchange consumes the pairing code and returns a device/installation-bound
+credential scoped to poll and result delivery. Access credentials expire after
+15 minutes and are rotated with a 30-day refresh credential. Poll and result
+requests send the access credential only in the `Authorization` header; pairing
+and refresh material is never included in those bodies. Disconnect first asks
+the server to revoke the device and removes session-only material only after that
+is confirmed. Credentials are held only in Chromium's trusted-context session
+storage, never in persistent extension storage; closing the browser requires
+explicit re-pairing. If Rumi is offline, the UI reports `revoke_pending` and
+lets the user retry. Legacy stored pairing tokens and credentials are removed
+during upgrade.
 
 `poll` request body:
 
 ```json
 {
-  "pairing_token": "example-token",
   "client": {
     "client_id": "uuid",
     "label": "My Edge Companion",
@@ -118,7 +132,6 @@ The extension talks to these local endpoints:
 
 ```json
 {
-  "pairing_token": "example-token",
   "client_id": "uuid",
   "results": [
     {

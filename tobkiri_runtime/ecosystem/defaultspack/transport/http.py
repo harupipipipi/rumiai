@@ -1635,6 +1635,16 @@ _LOCAL_UI_APPROVAL_METHOD_PATTERNS = (
 )
 
 _LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1"}
+_BROWSER_COMPANION_BRIDGE_PATHS = frozenset(
+    {
+        "/api/tools/browser-companion/bridge/exchange",
+        "/api/tools/browser-companion/bridge/poll",
+        "/api/tools/browser-companion/bridge/refresh",
+        "/api/tools/browser-companion/bridge/result",
+        "/api/tools/browser-companion/bridge/revoke",
+    }
+)
+_CHROME_EXTENSION_ID_RE = re.compile(r"^[a-p]{32}$")
 
 
 def _is_sensitive_coding_path(path):
@@ -1676,6 +1686,45 @@ def _is_allowed_sensitive_origin(origin):
     return _local_origin_allowed(origin)
 
 
+def _is_browser_companion_bridge_path(path):
+    return str(path or "") in _BROWSER_COMPANION_BRIDGE_PATHS
+
+
+def _is_browser_companion_extension_origin(origin):
+    """Accept only canonical Chrome extension origins for the paired bridge.
+
+    The unpacked companion has no stable extension id, so its origin cannot be
+    allowlisted ahead of installation.  This exception is intentionally kept
+    to the device-credential bridge: exchange still requires a one-time
+    pairing code and every other bridge operation verifies its credential.
+    """
+    if not origin:
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(origin)
+        hostname = parsed.hostname or ""
+        port = parsed.port
+    except (TypeError, ValueError):
+        return False
+    return (
+        parsed.scheme == "chrome-extension"
+        and bool(_CHROME_EXTENSION_ID_RE.fullmatch(hostname))
+        and port is None
+        and parsed.username is None
+        and parsed.password is None
+        and not parsed.path
+        and not parsed.query
+        and not parsed.fragment
+    )
+
+
+def _is_allowed_browser_api_origin(path, origin):
+    return _is_allowed_sensitive_origin(origin) or (
+        _is_browser_companion_bridge_path(path)
+        and _is_browser_companion_extension_origin(origin)
+    )
+
+
 def _header_value(headers, name):
     if not headers:
         return ""
@@ -1711,7 +1760,7 @@ def _browser_api_origin_error(method, path, headers, client_address=None):
     if not _is_browser_accessible_api_path(path):
         return None
     origin = _header_value(headers, "Origin")
-    if origin and not _is_allowed_sensitive_origin(origin):
+    if origin and not _is_allowed_browser_api_origin(path, origin):
         return (403, "origin not allowed for local defaultspack API", "ORIGIN_DENIED")
     return None
 
@@ -2189,6 +2238,14 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 "_query_params": dict(query_params),
                 "_headers": sanitized_forwarded_headers(self.headers),
             }
+            if method == "POST" and path in {
+                "/api/tools/browser-companion/bridge/poll",
+                "/api/tools/browser-companion/bridge/result",
+            }:
+                # Authorization is normally stripped before pack dispatch. These
+                # two device-bound routes need the bearer in a reserved,
+                # server-owned context field so request JSON cannot spoof it.
+                server_context["_browser_companion_bearer"] = _bearer_token(self.headers)
             if browser_exchange_path:
                 bearer = _bearer_token(self.headers)
                 if bearer and _local_auth_token_authorized(self.headers):
@@ -2512,7 +2569,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         origin = _header_value(self.headers, "Origin")
         if _is_sensitive_http_path(path) or _is_browser_accessible_api_path(path):
-            if _is_allowed_sensitive_origin(origin):
+            if _is_allowed_browser_api_origin(path, origin):
                 if origin:
                     self.send_header("Access-Control-Allow-Origin", origin)
                     self.send_header("Vary", "Origin")

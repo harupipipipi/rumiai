@@ -5,6 +5,8 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -478,21 +480,95 @@ def test_browser_companion_snapshot_forwards_snapshot_options_to_content_script(
         assert needle in capture_body
 
 
-def test_browser_companion_extension_keeps_pairing_token_in_local_storage():
+def test_browser_companion_extension_migrates_pairing_token_to_device_credentials():
     extension_root = _browser_companion_extension_root()
     background = (extension_root / "background.js").read_text(encoding="utf-8")
     options = (extension_root / "options.js").read_text(encoding="utf-8")
     options_html = (extension_root / "options.html").read_text(encoding="utf-8")
 
     assert "readLocalSettingsWithSyncMigration" in background
-    assert "chrome.storage.local.set({ [STORAGE_KEY]: merged })" in background
+    assert "delete merged.pairingToken" in background
+    assert "DEVICE_CREDENTIAL_KEY" in background
+    assert "chrome.storage.session.get(DEVICE_CREDENTIAL_KEY)" in background
+    assert "chrome.storage.session.set({ [DEVICE_CREDENTIAL_KEY]: credential })" in background
+    assert "chrome.storage.session.set({ [DEVICE_CREDENTIAL_KEY]: rotated })" in background
+    assert 'chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })' in background
+    assert "clearLegacyPersistedCredential" in background
+    assert "chrome.storage.local.set({ [DEVICE_CREDENTIAL_KEY]" not in background
+    assert "BRIDGE_EXCHANGE_PATH" in background
+    assert "BRIDGE_REFRESH_PATH" in background
+    assert "BRIDGE_REVOKE_PATH" in background
+    assert "pairing_token: settings.pairingToken" not in background
+    assert "Authorization: `Bearer ${settings.pairingToken}`" not in background
     assert "chrome.storage.sync.remove(STORAGE_KEY)" in background
     assert 'areaName !== "local"' in background
     assert "chrome.storage.local.get(STORAGE_KEY)" in options
-    assert "chrome.storage.local.set({ [STORAGE_KEY]: settings })" in options
+    assert 'type: "rumi:pair-device"' in options
+    assert 'type: "rumi:disconnect-device"' in options
     assert "profileLabel" in options
     assert 'name="profileLabel"' in options_html
+    assert 'name="pairingCode"' in options_html
     assert "chrome.storage.sync.set({ [STORAGE_KEY]: settings })" not in options
+
+
+def test_browser_companion_device_credential_lifecycle(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_companion_bridge as bridge_module
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore
+
+    store = BrowserCompanionBridgeStore(root=tmp_path / "bridge")
+    pairing_code = store.ensure_pairing(rotate=True)["pairing_token"]
+    issued = store.exchange_pairing(pairing_code, client_id="chrome-1", installation_id="install-1")
+
+    with pytest.raises(PermissionError, match="already-used"):
+        store.exchange_pairing(pairing_code, client_id="chrome-1", installation_id="install-1")
+
+    persisted = (store.root_dir / "device_credentials.json").read_text(encoding="utf-8")
+    assert pairing_code not in persisted
+    assert issued["access_token"] not in persisted
+    assert issued["refresh_token"] not in persisted
+    assert store.pairing_authorized(pairing_code) is False
+    assert store.authorize_device(issued["access_token"], client_id="chrome-1", installation_id="install-1", scope="bridge.poll")
+    assert store.authorize_device(issued["access_token"], client_id="copied", installation_id="install-1", scope="bridge.poll") is None
+    assert store.authorize_device(issued["access_token"], client_id="chrome-1", installation_id="copied", scope="bridge.poll") is None
+
+    rotated = store.rotate_access(issued["refresh_token"], client_id="chrome-1", installation_id="install-1")
+    assert rotated["refresh_token"] != issued["refresh_token"]
+    with pytest.raises(PermissionError, match="unknown refresh credential"):
+        store.rotate_access(issued["refresh_token"], client_id="chrome-1", installation_id="install-1")
+    assert store.authorize_device(issued["access_token"], client_id="chrome-1", installation_id="install-1", scope="bridge.poll") is None
+    assert store.authorize_device(rotated["access_token"], client_id="chrome-1", installation_id="install-1", scope="bridge.result")
+    monkeypatch.setattr(bridge_module, "_now_ts", lambda: float(rotated["access_expires_at_ts"]) + 1)
+    assert store.authorize_device(rotated["access_token"], client_id="chrome-1", installation_id="install-1", scope="bridge.poll") is None
+    monkeypatch.undo()
+    assert store.revoke_device(issued["credential_id"], refresh_token=rotated["refresh_token"], client_id="chrome-1", installation_id="install-1") is True
+    assert store.authorize_device(rotated["access_token"], client_id="chrome-1", installation_id="install-1", scope="bridge.poll") is None
+
+
+def test_browser_companion_refresh_rotation_is_single_winner(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore
+
+    store = BrowserCompanionBridgeStore(root=tmp_path / "bridge")
+    pairing_code = store.ensure_pairing(rotate=True)["pairing_token"]
+    issued = store.exchange_pairing(pairing_code, client_id="chrome-race", installation_id="install-race")
+    barrier = threading.Barrier(3)
+    outcomes = []
+
+    def rotate():
+        barrier.wait()
+        try:
+            outcomes.append(store.rotate_access(issued["refresh_token"], client_id="chrome-race", installation_id="install-race"))
+        except PermissionError as exc:
+            outcomes.append(exc)
+
+    threads = [threading.Thread(target=rotate) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    barrier.wait()
+    for thread in threads:
+        thread.join(timeout=2)
+
+    assert sum(isinstance(outcome, dict) for outcome in outcomes) == 1
+    assert sum(isinstance(outcome, PermissionError) for outcome in outcomes) == 1
 
 
 def test_browser_companion_bridge_routes_support_batch_results(tmp_path, monkeypatch):
@@ -500,15 +576,16 @@ def test_browser_companion_bridge_routes_support_batch_results(tmp_path, monkeyp
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore
 
     store = BrowserCompanionBridgeStore(root=tmp_path / "bridge")
-    token = store.ensure_pairing(rotate=True)["pairing_token"]
+    pairing_code = store.ensure_pairing(rotate=True)["pairing_token"]
+    credential = store.exchange_pairing(pairing_code, client_id="edge-1", installation_id="edge-install-1")
     store.create_command("edge-1", {"action": "browser.tabs", "payload": {}})
 
     monkeypatch.setattr(route_module, "BrowserCompanionBridgeStore", lambda: store)
 
     poll_response = route_module.run_poll(
         {
-            "_headers": {"Authorization": f"Bearer {token}"},
-            "client": {"client_id": "edge-1", "browser_name": "Microsoft Edge"},
+            "_headers": {"Authorization": f"Bearer {credential['access_token']}"},
+            "client": {"client_id": "edge-1", "installation_id": "edge-install-1", "browser_name": "Microsoft Edge"},
         }
     )
 
@@ -519,8 +596,9 @@ def test_browser_companion_bridge_routes_support_batch_results(tmp_path, monkeyp
 
     result_response = route_module.run_result(
         {
-            "_headers": {"Authorization": f"Bearer {token}"},
+            "_headers": {"Authorization": f"Bearer {credential['access_token']}"},
             "client_id": "edge-1",
+            "client": {"client_id": "edge-1", "installation_id": "edge-install-1"},
             "results": [
                 {
                     "command_id": command["command_id"],
@@ -537,6 +615,12 @@ def test_browser_companion_bridge_routes_support_batch_results(tmp_path, monkeyp
     assert completed["status"] == "completed"
     assert completed["result"]["tabs"][0]["id"] == 17
     assert completed["result"]["is_error"] is False
+
+
+def test_browser_companion_reserved_bearer_cannot_be_spoofed_from_json():
+    from core_runtime.api.safe_headers import strip_reserved_request_context
+
+    assert strip_reserved_request_context({"_browser_companion_bearer": "attacker"}) == {}
 
 
 def test_browser_companion_session_route_exposes_pairing_status(tmp_path, monkeypatch):

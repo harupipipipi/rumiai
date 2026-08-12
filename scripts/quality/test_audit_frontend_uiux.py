@@ -40,6 +40,18 @@ export function Example() {
         rules = {item.rule for item in scan_text("src/Dialog.tsx", source)}
         self.assertIn("a11y.icon-button-name", rules)
 
+    def test_rejects_persistent_extension_credential_writes_but_allows_legacy_removal(self) -> None:
+        persisted = 'chrome.storage.local.set({ deviceCredential: credential });'
+        removed = 'chrome.storage.local.remove("rumiBrowserCompanionDeviceCredential");'
+        self.assertIn(
+            "security.secret-browser-storage",
+            {item.rule for item in scan_text("extension/background.js", persisted)},
+        )
+        self.assertNotIn(
+            "security.secret-browser-storage",
+            {item.rule for item in scan_text("extension/background.js", removed)},
+        )
+
     def test_diff_parser_keeps_only_new_line_numbers(self) -> None:
         parsed = _parse_diff(
             """diff --git a/src/a.tsx b/src/a.tsx

@@ -37,6 +37,31 @@ def test_defaultspack_api_rejects_cross_site_origins():
     ) is None
 
 
+def test_browser_companion_bridge_accepts_only_canonical_extension_origins():
+    from transport.http import _browser_api_origin_error
+
+    extension_origin = "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+
+    assert _browser_api_origin_error(
+        "POST",
+        "/api/tools/browser-companion/bridge/exchange",
+        {"Origin": extension_origin},
+        ("127.0.0.1", 54321),
+    ) is None
+    assert _browser_api_origin_error(
+        "POST",
+        "/api/packs/defaultspack/knowledge",
+        {"Origin": extension_origin},
+        ("127.0.0.1", 54321),
+    )[2] == "ORIGIN_DENIED"
+    assert _browser_api_origin_error(
+        "POST",
+        "/api/tools/browser-companion/bridge/exchange",
+        {"Origin": "chrome-extension://not-an-extension-id"},
+        ("127.0.0.1", 54321),
+    )[2] == "ORIGIN_DENIED"
+
+
 def test_defaultspack_api_cors_does_not_allow_cross_site_origins():
     from transport.http import _RequestHandler
 
@@ -55,3 +80,11 @@ def test_defaultspack_api_cors_does_not_allow_cross_site_origins():
     handler._send_cors_headers()
 
     assert ("Access-Control-Allow-Origin", "http://localhost:8766") in sent_headers
+
+    sent_headers.clear()
+    extension_origin = "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+    handler.path = "/api/tools/browser-companion/bridge/exchange"
+    handler.headers = {"Origin": extension_origin}
+    handler._send_cors_headers()
+
+    assert ("Access-Control-Allow-Origin", extension_origin) in sent_headers
