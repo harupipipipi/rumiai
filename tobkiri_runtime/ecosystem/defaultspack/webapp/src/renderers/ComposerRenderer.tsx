@@ -1617,6 +1617,7 @@ function ModelDropdown({
   const [activeProviderIndex, setActiveProviderIndex] = useState(0);
   const [activeModelIndex, setActiveModelIndex] = useState(0);
   const searchRequestSeqRef = useRef(0);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const activeOptionRef = useRef<HTMLButtonElement | null>(null);
   const trimmedSearch = search.trim();
   const resolvedSelectorSchema = useMemo(
@@ -1653,6 +1654,25 @@ function ModelDropdown({
     ),
     [eligibleProfiles, providerTrigger, search],
   );
+
+  useIsomorphicLayoutEffect(() => {
+    const focusSearch = () => searchInputRef.current?.focus({ preventScroll: true });
+    focusSearch();
+    const focusTimer = window.setTimeout(focusSearch, 0);
+    return () => window.clearTimeout(focusTimer);
+  }, []);
+
+  useEffect(() => {
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+
+    document.addEventListener("keydown", handleDocumentKeyDown, true);
+    return () => document.removeEventListener("keydown", handleDocumentKeyDown, true);
+  }, [onClose]);
 
   useEffect(() => {
     searchRequestSeqRef.current += 1;
@@ -1793,6 +1813,7 @@ function ModelDropdown({
                 </span>
               )}
               <input
+                ref={searchInputRef}
                 type="text"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -3123,7 +3144,6 @@ export function ComposerRenderer({
     if (modelPickerRequestId <= 0) return;
     setMenuOpen(false);
     setModelDropdownOpen(true);
-    window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
   }, [modelPickerRequestId]);
 
   useEffect(() => {
