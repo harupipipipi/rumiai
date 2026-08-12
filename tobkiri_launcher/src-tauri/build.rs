@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -51,7 +50,6 @@ const ISOLATED_ENVIRONMENT_KEYS: &[&str] = &[
     "LANG",
     "LC_ALL",
     "LC_CTYPE",
-    "PATH",
     "SystemRoot",
     "TEMP",
     "TMP",
@@ -59,6 +57,7 @@ const ISOLATED_ENVIRONMENT_KEYS: &[&str] = &[
     "USERPROFILE",
     "WINDIR",
 ];
+const SOURCE_PROVENANCE_ENV: &str = "TOBKIRI_PACKAGING_SOURCE_PROVENANCE_FILE";
 
 #[cfg(not(test))]
 fn main() {
@@ -106,7 +105,7 @@ fn main() {
 fn main() {}
 
 fn isolated_python_module_command(
-    python: OsString,
+    python: &packaging_toolchain::VerifiedTool,
     source_root: &Path,
     module: &str,
 ) -> io::Result<Command> {
@@ -120,7 +119,7 @@ fn isolated_python_module_command(
         ));
     }
     let canonical_root = source_root.canonicalize()?;
-    let mut command = Command::new(python);
+    let mut command = python.command()?;
     command
         .env_clear()
         .args(["-I", "-B", "-c", ISOLATED_MODULE_CODE])
@@ -137,6 +136,13 @@ fn isolated_python_module_command(
         }
     }
     Ok(command)
+}
+
+fn bind_source_provenance_command(command: &mut Command, path: &Path) {
+    command
+        .arg("--source-provenance-file")
+        .arg(path)
+        .env(SOURCE_PROVENANCE_ENV, path);
 }
 
 fn warn_legacy_defaultspack_app_bundle() {
@@ -941,8 +947,9 @@ fn release_entrypoint(artifact: &Path, entrypoint: &str) -> io::Result<PathBuf> 
 }
 
 fn git_value(repo_root: &Path, args: &[&str], label: &str) -> io::Result<String> {
-    let git = packaging_toolchain::verified_tool_executable("git")?;
-    let output = Command::new(git)
+    let git = packaging_toolchain::verified_tool("git")?;
+    let output = git
+        .command()?
         .args(args)
         .current_dir(repo_root)
         .output()
@@ -1873,12 +1880,13 @@ fn stage_presentation_release_from_snapshot(
                 invalid_release(format!("failed to resolve repository root: {error}"))
             })?;
         let source_revision = current_source_revision(&repository_root)?;
+        let source_tree = current_source_tree(&repository_root, &source_revision)?;
         let trusted_source_manifest =
             committed_source_manifest(&repository_root, &source_revision)?;
         let snapshot_parent = std::env::var_os("OUT_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| staged_root.join(".verified-source-snapshots"));
-        let verified_source = packaged_source::verify_and_snapshot_against_manifest(
+        let mut verified_source = packaged_source::verify_and_snapshot_against_manifest(
             &repository_root.join("tobkiri_runtime"),
             &snapshot_parent,
             &trusted_source_manifest,
@@ -1888,41 +1896,72 @@ fn stage_presentation_release_from_snapshot(
                 "trusted Rust packaged Profile source-closure verification failed: {error}"
             ))
         })?;
-        let python = packaging_toolchain::verified_tool_executable("python")?;
-        let mut child = isolated_python_module_command(
-            python.into(),
-            verified_source.root(),
-            "scripts.generate_packaged_defaultspack_v4_bundle",
-        )?
-        .arg("--source-artifact")
-        .arg(&verified.artifact_path)
-        .arg("--bundle-root")
-        .arg(&bundle_root)
-        .arg("--artifact-root")
-        .arg(staged_root.join("ecosystem/defaultspack/platform-artifacts"))
-        .arg("--relative-path")
-        .arg(&verified.artifact_ref)
-        .arg("--entrypoint")
-        .arg(&verified.entrypoint)
-        .arg("--platform")
-        .arg(&verified.platform)
-        .arg("--architecture")
-        .arg(&verified.architecture)
-        .arg("--bundle-identity")
-        .arg(&verified.bundle_identity)
-        .arg("--source-commit")
-        .arg(source_revision)
-        .current_dir(verified_source.root())
-        .spawn()
-        .map_err(|error| {
-            invalid_release(format!("failed to run packaged Profile generator: {error}"))
-        })?;
-        let status = child.wait().map_err(|error| {
-            invalid_release(format!(
-                "failed waiting for packaged Profile generator: {error}"
-            ))
-        })?;
-        drop(child);
+        let source_provenance = serde_json::to_vec(&serde_json::json!({
+            "schema": "io.tobkiri.packaging-source-provenance.v1",
+            "source_commit": &source_revision,
+            "source_tree": &source_tree,
+            "source_clean": true,
+            "source_manifest_sha256": raw_byte_digest(&trusted_source_manifest),
+        }))
+        .map_err(io::Error::other)?;
+        let provenance_path = verified_source.bind_provenance(&source_provenance)?;
+        let python = packaging_toolchain::verified_tool("python")?;
+        verified_source.verify_unchanged()?;
+        let execution = (|| -> io::Result<_> {
+            let mut command = isolated_python_module_command(
+                &python,
+                verified_source.root(),
+                "scripts.generate_packaged_defaultspack_v4_bundle",
+            )?;
+            command
+                .arg("--source-artifact")
+                .arg(&verified.artifact_path)
+                .arg("--bundle-root")
+                .arg(&bundle_root)
+                .arg("--artifact-root")
+                .arg(staged_root.join("ecosystem/defaultspack/platform-artifacts"))
+                .arg("--relative-path")
+                .arg(&verified.artifact_ref)
+                .arg("--entrypoint")
+                .arg(&verified.entrypoint)
+                .arg("--platform")
+                .arg(&verified.platform)
+                .arg("--architecture")
+                .arg(&verified.architecture)
+                .arg("--bundle-identity")
+                .arg(&verified.bundle_identity)
+                .arg("--source-commit")
+                .arg(&source_revision)
+                .current_dir(verified_source.root());
+            bind_source_provenance_command(&mut command, &provenance_path);
+            let mut child = command.spawn().map_err(|error| {
+                invalid_release(format!("failed to run packaged Profile generator: {error}"))
+            })?;
+            child.wait().map_err(|error| {
+                invalid_release(format!(
+                    "failed waiting for packaged Profile generator: {error}"
+                ))
+            })
+        })()
+        .and_then(|status| {
+            verified_source.verify_unchanged()?;
+            Ok(status)
+        });
+        let cleanup = verified_source.cleanup();
+        let status = match (execution, cleanup) {
+            (Ok(status), Ok(())) => status,
+            (Err(error), Ok(())) => return Err(error),
+            (Ok(_), Err(cleanup)) => {
+                return Err(invalid_release(format!(
+                    "verified source snapshot cleanup failed: {cleanup}"
+                )))
+            }
+            (Err(error), Err(cleanup)) => {
+                return Err(invalid_release(format!(
+                    "{error}; verified source snapshot cleanup also failed: {cleanup}"
+                )))
+            }
+        };
         if !status.success() {
             return Err(invalid_release(format!(
                 "packaged Profile generator exited with {status}"
@@ -1956,8 +1995,9 @@ fn stage_presentation_release_from_snapshot(
 }
 
 fn current_source_revision(repository_root: &Path) -> io::Result<String> {
-    let git = packaging_toolchain::verified_tool_executable("git")?;
-    let revision = Command::new(&git)
+    let git = packaging_toolchain::verified_tool("git")?;
+    let revision = git
+        .command()?
         .args(["rev-parse", "--verify", "HEAD^{commit}"])
         .current_dir(repository_root)
         .output()
@@ -1978,7 +2018,8 @@ fn current_source_revision(repository_root: &Path) -> io::Result<String> {
             "production source revision must be a full lowercase commit SHA",
         ));
     }
-    let dirty = Command::new(&git)
+    let dirty = git
+        .command()?
         .args(["status", "--porcelain=v1", "--untracked-files=all"])
         .current_dir(repository_root)
         .output()
@@ -1996,11 +2037,40 @@ fn current_source_revision(repository_root: &Path) -> io::Result<String> {
     Ok(value)
 }
 
+fn current_source_tree(repository_root: &Path, revision: &str) -> io::Result<String> {
+    let git = packaging_toolchain::verified_tool("git")?;
+    let object = format!("{revision}^{{tree}}");
+    let output = git
+        .command()?
+        .args(["rev-parse", "--verify", &object])
+        .current_dir(repository_root)
+        .output()
+        .map_err(|error| invalid_release(format!("failed to read source tree: {error}")))?;
+    if !output.status.success() {
+        return Err(invalid_release("source checkout has no verifiable tree"));
+    }
+    let value = String::from_utf8(output.stdout)
+        .map_err(|error| invalid_release(format!("source tree is not UTF-8: {error}")))?
+        .trim()
+        .to_owned();
+    if !matches!(value.len(), 40 | 64)
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(invalid_release(
+            "source tree is not a canonical Git object ID",
+        ));
+    }
+    Ok(value)
+}
+
 fn committed_source_manifest(repository_root: &Path, revision: &str) -> io::Result<Vec<u8>> {
-    let git = packaging_toolchain::verified_tool_executable("git")?;
+    let git = packaging_toolchain::verified_tool("git")?;
     let object =
         format!("{revision}:tobkiri_runtime/packaged_defaultspack_source_manifest.v1.json");
-    let output = Command::new(git)
+    let output = git
+        .command()?
         .args(["show", &object])
         .current_dir(repository_root)
         .output()
@@ -2544,8 +2614,9 @@ fn copy_file(src: &Path, dst: &Path) -> io::Result<u64> {
 }
 
 fn copy_tracked_runtime_tree(repo_root: &Path, staged_root: &Path) -> io::Result<bool> {
-    let git = packaging_toolchain::verified_tool_executable("git")?;
-    let output = match Command::new(git)
+    let git = packaging_toolchain::verified_tool("git")?;
+    let output = match git
+        .command()?
         .args(["ls-files", "-z", "--", APP_SOURCE_DIR])
         .current_dir(repo_root)
         .output()
@@ -3820,9 +3891,11 @@ mod tests {
         fs::create_dir_all(&package_root).expect("package fixture root should be creatable");
         let package_test = repository_root
             .join("tobkiri_launcher/scripts/tests/test_package_presentation_artifact.py");
-        let python = packaging_toolchain::verified_tool_executable("python")
+        let python = packaging_toolchain::verified_tool("python")
             .expect("formal packaging Python binding should be available");
-        let status = Command::new(python)
+        let status = python
+            .command()
+            .expect("verified Python command should be constructible")
             .args([
                 "-c",
                 "import runpy,sys; from pathlib import Path; runpy.run_path(sys.argv[1])['_package'](Path(sys.argv[2]))",

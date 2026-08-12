@@ -15,7 +15,10 @@ serde_json = "1"
 sha2 = "0.10"
 
 [target.'cfg(windows)'.build-dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem"] }
+
+[target.'cfg(unix)'.build-dependencies]
+libc = "0.2"
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }

@@ -28,6 +28,8 @@ const FILES: &[&str] = &[
 ];
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_SOURCE_BYTES: u64 = 256 * 1024 * 1024;
+const PROVENANCE_FILENAME: &str = "packaging-source-provenance.v1.json";
+const MAX_PROVENANCE_BYTES: usize = 64 * 1024;
 
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
@@ -43,7 +45,14 @@ struct ExpectedFile {
 /// A verified source tree. Its directory is removed when the value is dropped.
 #[derive(Debug)]
 pub struct VerifiedSourceSnapshot {
+    owner: PathBuf,
     root: PathBuf,
+    owner_identity: (u64, u64, u64, i64, i64),
+    root_identity: (u64, u64, u64, i64, i64),
+    root_handle: File,
+    trusted_manifest: Vec<u8>,
+    provenance: Option<Vec<u8>>,
+    cleaned: bool,
 }
 
 impl VerifiedSourceSnapshot {
@@ -54,7 +63,90 @@ impl VerifiedSourceSnapshot {
 
 impl Drop for VerifiedSourceSnapshot {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
+        if !self.cleaned {
+            let _ = self.cleanup_inner();
+        }
+    }
+}
+
+impl VerifiedSourceSnapshot {
+    pub fn verify_unchanged(&self) -> io::Result<()> {
+        if identity(&self.root_handle.metadata()?) != self.root_identity
+            || identity(&fs::symlink_metadata(&self.root)?) != self.root_identity
+            || identity(&fs::symlink_metadata(&self.owner)?) != self.owner_identity
+        {
+            return Err(invalid("verified source snapshot root identity changed"));
+        }
+        verify_snapshot(&self.root, &self.trusted_manifest)?;
+        if let Some(expected) = &self.provenance {
+            let actual = read_manifest(&self.root.join(PROVENANCE_FILENAME))?;
+            if &actual != expected {
+                return Err(invalid("verified source provenance changed"));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn bind_provenance(&mut self, bytes: &[u8]) -> io::Result<PathBuf> {
+        if self.provenance.is_some() || bytes.is_empty() || bytes.len() > MAX_PROVENANCE_BYTES {
+            return Err(invalid("source provenance binding is invalid"));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&self.root, fs::Permissions::from_mode(0o700))?;
+        }
+        let path = self.root.join(PROVENANCE_FILENAME);
+        let result = (|| {
+            let mut output = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)?;
+            output.write_all(bytes)?;
+            output.sync_all()?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&path, fs::Permissions::from_mode(0o400))?;
+                fs::set_permissions(&self.root, fs::Permissions::from_mode(0o500))?;
+            }
+            Ok::<_, io::Error>(())
+        })();
+        if result.is_err() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&self.root, fs::Permissions::from_mode(0o500));
+            }
+            return result.map(|_| path);
+        }
+        self.provenance = Some(bytes.to_vec());
+        self.root_identity = identity(&self.root_handle.metadata()?);
+        self.verify_unchanged()?;
+        Ok(path)
+    }
+
+    pub fn cleanup(mut self) -> io::Result<()> {
+        let result = self.cleanup_inner();
+        if result.is_ok() {
+            self.cleaned = true;
+        }
+        result
+    }
+
+    fn cleanup_inner(&mut self) -> io::Result<()> {
+        if identity(&self.root_handle.metadata()?) != self.root_identity
+            || identity(&fs::symlink_metadata(&self.root)?) != self.root_identity
+            || identity(&fs::symlink_metadata(&self.owner)?) != self.owner_identity
+        {
+            return Err(invalid(
+                "refusing to clean a replaced verified source snapshot",
+            ));
+        }
+        make_tree_owner_writable(&self.root)?;
+        fs::remove_dir_all(&self.root)?;
+        fs::remove_dir(&self.owner)?;
+        Ok(())
     }
 }
 
@@ -294,7 +386,7 @@ fn collect_actual(root: &Path, current: &Path, actual: &mut BTreeSet<String>) ->
     Ok(())
 }
 
-fn create_snapshot(parent: &Path) -> io::Result<PathBuf> {
+fn create_snapshot(parent: &Path) -> io::Result<(PathBuf, PathBuf)> {
     fs::create_dir_all(parent)?;
     let parent_metadata = fs::symlink_metadata(parent)?;
     if parent_metadata.file_type().is_symlink() || !parent_metadata.is_dir() {
@@ -306,17 +398,158 @@ fn create_snapshot(parent: &Path) -> io::Result<PathBuf> {
             .duration_since(UNIX_EPOCH)
             .map_err(io::Error::other)?
             .as_nanos();
-        let path = canonical_parent.join(format!(
+        let owner = canonical_parent.join(format!(
             "packaged-source-snapshot-{}-{nonce}-{attempt}",
             std::process::id()
         ));
-        match fs::create_dir(&path) {
-            Ok(()) => return Ok(path),
+        match fs::create_dir(&owner) {
+            Ok(()) => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&owner, fs::Permissions::from_mode(0o700))?;
+                    if fs::symlink_metadata(&owner)?.uid() != unsafe { libc::geteuid() } {
+                        return Err(invalid("source snapshot owner has the wrong user"));
+                    }
+                }
+                let root = owner.join("source");
+                fs::create_dir(&root)?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&root, fs::Permissions::from_mode(0o700))?;
+                }
+                return Ok((owner, root));
+            }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(error),
         }
     }
     Err(invalid("could not create a unique source snapshot"))
+}
+
+fn write_trusted_manifest(root: &Path, bytes: &[u8]) -> io::Result<()> {
+    let path = root.join("packaged_defaultspack_source_manifest.v1.json");
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
+    output.write_all(bytes)?;
+    output.sync_all()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o400))?;
+    }
+    Ok(())
+}
+
+fn verify_snapshot(root: &Path, trusted_manifest: &[u8]) -> io::Result<()> {
+    let expected = parse_manifest(trusted_manifest)?;
+    if read_manifest(&root.join("packaged_defaultspack_source_manifest.v1.json"))?
+        != trusted_manifest
+    {
+        return Err(invalid("verified snapshot manifest changed"));
+    }
+    let mut actual = BTreeSet::new();
+    for relative in ROOTS {
+        collect_actual(root, &root.join(relative), &mut actual)?;
+    }
+    for relative in FILES {
+        let path = root.join(relative);
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(invalid("verified snapshot file type changed"));
+        }
+        actual.insert((*relative).to_owned());
+    }
+    if actual != expected.keys().cloned().collect() {
+        return Err(invalid("verified snapshot inventory changed"));
+    }
+    for (relative, record) in expected {
+        let path = root.join(relative);
+        verify_snapshot_file(&path, &record)?;
+    }
+    Ok(())
+}
+
+fn verify_snapshot_file(path: &Path, expected: &ExpectedFile) -> io::Result<()> {
+    let before = fs::symlink_metadata(path)?;
+    if before.file_type().is_symlink()
+        || !before.is_file()
+        || before.len() != expected.size
+        || executable(&before) != expected.executable
+    {
+        return Err(invalid("verified snapshot metadata changed"));
+    }
+    let mut input = File::open(path)?;
+    if identity(&input.metadata()?) != identity(&before) {
+        return Err(invalid("verified snapshot changed while opened"));
+    }
+    let mut digest = Sha256::new();
+    let mut size = 0_u64;
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let count = input.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        size = size
+            .checked_add(count as u64)
+            .ok_or_else(|| invalid("verified snapshot size overflow"))?;
+        if size > expected.size {
+            return Err(invalid("verified snapshot grew while read"));
+        }
+        digest.update(&buffer[..count]);
+    }
+    let after = fs::symlink_metadata(path)?;
+    if identity(&after) != identity(&before)
+        || size != expected.size
+        || format!("{:x}", digest.finalize()) != expected.sha256
+    {
+        return Err(invalid("verified snapshot digest or identity changed"));
+    }
+    Ok(())
+}
+
+fn seal_directories(path: &Path) -> io::Result<()> {
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let metadata = fs::symlink_metadata(entry.path())?;
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            seal_directories(&entry.path())?;
+        }
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o500))?;
+    }
+    Ok(())
+}
+
+fn make_tree_owner_writable(path: &Path) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(invalid("snapshot cleanup encountered a replaced directory"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    }
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let metadata = fs::symlink_metadata(entry.path())?;
+        if metadata.file_type().is_symlink() {
+            return Err(invalid("snapshot cleanup encountered a symlink"));
+        }
+        if metadata.is_dir() {
+            make_tree_owner_writable(&entry.path())?;
+        }
+    }
+    Ok(())
 }
 
 fn copy_verified(source: &Path, target: &Path, expected: &ExpectedFile) -> io::Result<()> {
@@ -487,7 +720,7 @@ fn verify_and_snapshot_against_manifest_with_hook(
         ));
     }
     before_copy();
-    let snapshot_root = create_snapshot(snapshot_parent)?;
+    let (snapshot_owner, snapshot_root) = create_snapshot(snapshot_parent)?;
     let result = (|| {
         for (relative, expected) in &manifest {
             copy_verified(
@@ -496,15 +729,28 @@ fn verify_and_snapshot_against_manifest_with_hook(
                 expected,
             )?;
         }
+        write_trusted_manifest(&snapshot_root, trusted_manifest)?;
+        verify_snapshot(&snapshot_root, trusted_manifest)?;
+        seal_directories(&snapshot_root)?;
         if identity(&fs::symlink_metadata(runtime_root)?) != identity(&root_metadata) {
             return Err(invalid("packaged source root changed during verification"));
         }
+        let root_handle = File::open(&snapshot_root)?;
         Ok(VerifiedSourceSnapshot {
+            owner_identity: identity(&fs::symlink_metadata(&snapshot_owner)?),
+            root_identity: identity(&root_handle.metadata()?),
+            owner: snapshot_owner.clone(),
             root: snapshot_root.clone(),
+            root_handle,
+            trusted_manifest: trusted_manifest.to_vec(),
+            provenance: None,
+            cleaned: false,
         })
     })();
     if result.is_err() {
+        let _ = make_tree_owner_writable(&snapshot_root);
         let _ = fs::remove_dir_all(&snapshot_root);
+        let _ = fs::remove_dir(&snapshot_owner);
     }
     result
 }
@@ -586,10 +832,15 @@ mod tests {
             fs::read(snapshot.root().join("scripts/fixture.py")).unwrap(),
             b"safe:scripts/fixture.py\n"
         );
-        assert!(!snapshot
-            .root()
-            .join("packaged_defaultspack_source_manifest.v1.json")
-            .exists());
+        assert_eq!(
+            fs::read(
+                snapshot
+                    .root()
+                    .join("packaged_defaultspack_source_manifest.v1.json")
+            )
+            .unwrap(),
+            fs::read(root.join("packaged_defaultspack_source_manifest.v1.json")).unwrap()
+        );
     }
 
     #[test]
@@ -606,6 +857,53 @@ mod tests {
             .join("scripts/generate_packaged_defaultspack_v4_bundle.py")
             .is_file());
         assert!(!snapshot.root().join("scripts/__pycache__").exists());
+    }
+
+    #[test]
+    fn actual_isolated_generator_imports_from_verified_snapshot() {
+        let tree = Tree::new("generator-integration");
+        let runtime_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .unwrap()
+            .join("tobkiri_runtime");
+        let mut snapshot = verify_and_snapshot(&runtime_root, &tree.0).unwrap();
+        let provenance = br#"{"schema":"io.tobkiri.packaging-source-provenance.v1","source_commit":"fixture","source_tree":"fixture","source_clean":true}"#;
+        let provenance_path = snapshot.bind_provenance(provenance).unwrap();
+        let python = super::super::packaging_toolchain::verified_tool("python").unwrap();
+        if !python
+            .command()
+            .unwrap()
+            .args(["-I", "-B", "-c", "import packaging"])
+            .status()
+            .unwrap()
+            .success()
+        {
+            eprintln!("skipping generator integration: packaging dependency is unavailable");
+            snapshot.cleanup().unwrap();
+            return;
+        }
+        let mut command = super::super::isolated_python_module_command(
+            &python,
+            snapshot.root(),
+            "scripts.generate_packaged_defaultspack_v4_bundle",
+        )
+        .unwrap();
+        super::super::bind_source_provenance_command(&mut command, &provenance_path);
+        command.arg("--help");
+        assert!(command
+            .get_args()
+            .any(|arg| arg == std::ffi::OsStr::new("--source-provenance-file")));
+        assert!(command
+            .get_envs()
+            .all(|(key, _)| key != std::ffi::OsStr::new("PATH")));
+        let status = command.status().unwrap();
+        assert!(
+            status.success(),
+            "actual isolated generator import must pass"
+        );
+        snapshot.verify_unchanged().unwrap();
+        snapshot.cleanup().unwrap();
     }
 
     #[test]
@@ -715,6 +1013,13 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(fs::read_dir(tree.0.join("snapshots"))
+            .unwrap()
+            .all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("packaged-source-snapshot-")));
     }
 
     #[test]
@@ -736,5 +1041,107 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("source") || error.kind() == io::ErrorKind::NotFound);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn umask_zero_still_produces_private_sealed_snapshot() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::Mutex;
+
+        static UMASK_LOCK: Mutex<()> = Mutex::new(());
+        let _lock = UMASK_LOCK.lock().unwrap();
+        let previous = unsafe { libc::umask(0) };
+        struct Restore(libc::mode_t);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                unsafe { libc::umask(self.0) };
+            }
+        }
+        let _restore = Restore(previous);
+        let tree = Tree::new("umask-zero");
+        let root = fixture(&tree);
+        let snapshot = verify_and_snapshot(&root, &tree.0).unwrap();
+        assert_eq!(
+            fs::metadata(&snapshot.owner).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(snapshot.root()).unwrap().permissions().mode() & 0o777,
+            0o500
+        );
+        assert_eq!(
+            fs::metadata(snapshot.root().join("scripts"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o500
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn postverify_replace_and_extra_are_detected() {
+        use std::os::unix::fs::PermissionsExt;
+
+        for mutation in ["replace", "extra"] {
+            let tree = Tree::new(mutation);
+            let root = fixture(&tree);
+            let snapshot = verify_and_snapshot(&root, &tree.0).unwrap();
+            let scripts = snapshot.root().join("scripts");
+            fs::set_permissions(&scripts, fs::Permissions::from_mode(0o700)).unwrap();
+            if mutation == "replace" {
+                fs::remove_file(scripts.join("fixture.py")).unwrap();
+                fs::write(scripts.join("fixture.py"), b"replacement\n").unwrap();
+            } else {
+                fs::write(scripts.join("extra.pyc"), b"extra").unwrap();
+            }
+            assert!(snapshot.verify_unchanged().is_err());
+        }
+    }
+
+    #[test]
+    fn failed_child_is_followed_by_explicit_snapshot_cleanup() {
+        let tree = Tree::new("spawn-cleanup");
+        let root = fixture(&tree);
+        let snapshot = verify_and_snapshot(&root, &tree.0).unwrap();
+        let owner = snapshot.owner.clone();
+        let python = super::super::packaging_toolchain::verified_tool("python").unwrap();
+        let status = super::super::isolated_python_module_command(
+            &python,
+            snapshot.root(),
+            "scripts.module_that_does_not_exist",
+        )
+        .unwrap()
+        .status()
+        .unwrap();
+        assert!(!status.success());
+        snapshot.cleanup().unwrap();
+        assert!(!owner.exists());
+    }
+
+    #[test]
+    fn cleanup_refuses_root_swap_and_preserves_replacement() {
+        let tree = Tree::new("cleanup-root-swap");
+        let root = fixture(&tree);
+        let snapshot = verify_and_snapshot(&root, &tree.0).unwrap();
+        let snapshot_root = snapshot.root.clone();
+        let moved = snapshot.owner.join("original-source");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&snapshot.owner, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::set_permissions(&snapshot_root, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        fs::rename(&snapshot_root, &moved).unwrap();
+        fs::create_dir(&snapshot_root).unwrap();
+        fs::write(snapshot_root.join("replacement"), b"preserve").unwrap();
+        let error = snapshot.cleanup().unwrap_err();
+        assert!(error.to_string().contains("refusing"));
+        assert_eq!(
+            fs::read(snapshot_root.join("replacement")).unwrap(),
+            b"preserve"
+        );
     }
 }
