@@ -10,6 +10,8 @@ use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
+#[cfg(target_os = "macos")]
+use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 
@@ -174,7 +176,7 @@ pub struct VerifiedTool {
     #[cfg(target_os = "macos")]
     macos_cdhash: Vec<u8>,
     #[cfg(target_os = "macos")]
-    python_installation: Option<MacOSPythonInstallationLease>,
+    python_installation: Option<Arc<MacOSPythonInstallationLease>>,
     lock: File,
 }
 
@@ -182,20 +184,20 @@ pub struct VerifiedTool {
 struct MacOSPythonInstallationLease {
     root: PathBuf,
     identity: (u64, u64, u64, u64, u64),
-    inventory: PathBuf,
     inventory_sha256: String,
     _root_handle: File,
-    _authority_handles: Vec<File>,
     _inventory_handle: File,
+    snapshot_path: Option<PathBuf>,
 }
 
 #[cfg(target_os = "macos")]
 impl MacOSPythonInstallationLease {
     fn verify_unchanged(&self) -> io::Result<()> {
-        for handle in &self._authority_handles {
-            if macos_fd_has_nontrivial_acl(handle)? {
-                return Err(invalid("macOS Python authority ACL changed"));
-            }
+        use std::collections::BTreeSet;
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        if macos_fd_has_nontrivial_acl(&self._root_handle)? {
+            return Err(invalid("macOS Python authority ACL changed"));
         }
         if macos_fd_has_nontrivial_acl(&self._inventory_handle)? {
             return Err(invalid("macOS Python inventory ACL changed"));
@@ -207,12 +209,140 @@ impl MacOSPythonInstallationLease {
         {
             return Err(invalid("macOS Python installation root identity changed"));
         }
-        let actual = format!("{:x}", Sha256::digest(fs::read(&self.inventory)?));
+        let mut inventory = self._inventory_handle.try_clone()?;
+        inventory.seek(SeekFrom::Start(0))?;
+        let mut digest = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let count = inventory.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            digest.update(&buffer[..count]);
+        }
+        let actual = format!("{:x}", digest.finalize());
         if actual != self.inventory_sha256 {
             return Err(invalid("macOS Python installation inventory changed"));
         }
+        inventory.seek(SeekFrom::Start(0))?;
+        let document: serde_json::Value = serde_json::from_reader(inventory)
+            .map_err(|error| invalid(format!("sealed Python manifest is invalid: {error}")))?;
+        let files = document
+            .get("files")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| invalid("sealed Python manifest files are missing"))?;
+        let mut expected = BTreeSet::new();
+        for entry in files {
+            let relative = entry
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| invalid("sealed Python inventory path is missing"))?;
+            let relative_path = Path::new(relative);
+            if relative_path.is_absolute()
+                || relative_path
+                    .components()
+                    .any(|component| !matches!(component, std::path::Component::Normal(_)))
+                || !expected.insert(relative.to_owned())
+            {
+                return Err(invalid("sealed Python inventory path is unsafe"));
+            }
+            let path = self.root.join(relative_path);
+            let metadata = fs::symlink_metadata(&path)?;
+            if metadata.file_type().is_symlink()
+                || !metadata.is_file()
+                || metadata.nlink() != 1
+                || metadata.permissions().mode() & 0o222 != 0
+            {
+                return Err(invalid("sealed Python inventory entry is unsafe"));
+            }
+            let bytes = fs::read(&path)?;
+            let digest = format!("{:x}", Sha256::digest(&bytes));
+            if entry.get("size").and_then(serde_json::Value::as_u64) != Some(bytes.len() as u64)
+                || entry.get("sha256").and_then(serde_json::Value::as_str) != Some(digest.as_str())
+                || entry.get("executable").and_then(serde_json::Value::as_bool)
+                    != Some(metadata.permissions().mode() & 0o111 != 0)
+            {
+                return Err(invalid("sealed Python inventory entry changed"));
+            }
+        }
+        let mut actual_paths = BTreeSet::new();
+        collect_snapshot_files(&self.root, &self.root, &mut actual_paths)?;
+        actual_paths.remove("sealed-environment.v1.json");
+        if actual_paths != expected {
+            return Err(invalid("sealed Python snapshot has missing or extra files"));
+        }
         Ok(())
     }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for MacOSPythonInstallationLease {
+    fn drop(&mut self) {
+        if let Some(path) = self.snapshot_path.take() {
+            let _ = cleanup_private_macos_python_snapshot(&path, Some(&self._root_handle));
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn cleanup_private_macos_python_snapshot(path: &Path, root: Option<&File>) -> io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let named = fs::symlink_metadata(path)?;
+    if named.file_type().is_symlink() || !named.is_dir() {
+        return Err(invalid("private Python cleanup root changed type"));
+    }
+    if let Some(root) = root {
+        let held = root.metadata()?;
+        if named.dev() != held.dev() || named.ino() != held.ino() {
+            return Err(invalid("private Python cleanup root identity changed"));
+        }
+    }
+    fn unseal(path: &Path) -> io::Result<()> {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            let metadata = fs::symlink_metadata(entry.path())?;
+            if metadata.file_type().is_symlink() {
+                return Err(invalid("private Python cleanup found a symlink"));
+            }
+            if metadata.is_dir() {
+                unseal(&entry.path())?;
+            }
+        }
+        Ok(())
+    }
+    unseal(path)?;
+    fs::remove_dir_all(path)
+}
+
+#[cfg(target_os = "macos")]
+fn collect_snapshot_files(
+    root: &Path,
+    directory: &Path,
+    output: &mut std::collections::BTreeSet<String>,
+) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() || metadata.permissions().mode() & 0o222 != 0 {
+            return Err(invalid("sealed Python snapshot contains unsafe entry"));
+        }
+        if metadata.is_dir() {
+            collect_snapshot_files(root, &path, output)?;
+        } else if metadata.is_file() {
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| invalid("sealed Python snapshot path escaped"))?;
+            output.insert(relative.to_string_lossy().replace('\\', "/"));
+        } else {
+            return Err(invalid("sealed Python snapshot contains special entry"));
+        }
+    }
+    Ok(())
 }
 
 impl VerifiedTool {
@@ -291,7 +421,9 @@ impl VerifiedTool {
                 if let Some(installation) = &self.python_installation {
                     installation.verify_unchanged()?;
                 }
-                if macos_code_identity(&self.execution_path)? != self.macos_cdhash {
+                if macos_code_identity(&self.execution_path, self.python_installation.is_some())?
+                    != self.macos_cdhash
+                {
                     return Err(invalid("macOS packaging tool CDHash changed before spawn"));
                 }
             }
@@ -591,7 +723,10 @@ impl<'a> VerifiedCommand<'a> {
 
     #[cfg(target_os = "macos")]
     fn spawn_darwin(&self, capture: bool) -> VerifiedSpawnOutcome {
-        let identity = match macos_code_identity(&self.tool.original_path) {
+        let identity = match macos_code_identity(
+            &self.tool.execution_path,
+            self.tool.python_installation.is_some(),
+        ) {
             Ok(identity) => identity,
             Err(error) => return VerifiedSpawnOutcome::NoChild(error),
         };
@@ -606,7 +741,7 @@ impl<'a> VerifiedCommand<'a> {
             ));
         }
         let mut child = match spawn_suspended_darwin(
-            &self.tool.original_path,
+            &self.tool.execution_path,
             &self.args,
             &self.environment(),
             self.current_dir_handle.as_ref(),
@@ -615,6 +750,7 @@ impl<'a> VerifiedCommand<'a> {
             Ok(child) => child,
             Err(error) => return VerifiedSpawnOutcome::NoChild(error),
         };
+        child._python_installation = self.tool.python_installation.clone();
         let capture_fds = [
             child.stdout.as_ref().map(std::os::fd::AsRawFd::as_raw_fd),
             child.stderr.as_ref().map(std::os::fd::AsRawFd::as_raw_fd),
@@ -914,6 +1050,7 @@ fn spawn_suspended_darwin(
         stderr: stderr_read,
         status: None,
         state: DarwinChildState::Running,
+        _python_installation: None,
     };
     Ok(child)
 }
@@ -1022,6 +1159,7 @@ pub struct DarwinChild {
     stderr: Option<File>,
     status: Option<ExitStatus>,
     state: DarwinChildState,
+    _python_installation: Option<Arc<MacOSPythonInstallationLease>>,
 }
 
 #[cfg(target_os = "macos")]
@@ -1333,7 +1471,7 @@ fn sealed_executable_copy(
 }
 
 #[cfg(target_os = "macos")]
-fn macos_code_identity(path: &Path) -> io::Result<Vec<u8>> {
+fn macos_code_identity(path: &Path, allow_adhoc: bool) -> io::Result<Vec<u8>> {
     use std::os::unix::ffi::OsStrExt;
     use std::ptr;
 
@@ -1412,7 +1550,7 @@ fn macos_code_identity(path: &Path) -> io::Result<Vec<u8>> {
                 (&mut flags as *mut i64).cast::<std::ffi::c_void>(),
             )
         } != 0;
-    if !flags_ok || !accepted_macos_signature_flags(flags) {
+    if !flags_ok || (!allow_adhoc && !accepted_macos_signature_flags(flags)) {
         unsafe { CFRelease(information) };
         return Err(invalid(
             "macOS packaging tool is ad-hoc or has unavailable signature flags",
@@ -1549,7 +1687,9 @@ fn open_macos_authority_chain(
 }
 
 #[cfg(target_os = "macos")]
-fn macos_python_installation_lease(path: &Path) -> io::Result<MacOSPythonInstallationLease> {
+fn macos_python_installation_lease(
+    path: &Path,
+) -> io::Result<(MacOSPythonInstallationLease, PathBuf)> {
     use std::os::unix::fs::OpenOptionsExt;
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
@@ -1559,24 +1699,26 @@ fn macos_python_installation_lease(path: &Path) -> io::Result<MacOSPythonInstall
     if !root.is_absolute() || root.canonicalize()? != root {
         return Err(invalid("macOS Python installation root is not canonical"));
     }
-    let expected_root = Path::new("/Library/Frameworks/Python.framework/Versions/3.13");
-    if root != expected_root {
+    let caller = unsafe { libc::geteuid() } as u32;
+    let root_handle = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(&root)?;
+    let before = root_handle.metadata()?;
+    if !before.is_dir()
+        || before.uid() != caller
+        || before.permissions().mode() & 0o222 != 0
+        || macos_fd_has_nontrivial_acl(&root_handle)?
+    {
         return Err(invalid(
-            "macOS Python installation root is not the fixed authority",
+            "rootless macOS Python snapshot is writable, foreign-owned, or has an ACL",
         ));
     }
-    let caller = unsafe { libc::geteuid() } as u32;
-    let caller_groups = current_process_groups()?;
-    let authority_handles = open_macos_authority_chain(&root, caller, &caller_groups)?;
-    let root_handle = authority_handles
-        .last()
-        .ok_or_else(|| invalid("macOS Python authority chain is empty"))?
-        .try_clone()?;
-    let before = root_handle.metadata()?;
-    if !path.starts_with(&root) || path.canonicalize()? != path {
+    let canonical_executable = path.canonicalize()?;
+    if !path.starts_with(&root) || canonical_executable != path {
         return Err(invalid("macOS Python executable escapes its installation"));
     }
-    let inventory = root.join(".tobkiri-packaging-python.v1.json");
+    let inventory = root.join("sealed-environment.v1.json");
     let inventory_handle = fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
@@ -1584,8 +1726,8 @@ fn macos_python_installation_lease(path: &Path) -> io::Result<MacOSPythonInstall
     let inventory_metadata = inventory_handle.metadata()?;
     if inventory_metadata.file_type().is_symlink()
         || !inventory_metadata.is_file()
-        || inventory_metadata.uid() != 0
-        || inventory_metadata.permissions().mode() & 0o022 != 0
+        || inventory_metadata.uid() != caller
+        || inventory_metadata.permissions().mode() & 0o222 != 0
         || inventory_metadata.nlink() != 1
         || macos_fd_has_nontrivial_acl(&inventory_handle)?
     {
@@ -1607,14 +1749,273 @@ fn macos_python_installation_lease(path: &Path) -> io::Result<MacOSPythonInstall
     let lease = MacOSPythonInstallationLease {
         root,
         identity: file_identity(&before),
-        inventory,
         inventory_sha256,
         _root_handle: root_handle,
-        _authority_handles: authority_handles,
         _inventory_handle: inventory_handle,
+        snapshot_path: None,
     };
     lease.verify_unchanged()?;
-    Ok(lease)
+    create_private_macos_python_snapshot(&lease, path)
+}
+
+#[cfg(target_os = "macos")]
+fn create_private_macos_python_snapshot(
+    source: &MacOSPythonInstallationLease,
+    source_executable: &Path,
+) -> io::Result<(MacOSPythonInstallationLease, PathBuf)> {
+    use std::collections::BTreeSet;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    source.verify_unchanged()?;
+    let mut inventory = source._inventory_handle.try_clone()?;
+    inventory.seek(SeekFrom::Start(0))?;
+    let document: serde_json::Value = serde_json::from_reader(inventory)
+        .map_err(|error| invalid(format!("sealed Python manifest is invalid: {error}")))?;
+    let files = document
+        .get("files")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| invalid("sealed Python manifest files are missing"))?;
+    let executable_relative = source_executable
+        .strip_prefix(&source.root)
+        .map_err(|_| invalid("packaging Python executable escapes source snapshot"))?
+        .to_path_buf();
+    let base = env::temp_dir().canonicalize()?;
+    let mut snapshot_path = None;
+    for attempt in 0..128_u32 {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(io::Error::other)?
+            .as_nanos();
+        let candidate = base.join(format!(
+            ".tobkiri-packaging-python-{}-{nonce}-{attempt}",
+            std::process::id()
+        ));
+        let mut builder = fs::DirBuilder::new();
+        builder.mode(0o700);
+        match builder.create(&candidate) {
+            Ok(()) => {
+                snapshot_path = Some(candidate);
+                break;
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    let snapshot_path = snapshot_path
+        .ok_or_else(|| invalid("could not allocate private packaging Python snapshot"))?;
+    let result = (|| {
+        let destination_root = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(&snapshot_path)?;
+        copy_macos_snapshot_file(
+            source._root_handle.as_raw_fd(),
+            destination_root.as_raw_fd(),
+            Path::new("sealed-environment.v1.json"),
+            false,
+        )?;
+        let mut directories = BTreeSet::new();
+        for entry in files {
+            let relative = entry
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| invalid("sealed Python inventory path is missing"))?;
+            let executable = entry
+                .get("executable")
+                .and_then(serde_json::Value::as_bool)
+                .ok_or_else(|| invalid("sealed Python executable flag is missing"))?;
+            let relative = Path::new(relative);
+            copy_macos_snapshot_file(
+                source._root_handle.as_raw_fd(),
+                destination_root.as_raw_fd(),
+                relative,
+                executable,
+            )?;
+            let mut parent = relative.parent();
+            while let Some(value) = parent.filter(|value| !value.as_os_str().is_empty()) {
+                directories.insert(value.to_path_buf());
+                parent = value.parent();
+            }
+        }
+        for relative in directories.iter().rev() {
+            let directory = open_macos_snapshot_directory(destination_root.as_raw_fd(), relative)?;
+            if unsafe { libc::fchmod(directory.as_raw_fd(), 0o500) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        if unsafe { libc::fchmod(destination_root.as_raw_fd(), 0o500) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let metadata = destination_root.metadata()?;
+        let inventory_path = snapshot_path.join("sealed-environment.v1.json");
+        let inventory_handle = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(&inventory_path)?;
+        let lease = MacOSPythonInstallationLease {
+            root: snapshot_path.clone(),
+            identity: file_identity(&metadata),
+            inventory_sha256: source.inventory_sha256.clone(),
+            _root_handle: destination_root,
+            _inventory_handle: inventory_handle,
+            snapshot_path: Some(snapshot_path.clone()),
+        };
+        lease.verify_unchanged()?;
+        source.verify_unchanged()?;
+        let private_executable = snapshot_path.join(&executable_relative);
+        let executable_metadata = fs::symlink_metadata(&private_executable)?;
+        if !executable_metadata.is_file()
+            || executable_metadata.file_type().is_symlink()
+            || executable_metadata.permissions().mode() & 0o111 == 0
+        {
+            return Err(invalid("private packaging Python executable is invalid"));
+        }
+        Ok((lease, private_executable))
+    })();
+    if result.is_err() {
+        // Construction residue is retained if its private name cannot be
+        // proven. A later run never adopts an existing name.
+        let _ = cleanup_private_macos_python_snapshot(&snapshot_path, None);
+    }
+    result
+}
+
+#[cfg(target_os = "macos")]
+fn copy_macos_snapshot_file(
+    source_root: std::os::fd::RawFd,
+    destination_root: std::os::fd::RawFd,
+    relative: &Path,
+    executable: bool,
+) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::io::Write;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::MetadataExt;
+    use std::path::Component;
+
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|part| !matches!(part, Component::Normal(_)))
+    {
+        return Err(invalid("private Python snapshot path is unsafe"));
+    }
+    let components = relative.components().collect::<Vec<_>>();
+    let mut source_directory = duplicate_macos_fd(source_root)?;
+    let mut destination_directory = duplicate_macos_fd(destination_root)?;
+    for component in &components[..components.len().saturating_sub(1)] {
+        let Component::Normal(name) = component else {
+            return Err(invalid("private Python snapshot component is unsafe"));
+        };
+        source_directory = open_macos_child_directory(source_directory, name, false)?;
+        destination_directory = open_macos_child_directory(destination_directory, name, true)?;
+    }
+    let name = components
+        .last()
+        .and_then(|component| match component {
+            Component::Normal(name) => Some(name),
+            _ => None,
+        })
+        .ok_or_else(|| invalid("private Python snapshot file path is empty"))?;
+    let name = CString::new(name.as_bytes()).map_err(|_| invalid("snapshot path contains NUL"))?;
+    let source_fd = unsafe {
+        libc::openat(
+            source_directory.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if source_fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let destination_fd = unsafe {
+        libc::openat(
+            destination_directory.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            if executable { 0o500 } else { 0o400 },
+        )
+    };
+    if destination_fd < 0 {
+        unsafe { libc::close(source_fd) };
+        return Err(io::Error::last_os_error());
+    }
+    let mut source = unsafe { File::from_raw_fd(source_fd) };
+    let mut destination = unsafe { File::from_raw_fd(destination_fd) };
+    let before = source.metadata()?;
+    if !before.is_file() || before.nlink() != 1 {
+        return Err(invalid("private Python source is not a singly-linked file"));
+    }
+    io::copy(&mut source, &mut destination)?;
+    destination.flush()?;
+    destination.sync_all()?;
+    let after = source.metadata()?;
+    if file_identity(&before) != file_identity(&after) {
+        return Err(invalid("private Python source changed during copy"));
+    }
+    drop(unsafe { OwnedFd::from_raw_fd(source_directory) });
+    drop(unsafe { OwnedFd::from_raw_fd(destination_directory) });
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn duplicate_macos_fd(fd: std::os::fd::RawFd) -> io::Result<std::os::fd::RawFd> {
+    let duplicate = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
+    if duplicate < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(duplicate)
+}
+
+#[cfg(target_os = "macos")]
+fn open_macos_child_directory(
+    parent: std::os::fd::RawFd,
+    name: &std::ffi::OsStr,
+    create: bool,
+) -> io::Result<std::os::fd::RawFd> {
+    use std::ffi::CString;
+    use std::os::fd::{FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+
+    let name = CString::new(name.as_bytes()).map_err(|_| invalid("snapshot path contains NUL"))?;
+    if create {
+        let result = unsafe { libc::mkdirat(parent, name.as_ptr(), 0o700) };
+        if result != 0 && io::Error::last_os_error().raw_os_error() != Some(libc::EEXIST) {
+            drop(unsafe { OwnedFd::from_raw_fd(parent) });
+            return Err(io::Error::last_os_error());
+        }
+    }
+    let child = unsafe {
+        libc::openat(
+            parent,
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    drop(unsafe { OwnedFd::from_raw_fd(parent) });
+    if child < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(child)
+}
+
+#[cfg(target_os = "macos")]
+fn open_macos_snapshot_directory(root: std::os::fd::RawFd, relative: &Path) -> io::Result<File> {
+    use std::os::fd::{FromRawFd, OwnedFd};
+    use std::path::Component;
+
+    let mut directory = duplicate_macos_fd(root)?;
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            drop(unsafe { OwnedFd::from_raw_fd(directory) });
+            return Err(invalid("snapshot directory path is unsafe"));
+        };
+        directory = open_macos_child_directory(directory, name, false)?;
+    }
+    Ok(unsafe { File::from_raw_fd(directory) })
 }
 
 #[cfg(windows)]
@@ -1779,21 +2180,26 @@ fn verify_tool_binding_guard(kind: &str, path: &Path, expected: &str) -> io::Res
         macos_cdhash,
         python_installation,
     ) = {
-        let cdhash = macos_code_identity(path)?;
-        let installation = if kind == "python" {
-            Some(macos_python_installation_lease(path)?)
+        let (installation, private_python) = if kind == "python" {
+            let (lease, executable) = macos_python_installation_lease(path)?;
+            (Some(Arc::new(lease)), Some(executable))
         } else {
-            None
+            (None, None)
         };
+        let execution = private_python.as_deref().unwrap_or(path);
+        let execution_metadata = fs::symlink_metadata(execution)?;
+        let cdhash = macos_code_identity(execution, installation.is_some())?;
         (
-            path.to_path_buf(),
+            execution.to_path_buf(),
             None,
-            metadata.clone(),
+            execution_metadata,
             false,
             cdhash,
             installation,
         )
     };
+    #[cfg(target_os = "macos")]
+    drop(file);
     #[cfg(windows)]
     let locked_file = {
         drop(file);
@@ -1801,6 +2207,8 @@ fn verify_tool_binding_guard(kind: &str, path: &Path, expected: &str) -> io::Res
     };
     #[cfg(all(not(unix), not(windows)))]
     let locked_file = file;
+    #[cfg(unix)]
+    let execution_lock = File::open(&execution_path)?;
     Ok(VerifiedTool {
         kind: kind.to_owned(),
         original_path: path.to_path_buf(),
@@ -1818,13 +2226,9 @@ fn verify_tool_binding_guard(kind: &str, path: &Path, expected: &str) -> io::Res
         #[cfg(target_os = "macos")]
         python_installation,
         lock: {
-            #[cfg(all(unix, not(target_os = "macos")))]
+            #[cfg(unix)]
             {
-                File::open(&execution_path)?
-            }
-            #[cfg(target_os = "macos")]
-            {
-                file
+                execution_lock
             }
             #[cfg(not(unix))]
             {

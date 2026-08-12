@@ -306,8 +306,8 @@
     {
       "path": "scripts/generator_source_manifest.py",
       "type": "regular-file",
-      "size": 32172,
-      "sha256": "02a10a7ca2d7b69945417bdcb16851057879d8aa2dd1fcfccd3404e8b407e651",
+      "size": 32564,
+      "sha256": "687687c5173bf8f909c701b9c8ad15bd62889d63f00ec022eea71d93d2b71fee",
       "executable": false
     },
     {

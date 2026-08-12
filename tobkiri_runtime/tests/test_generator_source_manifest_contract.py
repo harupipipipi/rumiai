@@ -140,3 +140,22 @@ def test_provenance_exact_keys_types_and_digests_are_strict(
     assert raised.value.code == expected_codes[mutation]
     assert raised.value.reason
     assert str(tmp_path) not in str(raised.value)
+
+
+@pytest.mark.parametrize("relative", ["scripts/__pycache__/attack.pyc", "scripts/attack.pyo"])
+def test_source_manifest_rejects_generated_python_bytecode(
+    tmp_path: Path, relative: str
+) -> None:
+    """Ignored bytecode is a structural closure violation, never an input."""
+    root = tmp_path / "runtime"
+    for directory in generator_source_manifest.SOURCE_ROOTS:
+        (root / directory).mkdir(parents=True, exist_ok=True)
+    for source in generator_source_manifest.SOURCE_FILES:
+        path = root / source
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"{}\n")
+    bytecode = root / relative
+    bytecode.parent.mkdir(parents=True, exist_ok=True)
+    bytecode.write_bytes(b"ignored attacker bytecode")
+    with pytest.raises(ValueError, match="generated Python bytecode"):
+        generator_source_manifest.build_source_manifest(root)

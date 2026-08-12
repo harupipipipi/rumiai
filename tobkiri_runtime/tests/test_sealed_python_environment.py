@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+import tarfile
 import types
 from pathlib import Path
 
@@ -21,12 +22,7 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 BUILDER_PATH = ROOT / ".github" / "scripts" / "build_sealed_python_environment.py"
 BOOTSTRAP_PATH = (
-    ROOT
-    / ".github"
-    / "scripts"
-    / "sealed_python_sources"
-    / "tobkiri_sealed"
-    / "bootstrap.py"
+    ROOT / ".github" / "scripts" / "sealed_python_sources" / "tobkiri_sealed" / "bootstrap.py"
 )
 
 
@@ -64,11 +60,7 @@ _SEALED_TEST_ENV_ALLOWLIST = frozenset(
 
 def _clean_sealed_test_environment() -> dict[str, str]:
     """Keep subprocess fixtures free of host loader and Python injection state."""
-    return {
-        key: value
-        for key, value in os.environ.items()
-        if key in _SEALED_TEST_ENV_ALLOWLIST
-    }
+    return {key: value for key, value in os.environ.items() if key in _SEALED_TEST_ENV_ALLOWLIST}
 
 
 def _make_test_mutable(path: Path) -> None:
@@ -104,8 +96,7 @@ def _fixture_sources(base: Path, target: str) -> tuple[Path, Path, Path]:
         encoding="utf-8",
     )
     (stdlib / "locale.py").write_text(
-        "def normalize(value):\n"
-        "    return value\n",
+        "def normalize(value):\n    return value\n",
         encoding="utf-8",
     )
     (stdlib / "shutil.py").write_text(
@@ -182,6 +173,173 @@ def _fixture_sources(base: Path, target: str) -> tuple[Path, Path, Path]:
     return runtime, venv, output
 
 
+def test_rootless_packaging_binding_and_identity_safe_cleanup(tmp_path: Path) -> None:
+    """Formal packaging binds and removes only a complete private sealed tree."""
+    target = "x86_64-pc-windows-msvc"
+    _runtime, _venv, output = _fixture_sources(tmp_path, target)
+    digest = BUILDER.validate_environment(output, target, run_native_smoke=False)
+    binding = tmp_path / "packaging.env"
+    source_snapshot = tmp_path / "source-snapshot"
+    source_snapshot.mkdir(mode=0o500)
+    BUILDER._write_packaging_binding(
+        binding,
+        output,
+        digest,
+        BUILDER.target_spec(target),
+        source_snapshot,
+        "b" * 40,
+        "c" * 64,
+        "d" * 64,
+    )
+    payload = binding.read_text(encoding="utf-8")
+    assert f"TOBKIRI_PACKAGING_PYTHON_SNAPSHOT={output}\n" in payload
+    assert f"TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256={digest}\n" in payload
+    os.environ[BUILDER.MANIFEST_SHA_ENV] = digest
+    try:
+        assert (
+            BUILDER.main(["--target", target, "--output-root", os.fspath(output), "--cleanup"]) == 0
+        )
+    finally:
+        os.environ.pop(BUILDER.MANIFEST_SHA_ENV, None)
+    assert not output.exists()
+
+
+def test_rootless_cleanup_rejects_name_swap_and_tamper(tmp_path: Path) -> None:
+    """A linked or changed candidate is never adopted as cleanup authority."""
+    target = "x86_64-pc-windows-msvc"
+    _runtime, _venv, output = _fixture_sources(tmp_path, target)
+    digest = BUILDER.validate_environment(output, target, run_native_smoke=False)
+    replacement = tmp_path / "replacement"
+    output.chmod(0o700)
+    output.rename(replacement)
+    output.symlink_to(replacement, target_is_directory=True)
+    os.environ[BUILDER.MANIFEST_SHA_ENV] = digest
+    try:
+        assert (
+            BUILDER.main(["--target", target, "--output-root", os.fspath(output), "--cleanup"]) == 1
+        )
+    finally:
+        os.environ.pop(BUILDER.MANIFEST_SHA_ENV, None)
+    assert output.is_symlink() and replacement.is_dir()
+
+
+def test_explicit_uv_authority_is_private_absolute_and_digest_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A private external uv stage is accepted without mutating the checkout."""
+    target = "aarch64-apple-darwin"
+    root = tmp_path / "uv-stage"
+    bundled = root / "bundled"
+    bundled.mkdir(parents=True, mode=0o700)
+    uv = bundled / "uv"
+    uv.write_bytes(b"pinned private uv")
+    uv.chmod(0o555)
+    monkeypatch.setitem(
+        BUILDER.UV_BINARY_SHA256_BY_TARGET,
+        target,
+        hashlib.sha256(uv.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setattr(BUILDER, "_uv_version", lambda *_args: None)
+    assert BUILDER._validate_pinned_uv_executable(ROOT, uv, BUILDER.target_spec(target)) == uv
+    bundled.chmod(0o755)
+    with pytest.raises(BUILDER.SealedEnvironmentError, match="not private"):
+        BUILDER._validate_pinned_uv_executable(ROOT, uv, BUILDER.target_spec(target))
+
+
+def test_macos_python_archive_authority_is_exact_and_offline_after_download(
+    tmp_path: Path,
+) -> None:
+    """Each mac target names one reviewed PBS revision/digest and safe payload."""
+    assert BUILDER.PYTHON_BUILD_REVISION == "20260510"
+    assert set(BUILDER.PYTHON_ARCHIVE_SHA256_BY_TARGET) == {
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+    }
+    for target, digest in BUILDER.PYTHON_ARCHIVE_SHA256_BY_TARGET.items():
+        assert len(digest) == 64
+        url = BUILDER._python_archive_url(BUILDER.target_spec(target))
+        assert f"cpython-3.13.13%2B20260510-{target}" in url
+        assert url.endswith("-install_only_stripped.tar.gz")
+    source = BUILDER_PATH.read_text(encoding="utf-8")
+    assert '"python",\n                "install"' not in source
+
+    archive = tmp_path / "python.tar.gz"
+    payload = tmp_path / "python"
+    payload.mkdir()
+    executable = payload / "bin/python3"
+    executable.parent.mkdir()
+    executable.write_bytes(b"python")
+    with tarfile.open(archive, "w:gz") as bundle:
+        bundle.add(payload, arcname="python")
+    extracted = BUILDER._extract_pinned_python_archive(archive, tmp_path / "output")
+    assert (extracted / "bin/python3").read_bytes() == b"python"
+
+
+def test_committed_source_inventory_copies_exact_bytes_and_rejects_tamper(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir(mode=0o500)
+    payloads = {
+        "tobkiri_runtime/module.py": b"VALUE = 1\n",
+        "tobkiri_runtime/packaged_defaultspack_source_manifest.v1.json": b"{}\n",
+    }
+    entries = []
+    source.chmod(0o700)
+    for relative, payload in payloads.items():
+        path = source / relative
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path.write_bytes(payload)
+        path.chmod(0o400)
+        entries.append(
+            {
+                "path": relative,
+                "size": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "executable": False,
+            }
+        )
+    manifest_digest = entries[1]["sha256"]
+    document = {
+        "schema": BUILDER.SOURCE_SNAPSHOT_SCHEMA,
+        "source_commit": "a" * 40,
+        "source_tree": "b" * 40,
+        "source_manifest_sha256": manifest_digest,
+        "files": entries,
+    }
+    encoded = (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    inventory_digest = hashlib.sha256(encoded).hexdigest()
+    (source / BUILDER.SOURCE_SNAPSHOT_MANIFEST).write_bytes(encoded)
+    (source / BUILDER.SOURCE_SNAPSHOT_MANIFEST).chmod(0o400)
+    for directory in sorted((path for path in source.rglob("*") if path.is_dir()), reverse=True):
+        directory.chmod(0o500)
+    source.chmod(0o500)
+    release_frame = {
+        "schema": BUILDER.SOURCE_SNAPSHOT_SCHEMA,
+        "source_commit": "a" * 40,
+        "source_tree": "b" * 40,
+        "source_manifest_sha256": manifest_digest,
+        "source_inventory_sha256": inventory_digest,
+    }
+    release_digest = hashlib.sha256(
+        (json.dumps(release_frame, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    ).hexdigest()
+    copied = BUILDER._copy_verified_source_snapshot(
+        source, tmp_path / "copied", inventory_digest, release_digest
+    )
+    assert (copied / "tobkiri_runtime/module.py").read_bytes() == b"VALUE = 1\n"
+    source.chmod(0o700)
+    module = source / "tobkiri_runtime/module.py"
+    module.chmod(0o600)
+    module.write_bytes(b"ATTACKER = True\n")
+    module.chmod(0o400)
+    source.chmod(0o500)
+    with pytest.raises(BUILDER.SealedEnvironmentError, match="bytes changed"):
+        BUILDER._copy_verified_source_snapshot(
+            source, tmp_path / "rejected", inventory_digest, release_digest
+        )
+
+
 @pytest.mark.parametrize(
     "target",
     ("x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"),
@@ -217,9 +375,9 @@ def test_manifest_contains_fixed_entrypoints_and_bootstrap_paths(tmp_path: Path)
     output = _fixture_sources(tmp_path, "x86_64-unknown-linux-gnu")[2]
     paths = {
         entry["path"]
-        for entry in json.loads(
-            (output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8")
-        )["files"]
+        for entry in json.loads((output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8"))[
+            "files"
+        ]
     }
     assert {
         "lease.v1",
@@ -341,6 +499,7 @@ def test_bootstrap_wire_dispatches_all_roles_and_publishes_attestation(
     try:
         sys.path.insert(0, str(source_root))
         import tobkiri_sealed.bootstrap as bootstrap
+
         sys.path = [
             str(output / "venv/lib/python3.13/site-packages"),
             str(output / "runtime/lib/python3.13"),
@@ -394,13 +553,8 @@ def test_bootstrap_wire_dispatches_all_roles_and_publishes_attestation(
             assert evidence["nonce"] == nonce
             assert evidence["lifetime_lease"] is True
             assert attestation.stat().st_mode & 0o777 == 0o600
-            assert all(
-                Path(item).resolve().is_relative_to(output)
-                for item in evidence["sys_path"]
-            )
-            assert all(
-                Path(item).resolve().is_relative_to(output) for item in sys.path
-            )
+            assert all(Path(item).resolve().is_relative_to(output) for item in evidence["sys_path"])
+            assert all(Path(item).resolve().is_relative_to(output) for item in sys.path)
             assert list(sys.path) == evidence["sys_path"]
             if role == "typed":
                 with pytest.raises(bootstrap.SealedBootstrapError, match="already exists"):
@@ -555,11 +709,7 @@ def test_fresh_isolated_subprocess_rejects_external_launch_metadata(
     tmp_path: Path,
 ) -> None:
     """A real isolated interpreter starts only from the sealed snapshot."""
-    target = (
-        "x86_64-pc-windows-msvc"
-        if os.name == "nt"
-        else "x86_64-unknown-linux-gnu"
-    )
+    target = "x86_64-pc-windows-msvc" if os.name == "nt" else "x86_64-unknown-linux-gnu"
     output = _fixture_sources(tmp_path / "sealed", target)[2]
     source_root = ROOT / ".github" / "scripts" / "sealed_python_sources"
     external = tmp_path / "external-shadow"
@@ -657,9 +807,7 @@ print(json.dumps({"result": result, "sys_path": list(sys.path)}))
     )
     assert success.returncode == 0, success.stderr
     child_evidence = json.loads(success.stdout)
-    attestation_evidence = json.loads(
-        success_attestation.read_text(encoding="utf-8")
-    )
+    attestation_evidence = json.loads(success_attestation.read_text(encoding="utf-8"))
     assert child_evidence["result"] == 8
     assert child_evidence["sys_path"] == attestation_evidence["sys_path"]
     assert not Path(base_env["METADATA_MARKER"]).exists()
@@ -827,8 +975,7 @@ def test_uv_version_runner_uses_structured_identity(
 def _write_fake_uv(path: Path, output: str, *, mode: int = 0o555) -> None:
     """Write a tiny executable that can exercise the uv identity gate."""
     path.write_text(
-        "#!/bin/sh\n"
-        f"printf '%s\\n' '{output.rstrip()}'\n",
+        f"#!/bin/sh\nprintf '%s\\n' '{output.rstrip()}'\n",
         encoding="utf-8",
     )
     path.chmod(mode)
@@ -854,8 +1001,7 @@ def test_builder_never_uses_fake_path_uv_when_bundled_binary_is_missing(
     )
     fake_uv.chmod(0o755)
     fake_uv.write_text(
-        fake_uv.read_text(encoding="utf-8")
-        + f"touch '{marker}'\n",
+        fake_uv.read_text(encoding="utf-8") + f"touch '{marker}'\n",
         encoding="utf-8",
     )
     fake_uv.chmod(0o555)
@@ -865,7 +1011,6 @@ def test_builder_never_uses_fake_path_uv_when_bundled_binary_is_missing(
         BUILDER.build_environment(
             repo_root,
             "x86_64-unknown-linux-gnu",
-            requirements_path=requirements,
         )
     assert not marker.exists()
 
@@ -993,10 +1138,9 @@ def test_sealed_basename_alone_does_not_select_packaged_imports(
     desktop_path = app_root / "ecosystem/defaultspack/defaultspack/desktop_app.py"
     desktop_path.parent.mkdir(parents=True)
     desktop_path.write_text(
-        (
-            ROOT
-            / "tobkiri_runtime/ecosystem/defaultspack/defaultspack/desktop_app.py"
-        ).read_text(encoding="utf-8"),
+        (ROOT / "tobkiri_runtime/ecosystem/defaultspack/defaultspack/desktop_app.py").read_text(
+            encoding="utf-8"
+        ),
         encoding="utf-8",
     )
     (sealed_root / "sealed-environment.v1.json").write_text("{}", encoding="utf-8")
@@ -1041,10 +1185,9 @@ def test_explicit_scope_selects_custom_named_snapshot_for_defaultspack(
     desktop_path = app_root / "ecosystem/defaultspack/defaultspack/desktop_app.py"
     desktop_path.parent.mkdir(parents=True)
     desktop_path.write_text(
-        (
-            ROOT
-            / "tobkiri_runtime/ecosystem/defaultspack/defaultspack/desktop_app.py"
-        ).read_text(encoding="utf-8"),
+        (ROOT / "tobkiri_runtime/ecosystem/defaultspack/defaultspack/desktop_app.py").read_text(
+            encoding="utf-8"
+        ),
         encoding="utf-8",
     )
     manifest_path = sealed_root / "sealed-environment.v1.json"
@@ -1223,44 +1366,28 @@ def test_bootstrap_and_resource_wiring_match_the_fixed_contract() -> None:
     """Static checks cover the wire, raw digest, and resource boundary."""
     bootstrap = BOOTSTRAP_PATH.read_text(encoding="utf-8")
     builder = BUILDER_PATH.read_text(encoding="utf-8")
-    preparer = (
-        ROOT / ".github" / "scripts" / "prepare_tauri_resources.py"
-    ).read_text(encoding="utf-8")
-    build_rs = (ROOT / "tobkiri_launcher" / "src-tauri" / "build.rs").read_text(
+    preparer = (ROOT / ".github" / "scripts" / "prepare_tauri_resources.py").read_text(
         encoding="utf-8"
     )
+    build_rs = (ROOT / "tobkiri_launcher" / "src-tauri" / "build.rs").read_text(encoding="utf-8")
     rust_protocol = (
         ROOT / "tobkiri_launcher" / "src-tauri" / "src" / "sealed_python.rs"
     ).read_text(encoding="utf-8")
-    protocol_path = (
-        ROOT
-        / "tobkiri_launcher"
-        / "src-tauri"
-        / "src"
-        / "sealed_python_protocol.rs"
-    )
+    protocol_path = ROOT / "tobkiri_launcher" / "src-tauri" / "src" / "sealed_python_protocol.rs"
     protocol_source = protocol_path.read_text(encoding="utf-8") if protocol_path.exists() else ""
     rust_contract = rust_protocol + protocol_source
     environment_schema = json.loads(
-        (
-            ROOT
-            / ".github"
-            / "schemas"
-            / "sealed-python-environment.v1.schema.json"
-        ).read_text(encoding="utf-8")
-    )
-    attestation_schema = json.loads(
-        (
-            ROOT
-            / ".github"
-            / "schemas"
-            / "sealed-python-attestation.v1.schema.json"
-        ).read_text(encoding="utf-8")
-    )
-    tauri = json.loads(
-        (ROOT / "tobkiri_launcher" / "src-tauri" / "tauri.conf.json").read_text(
+        (ROOT / ".github" / "schemas" / "sealed-python-environment.v1.schema.json").read_text(
             encoding="utf-8"
         )
+    )
+    attestation_schema = json.loads(
+        (ROOT / ".github" / "schemas" / "sealed-python-attestation.v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    tauri = json.loads(
+        (ROOT / "tobkiri_launcher" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8")
     )
 
     assert "lease.v1" in bootstrap
@@ -1269,10 +1396,7 @@ def test_bootstrap_and_resource_wiring_match_the_fixed_contract() -> None:
     assert "io.tobkiri.sealed-python-launch.v1" in bootstrap
     assert "os.replace" in bootstrap
     assert "fsync" in bootstrap and "chmod" in bootstrap
-    assert all(
-        f'"{role}"' in bootstrap
-        for role in ("typed", "defaultspack", "host_helper")
-    )
+    assert all(f'"{role}"' in bootstrap for role in ("typed", "defaultspack", "host_helper"))
     assert "sha256:" not in bootstrap
     assert "sha256:" not in builder
     assert "sha256:" not in json.dumps(environment_schema)
@@ -1304,20 +1428,10 @@ def test_bootstrap_and_resource_wiring_match_the_fixed_contract() -> None:
     ):
         assert marker in builder
     assert "--health" not in (
-        ROOT
-        / ".github"
-        / "scripts"
-        / "sealed_python_sources"
-        / "app"
-        / "defaultspack_entry.py"
+        ROOT / ".github" / "scripts" / "sealed_python_sources" / "app" / "defaultspack_entry.py"
     ).read_text(encoding="utf-8")
     assert "--headless" not in (
-        ROOT
-        / ".github"
-        / "scripts"
-        / "sealed_python_sources"
-        / "app"
-        / "host_helper_entry.py"
+        ROOT / ".github" / "scripts" / "sealed_python_sources" / "app" / "host_helper_entry.py"
     ).read_text(encoding="utf-8")
     assert "python-runtime" in preparer
     assert "sealed-environment.v1.json" in preparer
@@ -1368,10 +1482,14 @@ def test_raw_manifest_digest_matches_compact_cross_language_contract() -> None:
 
 def test_all_tauri_build_callsites_are_mac_release_gated() -> None:
     """No workflow or local production caller can publish Windows/Linux builds."""
-    tracked = subprocess.check_output(
-        ["git", "ls-files", "-z"],
-        cwd=ROOT,
-    ).decode("utf-8").split("\0")
+    tracked = (
+        subprocess.check_output(
+            ["git", "ls-files", "-z"],
+            cwd=ROOT,
+        )
+        .decode("utf-8")
+        .split("\0")
+    )
     needle = "cargo tauri " + "build"
     all_hits = []
     callsites = []
@@ -1403,9 +1521,7 @@ def test_all_tauri_build_callsites_are_mac_release_gated() -> None:
         "scripts/build-and-sign.sh",
     }
 
-    desktop = (ROOT / ".github/workflows/desktop-installers.yml").read_text(
-        encoding="utf-8"
-    )
+    desktop = (ROOT / ".github/workflows/desktop-installers.yml").read_text(encoding="utf-8")
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     release_build = release.split("\n  gather:", 1)[0]
     assert "release workflow is currently macOS-only" in release

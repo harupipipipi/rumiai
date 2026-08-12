@@ -138,6 +138,16 @@ def parse_args() -> argparse.Namespace:
         help="uv release version to bundle, for example 0.11.14.",
     )
     parser.add_argument(
+        "--stage-uv-only",
+        action="store_true",
+        help="Stage only the pinned uv resource and exit before other mutations.",
+    )
+    parser.add_argument(
+        "--uv-output-root",
+        type=Path,
+        help="Private absolute root used only with --stage-uv-only.",
+    )
+    parser.add_argument(
         "--require-runtime-tools",
         action="store_true",
         help="Fail unless bundled uv and pack-shell are present.",
@@ -1268,13 +1278,22 @@ def main() -> int:
     args = parse_args()
     repo_root = args.repo_root.resolve()
     source_root = repo_root / APP_SOURCE_DIR
+    if args.uv_output_root is not None:
+        if not args.stage_uv_only or not args.uv_output_root.is_absolute():
+            print(
+                "--uv-output-root requires --stage-uv-only and an absolute path",
+                file=sys.stderr,
+            )
+            return 2
+        source_root = args.uv_output_root
+        source_root.mkdir(mode=0o700, parents=False, exist_ok=False)
     dest_root = repo_root / APP_RESOURCE_DIR
 
-    if not source_root.joinpath("app.py").exists():
+    if not args.stage_uv_only and not source_root.joinpath("app.py").exists():
         print(f"Rumi source directory not found: {source_root}", file=sys.stderr)
         return 2
 
-    if args.target:
+    if args.target and not args.stage_uv_only:
         staged_pack_shell = stage_pack_shell(repo_root, source_root, args.target)
         print(f"Staged {staged_pack_shell.relative_to(repo_root)}")
 
@@ -1283,7 +1302,18 @@ def main() -> int:
             print("--uv-version requires --target", file=sys.stderr)
             return 2
         staged_uv = stage_uv(source_root, args.target, args.uv_version)
-        print(f"Staged {staged_uv.relative_to(repo_root)}")
+        displayed_uv = (
+            staged_uv
+            if args.uv_output_root is not None
+            else staged_uv.relative_to(repo_root)
+        )
+        print(f"Staged {displayed_uv}")
+
+    if args.stage_uv_only:
+        if not args.target or not args.uv_version:
+            print("--stage-uv-only requires --target and --uv-version", file=sys.stderr)
+            return 2
+        return 0
 
     if args.target:
         build_sealed_python_resource(repo_root, source_root, args.target)

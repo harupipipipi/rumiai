@@ -6,6 +6,7 @@ import io
 import json
 import os
 import shutil
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
@@ -173,6 +174,48 @@ def test_stage_uv_extracts_only_after_pinned_checksum_verification(tmp_path, mon
     assert staged.name == "uv.exe"
     assert staged.stat().st_mode & 0o222 == 0
     assert staged.stat().st_nlink == 1
+
+
+def test_stage_uv_only_uses_private_external_root_without_checkout_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The packaging bootstrap stages uv only under its nonce temp root."""
+    module = _load_prepare_tauri_resources()
+    output_root = tmp_path / "private-uv"
+    calls: list[Path] = []
+
+    def stage(source_root: Path, _target: str, _version: str) -> Path:
+        calls.append(source_root)
+        destination = source_root / "bundled" / "uv"
+        destination.parent.mkdir()
+        destination.write_bytes(b"pinned")
+        return destination
+
+    monkeypatch.setattr(module, "stage_uv", stage)
+    monkeypatch.setattr(
+        module,
+        "build_sealed_python_resource",
+        lambda *_args: pytest.fail("stage-only action continued into environment build"),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            os.fspath(SCRIPT_PATH),
+            "--repo-root",
+            os.fspath(ROOT),
+            "--target",
+            "aarch64-apple-darwin",
+            "--uv-version",
+            "0.11.14",
+            "--stage-uv-only",
+            "--uv-output-root",
+            os.fspath(output_root),
+        ],
+    )
+    assert module.main() == 0
+    assert calls == [output_root]
+    assert output_root.stat().st_mode & 0o077 == 0
 
 
 def test_stage_uv_fails_on_checksum_mismatch_before_extract(tmp_path, monkeypatch):

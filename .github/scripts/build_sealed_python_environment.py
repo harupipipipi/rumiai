@@ -3,9 +3,9 @@
 
 The release build runs on the native CI runner for one supported target.  It
 uses the repository's pinned ``uv`` binary, the exact CPython patch version,
-and the hash-locked runtime requirements export.  The resulting tree is
-copied into ``tobkiri_runtime/python-runtime`` and later assembled by the
-Tauri resource preparer under ``{resource_dir}/app``.
+and the hash-locked runtime requirements export.  The resulting private tree
+is passed directly to the Rust build through its absolute snapshot binding;
+the mutable checkout is never used as the runtime source.
 
 ``--check`` is intentionally network-free.  It validates a small synthetic
 fixture just as it validates a release tree, including the strict manifest,
@@ -28,8 +28,10 @@ import socket
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
+import urllib.request
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -43,6 +45,8 @@ APP_SOURCE_ROOT = "tobkiri_runtime"
 DEFAULT_OUTPUT_RELATIVE = Path("tobkiri_runtime/python-runtime")
 DEFAULT_REQUIREMENTS_RELATIVE = Path("tobkiri_runtime/requirements.txt")
 MANIFEST_FILENAME = "sealed-environment.v1.json"
+SOURCE_SNAPSHOT_MANIFEST = ".tobkiri-source-snapshot.v1.json"
+SOURCE_SNAPSHOT_SCHEMA = "io.tobkiri.rootless-source-snapshot.v1"
 MANIFEST_SCHEMA = "io.tobkiri.sealed-python-environment.v1"
 ATTESTATION_SCHEMA = "io.tobkiri.sealed-python-attestation.v1"
 MANIFEST_SHA_ENV = "TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256"
@@ -50,6 +54,7 @@ LEASE_FILENAME = "lease.v1"
 LEASE_CONTENT = "io.tobkiri.sealed-python-lease.v1\n"
 UV_VERSION = "0.11.14"
 PYTHON_VERSION = "3.13.13"
+PYTHON_BUILD_REVISION = "20260510"
 PACKAGE_ID = "dev.tobkiri.launcher"
 UV_ARCHIVE_SHA256_BY_TARGET = {
     "aarch64-apple-darwin": "4333af5c0730d94323a7819bbdf87ce92dd07fc857d67fff0059e0fca31b5c02",
@@ -63,8 +68,12 @@ UV_BINARY_SHA256_BY_TARGET = {
     "x86_64-pc-windows-msvc": "442b73298cf8648217e5bc232588bb1067f98ea5b40beea18e43c9c7929c020c",
     "x86_64-unknown-linux-gnu": "b5cbc3a3f35debad0b4770811efd190bcf460b654114d6a3f71e0ce298468e5d",
 }
+PYTHON_ARCHIVE_SHA256_BY_TARGET = {
+    "aarch64-apple-darwin": "16d2332d950178968534e65fe09f01f876d13af1147176fd0c77a74c9e4d1a4b",
+    "x86_64-apple-darwin": "8937475b0b8536d391270da4510488cb41ecd21040b63f9d8f84a8b1cdd491fc",
+}
 PACKAGE_KIND_BY_PLATFORM = {
-    "macos": "apple-code-signature-v1",
+    "macos": "pinned-python-build-standalone-v1",
     "windows": "windows-authenticode-v1",
     "linux": "linux-immutable-package-v1",
 }
@@ -128,12 +137,8 @@ class TargetSpec:
 
 
 TARGETS = {
-    "aarch64-apple-darwin": TargetSpec(
-        "aarch64-apple-darwin", "macos", "arm64", False
-    ),
-    "x86_64-apple-darwin": TargetSpec(
-        "x86_64-apple-darwin", "macos", "x86_64", False
-    ),
+    "aarch64-apple-darwin": TargetSpec("aarch64-apple-darwin", "macos", "arm64", False),
+    "x86_64-apple-darwin": TargetSpec("x86_64-apple-darwin", "macos", "x86_64", False),
     "x86_64-unknown-linux-gnu": TargetSpec(
         "x86_64-unknown-linux-gnu", "linux", "x86_64", False
     ),
@@ -218,7 +223,11 @@ def _assert_root(root: Path) -> Path:
         metadata = root.lstat()
     except OSError as exc:
         raise SealedEnvironmentError(f"sealed root is unavailable: {root}") from exc
-    if root.is_symlink() or _is_reparse_point(metadata) or not stat.S_ISDIR(metadata.st_mode):
+    if (
+        root.is_symlink()
+        or _is_reparse_point(metadata)
+        or not stat.S_ISDIR(metadata.st_mode)
+    ):
         raise SealedEnvironmentError(f"sealed root is not a real directory: {root}")
     return root.resolve(strict=True)
 
@@ -239,7 +248,9 @@ def _assert_regular_entry(path: Path, root: Path) -> os.stat_result:
     except OSError as exc:
         raise SealedEnvironmentError(f"sealed entry disappeared: {path}") from exc
     if path.is_symlink() or _is_reparse_point(metadata):
-        raise SealedEnvironmentError(f"sealed tree contains a link or reparse point: {path}")
+        raise SealedEnvironmentError(
+            f"sealed tree contains a link or reparse point: {path}"
+        )
     if not stat.S_ISREG(metadata.st_mode):
         raise SealedEnvironmentError(f"sealed tree contains a non-regular file: {path}")
     if metadata.st_nlink != 1:
@@ -260,13 +271,17 @@ def _walk_tree(root: Path) -> Iterable[tuple[str, Path, str, os.stat_result]]:
         try:
             children = sorted(current.iterdir(), key=lambda item: item.name)
         except OSError as exc:
-            raise SealedEnvironmentError(f"cannot read sealed directory: {current}") from exc
+            raise SealedEnvironmentError(
+                f"cannot read sealed directory: {current}"
+            ) from exc
         for child in children:
             relative = _posix_relative(child, resolved_root)
             try:
                 metadata = child.lstat()
             except OSError as exc:
-                raise SealedEnvironmentError(f"sealed entry disappeared: {child}") from exc
+                raise SealedEnvironmentError(
+                    f"sealed entry disappeared: {child}"
+                ) from exc
             if child.is_symlink() or _is_reparse_point(metadata):
                 raise SealedEnvironmentError(
                     f"sealed tree contains a link or reparse point: {relative}"
@@ -288,9 +303,16 @@ def _walk_tree(root: Path) -> Iterable[tuple[str, Path, str, os.stat_result]]:
                 yield relative, child, "directory", metadata
                 yield from visit(child)
             elif stat.S_ISREG(metadata.st_mode):
-                yield relative, child, "file", _assert_regular_entry(child, resolved_root)
+                yield (
+                    relative,
+                    child,
+                    "file",
+                    _assert_regular_entry(child, resolved_root),
+                )
             else:
-                raise SealedEnvironmentError(f"sealed tree contains a special file: {relative}")
+                raise SealedEnvironmentError(
+                    f"sealed tree contains a special file: {relative}"
+                )
 
     yield from visit(resolved_root)
 
@@ -309,9 +331,14 @@ def _copy_regular_file(source: Path, destination: Path, executable: bool) -> Non
     """Copy bytes without preserving timestamps, links, or source identity."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists() or destination.is_symlink():
-        raise SealedEnvironmentError(f"sealed destination already exists: {destination}")
+        raise SealedEnvironmentError(
+            f"sealed destination already exists: {destination}"
+        )
     try:
-        with source.open("rb") as source_handle, destination.open("xb") as destination_handle:
+        with (
+            source.open("rb") as source_handle,
+            destination.open("xb") as destination_handle,
+        ):
             shutil.copyfileobj(source_handle, destination_handle, length=1024 * 1024)
     except OSError as exc:
         raise SealedEnvironmentError(
@@ -324,7 +351,9 @@ def _copy_tree(source: Path, destination: Path, spec: TargetSpec) -> None:
     """Copy one source tree after rejecting unsafe source entries."""
     source = _assert_root(source)
     if destination.exists() or destination.is_symlink():
-        raise SealedEnvironmentError(f"sealed destination already exists: {destination}")
+        raise SealedEnvironmentError(
+            f"sealed destination already exists: {destination}"
+        )
     destination.mkdir(parents=True)
     destination.chmod(0o755)
     for relative, source_path, kind, metadata in _walk_tree(source):
@@ -424,16 +453,18 @@ def _freeze_tree(root: Path, spec: TargetSpec) -> None:
     for path in entries:
         metadata = path.lstat()
         if _is_reparse_point(metadata):
-            raise SealedEnvironmentError(f"sealed snapshot contains a reparse point: {path}")
+            raise SealedEnvironmentError(
+                f"sealed snapshot contains a reparse point: {path}"
+            )
         if stat.S_ISDIR(metadata.st_mode):
             path.chmod(IMMUTABLE_DIRECTORY_MODE)
         elif stat.S_ISREG(metadata.st_mode):
             executable = _executable_flag(path, metadata, spec)
-            path.chmod(
-                IMMUTABLE_EXECUTABLE_MODE if executable else IMMUTABLE_FILE_MODE
-            )
+            path.chmod(IMMUTABLE_EXECUTABLE_MODE if executable else IMMUTABLE_FILE_MODE)
         else:
-            raise SealedEnvironmentError(f"sealed snapshot contains a special file: {path}")
+            raise SealedEnvironmentError(
+                f"sealed snapshot contains a special file: {path}"
+            )
     root.chmod(IMMUTABLE_DIRECTORY_MODE)
 
 
@@ -474,7 +505,9 @@ def _materialize_links(
             _copy_tree(target, link, spec)
         elif stat.S_ISREG(metadata.st_mode):
             if metadata.st_nlink != 1:
-                raise SealedEnvironmentError(f"venv link target is hardlinked: {target}")
+                raise SealedEnvironmentError(
+                    f"venv link target is hardlinked: {target}"
+                )
             link.unlink()
             temporary = link.with_name(f".{link.name}.{os.getpid()}.materialized")
             if temporary.exists() or temporary.is_symlink():
@@ -546,7 +579,9 @@ def _normalize_venv(root: Path, runtime_root: Path, spec: TargetSpec) -> None:
     """Remove build-machine absolute paths from the relocatable venv."""
     cfg = root / "pyvenv.cfg"
     if not cfg.is_file() or cfg.is_symlink():
-        raise SealedEnvironmentError(f"relocatable venv configuration is missing: {cfg}")
+        raise SealedEnvironmentError(
+            f"relocatable venv configuration is missing: {cfg}"
+        )
     home = "../runtime" if spec.windows else "../runtime/bin"
     lines = cfg.read_text(encoding="utf-8").splitlines()
     replaced = False
@@ -612,8 +647,7 @@ def _files_digest(records: list[dict[str, object]]) -> str:
 
 def _group_digest(records: Iterable[dict[str, object]]) -> str:
     payload = b"".join(
-        f"{entry['path']}\0{entry['sha256']}\n".encode("utf-8")
-        for entry in records
+        f"{entry['path']}\0{entry['sha256']}\n".encode("utf-8") for entry in records
     )
     if not payload:
         raise SealedEnvironmentError("sealed sentinel group is empty")
@@ -641,9 +675,7 @@ def _sentinel_groups(
         and not str(entry["path"]).startswith("sentinels/")
     ]
     site_packages = [
-        entry
-        for entry in records
-        if str(entry["path"]).startswith(site_prefixes)
+        entry for entry in records if str(entry["path"]).startswith(site_prefixes)
     ]
     native_suffixes = (".so", ".dylib", ".dll", ".pyd", ".exe")
     native = [
@@ -926,7 +958,11 @@ def _run_role_smoke(
 def _verify_python_smoke(root: Path, spec: TargetSpec) -> None:
     """Run relocated native imports and all three fixed roles."""
     host = _native_host_spec()
-    if host is None or host.platform != spec.platform or host.architecture != spec.architecture:
+    if (
+        host is None
+        or host.platform != spec.platform
+        or host.architecture != spec.architecture
+    ):
         return
     python = _venv_python(root / "venv", spec)
     native_code = (
@@ -937,9 +973,12 @@ def _verify_python_smoke(root: Path, spec: TargetSpec) -> None:
     )
     environment = os.environ.copy()
     for key in list(environment):
-        if key in {"REPO", "RUMI_CORE_DIR", "PYTHONPATH", "PYTHONHOME"} or key.startswith(
-            ("DYLD_", "LD_")
-        ):
+        if key in {
+            "REPO",
+            "RUMI_CORE_DIR",
+            "PYTHONPATH",
+            "PYTHONHOME",
+        } or key.startswith(("DYLD_", "LD_")):
             environment.pop(key, None)
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
     native_result = subprocess.run(
@@ -1017,17 +1056,23 @@ def validate_environment(
         or document["architecture"] != spec.architecture
         or document["python_version"] != PYTHON_VERSION
     ):
-        raise SealedEnvironmentError("sealed manifest platform, architecture, or Python mismatch")
+        raise SealedEnvironmentError(
+            "sealed manifest platform, architecture, or Python mismatch"
+        )
     records = document["files"]
     actual_records = _records(root, spec)
     if records != actual_records:
-        raise SealedEnvironmentError("sealed file inventory does not match its manifest")
+        raise SealedEnvironmentError(
+            "sealed file inventory does not match its manifest"
+        )
     if document["environment_digest"] != _files_digest(records):
         raise SealedEnvironmentError("sealed environment digest does not match files")
     paths = {str(entry["path"]) for entry in records}
     missing = [path for path in _required_paths(spec) if path not in paths]
     if missing:
-        raise SealedEnvironmentError("sealed fixed entrypoint is missing: " + ", ".join(missing))
+        raise SealedEnvironmentError(
+            "sealed fixed entrypoint is missing: " + ", ".join(missing)
+        )
     site = _site_packages(root / "venv", PYTHON_VERSION, spec)
     package_relative = _posix_relative(site / "tobkiri_sealed" / "bootstrap.py", root)
     if package_relative not in paths:
@@ -1047,41 +1092,6 @@ def validate_environment(
     if run_native_smoke:
         _verify_python_smoke(root, spec)
     return raw_digest
-
-
-def _source_digest(repo_root: Path) -> str:
-    """Create a deterministic release identity from source and lock inputs."""
-    entries: list[tuple[str, str]] = []
-    runtime_root = repo_root / APP_SOURCE_ROOT
-    try:
-        tracked = subprocess.run(
-            ["git", "ls-files", "-z", "--", APP_SOURCE_ROOT],
-            cwd=repo_root,
-            check=True,
-            stdout=subprocess.PIPE,
-        ).stdout.decode("utf-8").split("\0")
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise SealedEnvironmentError("cannot enumerate tracked Tobkiri runtime sources") from exc
-    for relative in tracked:
-        if not relative or relative.startswith(f"{APP_SOURCE_ROOT}/python-runtime/"):
-            continue
-        source = repo_root / relative
-        if source.is_symlink() or not source.is_file():
-            raise SealedEnvironmentError(f"source identity input is unsafe: {relative}")
-        entries.append((relative, _sha256_file(source)))
-    for relative, source in _source_files(SEALED_SOURCE_ROOT):
-        entries.append((f".github/scripts/sealed_python_sources/{relative}", _sha256_file(source)))
-    del runtime_root
-    entries.sort()
-    payload = b"".join(f"{path}\0{digest}\n".encode("utf-8") for path, digest in entries)
-    return _sha256_bytes(payload)
-
-
-def _source_files(root: Path) -> Iterable[tuple[str, Path]]:
-    """Yield regular source files below a packaging template root."""
-    for relative, path, kind, _metadata in _walk_tree(root):
-        if kind == "file":
-            yield relative, path
 
 
 def _load_cleanup_remove():
@@ -1182,15 +1192,24 @@ def _validate_pinned_uv_executable(
     bundled_root = repo_root / APP_SOURCE_ROOT / "bundled"
     expected = bundled_root / ("uv.exe" if spec.windows else "uv")
     candidate = expected if uv_path is None else Path(uv_path)
-    if not candidate.is_absolute():
-        candidate = repo_root / candidate
+    if uv_path is not None and not candidate.is_absolute():
+        raise SealedEnvironmentError("explicit pinned uv path must be absolute")
     candidate = candidate.absolute()
-    if candidate != expected.absolute():
-        raise SealedEnvironmentError(
-            "pinned uv executable must be the archive-extracted resource at "
-            f"{expected}"
-        )
-    metadata = _assert_regular_entry(candidate, bundled_root)
+    authority_root = _assert_root(bundled_root if uv_path is None else candidate.parent)
+    if uv_path is None:
+        if candidate != expected.absolute():
+            raise SealedEnvironmentError("default pinned uv path changed")
+    else:
+        authority_metadata = authority_root.lstat()
+        if (
+            candidate.name != expected.name
+            or authority_root.is_symlink()
+            or not stat.S_ISDIR(authority_metadata.st_mode)
+            or authority_metadata.st_uid != os.geteuid()
+            or authority_metadata.st_mode & 0o077
+        ):
+            raise SealedEnvironmentError("pinned uv authority root is not private")
+    metadata = _assert_regular_entry(candidate, authority_root)
     if metadata.st_mode & 0o222:
         raise SealedEnvironmentError(
             f"pinned uv executable is owner-writable: {candidate}"
@@ -1210,10 +1229,21 @@ def _validate_pinned_uv_executable(
     return candidate
 
 
-def _run_uv(uv: Path, arguments: Sequence[str | os.PathLike[str]], cwd: Path) -> None:
-    environment = os.environ.copy()
-    environment["UV_NO_CONFIG"] = "1"
-    environment["UV_NO_PROGRESS"] = "1"
+def _run_uv(
+    uv: Path,
+    arguments: Sequence[str | os.PathLike[str]],
+    cwd: Path,
+    cache: Path,
+) -> None:
+    environment = {
+        "HOME": os.fspath(cache),
+        "LC_ALL": "C",
+        "PATH": "/usr/bin:/bin",
+        "TMPDIR": os.fspath(cache),
+        "UV_CACHE_DIR": os.fspath(cache / "uv-cache"),
+        "UV_NO_CONFIG": "1",
+        "UV_NO_PROGRESS": "1",
+    }
     try:
         subprocess.run(
             [os.fspath(uv), *[os.fspath(argument) for argument in arguments]],
@@ -1222,20 +1252,98 @@ def _run_uv(uv: Path, arguments: Sequence[str | os.PathLike[str]], cwd: Path) ->
             check=True,
         )
     except (OSError, subprocess.CalledProcessError) as exc:
-        raise SealedEnvironmentError(f"uv sealed-environment command failed: {arguments}") from exc
-
-
-def _find_runtime(install_root: Path, spec: TargetSpec) -> Path:
-    candidates = sorted(
-        path
-        for path in install_root.iterdir()
-        if path.is_dir() and path.name.startswith(f"cpython-{PYTHON_VERSION}-")
-    )
-    if len(candidates) != 1:
         raise SealedEnvironmentError(
-            f"uv installed an unexpected CPython layout: {[path.name for path in candidates]}"
+            f"uv sealed-environment command failed: {arguments}"
+        ) from exc
+
+
+def _python_archive_url(spec: TargetSpec) -> str:
+    if spec.triple not in PYTHON_ARCHIVE_SHA256_BY_TARGET:
+        raise SealedEnvironmentError(
+            f"no pinned CPython archive authority for {spec.triple}"
         )
-    runtime = candidates[0]
+    name = (
+        f"cpython-{PYTHON_VERSION}+{PYTHON_BUILD_REVISION}-{spec.triple}"
+        "-install_only_stripped.tar.gz"
+    )
+    return (
+        "https://github.com/astral-sh/python-build-standalone/releases/download/"
+        f"{PYTHON_BUILD_REVISION}/{name.replace('+', '%2B')}"
+    )
+
+
+def _download_pinned_python_archive(spec: TargetSpec, destination: Path) -> None:
+    """Download one exact PBS archive and bind it before extraction."""
+    request = urllib.request.Request(
+        _python_archive_url(spec),
+        headers={"User-Agent": "Tobkiri-sealed-python/1"},
+    )
+    digest = hashlib.sha256()
+    total = 0
+    with (
+        urllib.request.urlopen(request, timeout=60) as response,
+        destination.open("xb") as output,
+    ):
+        while chunk := response.read(1024 * 1024):
+            total += len(chunk)
+            if total > 128 * 1024 * 1024:
+                raise SealedEnvironmentError(
+                    "pinned CPython archive exceeds size bound"
+                )
+            digest.update(chunk)
+            output.write(chunk)
+        output.flush()
+        os.fsync(output.fileno())
+    expected = PYTHON_ARCHIVE_SHA256_BY_TARGET[spec.triple]
+    if digest.hexdigest() != expected:
+        raise SealedEnvironmentError("pinned CPython archive SHA-256 mismatch")
+
+
+def _extract_pinned_python_archive(archive: Path, destination: Path) -> Path:
+    """Extract only a path-contained PBS install_only tree."""
+    destination.mkdir(mode=0o700)
+    with tarfile.open(archive, "r:gz") as bundle:
+        members = bundle.getmembers()
+        if not members:
+            raise SealedEnvironmentError("pinned CPython archive is empty")
+        for member in members:
+            parts = Path(member.name).parts
+            if (
+                not parts
+                or parts[0] != "python"
+                or member.name.startswith("/")
+                or any(part in {"", ".", ".."} for part in parts)
+                or member.islnk()
+                or not (member.isdir() or member.isfile() or member.issym())
+            ):
+                raise SealedEnvironmentError(
+                    f"unsafe pinned CPython archive member: {member.name}"
+                )
+            if member.issym():
+                target = Path(*parts[:-1], member.linkname)
+                normalized: list[str] = []
+                for part in target.parts:
+                    if part in {"", "."}:
+                        continue
+                    if part == "..":
+                        if not normalized:
+                            raise SealedEnvironmentError(
+                                f"CPython archive link escapes: {member.name}"
+                            )
+                        normalized.pop()
+                    else:
+                        normalized.append(part)
+                if not normalized or normalized[0] != "python":
+                    raise SealedEnvironmentError(
+                        f"CPython archive link escapes: {member.name}"
+                    )
+        bundle.extractall(destination, members=members, filter="data")
+    return destination / "python"
+
+
+def _find_runtime(runtime: Path, spec: TargetSpec) -> Path:
+    if runtime.is_symlink() or not runtime.is_dir():
+        raise SealedEnvironmentError("pinned CPython runtime root is missing")
     python = _runtime_python(runtime, spec)
     code = (
         "import json,platform,sys; "
@@ -1250,7 +1358,9 @@ def _find_runtime(install_root: Path, spec: TargetSpec) -> Path:
         stderr=subprocess.PIPE,
     )
     report = json.loads(result.stdout)
-    expected_machine = "amd64" if spec.windows and spec.architecture == "x86_64" else spec.architecture
+    expected_machine = (
+        "amd64" if spec.windows and spec.architecture == "x86_64" else spec.architecture
+    )
     if report.get("version") != PYTHON_VERSION or report.get("machine") not in {
         spec.architecture,
         expected_machine,
@@ -1276,18 +1386,19 @@ def assemble_environment(
     python_version: str = PYTHON_VERSION,
     release_digest: str,
     application_source: Path | None = None,
+    sealed_source_root: Path = SEALED_SOURCE_ROOT,
 ) -> Path:
     """Assemble a deterministic sealed tree from prepared runtime fixtures."""
     spec = target_spec(target)
     if python_version != PYTHON_VERSION:
         raise SealedEnvironmentError(f"only CPython {PYTHON_VERSION} is supported")
     if not _is_sha256_identity(release_digest):
-        raise SealedEnvironmentError(
-            "release_digest must be a lowercase raw SHA-256"
-        )
+        raise SealedEnvironmentError("release_digest must be a lowercase raw SHA-256")
     output_root = Path(output_root)
     if output_root.exists() or output_root.is_symlink():
-        raise SealedEnvironmentError(f"assembly destination must be empty: {output_root}")
+        raise SealedEnvironmentError(
+            f"assembly destination must be empty: {output_root}"
+        )
     output_root.parent.mkdir(parents=True, exist_ok=True)
     output_root.mkdir()
     output_root.chmod(0o755)
@@ -1296,7 +1407,7 @@ def assemble_environment(
     _materialize_venv_links(Path(venv_source), spec)
     _normalize_venv(Path(venv_source), Path(runtime_source), spec)
     _copy_tree(Path(venv_source), output_root / "venv", spec)
-    _copy_tree(SEALED_SOURCE_ROOT / "app", output_root / "app", spec)
+    _copy_tree(sealed_source_root / "app", output_root / "app", spec)
     if application_source is not None:
         _copy_application_closure(
             Path(application_source),
@@ -1305,7 +1416,7 @@ def assemble_environment(
         )
     site_packages = _site_packages(output_root / "venv", python_version, spec)
     _copy_tree(
-        SEALED_SOURCE_ROOT / "tobkiri_sealed",
+        sealed_source_root / "tobkiri_sealed",
         site_packages / "tobkiri_sealed",
         spec,
     )
@@ -1320,6 +1431,165 @@ def assemble_environment(
     return manifest_path
 
 
+def _copy_verified_source_snapshot(
+    source_root: Path,
+    destination: Path,
+    expected_manifest_digest: str,
+    expected_release_digest: str,
+) -> Path:
+    """Copy exactly the digest-bound committed snapshot through opened files."""
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_manifest_digest):
+        raise SealedEnvironmentError("source inventory digest must be raw SHA-256")
+    manifest_path = source_root / SOURCE_SNAPSHOT_MANIFEST
+    descriptor = os.open(manifest_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        metadata = os.fstat(descriptor)
+        encoded = b""
+        while chunk := os.read(descriptor, 1024 * 1024):
+            encoded += chunk
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != 1
+        or metadata.st_mode & 0o222
+        or (metadata.st_dev, metadata.st_ino, metadata.st_size, metadata.st_mtime_ns)
+        != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+        or hashlib.sha256(encoded).hexdigest() != expected_manifest_digest
+    ):
+        raise SealedEnvironmentError("committed source inventory authority changed")
+
+    def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise SealedEnvironmentError(f"duplicate source inventory field: {key}")
+            result[key] = value
+        return result
+
+    try:
+        document = json.loads(encoded, object_pairs_hook=reject_duplicates)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SealedEnvironmentError("invalid committed source inventory") from exc
+    if (
+        not isinstance(document, dict)
+        or set(document)
+        != {"schema", "source_commit", "source_tree", "source_manifest_sha256", "files"}
+        or document.get("schema") != SOURCE_SNAPSHOT_SCHEMA
+        or not re.fullmatch(r"[0-9a-f]{40}", str(document.get("source_commit", "")))
+        or not re.fullmatch(r"[0-9a-f]{40}", str(document.get("source_tree", "")))
+        or not re.fullmatch(
+            r"[0-9a-f]{64}", str(document.get("source_manifest_sha256", ""))
+        )
+        or not isinstance(document.get("files"), list)
+    ):
+        raise SealedEnvironmentError("committed source inventory schema mismatch")
+    release_frame = {
+        "schema": SOURCE_SNAPSHOT_SCHEMA,
+        "source_commit": document["source_commit"],
+        "source_tree": document["source_tree"],
+        "source_manifest_sha256": document["source_manifest_sha256"],
+        "source_inventory_sha256": expected_manifest_digest,
+    }
+    release_bytes = (
+        json.dumps(release_frame, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
+    if (
+        not re.fullmatch(r"[0-9a-f]{64}", expected_release_digest)
+        or hashlib.sha256(release_bytes).hexdigest() != expected_release_digest
+    ):
+        raise SealedEnvironmentError("committed source release domain mismatch")
+    entries = document["files"]
+    expected_paths: list[str] = []
+    destination.mkdir(mode=0o700)
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {
+            "path",
+            "size",
+            "sha256",
+            "executable",
+        }:
+            raise SealedEnvironmentError("committed source entry schema mismatch")
+        relative = entry["path"]
+        if (
+            not isinstance(relative, str)
+            or relative.startswith("/")
+            or any(part in {"", ".", ".."} for part in Path(relative).parts)
+            or not isinstance(entry["size"], int)
+            or entry["size"] < 0
+            or not re.fullmatch(r"[0-9a-f]{64}", str(entry["sha256"]))
+            or not isinstance(entry["executable"], bool)
+            or (expected_paths and relative <= expected_paths[-1])
+        ):
+            raise SealedEnvironmentError("committed source entry is unsafe or unsorted")
+        source = source_root.joinpath(*Path(relative).parts)
+        source_descriptor = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            opened = os.fstat(source_descriptor)
+            payload = b""
+            while chunk := os.read(source_descriptor, 1024 * 1024):
+                payload += chunk
+            closed = os.fstat(source_descriptor)
+        finally:
+            os.close(source_descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or opened.st_mode & 0o222
+            or bool(opened.st_mode & 0o111) != entry["executable"]
+            or (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)
+            != (closed.st_dev, closed.st_ino, closed.st_size, closed.st_mtime_ns)
+            or len(payload) != entry["size"]
+            or hashlib.sha256(payload).hexdigest() != entry["sha256"]
+        ):
+            raise SealedEnvironmentError(f"committed source bytes changed: {relative}")
+        target = destination.joinpath(*Path(relative).parts)
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        target_descriptor = os.open(
+            target,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o500 if entry["executable"] else 0o400,
+        )
+        try:
+            offset = 0
+            while offset < len(payload):
+                offset += os.write(target_descriptor, payload[offset:])
+            os.fsync(target_descriptor)
+            os.fchmod(target_descriptor, 0o500 if entry["executable"] else 0o400)
+        finally:
+            os.close(target_descriptor)
+        expected_paths.append(relative)
+    actual = []
+    for relative, _path, kind, _metadata in _walk_tree(source_root):
+        if relative == SOURCE_SNAPSHOT_MANIFEST:
+            continue
+        if kind == "directory":
+            continue
+        if kind != "file":
+            raise SealedEnvironmentError("committed source snapshot contains a link")
+        actual.append(relative)
+    if actual != expected_paths:
+        raise SealedEnvironmentError(
+            "committed source inventory has missing or extra files"
+        )
+    manifest_entry = next(
+        (
+            entry
+            for entry in entries
+            if entry["path"]
+            == "tobkiri_runtime/packaged_defaultspack_source_manifest.v1.json"
+        ),
+        None,
+    )
+    if (
+        manifest_entry is None
+        or manifest_entry["sha256"] != document["source_manifest_sha256"]
+    ):
+        raise SealedEnvironmentError("runtime source manifest authority mismatch")
+    return destination
+
+
 def build_environment(
     repo_root: Path,
     target: str,
@@ -1328,37 +1598,40 @@ def build_environment(
     requirements_path: Path | None = None,
     uv_path: Path | None = None,
     release_digest: str | None = None,
+    source_inventory_sha256: str | None = None,
 ) -> Path:
     """Build a native release environment with pinned uv and hash locks."""
     spec = target_spec(target)
     repo_root = Path(repo_root).resolve(strict=True)
     output_root = Path(output_root or repo_root / DEFAULT_OUTPUT_RELATIVE)
-    requirements_path = Path(
-        requirements_path or repo_root / DEFAULT_REQUIREMENTS_RELATIVE
-    )
-    if requirements_path.is_symlink() or not requirements_path.is_file():
-        raise SealedEnvironmentError(f"locked runtime requirements are missing: {requirements_path}")
+    if requirements_path is not None:
+        raise SealedEnvironmentError(
+            "formal build does not accept an external requirements path"
+        )
     uv = _validate_pinned_uv_executable(repo_root, uv_path, spec)
-    release_digest = release_digest or _source_digest(repo_root)
+    if not release_digest:
+        raise SealedEnvironmentError("formal source release digest is required")
     source_parent = output_root.parent
     source_parent.mkdir(parents=True, exist_ok=True)
     _remove_owned_output(output_root)
-    with tempfile.TemporaryDirectory(prefix=".sealed-python-build-", dir=source_parent) as raw:
+    with tempfile.TemporaryDirectory(
+        prefix=".sealed-python-build-", dir=source_parent
+    ) as raw:
         work = Path(raw)
-        install_root = work / "python-install"
-        _run_uv(
-            uv,
-            [
-                "python",
-                "install",
-                PYTHON_VERSION,
-                "--install-dir",
-                install_root,
-                "--no-bin",
-            ],
+        verified_source = _copy_verified_source_snapshot(
             repo_root,
+            work / "source",
+            source_inventory_sha256 or "",
+            release_digest or "",
         )
-        runtime_source = _find_runtime(install_root, spec)
+        requirements_path = verified_source / DEFAULT_REQUIREMENTS_RELATIVE
+        cache = work / "cache"
+        cache.mkdir(mode=0o700)
+        archive = work / "python.tar.gz"
+        _download_pinned_python_archive(spec, archive)
+        runtime_source = _find_runtime(
+            _extract_pinned_python_archive(archive, work / "python-install"), spec
+        )
         runtime_copy = work / "runtime"
         _materialize_runtime_links(runtime_source, spec)
         _copy_tree(runtime_source, runtime_copy, spec)
@@ -1376,7 +1649,8 @@ def build_environment(
                 "copy",
                 "--no-project",
             ],
-            repo_root,
+            verified_source,
+            cache,
         )
         _run_uv(
             uv,
@@ -1394,7 +1668,8 @@ def build_environment(
                 target,
                 requirements_path,
             ],
-            repo_root,
+            verified_source,
+            cache,
         )
         assembled = work / "python-runtime"
         assemble_environment(
@@ -1403,7 +1678,10 @@ def build_environment(
             venv_source,
             target,
             release_digest=release_digest,
-            application_source=repo_root / APP_SOURCE_ROOT,
+            application_source=verified_source / APP_SOURCE_ROOT,
+            sealed_source_root=(
+                verified_source / ".github/scripts/sealed_python_sources"
+            ),
         )
         validate_environment(assembled, target, run_native_smoke=False)
         shutil.move(os.fspath(assembled), os.fspath(output_root))
@@ -1418,6 +1696,84 @@ def _write_binding(path: Path, digest: str) -> None:
     _write_text(path, f"{MANIFEST_SHA_ENV}={digest}\n")
 
 
+def _write_packaging_binding(
+    path: Path,
+    root: Path,
+    digest: str,
+    spec: TargetSpec,
+    source_snapshot: Path,
+    source_tree: str,
+    source_inventory_sha256: str,
+    release_digest: str,
+) -> None:
+    """Create the private, single-writer GitHub environment binding."""
+    python = _venv_python(root / "venv", spec)
+    if (
+        not source_snapshot.is_absolute()
+        or source_snapshot.is_symlink()
+        or not source_snapshot.is_dir()
+        or stat.S_IMODE(source_snapshot.stat().st_mode) != 0o500
+        or not re.fullmatch(r"[0-9a-f]{40}", source_tree)
+        or not re.fullmatch(r"[0-9a-f]{64}", source_inventory_sha256)
+        or not re.fullmatch(r"[0-9a-f]{64}", release_digest)
+    ):
+        raise SealedEnvironmentError("invalid committed source snapshot binding")
+    payload = (
+        f"{MANIFEST_SHA_ENV}={digest}\n"
+        f"TOBKIRI_PACKAGING_PYTHON={python}\n"
+        f"TOBKIRI_PACKAGING_PYTHON_SHA256={_sha256_file(python)}\n"
+        f"TOBKIRI_PACKAGING_PYTHON_SNAPSHOT={root}\n"
+        f"TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256={digest}\n"
+        f"TOBKIRI_PACKAGING_SOURCE_SNAPSHOT={source_snapshot}\n"
+        f"TOBKIRI_PACKAGING_SOURCE_TREE={source_tree}\n"
+        f"TOBKIRI_PACKAGING_SOURCE_INVENTORY_SHA256={source_inventory_sha256}\n"
+        f"TOBKIRI_PACKAGING_RELEASE_DIGEST={release_digest}\n"
+    )
+    if "\r" in payload or any(line.count("=") != 1 for line in payload.splitlines()):
+        raise SealedEnvironmentError("unsafe packaging environment payload")
+    parent = path.parent.resolve(strict=True)
+    runner_temp = os.environ.get("RUNNER_TEMP")
+    if runner_temp is not None:
+        try:
+            parent.relative_to(Path(runner_temp).resolve(strict=True))
+        except (OSError, ValueError) as exc:
+            raise SealedEnvironmentError(
+                "packaging environment output escapes RUNNER_TEMP"
+            ) from exc
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    opened = os.fstat(descriptor)
+    try:
+        encoded = payload.encode("utf-8")
+        offset = 0
+        while offset < len(encoded):
+            offset += os.write(descriptor, encoded[offset:])
+        os.fsync(descriptor)
+        metadata = os.fstat(descriptor)
+        named = path.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or metadata.st_mode & 0o077
+            or (metadata.st_dev, metadata.st_ino) != (named.st_dev, named.st_ino)
+        ):
+            raise SealedEnvironmentError(
+                "packaging environment output identity changed"
+            )
+    except Exception:
+        try:
+            named = path.lstat()
+            if (opened.st_dev, opened.st_ino) == (named.st_dev, named.st_ino):
+                path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    finally:
+        os.close(descriptor)
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse the build/check command line."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -1427,8 +1783,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--requirements", type=Path)
     parser.add_argument("--uv-path", type=Path)
     parser.add_argument("--release-digest")
+    parser.add_argument("--source-tree")
+    parser.add_argument("--source-inventory-sha256")
     parser.add_argument("--env-output", type=Path)
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--cleanup", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -1438,6 +1797,50 @@ def main(argv: Sequence[str] | None = None) -> int:
     repo_root = args.repo_root.resolve()
     output_root = Path(args.output_root or repo_root / DEFAULT_OUTPUT_RELATIVE)
     try:
+        if args.cleanup:
+            if args.check or args.env_output is not None:
+                raise SealedEnvironmentError("--cleanup is an exclusive action")
+            expected = os.environ.get(MANIFEST_SHA_ENV)
+            validate_environment(
+                output_root,
+                args.target,
+                expected_manifest_digest=expected,
+                run_native_smoke=False,
+            )
+            descriptor = os.open(
+                output_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+            )
+            try:
+                before = os.fstat(descriptor)
+                named = output_root.lstat()
+                if (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino):
+                    raise SealedEnvironmentError("cleanup snapshot identity changed")
+
+                def unseal_directories(directory: int, device: int) -> None:
+                    os.fchmod(directory, 0o700)
+                    for name in os.listdir(directory):
+                        metadata = os.stat(
+                            name, dir_fd=directory, follow_symlinks=False
+                        )
+                        if metadata.st_dev != device:
+                            raise SealedEnvironmentError("mount in cleanup snapshot")
+                        if stat.S_ISDIR(metadata.st_mode):
+                            child = os.open(
+                                name,
+                                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                dir_fd=directory,
+                            )
+                            try:
+                                unseal_directories(child, device)
+                            finally:
+                                os.close(child)
+
+                unseal_directories(descriptor, before.st_dev)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            _remove_owned_output(output_root)
+            return 0
         if args.check:
             digest = validate_environment(
                 output_root,
@@ -1454,10 +1857,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 requirements_path=args.requirements,
                 uv_path=args.uv_path,
                 release_digest=args.release_digest,
+                source_inventory_sha256=args.source_inventory_sha256,
             )
             digest = _sha256_file(manifest)
         if args.env_output:
-            _write_binding(args.env_output, digest)
+            _write_packaging_binding(
+                args.env_output,
+                output_root,
+                digest,
+                target_spec(args.target),
+                repo_root,
+                args.source_tree or "",
+                args.source_inventory_sha256 or "",
+                args.release_digest or "",
+            )
         return 0
     except (OSError, SealedEnvironmentError, subprocess.CalledProcessError) as exc:
         print(f"sealed Python environment preparation failed: {exc}", file=sys.stderr)

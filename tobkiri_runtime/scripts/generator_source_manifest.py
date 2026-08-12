@@ -176,6 +176,10 @@ def _walk_regular_files(
         for entry in sorted(entries, key=lambda item: item.name):
             path = Path(entry.path)
             entry_metadata = entry.stat(follow_symlinks=False)
+            if entry.name == "__pycache__":
+                raise ValueError(
+                    f"source closure contains generated Python bytecode directory: {path}"
+                )
             if entry.is_symlink():
                 raise ValueError(f"source closure contains a symlink: {path}")
             if stat.S_ISDIR(entry_metadata.st_mode):
@@ -185,6 +189,10 @@ def _walk_regular_files(
                     directories=directories,
                 )
             elif stat.S_ISREG(entry_metadata.st_mode):
+                if path.suffix.lower() in {".pyc", ".pyo"}:
+                    raise ValueError(
+                        f"source closure contains generated Python bytecode: {path}"
+                    )
                 yield path
             else:
                 raise ValueError(f"source closure contains a special entry: {path}")

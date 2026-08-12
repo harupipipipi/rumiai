@@ -51,39 +51,87 @@ jobs:
           test "${#token}" -eq 32
           echo "TOBKIRI_PACKAGING_TRANSACTION_TOKEN=$token" >> "$GITHUB_ENV"
 
-      - name: Report packaging Framework ACL authority
-        shell: bash
-        run: |
-          set -euo pipefail
-          for path in / /Library /Library/Frameworks /Library/Frameworks/Python.framework /Library/Frameworks/Python.framework/Versions /Library/Frameworks/Python.framework/Versions/3.13; do
-            if test -e "$path"; then
-              /usr/bin/stat -f 'path=%N uid=%u gid=%g mode=%Sp inode=%i' "$path"
-              /bin/ls -lde "$path"
-            else
-              echo "path=$path absent"
-            fi
-          done
-
-      - name: Bind verified packaging tool identities
+      - name: Build rootless sealed packaging Python
         shell: bash
         env:
           TOOLCHAIN_ENV: ${{ runner.temp }}/tobkiri-packaging-toolchain.env
         run: |
           set -euo pipefail
-          /usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py \
+          snapshot="$RUNNER_TEMP/tobkiri-packaging-python-$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"
+          uv_stage="$RUNNER_TEMP/tobkiri-packaging-uv-$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"
+          pre_git_env="$RUNNER_TEMP/tobkiri-packaging-git-$TOBKIRI_PACKAGING_TRANSACTION_TOKEN.env"
+          source_snapshot="$RUNNER_TEMP/tobkiri-packaging-source-$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"
+          source_env="$RUNNER_TEMP/tobkiri-packaging-source-$TOBKIRI_PACKAGING_TRANSACTION_TOKEN.env"
+          umask 077
+          formal_git="/Library/Developer/CommandLineTools/usr/bin/git"
+          identity_launcher="$RUNNER_TEMP/tobkiri-packaging-identity-$TOBKIRI_PACKAGING_TRANSACTION_TOKEN.py"
+          test "$(/usr/bin/stat -f '%Su:%Lp' "$formal_git")" = "root:755"
+          /usr/bin/codesign --verify --strict --all-architectures "$formal_git"
+          /usr/bin/codesign -d --verbose=4 "$formal_git" 2>&1 | /usr/bin/grep -qx 'Identifier=com.apple.git'
+          /usr/bin/codesign -d --verbose=4 "$formal_git" 2>&1 | /usr/bin/grep -qx 'TeamIdentifier=59GAB85EFG'
+          export GIT_CONFIG=/dev/null GIT_CONFIG_GLOBAL=/dev/null
+          export GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1
+          export GIT_ATTR_NOSYSTEM=1 GIT_EXEC_PATH=/private/var/empty
+          export GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0
+          identity_oid="$("$formal_git" --no-optional-locks --no-replace-objects -C "$GITHUB_WORKSPACE" rev-parse "$GITHUB_SHA:.github/scripts/packaging_toolchain_identity.py")"
+          test "$("$formal_git" -C "$GITHUB_WORKSPACE" cat-file -t "$identity_oid")" = blob
+          set -o noclobber
+          : > "$identity_launcher"
+          set +o noclobber
+          "$formal_git" -C "$GITHUB_WORKSPACE" cat-file blob "$identity_oid" > "$identity_launcher"
+          test "$("$formal_git" -C "$GITHUB_WORKSPACE" hash-object "$identity_launcher")" = "$identity_oid"
+          /bin/chmod 0400 "$identity_launcher"
+          exec {identity_fd}< "$identity_launcher"
+          formal_identity() {
+            PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I -B "/dev/fd/$identity_fd" "$@"
+          }
+          formal_identity \
+            --bind-git-env --env-output "$pre_git_env"
+          while IFS='=' read -r key value; do
+            case "$key" in
+              TOBKIRI_PACKAGING_GIT|TOBKIRI_PACKAGING_GIT_SHA256) export "$key=$value" ;;
+              *) exit 1 ;;
+            esac
+          done < "$pre_git_env"
+          formal_identity \
             --repository-root "$GITHUB_WORKSPACE" \
             --provenance .github/toolchains/packaging-python-macos.v1.json \
-            --source-commit "$GITHUB_SHA" \
-            --transaction-token "$TOBKIRI_PACKAGING_TRANSACTION_TOKEN" \
-            --prepare-macos-installation \
+            --source-commit "$GITHUB_SHA" --git "$TOBKIRI_PACKAGING_GIT" \
+            --git-sha256 "$TOBKIRI_PACKAGING_GIT_SHA256" --smoke-git-authority
+          formal_identity \
+            --repository-root "$GITHUB_WORKSPACE" --source-commit "$GITHUB_SHA" \
+            --git "$TOBKIRI_PACKAGING_GIT" --git-sha256 "$TOBKIRI_PACKAGING_GIT_SHA256" \
+            --snapshot-source --snapshot-root "$source_snapshot" --env-output "$source_env"
+          while IFS='=' read -r key value; do
+            case "$key" in
+              TOBKIRI_PACKAGING_SOURCE_SNAPSHOT|TOBKIRI_PACKAGING_SOURCE_TREE|TOBKIRI_PACKAGING_SOURCE_INVENTORY_SHA256|TOBKIRI_PACKAGING_RELEASE_DIGEST) export "$key=$value" ;;
+              *) exit 1 ;;
+            esac
+          done < "$source_env"
+          /usr/bin/python3 -B "$source_snapshot/.github/scripts/prepare_tauri_resources.py" \
+            --repo-root "$source_snapshot" \
+            --target "${{ matrix.target }}" --uv-version 0.11.14 --stage-uv-only \
+            --uv-output-root "$uv_stage"
+          /usr/bin/python3 -B "$source_snapshot/.github/scripts/build_sealed_python_environment.py" \
+            --repo-root "$source_snapshot" \
+            --target "${{ matrix.target }}" --output-root "$snapshot" \
+            --uv-path "$uv_stage/bundled/uv" --release-digest "$TOBKIRI_PACKAGING_RELEASE_DIGEST" \
+            --source-tree "$TOBKIRI_PACKAGING_SOURCE_TREE" \
+            --source-inventory-sha256 "$TOBKIRI_PACKAGING_SOURCE_INVENTORY_SHA256" \
             --env-output "$TOOLCHAIN_ENV"
+          formal_identity \
+            --bind-git-env --env-output "$TOOLCHAIN_ENV"
           for marker in \
             TOBKIRI_PACKAGING_PYTHON \
             TOBKIRI_PACKAGING_PYTHON_SHA256 \
             TOBKIRI_PACKAGING_GIT \
             TOBKIRI_PACKAGING_GIT_SHA256 \
             TOBKIRI_PACKAGING_PYTHON_SNAPSHOT \
-            TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256
+            TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256 \
+            TOBKIRI_PACKAGING_SOURCE_SNAPSHOT \
+            TOBKIRI_PACKAGING_SOURCE_TREE \
+            TOBKIRI_PACKAGING_SOURCE_INVENTORY_SHA256 \
+            TOBKIRI_PACKAGING_RELEASE_DIGEST
           do
             /usr/bin/grep -q "^${marker}=" "$TOOLCHAIN_ENV"
           done
@@ -106,35 +154,13 @@ jobs:
             tobkiri_runtime/requirements.txt
             tobkiri_runtime/requirements-dev.txt
 
-      - name: Check reviewed packaging Python provenance
-        run: |
-          /usr/bin/python3 -B .github/scripts/update_packaging_python_provenance.py \
-            --version 3.13.13 \
-            --requirements tobkiri_runtime/requirements.txt \
-            --output .github/toolchains/packaging-python-macos.v1.json \
-            --check
-
-      - name: Smoke verified system Git authority
+      - name: Verify rootless sealed packaging Python
         shell: bash
         run: |
           set -euo pipefail
-          /usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py \
-            --repository-root "$GITHUB_WORKSPACE" \
-            --provenance .github/toolchains/packaging-python-macos.v1.json \
-            --source-commit "$GITHUB_SHA" \
-            --git "$TOBKIRI_PACKAGING_GIT" \
-            --git-sha256 "$TOBKIRI_PACKAGING_GIT_SHA256" \
-            --smoke-git-authority
-
-      - name: Verify closed packaging Python installation
-        shell: bash
-        run: |
-          set -euo pipefail
-          /usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py \
-            --repository-root "$GITHUB_WORKSPACE" \
-            --transaction-token "$TOBKIRI_PACKAGING_TRANSACTION_TOKEN" \
-            --verify-macos-installation "$TOBKIRI_PACKAGING_PYTHON_SNAPSHOT" \
-            --inventory-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256"
+          TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256="$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256" \
+            /usr/bin/python3 -B .github/scripts/build_sealed_python_environment.py \
+            --target "${{ matrix.target }}" --output-root "$TOBKIRI_PACKAGING_PYTHON_SNAPSHOT" --check
 
       - name: Resolve checked-out source revision
         id: checked_out_source
@@ -224,21 +250,6 @@ jobs:
           )
           if untracked:
               raise SystemExit("checked-out source has untracked paths")
-          subprocess.run(
-              [
-                  "/usr/bin/python3",
-                  "-B",
-                  ".github/scripts/packaging_toolchain_identity.py",
-                  "--repository-root", os.environ["GITHUB_WORKSPACE"],
-                  "--provenance", ".github/toolchains/packaging-python-macos.v1.json",
-                  "--source-commit", source_revision,
-                  "--git", git,
-                  "--git-sha256", os.environ["TOBKIRI_PACKAGING_GIT_SHA256"],
-                  "--smoke-git-authority",
-              ],
-              check=True,
-              env={"PATH": "/usr/bin:/bin"},
-          )
           tag_revision = subprocess.check_output(
               [
                   *git_arguments,
@@ -298,37 +309,6 @@ jobs:
 
       - name: Install locked runtime and test dependencies
         run: python .github/scripts/install_locked_python_test_dependencies.py
-
-      - name: Exercise root packaging ancestor transactions
-        env:
-          TOBKIRI_REQUIRE_ROOT_PROCESS_TESTS: "1"
-          ROOT_PROCESS_JUNIT: ${{ runner.temp }}/packaging-root-process-tests.xml
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m pytest -q -rs \
-            --junitxml="$ROOT_PROCESS_JUNIT" \
-            .github/scripts/tests/test_packaging_toolchain_identity.py::test_process_creates_and_rolls_back_clean_framework_ancestors \
-            .github/scripts/tests/test_packaging_toolchain_identity.py::test_process_recovers_kill_midway_through_ancestor_creation \
-            .github/scripts/tests/test_packaging_toolchain_identity.py::test_process_retains_created_ancestor_that_becomes_nonempty \
-            .github/scripts/tests/test_packaging_toolchain_identity.py::test_root_owned_group_writable_ancestor_requires_caller_nonmembership \
-            .github/scripts/tests/test_packaging_toolchain_identity.py::test_process_rejects_effective_acl_and_acl_identity_swap \
-            .github/scripts/tests/test_packaging_toolchain_identity.py::test_process_rejects_other_uid_existing_ancestor_when_available \
-            .github/scripts/tests/test_packaging_toolchain_identity.py::test_root_process_normalizes_signed_extract_ownership_by_inode \
-            .github/scripts/tests/test_packaging_toolchain_identity.py::test_root_process_preserves_preinstalled_framework_leaf \
-            .github/scripts/tests/test_packaging_toolchain_identity.py::test_root_process_lock_excludes_concurrency_and_releases_after_kill \
-            .github/scripts/tests/test_packaging_toolchain_identity.py::test_published_ancestor_is_traversable_by_nonroot_process_when_available
-          python - "$ROOT_PROCESS_JUNIT" <<'PY'
-          import sys
-          import xml.etree.ElementTree as ET
-
-          root = ET.parse(sys.argv[1]).getroot()
-          suites = [root] if root.tag == "testsuite" else list(root.findall("testsuite"))
-          skipped = sum(int(suite.attrib.get("skipped", "0")) for suite in suites)
-          tests = sum(int(suite.attrib.get("tests", "0")) for suite in suites)
-          if tests != 10 or skipped != 0:
-              raise SystemExit(f"root process contract requires 10 tests and 0 skips: {tests=}, {skipped=}")
-          PY
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -603,13 +583,17 @@ jobs:
         run: |
           set +e
           set -uo pipefail
-          args=(--transaction-token "$TOBKIRI_PACKAGING_TRANSACTION_TOKEN" --cleanup-transaction)
-          if test -n "${TOBKIRI_PACKAGING_PYTHON_SNAPSHOT:-}"; then
-            args+=(--cleanup-macos-installation "$TOBKIRI_PACKAGING_PYTHON_SNAPSHOT")
-            args+=(--inventory-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256")
+          cleanup_status=0
+          if test -n "${TOBKIRI_PACKAGING_PYTHON_SNAPSHOT:-}" && \
+             test -n "${TOBKIRI_PACKAGING_SOURCE_SNAPSHOT:-}"; then
+            TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256="$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256" \
+              /usr/bin/python3 -B "$TOBKIRI_PACKAGING_SOURCE_SNAPSHOT/.github/scripts/build_sealed_python_environment.py" \
+              --target "${{ matrix.target }}" --output-root "$TOBKIRI_PACKAGING_PYTHON_SNAPSHOT" --cleanup
+            cleanup_status=$?
+          elif test -n "${TOBKIRI_PACKAGING_PYTHON_SNAPSHOT:-}"; then
+            echo "::warning::Committed cleanup authority is unavailable; residue retained"
+            cleanup_status=1
           fi
-          /usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py "${args[@]}"
-          cleanup_status=$?
           if test "$cleanup_status" -ne 0; then
             if test "$PRIMARY_JOB_STATUS" = success; then
               exit "$cleanup_status"

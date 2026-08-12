@@ -31,6 +31,8 @@ const RUNTIME_RESOURCE_MANIFEST: &str = "runtime-resource-manifest.v1.json";
 const RUNTIME_RESOURCE_SCHEMA: &str = "io.tobkiri.runtime-resource-manifest.v1";
 const SEALED_PYTHON_ROOT: &str = "python-runtime";
 const SEALED_PYTHON_MANIFEST: &str = "sealed-environment.v1.json";
+const PACKAGING_PYTHON_SNAPSHOT_ENV: &str = "TOBKIRI_PACKAGING_PYTHON_SNAPSHOT";
+const PACKAGING_PYTHON_INVENTORY_SHA_ENV: &str = "TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256";
 const SEALED_PYTHON_SCHEMA: &str = "io.tobkiri.sealed-python-environment.v1";
 const CARGO_TARGET_DIR_ENV: &str = "CARGO_TARGET_DIR";
 const PANEL_BUILD_DIR_ENV: &str = "TOBKIRI_PANEL_BUILD_DIR";
@@ -178,11 +180,12 @@ fn main() {
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/flows");
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/lang");
     println!("cargo:rerun-if-changed=../../tobkiri_runtime/requirements.txt");
-    println!("cargo:rerun-if-changed=../../tobkiri_runtime/python-runtime");
     println!("cargo:rerun-if-changed=bundled");
     println!("cargo:rerun-if-changed=bundled/presentation_catalog.json");
     println!("cargo:rerun-if-env-changed={PRESENTATION_RELEASE_ROOT_ENV}");
     println!("cargo:rerun-if-env-changed={PANEL_BUILD_DIR_ENV}");
+    println!("cargo:rerun-if-env-changed={PACKAGING_PYTHON_SNAPSHOT_ENV}");
+    println!("cargo:rerun-if-env-changed={PACKAGING_PYTHON_INVENTORY_SHA_ENV}");
     println!("cargo:rerun-if-changed=capabilities");
 
     if let Some(panel_dir) = configured_panel_build_dir(&PathBuf::from(env!("CARGO_MANIFEST_DIR")))
@@ -431,8 +434,16 @@ fn stage_runtime_bundle() -> io::Result<()> {
     }
     verify_canonical_host_package(&staged_root, &runtime_root)
         .map_err(|error| stage_error("verify canonical Host package", error))?;
-    copy_generated_resource_dirs(&project_dir, &runtime_root, &staged_root)
-        .map_err(|error| stage_error("copy generated resources", error))?;
+    let sealed_python_source = configured_sealed_python_snapshot()?;
+    bind_sealed_python_root(&sealed_python_source)
+        .map_err(|error| stage_error("verify source sealed Python", error))?;
+    copy_generated_resource_dirs(
+        &project_dir,
+        &runtime_root,
+        &staged_root,
+        Some(&sealed_python_source),
+    )
+    .map_err(|error| stage_error("copy generated resources", error))?;
     stage_setup_brand_icon(repo_root, &staged_root)
         .map_err(|error| stage_error("stage setup brand icon", error))?;
 
@@ -463,7 +474,7 @@ fn stage_runtime_bundle() -> io::Result<()> {
 
     stage_pack_shell(repo_root, &staged_root)
         .map_err(|error| stage_error("stage pack-shell", error))?;
-    bind_sealed_python_environment(&staged_root)
+    bind_sealed_python_root(&staged_root.join(SEALED_PYTHON_ROOT))
         .map_err(|error| stage_error("bind sealed Python environment", error))?;
     write_runtime_resource_manifest(&staged_root)
         .map_err(|error| stage_error("seal staged runtime", error))?;
@@ -498,9 +509,8 @@ fn collect_runtime_resource_files(root: &Path, current: &Path) -> io::Result<Vec
     Ok(files)
 }
 
-fn bind_sealed_python_environment(staged_root: &Path) -> io::Result<()> {
+fn bind_sealed_python_root(root: &Path) -> io::Result<()> {
     reject_unsupported_sealed_python_release_target()?;
-    let root = staged_root.join(SEALED_PYTHON_ROOT);
     let manifest_path = root.join(SEALED_PYTHON_MANIFEST);
     if !manifest_path.exists() {
         println!("cargo:rustc-env=TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256=");
@@ -515,6 +525,20 @@ fn bind_sealed_python_environment(staged_root: &Path) -> io::Result<()> {
     require_directory(&root, "sealed Python environment root")?;
     require_regular_file(&manifest_path, "sealed Python environment manifest")?;
     let bytes = fs::read(&manifest_path)?;
+    if required_cargo_profile()? == "release" {
+        let expected = std::env::var(PACKAGING_PYTHON_INVENTORY_SHA_ENV).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("{PACKAGING_PYTHON_INVENTORY_SHA_ENV} is required"),
+            )
+        })?;
+        if !valid_raw_sha256(&expected) || raw_byte_digest(&bytes) != expected {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "sealed Python manifest differs from the formal inventory binding",
+            ));
+        }
+    }
     let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -581,7 +605,7 @@ fn bind_sealed_python_environment(staged_root: &Path) -> io::Result<()> {
         "package_provenance",
     )?;
     let required_provenance = match platform {
-        "macos" => "apple-code-signature-v1",
+        "macos" => "pinned-python-build-standalone-v1",
         "windows" => "windows-authenticode-v1",
         _ => "linux-immutable-package-v1",
     };
@@ -621,8 +645,7 @@ fn bind_sealed_python_environment(staged_root: &Path) -> io::Result<()> {
         .get("environment_digest")
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "environment_digest missing"))?;
-    if raw_byte_digest(&serde_json::to_vec(files).map_err(io::Error::other)?) != environment_digest
-    {
+    if sealed_python_inventory_digest(files)? != environment_digest {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "sealed Python environment digest differs from sorted file inventory",
@@ -795,6 +818,45 @@ fn bind_sealed_python_environment(staged_root: &Path) -> io::Result<()> {
     Ok(())
 }
 
+fn sealed_python_inventory_digest(files: &[serde_json::Value]) -> io::Result<String> {
+    let mut payload = String::from("[");
+    for (index, value) in files.iter().enumerate() {
+        let entry = value.as_object().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "sealed Python file entry must be an object",
+            )
+        })?;
+        if index != 0 {
+            payload.push(',');
+        }
+        payload.push_str("{\"path\":");
+        payload.push_str(&serde_json::to_string(entry.get("path").ok_or_else(
+            || io::Error::new(io::ErrorKind::InvalidData, "sealed Python path missing"),
+        )?)?);
+        payload.push_str(",\"size\":");
+        payload.push_str(&serde_json::to_string(entry.get("size").ok_or_else(
+            || io::Error::new(io::ErrorKind::InvalidData, "sealed Python size missing"),
+        )?)?);
+        payload.push_str(",\"sha256\":");
+        payload.push_str(&serde_json::to_string(entry.get("sha256").ok_or_else(
+            || io::Error::new(io::ErrorKind::InvalidData, "sealed Python digest missing"),
+        )?)?);
+        payload.push_str(",\"executable\":");
+        payload.push_str(&serde_json::to_string(
+            entry.get("executable").ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "sealed Python executable flag missing",
+                )
+            })?,
+        )?);
+        payload.push('}');
+    }
+    payload.push(']');
+    Ok(raw_byte_digest(payload.as_bytes()))
+}
+
 fn reject_unsupported_sealed_python_release_target() -> io::Result<()> {
     if required_cargo_profile()? != "release" {
         return Ok(());
@@ -850,6 +912,13 @@ fn valid_sha256(value: Option<&serde_json::Value>) -> bool {
                     .bytes()
                     .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
         })
+}
+
+fn valid_raw_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn raw_byte_digest(bytes: &[u8]) -> String {
@@ -4176,10 +4245,16 @@ fn copy_generated_resource_dirs(
     project_dir: &Path,
     runtime_root: &Path,
     staged_root: &Path,
+    sealed_python_source: Option<&Path>,
 ) -> io::Result<()> {
     let configured_panel_dir = configured_panel_build_dir(project_dir);
     for rel_dir in GENERATED_RESOURCE_DIRS {
-        let source_dir = if *rel_dir == PANEL_RESOURCE_DIR {
+        let source_dir = if *rel_dir == SEALED_PYTHON_ROOT {
+            let Some(source) = sealed_python_source else {
+                continue;
+            };
+            source.to_path_buf()
+        } else if *rel_dir == PANEL_RESOURCE_DIR {
             configured_panel_dir
                 .clone()
                 .unwrap_or_else(|| runtime_root.join(rel_dir))
@@ -4207,9 +4282,31 @@ fn copy_generated_resource_dirs(
                 ),
             ));
         }
-        copy_dir_recursive_filtered(&source_dir, &staged_root.join(rel_dir), runtime_root)?;
+        if *rel_dir == SEALED_PYTHON_ROOT {
+            copy_dir_recursive(&source_dir, &staged_root.join(rel_dir))?;
+            mirror_directory_permissions(&source_dir, &staged_root.join(rel_dir))?;
+        } else {
+            copy_dir_recursive_filtered(&source_dir, &staged_root.join(rel_dir), runtime_root)?;
+        }
     }
     Ok(())
+}
+
+fn configured_sealed_python_snapshot() -> io::Result<PathBuf> {
+    let configured = std::env::var_os(PACKAGING_PYTHON_SNAPSHOT_ENV).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{PACKAGING_PYTHON_SNAPSHOT_ENV} is required"),
+        )
+    })?;
+    let source = PathBuf::from(configured);
+    if !source.is_absolute() || source.canonicalize()? != source {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "sealed Python snapshot path is not canonical absolute",
+        ));
+    }
+    Ok(source)
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
@@ -4243,6 +4340,16 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn mirror_directory_permissions(src: &Path, dst: &Path) -> io::Result<()> {
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            mirror_directory_permissions(&entry.path(), &dst.join(entry.file_name()))?;
+        }
+    }
+    fs::set_permissions(dst, fs::metadata(src)?.permissions())
 }
 
 fn copy_dir_recursive_filtered(src: &Path, dst: &Path, runtime_root: &Path) -> io::Result<()> {
@@ -4625,7 +4732,7 @@ mod tests {
                 "executable": executable
             }));
         }
-        let inventory_digest = raw_byte_digest(&serde_json::to_vec(&files).unwrap());
+        let inventory_digest = sealed_python_inventory_digest(&files).unwrap();
         let manifest = serde_json::json!({
             "schema": SEALED_PYTHON_SCHEMA,
             "environment_digest": inventory_digest,
@@ -4633,7 +4740,7 @@ mod tests {
             "architecture": expected_pack_shell_architecture(target),
             "python_version": "3.13.13",
             "package_provenance": {
-                "kind": "apple-code-signature-v1",
+                "kind": "pinned-python-build-standalone-v1",
                 "package_id": "dev.tobkiri.launcher",
                 "release_digest": raw_byte_digest(b"release")
             },
@@ -4644,12 +4751,22 @@ mod tests {
             },
             "files": files
         });
-        fs::write(
-            root.join(SEALED_PYTHON_MANIFEST),
-            serde_json::to_vec(&manifest).unwrap(),
+        let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+        fs::write(root.join(SEALED_PYTHON_MANIFEST), &manifest_bytes).unwrap();
+        let _inventory = EnvironmentGuard::set_value(
+            PACKAGING_PYTHON_INVENTORY_SHA_ENV,
+            raw_byte_digest(&manifest_bytes),
+        );
+        bind_sealed_python_root(&root).unwrap();
+        let staged = tree.path().join("staged");
+        copy_generated_resource_dirs(
+            &tree.path().join("tobkiri_launcher/src-tauri"),
+            &tree.path().join(APP_SOURCE_DIR),
+            &staged,
+            Some(&root),
         )
         .unwrap();
-        bind_sealed_python_environment(tree.path()).unwrap();
+        bind_sealed_python_root(&staged.join(SEALED_PYTHON_ROOT)).unwrap();
 
         let mut swapped = manifest.clone();
         swapped["environment_digest"] = swapped["package_provenance"]["release_digest"].clone();
@@ -4658,7 +4775,7 @@ mod tests {
             serde_json::to_vec(&swapped).unwrap(),
         )
         .unwrap();
-        assert!(bind_sealed_python_environment(tree.path()).is_err());
+        assert!(bind_sealed_python_root(&root).is_err());
 
         let mut prefixed = manifest;
         prefixed["sentinels"]["stdlib_sha256"] =
@@ -4668,7 +4785,42 @@ mod tests {
             serde_json::to_vec(&prefixed).unwrap(),
         )
         .unwrap();
-        assert!(bind_sealed_python_environment(tree.path()).is_err());
+        assert!(bind_sealed_python_root(&root).is_err());
+    }
+
+    #[test]
+    fn sealed_python_digest_matches_python_fixed_field_framing() {
+        let files = vec![serde_json::json!({
+            "executable": false,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 1,
+            "path": "a.txt"
+        })];
+        assert_eq!(
+            sealed_python_inventory_digest(&files).unwrap(),
+            "2cb00f58e1f3c0794078cb2a0580641e7941aa509e09e3651cbd654c9a32fab2"
+        );
+        let reordered = vec![serde_json::from_str(
+            r#"{"size":1,"executable":false,"path":"a.txt","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#,
+        )
+        .unwrap()];
+        assert_eq!(
+            sealed_python_inventory_digest(&reordered).unwrap(),
+            "2cb00f58e1f3c0794078cb2a0580641e7941aa509e09e3651cbd654c9a32fab2"
+        );
+        let mut two_files = files.clone();
+        two_files.push(serde_json::json!({
+            "path": "b.txt",
+            "size": 2,
+            "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "executable": true
+        }));
+        let original = sealed_python_inventory_digest(&two_files).unwrap();
+        two_files.reverse();
+        assert_ne!(
+            sealed_python_inventory_digest(&two_files).unwrap(),
+            original
+        );
     }
 
     #[test]
@@ -5280,7 +5432,7 @@ mod tests {
             .expect("isolated panel should be writable");
         let _panel_dir = EnvironmentGuard::set_path(PANEL_BUILD_DIR_ENV, &isolated_panel);
 
-        copy_generated_resource_dirs(&project_dir, &runtime_root, &staged_root)
+        copy_generated_resource_dirs(&project_dir, &runtime_root, &staged_root, None)
             .expect("isolated panel should be staged");
 
         assert_eq!(
@@ -5307,7 +5459,7 @@ mod tests {
         let missing_panel = tree.path().join("runner-temp/missing-panel");
         let _panel_dir = EnvironmentGuard::set_path(PANEL_BUILD_DIR_ENV, &missing_panel);
 
-        let error = copy_generated_resource_dirs(&project_dir, &runtime_root, &staged_root)
+        let error = copy_generated_resource_dirs(&project_dir, &runtime_root, &staged_root, None)
             .expect_err("missing configured panel must fail closed");
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
     }
