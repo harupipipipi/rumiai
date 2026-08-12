@@ -1022,20 +1022,9 @@ impl DarwinChild {
                 }
             }
             Err(primary) if self.state == DarwinChildState::ExternalReaped => Err(primary),
-            Err(primary) => {
-                self.state = DarwinChildState::Running;
-                match self.kill().and_then(|()| {
-                    self.wait_nonblocking_until(
-                        std::time::Instant::now() + std::time::Duration::from_secs(2),
-                    )?
-                    .ok_or_else(|| invalid("timed out reaping Darwin child after wait failure"))
-                }) {
-                    Ok(_) => Err(primary),
-                    Err(cleanup) => Err(invalid(format!(
-                        "{primary}; Darwin child containment also failed: {cleanup}"
-                    ))),
-                }
-            }
+            Err(primary) => Err(invalid(format!(
+                "{primary}; Darwin child identity is lost, so PID containment was stopped to avoid signaling a reused PID"
+            ))),
         };
         let stdout_result = join_reader(stdout, "stdout");
         let stderr_result = join_reader(stderr, "stderr");

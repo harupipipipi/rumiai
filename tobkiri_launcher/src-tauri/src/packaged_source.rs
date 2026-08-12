@@ -1707,6 +1707,25 @@ pub fn verify_and_snapshot_against_manifest(
     )
 }
 
+#[cfg(not(unix))]
+fn unsupported_nonunix_snapshot() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::Unsupported,
+        "packaged source snapshots are disabled on non-Unix platforms until handle-anchored cleanup is available",
+    )
+}
+
+#[cfg(not(unix))]
+fn verify_and_snapshot_against_manifest_with_hook(
+    _runtime_root: &Path,
+    _snapshot_parent: &Path,
+    _trusted_manifest: &[u8],
+    _before_copy: impl FnOnce(),
+) -> io::Result<VerifiedSourceSnapshot> {
+    Err(unsupported_nonunix_snapshot())
+}
+
+#[cfg(unix)]
 fn verify_and_snapshot_against_manifest_with_hook(
     runtime_root: &Path,
     snapshot_parent: &Path,
@@ -2260,5 +2279,20 @@ mod tests {
             fs::read(snapshot_root.join("replacement")).unwrap(),
             b"preserve"
         );
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn nonunix_snapshot_creation_is_fail_closed_before_path_mutation() {
+        let tree = Tree::new("nonunix-disabled");
+        let snapshot_parent = tree.0.join("snapshot-parent-must-not-exist");
+        let error = verify_and_snapshot_against_manifest(
+            &tree.0.join("runtime-must-not-be-read"),
+            &snapshot_parent,
+            b"not a manifest",
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert!(!snapshot_parent.exists());
     }
 }
