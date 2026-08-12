@@ -2423,8 +2423,9 @@ fn write_canonical_json(path: &Path, value: &serde_json::Value) -> io::Result<()
     fs::write(path, bytes)
 }
 
-fn source_manifest_digests_from_lock(
+fn selected_source_manifest_digests_from_lock(
     lock_path: &Path,
+    selected: &serde_json::Map<String, serde_json::Value>,
 ) -> io::Result<serde_json::Map<String, serde_json::Value>> {
     let lock: serde_json::Value = serde_json::from_slice(&read_regular_file(
         lock_path,
@@ -2503,15 +2504,26 @@ fn source_manifest_digests_from_lock(
                 "generated Defaults Pack pack.id is invalid",
             ));
         }
-        if digests
-            .insert(pack_id, serde_json::Value::String(digest.to_owned()))
-            .is_some()
-        {
-            return Err(invalid_release("Defaults lock contains a duplicate Pack"));
+        if path != format!("packs/{pack_id}.pack.v4.json") {
+            return Err(invalid_release(
+                "Defaults lock Pack path differs from exact pack.id",
+            ));
+        }
+        if selected.contains_key(&pack_id) {
+            if digests
+                .insert(pack_id, serde_json::Value::String(digest.to_owned()))
+                .is_some()
+            {
+                return Err(invalid_release(
+                    "Defaults lock contains a duplicate selected Pack",
+                ));
+            }
         }
     }
-    if digests.is_empty() {
-        return Err(invalid_release("Defaults lock contains no Pack entries"));
+    if digests.len() != selected.len() || selected.keys().any(|key| !digests.contains_key(key)) {
+        return Err(invalid_release(
+            "Defaults lock is missing a selected catalog Pack",
+        ));
     }
     Ok(digests)
 }
@@ -2524,7 +2536,7 @@ fn verify_catalog_source_manifest_digests(
         .get("source_manifest_digests")
         .and_then(serde_json::Value::as_object)
         .ok_or_else(|| invalid_release("catalog source_manifest_digests are missing"))?;
-    let expected = source_manifest_digests_from_lock(lock_path)?;
+    let expected = selected_source_manifest_digests_from_lock(lock_path, actual)?;
     if actual != &expected {
         return Err(invalid_release(
             "catalog selected Pack set differs from the exact Defaults lock Pack entries",
@@ -2615,9 +2627,18 @@ fn produce_and_stage_core_presentation_release(staged_root: &Path) -> io::Result
                         )?)?;
                     catalog["default_profile_digest"] =
                         serde_json::Value::String(projection.default_profile_sha256.clone());
-                    catalog["source_manifest_digests"] = serde_json::Value::Object(
-                        source_manifest_digests_from_lock(&bundle_root.join("bundle.lock.json"))?,
-                    );
+                    let selected =
+                        catalog["source_manifest_digests"]
+                            .as_object()
+                            .ok_or_else(|| {
+                                invalid_release("canonical catalog selected Pack set is missing")
+                            })?;
+                    let updated_source_digests = selected_source_manifest_digests_from_lock(
+                        &bundle_root.join("bundle.lock.json"),
+                        selected,
+                    )?;
+                    catalog["source_manifest_digests"] =
+                        serde_json::Value::Object(updated_source_digests);
                     let variants = catalog["shell_providers"]
                         .as_array_mut()
                         .and_then(|providers| {
@@ -4993,6 +5014,97 @@ mod tests {
         let error = verify_catalog_source_manifest_digests(&catalog, &lock_path)
             .expect_err("shared forged digest must not authenticate Pack bytes");
         assert!(error.to_string().contains("exact Pack bytes"));
+    }
+
+    #[test]
+    fn selected_pack_binding_rejects_missing_duplicate_wrong_path_id_and_digest() {
+        for mutation in ["missing", "duplicate", "path", "id", "digest"] {
+            let tree = TestTree::new(&format!("selected-pack-{mutation}"));
+            let (release_root, _, catalog_path) = release_fixture(&tree);
+            let lock_path = release_root.join("ecosystem/defaultspack/v4/bundle.lock.json");
+            let mut lock: serde_json::Value =
+                serde_json::from_slice(&fs::read(&lock_path).expect("lock fixture should read"))
+                    .expect("lock fixture should parse");
+            match mutation {
+                "missing" => lock["entries"] = serde_json::json!([]),
+                "duplicate" => {
+                    let duplicate = lock["entries"][0].clone();
+                    lock["entries"].as_array_mut().unwrap().push(duplicate);
+                }
+                "path" => {
+                    lock["entries"][0]["path"] =
+                        serde_json::Value::String("packs/wrong.pack.v4.json".into());
+                }
+                "id" => {
+                    let pack_path = release_root
+                        .join("ecosystem/defaultspack/v4/packs/defaults-basepack.pack.v4.json");
+                    let mut pack: serde_json::Value = serde_json::from_slice(
+                        &fs::read(&pack_path).expect("Pack fixture should read"),
+                    )
+                    .expect("Pack fixture should parse");
+                    pack["pack"]["id"] = serde_json::Value::String("wrong".into());
+                    let bytes = serde_json::to_vec(&pack).expect("Pack should encode");
+                    fs::write(&pack_path, &bytes).expect("Pack mutation should write");
+                    lock["entries"][0]["digest"] = serde_json::Value::String(byte_digest(&bytes));
+                }
+                "digest" => {
+                    lock["entries"][0]["digest"] =
+                        serde_json::Value::String(format!("sha256:{}", "b".repeat(64)));
+                }
+                _ => unreachable!(),
+            }
+            fs::write(
+                &lock_path,
+                serde_json::to_vec(&lock).expect("lock should encode"),
+            )
+            .expect("lock mutation should write");
+            let catalog: serde_json::Value = serde_json::from_slice(
+                &fs::read(&catalog_path).expect("catalog fixture should read"),
+            )
+            .expect("catalog fixture should parse");
+            verify_catalog_source_manifest_digests(&catalog, &lock_path)
+                .expect_err("selected Pack mismatch must fail closed");
+        }
+    }
+
+    #[test]
+    fn nonselected_lock_pack_is_allowed_but_not_added_to_catalog() {
+        let tree = TestTree::new("nonselected-pack-extra");
+        let (release_root, _, catalog_path) = release_fixture(&tree);
+        let lock_path = release_root.join("ecosystem/defaultspack/v4/bundle.lock.json");
+        let bundle_root = lock_path.parent().expect("lock has bundle root");
+        let extra_path = bundle_root.join("packs/shell.cli.default.pack.v4.json");
+        fs::write(
+            &extra_path,
+            include_bytes!(
+                "../../tobkiri_runtime/ecosystem/defaultspack/v4/packs/shell.cli.default.pack.v4.json"
+            ),
+        )
+        .expect("extra Pack fixture should copy");
+        let mut lock: serde_json::Value =
+            serde_json::from_slice(&fs::read(&lock_path).expect("lock fixture should read"))
+                .expect("lock fixture should parse");
+        lock["entries"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "path": "packs/shell.cli.default.pack.v4.json",
+                "kind": "pack",
+                "digest": byte_digest(&fs::read(&extra_path).expect("extra Pack should read")),
+            }));
+        fs::write(
+            &lock_path,
+            serde_json::to_vec(&lock).expect("lock should encode"),
+        )
+        .expect("lock should write");
+        let catalog: serde_json::Value =
+            serde_json::from_slice(&fs::read(&catalog_path).expect("catalog should read"))
+                .expect("catalog should parse");
+        let selected = catalog["source_manifest_digests"].as_object().unwrap();
+        let updated = selected_source_manifest_digests_from_lock(&lock_path, selected)
+            .expect("nonselected Pack extra should be allowed");
+        assert_eq!(updated.len(), selected.len());
+        assert!(!updated.contains_key("shell.cli.default"));
     }
 
     #[cfg(target_os = "macos")]
