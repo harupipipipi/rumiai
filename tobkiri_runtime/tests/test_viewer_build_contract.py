@@ -131,13 +131,23 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
         ]
         assert cargo_positions and all(position > source_at for position in cargo_positions)
         assert bind_at < source_at
+        clean_at = build_contents.index("source_clean = subprocess.run(")
+        untracked_at = build_contents.index('"ls-files"')
+        output_at = build_contents.index('output.write(f"source_revision=')
+        assert source_at < clean_at < output_at
+        assert source_at < untracked_at < output_at
+        assert '"diff-index"' in build_contents
+        assert '"--cached"' in build_contents
+        assert '"--no-ext-diff"' in build_contents
+        assert '"--no-textconv"' in build_contents
+        assert 'raise SystemExit("checked-out index must match HEAD")' in build_contents
+        assert 'raise SystemExit("checked-out source has untracked paths")' in build_contents
         assert "TOBKIRI_PACKAGING_PYTHON" in build_contents
         assert "TOBKIRI_PACKAGING_PYTHON_SHA256" in build_contents
         assert "TOBKIRI_PACKAGING_GIT" in build_contents
         assert "TOBKIRI_PACKAGING_GIT_SHA256" in build_contents
         assert "source_revision=" in build_contents
         assert "source_tree=" in build_contents
-        assert "source_status" in build_contents
         assert "TOBKIRI_PACKAGING_SOURCE_PROVENANCE_FILE" not in build_contents
         assert "--source-provenance-file" not in build_contents
         assert "/usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py" in build_contents
@@ -145,7 +155,7 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
             "--provenance .github/toolchains/packaging-python-macos.v1.json"
             in build_contents
         )
-        assert build_contents.count('--source-commit "$GITHUB_SHA"') == 1
+        assert build_contents.count('--source-commit "$GITHUB_SHA"') == 2
         assert (
             '--transaction-token "$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"'
             in build_contents
