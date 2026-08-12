@@ -757,6 +757,45 @@ def _prepare_refresh_race(
     return 41
 
 
+def test_server_closes_server_captured_refresh_session_on_stop(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import core_runtime.authority.v4 as authority_v4
+    import core_runtime.bootstrap.production_v4 as production_v4
+    import core_runtime.bootstrap.profile_capture as profile_capture
+
+    initial = _RefreshDispatch("initial")
+    captured = _RefreshDispatch("captured")
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+        dispatch_session=initial,  # type: ignore[arg-type]
+    )
+    generation = _prepare_refresh_race(server, monkeypatch)
+    monkeypatch.setattr(profile_capture, "capture_default_profile", lambda: object())
+    monkeypatch.setattr(profile_capture, "runtime_user_data_root", lambda: tmp_path)
+    monkeypatch.setattr(authority_v4, "AuthorityStore", lambda _path: object())
+    monkeypatch.setattr(
+        production_v4,
+        "capture_production_dispatch",
+        lambda *_args, **_kwargs: captured,
+    )
+
+    try:
+        server._refresh_runtime_capture(None, lifecycle_generation=generation)
+        assert server._dispatch_session is captured
+        assert server._dispatch_session_owned_by_server is True
+        assert initial.close_calls == 1
+        assert captured.close_calls == 0
+    finally:
+        server.stop()
+
+    assert captured.close_calls == 1
+    assert server._dispatch_session is None
+    assert server._dispatch_session_owned_by_server is False
+
+
 def test_older_same_generation_refresh_cannot_replace_newer_publish(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

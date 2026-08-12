@@ -1924,6 +1924,10 @@ class PackAPIServer:
         self.port = self.config.port
         self._panel_auth_manager = panel_auth_manager or get_panel_auth_manager()
         self._dispatch_session = dispatch_session
+        # A caller-provided session remains caller-owned.  Refreshes that the
+        # server captures itself become server-owned so their Broker,
+        # authority store, and provider close callbacks have a bounded owner.
+        self._dispatch_session_owned_by_server = False
         self.app_lifecycle_manager = app_lifecycle_manager
         self._contract_routes = contract_binding_map(contract_bindings)
         self._web_mounts = web_mounts
@@ -2093,6 +2097,7 @@ class PackAPIServer:
         from .di_container import get_container
 
         session = activated_session
+        server_captured_session = session is None
         try:
             runtime_root, bundle_root, _catalog, bindings = (
                 _load_production_capture_inputs()
@@ -2146,6 +2151,7 @@ class PackAPIServer:
                 )
                 handler._runtime_port = self.port
                 self._dispatch_session = session
+                self._dispatch_session_owned_by_server = server_captured_session
                 self._contract_routes = routes
                 self.handler_class = handler
                 if self.server is not None:
@@ -2178,6 +2184,8 @@ class PackAPIServer:
 
     def stop(self) -> None:
         """Stop the server and discard its captured handler bindings."""
+
+        owned_dispatch_session: DispatchSession | None = None
 
         with self._lifecycle_lock:
             if self._lifecycle_state == "stopped":
@@ -2239,6 +2247,10 @@ class PackAPIServer:
                 if self.thread is thread:
                     self.thread = None
                 self.handler_class = None
+                if self._dispatch_session_owned_by_server:
+                    owned_dispatch_session = self._dispatch_session
+                    self._dispatch_session = None
+                    self._dispatch_session_owned_by_server = False
                 self._lifecycle_state = "stopped"
                 self._stop_failed = False
                 self._stop_complete.set()
@@ -2250,6 +2262,13 @@ class PackAPIServer:
         if not drained or serving_thread_alive:
             logger.error("Pack v4 API server teardown incomplete: %s", diagnostics)
             raise RuntimeError(f"Pack v4 API server teardown incomplete: {diagnostics}")
+        if owned_dispatch_session is not None:
+            close = getattr(owned_dispatch_session, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    logger.exception("failed to close server-owned dispatch session")
         logger.info("Pack v4 API server stopped")
 
     def is_running(self) -> bool:
