@@ -15,6 +15,7 @@ import {
   createRuntimeSurfaceClient,
   extractExactFlowDescriptors,
   extractExactOperationDescriptors,
+  extractExactPackDescriptors,
   extractExactPlanBindings,
   extractExactProfileCatalog,
   extractExactProfileCatalogSelectablePackIds,
@@ -433,6 +434,29 @@ test('synthetic links are rejected unless sourced from exact plan bindings', () 
 test('regex labels cannot classify a Pack as Flow or AI Input', () => {
   assert.deepEqual(extractExactFlowDescriptors({packs: [{name: 'flow-runner'}]}), []);
   assert.deepEqual(extractExactOperationDescriptors({operations: [{label: 'AI Input', operation_id: 'operation.one'}]}), []);
+});
+
+test('Pack projection rejects artifact-reference drift and duplicate Pack identities', () => {
+  const pack = {
+    pack_id: 'provider-pack',
+    role: 'provider',
+    kind: 'normal',
+    version: '1.0.0',
+    display_name: 'Provider Pack',
+    artifact_digest: digest('a'),
+    artifact_ref: `pack-v4://provider-pack@${digest('a')}`,
+    installed: true,
+    enabled: true,
+    approved: true,
+    required: false,
+    invokable_operations: ['contract.one.v1::operation.one'],
+  };
+  assert.equal(extractExactPackDescriptors({packs: [pack]}).length, 1);
+  assert.deepEqual(
+    extractExactPackDescriptors({packs: [{...pack, artifact_ref: 'pack-v4://provider-pack@tampered'}]}),
+    [],
+  );
+  assert.deepEqual(extractExactPackDescriptors({packs: [pack, pack]}), []);
 });
 
 test('operation extraction normalizes the formal contract_invoke action and rejects legacy write labels', () => {

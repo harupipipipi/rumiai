@@ -161,6 +161,33 @@ test('contract invocation selection fails closed on revoked, stale, and digest-m
   assert.deepEqual(
     selectAdvancedContractInvokableOperations(
       descriptor,
+      state,
+      validEnvelope,
+      [operation('selected', {artifact_digest: digest('d')})],
+    ),
+    [],
+  );
+  assert.deepEqual(
+    selectAdvancedContractInvokableOperations(
+      descriptor,
+      state,
+      validEnvelope,
+      [operation('selected', {
+        owner_pack_id: 'different-pack',
+        invocation_owner_pack_id: 'different-pack',
+        route: {
+          contract_id: 'selected.contract',
+          operation_id: 'selected',
+          function_id: 'selected.function',
+          provider_pack_id: 'different-pack',
+        },
+      })],
+    ),
+    [],
+  );
+  assert.deepEqual(
+    selectAdvancedContractInvokableOperations(
+      descriptor,
       {...state, error: {code: 'APPROVAL_DENIED'}},
       validEnvelope,
       [selectedOperation],

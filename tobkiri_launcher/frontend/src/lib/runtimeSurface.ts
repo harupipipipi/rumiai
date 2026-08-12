@@ -1281,7 +1281,8 @@ function extractExactArray(value: unknown, key: string): Record<string, unknown>
 
 /** Normalize complete Pack lifecycle rows from the exact Packs projection. */
 export function extractExactPackDescriptors(value: unknown): RuntimePackDescriptor[] {
-  return extractExactArray(value, 'packs').flatMap((candidate) => {
+  const rows = extractExactArray(value, 'packs');
+  const packs = rows.flatMap((candidate) => {
     const invokableOperations = candidate.invokable_operations;
     const reason = candidate.reason;
     if (
@@ -1290,8 +1291,8 @@ export function extractExactPackDescriptors(value: unknown): RuntimePackDescript
       || !validString(candidate.kind)
       || !validString(candidate.version)
       || !validString(candidate.display_name)
-      || !validString(candidate.artifact_digest)
-      || !validString(candidate.artifact_ref)
+      || !isSha256Digest(candidate.artifact_digest)
+      || candidate.artifact_ref !== `pack-v4://${candidate.pack_id}@${candidate.artifact_digest}`
       || typeof candidate.installed !== 'boolean'
       || typeof candidate.enabled !== 'boolean'
       || typeof candidate.approved !== 'boolean'
@@ -1327,6 +1328,13 @@ export function extractExactPackDescriptors(value: unknown): RuntimePackDescript
       ...(normalizedReason === undefined ? {} : {reason: normalizedReason}),
     }];
   });
+  if (
+    packs.length !== rows.length
+    || new Set(packs.map((pack) => pack.pack_id)).size !== packs.length
+  ) {
+    return [];
+  }
+  return packs;
 }
 
 /**

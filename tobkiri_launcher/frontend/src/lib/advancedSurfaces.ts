@@ -1,8 +1,10 @@
 import {
   extractAuthoritativeInvokableOperationKeys,
+  extractExactPackDescriptors,
   RUNTIME_CONTRACT_INVOKE_ACTION,
   type RuntimeSurfaceId,
   type RuntimeOperationDescriptor,
+  type RuntimePackDescriptor,
   type RuntimeSurfaceEnvelope,
 } from './runtimeSurface';
 
@@ -147,10 +149,18 @@ function operationHasExactInvocationBinding(
   envelope: RuntimeSurfaceEnvelope<unknown>,
   operation: RuntimeOperationDescriptor,
   authoritativeKeys: ReadonlySet<string>,
+  authoritativePacks: readonly RuntimePackDescriptor[],
 ): boolean {
+  const operationKey = authoritativeOperationKey(operation.contract_id, operation.operation_id);
+  const ownerPack = authoritativePacks.find((pack) => pack.pack_id === operation.owner_pack_id);
   return operation.action === RUNTIME_CONTRACT_INVOKE_ACTION
     && operation.invokable
-    && authoritativeKeys.has(authoritativeOperationKey(operation.contract_id, operation.operation_id))
+    && authoritativeKeys.has(operationKey)
+    && ownerPack !== undefined
+    && ownerPack.enabled
+    && ownerPack.approved
+    && ownerPack.artifact_digest === operation.artifact_digest
+    && ownerPack.invokable_operations.includes(operationKey)
     && operation.invocation_contribution_id !== null
     && operation.invocation_owner_pack_id === operation.owner_pack_id
     && operation.invocation_catalog_hash === envelope.catalog_revision
@@ -185,9 +195,11 @@ export function selectAdvancedContractInvokableOperations(
   }
   const authoritativeKeys = extractAuthoritativeInvokableOperationKeys(envelope.data);
   if (!authoritativeKeys) return [];
+  const authoritativePacks = extractExactPackDescriptors(envelope.data);
+  if (authoritativePacks.length === 0) return [];
   return operations.filter((operation) => (
     (!declaredOperationIds || declaredOperationIds.has(operation.operation_id))
-    && operationHasExactInvocationBinding(envelope, operation, authoritativeKeys)
+    && operationHasExactInvocationBinding(envelope, operation, authoritativeKeys, authoritativePacks)
   ));
 }
 

@@ -9,9 +9,41 @@ import {Button} from '@/src/components/ui/Button';
 import {Card, CardContent, CardHeader, CardTitle} from '@/src/components/ui/Card';
 import {useRuntimeSurface} from '@/src/hooks/useRuntimeSurface';
 import {LAUNCHER_ADVANCED_VIEWS} from '@/src/lib/advancedSurfaces';
-import {extractExactPackDescriptors} from '@/src/lib/runtimeSurface';
+import {extractExactPackDescriptors, type RuntimePackDescriptor} from '@/src/lib/runtimeSurface';
 import {panelRoutes} from '@/src/lib/routes';
-import {useAppStore} from '@/src/store';
+import {useAppStore, type Pack} from '@/src/store';
+
+/** Require the Pack control rows to stay bound to the accepted Profile snapshot. */
+export function exactPackControlCatalogBinding(
+  packs: readonly Pick<Pack, 'profileRevision' | 'planDigest'>[],
+  surface: {profile_revision: string; plan_digest: string} | null,
+): boolean {
+  return Boolean(
+    surface
+    && packs.length > 0
+    && packs.every((pack) => (
+      pack.profileRevision === surface.profile_revision
+      && pack.planDigest === surface.plan_digest
+    )),
+  );
+}
+
+/** Require an active Pack row to match the control catalog's exact artifact/state. */
+export function exactActivePackJoin(
+  pack: Pick<Pack, 'id' | 'version' | 'artifactDigest' | 'installed' | 'enabled' | 'approved' | 'required'>,
+  activeRow: Pick<RuntimePackDescriptor, 'pack_id' | 'version' | 'artifact_digest' | 'installed' | 'enabled' | 'approved' | 'required'> | undefined,
+): boolean {
+  return Boolean(
+    activeRow
+    && activeRow.pack_id === pack.id
+    && activeRow.version === pack.version
+    && activeRow.artifact_digest === pack.artifactDigest
+    && activeRow.installed === pack.installed
+    && activeRow.enabled === pack.enabled
+    && activeRow.approved === pack.approved
+    && activeRow.required === Boolean(pack.required),
+  );
+}
 
 export function NodeManager() {
   const surface = useRuntimeSurface<unknown>('packs');
@@ -36,14 +68,7 @@ export function NodeManager() {
   const activeById = new Map(activeRows.map((row) => [row.pack_id, row]));
   const controlCatalogRevisions = new Set(packs.map((pack) => pack.catalogRevision).filter(Boolean));
   const controlCatalogStable = packs.length > 0 && controlCatalogRevisions.size === 1;
-  const profilePlanBound = Boolean(
-    surface.data
-    && packs.length > 0
-    && packs.every((pack) => (
-      pack.profileRevision === surface.data?.profile_revision
-      && pack.planDigest === surface.data?.plan_digest
-    )),
-  );
+  const profilePlanBound = exactPackControlCatalogBinding(packs, surface.data);
   const runtimeReady = surface.status === 'ready' && !surface.stale;
   const canUseLifecycle = runtimeReady && controlCatalogStable && profilePlanBound;
 
@@ -68,17 +93,19 @@ export function NodeManager() {
           <CardContent className="grid gap-3">
             {packs.map((pack) => {
               const activeRow = activeById.get(pack.id);
-              const activeJoinRequired = pack.installed && pack.approved;
-              const activeJoinValid = !activeJoinRequired || Boolean(activeRow);
+              const activeJoinRequired = Boolean(activeRow) || (pack.installed && pack.approved);
+              const activeJoinValid = !activeJoinRequired || exactActivePackJoin(pack, activeRow);
               const canAct = canUseLifecycle && (!activeJoinRequired || activeJoinValid);
               const mutationResultUnknown = Object.values(packMutationUnknown).some((record) => record.metadata.pack_id === pack.id);
               const shownName = activeRow?.display_name ?? pack.name;
               const shownDigest = activeRow?.artifact_digest ?? pack.artifactDigest;
               const joinWarning = activeJoinRequired && !activeRow
                 ? 'Active Pack evidence is not present in this snapshot; runtime actions remain locked.'
-                : !activeRow
-                  ? 'Not in the active closure yet; install or approval can prepare it for Profile selection.'
-                  : null;
+                : activeJoinRequired && !activeJoinValid
+                  ? 'Active Pack evidence does not match this Pack artifact or lifecycle state; runtime actions remain locked.'
+                  : !activeRow
+                    ? 'Not in the active closure yet; install or approval can prepare it for Profile selection.'
+                    : null;
               return (
                 <article key={pack.id} className="grid gap-3 rounded-lg border border-border bg-bg-main p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
                   <div className="min-w-0">
