@@ -340,7 +340,16 @@ def test_relocated_generator_rejects_malformed_source_provenance(
         source_contract=contract,
     )
     assert result.returncode != 0
-    assert "source tree" in result.stderr.lower()
+    stderr = result.stderr.strip()
+    safe_error = stderr.splitlines()[-1]
+    assert "SourceProvenanceError:" in safe_error
+    assert "[provenance.source_tree]" in safe_error
+    assert "source_tree must be a full lowercase 40-hex identity" in safe_error
+    assert "not-a-source-tree" not in safe_error
+    assert os.fspath(tmp_path) not in safe_error
+    assert os.fspath(checkout) not in safe_error
+    assert "ValueError:" not in safe_error
+    assert "During handling of the above exception" not in stderr
 
 
 def test_relocated_generator_rejects_missing_tampered_or_external_cleanup(tmp_path: Path) -> None:
