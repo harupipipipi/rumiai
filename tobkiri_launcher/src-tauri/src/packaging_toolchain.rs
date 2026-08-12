@@ -9,7 +9,7 @@ use std::env;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
 
 use sha2::{Digest, Sha256};
 
@@ -148,15 +148,18 @@ pub struct VerifiedTool {
     #[cfg(unix)]
     execution_path: PathBuf,
     #[cfg(unix)]
+    execution_owner: Option<PathBuf>,
+    #[cfg(unix)]
     execution_identity: (u64, u64, u64, u64, u64),
     #[cfg(unix)]
     owns_execution_copy: bool,
-    #[cfg(not(unix))]
+    #[cfg(target_os = "macos")]
+    macos_cdhash: Vec<u8>,
     lock: File,
 }
 
 impl VerifiedTool {
-    pub fn command(&self) -> io::Result<Command> {
+    pub fn command(&self) -> io::Result<VerifiedCommand<'_>> {
         #[cfg(not(unix))]
         {
             let current = fs::symlink_metadata(&self.original_path)?;
@@ -179,12 +182,16 @@ impl VerifiedTool {
             {
                 return Err(invalid("sealed packaging tool copy was replaced"));
             }
-            return Ok(Command::new(&self.execution_path));
+            #[cfg(target_os = "macos")]
+            if macos_code_identity(&self.execution_path)? != self.macos_cdhash {
+                return Err(invalid("macOS packaging tool CDHash changed before spawn"));
+            }
+            return Ok(VerifiedCommand::new(self));
         }
         #[cfg(not(unix))]
         {
             let _ = &self.lock;
-            Ok(Command::new(&self.original_path))
+            Ok(VerifiedCommand::new(self))
         }
     }
 
@@ -204,7 +211,14 @@ impl Drop for VerifiedTool {
                         && !metadata.file_type().is_symlink()
                         && file_identity(&metadata) == self.execution_identity
                     {
+                        if let Some(owner) = &self.execution_owner {
+                            use std::os::unix::fs::PermissionsExt;
+                            let _ = fs::set_permissions(owner, fs::Permissions::from_mode(0o700));
+                        }
                         let _ = fs::remove_file(&self.execution_path);
+                        if let Some(owner) = &self.execution_owner {
+                            let _ = fs::remove_dir(owner);
+                        }
                     }
                 }
             }
@@ -212,31 +226,664 @@ impl Drop for VerifiedTool {
     }
 }
 
+/// Command builder whose Unix child replaces itself from the verified open
+/// executable descriptor.  No packaging tool pathname is reopened on Linux.
+pub struct VerifiedCommand<'a> {
+    tool: &'a VerifiedTool,
+    args: Vec<std::ffi::OsString>,
+    environment: std::collections::BTreeMap<std::ffi::OsString, std::ffi::OsString>,
+    clear_environment: bool,
+    current_dir: Option<PathBuf>,
+    #[cfg(unix)]
+    current_dir_handle: Option<File>,
+}
+
+pub enum VerifiedChild {
+    Standard(Child),
+    #[cfg(target_os = "macos")]
+    Darwin(DarwinChild),
+}
+
+impl VerifiedChild {
+    pub fn wait(&mut self) -> io::Result<ExitStatus> {
+        match self {
+            Self::Standard(child) => child.wait(),
+            #[cfg(target_os = "macos")]
+            Self::Darwin(child) => child.wait(),
+        }
+    }
+
+    pub fn kill(&mut self) -> io::Result<()> {
+        match self {
+            Self::Standard(child) => child.kill(),
+            #[cfg(target_os = "macos")]
+            Self::Darwin(child) => child.kill(),
+        }
+    }
+}
+
+impl<'a> VerifiedCommand<'a> {
+    fn new(tool: &'a VerifiedTool) -> Self {
+        Self {
+            tool,
+            args: Vec::new(),
+            environment: std::collections::BTreeMap::new(),
+            clear_environment: false,
+            current_dir: None,
+            #[cfg(unix)]
+            current_dir_handle: None,
+        }
+    }
+
+    pub fn arg<S: AsRef<std::ffi::OsStr>>(&mut self, arg: S) -> &mut Self {
+        self.args.push(arg.as_ref().to_owned());
+        self
+    }
+
+    pub fn args<I, S>(&mut self, args: I) -> &mut Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>,
+    {
+        self.args
+            .extend(args.into_iter().map(|arg| arg.as_ref().to_owned()));
+        self
+    }
+
+    pub fn env<K, V>(&mut self, key: K, value: V) -> &mut Self
+    where
+        K: AsRef<std::ffi::OsStr>,
+        V: AsRef<std::ffi::OsStr>,
+    {
+        assert!(
+            !key.as_ref().as_encoded_bytes().contains(&b'='),
+            "environment key must not contain '='"
+        );
+        self.environment
+            .insert(key.as_ref().to_owned(), value.as_ref().to_owned());
+        self
+    }
+
+    pub fn env_clear(&mut self) -> &mut Self {
+        self.clear_environment = true;
+        self.environment.clear();
+        self
+    }
+
+    pub fn current_dir<P: AsRef<Path>>(&mut self, path: P) -> io::Result<&mut Self> {
+        self.current_dir = Some(path.as_ref().to_owned());
+        #[cfg(unix)]
+        {
+            use std::ffi::CString;
+            use std::os::fd::FromRawFd;
+            use std::os::unix::ffi::OsStrExt;
+            let encoded = CString::new(path.as_ref().as_os_str().as_bytes())
+                .map_err(|_| invalid("verified command cwd contains NUL"))?;
+            let fd = unsafe {
+                libc::open(
+                    encoded.as_ptr(),
+                    libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+                )
+            };
+            if fd == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            self.current_dir_handle = Some(unsafe { File::from_raw_fd(fd) });
+        }
+        Ok(self)
+    }
+
+    #[cfg(unix)]
+    pub fn current_dir_handle(&mut self, directory: &File) -> io::Result<&mut Self> {
+        self.current_dir = None;
+        self.current_dir_handle = Some(directory.try_clone()?);
+        Ok(self)
+    }
+
+    fn environment(&self) -> std::collections::BTreeMap<std::ffi::OsString, std::ffi::OsString> {
+        let mut values = if self.clear_environment {
+            std::collections::BTreeMap::new()
+        } else {
+            std::env::vars_os().collect()
+        };
+        values.extend(self.environment.clone());
+        values
+    }
+
+    #[cfg(unix)]
+    fn command_with_stdio(&self, capture: bool) -> io::Result<Command> {
+        use std::ffi::CString;
+        use std::os::fd::AsRawFd;
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::process::CommandExt;
+
+        let executable = self.tool.execution_path.clone();
+        let executable_c = CString::new(executable.as_os_str().as_bytes())
+            .map_err(|_| invalid("sealed executable path contains NUL"))?;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let executable_fd = self.tool.lock.try_clone()?;
+        let current_dir_fd = self
+            .current_dir_handle
+            .as_ref()
+            .map(File::try_clone)
+            .transpose()?;
+        let argv = std::iter::once(self.tool.original_path.as_os_str())
+            .chain(self.args.iter().map(std::ffi::OsString::as_os_str))
+            .map(|value| {
+                CString::new(value.as_bytes()).map_err(|_| invalid("tool argument contains NUL"))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        let environment = self
+            .environment()
+            .into_iter()
+            .map(|(key, value)| {
+                let mut pair = key.as_bytes().to_vec();
+                pair.push(b'=');
+                pair.extend_from_slice(value.as_bytes());
+                CString::new(pair).map_err(|_| invalid("tool environment contains NUL"))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        let argv_ptrs = argv
+            .iter()
+            .map(|value| value.as_ptr())
+            .chain(std::iter::once(std::ptr::null()))
+            .map(|value| value as usize)
+            .collect::<Vec<_>>();
+        let environment_ptrs = environment
+            .iter()
+            .map(|value| value.as_ptr())
+            .chain(std::iter::once(std::ptr::null()))
+            .map(|value| value as usize)
+            .collect::<Vec<_>>();
+        let mut command = Command::new("/usr/bin/false");
+        command.env_clear();
+        if let Some(directory) = &self.current_dir {
+            command.current_dir(directory);
+        }
+        if capture {
+            command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        }
+        unsafe {
+            command.pre_exec(move || {
+                let _argv_storage = &argv;
+                let _environment_storage = &environment;
+                let argv_raw = argv_ptrs.as_ptr().cast::<*const libc::c_char>();
+                let environment_raw = environment_ptrs.as_ptr().cast::<*const libc::c_char>();
+                if let Some(directory) = &current_dir_fd {
+                    if libc::fchdir(directory.as_raw_fd()) == -1 {
+                        return Err(io::Error::last_os_error());
+                    }
+                }
+                #[cfg(any(target_os = "linux", target_os = "android"))]
+                {
+                    let fd = executable_fd.as_raw_fd();
+                    if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
+                        return Err(io::Error::last_os_error());
+                    }
+                    libc::fexecve(fd, argv_raw, environment_raw);
+                }
+                #[cfg(not(any(target_os = "linux", target_os = "android")))]
+                {
+                    libc::execve(executable_c.as_ptr(), argv_raw, environment_raw);
+                }
+                Err(io::Error::last_os_error())
+            });
+        }
+        Ok(command)
+    }
+
+    #[cfg(windows)]
+    fn command_with_stdio(&self, capture: bool) -> io::Result<Command> {
+        let mut command = Command::new(&self.tool.original_path);
+        if self.clear_environment {
+            command.env_clear();
+        }
+        command.args(&self.args).envs(&self.environment);
+        if let Some(directory) = &self.current_dir {
+            command.current_dir(directory);
+        }
+        if capture {
+            command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        }
+        Ok(command)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn spawn_darwin(&self, capture: bool) -> io::Result<DarwinChild> {
+        verify_protected_macos_path(&self.tool.original_path)?;
+        if macos_code_identity(&self.tool.original_path)? != self.tool.macos_cdhash {
+            return Err(invalid(
+                "macOS packaging tool identity changed before spawn",
+            ));
+        }
+        if self.current_dir.is_some() && self.current_dir_handle.is_none() {
+            return Err(invalid("Darwin verified command cwd could not be anchored"));
+        }
+        let child = spawn_suspended_darwin(
+            &self.tool.original_path,
+            &self.args,
+            &self.environment(),
+            self.current_dir_handle.as_ref(),
+            capture,
+        )?;
+        let pid = child.pid;
+        let result = (|| {
+            if macos_guest_code_identity(pid)? != self.tool.macos_cdhash {
+                return Err(invalid("suspended macOS child identity mismatch"));
+            }
+            if unsafe { libc::kill(pid, libc::SIGCONT) } == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+            let mut child = child;
+            let _ = child.wait();
+            return Err(error);
+        }
+        Ok(child)
+    }
+
+    pub fn spawn(&mut self) -> io::Result<VerifiedChild> {
+        #[cfg(target_os = "macos")]
+        {
+            return self.spawn_darwin(false).map(VerifiedChild::Darwin);
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            self.command_with_stdio(false)?
+                .spawn()
+                .map(VerifiedChild::Standard)
+        }
+    }
+
+    pub fn status(&mut self) -> io::Result<ExitStatus> {
+        self.spawn()?.wait()
+    }
+
+    pub fn output(&mut self) -> io::Result<Output> {
+        #[cfg(target_os = "macos")]
+        {
+            return self.spawn_darwin(true)?.wait_with_output();
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let mut command = self.command_with_stdio(true)?;
+            command.stdin(Stdio::null());
+            command.spawn()?.wait_with_output()
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn spawn_suspended_darwin(
+    executable: &Path,
+    arguments: &[std::ffi::OsString],
+    environment: &std::collections::BTreeMap<std::ffi::OsString, std::ffi::OsString>,
+    directory: Option<&File>,
+    capture: bool,
+) -> io::Result<DarwinChild> {
+    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+
+    unsafe extern "C" {
+        fn posix_spawn(
+            pid: *mut i32,
+            path: *const libc::c_char,
+            actions: *const *mut std::ffi::c_void,
+            attributes: *const *mut std::ffi::c_void,
+            argv: *const *mut libc::c_char,
+            envp: *const *mut libc::c_char,
+        ) -> i32;
+        fn posix_spawnattr_init(attributes: *mut *mut std::ffi::c_void) -> i32;
+        fn posix_spawnattr_setflags(attributes: *mut *mut std::ffi::c_void, flags: i16) -> i32;
+        fn posix_spawnattr_destroy(attributes: *mut *mut std::ffi::c_void) -> i32;
+        fn posix_spawn_file_actions_init(actions: *mut *mut std::ffi::c_void) -> i32;
+        fn posix_spawn_file_actions_addfchdir_np(
+            actions: *mut *mut std::ffi::c_void,
+            fd: i32,
+        ) -> i32;
+        fn posix_spawn_file_actions_adddup2(
+            actions: *mut *mut std::ffi::c_void,
+            fd: i32,
+            newfd: i32,
+        ) -> i32;
+        fn posix_spawn_file_actions_addclose(actions: *mut *mut std::ffi::c_void, fd: i32) -> i32;
+        fn posix_spawn_file_actions_destroy(actions: *mut *mut std::ffi::c_void) -> i32;
+    }
+    fn pipe() -> io::Result<(File, File)> {
+        let mut fds = [-1; 2];
+        if unsafe { libc::pipe(fds.as_mut_ptr()) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(unsafe { (File::from_raw_fd(fds[0]), File::from_raw_fd(fds[1])) })
+    }
+    let path = CString::new(executable.as_os_str().as_bytes())
+        .map_err(|_| invalid("Darwin executable path contains NUL"))?;
+    let argv = std::iter::once(executable.as_os_str())
+        .chain(arguments.iter().map(std::ffi::OsString::as_os_str))
+        .map(|value| {
+            CString::new(value.as_bytes()).map_err(|_| invalid("Darwin argument contains NUL"))
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    let env = environment
+        .iter()
+        .map(|(key, value)| {
+            let mut pair = key.as_bytes().to_vec();
+            pair.push(b'=');
+            pair.extend_from_slice(value.as_bytes());
+            CString::new(pair).map_err(|_| invalid("Darwin environment contains NUL"))
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    let mut argv_ptrs = argv
+        .iter()
+        .map(|v| v.as_ptr() as *mut _)
+        .chain(std::iter::once(std::ptr::null_mut()))
+        .collect::<Vec<_>>();
+    let mut env_ptrs = env
+        .iter()
+        .map(|v| v.as_ptr() as *mut _)
+        .chain(std::iter::once(std::ptr::null_mut()))
+        .collect::<Vec<_>>();
+    let (stdout_read, stdout_write) = if capture {
+        let (r, w) = pipe()?;
+        (Some(r), Some(w))
+    } else {
+        (None, None)
+    };
+    let (stderr_read, stderr_write) = if capture {
+        let (r, w) = pipe()?;
+        (Some(r), Some(w))
+    } else {
+        (None, None)
+    };
+    let null_input = if capture {
+        Some(File::open("/dev/null")?)
+    } else {
+        None
+    };
+    let mut attributes = std::ptr::null_mut();
+    let mut actions = std::ptr::null_mut();
+    let mut pid = 0_i32;
+    let result = unsafe {
+        let mut code = posix_spawnattr_init(&mut attributes);
+        if code == 0 {
+            code =
+                posix_spawnattr_setflags(&mut attributes, libc::POSIX_SPAWN_START_SUSPENDED as i16);
+        }
+        if code == 0 {
+            code = posix_spawn_file_actions_init(&mut actions);
+        }
+        if code == 0 {
+            if let Some(directory) = directory {
+                code = posix_spawn_file_actions_addfchdir_np(&mut actions, directory.as_raw_fd());
+            }
+        }
+        if code == 0 {
+            if let Some(file) = &null_input {
+                code = posix_spawn_file_actions_adddup2(
+                    &mut actions,
+                    file.as_raw_fd(),
+                    libc::STDIN_FILENO,
+                );
+            }
+        }
+        if code == 0 {
+            if let Some(file) = &stdout_write {
+                code = posix_spawn_file_actions_adddup2(
+                    &mut actions,
+                    file.as_raw_fd(),
+                    libc::STDOUT_FILENO,
+                );
+            }
+        }
+        if code == 0 {
+            if let Some(file) = &stderr_write {
+                code = posix_spawn_file_actions_adddup2(
+                    &mut actions,
+                    file.as_raw_fd(),
+                    libc::STDERR_FILENO,
+                );
+            }
+        }
+        if code == 0 {
+            if let Some(file) = &stdout_read {
+                code = posix_spawn_file_actions_addclose(&mut actions, file.as_raw_fd());
+            }
+        }
+        if code == 0 {
+            if let Some(file) = &stderr_read {
+                code = posix_spawn_file_actions_addclose(&mut actions, file.as_raw_fd());
+            }
+        }
+        if code == 0 {
+            code = posix_spawn(
+                &mut pid,
+                path.as_ptr(),
+                &actions,
+                &attributes,
+                argv_ptrs.as_mut_ptr(),
+                env_ptrs.as_mut_ptr(),
+            );
+        }
+        if !actions.is_null() {
+            posix_spawn_file_actions_destroy(&mut actions);
+        }
+        if !attributes.is_null() {
+            posix_spawnattr_destroy(&mut attributes);
+        }
+        code
+    };
+    drop(stdout_write);
+    drop(stderr_write);
+    if result != 0 {
+        return Err(io::Error::from_raw_os_error(result));
+    }
+    Ok(DarwinChild {
+        pid,
+        stdout: stdout_read,
+        stderr: stderr_read,
+        status: None,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_guest_code_identity(pid: i32) -> io::Result<Vec<u8>> {
+    type CFTypeRef = *const std::ffi::c_void;
+    type CFDictionaryRef = *const std::ffi::c_void;
+    type SecCodeRef = *const std::ffi::c_void;
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn CFNumberCreate(
+            allocator: CFTypeRef,
+            kind: i32,
+            value: *const std::ffi::c_void,
+        ) -> CFTypeRef;
+        fn CFDictionaryCreate(
+            allocator: CFTypeRef,
+            keys: *const CFTypeRef,
+            values: *const CFTypeRef,
+            count: isize,
+            key_callbacks: *const std::ffi::c_void,
+            value_callbacks: *const std::ffi::c_void,
+        ) -> CFDictionaryRef;
+        fn CFDictionaryGetValue(dictionary: CFDictionaryRef, key: CFTypeRef) -> CFTypeRef;
+        fn CFDataGetLength(data: CFTypeRef) -> isize;
+        fn CFDataGetBytePtr(data: CFTypeRef) -> *const u8;
+        fn CFRelease(value: CFTypeRef);
+    }
+    #[link(name = "Security", kind = "framework")]
+    unsafe extern "C" {
+        static kSecGuestAttributePid: CFTypeRef;
+        static kSecCodeInfoUnique: CFTypeRef;
+        fn SecCodeCopyGuestWithAttributes(
+            host: SecCodeRef,
+            attributes: CFDictionaryRef,
+            flags: u32,
+            guest: *mut SecCodeRef,
+        ) -> i32;
+        fn SecCodeCopySigningInformation(
+            code: SecCodeRef,
+            flags: u32,
+            information: *mut CFDictionaryRef,
+        ) -> i32;
+    }
+    let number = unsafe {
+        CFNumberCreate(
+            std::ptr::null(),
+            9,
+            (&pid as *const i32).cast::<std::ffi::c_void>(),
+        )
+    };
+    if number.is_null() {
+        return Err(invalid("could not encode suspended macOS child PID"));
+    }
+    let attributes = unsafe {
+        CFDictionaryCreate(
+            std::ptr::null(),
+            &kSecGuestAttributePid,
+            &number,
+            1,
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    };
+    if attributes.is_null() {
+        unsafe { CFRelease(number) };
+        return Err(invalid("could not create suspended macOS child attributes"));
+    }
+    let mut guest = std::ptr::null();
+    let copied =
+        unsafe { SecCodeCopyGuestWithAttributes(std::ptr::null(), attributes, 0, &mut guest) };
+    unsafe { CFRelease(attributes) };
+    unsafe { CFRelease(number) };
+    if copied != 0 || guest.is_null() {
+        return Err(invalid(
+            "could not resolve suspended macOS child code object",
+        ));
+    }
+    let mut information = std::ptr::null();
+    let signed = unsafe { SecCodeCopySigningInformation(guest, 1 << 1, &mut information) };
+    unsafe { CFRelease(guest) };
+    if signed != 0 || information.is_null() {
+        return Err(invalid("could not read suspended macOS child signature"));
+    }
+    let unique = unsafe { CFDictionaryGetValue(information, kSecCodeInfoUnique) };
+    let length = if unique.is_null() {
+        0
+    } else {
+        unsafe { CFDataGetLength(unique) }
+    };
+    if length <= 0 || length > 64 {
+        unsafe { CFRelease(information) };
+        return Err(invalid("suspended macOS child CDHash is unavailable"));
+    }
+    let digest =
+        unsafe { std::slice::from_raw_parts(CFDataGetBytePtr(unique), length as usize) }.to_vec();
+    unsafe { CFRelease(information) };
+    Ok(digest)
+}
+
+#[cfg(target_os = "macos")]
+pub struct DarwinChild {
+    pid: i32,
+    stdout: Option<File>,
+    stderr: Option<File>,
+    status: Option<ExitStatus>,
+}
+
+#[cfg(target_os = "macos")]
+impl DarwinChild {
+    fn wait(&mut self) -> io::Result<ExitStatus> {
+        if let Some(status) = self.status {
+            return Ok(status);
+        }
+        let mut raw = 0;
+        if unsafe { libc::waitpid(self.pid, &mut raw, 0) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        use std::os::unix::process::ExitStatusExt;
+        let status = ExitStatus::from_raw(raw);
+        self.status = Some(status);
+        Ok(status)
+    }
+
+    fn kill(&mut self) -> io::Result<()> {
+        if unsafe { libc::kill(self.pid, libc::SIGKILL) } == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn wait_with_output(mut self) -> io::Result<Output> {
+        let stdout = self.stdout.take().map(|mut file| {
+            std::thread::spawn(move || {
+                let mut bytes = Vec::new();
+                file.read_to_end(&mut bytes).map(|_| bytes)
+            })
+        });
+        let stderr = self.stderr.take().map(|mut file| {
+            std::thread::spawn(move || {
+                let mut bytes = Vec::new();
+                file.read_to_end(&mut bytes).map(|_| bytes)
+            })
+        });
+        let status = self.wait()?;
+        let stdout = stdout
+            .map(|thread| {
+                thread
+                    .join()
+                    .map_err(|_| invalid("stdout reader panicked"))?
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let stderr = stderr
+            .map(|thread| {
+                thread
+                    .join()
+                    .map_err(|_| invalid("stderr reader panicked"))?
+            })
+            .transpose()?
+            .unwrap_or_default();
+        Ok(Output {
+            status,
+            stdout,
+            stderr,
+        })
+    }
+}
+
 #[cfg(unix)]
 fn sealed_executable_copy(
-    mut source: File,
-    original: &Path,
+    source: &mut File,
+    _original: &Path,
     expected: &str,
-) -> io::Result<(PathBuf, fs::Metadata, bool)> {
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
+) -> io::Result<(PathBuf, Option<PathBuf>, fs::Metadata, bool)> {
     use std::os::unix::fs::PermissionsExt;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    let parent = original.parent().unwrap();
+    let base = env::temp_dir().canonicalize()?;
     for attempt in 0..128_u32 {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(io::Error::other)?
             .as_nanos();
-        let name = original
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| invalid("packaging tool has no UTF-8 file name"))?;
-        let target = parent.join(format!(
-            ".{name}.tobkiri-verified-{}-{nonce}-{attempt}",
+        let owner = base.join(format!(
+            "tobkiri-verified-tool-{}-{nonce}-{attempt}",
             std::process::id()
         ));
+        match fs::create_dir(&owner) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+        fs::set_permissions(&owner, fs::Permissions::from_mode(0o700))?;
+        let target = owner.join("executable");
         match fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -244,7 +891,7 @@ fn sealed_executable_copy(
         {
             Ok(mut output) => {
                 source.seek(SeekFrom::Start(0))?;
-                io::copy(&mut source, &mut output)?;
+                io::copy(source, &mut output)?;
                 output.sync_all()?;
                 fs::set_permissions(&target, fs::Permissions::from_mode(0o500))?;
                 let metadata = fs::symlink_metadata(&target)?;
@@ -253,40 +900,161 @@ fn sealed_executable_copy(
                     let _ = fs::remove_file(&target);
                     return Err(invalid("sealed packaging tool copy digest mismatch"));
                 }
-                return Ok((target, metadata, true));
+                fs::set_permissions(&owner, fs::Permissions::from_mode(0o500))?;
+                return Ok((target, Some(owner), metadata, true));
             }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
-                let path = CString::new(parent.as_os_str().as_bytes())
-                    .map_err(|_| invalid("packaging tool parent contains NUL"))?;
-                if unsafe { libc::access(path.as_ptr(), libc::W_OK) } == 0 {
-                    return Err(invalid(
-                        "writable packaging tool parent refused sealed copy",
-                    ));
-                }
-                let executable = CString::new(original.as_os_str().as_bytes())
-                    .map_err(|_| invalid("packaging tool path contains NUL"))?;
-                if unsafe { libc::access(executable.as_ptr(), libc::W_OK) } == 0 {
-                    return Err(invalid(
-                        "writable packaging tool cannot be sealed in its protected parent",
-                    ));
-                }
-                let metadata = fs::symlink_metadata(original)?;
-                return Ok((original.to_path_buf(), metadata, false));
+            Err(error) => {
+                let _ = fs::remove_dir(&owner);
+                return Err(error);
             }
-            Err(error) => return Err(error),
         }
     }
     Err(invalid("could not create sealed packaging tool copy"))
 }
 
+#[cfg(target_os = "macos")]
+fn macos_code_identity(path: &Path) -> io::Result<Vec<u8>> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::ptr;
+
+    type CFTypeRef = *const std::ffi::c_void;
+    type CFURLRef = *const std::ffi::c_void;
+    type CFDictionaryRef = *const std::ffi::c_void;
+    type SecStaticCodeRef = *const std::ffi::c_void;
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn CFURLCreateFromFileSystemRepresentation(
+            allocator: CFTypeRef,
+            bytes: *const u8,
+            length: isize,
+            is_directory: u8,
+        ) -> CFURLRef;
+        fn CFDictionaryGetValue(dictionary: CFDictionaryRef, key: CFTypeRef) -> CFTypeRef;
+        fn CFNumberGetValue(number: CFTypeRef, kind: i32, value: *mut std::ffi::c_void) -> u8;
+        fn CFDataGetLength(data: CFTypeRef) -> isize;
+        fn CFDataGetBytePtr(data: CFTypeRef) -> *const u8;
+        fn CFRelease(value: CFTypeRef);
+    }
+    #[link(name = "Security", kind = "framework")]
+    unsafe extern "C" {
+        static kSecCodeInfoFlags: CFTypeRef;
+        static kSecCodeInfoUnique: CFTypeRef;
+        fn SecStaticCodeCreateWithPath(
+            path: CFURLRef,
+            flags: u32,
+            code: *mut SecStaticCodeRef,
+        ) -> i32;
+        fn SecStaticCodeCheckValidity(
+            code: SecStaticCodeRef,
+            flags: u32,
+            requirement: CFTypeRef,
+        ) -> i32;
+        fn SecCodeCopySigningInformation(
+            code: SecStaticCodeRef,
+            flags: u32,
+            information: *mut CFDictionaryRef,
+        ) -> i32;
+    }
+    let bytes = path.as_os_str().as_bytes();
+    let url = unsafe {
+        CFURLCreateFromFileSystemRepresentation(
+            ptr::null(),
+            bytes.as_ptr(),
+            bytes.len() as isize,
+            0,
+        )
+    };
+    if url.is_null() {
+        return Err(invalid("could not create macOS packaging tool URL"));
+    }
+    let mut code = ptr::null();
+    let create = unsafe { SecStaticCodeCreateWithPath(url, 0, &mut code) };
+    unsafe { CFRelease(url) };
+    if create != 0 || code.is_null() {
+        return Err(invalid("macOS packaging tool is unsigned"));
+    }
+    const STRICT_VALIDITY: u32 = (1 << 29) | (1 << 3) | (1 << 1) | 1;
+    let validity = unsafe { SecStaticCodeCheckValidity(code, STRICT_VALIDITY, ptr::null()) };
+    let mut information = ptr::null();
+    let copied = unsafe { SecCodeCopySigningInformation(code, 1 << 1, &mut information) };
+    unsafe { CFRelease(code) };
+    if validity != 0 || copied != 0 || information.is_null() {
+        return Err(invalid("macOS packaging tool signature is invalid"));
+    }
+    let flags_value = unsafe { CFDictionaryGetValue(information, kSecCodeInfoFlags) };
+    let mut flags = 0_i64;
+    let flags_ok = !flags_value.is_null()
+        && unsafe {
+            CFNumberGetValue(
+                flags_value,
+                4,
+                (&mut flags as *mut i64).cast::<std::ffi::c_void>(),
+            )
+        } != 0;
+    const CS_ADHOC: i64 = 0x2;
+    if !flags_ok || flags & CS_ADHOC != 0 {
+        unsafe { CFRelease(information) };
+        return Err(invalid(
+            "ad-hoc macOS packaging tool signature is forbidden",
+        ));
+    }
+    let unique = unsafe { CFDictionaryGetValue(information, kSecCodeInfoUnique) };
+    let length = if unique.is_null() {
+        0
+    } else {
+        unsafe { CFDataGetLength(unique) }
+    };
+    if length <= 0 || length > 64 {
+        unsafe { CFRelease(information) };
+        return Err(invalid("macOS packaging tool CDHash is unavailable"));
+    }
+    let digest =
+        unsafe { std::slice::from_raw_parts(CFDataGetBytePtr(unique), length as usize) }.to_vec();
+    unsafe { CFRelease(information) };
+    Ok(digest)
+}
+
+#[cfg(target_os = "macos")]
+fn verify_protected_macos_path(path: &Path) -> io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::MetadataExt;
+
+    let mut current = Some(path);
+    while let Some(component) = current {
+        let metadata = fs::symlink_metadata(component)?;
+        if metadata.file_type().is_symlink() {
+            return Err(invalid("macOS packaging tool path contains a symlink"));
+        }
+        let mode = metadata.mode();
+        if metadata.uid() == unsafe { libc::geteuid() } && mode & 0o200 != 0 {
+            return Err(invalid(format!(
+                "macOS packaging tool path is writable by the current user: {}",
+                component.display()
+            )));
+        }
+        let encoded = std::ffi::CString::new(component.as_os_str().as_bytes())
+            .map_err(|_| invalid("macOS packaging tool path contains NUL"))?;
+        if unsafe { libc::access(encoded.as_ptr(), libc::W_OK) } == 0 {
+            return Err(invalid(format!(
+                "macOS packaging tool path is replaceable by the current user: {}",
+                component.display()
+            )));
+        }
+        current = component.parent().filter(|parent| *parent != component);
+    }
+    Ok(())
+}
+
 #[cfg(windows)]
 fn locked_windows_executable(path: &Path, expected: &str) -> io::Result<File> {
+    use std::mem::{size_of, MaybeUninit};
     use std::os::windows::ffi::OsStrExt;
     use std::os::windows::io::FromRawHandle;
     use windows_sys::Win32::Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
+        CreateFileW, FileAttributeTagInfo, FileStandardInfo, GetFileInformationByHandleEx,
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT,
+        FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, FILE_STANDARD_INFO,
         OPEN_EXISTING,
     };
 
@@ -310,6 +1078,39 @@ fn locked_windows_executable(path: &Path, expected: &str) -> io::Result<File> {
         return Err(io::Error::last_os_error());
     }
     let mut file = unsafe { File::from_raw_handle(handle) };
+    let mut attributes = MaybeUninit::<FILE_ATTRIBUTE_TAG_INFO>::zeroed();
+    if unsafe {
+        GetFileInformationByHandleEx(
+            handle,
+            FileAttributeTagInfo,
+            attributes.as_mut_ptr().cast(),
+            size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    let attributes = unsafe { attributes.assume_init() };
+    if attributes.FileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY) != 0 {
+        return Err(invalid(
+            "Windows packaging tool is a reparse point or directory",
+        ));
+    }
+    let mut standard = MaybeUninit::<FILE_STANDARD_INFO>::zeroed();
+    if unsafe {
+        GetFileInformationByHandleEx(
+            handle,
+            FileStandardInfo,
+            standard.as_mut_ptr().cast(),
+            size_of::<FILE_STANDARD_INFO>() as u32,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    if unsafe { standard.assume_init() }.NumberOfLinks != 1 {
+        return Err(invalid("Windows packaging tool is hardlinked"));
+    }
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 1024 * 1024];
     loop {
@@ -383,15 +1184,22 @@ fn verify_tool_binding_guard(kind: &str, path: &Path, expected: &str) -> io::Res
             "{digest_key} must be lowercase raw SHA-256"
         )));
     }
-    let (file, metadata, actual) = open_hashed_regular_executable(path)?;
+    #[allow(unused_mut)]
+    let (mut file, metadata, actual) = open_hashed_regular_executable(path)?;
     if actual != expected {
         return Err(invalid(format!(
             "{kind} executable digest mismatch: expected {expected}, got {actual}"
         )));
     }
-    #[cfg(unix)]
-    let (execution_path, execution_metadata, owns_execution_copy) =
-        sealed_executable_copy(file, path, expected)?;
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let (execution_path, execution_owner, execution_metadata, owns_execution_copy) =
+        sealed_executable_copy(&mut file, path, expected)?;
+    #[cfg(target_os = "macos")]
+    let (execution_path, execution_owner, execution_metadata, owns_execution_copy, macos_cdhash) = {
+        verify_protected_macos_path(path)?;
+        let cdhash = macos_code_identity(path)?;
+        (path.to_path_buf(), None, metadata.clone(), false, cdhash)
+    };
     #[cfg(windows)]
     let locked_file = {
         drop(file);
@@ -406,11 +1214,27 @@ fn verify_tool_binding_guard(kind: &str, path: &Path, expected: &str) -> io::Res
         #[cfg(unix)]
         execution_path,
         #[cfg(unix)]
+        execution_owner,
+        #[cfg(unix)]
         execution_identity: file_identity(&execution_metadata),
         #[cfg(unix)]
         owns_execution_copy,
-        #[cfg(not(unix))]
-        lock: locked_file,
+        #[cfg(target_os = "macos")]
+        macos_cdhash,
+        lock: {
+            #[cfg(all(unix, not(target_os = "macos")))]
+            {
+                File::open(&execution_path)?
+            }
+            #[cfg(target_os = "macos")]
+            {
+                file
+            }
+            #[cfg(not(unix))]
+            {
+                locked_file
+            }
+        },
     })
 }
 
@@ -523,7 +1347,7 @@ mod tests {
         assert!(tampered.to_string().contains("digest mismatch"));
     }
 
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "macos")))]
     #[test]
     fn replaced_python_and_git_paths_never_execute_replacement() {
         use std::os::unix::fs::PermissionsExt;
@@ -557,6 +1381,35 @@ mod tests {
                 "replacement {kind} must never execute"
             );
         }
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn in_place_overwrite_after_binding_never_executes_modified_original() {
+        use std::os::unix::fs::PermissionsExt;
+        let tool = TestFile::new(
+            "in-place",
+            b"#!/bin/sh\nprintf trusted > \"$TOBKIRI_TRUSTED_MARKER\"\n",
+        );
+        let trusted = tool.path.with_file_name("in-place-trusted");
+        let evil = tool.path.with_file_name("in-place-evil");
+        let guard = verify_tool_binding_guard("python", &tool.path, &tool.digest()).unwrap();
+        fs::set_permissions(&tool.path, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(
+            &tool.path,
+            b"#!/bin/sh\nprintf evil > \"$TOBKIRI_EVIL_MARKER\"\n",
+        )
+        .unwrap();
+        let status = guard
+            .command()
+            .unwrap()
+            .env("TOBKIRI_TRUSTED_MARKER", &trusted)
+            .env("TOBKIRI_EVIL_MARKER", &evil)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert!(trusted.exists());
+        assert!(!evil.exists());
     }
 
     #[test]

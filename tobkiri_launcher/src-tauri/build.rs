@@ -57,7 +57,6 @@ const ISOLATED_ENVIRONMENT_KEYS: &[&str] = &[
     "USERPROFILE",
     "WINDIR",
 ];
-const SOURCE_PROVENANCE_ENV: &str = "TOBKIRI_PACKAGING_SOURCE_PROVENANCE_FILE";
 
 #[cfg(not(test))]
 fn main() {
@@ -104,26 +103,17 @@ fn main() {
 #[cfg(test)]
 fn main() {}
 
-fn isolated_python_module_command(
-    python: &packaging_toolchain::VerifiedTool,
-    source_root: &Path,
+fn isolated_python_module_command<'a>(
+    python: &'a packaging_toolchain::VerifiedTool,
+    source: &packaged_source::VerifiedSourceSnapshot,
     module: &str,
-) -> io::Result<Command> {
-    if source_root.is_symlink() || !source_root.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!(
-                "isolated Python source root is unavailable: {}",
-                source_root.display()
-            ),
-        ));
-    }
-    let canonical_root = source_root.canonicalize()?;
+) -> io::Result<packaging_toolchain::VerifiedCommand<'a>> {
+    source.verify_unchanged()?;
     let mut command = python.command()?;
     command
         .env_clear()
         .args(["-I", "-B", "-c", ISOLATED_MODULE_CODE])
-        .arg(canonical_root)
+        .arg(".")
         .arg(module)
         .env(
             "GIT_CONFIG_GLOBAL",
@@ -135,14 +125,17 @@ fn isolated_python_module_command(
             command.env(key, value);
         }
     }
+    source.bind_command_cwd(&mut command)?;
     Ok(command)
 }
 
-fn bind_source_provenance_command(command: &mut Command, path: &Path) {
+fn bind_source_provenance_command(
+    command: &mut packaging_toolchain::VerifiedCommand<'_>,
+    _path: &Path,
+) {
     command
         .arg("--source-provenance-file")
-        .arg(path)
-        .env(SOURCE_PROVENANCE_ENV, path);
+        .arg("packaging-source-provenance.v1.json");
 }
 
 fn warn_legacy_defaultspack_app_bundle() {
@@ -951,7 +944,7 @@ fn git_value(repo_root: &Path, args: &[&str], label: &str) -> io::Result<String>
     let output = git
         .command()?
         .args(args)
-        .current_dir(repo_root)
+        .current_dir(repo_root)?
         .output()
         .map_err(|error| invalid_release(format!("failed to read {label}: {error}")))?;
     if !output.status.success() {
@@ -1896,21 +1889,21 @@ fn stage_presentation_release_from_snapshot(
                 "trusted Rust packaged Profile source-closure verification failed: {error}"
             ))
         })?;
-        let source_provenance = serde_json::to_vec(&serde_json::json!({
-            "schema": "io.tobkiri.packaging-source-provenance.v1",
-            "source_commit": &source_revision,
-            "source_tree": &source_tree,
-            "source_clean": true,
-            "source_manifest_sha256": raw_byte_digest(&trusted_source_manifest),
-        }))
-        .map_err(io::Error::other)?;
-        let provenance_path = verified_source.bind_provenance(&source_provenance)?;
-        let python = packaging_toolchain::verified_tool("python")?;
-        verified_source.verify_unchanged()?;
         let execution = (|| -> io::Result<_> {
+            let source_provenance = serde_json::to_vec(&serde_json::json!({
+                "schema": "io.tobkiri.packaging-source-provenance.v1",
+                "source_commit": &source_revision,
+                "source_tree": &source_tree,
+                "source_clean": true,
+                "source_manifest_sha256": raw_byte_digest(&trusted_source_manifest),
+            }))
+            .map_err(io::Error::other)?;
+            let provenance_path = verified_source.bind_provenance(&source_provenance)?;
+            let python = packaging_toolchain::verified_tool("python")?;
+            verified_source.verify_unchanged()?;
             let mut command = isolated_python_module_command(
                 &python,
-                verified_source.root(),
+                &verified_source,
                 "scripts.generate_packaged_defaultspack_v4_bundle",
             )?;
             command
@@ -1929,19 +1922,21 @@ fn stage_presentation_release_from_snapshot(
                 .arg("--architecture")
                 .arg(&verified.architecture)
                 .arg("--bundle-identity")
-                .arg(&verified.bundle_identity)
-                .arg("--source-commit")
-                .arg(&source_revision)
-                .current_dir(verified_source.root());
+                .arg(&verified.bundle_identity);
             bind_source_provenance_command(&mut command, &provenance_path);
             let mut child = command.spawn().map_err(|error| {
                 invalid_release(format!("failed to run packaged Profile generator: {error}"))
             })?;
-            child.wait().map_err(|error| {
-                invalid_release(format!(
-                    "failed waiting for packaged Profile generator: {error}"
-                ))
-            })
+            match child.wait() {
+                Ok(status) => Ok(status),
+                Err(error) => {
+                    let kill = child.kill();
+                    let reap = child.wait();
+                    Err(invalid_release(format!(
+                        "failed waiting for packaged Profile generator: {error}; kill={kill:?}; reap={reap:?}"
+                    )))
+                }
+            }
         })()
         .and_then(|status| {
             verified_source.verify_unchanged()?;
@@ -1999,7 +1994,7 @@ fn current_source_revision(repository_root: &Path) -> io::Result<String> {
     let revision = git
         .command()?
         .args(["rev-parse", "--verify", "HEAD^{commit}"])
-        .current_dir(repository_root)
+        .current_dir(repository_root)?
         .output()
         .map_err(|error| invalid_release(format!("failed to read source revision: {error}")))?;
     if !revision.status.success() {
@@ -2021,7 +2016,7 @@ fn current_source_revision(repository_root: &Path) -> io::Result<String> {
     let dirty = git
         .command()?
         .args(["status", "--porcelain=v1", "--untracked-files=all"])
-        .current_dir(repository_root)
+        .current_dir(repository_root)?
         .output()
         .map_err(|error| invalid_release(format!("failed to inspect source status: {error}")))?;
     if !dirty.status.success() {
@@ -2043,7 +2038,7 @@ fn current_source_tree(repository_root: &Path, revision: &str) -> io::Result<Str
     let output = git
         .command()?
         .args(["rev-parse", "--verify", &object])
-        .current_dir(repository_root)
+        .current_dir(repository_root)?
         .output()
         .map_err(|error| invalid_release(format!("failed to read source tree: {error}")))?;
     if !output.status.success() {
@@ -2072,7 +2067,7 @@ fn committed_source_manifest(repository_root: &Path, revision: &str) -> io::Resu
     let output = git
         .command()?
         .args(["show", &object])
-        .current_dir(repository_root)
+        .current_dir(repository_root)?
         .output()
         .map_err(|error| {
             invalid_release(format!("failed to read committed source manifest: {error}"))
@@ -2618,7 +2613,7 @@ fn copy_tracked_runtime_tree(repo_root: &Path, staged_root: &Path) -> io::Result
     let output = match git
         .command()?
         .args(["ls-files", "-z", "--", APP_SOURCE_DIR])
-        .current_dir(repo_root)
+        .current_dir(repo_root)?
         .output()
     {
         Ok(output) => output,
@@ -3903,6 +3898,7 @@ mod tests {
             .arg(&package_test)
             .arg(&package_root)
             .current_dir(&repository_root)
+            .expect("repository cwd should be anchorable")
             .status()
             .expect("official packager fixture should run");
         assert!(status.success(), "official packager fixture should succeed");

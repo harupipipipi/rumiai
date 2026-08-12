@@ -50,20 +50,43 @@ pub struct VerifiedSourceSnapshot {
     owner_identity: (u64, u64, u64, i64, i64),
     root_identity: (u64, u64, u64, i64, i64),
     root_handle: File,
+    #[cfg(unix)]
+    directory_identities: BTreeMap<String, (u64, u64, u64, i64, i64)>,
+    #[cfg(unix)]
+    parent_handle: File,
+    #[cfg(unix)]
+    owner_handle: File,
+    #[cfg(unix)]
+    owner_name: std::ffi::OsString,
     trusted_manifest: Vec<u8>,
     provenance: Option<Vec<u8>>,
-    cleaned: bool,
+    cleanup_attempted: bool,
 }
 
 impl VerifiedSourceSnapshot {
     pub fn root(&self) -> &Path {
         &self.root
     }
+
+    pub fn bind_command_cwd(
+        &self,
+        command: &mut super::packaging_toolchain::VerifiedCommand<'_>,
+    ) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            command.current_dir_handle(&self.root_handle)?;
+        }
+        #[cfg(not(unix))]
+        {
+            command.current_dir(&self.root);
+        }
+        Ok(())
+    }
 }
 
 impl Drop for VerifiedSourceSnapshot {
     fn drop(&mut self) {
-        if !self.cleaned {
+        if !self.cleanup_attempted {
             let _ = self.cleanup_inner();
         }
     }
@@ -77,6 +100,14 @@ impl VerifiedSourceSnapshot {
         {
             return Err(invalid("verified source snapshot root identity changed"));
         }
+        #[cfg(unix)]
+        verify_snapshot_at(
+            &self.root_handle,
+            &self.trusted_manifest,
+            self.provenance.as_deref(),
+            &self.directory_identities,
+        )?;
+        #[cfg(not(unix))]
         verify_snapshot(&self.root, &self.trusted_manifest)?;
         if let Some(expected) = &self.provenance {
             let actual = read_manifest(&self.root.join(PROVENANCE_FILENAME))?;
@@ -94,10 +125,15 @@ impl VerifiedSourceSnapshot {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&self.root, fs::Permissions::from_mode(0o700))?;
+            self.root_handle
+                .set_permissions(fs::Permissions::from_mode(0o700))?;
         }
         let path = self.root.join(PROVENANCE_FILENAME);
         let result = (|| {
+            #[cfg(unix)]
+            let mut output =
+                create_relative_file(&self.root_handle, Path::new(PROVENANCE_FILENAME), 0o400)?;
+            #[cfg(not(unix))]
             let mut output = OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -107,8 +143,9 @@ impl VerifiedSourceSnapshot {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&path, fs::Permissions::from_mode(0o400))?;
-                fs::set_permissions(&self.root, fs::Permissions::from_mode(0o500))?;
+                output.set_permissions(fs::Permissions::from_mode(0o400))?;
+                self.root_handle
+                    .set_permissions(fs::Permissions::from_mode(0o500))?;
             }
             Ok::<_, io::Error>(())
         })();
@@ -116,22 +153,35 @@ impl VerifiedSourceSnapshot {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let _ = fs::set_permissions(&self.root, fs::Permissions::from_mode(0o500));
+                let _ = self
+                    .root_handle
+                    .set_permissions(fs::Permissions::from_mode(0o500));
             }
             return result.map(|_| path);
         }
         self.provenance = Some(bytes.to_vec());
         self.root_identity = identity(&self.root_handle.metadata()?);
+        #[cfg(unix)]
+        {
+            self.directory_identities
+                .insert(String::new(), self.root_identity);
+            let provenance = openat_nofollow(
+                &self.root_handle,
+                std::ffi::OsStr::new(PROVENANCE_FILENAME),
+                libc::O_RDONLY,
+            )?;
+            self.directory_identities.insert(
+                PROVENANCE_FILENAME.to_owned(),
+                identity(&provenance.metadata()?),
+            );
+        }
         self.verify_unchanged()?;
         Ok(path)
     }
 
     pub fn cleanup(mut self) -> io::Result<()> {
-        let result = self.cleanup_inner();
-        if result.is_ok() {
-            self.cleaned = true;
-        }
-        result
+        self.cleanup_attempted = true;
+        self.cleanup_inner()
     }
 
     fn cleanup_inner(&mut self) -> io::Result<()> {
@@ -143,8 +193,29 @@ impl VerifiedSourceSnapshot {
                 "refusing to clean a replaced verified source snapshot",
             ));
         }
-        make_tree_owner_writable(&self.root)?;
-        fs::remove_dir_all(&self.root)?;
+        #[cfg(unix)]
+        remove_snapshot_at(&self.root_handle, &self.directory_identities)?;
+        #[cfg(not(unix))]
+        {
+            make_tree_owner_writable(&self.root)?;
+            fs::remove_dir_all(&self.root)?;
+        }
+        #[cfg(unix)]
+        {
+            verify_named_identity(
+                &self.owner_handle,
+                std::ffi::OsStr::new("source"),
+                self.root_identity,
+            )?;
+            unlinkat_name(
+                &self.owner_handle,
+                std::ffi::OsStr::new("source"),
+                libc::AT_REMOVEDIR,
+            )?;
+            verify_named_identity(&self.parent_handle, &self.owner_name, self.owner_identity)?;
+            unlinkat_name(&self.parent_handle, &self.owner_name, libc::AT_REMOVEDIR)?;
+        }
+        #[cfg(not(unix))]
         fs::remove_dir(&self.owner)?;
         Ok(())
     }
@@ -386,7 +457,20 @@ fn collect_actual(root: &Path, current: &Path, actual: &mut BTreeSet<String>) ->
     Ok(())
 }
 
-fn create_snapshot(parent: &Path) -> io::Result<(PathBuf, PathBuf)> {
+struct SnapshotCreation {
+    owner: PathBuf,
+    root: PathBuf,
+    #[cfg(unix)]
+    parent_handle: File,
+    #[cfg(unix)]
+    owner_handle: File,
+    #[cfg(unix)]
+    root_handle: File,
+    #[cfg(unix)]
+    owner_name: std::ffi::OsString,
+}
+
+fn create_snapshot(parent: &Path) -> io::Result<SnapshotCreation> {
     fs::create_dir_all(parent)?;
     let parent_metadata = fs::symlink_metadata(parent)?;
     if parent_metadata.file_type().is_symlink() || !parent_metadata.is_dir() {
@@ -402,7 +486,29 @@ fn create_snapshot(parent: &Path) -> io::Result<(PathBuf, PathBuf)> {
             "packaged-source-snapshot-{}-{nonce}-{attempt}",
             std::process::id()
         ));
-        match fs::create_dir(&owner) {
+        #[cfg(unix)]
+        let (creation, parent_handle, owner_name) = {
+            use std::ffi::CString;
+            use std::os::fd::AsRawFd;
+            use std::os::unix::ffi::OsStrExt;
+            let parent_handle = File::open(&canonical_parent)?;
+            let owner_name = owner
+                .file_name()
+                .ok_or_else(|| invalid("snapshot owner has no name"))?
+                .to_owned();
+            let name = CString::new(owner_name.as_bytes())
+                .map_err(|_| invalid("snapshot owner name contains NUL"))?;
+            let result = unsafe { libc::mkdirat(parent_handle.as_raw_fd(), name.as_ptr(), 0o700) };
+            let creation = if result == -1 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(())
+            };
+            (creation, parent_handle, owner_name)
+        };
+        #[cfg(not(unix))]
+        let creation = fs::create_dir(&owner);
+        match creation {
             Ok(()) => {
                 #[cfg(unix)]
                 {
@@ -414,13 +520,43 @@ fn create_snapshot(parent: &Path) -> io::Result<(PathBuf, PathBuf)> {
                     }
                 }
                 let root = owner.join("source");
+                #[cfg(unix)]
+                let (owner_handle, root_handle) = {
+                    use std::os::fd::AsRawFd;
+                    let owner_handle = File::open(&owner)?;
+                    let name = b"source\0";
+                    if unsafe {
+                        libc::mkdirat(owner_handle.as_raw_fd(), name.as_ptr().cast(), 0o700)
+                    } == -1
+                    {
+                        return Err(io::Error::last_os_error());
+                    }
+                    let root_handle = openat_nofollow(
+                        &owner_handle,
+                        std::ffi::OsStr::new("source"),
+                        libc::O_RDONLY | libc::O_DIRECTORY,
+                    )?;
+                    (owner_handle, root_handle)
+                };
+                #[cfg(not(unix))]
                 fs::create_dir(&root)?;
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
                     fs::set_permissions(&root, fs::Permissions::from_mode(0o700))?;
                 }
-                return Ok((owner, root));
+                return Ok(SnapshotCreation {
+                    owner,
+                    root,
+                    #[cfg(unix)]
+                    parent_handle,
+                    #[cfg(unix)]
+                    owner_handle,
+                    #[cfg(unix)]
+                    root_handle,
+                    #[cfg(unix)]
+                    owner_name,
+                });
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(error),
@@ -443,6 +579,17 @@ fn write_trusted_manifest(root: &Path, bytes: &[u8]) -> io::Result<()> {
         fs::set_permissions(path, fs::Permissions::from_mode(0o400))?;
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn write_trusted_manifest_at(root: &File, bytes: &[u8]) -> io::Result<()> {
+    let mut output = create_relative_file(
+        root,
+        Path::new("packaged_defaultspack_source_manifest.v1.json"),
+        0o400,
+    )?;
+    output.write_all(bytes)?;
+    output.sync_all()
 }
 
 fn verify_snapshot(root: &Path, trusted_manifest: &[u8]) -> io::Result<()> {
@@ -470,6 +617,353 @@ fn verify_snapshot(root: &Path, trusted_manifest: &[u8]) -> io::Result<()> {
     for (relative, record) in expected {
         let path = root.join(relative);
         verify_snapshot_file(&path, &record)?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn directory_entries(directory: &File) -> io::Result<Vec<std::ffi::OsString>> {
+    use std::ffi::CStr;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+
+    let dot = b".\0";
+    let duplicate = unsafe {
+        libc::openat(
+            directory.as_raw_fd(),
+            dot.as_ptr().cast(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        )
+    };
+    if duplicate == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    let stream = unsafe { libc::fdopendir(duplicate) };
+    if stream.is_null() {
+        unsafe { libc::close(duplicate) };
+        return Err(io::Error::last_os_error());
+    }
+    let mut names = Vec::new();
+    loop {
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        unsafe {
+            *libc::__error() = 0;
+        }
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        unsafe {
+            *libc::__errno_location() = 0;
+        }
+        let entry = unsafe { libc::readdir(stream) };
+        if entry.is_null() {
+            let error = io::Error::last_os_error();
+            unsafe { libc::closedir(stream) };
+            return if error.raw_os_error() == Some(0) {
+                names.sort();
+                Ok(names)
+            } else {
+                Err(error)
+            };
+        }
+        let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) }.to_bytes();
+        if name != b"." && name != b".." {
+            names.push(std::ffi::OsStr::from_bytes(name).to_owned());
+        }
+    }
+}
+
+#[cfg(unix)]
+fn openat_nofollow(directory: &File, name: &std::ffi::OsStr, flags: i32) -> io::Result<File> {
+    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    let name = CString::new(name.as_bytes()).map_err(|_| invalid("snapshot name contains NUL"))?;
+    let fd = unsafe {
+        libc::openat(
+            directory.as_raw_fd(),
+            name.as_ptr(),
+            flags | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        )
+    };
+    if fd == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(unsafe { File::from_raw_fd(fd) })
+    }
+}
+
+#[cfg(unix)]
+fn open_relative_directory(root: &File, relative: &str) -> io::Result<File> {
+    let mut current = root.try_clone()?;
+    for component in relative.split('/') {
+        current = openat_nofollow(
+            &current,
+            std::ffi::OsStr::new(component),
+            libc::O_RDONLY | libc::O_DIRECTORY,
+        )?;
+    }
+    Ok(current)
+}
+
+#[cfg(unix)]
+fn ensure_relative_directory(root: &File, relative: &Path) -> io::Result<File> {
+    use std::ffi::CString;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+    let mut current = root.try_clone()?;
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            return Err(invalid("snapshot directory path is unsafe"));
+        };
+        match openat_nofollow(&current, name, libc::O_RDONLY | libc::O_DIRECTORY) {
+            Ok(child) => current = child,
+            Err(error) if error.raw_os_error() == Some(libc::ENOENT) => {
+                let name_c = CString::new(name.as_bytes())
+                    .map_err(|_| invalid("snapshot directory contains NUL"))?;
+                if unsafe { libc::mkdirat(current.as_raw_fd(), name_c.as_ptr(), 0o700) } == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+                current = openat_nofollow(&current, name, libc::O_RDONLY | libc::O_DIRECTORY)?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(current)
+}
+
+#[cfg(unix)]
+fn create_relative_file(root: &File, relative: &Path, mode: u32) -> io::Result<File> {
+    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    let parent = relative.parent().unwrap_or_else(|| Path::new(""));
+    let directory = ensure_relative_directory(root, parent)?;
+    let name = relative
+        .file_name()
+        .ok_or_else(|| invalid("snapshot file has no name"))?;
+    let encoded =
+        CString::new(name.as_bytes()).map_err(|_| invalid("snapshot file contains NUL"))?;
+    let fd = unsafe {
+        libc::openat(
+            directory.as_raw_fd(),
+            encoded.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            mode,
+        )
+    };
+    if fd == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(unsafe { File::from_raw_fd(fd) })
+    }
+}
+
+#[cfg(unix)]
+fn walk_snapshot_at(
+    directory: &File,
+    relative: &str,
+    files: &mut BTreeMap<String, File>,
+    directories: &mut BTreeMap<String, (u64, u64, u64, i64, i64)>,
+) -> io::Result<()> {
+    directories.insert(relative.to_owned(), identity(&directory.metadata()?));
+    for name in directory_entries(directory)? {
+        let component = name
+            .to_str()
+            .ok_or_else(|| invalid("snapshot path is not UTF-8"))?;
+        let child_relative = if relative.is_empty() {
+            component.to_owned()
+        } else {
+            format!("{relative}/{component}")
+        };
+        match openat_nofollow(directory, &name, libc::O_RDONLY | libc::O_DIRECTORY) {
+            Ok(child) => walk_snapshot_at(&child, &child_relative, files, directories)?,
+            Err(error) if matches!(error.raw_os_error(), Some(libc::ENOTDIR)) => {
+                let child = openat_nofollow(directory, &name, libc::O_RDONLY)?;
+                if !child.metadata()?.is_file() {
+                    return Err(invalid("snapshot contains a special entry"));
+                }
+                directories.insert(child_relative.clone(), identity(&child.metadata()?));
+                files.insert(child_relative, child);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn verify_open_file(mut file: &File, expected: &ExpectedFile) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let metadata = file.metadata()?;
+    let expected_mode = if expected.executable { 0o500 } else { 0o400 };
+    if !metadata.is_file()
+        || metadata.len() != expected.size
+        || metadata.permissions().mode() & 0o777 != expected_mode
+    {
+        return Err(invalid("anchored snapshot metadata changed"));
+    }
+    let mut digest = Sha256::new();
+    let mut size = 0_u64;
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        size += count as u64;
+        digest.update(&buffer[..count]);
+    }
+    if size != expected.size || format!("{:x}", digest.finalize()) != expected.sha256 {
+        return Err(invalid("anchored snapshot digest changed"));
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn verify_snapshot_at(
+    root: &File,
+    trusted_manifest: &[u8],
+    provenance: Option<&[u8]>,
+    expected_directories: &BTreeMap<String, (u64, u64, u64, i64, i64)>,
+) -> io::Result<()> {
+    let expected = parse_manifest(trusted_manifest)?;
+    let mut files = BTreeMap::new();
+    let mut directories = BTreeMap::new();
+    walk_snapshot_at(root, "", &mut files, &mut directories)?;
+    if &directories != expected_directories {
+        return Err(invalid("anchored snapshot entry identity changed"));
+    }
+    use std::os::unix::fs::PermissionsExt;
+    for relative in directories.keys().filter(|path| !files.contains_key(*path)) {
+        let directory = if relative.is_empty() {
+            root.try_clone()?
+        } else {
+            open_relative_directory(root, relative)?
+        };
+        if directory.metadata()?.permissions().mode() & 0o777 != 0o500 {
+            return Err(invalid("anchored snapshot directory mode changed"));
+        }
+    }
+    let manifest_name = "packaged_defaultspack_source_manifest.v1.json";
+    let mut manifest = files
+        .remove(manifest_name)
+        .ok_or_else(|| invalid("anchored snapshot manifest is missing"))?;
+    use std::os::unix::fs::MetadataExt;
+    let manifest_metadata = manifest.metadata()?;
+    if !manifest_metadata.is_file()
+        || manifest_metadata.nlink() != 1
+        || manifest_metadata.permissions().mode() & 0o777 != 0o400
+        || manifest_metadata.len() > MAX_MANIFEST_BYTES
+    {
+        return Err(invalid("anchored snapshot manifest metadata changed"));
+    }
+    let mut bytes = Vec::new();
+    manifest.read_to_end(&mut bytes)?;
+    if bytes != trusted_manifest {
+        return Err(invalid("anchored snapshot manifest changed"));
+    }
+    if let Some(expected_provenance) = provenance {
+        let mut file = files
+            .remove(PROVENANCE_FILENAME)
+            .ok_or_else(|| invalid("anchored snapshot provenance is missing"))?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file()
+            || metadata.nlink() != 1
+            || metadata.permissions().mode() & 0o777 != 0o400
+            || metadata.len() > MAX_PROVENANCE_BYTES as u64
+        {
+            return Err(invalid("anchored snapshot provenance metadata changed"));
+        }
+        let mut actual = Vec::new();
+        file.read_to_end(&mut actual)?;
+        if actual != expected_provenance {
+            return Err(invalid("anchored snapshot provenance changed"));
+        }
+    }
+    if files.keys().cloned().collect::<BTreeSet<_>>() != expected.keys().cloned().collect() {
+        return Err(invalid("anchored snapshot inventory changed"));
+    }
+    for (relative, record) in expected {
+        verify_open_file(&files[&relative], &record)?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn remove_snapshot_at(
+    root: &File,
+    expected_directories: &BTreeMap<String, (u64, u64, u64, i64, i64)>,
+) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+
+    fn recurse(
+        directory: &File,
+        relative: &str,
+        expected: &BTreeMap<String, (u64, u64, u64, i64, i64)>,
+    ) -> io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        if expected.get(relative) != Some(&identity(&directory.metadata()?)) {
+            return Err(invalid("refusing cleanup of replaced snapshot directory"));
+        }
+        directory.set_permissions(fs::Permissions::from_mode(0o700))?;
+        for name in directory_entries(directory)? {
+            let component = name.to_string_lossy();
+            let child_relative = if relative.is_empty() {
+                component.into_owned()
+            } else {
+                format!("{relative}/{component}")
+            };
+            let (child, flags) =
+                match openat_nofollow(directory, &name, libc::O_RDONLY | libc::O_DIRECTORY) {
+                    Ok(child) => (child, libc::AT_REMOVEDIR),
+                    Err(error) if error.raw_os_error() == Some(libc::ENOTDIR) => {
+                        (openat_nofollow(directory, &name, libc::O_RDONLY)?, 0)
+                    }
+                    Err(error) => return Err(error),
+                };
+            if expected.get(&child_relative) != Some(&identity(&child.metadata()?)) {
+                return Err(invalid(
+                    "refusing cleanup of replaced or extra snapshot entry",
+                ));
+            }
+            if flags == libc::AT_REMOVEDIR {
+                recurse(&child, &child_relative, expected)?;
+            }
+            let encoded =
+                CString::new(name.as_bytes()).map_err(|_| invalid("cleanup name contains NUL"))?;
+            if unsafe { libc::unlinkat(directory.as_raw_fd(), encoded.as_ptr(), flags) } == -1 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        Ok(())
+    }
+    recurse(root, "", expected_directories)
+}
+
+#[cfg(unix)]
+fn unlinkat_name(directory: &File, name: &std::ffi::OsStr, flags: i32) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+    let encoded =
+        CString::new(name.as_bytes()).map_err(|_| invalid("cleanup name contains NUL"))?;
+    if unsafe { libc::unlinkat(directory.as_raw_fd(), encoded.as_ptr(), flags) } == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+fn verify_named_identity(
+    directory: &File,
+    name: &std::ffi::OsStr,
+    expected: (u64, u64, u64, i64, i64),
+) -> io::Result<()> {
+    let child = openat_nofollow(directory, name, libc::O_RDONLY | libc::O_DIRECTORY)?;
+    if identity(&child.metadata()?) != expected {
+        return Err(invalid("refusing cleanup of replaced snapshot name"));
     }
     Ok(())
 }
@@ -527,6 +1021,19 @@ fn seal_directories(path: &Path) -> io::Result<()> {
         fs::set_permissions(path, fs::Permissions::from_mode(0o500))?;
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn seal_directories_at(directory: &File) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    for name in directory_entries(directory)? {
+        match openat_nofollow(directory, &name, libc::O_RDONLY | libc::O_DIRECTORY) {
+            Ok(child) => seal_directories_at(&child)?,
+            Err(error) if error.raw_os_error() == Some(libc::ENOTDIR) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    directory.set_permissions(fs::Permissions::from_mode(0o500))
 }
 
 fn make_tree_owner_writable(path: &Path) -> io::Result<()> {
@@ -626,6 +1133,61 @@ fn copy_verified(source: &Path, target: &Path, expected: &ExpectedFile) -> io::R
     Ok(())
 }
 
+#[cfg(unix)]
+fn copy_verified_at(
+    source_root: &File,
+    target_root: &File,
+    relative: &Path,
+    expected: &ExpectedFile,
+) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let source_parent = open_relative_directory(
+        source_root,
+        relative
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .to_str()
+            .ok_or_else(|| invalid("source path is not UTF-8"))?,
+    )?;
+    let name = relative
+        .file_name()
+        .ok_or_else(|| invalid("source has no name"))?;
+    let mut input = openat_nofollow(&source_parent, name, libc::O_RDONLY)?;
+    let metadata = input.metadata()?;
+    if !metadata.is_file()
+        || metadata.nlink() != 1
+        || metadata.len() != expected.size
+        || executable(&metadata) != expected.executable
+    {
+        return Err(invalid("anchored source metadata differs from manifest"));
+    }
+    let mut output = create_relative_file(
+        target_root,
+        relative,
+        if expected.executable { 0o500 } else { 0o400 },
+    )?;
+    let mut digest = Sha256::new();
+    let mut count = 0_u64;
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let read = input.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        count += read as u64;
+        if count > expected.size {
+            return Err(invalid("anchored source grew while copied"));
+        }
+        digest.update(&buffer[..read]);
+        output.write_all(&buffer[..read])?;
+    }
+    output.sync_all()?;
+    if count != expected.size || format!("{:x}", digest.finalize()) != expected.sha256 {
+        return Err(invalid("anchored source digest differs from manifest"));
+    }
+    Ok(())
+}
+
 fn read_manifest(path: &Path) -> io::Result<Vec<u8>> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink()
@@ -699,6 +1261,8 @@ fn verify_and_snapshot_against_manifest_with_hook(
         ));
     }
     let manifest = parse_manifest(trusted_manifest)?;
+    #[cfg(unix)]
+    let runtime_handle = File::open(runtime_root)?;
     let mut actual = BTreeSet::new();
     for relative in ROOTS {
         collect_actual(runtime_root, &runtime_root.join(relative), &mut actual)?;
@@ -720,37 +1284,98 @@ fn verify_and_snapshot_against_manifest_with_hook(
         ));
     }
     before_copy();
-    let (snapshot_owner, snapshot_root) = create_snapshot(snapshot_parent)?;
+    let creation = create_snapshot(snapshot_parent)?;
+    let snapshot_owner = creation.owner.clone();
+    let snapshot_root = creation.root.clone();
     let result = (|| {
+        #[cfg(unix)]
+        let root_handle = creation.root_handle.try_clone()?;
         for (relative, expected) in &manifest {
+            #[cfg(unix)]
+            copy_verified_at(&runtime_handle, &root_handle, Path::new(relative), expected)?;
+            #[cfg(not(unix))]
             copy_verified(
                 &runtime_root.join(relative),
                 &snapshot_root.join(relative),
                 expected,
             )?;
         }
+        #[cfg(unix)]
+        write_trusted_manifest_at(&root_handle, trusted_manifest)?;
+        #[cfg(not(unix))]
         write_trusted_manifest(&snapshot_root, trusted_manifest)?;
-        verify_snapshot(&snapshot_root, trusted_manifest)?;
-        seal_directories(&snapshot_root)?;
+        #[cfg(unix)]
+        seal_directories_at(&root_handle)?;
+        #[cfg(not(unix))]
+        {
+            verify_snapshot(&snapshot_root, trusted_manifest)?;
+            seal_directories(&snapshot_root)?;
+        }
         if identity(&fs::symlink_metadata(runtime_root)?) != identity(&root_metadata) {
             return Err(invalid("packaged source root changed during verification"));
         }
+        #[cfg(not(unix))]
         let root_handle = File::open(&snapshot_root)?;
+        #[cfg(unix)]
+        let parent_handle = creation.parent_handle.try_clone()?;
+        #[cfg(unix)]
+        let owner_handle = creation.owner_handle.try_clone()?;
+        #[cfg(unix)]
+        let owner_name = creation.owner_name.clone();
+        #[cfg(unix)]
+        let directory_identities = {
+            let mut files = BTreeMap::new();
+            let mut directories = BTreeMap::new();
+            walk_snapshot_at(&root_handle, "", &mut files, &mut directories)?;
+            directories
+        };
         Ok(VerifiedSourceSnapshot {
             owner_identity: identity(&fs::symlink_metadata(&snapshot_owner)?),
             root_identity: identity(&root_handle.metadata()?),
             owner: snapshot_owner.clone(),
             root: snapshot_root.clone(),
             root_handle,
+            #[cfg(unix)]
+            parent_handle,
+            #[cfg(unix)]
+            owner_handle,
+            #[cfg(unix)]
+            owner_name,
+            #[cfg(unix)]
+            directory_identities,
             trusted_manifest: trusted_manifest.to_vec(),
             provenance: None,
-            cleaned: false,
+            cleanup_attempted: false,
         })
     })();
     if result.is_err() {
-        let _ = make_tree_owner_writable(&snapshot_root);
-        let _ = fs::remove_dir_all(&snapshot_root);
-        let _ = fs::remove_dir(&snapshot_owner);
+        #[cfg(unix)]
+        {
+            if let (Ok(root), Ok(owner), Ok(parent), Some(owner_name)) = (
+                File::open(&snapshot_root),
+                File::open(&snapshot_owner),
+                snapshot_owner
+                    .parent()
+                    .ok_or_else(|| invalid("snapshot owner has no parent"))
+                    .and_then(File::open),
+                snapshot_owner.file_name(),
+            ) {
+                let mut files = BTreeMap::new();
+                let mut identities = BTreeMap::new();
+                if walk_snapshot_at(&root, "", &mut files, &mut identities).is_ok() {
+                    let _ = remove_snapshot_at(&root, &identities);
+                    let _ =
+                        unlinkat_name(&owner, std::ffi::OsStr::new("source"), libc::AT_REMOVEDIR);
+                    let _ = unlinkat_name(&parent, owner_name, libc::AT_REMOVEDIR);
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = make_tree_owner_writable(&snapshot_root);
+            let _ = fs::remove_dir_all(&snapshot_root);
+            let _ = fs::remove_dir(&snapshot_owner);
+        }
     }
     result
 }
@@ -758,6 +1383,19 @@ fn verify_and_snapshot_against_manifest_with_hook(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn copy_fixture_tree(source: &Path, target: &Path) {
+        fs::create_dir_all(target).unwrap();
+        for entry in fs::read_dir(source).unwrap() {
+            let entry = entry.unwrap();
+            let destination = target.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_fixture_tree(&entry.path(), &destination);
+            } else {
+                fs::copy(entry.path(), destination).unwrap();
+            }
+        }
+    }
 
     struct Tree(PathBuf);
     impl Tree {
@@ -871,37 +1509,51 @@ mod tests {
         let provenance = br#"{"schema":"io.tobkiri.packaging-source-provenance.v1","source_commit":"fixture","source_tree":"fixture","source_clean":true}"#;
         let provenance_path = snapshot.bind_provenance(provenance).unwrap();
         let python = super::super::packaging_toolchain::verified_tool("python").unwrap();
-        if !python
-            .command()
-            .unwrap()
-            .args(["-I", "-B", "-c", "import packaging"])
-            .status()
-            .unwrap()
-            .success()
-        {
-            eprintln!("skipping generator integration: packaging dependency is unavailable");
-            snapshot.cleanup().unwrap();
-            return;
-        }
+        let fixture_root = tree.0.join("generator-fixture");
+        let source_artifact = fixture_root.join("verified-release/Tobkiri.AppImage");
+        fs::create_dir_all(source_artifact.parent().unwrap()).unwrap();
+        fs::write(
+            &source_artifact,
+            b"\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00>\x00fixture",
+        )
+        .unwrap();
+        let bundle_root = fixture_root.join("defaultspack/v4");
+        copy_fixture_tree(
+            &runtime_root.join("ecosystem/defaultspack/v4"),
+            &bundle_root,
+        );
+        let artifact_root = fixture_root.join("defaultspack/platform-artifacts");
         let mut command = super::super::isolated_python_module_command(
             &python,
-            snapshot.root(),
+            &snapshot,
             "scripts.generate_packaged_defaultspack_v4_bundle",
         )
         .unwrap();
         super::super::bind_source_provenance_command(&mut command, &provenance_path);
-        command.arg("--help");
-        assert!(command
-            .get_args()
-            .any(|arg| arg == std::ffi::OsStr::new("--source-provenance-file")));
-        assert!(command
-            .get_envs()
-            .all(|(key, _)| key != std::ffi::OsStr::new("PATH")));
-        let status = command.status().unwrap();
+        command
+            .arg("--source-artifact")
+            .arg(&source_artifact)
+            .arg("--bundle-root")
+            .arg(&bundle_root)
+            .arg("--artifact-root")
+            .arg(&artifact_root)
+            .args(["--relative-path", "Tobkiri.AppImage"])
+            .args(["--entrypoint", "Tobkiri.AppImage"])
+            .args(["--platform", "linux"])
+            .args(["--architecture", "x86_64"])
+            .args(["--bundle-identity", "io.tobkiri.shell.tauri"]);
+        let output = command.output().unwrap();
         assert!(
-            status.success(),
-            "actual isolated generator import must pass"
+            output.status.success(),
+            "actual generator failed: {}",
+            String::from_utf8_lossy(&output.stderr)
         );
+        assert!(bundle_root.join("defaults.profile.v4.json").is_file());
+        assert!(bundle_root
+            .join("shell.tauri.default.shell.v1.json")
+            .is_file());
+        assert!(bundle_root.join("bundle.lock.json").is_file());
+        assert!(artifact_root.join("Tobkiri.AppImage").is_file());
         snapshot.verify_unchanged().unwrap();
         snapshot.cleanup().unwrap();
     }
@@ -1110,7 +1762,7 @@ mod tests {
         let python = super::super::packaging_toolchain::verified_tool("python").unwrap();
         let status = super::super::isolated_python_module_command(
             &python,
-            snapshot.root(),
+            &snapshot,
             "scripts.module_that_does_not_exist",
         )
         .unwrap()
