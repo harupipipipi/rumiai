@@ -210,6 +210,31 @@ jobs:
       - name: Install locked runtime and test dependencies
         run: python .github/scripts/install_locked_python_test_dependencies.py
 
+      - name: Exercise root packaging ancestor transactions
+        env:
+          TOBKIRI_REQUIRE_ROOT_PROCESS_TESTS: "1"
+          ROOT_PROCESS_JUNIT: ${{ runner.temp }}/packaging-root-process-tests.xml
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q -rs \
+            --junitxml="$ROOT_PROCESS_JUNIT" \
+            .github/scripts/tests/test_packaging_toolchain_identity.py::test_process_creates_and_rolls_back_clean_framework_ancestors \
+            .github/scripts/tests/test_packaging_toolchain_identity.py::test_process_recovers_kill_midway_through_ancestor_creation \
+            .github/scripts/tests/test_packaging_toolchain_identity.py::test_process_retains_created_ancestor_that_becomes_nonempty \
+            .github/scripts/tests/test_packaging_toolchain_identity.py::test_published_ancestor_is_traversable_by_nonroot_process_when_available
+          python - "$ROOT_PROCESS_JUNIT" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          suites = [root] if root.tag == "testsuite" else list(root.findall("testsuite"))
+          skipped = sum(int(suite.attrib.get("skipped", "0")) for suite in suites)
+          tests = sum(int(suite.attrib.get("tests", "0")) for suite in suites)
+          if tests != 4 or skipped != 0:
+              raise SystemExit(f"root process contract requires 4 tests and 0 skips: {tests=}, {skipped=}")
+          PY
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:

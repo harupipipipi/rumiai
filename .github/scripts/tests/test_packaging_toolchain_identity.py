@@ -38,6 +38,9 @@ if _UPDATE_SPEC is None or _UPDATE_SPEC.loader is None:
     raise RuntimeError(f"cannot load provenance generator: {_UPDATE_SCRIPT}")
 _UPDATE = importlib.util.module_from_spec(_UPDATE_SPEC)
 _UPDATE_SPEC.loader.exec_module(_UPDATE)
+_REQUIRE_ROOT_PROCESS_TESTS = (
+    os.environ.get("TOBKIRI_REQUIRE_ROOT_PROCESS_TESTS") == "1"
+)
 
 
 def _executable(path: Path, payload: bytes = b"tool fixture") -> Path:
@@ -298,6 +301,8 @@ def _ancestor_helper(
     failpoint: str = "",
 ) -> subprocess.CompletedProcess[bytes]:
     arguments = [sys.executable, "-I", "-B", "-c", code, anchor]
+    if _REQUIRE_ROOT_PROCESS_TESTS:
+        arguments = ["/usr/bin/sudo", "-n", *arguments]
     if code == _MODULE.ROOT_ENSURE_PARENT_CODE:
         arguments.extend(
             [
@@ -338,6 +343,11 @@ def _require_privileged_ancestor_result(
         and os.geteuid() != 0
         and b"exclusive rename failed" in result.stderr
     ):
+        if _REQUIRE_ROOT_PROCESS_TESTS:
+            pytest.fail(
+                "required root ancestor process path did not execute: "
+                + result.stderr.decode(errors="replace")
+            )
         pytest.skip("macOS requires root to rename a published 0555 directory")
     assert result.returncode == 0
 
@@ -408,6 +418,11 @@ def test_process_recovers_kill_midway_through_ancestor_creation(
         "after_mkdir:1",
     )
     if killed.returncode > 0 and b"exclusive rename failed" in killed.stderr:
+        if _REQUIRE_ROOT_PROCESS_TESTS:
+            pytest.fail(
+                "required root kill/recovery path did not execute: "
+                + killed.stderr.decode(errors="replace")
+            )
         pytest.skip("macOS requires root to reach the second missing ancestor")
     assert killed.returncode < 0
     _require_privileged_ancestor_result(
@@ -503,6 +518,8 @@ def test_published_ancestor_is_traversable_by_nonroot_process_when_available() -
         check=False,
     )
     if sudo.returncode != 0:
+        if _REQUIRE_ROOT_PROCESS_TESTS:
+            pytest.fail("passwordless sudo/nobody fixture is required by CI")
         pytest.skip("passwordless nobody process is unavailable")
     base = Path(tempfile.mkdtemp(prefix="tobkiri-ancestor-", dir="/private/tmp"))
     try:
@@ -745,3 +762,28 @@ def test_workflows_run_real_installation_e2e_and_cleanup(workflow_name: str) -> 
     assert '--source-commit "$GITHUB_SHA"' in payload
     assert '--transaction-token "$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"' in payload
     assert "if: always() && env.TOBKIRI_PACKAGING_TRANSACTION_TOKEN != ''" in payload
+
+
+@pytest.mark.parametrize("workflow_name", ["release.yml", "desktop-installers.yml"])
+def test_workflows_require_exact_root_process_tests_without_skips(
+    workflow_name: str,
+) -> None:
+    """macOS packaging CI cannot silently skip any privileged process contract."""
+    workflow = _SCRIPT.parents[1] / "workflows" / workflow_name
+    payload = workflow.read_text(encoding="utf-8")
+    nodeids = (
+        "test_process_creates_and_rolls_back_clean_framework_ancestors",
+        "test_process_recovers_kill_midway_through_ancestor_creation",
+        "test_process_retains_created_ancestor_that_becomes_nonempty",
+        "test_published_ancestor_is_traversable_by_nonroot_process_when_available",
+    )
+    step = payload[
+        payload.index(
+            "- name: Exercise root packaging ancestor transactions"
+        ) : payload.index("- name: Install Rust toolchain")
+    ]
+    assert 'TOBKIRI_REQUIRE_ROOT_PROCESS_TESTS: "1"' in step
+    assert "python -m pytest -q -rs" in step
+    assert '--junitxml="$ROOT_PROCESS_JUNIT"' in step
+    assert all(step.count(f"::{nodeid}") == 1 for nodeid in nodeids)
+    assert "tests != 4 or skipped != 0" in step
