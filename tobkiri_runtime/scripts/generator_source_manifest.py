@@ -47,6 +47,28 @@ PROVENANCE_KEYS = (
 )
 _ROOT = Path(__file__).resolve().parents[1]
 
+PROVENANCE_ERROR_JSON = "provenance.json"
+PROVENANCE_ERROR_DUPLICATE_FIELD = "provenance.duplicate_field"
+PROVENANCE_ERROR_UNKNOWN_FIELD = "provenance.unknown_field"
+PROVENANCE_ERROR_MISSING_FIELD = "provenance.missing_field"
+PROVENANCE_ERROR_SCHEMA = "provenance.schema"
+PROVENANCE_ERROR_SOURCE_COMMIT_TYPE = "provenance.source_commit_type"
+PROVENANCE_ERROR_SOURCE_COMMIT = "provenance.source_commit"
+PROVENANCE_ERROR_SOURCE_TREE_TYPE = "provenance.source_tree_type"
+PROVENANCE_ERROR_SOURCE_TREE = "provenance.source_tree"
+PROVENANCE_ERROR_SOURCE_CLEAN_TYPE = "provenance.source_clean_type"
+PROVENANCE_ERROR_SOURCE_CLEAN = "provenance.source_clean"
+PROVENANCE_ERROR_MANIFEST_DIGEST_TYPE = "provenance.manifest_digest_type"
+PROVENANCE_ERROR_MANIFEST_DIGEST_FORMAT = "provenance.manifest_digest_format"
+PROVENANCE_ERROR_MANIFEST_DIGEST_MISMATCH = "provenance.manifest_digest_mismatch"
+PROVENANCE_ERROR_SOURCE_CLOSURE = "provenance.source_closure"
+PROVENANCE_ERROR_PATH = "provenance.path"
+PROVENANCE_ERROR_FILE = "provenance.file"
+PROVENANCE_ERROR_FILE_REQUIRED = "provenance.file_required"
+PROVENANCE_ERROR_INVALID = "provenance.invalid"
+PROVENANCE_ERROR_ROOT = "provenance.root"
+PROVENANCE_ERROR_PERMISSION = "provenance.permission"
+
 
 @dataclass(frozen=True)
 class SourceProvenance:
@@ -59,12 +81,33 @@ class SourceProvenance:
     path: Path
 
 
+class SourceProvenanceError(ValueError):
+    """A fail-closed provenance rejection with a stable code and safe reason."""
+
+    def __init__(
+        self,
+        code: str,
+        reason: str,
+        *,
+        context: str | None = None,
+    ) -> None:
+        self.code = code
+        self.error_code = code
+        self.reason = reason
+        self.safe_reason = reason
+        message = f"{context} [{code}]: {reason}" if context else reason
+        super().__init__(message)
+
+
 def _strict_object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     """Reject duplicate JSON object keys instead of silently overwriting them."""
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
-            raise ValueError(f"duplicate source provenance field: {key}")
+            raise SourceProvenanceError(
+                PROVENANCE_ERROR_DUPLICATE_FIELD,
+                "duplicate source provenance field",
+            )
         result[key] = value
     return result
 
@@ -319,24 +362,47 @@ def verify_source_closure(root: Path = _ROOT) -> dict[str, Any]:
 
 def _valid_provenance_identity(value: Any, field: str) -> str:
     """Validate one full lowercase Git identity from sealed provenance."""
+    code = {
+        "source_commit": PROVENANCE_ERROR_SOURCE_COMMIT,
+        "source_tree": PROVENANCE_ERROR_SOURCE_TREE,
+    }[field]
+    if not isinstance(value, str):
+        type_code = {
+            "source_commit": PROVENANCE_ERROR_SOURCE_COMMIT_TYPE,
+            "source_tree": PROVENANCE_ERROR_SOURCE_TREE_TYPE,
+        }[field]
+        raise SourceProvenanceError(
+            type_code,
+            f"{field} must be a string containing a full lowercase 40-hex identity",
+        )
     if (
-        not isinstance(value, str)
-        or len(value) != 40
+        len(value) != 40
         or len(set(value)) <= 1
         or any(character not in "0123456789abcdef" for character in value)
     ):
-        raise ValueError(f"{field} must be a full lowercase 40-hex identity")
+        raise SourceProvenanceError(
+            code,
+            f"{field} must be a full lowercase 40-hex identity",
+        )
     return value
 
 
 def _valid_provenance_digest(value: Any, field: str) -> str:
     """Validate one raw lowercase SHA-256 digest from sealed provenance."""
+    code = (
+        PROVENANCE_ERROR_MANIFEST_DIGEST_TYPE
+        if not isinstance(value, str)
+        else PROVENANCE_ERROR_MANIFEST_DIGEST_FORMAT
+    )
     if (
         not isinstance(value, str)
         or len(value) != 64
         or any(character not in "0123456789abcdef" for character in value)
     ):
-        raise ValueError(f"{field} must be a raw lowercase 64-hex SHA-256")
+        raise SourceProvenanceError(
+            code,
+            f"{field} must be a raw lowercase 64-hex SHA-256",
+        )
     return value
 
 
@@ -362,55 +428,136 @@ def load_source_provenance(
     private source snapshot.  Python accepts the filename as an input, but never
     creates provenance or derives its identities from a checkout or Git.
     """
-    root = root.expanduser().absolute()
-    reject_symlink_components(root)
+    try:
+        root = root.expanduser().absolute()
+        reject_symlink_components(root)
+    except (OSError, TypeError, ValueError):
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_ROOT,
+            "source provenance root is invalid",
+        ) from None
     if root.is_symlink() or not root.is_dir():
-        raise ValueError(f"source provenance root is not a real directory: {root}")
-    root = root.resolve(strict=True)
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_ROOT,
+            "source provenance root is not a real directory",
+        )
+    try:
+        root = root.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_ROOT,
+            "source provenance root is unavailable",
+        ) from None
     expected_path = root / SOURCE_PROVENANCE_FILENAME
-    supplied = expected_path if provenance_file is None else Path(provenance_file)
+    try:
+        supplied = expected_path if provenance_file is None else Path(provenance_file)
+    except (TypeError, ValueError):
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_PATH,
+            "source provenance path is invalid",
+        ) from None
     if supplied.is_absolute():
         supplied = supplied.absolute()
         if supplied != expected_path:
-            raise ValueError(
-                "source provenance path must bind the snapshot root's canonical file"
+            raise SourceProvenanceError(
+                PROVENANCE_ERROR_PATH,
+                "source provenance path must bind the snapshot root's canonical file",
             )
         path = supplied
     else:
         if supplied.as_posix() != SOURCE_PROVENANCE_FILENAME:
-            raise ValueError(
-                "source provenance path must be the canonical snapshot-relative filename"
+            raise SourceProvenanceError(
+                PROVENANCE_ERROR_PATH,
+                "source provenance path must be the canonical snapshot-relative filename",
             )
         path = root / SOURCE_PROVENANCE_FILENAME
-    metadata = _regular_file(path, "source provenance")
+    try:
+        metadata = _regular_file(path, "source provenance")
+    except (OSError, ValueError):
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_FILE,
+            "source provenance is not a regular non-hardlinked file",
+        ) from None
     if metadata.st_mode & 0o222:
-        raise ValueError("source provenance must not be owner-writable")
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_PERMISSION,
+            "source provenance must not be owner-writable",
+        )
     try:
         raw = path.read_bytes()
         value = json.loads(
             raw.decode("utf-8"), object_pairs_hook=_strict_object_pairs
         )
+    except SourceProvenanceError:
+        raise
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise ValueError("source provenance JSON is invalid") from error
-    if not isinstance(value, dict) or set(value) != set(PROVENANCE_KEYS):
-        raise ValueError("source provenance has unexpected top-level fields")
+        del error
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_JSON,
+            "source provenance JSON is invalid",
+        ) from None
+    if not isinstance(value, dict):
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_JSON,
+            "source provenance JSON must be an object",
+        )
+    unknown = set(value) - set(PROVENANCE_KEYS)
+    if unknown:
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_UNKNOWN_FIELD,
+            "source provenance has an unknown top-level field",
+        )
+    missing = set(PROVENANCE_KEYS) - set(value)
+    if missing:
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_MISSING_FIELD,
+            "source provenance is missing a required top-level field",
+        )
     if value["schema"] != SOURCE_PROVENANCE_SCHEMA:
-        raise ValueError("source provenance schema is invalid")
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_SCHEMA,
+            "source provenance schema is invalid",
+        )
     source_commit = _valid_provenance_identity(
         value["source_commit"], "source_commit"
     )
     source_tree = _valid_provenance_identity(value["source_tree"], "source_tree")
+    if type(value["source_clean"]) is not bool:
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_SOURCE_CLEAN_TYPE,
+            "source_clean must be the boolean true",
+        )
     if value["source_clean"] is not True:
-        raise ValueError("source_clean must be true")
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_SOURCE_CLEAN,
+            "source_clean must be true",
+        )
     source_manifest_sha256 = _valid_provenance_digest(
         value["source_manifest_sha256"], "source_manifest_sha256"
     )
     manifest = root / SOURCE_MANIFEST_FILENAME
-    _regular_file(manifest, "source manifest")
-    actual_manifest_sha256 = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    try:
+        _regular_file(manifest, "source manifest")
+        actual_manifest_sha256 = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    except (OSError, ValueError):
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_FILE,
+            "source manifest is unavailable or not a regular non-hardlinked file",
+        ) from None
     if actual_manifest_sha256 != source_manifest_sha256:
-        raise ValueError("source provenance manifest digest does not match its bytes")
-    verify_source_closure(root)
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_MANIFEST_DIGEST_MISMATCH,
+            "source provenance manifest digest does not match its bytes",
+        )
+    try:
+        verify_source_closure(root)
+    except SourceProvenanceError:
+        raise
+    except (OSError, ValueError):
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_SOURCE_CLOSURE,
+            "packaged Defaults source closure differs from its sealed manifest",
+        ) from None
     return SourceProvenance(
         source_commit=source_commit,
         source_tree=source_tree,
@@ -427,10 +574,10 @@ def _snapshot_inventory(root: Path) -> dict[str, tuple[Any, ...]]:
     def visit(path: Path, relative: str) -> None:
         metadata = path.stat(follow_symlinks=False)
         if path.is_symlink():
-            raise ValueError(f"source snapshot contains a symlink: {path}")
+            raise ValueError("source snapshot contains a symlink")
         mode = stat.S_IMODE(metadata.st_mode)
         if mode & 0o222:
-            raise ValueError(f"source snapshot entry is owner-writable: {path}")
+            raise ValueError("source snapshot entry is owner-writable")
         if stat.S_ISDIR(metadata.st_mode):
             inventory[relative] = (
                 "directory",
@@ -448,7 +595,7 @@ def _snapshot_inventory(root: Path) -> dict[str, tuple[Any, ...]]:
                     visit(child, child_relative)
             return
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
-            raise ValueError(f"source snapshot contains an unsupported file: {path}")
+            raise ValueError("source snapshot contains an unsupported file")
         inventory[relative] = (
             "regular-file",
             metadata.st_dev,
@@ -514,7 +661,11 @@ class SourceSnapshotLease:
         """Reject root replacement, chmod, links, extra paths, or byte changes."""
         if self._identity(self._owner_fd) != self._owner_identity:
             raise ValueError("source snapshot owner identity changed")
-        if self._identity(self._root_fd) != self._root_identity:
+        current_root = self._identity(self._root_fd)
+        if (
+            current_root[:2] != self._root_identity[:2]
+            or current_root[3:] != self._root_identity[3:]
+        ):
             raise ValueError("source snapshot root identity changed")
         if self._inventory != _snapshot_inventory(self.root):
             raise ValueError("source snapshot inventory changed")

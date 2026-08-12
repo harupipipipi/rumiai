@@ -74,8 +74,13 @@ def test_provenance_duplicate_key_is_rejected(tmp_path: Path) -> None:
     )
     root = _root_with_provenance(tmp_path, raw)
 
-    with pytest.raises(ValueError, match="duplicate source provenance field"):
+    with pytest.raises(
+        generator_source_manifest.SourceProvenanceError,
+        match="duplicate source provenance field",
+    ) as raised:
         generator_source_manifest.load_source_provenance(root)
+    assert raised.value.code == generator_source_manifest.PROVENANCE_ERROR_DUPLICATE_FIELD
+    assert str(tmp_path) not in str(raised.value)
 
 
 @pytest.mark.parametrize(
@@ -85,6 +90,8 @@ def test_provenance_duplicate_key_is_rejected(tmp_path: Path) -> None:
         "missing",
         "wrong-type",
         "wrong-digest",
+        "wrong-commit-type",
+        "wrong-tree-type",
     ],
 )
 def test_provenance_exact_keys_types_and_digests_are_strict(
@@ -106,12 +113,28 @@ def test_provenance_exact_keys_types_and_digests_are_strict(
     elif mutation == "wrong-type":
         fields["source_clean"] = 1
     else:
-        fields["source_manifest_sha256"] = "SHA256:" + manifest_digest
+        if mutation == "wrong-digest":
+            fields["source_manifest_sha256"] = "SHA256:" + manifest_digest
+        elif mutation == "wrong-commit-type":
+            fields["source_commit"] = {"not": "a string"}
+        else:
+            fields["source_tree"] = 42
     root = _root_with_provenance(
         tmp_path,
         json.dumps(fields, separators=(",", ":")).encode("utf-8"),
     )
     monkeypatch.setattr(generator_source_manifest, "verify_source_closure", lambda _: {})
 
-    with pytest.raises(ValueError):
+    expected_codes = {
+        "unknown": generator_source_manifest.PROVENANCE_ERROR_UNKNOWN_FIELD,
+        "missing": generator_source_manifest.PROVENANCE_ERROR_MISSING_FIELD,
+        "wrong-type": generator_source_manifest.PROVENANCE_ERROR_SOURCE_CLEAN_TYPE,
+        "wrong-digest": generator_source_manifest.PROVENANCE_ERROR_MANIFEST_DIGEST_FORMAT,
+        "wrong-commit-type": generator_source_manifest.PROVENANCE_ERROR_SOURCE_COMMIT_TYPE,
+        "wrong-tree-type": generator_source_manifest.PROVENANCE_ERROR_SOURCE_TREE_TYPE,
+    }
+    with pytest.raises(generator_source_manifest.SourceProvenanceError) as raised:
         generator_source_manifest.load_source_provenance(root)
+    assert raised.value.code == expected_codes[mutation]
+    assert raised.value.reason
+    assert str(tmp_path) not in str(raised.value)

@@ -14,7 +14,10 @@ from pathlib import Path, PureWindowsPath
 from typing import Any, Mapping, TypedDict
 
 from .generator_source_manifest import (
+    PROVENANCE_ERROR_FILE_REQUIRED,
+    PROVENANCE_ERROR_INVALID,
     SourceProvenance,
+    SourceProvenanceError,
     load_source_provenance,
     verify_source_closure,
 )
@@ -395,13 +398,27 @@ def _preverified_source_provenance(
 ) -> SourceProvenance:
     """Accept only the core-bound provenance file inside a sealed snapshot."""
     if provenance_file is None:
-        raise ValueError("packaged Profile source provenance file is required")
-    candidate = Path(provenance_file).expanduser()
-    source_root = candidate.parent if candidate.is_absolute() else ROOT
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_FILE_REQUIRED,
+            "source provenance file is required",
+            context="packaged Profile source provenance is invalid",
+        )
     try:
+        candidate = Path(provenance_file).expanduser()
+        source_root = candidate.parent if candidate.is_absolute() else ROOT
         return load_source_provenance(source_root, candidate)
-    except (OSError, ValueError) as error:
-        raise ValueError("packaged Profile source provenance is invalid") from error
+    except SourceProvenanceError as error:
+        raise SourceProvenanceError(
+            error.code,
+            error.reason,
+            context="packaged Profile source provenance is invalid",
+        ) from None
+    except (OSError, TypeError, ValueError):
+        raise SourceProvenanceError(
+            PROVENANCE_ERROR_INVALID,
+            "source provenance could not be verified",
+            context="packaged Profile source provenance is invalid",
+        ) from None
 
 
 def _validate_staged_bundle(

@@ -255,8 +255,15 @@ def test_generator_rejects_unverified_source_revision(
         json.dumps(provenance, separators=(",", ":")), encoding="utf-8"
     )
     _SOURCE_PROVENANCE.chmod(0o400)
-    with pytest.raises(ValueError, match="full lowercase 40-hex identity"):
+    with pytest.raises(
+        generator_source_manifest.SourceProvenanceError,
+        match="full lowercase 40-hex identity",
+    ) as raised:
         _stage(source, bundle, artifacts)
+    assert raised.value.code == generator_source_manifest.PROVENANCE_ERROR_SOURCE_COMMIT
+    assert raised.value.reason == "source_commit must be a full lowercase 40-hex identity"
+    assert str(tmp_path) not in str(raised.value)
+    assert raised.value.__cause__ is None
 
 
 def test_generator_requires_exact_clean_snapshot_provenance(tmp_path: Path) -> None:
@@ -271,8 +278,41 @@ def test_generator_requires_exact_clean_snapshot_provenance(tmp_path: Path) -> N
         json.dumps(provenance, separators=(",", ":")), encoding="utf-8"
     )
     _SOURCE_PROVENANCE.chmod(0o400)
-    with pytest.raises(ValueError, match="source_clean"):
+    with pytest.raises(
+        generator_source_manifest.SourceProvenanceError,
+        match="source_clean",
+    ) as raised:
         _stage(source, bundle, artifacts)
+    assert raised.value.code == generator_source_manifest.PROVENANCE_ERROR_SOURCE_CLEAN
+    assert raised.value.reason == "source_clean must be true"
+    assert str(tmp_path) not in str(raised.value)
+    assert raised.value.__cause__ is None
+
+
+def test_generator_rejects_unverified_source_tree_without_leaking_paths(
+    tmp_path: Path,
+) -> None:
+    """The wrapper preserves a typed tree reason without exposing its path."""
+    bundle, artifacts = _bundle_roots(tmp_path)
+    source = _linux_source(tmp_path / "source")
+    assert _SOURCE_PROVENANCE is not None
+    provenance = json.loads(_SOURCE_PROVENANCE.read_text())
+    provenance["source_tree"] = "not-a-tree"
+    _SOURCE_PROVENANCE.chmod(0o600)
+    _SOURCE_PROVENANCE.write_text(
+        json.dumps(provenance, separators=(",", ":")), encoding="utf-8"
+    )
+    _SOURCE_PROVENANCE.chmod(0o400)
+
+    with pytest.raises(
+        generator_source_manifest.SourceProvenanceError,
+        match="full lowercase 40-hex identity",
+    ) as raised:
+        _stage(source, bundle, artifacts)
+    assert raised.value.code == generator_source_manifest.PROVENANCE_ERROR_SOURCE_TREE
+    assert raised.value.reason == "source_tree must be a full lowercase 40-hex identity"
+    assert str(tmp_path) not in str(raised.value)
+    assert raised.value.__cause__ is None
 
 
 def test_source_snapshot_lease_rejects_chmod_and_root_swap(tmp_path: Path) -> None:

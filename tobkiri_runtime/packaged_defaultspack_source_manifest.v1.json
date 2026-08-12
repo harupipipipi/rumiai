@@ -299,15 +299,15 @@
     {
       "path": "scripts/generate_packaged_defaultspack_v4_bundle.py",
       "type": "regular-file",
-      "size": 31801,
-      "sha256": "3424e63470bb550298a0e6927bfc60c2a32fbf33493f211d9e0cecd99ae8925b",
+      "size": 32387,
+      "sha256": "c69d0d3d9e4f16bad6a060b65823754f9683d669b32744749d4cffc309a26bad",
       "executable": false
     },
     {
       "path": "scripts/generator_source_manifest.py",
       "type": "regular-file",
-      "size": 26982,
-      "sha256": "0c0b37b24cdd39b12e40e84ca53e979b5a4e04bbf54a11d56a6869a0e24ce0cf",
+      "size": 32172,
+      "sha256": "02a10a7ca2d7b69945417bdcb16851057879d8aa2dd1fcfccd3404e8b407e651",
       "executable": false
     },
     {
