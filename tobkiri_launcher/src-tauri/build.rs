@@ -2463,21 +2463,46 @@ fn source_manifest_digests_from_lock(
         if !path.starts_with("packs/") || !path.ends_with(".pack.v4.json") {
             return Err(invalid_release("Defaults lock Pack path is not canonical"));
         }
-        let pack: serde_json::Value = serde_json::from_slice(&read_regular_file(
+        let pack_bytes = read_regular_file(
             &lock_path
                 .parent()
                 .ok_or_else(|| invalid_release("Defaults lock has no bundle root"))?
                 .join(relative),
             "generated Defaults Pack",
-        )?)
-        .map_err(|error| {
+        )?;
+        if byte_digest(&pack_bytes) != digest {
+            return Err(invalid_release(
+                "Defaults lock Pack digest differs from exact Pack bytes",
+            ));
+        }
+        let pack: serde_json::Value = serde_json::from_slice(&pack_bytes).map_err(|error| {
             invalid_release(format!("generated Defaults Pack is malformed: {error}"))
         })?;
+        let pack_object = pack
+            .as_object()
+            .ok_or_else(|| invalid_release("generated Defaults Pack must be an object"))?;
+        if pack_object.contains_key("pack_id")
+            || pack_object
+                .get("pack_api_version")
+                .and_then(serde_json::Value::as_str)
+                != Some("io.tobkiri.pack.v4")
+        {
+            return Err(invalid_release(
+                "generated Defaults Pack schema is not exactly io.tobkiri.pack.v4",
+            ));
+        }
         let pack_id = pack
-            .get("pack_id")
+            .get("pack")
+            .and_then(serde_json::Value::as_object)
+            .and_then(|object| object.get("id"))
             .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| invalid_release("generated Defaults Pack has no pack_id"))?
+            .ok_or_else(|| invalid_release("generated Defaults Pack has no pack.id"))?
             .to_owned();
+        if pack_id.is_empty() || pack_id.contains('\0') {
+            return Err(invalid_release(
+                "generated Defaults Pack pack.id is invalid",
+            ));
+        }
         if digests
             .insert(pack_id, serde_json::Value::String(digest.to_owned()))
             .is_some()
@@ -4571,20 +4596,22 @@ mod tests {
         let pack_path = defaultspack_lock_path
             .parent()
             .expect("lock has a parent")
-            .join("packs/fixture-base.pack.v4.json");
+            .join("packs/defaults-basepack.pack.v4.json");
         fs::create_dir_all(pack_path.parent().expect("Pack has a parent"))
             .expect("Pack fixture directory should exist");
-        fs::write(&pack_path, b"{\"pack_id\":\"fixture-base\"}\n")
-            .expect("Pack fixture should be writable");
-        let pack_digest = format!(
-            "sha256:{}",
-            byte_digest(&fs::read(&pack_path).expect("Pack should be readable"))
-        );
+        fs::write(
+            &pack_path,
+            include_bytes!(
+                "../../tobkiri_runtime/ecosystem/defaultspack/v4/packs/defaults-basepack.pack.v4.json"
+            ),
+        )
+        .expect("real Pack fixture should be writable");
+        let pack_digest = byte_digest(&fs::read(&pack_path).expect("Pack should be readable"));
         fs::write(
             &defaultspack_lock_path,
             serde_json::to_vec(&serde_json::json!({
                 "entries": [{
-                    "path": "packs/fixture-base.pack.v4.json",
+                    "path": "packs/defaults-basepack.pack.v4.json",
                     "kind": "pack",
                     "digest": pack_digest,
                 }]
@@ -4613,7 +4640,7 @@ mod tests {
         let mut catalog = serde_json::json!({
             "schema": PRESENTATION_CATALOG_SCHEMA,
             "default_profile_digest": default_profile_sha256,
-            "source_manifest_digests": { "fixture-base": pack_digest },
+            "source_manifest_digests": { "defaults-basepack": pack_digest },
             "default_selection": {
                 "base_pack_id": "fixture-base",
                 "shell_provider_id": "shell.tauri.default",
@@ -4918,12 +4945,12 @@ mod tests {
             match mutation {
                 "stale" | "wrong" => {
                     bindings.insert(
-                        "fixture-base".into(),
+                        "defaults-basepack".into(),
                         serde_json::Value::String(format!("sha256:{}", "0".repeat(64))),
                     );
                 }
                 "missing" => {
-                    bindings.remove("fixture-base");
+                    bindings.remove("defaults-basepack");
                 }
                 "extra" => {
                     bindings.insert(
@@ -4941,6 +4968,31 @@ mod tests {
             .expect_err("Pack binding mismatch must fail closed");
             assert!(error.to_string().contains("Pack set"));
         }
+    }
+
+    #[test]
+    fn lock_and_catalog_cannot_share_a_forged_pack_digest() {
+        let tree = TestTree::new("pack-binding-shared-forgery");
+        let (release_root, _, catalog_path) = release_fixture(&tree);
+        let lock_path = release_root.join("ecosystem/defaultspack/v4/bundle.lock.json");
+        let forged = format!("sha256:{}", "a".repeat(64));
+        let mut lock: serde_json::Value =
+            serde_json::from_slice(&fs::read(&lock_path).expect("lock fixture should be readable"))
+                .expect("lock fixture should parse");
+        lock["entries"][0]["digest"] = serde_json::Value::String(forged.clone());
+        fs::write(
+            &lock_path,
+            serde_json::to_vec(&lock).expect("lock should encode"),
+        )
+        .expect("forged lock should write");
+        let mut catalog: serde_json::Value = serde_json::from_slice(
+            &fs::read(&catalog_path).expect("catalog fixture should be readable"),
+        )
+        .expect("catalog fixture should parse");
+        catalog["source_manifest_digests"]["defaults-basepack"] = serde_json::Value::String(forged);
+        let error = verify_catalog_source_manifest_digests(&catalog, &lock_path)
+            .expect_err("shared forged digest must not authenticate Pack bytes");
+        assert!(error.to_string().contains("exact Pack bytes"));
     }
 
     #[cfg(target_os = "macos")]
