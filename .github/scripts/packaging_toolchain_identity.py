@@ -515,7 +515,7 @@ def _verify_clean_checkout(
         repository_root,
         "ls-files",
         "--others",
-        "--exclude-per-directory=.gitignore",
+        "-z",
         "--",
     )
     if untracked:

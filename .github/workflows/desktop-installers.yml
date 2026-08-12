@@ -240,10 +240,9 @@ jobs:
                   *git_arguments,
                   "ls-files",
                   "--others",
-                  "--exclude-per-directory=.gitignore",
+                  "-z",
                   "--",
               ],
-              text=True,
               env=git_environment,
           )
           if untracked:

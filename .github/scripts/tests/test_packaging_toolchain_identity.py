@@ -254,6 +254,10 @@ def test_formal_git_commands_do_not_execute_repository_drivers(
     )
     authority = repository / "authority.txt"
     tracked = repository / "tracked.txt"
+    (repository / ".gitignore").write_text(
+        ".cargo/\n.pythonrc.py\nsitecustomize.py\ntool-wrapper\nnested/\n",
+        encoding="utf-8",
+    )
     authority.write_bytes(b"trusted authority\n")
     tracked.write_bytes(b"AAAA\n")
     subprocess.run([git.path, "-C", repository, "add", "."], check=True)
@@ -299,15 +303,26 @@ def test_formal_git_commands_do_not_execute_repository_drivers(
         f"*.txt filter={driver} diff={driver}\n", encoding="utf-8"
     )
     (repository / ".git" / "info" / "exclude").write_text("*\n", encoding="utf-8")
-    untracked = repository / "must-be-detected.txt"
-    untracked.write_bytes(b"untracked\n")
+    ignored_untracked = (
+        repository / ".cargo" / "config.toml",
+        repository / ".pythonrc.py",
+        repository / "sitecustomize.py",
+        repository / "tool-wrapper",
+        repository / "nested" / "build.rs",
+    )
+    for untracked in ignored_untracked:
+        untracked.parent.mkdir(parents=True, exist_ok=True)
+        untracked.write_bytes(b"must be rejected despite .gitignore\n")
 
     with pytest.raises(ToolIdentityError, match="untracked paths"):
         _MODULE.smoke_git_authority(
             git, repository, commit, _MODULE.PurePosixPath("authority.txt")
         )
     assert not marker.exists()
-    untracked.unlink()
+    shutil.rmtree(repository / ".cargo")
+    shutil.rmtree(repository / "nested")
+    for untracked in ignored_untracked[1:4]:
+        untracked.unlink()
     tracked.write_bytes(b"BBBB\n")
 
     with pytest.raises(ToolIdentityError, match="tracked file bytes changed"):
@@ -955,7 +970,9 @@ def test_workflows_smoke_fixed_isolated_git_authority(workflow_name: str) -> Non
     assert '"--no-ext-diff"' in source
     assert '"--no-textconv"' in source
     assert '"ls-files"' in source
-    assert '"--exclude-per-directory=.gitignore"' in source
+    assert '"-z"' in source
+    assert "exclude-standard" not in source
+    assert "exclude-per-directory" not in source
     assert '"status"' not in smoke
 
 
@@ -985,6 +1002,17 @@ def test_formal_git_environment_contract_is_identical_across_consumers() -> None
     assert '"diff-index"' in revision
     assert '"--cached"' in revision
     assert '"status"' not in revision
+    assert '"ls-files", "--others", "-z", "--"' in revision
+    assert "exclude-standard" not in build_source
+    assert "exclude-per-directory" not in build_source
+    provenance = build_source[
+        build_source.index("fn current_source_provenance") : build_source.index(
+            "fn expected_target"
+        )
+    ]
+    assert "remote.origin.url" not in provenance
+    assert "SOURCE_AUTHORITY_PATH" in provenance
+    assert 'args(["show", &object])' in provenance
     assert "filter.review" not in python_source
     assert "filter.review" not in rust_source
     for workflow_name in ("release.yml", "desktop-installers.yml"):
@@ -994,6 +1022,8 @@ def test_formal_git_environment_contract_is_identical_across_consumers() -> None
         assert '"GIT_CEILING_DIRECTORIES": os.environ["GITHUB_WORKSPACE"]' in payload
         assert "filter.review" not in payload
         assert '"status", "--porcelain' not in payload
+        assert "exclude-standard" not in payload
+        assert "exclude-per-directory" not in payload
 
 
 @pytest.mark.parametrize("workflow_name", ["release.yml", "desktop-installers.yml"])

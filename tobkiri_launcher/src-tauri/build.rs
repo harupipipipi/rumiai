@@ -21,6 +21,7 @@ use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
 const APP_SOURCE_DIR: &str = "tobkiri_runtime";
+const SOURCE_AUTHORITY_PATH: &str = "tobkiri_runtime/docs/PACK_ARCHITECTURE_DESIGN_INPUTS.json";
 const PRESENTATION_RELEASE_ROOT_ENV: &str = "TOBKIRI_PRESENTATION_RELEASE_ROOT";
 const PRESENTATION_CATALOG_FILENAME: &str = "presentation_catalog.json";
 const PRESENTATION_RELEASE_FILENAME: &str = "presentation_release.v4.json";
@@ -1218,6 +1219,51 @@ fn source_identity_from_remote(remote: &str) -> String {
     format!("git:{remote}")
 }
 
+#[derive(serde::Deserialize)]
+struct VersionedSourceAuthority {
+    schema: String,
+    status: String,
+    repository: String,
+}
+
+fn source_provenance_from_blob(blob: &[u8], revision: &str) -> io::Result<(String, String)> {
+    if revision.len() != 40
+        || !revision
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(invalid_release(format!(
+            "source revision is not a full lowercase commit SHA: {revision}"
+        )));
+    }
+    let authority: VersionedSourceAuthority = serde_json::from_slice(blob).map_err(|error| {
+        invalid_release(format!(
+            "versioned source authority is invalid JSON: {error}"
+        ))
+    })?;
+    if authority.schema != "io.tobkiri.architecture.design-inputs.v1"
+        || authority.status != "normative-provenance"
+    {
+        return Err(invalid_release(
+            "versioned source authority schema/status is invalid",
+        ));
+    }
+    let upstream = source_identity_from_remote(&authority.repository);
+    if !upstream.starts_with("github:")
+        || upstream.contains(char::is_whitespace)
+        || upstream.contains(['?', '#'])
+    {
+        return Err(invalid_release(
+            "versioned source authority repository is not canonical GitHub identity",
+        ));
+    }
+    let authority_digest = format!("{:x}", Sha256::digest(blob));
+    Ok((
+        format!("{upstream}@sha256:{authority_digest}"),
+        revision.to_owned(),
+    ))
+}
+
 fn current_source_provenance() -> io::Result<(String, String)> {
     let project_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let repo_root = project_dir
@@ -1229,21 +1275,20 @@ fn current_source_provenance() -> io::Result<(String, String)> {
         &["rev-parse", "--verify", "HEAD"],
         "source revision",
     )?;
-    if revision.len() != 40
-        || !revision
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-    {
-        return Err(invalid_release(format!(
-            "source revision is not a full lowercase commit SHA: {revision}"
-        )));
+    let git = packaging_toolchain::verified_tool("git")?;
+    let object = format!("{revision}:{SOURCE_AUTHORITY_PATH}");
+    let authority = git
+        .command()?
+        .args(["show", &object])
+        .current_dir(repo_root)?
+        .output()
+        .map_err(|error| invalid_release(format!("failed to read source authority: {error}")))?;
+    if !authority.status.success() {
+        return Err(invalid_release(
+            "versioned source authority is absent from the source commit",
+        ));
     }
-    let remote = git_value(
-        repo_root,
-        &["config", "--get", "remote.origin.url"],
-        "source identity",
-    )?;
-    Ok((source_identity_from_remote(&remote), revision))
+    source_provenance_from_blob(&authority.stdout, &revision)
 }
 
 fn expected_target() -> io::Result<(String, String)> {
@@ -3016,12 +3061,7 @@ fn current_source_revision(repository_root: &Path) -> io::Result<String> {
     verify_tracked_worktree_bytes(&git, repository_root, &value)?;
     let untracked = git
         .command()?
-        .args([
-            "ls-files",
-            "--others",
-            "--exclude-per-directory=.gitignore",
-            "--",
-        ])
+        .args(["ls-files", "--others", "-z", "--"])
         .current_dir(repository_root)?
         .output()
         .map_err(|error| invalid_release(format!("failed to inspect untracked source: {error}")))?;
@@ -3030,12 +3070,56 @@ fn current_source_revision(repository_root: &Path) -> io::Result<String> {
             "source checkout untracked inventory could not be verified",
         ));
     }
-    if !untracked.stdout.is_empty() {
-        return Err(invalid_release(
-            "production source revision cannot describe untracked paths",
-        ));
+    for encoded in untracked
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+    {
+        let relative = std::str::from_utf8(encoded)
+            .map_err(|_| invalid_release("untracked source path is not UTF-8"))?;
+        verify_allowed_generated_untracked(repository_root, relative)?;
     }
     Ok(value)
+}
+
+fn verify_allowed_generated_untracked(repository_root: &Path, relative: &str) -> io::Result<()> {
+    const GENERATED_ROOTS: &[(&str, bool)] = &[
+        ("pack-shell/target", false),
+        ("tobkiri_launcher/src-tauri/target", false),
+        ("tobkiri_launcher/frontend/node_modules", true),
+        (
+            "tobkiri_runtime/ecosystem/defaultspack/webapp/node_modules",
+            true,
+        ),
+        ("tobkiri_runtime/ecosystem/defaultspack/webapp/dist", false),
+    ];
+    let relative_path = safe_release_relative_path(relative, "untracked source path")?;
+    let (root, allow_symlink) = GENERATED_ROOTS
+        .iter()
+        .find(|(root, _)| relative == *root || relative.starts_with(&format!("{root}/")))
+        .copied()
+        .ok_or_else(|| {
+            invalid_release(format!(
+                "production source revision cannot describe untracked path: {relative}"
+            ))
+        })?;
+    let root_path = repository_root.join(root);
+    let root_metadata = fs::symlink_metadata(&root_path)?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return Err(invalid_release(format!(
+            "generated untracked root has unsafe type: {root}"
+        )));
+    }
+    let metadata = fs::symlink_metadata(repository_root.join(relative_path))?;
+    if !(metadata.is_file()
+        || metadata.is_dir()
+        || (allow_symlink && metadata.file_type().is_symlink()))
+    {
+        return Err(invalid_release(format!(
+            "generated untracked path has unsafe type: {relative}"
+        )));
+    }
+    Ok(())
 }
 
 fn verify_tracked_worktree_bytes(
@@ -4376,6 +4460,44 @@ mod tests {
                 std::env::remove_var(self.key);
             }
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn production_source_provenance_uses_versioned_head_blob_without_local_config() {
+        let _environment = environment_lock();
+        let git = Path::new("/Library/Developer/CommandLineTools/usr/bin/git");
+        assert!(git.is_file(), "formal Command Line Tools Git is required");
+        let digest = format!("{:x}", Sha256::digest(fs::read(git).unwrap()));
+        let _git_path = EnvironmentGuard::set_path(packaging_toolchain::GIT_PATH_ENV, git);
+        let _git_digest = EnvironmentGuard::set_value(packaging_toolchain::GIT_SHA256_ENV, &digest);
+        let (identity, revision) =
+            current_source_provenance().expect("versioned HEAD provenance should resolve");
+        let (_, authority_digest) = identity
+            .split_once("@sha256:")
+            .expect("source identity should bind its authority blob digest");
+        assert!(identity.starts_with("github:"));
+        assert_eq!(authority_digest.len(), 64);
+        assert!(authority_digest
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit()));
+        assert_eq!(revision.len(), 40);
+    }
+
+    #[test]
+    fn generated_untracked_allowlist_is_exact_and_type_checked() {
+        let tree = TestTree::new("generated-untracked-allowlist");
+        let allowed_root = tree.path().join("pack-shell/target");
+        fs::create_dir_all(&allowed_root).unwrap();
+        fs::write(allowed_root.join("artifact"), b"generated").unwrap();
+        verify_allowed_generated_untracked(tree.path(), "pack-shell/target/artifact")
+            .expect("exact generated output should be allowed");
+
+        let cargo = tree.path().join(".cargo");
+        fs::create_dir_all(&cargo).unwrap();
+        fs::write(cargo.join("config.toml"), b"[build]\nrustc='attacker'\n").unwrap();
+        verify_allowed_generated_untracked(tree.path(), ".cargo/config.toml")
+            .expect_err("authority-affecting untracked config must be rejected");
     }
 
     fn write_pack_shell_fixture(root: &Path, target: &str, profile: &str) -> PathBuf {
