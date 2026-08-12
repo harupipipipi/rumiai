@@ -59,6 +59,34 @@ def _catalog_with_second_profile(catalog: BundledCatalog) -> BundledCatalog:
     )
 
 
+def _resolved_with_added_pack(active_runtime, catalog: BundledCatalog, pack_id: str):
+    manifest = catalog.packs[pack_id]
+    artifact_digest = manifest["pack"]["artifact_digest"]
+    profile = {
+        **active_runtime.resolved.profile,
+        "packs": [
+            *active_runtime.resolved.profile["packs"],
+            {
+                "pack_id": pack_id,
+                "artifact_digest": artifact_digest,
+                "role": "provider",
+            },
+        ],
+    }
+    profile_lock = {
+        **active_runtime.resolved.lock,
+        "effective_set": [
+            *active_runtime.resolved.lock["effective_set"],
+            {
+                "identity": pack_id,
+                "artifact_digest": artifact_digest,
+                "role": "pack",
+            },
+        ],
+    }
+    return replace(active_runtime.resolved, profile=profile, lock=profile_lock)
+
+
 def test_multiple_profile_projection_has_exact_bindings_and_active_marker(
     active_runtime,
 ) -> None:
@@ -104,6 +132,89 @@ def test_catalog_refresh_exposes_new_profile_without_changing_active_pointer(
     assert result["data"]["active_profile_id"] == "defaults"
     assert result["data"]["count"] == 2
     assert active_runtime.activation == before_activation
+
+
+def test_active_catalog_projects_exact_profile_lock_closure_and_current_records(
+    active_runtime,
+) -> None:
+    catalog = BundledCatalog.load(_bundle_root())
+    pack_id = "dev.tauri.toolchain.default"
+    resolved = _resolved_with_added_pack(active_runtime, catalog, pack_id)
+    active = replace(active_runtime, resolved=resolved)
+
+    projected = project_profile_catalog(catalog, active)["profiles"][0]
+    closure = {item["pack_id"]: item for item in projected["pack_closure"]}
+
+    assert pack_id not in {item["pack_id"] for item in catalog.profiles["defaults"]["packs"]}
+    assert closure[pack_id]["role"] == "provider"
+    assert (
+        closure[pack_id]["artifact_digest"] == (catalog.packs[pack_id]["pack"]["artifact_digest"])
+    )
+    assert resolved.profile["profile_api_version"] == "io.tobkiri.profile.v5"
+    assert resolved.lock["lock_api_version"] == "io.tobkiri.profile-lock.v5"
+    assert resolved.plan["plan_api_version"] == "io.tobkiri.resolved-plan.v2"
+    assert active.activation["activation_api_version"] == ("io.tobkiri.activation-record.v2")
+
+
+def test_catalog_restores_session_candidate_and_pack_closure_after_restart(
+    active_runtime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = BundledCatalog.load(_bundle_root())
+    pack_id = "dev.tauri.toolchain.default"
+    resolved_with_pack = _resolved_with_added_pack(active_runtime, catalog, pack_id)
+    monkeypatch.setattr(
+        "core_runtime.pack_control_v4.resolve_profile_pack_set",
+        lambda _pack_ids: resolved_with_pack,
+    )
+    first_surface = RuntimeSurfaceService(
+        snapshot_loader=lambda: active_runtime,
+        catalog_loader=lambda: catalog,
+    )
+    resolved = RuntimeProfileChangeService(surface_service=first_surface).resolve(
+        {
+            "profile_id": "defaults",
+            "expected_profile_revision": active_runtime.resolved.plan["profile_revision"],
+            "expected_plan_digest": active_runtime.resolved.plan["plan_digest"],
+            "desired_pack_ids": ["defaultspack", pack_id],
+        },
+        session_id="session-catalog-restart",
+    )
+
+    restarted_surface = RuntimeSurfaceService(
+        snapshot_loader=lambda: active_runtime,
+        catalog_loader=lambda: catalog,
+    )
+    candidate = restarted_surface.read_profile_catalog(session_id="session-catalog-restart")[
+        "data"
+    ]["profiles"][0]
+    isolated = restarted_surface.read_profile_catalog(session_id="other-session")["data"][
+        "profiles"
+    ][0]
+
+    assert candidate["candidate"] == {
+        "state": "resolved",
+        "candidate_id": resolved["candidate_id"],
+        "candidate_digest": resolved["candidate_digest"],
+        "expires_at": candidate["candidate"]["expires_at"],
+    }
+    assert candidate["candidate"]["expires_at"].endswith("Z")
+    assert pack_id in {item["pack_id"] for item in candidate["pack_closure"]}
+    assert isolated["candidate"]["state"] == "not_staged"
+    assert pack_id not in {item["pack_id"] for item in isolated["pack_closure"]}
+
+    RuntimeProfileChangeService(surface_service=restarted_surface).review(
+        {
+            "candidate_id": resolved["candidate_id"],
+            "candidate_digest": resolved["candidate_digest"],
+        },
+        session_id="session-catalog-restart",
+    )
+    after_review = RuntimeSurfaceService(
+        snapshot_loader=lambda: active_runtime,
+        catalog_loader=lambda: catalog,
+    ).read_profile_catalog(session_id="session-catalog-restart")["data"]["profiles"][0]
+    assert after_review["candidate"]["state"] == "reviewed"
 
 
 def test_catalog_binding_rejects_unknown_stale_and_tampered_profiles() -> None:

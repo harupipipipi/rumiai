@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
@@ -45,6 +46,8 @@ def profile_definition_digest(catalog: BundledCatalog, profile_id: str) -> str:
 def project_profile_catalog(
     catalog: BundledCatalog,
     active: ActiveDefaultProfile,
+    *,
+    candidates: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, object]:
     """Project all admitted Profile definitions without changing active state."""
 
@@ -65,6 +68,11 @@ def project_profile_catalog(
             active_plan_digest=active_plan_digest,
             active_lock_digest=active_lock_digest,
             active_authority_digest=active_authority_digest,
+            active_profile=active.resolved.profile if profile_id == active_profile_id else None,
+            active_effective_set=(
+                active.resolved.lock["effective_set"] if profile_id == active_profile_id else None
+            ),
+            candidate=(candidates or {}).get(profile_id),
         )
         for profile_id, definition in sorted(catalog.profiles.items())
     ]
@@ -114,6 +122,9 @@ def _project_definition(
     active_plan_digest: str,
     active_lock_digest: str,
     active_authority_digest: str,
+    active_profile: Mapping[str, Any] | None,
+    active_effective_set: object,
+    candidate: Mapping[str, Any] | None,
 ) -> dict[str, object]:
     diagnostics: list[dict[str, str]] = []
     base_id = str(definition["base"]["pack_id"])
@@ -132,8 +143,7 @@ def _project_definition(
         if presentation["family"] not in requirements["presentation_families"]:
             diagnostics.append({"code": "SHELL_FAMILY_INCOMPATIBLE", "subject": shell_id})
         missing_capabilities = sorted(
-            set(requirements["required_capabilities"])
-            - set(presentation["capabilities"])
+            set(requirements["required_capabilities"]) - set(presentation["capabilities"])
         )
         diagnostics.extend(
             {"code": "SHELL_CAPABILITY_MISSING", "subject": capability}
@@ -174,8 +184,30 @@ def _project_definition(
         ):
             diagnostics.append({"code": "APPLICATION_KIND_INVALID", "subject": pack_id})
 
-    closure = _static_pack_closure(catalog, base_id, shell, requested, diagnostics)
     is_active = profile_id == active_profile_id
+    candidate_review = candidate.get("review") if isinstance(candidate, Mapping) else None
+    candidate_profile = (
+        candidate_review.get("profile") if isinstance(candidate_review, Mapping) else None
+    )
+    candidate_lock = (
+        candidate_review.get("profile_lock") if isinstance(candidate_review, Mapping) else None
+    )
+    if isinstance(candidate_profile, Mapping) and isinstance(candidate_lock, Mapping):
+        closure = _resolved_pack_closure(
+            catalog,
+            candidate_profile,
+            candidate_lock.get("effective_set"),
+            diagnostics,
+        )
+    elif is_active and active_profile is not None:
+        closure = _resolved_pack_closure(
+            catalog,
+            active_profile,
+            active_effective_set,
+            diagnostics,
+        )
+    else:
+        closure = _static_pack_closure(catalog, base_id, shell, requested, diagnostics)
     provenance = dict(definition["provenance"])
     definition_digest = canonical_digest(definition)
     return {
@@ -214,12 +246,69 @@ def _project_definition(
             "definition_references": list(definition["authority_references"]),
         },
         "candidate": {
-            "state": "not_staged",
-            "candidate_id": None,
-            "candidate_digest": None,
-            "expires_at": None,
+            "state": str(candidate["state"]) if candidate is not None else "not_staged",
+            "candidate_id": (str(candidate["candidate_id"]) if candidate is not None else None),
+            "candidate_digest": (
+                str(candidate["candidate_digest"]) if candidate is not None else None
+            ),
+            "expires_at": (
+                datetime.fromtimestamp(float(candidate["expires_at"]), timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z")
+                if candidate is not None
+                else None
+            ),
         },
     }
+
+
+def _resolved_pack_closure(
+    catalog: BundledCatalog,
+    profile: Mapping[str, Any],
+    effective_set: object,
+    diagnostics: list[dict[str, str]],
+) -> list[dict[str, object]]:
+    """Project the exact resolved ProfileLock closure without re-resolving it."""
+
+    if not isinstance(effective_set, list):
+        diagnostics.append({"code": "PROFILE_LOCK_CLOSURE_INVALID", "subject": "effective_set"})
+        return []
+    roles = {
+        str(profile["base"]["pack_id"]): "base",
+        str(profile["shell"]["pack_id"]): "shell",
+    }
+    roles.update(
+        {str(item["pack_id"]): str(item.get("role") or "provider") for item in profile["packs"]}
+    )
+    result: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for item in effective_set:
+        if not isinstance(item, Mapping):
+            diagnostics.append({"code": "PROFILE_LOCK_CLOSURE_INVALID", "subject": "effective_set"})
+            continue
+        pack_id = str(item.get("identity") or "")
+        digest = str(item.get("artifact_digest") or "")
+        manifest = catalog.packs.get(pack_id)
+        if not pack_id or pack_id in seen:
+            diagnostics.append({"code": "PACK_DUPLICATE", "subject": pack_id or "effective_set"})
+            continue
+        seen.add(pack_id)
+        if manifest is None:
+            diagnostics.append({"code": "PACK_UNAVAILABLE", "subject": pack_id})
+            continue
+        if digest != str(manifest["pack"]["artifact_digest"]):
+            diagnostics.append({"code": "PACK_DIGEST_MISMATCH", "subject": pack_id})
+            continue
+        result.append(
+            {
+                "pack_id": pack_id,
+                "role": roles.get(pack_id, "dependency"),
+                "version": str(manifest["pack"]["version"]),
+                "artifact_digest": digest,
+                "artifact_ref": f"pack-v4://{pack_id}@{digest}",
+            }
+        )
+    return sorted(result, key=lambda row: str(row["pack_id"]))
 
 
 def _static_pack_closure(

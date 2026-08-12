@@ -806,24 +806,54 @@ class RuntimeSurfaceService:
         deadline.checkpoint()
         return self._read_envelope(snapshot, surface="profile", data=data)
 
-    def read_profile_catalog(self) -> dict[str, object]:
+    def read_profile_catalog(self, *, session_id: str | None = None) -> dict[str, object]:
         """Return all verified Profile definitions without changing selection."""
 
         return self._run_read(
             "canonical Profile catalog timed out",
-            self._read_profile_catalog,
+            lambda deadline: self._read_profile_catalog(
+                deadline,
+                session_id=session_id,
+            ),
         )
 
-    def _read_profile_catalog(self, deadline: _ReadDeadline) -> dict[str, object]:
+    def _read_profile_catalog(
+        self,
+        deadline: _ReadDeadline,
+        *,
+        session_id: str | None,
+    ) -> dict[str, object]:
         try:
             deadline.checkpoint()
             active = self._snapshot_loader()
             deadline.checkpoint()
             catalog = self._catalog_loader()
             deadline.checkpoint()
+            candidate_records: tuple[Mapping[str, Any], ...] = ()
+            if session_id is not None:
+                from .bootstrap.profile_capture import runtime_user_data_root
+                from .control_reconciliation_v4 import ControlReconciliationStore
+
+                candidate_records = ControlReconciliationStore(
+                    runtime_user_data_root() / "control" / "reconciliation-v4.sqlite3"
+                ).profile_candidates(session_id=session_id)
+                deadline.checkpoint()
+            candidate_map = {
+                str(record["review"]["profile"]["profile_id"]): record
+                for record in candidate_records
+            }
+            effective_sets: list[object] = [active.resolved.lock["effective_set"]]
+            effective_sets.extend(
+                record["review"]["profile_lock"]["effective_set"] for record in candidate_records
+            )
+            catalog = _catalog_for_effective_sets(catalog, effective_sets)
             from .profile_catalog_v4 import project_profile_catalog
 
-            projection = project_profile_catalog(catalog, active)
+            projection = project_profile_catalog(
+                catalog,
+                active,
+                candidates=candidate_map,
+            )
         except ProfileResolutionDenied as error:
             raise _map_profile_error(error) from error
         except RuntimeSurfaceError:
@@ -1947,11 +1977,45 @@ def _catalog_for_active_closure(
 ) -> BundledCatalog:
     """Add only admitted external manifests selected by the verified lock."""
 
-    missing = {
-        str(item["identity"])
-        for item in active.resolved.lock["effective_set"]
-        if str(item["identity"]) not in catalog.packs
-    }
+    return _catalog_for_effective_sets(
+        catalog,
+        (active.resolved.lock["effective_set"],),
+    )
+
+
+def _catalog_for_effective_sets(
+    catalog: BundledCatalog,
+    effective_sets: object,
+) -> BundledCatalog:
+    """Add admitted external manifests required by exact resolved closures."""
+
+    expected: dict[str, str] = {}
+    if not isinstance(effective_sets, (list, tuple)):
+        raise RuntimeSurfaceError(
+            RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
+            "resolved Profile closure is invalid",
+        )
+    for effective_set in effective_sets:
+        if not isinstance(effective_set, list):
+            raise RuntimeSurfaceError(
+                RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
+                "resolved Profile closure is invalid",
+            )
+        for item in effective_set:
+            if not isinstance(item, Mapping):
+                raise RuntimeSurfaceError(
+                    RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
+                    "resolved Profile closure entry is invalid",
+                )
+            pack_id = str(item.get("identity") or "")
+            digest = str(item.get("artifact_digest") or "")
+            prior = expected.setdefault(pack_id, digest)
+            if not pack_id or prior != digest:
+                raise RuntimeSurfaceError(
+                    RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
+                    "resolved Profile closure identity is inconsistent",
+                )
+    missing = {pack_id for pack_id in expected if pack_id not in catalog.packs}
     if not missing:
         return catalog
     from .external_pack_catalog_v4 import resolve_admitted_pack_root
@@ -1972,7 +2036,10 @@ def _catalog_for_active_closure(
                 RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
                 "selected external Pack manifest is invalid",
             ) from error
-        if manifest["pack"]["id"] != pack_id:
+        if (
+            manifest["pack"]["id"] != pack_id
+            or manifest["pack"]["artifact_digest"] != expected[pack_id]
+        ):
             raise RuntimeSurfaceError(
                 RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
                 "selected external Pack identity does not match",
@@ -1984,6 +2051,7 @@ def _catalog_for_active_closure(
         bases=catalog.bases,
         shells=catalog.shells,
         profiles=catalog.profiles,
+        artifact_root=catalog.artifact_root,
     )
 
 

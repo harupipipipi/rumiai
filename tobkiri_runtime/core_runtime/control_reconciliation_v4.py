@@ -1114,6 +1114,49 @@ class ControlReconciliationStore:
             raise ControlReconciliationError("candidate digest belongs to another session")
         return record
 
+    def profile_candidates(
+        self,
+        *,
+        session_id: str,
+        now: float | None = None,
+    ) -> tuple[Mapping[str, Any], ...]:
+        """Return the newest unexpired ceremony per Profile for one session."""
+
+        if not self.path.exists():
+            return ()
+        session_digest = self.session_digest(session_id)
+        current_time = self._clock() if now is None else float(now)
+        try:
+            with self._connect_existing() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM profile_ceremonies
+                    WHERE session_digest=? AND expires_at>? AND state!='activated'
+                    ORDER BY updated_at DESC, candidate_id DESC
+                    """,
+                    (session_digest, current_time),
+                ).fetchall()
+        except ControlReconciliationError:
+            raise
+        except (OSError, sqlite3.Error) as error:
+            raise ControlReconciliationUnavailableError(
+                "Profile ceremony catalog read failed"
+            ) from error
+        records: list[Mapping[str, Any]] = []
+        seen_profiles: set[str] = set()
+        for row in rows:
+            record = _ceremony_record(row)
+            if record is None:
+                continue
+            review = _mapping(record.get("review"), "review")
+            profile = _mapping(review.get("profile"), "Profile")
+            profile_id = _required(profile.get("profile_id"), "Profile identity")
+            if profile_id in seen_profiles:
+                continue
+            seen_profiles.add(profile_id)
+            records.append(record)
+        return tuple(records)
+
     def transition_reviewed(
         self, candidate_id: str, candidate_digest: str, *, session_id: str
     ) -> Mapping[str, Any]:

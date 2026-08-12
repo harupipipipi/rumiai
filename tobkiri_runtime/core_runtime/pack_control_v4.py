@@ -297,7 +297,9 @@ class CapturedPackControlSession:
                 ) | _require_empty(arguments)
             if operation_id == "profile.catalog.read":
                 _require_empty(arguments)
-                return self._runtime_surface.read_profile_catalog()
+                return self._runtime_surface.read_profile_catalog(
+                    session_id=_panel_session_root(session_id)
+                )
             if operation_id == "operation.status.read":
                 request_id = _required(
                     arguments.pop("request_id", None),
