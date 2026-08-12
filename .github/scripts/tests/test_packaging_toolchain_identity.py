@@ -912,7 +912,14 @@ def _installation_helper(
     caller_groups: tuple[int, ...] = (),
 ) -> subprocess.CompletedProcess[bytes]:
     staging = parent.parent / f"{_MODULE.STAGING_PREFIX}{token}"
-    staging.mkdir(mode=0o700, exist_ok=True)
+    if privileged:
+        if not staging.exists():
+            subprocess.run(
+                ["/usr/bin/sudo", "-n", "/bin/mkdir", "-m", "0500", staging],
+                check=True,
+            )
+    else:
+        staging.mkdir(mode=0o700, exist_ok=True)
     owner_uid = os.getuid() if owner_uid is None else owner_uid
     arguments = [sys.executable, "-I", "-B", "-c", code]
     if privileged:
@@ -1588,6 +1595,7 @@ def test_existing_unowned_version_leaf_fails_closed(tmp_path: Path) -> None:
         "",
         "after_mkdir",
         "after_displacement_journal",
+        "after_leaf_seal",
         "after_displacement",
         "after_rename",
     ],
@@ -1618,6 +1626,56 @@ def test_host_leaf_is_quarantined_and_restored_by_exact_inode(
     assert marker.read_bytes() == b"preserve host Python"
     assert (fixed.stat().st_dev, fixed.stat().st_ino) == original
     assert not (parent / f"{_MODULE.DISPLACED_PREFIX}{token}").exists()
+
+
+def test_python_org_admin_writable_host_leaf_is_sealed_and_restored(
+    tmp_path: Path,
+) -> None:
+    """The official root:admin 0775 leaf is sealed without trusting its bytes."""
+    parent = tmp_path / "versions"
+    fixed = parent / "3.13"
+    fixed.mkdir(parents=True)
+    fixed.chmod(0o775)
+    marker = fixed / "host-marker"
+    marker.write_bytes(b"untrusted host Python")
+    token = "a" * 32
+    caller_groups = tuple({os.getegid(), *os.getgroups()})
+
+    created = _installation_helper(
+        _MODULE.ROOT_CREATE_INSTALLATION_CODE,
+        parent,
+        token,
+        caller_uid=2**31 - 1,
+        caller_groups=caller_groups,
+    )
+    assert created.returncode == 0, created.stderr
+    displaced = parent / f"{_MODULE.DISPLACED_PREFIX}{token}"
+    assert displaced.stat().st_mode & 0o7777 == 0o700
+    assert _recovery_helper(parent, "b" * 32).returncode == 0
+    assert fixed.stat().st_mode & 0o7777 == 0o775
+    assert marker.read_bytes() == b"untrusted host Python"
+
+
+def test_world_writable_host_leaf_is_not_quarantined(tmp_path: Path) -> None:
+    """Only the Python.org group-write shape is sealable; other-write is not."""
+    parent = tmp_path / "versions"
+    fixed = parent / "3.13"
+    fixed.mkdir(parents=True)
+    fixed.chmod(0o777)
+    marker = fixed / "host-marker"
+    marker.write_bytes(b"preserve")
+
+    result = _installation_helper(
+        _MODULE.ROOT_CREATE_INSTALLATION_CODE,
+        parent,
+        "c" * 32,
+        caller_uid=2**31 - 1,
+        caller_groups=tuple({os.getegid(), *os.getgroups()}),
+    )
+    assert result.returncode != 0
+    assert b"caller_write=1" in result.stderr
+    assert fixed.stat().st_mode & 0o7777 == 0o777
+    assert marker.read_bytes() == b"preserve"
 
 
 def test_existing_symlink_is_never_displaced_or_followed(tmp_path: Path) -> None:
@@ -1843,7 +1901,7 @@ def test_root_process_lock_excludes_concurrency_and_releases_after_kill() -> Non
         _MODULE._remove_root_tree(parent, parent_identity)
 
 
-def test_root_process_preserves_preinstalled_framework_leaf(tmp_path: Path) -> None:
+def test_root_process_preserves_preinstalled_framework_leaf() -> None:
     """The CI root path quarantines then restores the exact host Framework inode."""
     sudo = subprocess.run(
         ["/usr/bin/sudo", "-n", "/usr/bin/true"],
@@ -1855,15 +1913,17 @@ def test_root_process_preserves_preinstalled_framework_leaf(tmp_path: Path) -> N
         if _REQUIRE_ROOT_PROCESS_TESTS:
             pytest.fail("passwordless sudo is required for Framework displacement test")
         pytest.skip("passwordless sudo is unavailable")
-    parent = tmp_path / "versions"
+    fixture_root = Path("/private/tmp") / (
+        f"tobkiri-packaging-framework-test-{secrets.token_hex(16)}"
+    )
+    parent = fixture_root / "versions"
     fixed = parent / "3.13"
-    staging = tmp_path / "staging"
     fixed.mkdir(parents=True)
-    staging.mkdir()
     marker = fixed / "host-marker"
     marker.write_bytes(b"host Framework")
     token = "6" * 32
     groups = tuple({os.getegid(), *os.getgroups()})
+    fixture_identity = (fixture_root.stat().st_dev, fixture_root.stat().st_ino)
     try:
         subprocess.run(
             [
@@ -1872,15 +1932,19 @@ def test_root_process_preserves_preinstalled_framework_leaf(tmp_path: Path) -> N
                 "/usr/sbin/chown",
                 "-R",
                 "root:wheel",
-                parent,
-                staging,
+                fixture_root,
             ],
             check=True,
         )
         subprocess.run(
-            ["/usr/bin/sudo", "-n", "/bin/chmod", "0555", parent, fixed, staging],
+            ["/usr/bin/sudo", "-n", "/bin/chmod", "0555", fixture_root, parent],
             check=True,
         )
+        subprocess.run(
+            ["/usr/bin/sudo", "-n", "/usr/sbin/chown", "root:admin", fixed],
+            check=True,
+        )
+        subprocess.run(["/usr/bin/sudo", "-n", "/bin/chmod", "0775", fixed], check=True)
         created = _installation_helper(
             _MODULE.ROOT_CREATE_INSTALLATION_CODE,
             parent,
@@ -1900,25 +1964,68 @@ def test_root_process_preserves_preinstalled_framework_leaf(tmp_path: Path) -> N
             caller_groups=groups,
         )
         assert recovered.returncode == 0, recovered.stderr
+        assert fixed.stat().st_mode & 0o7777 == 0o775
         restored = subprocess.run(
             ["/usr/bin/sudo", "-n", "/bin/cat", marker],
             stdout=subprocess.PIPE,
             check=True,
         )
         assert restored.stdout == b"host Framework"
-    finally:
+
         subprocess.run(
             [
                 "/usr/bin/sudo",
                 "-n",
                 "/usr/sbin/chown",
-                "-R",
-                f"{os.getuid()}:{os.getgid()}",
-                tmp_path,
+                f"{os.geteuid()}:{os.getegid()}",
+                fixed,
             ],
             check=True,
         )
-        subprocess.run(["/bin/chmod", "-R", "u+rwX", tmp_path], check=True)
+        same_uid = _installation_helper(
+            _MODULE.ROOT_CREATE_INSTALLATION_CODE,
+            parent,
+            "7" * 32,
+            privileged=True,
+            owner_uid=0,
+            caller_uid=os.geteuid(),
+            caller_groups=groups,
+        )
+        assert same_uid.returncode != 0
+        assert b"unsafe existing fixed prefix authority" in same_uid.stderr
+        assert f"uid={os.geteuid()}".encode() in same_uid.stderr
+
+        subprocess.run(
+            ["/usr/bin/sudo", "-n", "/usr/sbin/chown", "root:admin", fixed],
+            check=True,
+        )
+        caller_name = subprocess.run(
+            ["/usr/bin/id", "-un"],
+            stdout=subprocess.PIPE,
+            text=True,
+            check=True,
+            env={"PATH": "/usr/bin:/bin"},
+        ).stdout.strip()
+        acl_entry = f"{caller_name} allow write,delete,add_file,add_subdirectory"
+        subprocess.run(
+            ["/usr/bin/sudo", "-n", "/bin/chmod", "+a", acl_entry, fixed],
+            check=True,
+        )
+        acl_result = _installation_helper(
+            _MODULE.ROOT_CREATE_INSTALLATION_CODE,
+            parent,
+            "8" * 32,
+            privileged=True,
+            owner_uid=0,
+            caller_uid=os.geteuid(),
+            caller_groups=groups,
+        )
+        assert acl_result.returncode != 0
+        assert b"acl=1" in acl_result.stderr
+        subprocess.run(["/usr/bin/sudo", "-n", "/bin/chmod", "-RN", fixed], check=True)
+    finally:
+        subprocess.run(["/usr/bin/sudo", "-n", "/bin/chmod", "-RN", fixed], check=False)
+        _MODULE._remove_root_tree(fixture_root, fixture_identity)
 
 
 def test_version_transaction_preserves_other_versions_and_rejects_concurrency(
@@ -2049,6 +2156,8 @@ def test_production_mutations_share_the_root_os_lock_contract() -> None:
     assert "process_start(displacement['owner_pid'])" in source
     assert "multiple displacement journals are ambiguous" in source
     assert "recorded staging authority changed" in source
+    assert "uid=%d gid=%d mode=%#o dev=%d parent_dev=%d" in source
+    assert "caller_write=%d acl=%d" in source
 
 
 def test_formal_source_never_copies_actions_setup_python() -> None:
@@ -2275,6 +2384,7 @@ def test_workflows_report_acl_authority_before_binding(workflow_name: str) -> No
     diagnostic = payload[report:binder]
     assert "/usr/bin/stat -f 'path=%N uid=%u gid=%g mode=%Sp inode=%i'" in diagnostic
     assert "/bin/ls -lde" in diagnostic
+    assert "/Library/Frameworks/Python.framework/Versions/3.13" in diagnostic
 
 
 def test_windows_python_smoke_propagates_each_pytest_exit_code() -> None:

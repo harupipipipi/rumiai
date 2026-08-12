@@ -1384,16 +1384,28 @@ try:
     if previous is not None:
         previous_info = os.fstat(previous)
         previous_entries = os.listdir(previous)
-        if previous_info.st_uid != owner or caller_can_write(previous_info) or \
-           nontrivial_acl(previous):
-            raise SystemExit('unsafe existing fixed prefix authority')
+        previous_mode = stat.S_IMODE(previous_info.st_mode)
+        previous_acl = nontrivial_acl(previous)
+        previous_caller_write = caller_can_write(previous_info)
+        if previous_info.st_uid != owner or previous_info.st_uid == caller_uid or \
+           previous_info.st_dev != parent_info.st_dev or previous_mode & 0o7002 or \
+           previous_mode & 0o500 != 0o500 or previous_acl:
+            raise SystemExit(
+                'unsafe existing fixed prefix authority: '
+                'path=%s uid=%d gid=%d mode=%#o dev=%d parent_dev=%d '
+                'caller_write=%d acl=%d' %
+                (target, previous_info.st_uid, previous_info.st_gid,
+                 previous_mode, previous_info.st_dev, parent_info.st_dev,
+                 previous_caller_write, previous_acl))
         if journal_name in previous_entries or \
            '.tobkiri-packaging-python.v1.json' in previous_entries:
             raise SystemExit('existing managed fixed prefix was not released')
-        os.close(previous)
+        sealed_mode=0o500 if owner==0 else 0o700
         displacement = canonical({'dev': previous_info.st_dev, 'displaced': displaced,
                                   'ino': previous_info.st_ino,'owner_pid':os.getpid(),
                                   'owner_start':process_start(os.getpid()),
+                                  'original_mode':previous_mode,
+                                  'sealed_mode':sealed_mode,
                                   'schema': displacement_schema, 'target': target,
                                   'staging_dev':staging_info.st_dev,
                                   'staging_ino':staging_info.st_ino,'token': token})
@@ -1408,6 +1420,13 @@ try:
         finally: os.close(displacement_fd)
         os.fsync(parent)
         if failpoint == 'after_displacement_journal': os.kill(os.getpid(), signal.SIGKILL)
+        os.fchmod(previous, sealed_mode); os.fsync(previous)
+        sealed_info=os.fstat(previous)
+        if (sealed_info.st_dev,sealed_info.st_ino)!=(previous_info.st_dev,previous_info.st_ino) or \
+           stat.S_IMODE(sealed_info.st_mode)!=sealed_mode or caller_can_write(sealed_info) or \
+           nontrivial_acl(previous):
+            raise SystemExit('existing fixed prefix seal verification failed')
+        if failpoint == 'after_leaf_seal': os.kill(os.getpid(), signal.SIGKILL)
         if failpoint == 'barrier_after_displacement_journal':
             barrier=os.open('.barrier-ready',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,
                             0o400,dir_fd=staging); os.fsync(barrier); os.close(barrier)
@@ -1420,6 +1439,10 @@ try:
             os.unlink('.barrier-ready',dir_fd=staging)
             os.unlink('.barrier-release',dir_fd=staging); os.fsync(staging)
         exclusive_rename(fixed, displaced); os.fsync(parent)
+        displaced_info=os.stat(displaced,dir_fd=parent,follow_symlinks=False)
+        if (displaced_info.st_dev,displaced_info.st_ino)!=(previous_info.st_dev,previous_info.st_ino):
+            raise SystemExit('displaced fixed prefix identity changed')
+        os.close(previous)
         if failpoint == 'after_displacement': os.kill(os.getpid(), signal.SIGKILL)
     exclusive_rename(provisional, fixed)
     os.fsync(parent)
@@ -1499,11 +1522,14 @@ def displacement_journal(name):
         payload = dict(pairs)
     except Exception: raise SystemExit('partial or invalid displacement journal')
     if canonical(payload) != encoded or \
-       set(payload) != {'dev','displaced','ino','owner_pid','owner_start','schema','staging_dev','staging_ino','target','token'} or \
+       set(payload) != {'dev','displaced','ino','original_mode','owner_pid','owner_start','schema','sealed_mode','staging_dev','staging_ino','target','token'} or \
        payload['schema'] != displacement_schema or \
        payload['target'] != os.path.join(parent_path, fixed) or \
        payload['displaced'] != displaced_prefix + payload['token'] or \
        name != displacement_prefix + payload['token'] + '.json' or \
+       not isinstance(payload['original_mode'],int) or \
+       payload['original_mode']<0 or payload['original_mode']>0o777 or \
+       payload['sealed_mode']!=(0o500 if owner==0 else 0o700) or \
        not isinstance(payload['owner_pid'],int) or payload['owner_pid']<=0 or \
        not isinstance(payload['owner_start'],str) or len(payload['owner_start'])>64:
         raise SystemExit('displacement journal authority mismatch')
@@ -1660,15 +1686,28 @@ try:
             current_info = None if current is None else os.fstat(current)
             if current_info is None or (current_info.st_dev, current_info.st_ino) != expected:
                 raise SystemExit('displaced fixed prefix identity is lost')
+            current_mode=stat.S_IMODE(current_info.st_mode)
+            if current_mode not in (displacement['sealed_mode'],
+                                    displacement['original_mode']):
+                raise SystemExit('fixed prefix sealed mode changed')
+            os.fchmod(current,displacement['original_mode']); os.fsync(current)
         else:
             displaced_info = os.fstat(displaced)
             if displaced_info.st_uid != owner or nontrivial_acl(displaced) or \
+               stat.S_IMODE(displaced_info.st_mode)!=displacement['sealed_mode'] or \
                (displaced_info.st_dev, displaced_info.st_ino) != expected:
                 raise SystemExit('displaced fixed prefix authority changed')
             if current is not None:
                 raise SystemExit('fixed prefix blocks displaced restoration')
             os.close(displaced); displaced = None
             exclusive_rename(displaced_name, fixed); os.fsync(parent)
+            restored=os.open(fixed,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,
+                             dir_fd=parent)
+            restored_info=os.fstat(restored)
+            if (restored_info.st_dev,restored_info.st_ino)!=expected:
+                raise SystemExit('restored fixed prefix identity changed')
+            os.fchmod(restored,displacement['original_mode']); os.fsync(restored)
+            os.close(restored)
         if current is not None: os.close(current)
         if displaced is not None: os.close(displaced)
         journal_entry=displacement_prefix+displacement['token']+'.json'

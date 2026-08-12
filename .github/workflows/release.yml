@@ -55,7 +55,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for path in / /Library /Library/Frameworks /Library/Frameworks/Python.framework /Library/Frameworks/Python.framework/Versions; do
+          for path in / /Library /Library/Frameworks /Library/Frameworks/Python.framework /Library/Frameworks/Python.framework/Versions /Library/Frameworks/Python.framework/Versions/3.13; do
             if test -e "$path"; then
               /usr/bin/stat -f 'path=%N uid=%u gid=%g mode=%Sp inode=%i' "$path"
               /bin/ls -lde "$path"
