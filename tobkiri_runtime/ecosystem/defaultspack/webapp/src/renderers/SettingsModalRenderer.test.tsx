@@ -14,7 +14,49 @@ import {
 } from "./settings/renderers/slashCommandsField";
 import { apiKeySetupTargetFieldId } from "./settings/renderers/settingsFieldRendererUtils";
 import type { TemplateSettingsField } from "./template/settingsFieldMetadata";
-import type { SettingsSection } from "../lib/api";
+import type { SettingsSection, UICatalog } from "../lib/api";
+
+function coreSettingsSections(): SettingsSection[] {
+  return [
+    {
+      id: "models",
+      label: "Models",
+      description: "Model settings",
+      fields: [{ id: "preferred_model", label: "Preferred Model", type: "text", default: "local/default" }],
+    },
+    {
+      id: "apis",
+      label: "API Tokens",
+      description: "Provider tokens",
+      fields: [{ id: "api_keys", label: "API Tokens", type: "readonly", default: "configured" }],
+    },
+    {
+      id: "tools",
+      label: "Tools",
+      description: "Tool defaults",
+      fields: [{ id: "default_tool_mode", label: "Tool Mode", type: "select", options: [{ value: "auto", label: "Auto" }] }],
+    },
+    {
+      id: "general",
+      label: "General",
+      description: "General settings",
+      fields: [{ id: "language", label: "Language", type: "text", default: "ja" }],
+    },
+  ];
+}
+
+function makeCatalog(
+  settingsSections: SettingsSection[] = [],
+  settingsValues: Record<string, Record<string, unknown>> = {},
+): UICatalog {
+  return {
+    sidebar: { filters: [], items: [] },
+    settings: { sections: settingsSections, values: settingsValues },
+    chat_rendering: { renderers: [] },
+    extension_points: [],
+    parts: [],
+  };
+}
 
 function makeModelOption(index: number) {
   return {
@@ -39,6 +81,53 @@ test("settings row selection clears when the selected row is clicked again", () 
   assert.equal(toggleSettingsRowSelection("provider:token", "provider:token"), "");
   assert.equal(toggleSettingsRowSelection("provider:token", "provider:other"), "provider:other");
   assert.equal(toggleSettingsRowSelection("", "provider:token"), "provider:token");
+});
+
+test("SettingsModalRenderer keeps catalog settings visible when registered metadata is empty", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      locale: "en",
+      catalog: makeCatalog(coreSettingsSections(), {
+        models: { preferred_model: "local/default" },
+        apis: { api_keys: "configured" },
+      }),
+      health: { status: "ok", pack: "defaultspack", ts: "2026-07-04T00:00:00Z" },
+      previewsCount: 0,
+      settingsSections: [],
+      settingsValues: {},
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Preferred Model/);
+  assert.match(html, /Models/);
+  assert.match(html, /Tools/);
+  assert.doesNotMatch(html, /No settings match your search/);
+});
+
+test("SettingsModalRenderer empty payload still exposes core control center categories", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: null,
+      locale: "en",
+      catalog: makeCatalog(),
+      health: null,
+      previewsCount: 0,
+      settingsSections: [],
+      settingsValues: {},
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /AI Assistant/);
+  assert.match(html, /Models/);
+  assert.match(html, /Tools/);
+  assert.doesNotMatch(html, /No settings match your search/);
 });
 
 test("settings AI surface launches the normal chat with the Settings skill", () => {

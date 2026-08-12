@@ -118,6 +118,7 @@ import {
   resolveComposerHomeTitle,
   resolveSettingsAssistantSkill,
 } from "./lib/settingsMode";
+import { resolveSettingsState } from "./lib/settingsState";
 import { isRegisteredSlashCommand, mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./lib/registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicyReferencePayload, templateToolPolicySettings } from "./lib/templateAiInput";
 import { initialComposerFieldValues, normalizeComposerFields, structuredComposerPayload } from "./lib/structuredComposer";
@@ -3508,6 +3509,9 @@ function ChatApp() {
     if (requestSequence !== refreshCatalogSequenceRef.current) return null;
     const nextCatalog = catalogResult.status === "fulfilled" ? catalogResult.value : null;
     const nextSettings = settingsResult.status === "fulfilled" ? settingsResult.value : null;
+    const resolvedSettings = nextSettings || nextCatalog?.settings
+      ? resolveSettingsState(nextSettings, nextCatalog)
+      : null;
     if (nextCatalog) {
       setCatalog(nextCatalog);
     } else if (catalogResult.status === "rejected") {
@@ -3525,12 +3529,12 @@ function ChatApp() {
         message: profilesResult.reason instanceof Error ? profilesResult.reason.message : "Failed to load model profiles.",
       });
     }
-    if (nextSettings) {
-      setSettingsSections(nextSettings.sections);
+    if (resolvedSettings) {
+      setSettingsSections(resolvedSettings.sections);
       // Provider/OAuth refreshes run independently of settings saves. Preserve
       // dirty values until the existing save/retry flow has resolved them.
       if (settingsDirtyKeysRef.current.length === 0) {
-        const nextValues = withCalendarSettingsValues(nextSettings.values);
+        const nextValues = withCalendarSettingsValues(resolvedSettings.values);
         settingsValuesRef.current = nextValues;
         setSettingsValues(nextValues);
       }
@@ -3561,7 +3565,7 @@ function ChatApp() {
             nextCatalog?.commands ?? [],
           ),
     );
-    const defaultMode = nextSettings?.values.preview?.default_mode;
+    const defaultMode = resolvedSettings?.values.preview?.default_mode;
     if (defaultMode === "auto" || defaultMode === "manual") {
       setPreviewMode(defaultMode);
     }
