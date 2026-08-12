@@ -144,6 +144,8 @@ class CapturedPackControlSession:
         binding: _Binding,
         *,
         packvm_readiness_reader: Callable[[], Mapping[str, Any]] | None = None,
+        active_profile_loader: Callable[[], Any] | None = None,
+        bundle_root: Path | None = None,
     ) -> None:
         self._binding = binding
         self._lock = threading.RLock()
@@ -152,11 +154,20 @@ class CapturedPackControlSession:
             RuntimeProfileChangeService,
             RuntimeSurfaceService,
         )
+        from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 
-        self._runtime_surface = RuntimeSurfaceService(
-            packvm_readiness_reader=packvm_readiness_reader
+        catalog_loader = (
+            (lambda: BundledCatalog.load(bundle_root)) if bundle_root is not None else None
         )
-        self._profile_changes = RuntimeProfileChangeService(surface_service=self._runtime_surface)
+        self._runtime_surface = RuntimeSurfaceService(
+            snapshot_loader=active_profile_loader,
+            catalog_loader=catalog_loader,
+            packvm_readiness_reader=packvm_readiness_reader,
+        )
+        self._profile_changes = RuntimeProfileChangeService(
+            surface_service=self._runtime_surface,
+            bundle_root=bundle_root,
+        )
 
     @classmethod
     def capture(
@@ -574,9 +585,16 @@ class CapturedPackControlSession:
 def capture_pack_control_session(
     *,
     packvm_readiness_reader: Callable[[], Mapping[str, Any]] | None = None,
+    active_profile_loader: Callable[[], Any] | None = None,
+    bundle_root: Path | None = None,
 ) -> CapturedPackControlSession:
     """Capture the Pack control session used by the production HTTP surface."""
-    return CapturedPackControlSession.capture(packvm_readiness_reader=packvm_readiness_reader)
+    return CapturedPackControlSession(
+        _capture_binding(),
+        packvm_readiness_reader=packvm_readiness_reader,
+        active_profile_loader=active_profile_loader,
+        bundle_root=bundle_root,
+    )
 
 
 def capture_pack_control_catalog() -> Mapping[str, Any]:
@@ -917,6 +935,7 @@ def resolve_profile_pack_set(
     expected_profile_definition_digest: str | None = None,
     expected_profile_catalog_digest: str | None = None,
     expected_bundle_lock_digest: str | None = None,
+    bundle_root: Path | None = None,
 ) -> Any:
     """Resolve a candidate Pack closure without activating or persisting it.
 
@@ -939,7 +958,7 @@ def resolve_profile_pack_set(
     )
 
     user_data = _user_data_root()
-    bundle_root = _bundle_root()
+    bundle_root = bundle_root or _bundle_root()
     catalog = BundledCatalog.load(bundle_root)
     from .profile_catalog_v4 import require_profile_catalog_binding
 
@@ -1101,6 +1120,7 @@ def activate_resolved_profile_pack_set(
     expected_profile_revision: str,
     expected_plan_digest: str,
     expected_activation_id: str,
+    bundle_root: Path | None = None,
 ) -> Mapping[str, Any]:
     """Activate one reviewed candidate if its captured predecessor is current."""
 
@@ -1119,7 +1139,7 @@ def activate_resolved_profile_pack_set(
             workspace,
             profile_id=profile_id,
             authority=authority,
-            catalog=BundledCatalog.load(_bundle_root()),
+            catalog=BundledCatalog.load(bundle_root or _bundle_root()),
         )
         active = store.load_active_snapshot()
         if hmac.compare_digest(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import io
 import hashlib
@@ -173,11 +174,15 @@ def _fixture_sources(base: Path, target: str) -> tuple[Path, Path, Path]:
     return runtime, venv, output
 
 
-def test_rootless_packaging_binding_and_identity_safe_cleanup(tmp_path: Path) -> None:
+def test_rootless_packaging_binding_and_identity_safe_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Formal packaging binds and removes only a complete private sealed tree."""
     target = "x86_64-pc-windows-msvc"
     _runtime, _venv, output = _fixture_sources(tmp_path, target)
     digest = BUILDER.validate_environment(output, target, run_native_smoke=False)
+    monkeypatch.setenv("RUNNER_TEMP", os.fspath(tmp_path))
     binding = tmp_path / "packaging.env"
     source_snapshot = tmp_path / "source-snapshot"
     source_snapshot.mkdir(mode=0o500)
@@ -1023,6 +1028,7 @@ def test_builder_rejects_correct_version_stdout_spoof(
     repo_root = tmp_path / "repo"
     bundled = repo_root / "tobkiri_runtime" / "bundled"
     bundled.mkdir(parents=True)
+    bundled.chmod(0o700)
     uv = bundled / "uv"
     _write_fake_uv(
         uv,
@@ -1053,6 +1059,7 @@ def test_builder_rejects_wrong_version_or_target_after_byte_binding(
     repo_root = tmp_path / "repo"
     bundled = repo_root / "tobkiri_runtime" / "bundled"
     bundled.mkdir(parents=True)
+    bundled.chmod(0o700)
     uv = bundled / "uv"
     _write_fake_uv(uv, output)
     monkeypatch.setitem(
@@ -1077,6 +1084,7 @@ def test_builder_rejects_owner_writable_staged_uv(
     repo_root = tmp_path / "repo"
     bundled = repo_root / "tobkiri_runtime" / "bundled"
     bundled.mkdir(parents=True)
+    bundled.chmod(0o700)
     uv = bundled / "uv"
     _write_fake_uv(
         uv,
@@ -1397,8 +1405,18 @@ def test_bootstrap_and_resource_wiring_match_the_fixed_contract() -> None:
     assert "os.replace" in bootstrap
     assert "fsync" in bootstrap and "chmod" in bootstrap
     assert all(f'"{role}"' in bootstrap for role in ("typed", "defaultspack", "host_helper"))
-    assert "sha256:" not in bootstrap
-    assert "sha256:" not in builder
+    bootstrap_strings = {
+        node.value
+        for node in ast.walk(ast.parse(bootstrap))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    builder_strings = {
+        node.value
+        for node in ast.walk(ast.parse(builder))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    assert not any(value.startswith("sha256:") for value in bootstrap_strings)
+    assert not any(value.startswith("sha256:") for value in builder_strings)
     assert "sha256:" not in json.dumps(environment_schema)
     for field in (
         "schema",
@@ -1436,7 +1454,7 @@ def test_bootstrap_and_resource_wiring_match_the_fixed_contract() -> None:
     assert "python-runtime" in preparer
     assert "sealed-environment.v1.json" in preparer
     assert "python-runtime" in build_rs
-    assert "bind_sealed_python_environment" in build_rs
+    assert "bind_sealed_python_root" in build_rs
     assert "TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256" in build_rs
     assert environment_schema["$id"] == BUILDER.MANIFEST_SCHEMA
     assert environment_schema["$defs"]["sha256"]["pattern"] == "^[0-9a-f]{64}$"

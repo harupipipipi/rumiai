@@ -273,13 +273,33 @@ def _resolved_pack_closure(
     if not isinstance(effective_set, list):
         diagnostics.append({"code": "PROFILE_LOCK_CLOSURE_INVALID", "subject": "effective_set"})
         return []
+    definition = catalog.profiles.get(str(profile.get("profile_id") or ""))
+    requested = definition.get("packs") if isinstance(definition, Mapping) else ()
     roles = {
         str(profile["base"]["pack_id"]): "base",
         str(profile["shell"]["pack_id"]): "shell",
     }
     roles.update(
-        {str(item["pack_id"]): str(item.get("role") or "provider") for item in profile["packs"]}
+        {
+            str(item["pack_id"]): str(item.get("role") or "provider")
+            for item in requested
+            if isinstance(item, Mapping)
+        }
     )
+    selected_ids = {
+        str(item.get("identity") or "")
+        for item in effective_set
+        if isinstance(item, Mapping)
+    }
+    dependency_ids = {
+        str(dependency_id)
+        for pack_id in selected_ids
+        if pack_id in catalog.packs
+        for dependency_id in catalog.packs[pack_id]["requirements"][
+            "pack_dependencies"
+        ]
+        if dependency_id in selected_ids
+    }
     result: list[dict[str, object]] = []
     seen: set[str] = set()
     for item in effective_set:
@@ -302,7 +322,10 @@ def _resolved_pack_closure(
         result.append(
             {
                 "pack_id": pack_id,
-                "role": roles.get(pack_id, "dependency"),
+                "role": roles.get(
+                    pack_id,
+                    "dependency" if pack_id in dependency_ids else "provider",
+                ),
                 "version": str(manifest["pack"]["version"]),
                 "artifact_digest": digest,
                 "artifact_ref": f"pack-v4://{pack_id}@{digest}",

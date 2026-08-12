@@ -282,12 +282,14 @@ class RuntimeProfileChangeService:
         clock: Callable[[], float] = time.time,
         surface_service: "RuntimeSurfaceService | None" = None,
         store_path: Path | None = None,
+        bundle_root: Path | None = None,
     ) -> None:
         if ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be positive")
         self._ttl_seconds = ttl_seconds
         self._clock = clock
         self._surface_service = surface_service
+        self._bundle_root = bundle_root
         self._lock = threading.RLock()
         if store_path is None:
             from .bootstrap.profile_capture import runtime_user_data_root
@@ -373,6 +375,9 @@ class RuntimeProfileChangeService:
         try:
             from .pack_control_v4 import resolve_profile_pack_set
 
+            bundle_binding = (
+                {} if self._bundle_root is None else {"bundle_root": self._bundle_root}
+            )
             if authoritative_selection:
                 resolved = resolve_profile_pack_set(
                     pack_ids,
@@ -380,9 +385,13 @@ class RuntimeProfileChangeService:
                     expected_profile_definition_digest=definition_digest,
                     expected_profile_catalog_digest=catalog_digest,
                     expected_bundle_lock_digest=bundle_digest,
+                    **bundle_binding,
                 )
             else:
-                resolved = resolve_profile_pack_set(pack_ids)
+                resolved = resolve_profile_pack_set(
+                    pack_ids,
+                    **bundle_binding,
+                )
         except Exception as error:
             raise _map_change_error(error) from error
         current_data = cast(Mapping[str, Any], current["data"])
@@ -575,6 +584,11 @@ class RuntimeProfileChangeService:
             try:
                 from .pack_control_v4 import activate_resolved_profile_pack_set
 
+                bundle_binding = (
+                    {}
+                    if self._bundle_root is None
+                    else {"bundle_root": self._bundle_root}
+                )
                 activation = activate_resolved_profile_pack_set(
                     candidate.resolved,
                     activation_id=(
@@ -589,6 +603,7 @@ class RuntimeProfileChangeService:
                     expected_profile_revision=candidate.expected_profile_revision,
                     expected_plan_digest=candidate.expected_plan_digest,
                     expected_activation_id=candidate.expected_activation_id,
+                    **bundle_binding,
                 )
             except Exception as error:
                 raise _map_change_error(error) from error
