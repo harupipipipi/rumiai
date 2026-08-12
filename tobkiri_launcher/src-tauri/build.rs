@@ -17,6 +17,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use ed25519_dalek::Signer;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use rand::RngCore;
+use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
 const APP_SOURCE_DIR: &str = "tobkiri_runtime";
@@ -2992,23 +2993,201 @@ fn current_source_revision(repository_root: &Path) -> io::Result<String> {
             "production source revision must be a full lowercase commit SHA",
         ));
     }
-    let dirty = git
+    let clean_index = git
         .command()?
-        .args(["status", "--porcelain=v1", "--untracked-files=all"])
+        .args([
+            "diff-index",
+            "--cached",
+            "--quiet",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--ignore-submodules=none",
+            &value,
+            "--",
+        ])
         .current_dir(repository_root)?
-        .output()
-        .map_err(|error| invalid_release(format!("failed to inspect source status: {error}")))?;
-    if !dirty.status.success() {
+        .status()
+        .map_err(|error| invalid_release(format!("failed to inspect source index: {error}")))?;
+    if !clean_index.success() {
         return Err(invalid_release(
-            "source checkout status could not be verified",
+            "production source index does not match its revision",
         ));
     }
-    if !dirty.stdout.is_empty() {
+    verify_tracked_worktree_bytes(&git, repository_root, &value)?;
+    let untracked = git
+        .command()?
+        .args([
+            "ls-files",
+            "--others",
+            "--exclude-per-directory=.gitignore",
+            "--",
+        ])
+        .current_dir(repository_root)?
+        .output()
+        .map_err(|error| invalid_release(format!("failed to inspect untracked source: {error}")))?;
+    if !untracked.status.success() {
         return Err(invalid_release(
-            "production source revision cannot describe a dirty checkout",
+            "source checkout untracked inventory could not be verified",
+        ));
+    }
+    if !untracked.stdout.is_empty() {
+        return Err(invalid_release(
+            "production source revision cannot describe untracked paths",
         ));
     }
     Ok(value)
+}
+
+fn verify_tracked_worktree_bytes(
+    git: &packaging_toolchain::VerifiedTool,
+    repository_root: &Path,
+    revision: &str,
+) -> io::Result<()> {
+    let tree = git
+        .command()?
+        .args(["ls-tree", "-r", "-z", "--full-tree", revision])
+        .current_dir(repository_root)?
+        .output()
+        .map_err(|error| invalid_release(format!("failed to read source tree: {error}")))?;
+    if !tree.status.success() {
+        return Err(invalid_release("source tree inventory could not be read"));
+    }
+    for record in tree
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+    {
+        let separator = record
+            .iter()
+            .position(|byte| *byte == b'\t')
+            .ok_or_else(|| invalid_release("source tree entry is malformed"))?;
+        let (header, encoded_path) = record.split_at(separator);
+        let encoded_path = &encoded_path[1..];
+        let header = std::str::from_utf8(header)
+            .map_err(|_| invalid_release("source tree header is not UTF-8"))?;
+        let mut fields = header.split(' ');
+        let mode = fields
+            .next()
+            .ok_or_else(|| invalid_release("source tree mode is missing"))?;
+        let kind = fields
+            .next()
+            .ok_or_else(|| invalid_release("source tree kind is missing"))?;
+        let expected = fields
+            .next()
+            .ok_or_else(|| invalid_release("source tree object ID is missing"))?;
+        if fields.next().is_some()
+            || kind != "blob"
+            || !matches!(mode, "100644" | "100755" | "120000")
+        {
+            return Err(invalid_release("source tree entry is unsupported"));
+        }
+        let relative = std::str::from_utf8(encoded_path)
+            .map_err(|_| invalid_release("source tree path is not UTF-8"))?;
+        let relative = safe_release_relative_path(relative, "source tree path")?;
+        let path = repository_root.join(&relative);
+        let before = fs::symlink_metadata(&path)?;
+        let payload = if mode == "120000" {
+            if !before.file_type().is_symlink() {
+                return Err(invalid_release(format!(
+                    "tracked symlink type changed: {}",
+                    relative.display()
+                )));
+            }
+            fs::read_link(&path)?
+                .as_os_str()
+                .as_encoded_bytes()
+                .to_vec()
+        } else {
+            if !before.is_file() || before.file_type().is_symlink() {
+                return Err(invalid_release(format!(
+                    "tracked file type changed: {}",
+                    relative.display()
+                )));
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if (before.permissions().mode() & 0o111 != 0) != (mode == "100755") {
+                    return Err(invalid_release(format!(
+                        "tracked executable mode changed: {}",
+                        relative.display()
+                    )));
+                }
+            }
+            let mut file = File::open(&path)?;
+            let opened = file.metadata()?;
+            if !same_source_object(&before, &opened) {
+                return Err(invalid_release(format!(
+                    "tracked file changed before read: {}",
+                    relative.display()
+                )));
+            }
+            let mut payload = Vec::new();
+            file.read_to_end(&mut payload)?;
+            if !same_source_object(&opened, &file.metadata()?) {
+                return Err(invalid_release(format!(
+                    "tracked file changed while read: {}",
+                    relative.display()
+                )));
+            }
+            payload
+        };
+        let after = fs::symlink_metadata(&path)?;
+        if !same_source_object(&before, &after) {
+            return Err(invalid_release(format!(
+                "tracked path changed while verified: {}",
+                relative.display()
+            )));
+        }
+        let header = format!("blob {}\0", payload.len());
+        let actual = match expected.len() {
+            40 => {
+                let mut digest = Sha1::new();
+                digest.update(header.as_bytes());
+                digest.update(&payload);
+                format!("{:x}", digest.finalize())
+            }
+            64 => {
+                let mut digest = Sha256::new();
+                digest.update(header.as_bytes());
+                digest.update(&payload);
+                format!("{:x}", digest.finalize())
+            }
+            _ => {
+                return Err(invalid_release(
+                    "source tree object ID length is unsupported",
+                ))
+            }
+        };
+        if actual != expected {
+            return Err(invalid_release(format!(
+                "tracked file bytes changed: {}",
+                relative.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn same_source_object(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        left.dev() == right.dev()
+            && left.ino() == right.ino()
+            && left.file_type() == right.file_type()
+            && left.len() == right.len()
+            && left.mtime() == right.mtime()
+            && left.mtime_nsec() == right.mtime_nsec()
+            && left.ctime() == right.ctime()
+            && left.ctime_nsec() == right.ctime_nsec()
+    }
+    #[cfg(not(unix))]
+    {
+        left.file_type() == right.file_type()
+            && left.len() == right.len()
+            && left.modified().ok() == right.modified().ok()
+    }
 }
 
 fn current_source_tree(repository_root: &Path, revision: &str) -> io::Result<String> {

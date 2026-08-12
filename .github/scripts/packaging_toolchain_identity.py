@@ -42,15 +42,9 @@ ISOLATED_GIT_ARGUMENTS = (
     "-c",
     "core.attributesFile=/dev/null",
     "-c",
+    "core.excludesFile=/dev/null",
+    "-c",
     "diff.external=",
-    "-c",
-    "filter.review.clean=",
-    "-c",
-    "filter.review.smudge=",
-    "-c",
-    "filter.review.process=",
-    "-c",
-    "filter.review.required=false",
     "-c",
     "core.sshCommand=false",
     "-c",
@@ -384,7 +378,9 @@ def _transaction_path(token: str) -> Path:
     return STAGING_PARENT / f"{STAGING_PREFIX}{token}"
 
 
-def _git_output(git: ToolIdentity, repository_root: Path, *arguments: str) -> bytes:
+def _git_result(
+    git: ToolIdentity, repository_root: Path, *arguments: str
+) -> subprocess.CompletedProcess[bytes]:
     current = _regular_executable(git.path, "Git")
     if current != git:
         raise ToolIdentityError("trusted Git identity changed before execution")
@@ -409,6 +405,8 @@ def _git_output(git: ToolIdentity, repository_root: Path, *arguments: str) -> by
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
+        # GIT_CONFIG redirects only `git config`; safety for every other command
+        # comes from the fixed plumbing set and Core byte/inventory verification.
         env={
             "GIT_ATTR_NOSYSTEM": "1",
             "GIT_CEILING_DIRECTORIES": os.fspath(repository_root),
@@ -427,11 +425,101 @@ def _git_output(git: ToolIdentity, repository_root: Path, *arguments: str) -> by
             "XDG_CONFIG_HOME": os.fspath(ISOLATED_GIT_EXEC_PATH),
         },
     )
+    return result
+
+
+def _git_output(git: ToolIdentity, repository_root: Path, *arguments: str) -> bytes:
+    result = _git_result(git, repository_root, *arguments)
     if result.returncode != 0:
         raise ToolIdentityError(
             f"trusted Git object read failed: {result.stderr.decode(errors='replace')}"
         )
     return result.stdout
+
+
+def _verify_clean_checkout(
+    git: ToolIdentity, repository_root: Path, commit: str
+) -> None:
+    """Verify index and worktree bytes without porcelain or conversion filters."""
+    result = _git_result(
+        git,
+        repository_root,
+        "diff-index",
+        "--cached",
+        "--quiet",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--ignore-submodules=none",
+        commit,
+        "--",
+    )
+    if result.returncode == 1:
+        raise ToolIdentityError("trusted Git repository is not clean")
+    if result.returncode != 0:
+        raise ToolIdentityError(
+            "trusted Git clean plumbing failed: "
+            + result.stderr.decode(errors="replace")
+        )
+    tree = _git_output(
+        git, repository_root, "ls-tree", "-r", "-z", "--full-tree", commit
+    )
+    for record in tree.split(b"\0"):
+        if not record:
+            continue
+        try:
+            header, encoded_path = record.split(b"\t", 1)
+            mode, kind, expected = header.split(b" ", 2)
+            relative = _safe_relative(encoded_path.decode("utf-8"), "Git tree path")
+        except (UnicodeDecodeError, ValueError) as error:
+            raise ToolIdentityError("trusted Git tree entry is malformed") from error
+        if kind != b"blob" or mode not in {b"100644", b"100755", b"120000"}:
+            raise ToolIdentityError("trusted Git tree contains an unsupported entry")
+        path = repository_root.joinpath(*relative.parts)
+        before = path.lstat()
+        if mode == b"120000":
+            if not stat.S_ISLNK(before.st_mode):
+                raise ToolIdentityError(f"tracked symlink type changed: {relative}")
+            payload = os.fsencode(os.readlink(path))
+            after = path.lstat()
+        else:
+            if not stat.S_ISREG(before.st_mode) or path.is_symlink():
+                raise ToolIdentityError(f"tracked file type changed: {relative}")
+            executable = bool(before.st_mode & 0o111)
+            if executable != (mode == b"100755"):
+                raise ToolIdentityError(f"tracked executable mode changed: {relative}")
+            descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            try:
+                opened = os.fstat(descriptor)
+                chunks: list[bytes] = []
+                while chunk := os.read(descriptor, 1024 * 1024):
+                    chunks.append(chunk)
+                payload = b"".join(chunks)
+                after = os.fstat(descriptor)
+            finally:
+                os.close(descriptor)
+            if _file_identity(before) != _file_identity(opened):
+                raise ToolIdentityError(f"tracked file changed before read: {relative}")
+        if _file_identity(before) != _file_identity(after):
+            raise ToolIdentityError(f"tracked path changed while read: {relative}")
+        framed = f"blob {len(payload)}\0".encode() + payload
+        if len(expected) == 40:
+            actual = hashlib.sha1(framed, usedforsecurity=True).hexdigest()
+        elif len(expected) == 64:
+            actual = hashlib.sha256(framed).hexdigest()
+        else:
+            raise ToolIdentityError("trusted Git blob object ID length is unsupported")
+        if actual.encode() != expected:
+            raise ToolIdentityError(f"tracked file bytes changed: {relative}")
+    untracked = _git_output(
+        git,
+        repository_root,
+        "ls-files",
+        "--others",
+        "--exclude-per-directory=.gitignore",
+        "--",
+    )
+    if untracked:
+        raise ToolIdentityError("trusted Git repository has untracked paths")
 
 
 def _committed_blob(
@@ -457,11 +545,7 @@ def smoke_git_authority(
         raise ToolIdentityError("trusted Git HEAD smoke mismatch")
     if not _git_output(git, repository_root, "show", f"{commit}:{committed_path}"):
         raise ToolIdentityError("trusted Git committed blob smoke returned no bytes")
-    status = _git_output(
-        git, repository_root, "status", "--porcelain=v1", "--untracked-files=all"
-    )
-    if status:
-        raise ToolIdentityError("trusted Git repository is not clean")
+    _verify_clean_checkout(git, repository_root, commit)
 
 
 def _seal_root_bytes(path: Path, encoded: bytes) -> None:

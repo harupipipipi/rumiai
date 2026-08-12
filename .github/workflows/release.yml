@@ -157,10 +157,7 @@ jobs:
               "-c", "core.hooksPath=/dev/null",
               "-c", "core.attributesFile=/dev/null",
               "-c", "diff.external=",
-              "-c", "filter.review.clean=",
-              "-c", "filter.review.smudge=",
-              "-c", "filter.review.process=",
-              "-c", "filter.review.required=false",
+              "-c", "core.excludesFile=/dev/null",
               "-c", "core.sshCommand=false",
               "-c", "core.pager=cat",
               "-c", "pager.show=cat",
@@ -183,13 +180,51 @@ jobs:
               character not in "0123456789abcdef" for character in source_tree
           ):
               raise SystemExit("checked-out source tree is not a full lowercase SHA")
-          source_status = subprocess.check_output(
-              [*git_arguments, "status", "--porcelain=v1", "--untracked-files=all"],
+          source_clean = subprocess.run(
+              [
+                  *git_arguments,
+                  "diff-index",
+                  "--cached",
+                  "--quiet",
+                  "--no-ext-diff",
+                  "--no-textconv",
+                  "--ignore-submodules=none",
+                  "HEAD",
+                  "--",
+              ],
+              env=git_environment,
+              check=False,
+          )
+          if source_clean.returncode != 0:
+              raise SystemExit("checked-out index must match HEAD")
+          untracked = subprocess.check_output(
+              [
+                  *git_arguments,
+                  "ls-files",
+                  "--others",
+                  "--exclude-per-directory=.gitignore",
+                  "--",
+              ],
               text=True,
               env=git_environment,
           )
-          if source_status.strip():
-              raise SystemExit("checked-out source must be clean before packaging")
+          if untracked:
+              raise SystemExit("checked-out source has untracked paths")
+          subprocess.run(
+              [
+                  "/usr/bin/python3",
+                  "-B",
+                  ".github/scripts/packaging_toolchain_identity.py",
+                  "--repository-root", os.environ["GITHUB_WORKSPACE"],
+                  "--provenance", ".github/toolchains/packaging-python-macos.v1.json",
+                  "--source-commit", source_revision,
+                  "--git", git,
+                  "--git-sha256", os.environ["TOBKIRI_PACKAGING_GIT_SHA256"],
+                  "--smoke-git-authority",
+              ],
+              check=True,
+              env={"PATH": "/usr/bin:/bin"},
+          )
           tag_revision = subprocess.check_output(
               [
                   *git_arguments,

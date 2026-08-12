@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import os
+import secrets
 import json
 import shutil
 import subprocess
@@ -200,7 +201,7 @@ def test_macos_git_rejects_xcode_and_binds_command_line_tools() -> None:
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS fixed Git authority")
-def test_real_system_git_smoke_ignores_helper_and_config_injection(
+def test_real_system_git_smoke_does_not_execute_configured_helper(
     tmp_path: Path,
 ) -> None:
     """Built-in formal reads ignore PATH helpers and repository fsmonitor commands."""
@@ -236,10 +237,10 @@ def test_real_system_git_smoke_ignores_helper_and_config_injection(
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS fixed Git authority")
-def test_formal_git_ignores_repository_config_and_attribute_filter(
+def test_formal_git_commands_do_not_execute_repository_drivers(
     tmp_path: Path,
 ) -> None:
-    """Production Git reads ignore local/worktree config and external filters."""
+    """Production plumbing and Core hashing never execute repository drivers."""
     git = _MODULE.bind_git()
     repository = tmp_path / "repository"
     repository.mkdir()
@@ -269,9 +270,15 @@ def test_formal_git_ignores_repository_config_and_attribute_filter(
     helper.chmod(0o755)
     malicious_include = tmp_path / "included.config"
     malicious_include.write_text(f"[alias]\n\treview = !'{helper}'\n", encoding="utf-8")
+    driver = f"adversarial-{secrets.token_hex(8)}"
     local_values = {
-        "filter.review.clean": os.fspath(helper),
-        "filter.review.required": "true",
+        f"filter.{driver}.clean": os.fspath(helper),
+        f"filter.{driver}.smudge": os.fspath(helper),
+        f"filter.{driver}.process": os.fspath(helper),
+        f"filter.{driver}.required": "true",
+        f"diff.{driver}.command": os.fspath(helper),
+        f"diff.{driver}.textconv": os.fspath(helper),
+        f"diff.{driver}.trustExitCode": "true",
         "alias.review": f"!{helper}",
         "include.path": os.fspath(malicious_include),
         "core.sshCommand": os.fspath(helper),
@@ -285,13 +292,25 @@ def test_formal_git_ignores_repository_config_and_attribute_filter(
             check=True,
         )
     (repository / ".git" / "config.worktree").write_text(
-        f'[filter "review"]\n\tclean = {helper}\n', encoding="utf-8"
+        f'[filter "{driver}"]\n\tclean = {helper}\n', encoding="utf-8"
     )
     info_attributes = repository / ".git" / "info" / "attributes"
-    info_attributes.write_text("*.txt filter=review\n", encoding="utf-8")
+    info_attributes.write_text(
+        f"*.txt filter={driver} diff={driver}\n", encoding="utf-8"
+    )
+    (repository / ".git" / "info" / "exclude").write_text("*\n", encoding="utf-8")
+    untracked = repository / "must-be-detected.txt"
+    untracked.write_bytes(b"untracked\n")
+
+    with pytest.raises(ToolIdentityError, match="untracked paths"):
+        _MODULE.smoke_git_authority(
+            git, repository, commit, _MODULE.PurePosixPath("authority.txt")
+        )
+    assert not marker.exists()
+    untracked.unlink()
     tracked.write_bytes(b"BBBB\n")
 
-    with pytest.raises(ToolIdentityError, match="repository is not clean"):
+    with pytest.raises(ToolIdentityError, match="tracked file bytes changed"):
         _MODULE.smoke_git_authority(
             git, repository, commit, _MODULE.PurePosixPath("authority.txt")
         )
@@ -931,11 +950,17 @@ def test_workflows_smoke_fixed_isolated_git_authority(workflow_name: str) -> Non
     ]
     assert '"rev-parse", "--verify", "HEAD^{commit}"' in smoke
     assert '"show", f"{commit}:{committed_path}"' in smoke
-    assert '"status", "--porcelain=v1", "--untracked-files=all"' in smoke
+    assert "_verify_clean_checkout(git, repository_root, commit)" in smoke
+    assert '"diff-index"' in source
+    assert '"--no-ext-diff"' in source
+    assert '"--no-textconv"' in source
+    assert '"ls-files"' in source
+    assert '"--exclude-per-directory=.gitignore"' in source
+    assert '"status"' not in smoke
 
 
 def test_formal_git_environment_contract_is_identical_across_consumers() -> None:
-    """Python, Rust, and both workflows disable repository config explicitly."""
+    """All consumers isolate config queries without relying on it for other commands."""
     python_source = _SCRIPT.read_text(encoding="utf-8")
     rust_source = (
         _SCRIPT.parents[2]
@@ -944,15 +969,31 @@ def test_formal_git_environment_contract_is_identical_across_consumers() -> None
         / "src"
         / "packaging_toolchain.rs"
     ).read_text(encoding="utf-8")
+    build_source = (
+        _SCRIPT.parents[2] / "tobkiri_launcher" / "src-tauri" / "build.rs"
+    ).read_text(encoding="utf-8")
     assert '"GIT_CONFIG": os.devnull' in python_source
     assert '.env("GIT_CONFIG", "/dev/null")' in rust_source
     assert '"GIT_CEILING_DIRECTORIES": os.fspath(repository_root)' in python_source
     assert 'OsString::from("GIT_CEILING_DIRECTORIES")' in rust_source
+    revision = build_source[
+        build_source.index("fn current_source_revision") : build_source.index(
+            "fn current_source_tree"
+        )
+    ]
+    assert "verify_tracked_worktree_bytes" in revision
+    assert '"diff-index"' in revision
+    assert '"--cached"' in revision
+    assert '"status"' not in revision
+    assert "filter.review" not in python_source
+    assert "filter.review" not in rust_source
     for workflow_name in ("release.yml", "desktop-installers.yml"):
         workflow = _SCRIPT.parents[1] / "workflows" / workflow_name
         payload = workflow.read_text(encoding="utf-8")
         assert '"GIT_CONFIG": os.devnull' in payload
         assert '"GIT_CEILING_DIRECTORIES": os.environ["GITHUB_WORKSPACE"]' in payload
+        assert "filter.review" not in payload
+        assert '"status", "--porcelain' not in payload
 
 
 @pytest.mark.parametrize("workflow_name", ["release.yml", "desktop-installers.yml"])

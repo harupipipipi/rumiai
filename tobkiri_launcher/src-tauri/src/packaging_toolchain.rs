@@ -225,15 +225,9 @@ impl VerifiedTool {
                 "-c",
                 "core.attributesFile=/dev/null",
                 "-c",
+                "core.excludesFile=/dev/null",
+                "-c",
                 "diff.external=",
-                "-c",
-                "filter.review.clean=",
-                "-c",
-                "filter.review.smudge=",
-                "-c",
-                "filter.review.process=",
-                "-c",
-                "filter.review.required=false",
                 "-c",
                 "core.sshCommand=false",
                 "-c",
@@ -249,6 +243,8 @@ impl VerifiedTool {
             .env("LC_ALL", "C")
             .env("PATH", "/usr/bin:/bin")
             .env("PAGER", "cat")
+            // GIT_CONFIG redirects only `git config`. Other commands are
+            // constrained to non-executing plumbing and Core byte checks.
             .env("GIT_CONFIG", "/dev/null")
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")
