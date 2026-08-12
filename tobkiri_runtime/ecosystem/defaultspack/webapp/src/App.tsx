@@ -133,11 +133,27 @@ import { RendererBoundary } from "./renderers/trustedRendererLoader";
 import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ContextUsageInfo, DroppedWidget, SettingsLoadState, SettingsSaveState } from "./renderers/types";
 import { LayerPortal } from "./ui/layers/LayerPortal";
 
-type ComposerCandidateMenuState = {
+export type ComposerCandidateMenuState = {
   mode: "model";
   query: string;
   candidates: ModelCommandCandidate[];
 } | null;
+
+type ComposerDraftResetTargets = {
+  setInput: (value: string) => void;
+  setAttachedFiles: (value: AttachedFile[]) => void;
+  setDroppedWidgets: (value: DroppedWidget[]) => void;
+  setComposerCandidateMenu: (value: ComposerCandidateMenuState) => void;
+  bumpResetToken?: () => void;
+};
+
+export function clearComposerDraft(targets: ComposerDraftResetTargets) {
+  targets.setInput("");
+  targets.setAttachedFiles([]);
+  targets.setDroppedWidgets([]);
+  targets.setComposerCandidateMenu(null);
+  targets.bumpResetToken?.();
+}
 
 type BackendConnectionState = "online" | "degraded" | "offline";
 
@@ -2287,6 +2303,12 @@ function matchCommandName(body: string, candidate: string): string | null {
   return flexibleMatch ? flexibleMatch[0].trimEnd() : null;
 }
 
+export function isClearComposerCommandInput(input: string): boolean {
+  const trimmed = input.trim();
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) return false;
+  return matchCommandName(trimmed.slice(1).trim().toLowerCase(), "clear") !== null;
+}
+
 function normalizeCommandText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
@@ -2517,6 +2539,7 @@ function ChatApp() {
   );
   const [structuredComposerValues, setStructuredComposerValues] = useState<Record<string, string>>({});
   const [composerCandidateMenu, setComposerCandidateMenu] = useState<ComposerCandidateMenuState>(null);
+  const [composerResetToken, setComposerResetToken] = useState(0);
   const [isSpotlightOpen, setIsSpotlightOpen] = useState(false);
   const [spotlightQuery, setSpotlightQuery] = useState("");
   const [spotlightFilter, setSpotlightFilter] = useState<SpotlightFilter>("all");
@@ -2629,6 +2652,19 @@ function ChatApp() {
       pendingMentionAttachmentRequestsRef.current.clear();
     }
     syncPendingMentionAttachmentPaths();
+  };
+
+  const resetComposerDraft = () => {
+    clearComposerDraft({
+      setInput,
+      setAttachedFiles,
+      setDroppedWidgets,
+      setComposerCandidateMenu,
+      bumpResetToken: () => setComposerResetToken((value) => value + 1),
+    });
+    cancelPendingMentionAttachments();
+    dismissedComposerMentionToolsRef.current.clear();
+    setComposerEntityReferences([]);
   };
 
   const semanticAttachmentPathsIncludingPending = (files: AttachedFile[]) => [
@@ -3947,11 +3983,7 @@ function ChatApp() {
     setPreviews([]);
     setError(null);
     setIsGenerating(false);
-    cancelPendingMentionAttachments();
-    setAttachedFiles([]);
-    setDroppedWidgets([]);
-    dismissedComposerMentionToolsRef.current.clear();
-    setComposerEntityReferences([]);
+    resetComposerDraft();
     replaceChatIdInUrl(null, false);
   };
 
@@ -4628,12 +4660,7 @@ function ChatApp() {
         handleNewTask();
         return;
       case "clear_composer_state":
-        setInput("");
-        cancelPendingMentionAttachments();
-        setAttachedFiles([]);
-        setDroppedWidgets([]);
-        dismissedComposerMentionToolsRef.current.clear();
-        setComposerEntityReferences([]);
+        resetComposerDraft();
         if (activeConversationId) {
           forgetPendingRequest(activeConversationId);
           replaceChatIdInUrl(activeConversationId, false);
@@ -5153,6 +5180,13 @@ function ChatApp() {
     const tab = createWorkspaceTab(kind, {
       title: kind === "chat" ? "New Conversation" : option?.label,
     });
+    if (kind === "chat") {
+      setActiveConversationId(null);
+      setActiveConversation(null);
+      setPreviews([]);
+      resetComposerDraft();
+      replaceChatIdInUrl(null, false);
+    }
     setWorkspaceTabs((current) => [...current, tab]);
     activateWorkspaceTab(tab);
   };
@@ -6125,6 +6159,15 @@ function ChatApp() {
     }
     setRetryableSubmission(null);
 
+    if (!override && isClearComposerCommandInput(inputForSubmit)) {
+      resetComposerDraft();
+      if (activeConversationId) {
+        forgetPendingRequest(activeConversationId);
+        replaceChatIdInUrl(activeConversationId, false);
+      }
+      return;
+    }
+
     const commandInput = override ? null : parseSlashCommandInput(inputForSubmit, effectiveCommandCatalog, { enabled: slashCommandsEnabled });
     if (commandInput) {
       const shouldClearInput = await executeComposerCommand(commandInput.command.id, commandInput.raw);
@@ -6952,6 +6995,7 @@ function ChatApp() {
       structuredInputValues={effectiveStructuredComposerValues}
       modelCommandCandidates={modelCommandCandidates}
       modelPickerRequestId={modelPickerRequestId}
+      composerResetToken={composerResetToken}
       modelStatusIndicators={composerModelStatusIndicators}
       voiceInputEnabled={settingsValues.general?.voice_input_enabled !== false}
       voiceInputUseAi={settingsValues.general?.voice_input_use_ai === true}
