@@ -16,50 +16,7 @@
     "removal_wave": 10,
     "sunset_at": "2099-01-01"
   },
-  "operation_catalog": [
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_knowledge_marketplace_pack.marketplace.card_schema",
-      "owner": "rumi_knowledge_marketplace_pack",
-      "source_kind": "legacy_connectivity"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_knowledge_marketplace_pack.marketplace.install_review_workflow",
-      "owner": "rumi_knowledge_marketplace_pack",
-      "source_kind": "legacy_connectivity"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_knowledge_marketplace_pack.marketplace.listing_preview",
-      "owner": "rumi_knowledge_marketplace_pack",
-      "source_kind": "legacy_connectivity"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_knowledge_marketplace_pack.marketplace.model_tiers",
-      "owner": "rumi_knowledge_marketplace_pack",
-      "source_kind": "legacy_connectivity"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_knowledge_marketplace_pack.marketplace.provenance_ledger",
-      "owner": "rumi_knowledge_marketplace_pack",
-      "source_kind": "legacy_connectivity"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_knowledge_marketplace_pack.marketplace.tag_requirements",
-      "owner": "rumi_knowledge_marketplace_pack",
-      "source_kind": "legacy_connectivity"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_knowledge_marketplace_pack.marketplace.trust_rubric",
-      "owner": "rumi_knowledge_marketplace_pack",
-      "source_kind": "legacy_connectivity"
-    }
-  ],
+  "operation_catalog": [],
   "pack": {
     "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     "display_name": "Rumi Knowledge Marketplace Pack",

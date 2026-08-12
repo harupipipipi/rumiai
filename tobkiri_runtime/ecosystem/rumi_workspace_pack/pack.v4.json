@@ -16,44 +16,7 @@
     "removal_wave": 10,
     "sunset_at": "2099-01-01"
   },
-  "operation_catalog": [
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_workspace_pack.rumi.workspace.artifact_types",
-      "owner": "rumi_workspace_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_workspace_pack.rumi.workspace.capabilities",
-      "owner": "rumi_workspace_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_workspace_pack.rumi.workspace.export_targets",
-      "owner": "rumi_workspace_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_workspace_pack.rumi.workspace.job_recipes",
-      "owner": "rumi_workspace_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_workspace_pack.rumi.workspace.profiles",
-      "owner": "rumi_workspace_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_workspace_pack.rumi.workspace.tools",
-      "owner": "rumi_workspace_pack",
-      "source_kind": "legacy_component"
-    }
-  ],
+  "operation_catalog": [],
   "pack": {
     "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     "display_name": "rumi_workspace_pack",

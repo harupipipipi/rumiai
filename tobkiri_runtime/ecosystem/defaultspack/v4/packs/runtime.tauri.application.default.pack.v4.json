@@ -43,18 +43,18 @@
     "source_digest": "sha256:fa77f6cb4451a7b814e3ae194e099fbf49ee7ec93853d25ee576471b096247a0",
     "repository_commit": "working-tree",
     "repository_commit_trusted": false,
-    "content_root_digest": "sha256:da635d56d1cf024e490e90fb1c335f70d77497783d712fce135fbd496b57f85f",
+    "content_root_digest": "sha256:6edef849c8f4e80186b9cc8450932b9f67f40ed50664ab47cc0de782aa4af8d4",
     "generator": "defaultspack-v4-core",
     "generator_version": "2.0.0",
     "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
-    "generator_digest": "sha256:05b88e9aa4212aab0f9358fb4c185250eb8369f8a9cdb5ca7edf1c368db98404",
+    "generator_digest": "sha256:650df5460ee0057177635518ec1bc4dfd2a666a3be849aa549fa32686f3f8308",
     "input_inventory_digest": "sha256:6b04dc3226d664357bdf516ee6ebfaf175c34c6cdaabec64b7df21da3f429ff2",
     "normative": true,
     "evidence": [
       {
         "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
         "rule_id": "normative-generator-bytes",
-        "digest": "sha256:05b88e9aa4212aab0f9358fb4c185250eb8369f8a9cdb5ca7edf1c368db98404"
+        "digest": "sha256:650df5460ee0057177635518ec1bc4dfd2a666a3be849aa549fa32686f3f8308"
       },
       {
         "path": "ecosystem/defaultspack/v4/packs/runtime.tauri.application.default.pack.v4.json",
@@ -103,7 +103,7 @@
     }
   ],
   "integrity": {
-    "source_identity": "sha256:b6878bf2139c4361338300dd03361eafa6c273d391d990d0f5539bda46a83db7",
+    "source_identity": "sha256:84cf35a2bfcb5dfc59ed45eed5c571ae6eaf9754ab30baa66a5b4ca99ddc8dfc",
     "artifact_set_digest": "sha256:1fc3d007e46bc537f93a4fea9fe59ac220d9965403673437f84c5025ceb5e545",
     "contract_catalog_digest": "sha256:0df46117366f419dbad8685b74340a655d45e46e71fc5a0c1eb30c9fce00f614"
   }

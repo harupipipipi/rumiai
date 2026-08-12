@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 from types import ModuleType
 
 import pytest
@@ -84,3 +87,16 @@ def test_core_generator_transaction_rejects_destination_symlink(
         )
 
     assert outside.read_text(encoding="utf-8") == "outside"
+
+
+def test_core_generator_script_entrypoint_is_independent_of_cwd() -> None:
+    """The documented file entrypoint imports the runtime from a fresh checkout."""
+    result = subprocess.run(
+        [sys.executable, "-B", str(GENERATOR), "--check"],
+        cwd=ROOT.parent,
+        env={"PATH": os.environ["PATH"], "PYTHONDONTWRITEBYTECODE": "1"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

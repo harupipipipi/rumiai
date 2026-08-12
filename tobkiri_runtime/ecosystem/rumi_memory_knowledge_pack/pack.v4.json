@@ -16,62 +16,7 @@
     "removal_wave": 10,
     "sunset_at": "2099-01-01"
   },
-  "operation_catalog": [
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_memory_knowledge_pack.rumi.memory.capabilities",
-      "owner": "rumi_memory_knowledge_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_memory_knowledge_pack.rumi.memory.evidence_schema",
-      "owner": "rumi_memory_knowledge_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_memory_knowledge_pack.rumi.memory.hygiene_policy",
-      "owner": "rumi_memory_knowledge_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_memory_knowledge_pack.rumi.memory.object_schema",
-      "owner": "rumi_memory_knowledge_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_memory_knowledge_pack.rumi.memory.recall_evidence_policy",
-      "owner": "rumi_memory_knowledge_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_memory_knowledge_pack.rumi.memory.recall_workflows",
-      "owner": "rumi_memory_knowledge_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_memory_knowledge_pack.rumi.memory.skill_learning_policy",
-      "owner": "rumi_memory_knowledge_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_memory_knowledge_pack.rumi.memory.skill_learning_proposal_schema",
-      "owner": "rumi_memory_knowledge_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_memory_knowledge_pack.rumi.memory.surface_catalog",
-      "owner": "rumi_memory_knowledge_pack",
-      "source_kind": "legacy_component"
-    }
-  ],
+  "operation_catalog": [],
   "pack": {
     "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     "display_name": "rumi_memory_knowledge_pack",

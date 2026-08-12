@@ -790,21 +790,10 @@ def _manifest_document(
             }
             for operation in operations
         )
-    legacy_effects = _effect_ceiling(
-        record["capabilities"],
-        record["network"],
-        record["secrets"],
-        host_execution=record["execution_boundary"] == "host_brokered",
-    )
-    operation_catalog.extend(
-        {
-            "operation_id": _canonical_id(f"{record['pack_id']}.{item['id']}"),
-            "owner": record["pack_id"],
-            "source_kind": item["source"],
-            "effect_ceiling": legacy_effects,
-        }
-        for item in record["legacy_operations"]
-    )
+    # Legacy component/connectivity operations are migration evidence only.
+    # They are deliberately not projected into the v4 authority catalog: a
+    # declarative Pack must not acquire an executable Operation/Function
+    # principal merely because an old compatibility manifest named one.
     return {
         "pack_api_version": "io.tobkiri.pack.v4",
         "pack": {
@@ -930,6 +919,7 @@ def verify_rendered_artifacts(files: Mapping[str, str]) -> None:
         == index["source_identity"]
     ):
         raise PackV4MigrationError("generated source identities disagree")
+    _verify_function_operation_principals(manifest)
     entries = {item["path"]: item for item in index["artifacts"]}
     for name in ("pack.v4.json", "contracts.v4.json"):
         expected = "sha256:" + hashlib.sha256(files[name].encode("utf-8")).hexdigest()
@@ -960,6 +950,128 @@ def verify_rendered_artifacts(files: Mapping[str, str]) -> None:
                     raise PackV4MigrationError(
                         f"operation schema digest is invalid: {operation['operation_id']}"
                     )
+
+
+def _verify_function_operation_principals(manifest: Mapping[str, Any]) -> None:
+    """Require one finite v4 principal path for every executable operation.
+
+    The source catalog may retain legacy operations for offline migration
+    evidence, but generated authority artifacts contain only canonical
+    Contract/Operation/Function relationships.  Declarative Packs therefore
+    have no executable catalog at all.
+    """
+
+    pack = manifest.get("pack")
+    requirements = manifest.get("requirements")
+    functions = manifest.get("functions")
+    contracts = manifest.get("contracts")
+    operation_catalog = manifest.get("operation_catalog")
+    provider_catalog = manifest.get("provider_catalog")
+    if not all(
+        isinstance(value, list)
+        for value in (functions, contracts, operation_catalog, provider_catalog)
+    ) or not isinstance(pack, Mapping) or not isinstance(requirements, Mapping):
+        raise PackV4MigrationError("generated Pack v4 principal fields are malformed")
+
+    pack_id = str(pack.get("id") or "")
+    boundary = requirements.get("execution_boundary")
+    if boundary == "host_brokered":
+        expected_role = "host_capability_provider"
+    elif boundary == "sandbox":
+        expected_role = "brokered"
+    elif boundary in {"declarative_only", "remote"}:
+        expected_role = None
+    else:
+        raise PackV4MigrationError(f"unknown Pack execution boundary: {pack_id}")
+
+    if len({item.get("id") for item in functions if isinstance(item, Mapping)}) != len(functions):
+        raise PackV4MigrationError(f"duplicate Function principal in Pack: {pack_id}")
+    contract_by_revision = {
+        item.get("revision_digest"): item
+        for item in contracts
+        if isinstance(item, Mapping)
+    }
+    expected_operations: set[tuple[str, str, str]] = set()
+    expected_providers: set[tuple[str, str, tuple[str, ...]]] = set()
+    for function in functions:
+        if not isinstance(function, Mapping):
+            raise PackV4MigrationError(f"malformed Function principal in Pack: {pack_id}")
+        function_id = str(function.get("id") or "")
+        operations = function.get("operations")
+        if not isinstance(operations, list) or not operations:
+            raise PackV4MigrationError(f"Function has no Operations: {pack_id}/{function_id}")
+        if expected_role is not None and function.get("role") != expected_role:
+            raise PackV4MigrationError(
+                f"Function role does not match Pack boundary: {pack_id}/{function_id}"
+            )
+        revision = function.get("contract_revision_digest")
+        contract = contract_by_revision.get(revision)
+        if not isinstance(contract, Mapping):
+            raise PackV4MigrationError(
+                f"Function Contract revision is missing: {pack_id}/{function_id}"
+            )
+        contract_operations = {
+            str(item.get("operation_id") if isinstance(item, Mapping) else item)
+            for item in contract.get("operations", [])
+        }
+        if set(operations) - contract_operations:
+            raise PackV4MigrationError(
+                f"Function references an unknown Operation: {pack_id}/{function_id}"
+            )
+        implementation_digest = function.get("implementation_digest")
+        artifact_digests = {
+            item.get("digest")
+            for item in manifest.get("artifacts", [])
+            if isinstance(item, Mapping)
+        }
+        if implementation_digest not in artifact_digests:
+            raise PackV4MigrationError(
+                f"Function implementation is not in the Pack artifact set: {pack_id}/{function_id}"
+            )
+        expected_providers.add(
+            (function_id, str(contract.get("contract_id")), tuple(operations))
+        )
+        for operation_id in operations:
+            expected_operations.add(
+                (str(operation_id), str(contract.get("contract_id")), function_id)
+            )
+
+    if functions:
+        if any(
+            not isinstance(item, Mapping)
+            or item.get("source_kind") != "canonical_v4_contract"
+            for item in operation_catalog
+        ):
+            raise PackV4MigrationError(
+                f"legacy Operation source leaked into Pack v4 authority: {pack_id}"
+            )
+    elif contracts or operation_catalog or provider_catalog:
+        raise PackV4MigrationError(
+            f"declarative Pack has executable catalog entries: {pack_id}"
+        )
+
+    actual_operations = {
+        (
+            str(item.get("operation_id")),
+            str(item.get("contract_reference")),
+            str(item.get("provider_id")),
+        )
+        for item in operation_catalog
+        if isinstance(item, Mapping)
+    }
+    actual_providers = {
+        (
+            str(item.get("provider_id")),
+            str(item.get("contract_reference")),
+            tuple(item.get("operations", ())),
+        )
+        for item in provider_catalog
+        if isinstance(item, Mapping)
+    }
+    if actual_operations != expected_operations:
+        raise PackV4MigrationError(f"Operation catalog does not match Functions: {pack_id}")
+    if actual_providers != expected_providers:
+        raise PackV4MigrationError(f"Provider catalog does not match Functions: {pack_id}")
 
 
 def _validate_catalog_payload(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:

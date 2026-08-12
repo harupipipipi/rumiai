@@ -16,44 +16,7 @@
     "removal_wave": 10,
     "sunset_at": "2099-01-01"
   },
-  "operation_catalog": [
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_operations_company_pack.rumi.mimo_coding_company.bootstrap",
-      "owner": "rumi_operations_company_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_operations_company_pack.rumi.mimo_coding_company.manifest",
-      "owner": "rumi_operations_company_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_operations_company_pack.rumi.mimo_coding_company.status",
-      "owner": "rumi_operations_company_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_operations_company_pack.rumi.operations_company.bootstrap",
-      "owner": "rumi_operations_company_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_operations_company_pack.rumi.operations_company.manifest",
-      "owner": "rumi_operations_company_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_operations_company_pack.rumi.operations_company.status",
-      "owner": "rumi_operations_company_pack",
-      "source_kind": "legacy_component"
-    }
-  ],
+  "operation_catalog": [],
   "pack": {
     "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     "display_name": "rumi_operations_company_pack",

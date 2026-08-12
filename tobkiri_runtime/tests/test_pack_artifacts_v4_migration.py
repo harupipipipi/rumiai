@@ -138,7 +138,7 @@ def test_all_packs_have_valid_deterministic_v4_artifacts() -> None:
         "packs": 143,
         "valid": 143,
         "contracts": 162,
-        "operations": 260,
+            "operations": 221,
     }
     payload = _catalog()
     assert payload["excluded_packs"] == sorted(EXCLUDED_PACKS)
@@ -206,7 +206,7 @@ def test_tampered_and_stale_generated_artifacts_fail_closed() -> None:
 
 
 def test_global_catalog_has_no_duplicate_provider_or_operation() -> None:
-    """Provider and operation identities are globally qualified and unique."""
+    """Canonical Provider and Operation identities are globally unique."""
     providers: set[str] = set()
     operations: set[str] = set()
     owners: dict[str, str] = {}
@@ -222,7 +222,34 @@ def test_global_catalog_has_no_duplicate_provider_or_operation() -> None:
             assert provider["provider_id"] not in providers
             providers.add(provider["provider_id"])
         for operation in manifest["operation_catalog"]:
+            assert operation["source_kind"] == "canonical_v4_contract"
             assert operation["operation_id"] not in operations
             operations.add(operation["operation_id"])
     assert len(providers) == 162
-    assert len(operations) == 260
+    assert len(operations) == 221
+
+
+def test_legacy_operation_source_cannot_enter_v4_authority_catalog() -> None:
+    """Offline legacy evidence is never an executable v4 Operation."""
+    record = next(
+        item
+        for item in _catalog()["packs"]
+        if item["pack_id"] == "rumi_agent_services_pack"
+    )
+    files = _render_record(record)
+    manifest = json.loads(files["pack.v4.json"])
+    assert manifest["functions"] == []
+    assert manifest["operation_catalog"] == []
+    assert manifest["provider_catalog"] == []
+
+    manifest["operation_catalog"] = [
+        {
+            "operation_id": "rumi_agent_services_pack.legacy.operation",
+            "owner": record["pack_id"],
+            "source_kind": "legacy_component",
+            "effect_ceiling": [],
+        }
+    ]
+    files["pack.v4.json"] = json.dumps(manifest, sort_keys=True) + "\n"
+    with pytest.raises(PackV4MigrationError, match="executable catalog entries"):
+        verify_rendered_artifacts(files)

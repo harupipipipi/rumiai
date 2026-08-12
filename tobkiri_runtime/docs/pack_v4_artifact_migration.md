@@ -8,8 +8,8 @@ migration is owned by the defaultspack migration stream.
 The catalog was imported once from 95 v3-authoritative and 44 legacy-only
 Packs. The import retains Pack and Contract dependencies, capabilities,
 network and secret requirements, host-execution and workspace boundaries,
-approval policy, provider semantics, schemas, legacy component operations,
-runtime artifact digests, and source evidence. A normal generation never
+approval policy, provider semantics, schemas, legacy source evidence, runtime
+artifact digests, and source evidence. A normal generation never
 reads `rumi.pack.v3.json` or `ecosystem.json`.
 
 ## Canonical and compatibility files
@@ -26,8 +26,13 @@ Each migrated Pack has three production artifacts:
 The old `rumi.pack.v3.json` and `ecosystem.json` documents are offline,
 read-only compatibility projections. They are not fallback authority sources.
 Legacy Contract IDs are retained in `migration.legacy_ids`; production
-Contract IDs use the `tobkiri.*` namespace. Provider and operation IDs are
-Pack-qualified so a registry never needs an ambiguous global fallback.
+Contract IDs use the `tobkiri.*` namespace. Provider and Operation IDs are
+Pack-qualified so a registry never needs an ambiguous global fallback. Legacy
+component and connectivity operations remain only in the canonical source
+catalog's offline migration evidence; they are never emitted into a v4
+`operation_catalog`. Declarative content Packs therefore have empty Function,
+Provider, Contract, and Operation catalogs rather than synthetic executable
+principals.
 
 ## Generation and verification
 
@@ -40,8 +45,11 @@ python scripts/migrate_pack_artifacts_v4.py --check
 
 `--check` is read-only and rejects missing, hand-edited, stale, malformed, or
 internally inconsistent output. It also validates schemas, source identities,
-artifact hashes, Contract revisions, schema hashes, integrity seals, and
-global Contract-owner/provider/operation uniqueness.
+artifact hashes, Contract revisions, Function-to-Contract-to-Operation
+principal closure, schema hashes, integrity seals, and global
+Contract-owner/provider/Operation uniqueness. The Defaultspack bundle and
+executable catalog have separate official `--check` generators; CI runs all
+three checks together.
 
 `--import-legacy` is reserved for replaying the one-way migration from the
 pinned migration commit. It must not be used by runtime discovery, profile
@@ -51,7 +59,8 @@ resolution, dispatch, or ordinary artifact builds.
 
 v3 Contracts become accepted v4 Contracts with one deterministic Contract
 owner and one or more Pack-qualified providers. Entry points become exact
-qualified operations. Legacy component/connectivity operations retain their
-original qualified name inside a Pack-qualified operation ID. Packs that only
-ship declarative content have empty function/provider/operation catalogs;
-the generator does not invent executable operations to fill those catalogs.
+qualified Operations, each covered by one finite Function principal path. A
+legacy component/connectivity name is retained only as migration evidence; it
+does not become a v4 Operation. Packs that only ship declarative content have
+empty Function/Provider/Contract/Operation catalogs; the generator does not
+invent executable Operations to fill those catalogs.

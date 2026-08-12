@@ -8,7 +8,7 @@
     ],
     "required_contracts": []
   },
-  "definition_revision": "sha256:1afe8fe9eeacb93569e4c1c64cd908e9767139c7bb93b314de519eb6fef1b758",
+  "definition_revision": "sha256:a571a84d4a215cd0a65bdf127d0d16e5b131763f152d5cd00663134f72eda870",
   "dependencies": [],
   "pack_id": "defaults-basepack",
   "policy_foundation": {
@@ -23,18 +23,18 @@
     "source_digest": "sha256:d77ab5ddd24c978e196c451cca7cac67608606de3d6f23ef124de77820c18fca",
     "repository_commit": "working-tree",
     "repository_commit_trusted": false,
-    "content_root_digest": "sha256:24b051ea274f62f73db098aaa8de7ad5ddaae215d2da5036463dac58f101f45b",
+    "content_root_digest": "sha256:813a842b7fc1cdcb8cf5b480fe01230b2c8aa6ae16338bb66cfc7d0f94625d2e",
     "generator": "defaultspack-v4-core",
     "generator_version": "2.0.0",
     "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
-    "generator_digest": "sha256:05b88e9aa4212aab0f9358fb4c185250eb8369f8a9cdb5ca7edf1c368db98404",
+    "generator_digest": "sha256:650df5460ee0057177635518ec1bc4dfd2a666a3be849aa549fa32686f3f8308",
     "input_inventory_digest": "sha256:95182f42d07a89d22c4a07f5c28d1a029f31ccee1c42eea3a785d2e13cfcf3c6",
     "normative": true,
     "evidence": [
       {
         "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
         "rule_id": "normative-generator-bytes",
-        "digest": "sha256:05b88e9aa4212aab0f9358fb4c185250eb8369f8a9cdb5ca7edf1c368db98404"
+        "digest": "sha256:650df5460ee0057177635518ec1bc4dfd2a666a3be849aa549fa32686f3f8308"
       },
       {
         "path": "ecosystem/defaultspack/v4/defaults-basepack.base.v1.json",

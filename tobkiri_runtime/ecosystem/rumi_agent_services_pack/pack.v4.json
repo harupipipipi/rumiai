@@ -16,56 +16,7 @@
     "removal_wave": 10,
     "sunset_at": "2099-01-01"
   },
-  "operation_catalog": [
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_agent_services_pack.rumi.agent_services.capability_catalog",
-      "owner": "rumi_agent_services_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_agent_services_pack.rumi.agent_services.examples",
-      "owner": "rumi_agent_services_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_agent_services_pack.rumi.agent_services.handoffs",
-      "owner": "rumi_agent_services_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_agent_services_pack.rumi.agent_services.presets",
-      "owner": "rumi_agent_services_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_agent_services_pack.rumi.agent_services.profiles",
-      "owner": "rumi_agent_services_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_agent_services_pack.rumi.agent_services.prompts",
-      "owner": "rumi_agent_services_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_agent_services_pack.rumi.agent_services.routing",
-      "owner": "rumi_agent_services_pack",
-      "source_kind": "legacy_component"
-    },
-    {
-      "effect_ceiling": [],
-      "operation_id": "rumi_agent_services_pack.rumi.agent_services.workflow_templates",
-      "owner": "rumi_agent_services_pack",
-      "source_kind": "legacy_component"
-    }
-  ],
+  "operation_catalog": [],
   "pack": {
     "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     "display_name": "rumi_agent_services_pack",
