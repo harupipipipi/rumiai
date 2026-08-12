@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import importlib.util
 import os
 import secrets
+import signal
 import json
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -906,7 +911,7 @@ def _installation_helper(
     caller_uid: int = 2**31 - 1,
     caller_groups: tuple[int, ...] = (),
 ) -> subprocess.CompletedProcess[bytes]:
-    staging = parent.parent / "staging"
+    staging = parent.parent / f"{_MODULE.STAGING_PREFIX}{token}"
     staging.mkdir(mode=0o700, exist_ok=True)
     owner_uid = os.getuid() if owner_uid is None else owner_uid
     arguments = [sys.executable, "-I", "-B", "-c", code]
@@ -920,21 +925,60 @@ def _installation_helper(
             _MODULE.INSTALLATION_JOURNAL_NAME,
             _MODULE.INSTALLATION_JOURNAL_SCHEMA,
             staging,
-            _MODULE.DISPLACEMENT_JOURNAL_NAME,
+            _MODULE.DISPLACEMENT_JOURNAL_PREFIX,
             _MODULE.DISPLACEMENT_JOURNAL_SCHEMA,
             _MODULE.DISPLACED_PREFIX,
+            _MODULE.INSTALLATION_LOCK_NAME,
             str(owner_uid),
             str(caller_uid),
             ",".join(str(group) for group in caller_groups),
             failpoint,
         ]
     )
-    return subprocess.run(
-        arguments,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
+
+    @contextlib.contextmanager
+    def local_lock() -> object:
+        lock_path = parent / _MODULE.INSTALLATION_LOCK_NAME
+        if lock_path.exists():
+            os.chmod(lock_path, 0o600)
+        descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o400)
+        os.chmod(lock_path, 0o400)
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        start = subprocess.run(
+            ["/bin/ps", "-o", "lstart=", "-p", str(os.getpid())],
+            stdout=subprocess.PIPE,
+            text=True,
+            check=True,
+            env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+        ).stdout.strip()
+        payload = _MODULE._canonical_json(
+            {
+                "pid": os.getpid(),
+                "schema": "tobkiri.packaging-python-lock.v1",
+                "start": start,
+                "token": token,
+            }
+        )
+        os.ftruncate(descriptor, 0)
+        os.write(descriptor, payload)
+        os.fsync(descriptor)
+        try:
+            yield
+        finally:
+            os.close(descriptor)
+
+    lock_context = (
+        _MODULE._installation_lock(SimpleNamespace(install_root=parent / "3.13"), token)
+        if privileged
+        else local_lock()
     )
+    with lock_context:
+        return subprocess.run(
+            arguments,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
 
 
 def _recovery_helper(
@@ -1485,7 +1529,7 @@ def test_process_recovers_kill_immediately_after_provisional_mkdir(
     assert created.returncode < 0
     assert (parent / f"{_MODULE.PROVISIONAL_PREFIX}{token}").is_dir()
     assert _recovery_helper(parent).returncode == 0
-    assert list(parent.iterdir()) == []
+    assert [path.name for path in parent.iterdir()] == [_MODULE.INSTALLATION_LOCK_NAME]
 
 
 def test_process_preserves_partial_journal_as_diagnostic_residue(
@@ -1540,7 +1584,13 @@ def test_existing_unowned_version_leaf_fails_closed(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "failpoint",
-    ["", "after_mkdir", "after_displacement_journal", "after_displacement"],
+    [
+        "",
+        "after_mkdir",
+        "after_displacement_journal",
+        "after_displacement",
+        "after_rename",
+    ],
 )
 def test_host_leaf_is_quarantined_and_restored_by_exact_inode(
     tmp_path: Path, failpoint: str
@@ -1563,7 +1613,8 @@ def test_host_leaf_is_quarantined_and_restored_by_exact_inode(
     else:
         assert created.returncode == 0
         assert not (fixed / "host-marker").exists()
-    assert _recovery_helper(parent, token).returncode == 0
+    recovery_token = "9" * 32
+    assert _recovery_helper(parent, recovery_token).returncode == 0
     assert marker.read_bytes() == b"preserve host Python"
     assert (fixed.stat().st_dev, fixed.stat().st_ino) == original
     assert not (parent / f"{_MODULE.DISPLACED_PREFIX}{token}").exists()
@@ -1630,6 +1681,166 @@ def test_displaced_leaf_name_swap_is_retained_fail_closed(tmp_path: Path) -> Non
     assert b"displaced fixed prefix authority changed" in recovered.stderr
     assert replacement.read_bytes() == b"preserve"
     assert (saved / "host-marker").read_bytes() == b"host"
+
+
+def test_live_or_ambiguous_displacement_journal_is_retained(
+    tmp_path: Path,
+) -> None:
+    """PID+start liveness and multiple journals both stop recovery fail closed."""
+    parent = tmp_path / "versions"
+    fixed = parent / "3.13"
+    fixed.mkdir(parents=True)
+    (fixed / "host-marker").write_bytes(b"host")
+    token = "3" * 32
+    assert (
+        _installation_helper(
+            _MODULE.ROOT_CREATE_INSTALLATION_CODE, parent, token
+        ).returncode
+        == 0
+    )
+    journal = parent / f"{_MODULE.DISPLACEMENT_JOURNAL_PREFIX}{token}.json"
+    payload = json.loads(journal.read_bytes())
+    payload["owner_pid"] = os.getpid()
+    payload["owner_start"] = subprocess.run(
+        ["/bin/ps", "-o", "lstart=", "-p", str(os.getpid())],
+        stdout=subprocess.PIPE,
+        text=True,
+        check=True,
+        env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+    ).stdout.strip()
+    journal.chmod(0o600)
+    journal.write_bytes(_MODULE._canonical_json(payload))
+    journal.chmod(0o400)
+    live = _recovery_helper(parent, "2" * 32)
+    assert live.returncode != 0
+    assert b"owner process is still live" in live.stderr
+
+    payload["owner_pid"] = 2**30
+    payload["owner_start"] = "stale"
+    journal.chmod(0o600)
+    journal.write_bytes(_MODULE._canonical_json(payload))
+    journal.chmod(0o400)
+    second = parent / f"{_MODULE.DISPLACEMENT_JOURNAL_PREFIX}{'1' * 32}.json"
+    second.write_bytes(journal.read_bytes())
+    second.chmod(0o400)
+    ambiguous = _recovery_helper(parent, "2" * 32)
+    assert ambiguous.returncode != 0
+    assert b"multiple displacement journals are ambiguous" in ambiguous.stderr
+
+    second.unlink()
+    unknown = parent / f"{_MODULE.DISPLACEMENT_JOURNAL_PREFIX}not-a-token.json"
+    unknown.write_bytes(journal.read_bytes())
+    unknown.chmod(0o400)
+    invalid = _recovery_helper(parent, "2" * 32)
+    assert invalid.returncode != 0
+    assert b"unknown displacement journal entry" in invalid.stderr
+
+
+def test_transaction_lock_excludes_second_writer_at_fsynced_journal_barrier(
+    tmp_path: Path,
+) -> None:
+    """Only one process crosses the displacement-journal to rename barrier."""
+    parent = tmp_path / "versions"
+    fixed = parent / "3.13"
+    fixed.mkdir(parents=True)
+    (fixed / "host-marker").write_bytes(b"host")
+    staging = tmp_path / f"{_MODULE.STAGING_PREFIX}{'d' * 32}"
+    results: list[subprocess.CompletedProcess[bytes]] = []
+
+    def first_writer() -> None:
+        results.append(
+            _installation_helper(
+                _MODULE.ROOT_CREATE_INSTALLATION_CODE,
+                parent,
+                "d" * 32,
+                "barrier_after_displacement_journal",
+            )
+        )
+
+    thread = threading.Thread(target=first_writer)
+    thread.start()
+    deadline = time.monotonic() + 5
+    while not (staging / ".barrier-ready").exists():
+        if time.monotonic() >= deadline:
+            pytest.fail("first writer did not reach the fsynced journal barrier")
+        time.sleep(0.01)
+    with pytest.raises(BlockingIOError):
+        _installation_helper(_MODULE.ROOT_CREATE_INSTALLATION_CODE, parent, "e" * 32)
+    (staging / ".barrier-release").write_bytes(b"release")
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert len(results) == 1 and results[0].returncode == 0
+    assert _recovery_helper(parent, "f" * 32).returncode == 0
+    assert (fixed / "host-marker").read_bytes() == b"host"
+
+
+def test_root_process_lock_excludes_concurrency_and_releases_after_kill() -> None:
+    """The kernel lock admits one root holder and is released on cancellation."""
+    sudo = subprocess.run(
+        ["/usr/bin/sudo", "-n", "/usr/bin/true"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if sudo.returncode != 0:
+        if _REQUIRE_ROOT_PROCESS_TESTS:
+            pytest.fail("passwordless sudo is required for installation lock test")
+        pytest.skip("passwordless sudo is unavailable")
+    parent = Path("/private/tmp") / (
+        f"tobkiri-packaging-lock-test-{secrets.token_hex(16)}"
+    )
+    subprocess.run(
+        ["/usr/bin/sudo", "-n", "/bin/mkdir", "-m", "0555", parent],
+        check=True,
+    )
+    parent_identity = (parent.stat().st_dev, parent.stat().st_ino)
+    groups = ",".join(str(group) for group in {os.getegid(), *os.getgroups()})
+
+    def holder(token: str) -> subprocess.Popen[str]:
+        return subprocess.Popen(
+            [
+                "/usr/bin/sudo",
+                "-n",
+                "/usr/bin/python3",
+                "-I",
+                "-B",
+                "-c",
+                _MODULE.ROOT_INSTALLATION_LOCK_CODE,
+                parent,
+                _MODULE.INSTALLATION_LOCK_NAME,
+                token,
+                "0",
+                str(os.geteuid()),
+                groups,
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env={"PATH": "/usr/bin:/bin"},
+            start_new_session=True,
+        )
+
+    first = holder("a" * 32)
+    try:
+        assert first.stdout is not None and first.stdout.readline().strip() == "READY"
+        blocked = holder("b" * 32)
+        assert blocked.wait(timeout=5) != 0
+        os.killpg(first.pid, signal.SIGKILL)
+        first.wait(timeout=5)
+        recovered = holder("c" * 32)
+        try:
+            assert recovered.stdout is not None
+            assert recovered.stdout.readline().strip() == "READY"
+        finally:
+            if recovered.stdin is not None:
+                recovered.stdin.close()
+            recovered.wait(timeout=5)
+    finally:
+        if first.poll() is None:
+            os.killpg(first.pid, signal.SIGKILL)
+            first.wait(timeout=5)
+        _MODULE._remove_root_tree(parent, parent_identity)
 
 
 def test_root_process_preserves_preinstalled_framework_leaf(tmp_path: Path) -> None:
@@ -1796,30 +2007,55 @@ def test_prefix_journal_precedes_ditto_and_cancellation_cleanup_is_persistent() 
     """Partial copy is journaled before ditto and retained for always cleanup."""
     source = _SCRIPT.read_text(encoding="utf-8")
     prepare = source[
-        source.index("def prepare_macos_installation") : source.index(
+        source.index("def _prepare_macos_installation_locked") : source.index(
             "def cleanup_macos_installation"
         )
     ]
     assert prepare.index("_create_installation_root(") < prepare.index(
         '"/usr/bin/ditto"'
     )
-    assert prepare.index("ensure_installation_parent(") < prepare.index(
-        "_remove_previous_installation("
-    )
     assert prepare.index("_remove_previous_installation(") < prepare.index(
         "_create_installation_root("
     )
     assert prepare.index("_create_installation_root(") < prepare.index("installer_url")
-    assert "recover_stale_installations(" not in prepare
-    assert "cleanup_transaction(token)" in prepare
-    assert "_remove_root_tree(staging)" not in prepare
+    assert prepare.index("recover_stale_installations(") < prepare.index(
+        "_remove_previous_installation("
+    )
+    assert "recover_stale_installations(provenance, staging, token)" in prepare
+    assert "cleanup_created_ancestors(provenance, staging, token)" in prepare
+    assert "_remove_root_tree(staging)" in prepare
+    wrapper = source[
+        source.index("def prepare_macos_installation(") : source.index(
+            "def cleanup_macos_installation"
+        )
+    ]
+    assert wrapper.index("ensure_installation_parent(") < wrapper.index(
+        "_installation_lock("
+    )
+
+
+def test_production_mutations_share_the_root_os_lock_contract() -> None:
+    """Prepare and recovery mutate only while the validated flock lease is held."""
+    source = _SCRIPT.read_text(encoding="utf-8")
+    cleanup = source[
+        source.index("def cleanup_transaction(") : source.index(
+            "def _transaction_is_absent("
+        )
+    ]
+    assert cleanup.index("with _installation_lock(") < cleanup.index(
+        "recover_stale_installations("
+    )
+    assert "fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)" in source
+    assert "process_start(displacement['owner_pid'])" in source
+    assert "multiple displacement journals are ambiguous" in source
+    assert "recorded staging authority changed" in source
 
 
 def test_formal_source_never_copies_actions_setup_python() -> None:
     """Only the pinned installer payload is copied to its designated prefix."""
     source = _SCRIPT.read_text(encoding="utf-8")
     prepare = source[
-        source.index("def prepare_macos_installation") : source.index(
+        source.index("def _prepare_macos_installation_locked") : source.index(
             "def cleanup_macos_installation"
         )
     ]
@@ -2012,6 +2248,7 @@ def test_workflows_require_exact_root_process_tests_without_skips(
         "test_process_rejects_effective_acl_and_acl_identity_swap",
         "test_process_rejects_other_uid_existing_ancestor_when_available",
         "test_root_process_preserves_preinstalled_framework_leaf",
+        "test_root_process_lock_excludes_concurrency_and_releases_after_kill",
         "test_published_ancestor_is_traversable_by_nonroot_process_when_available",
     )
     step = payload[
@@ -2023,7 +2260,7 @@ def test_workflows_require_exact_root_process_tests_without_skips(
     assert "python -m pytest -q -rs" in step
     assert '--junitxml="$ROOT_PROCESS_JUNIT"' in step
     assert all(step.count(f"::{nodeid}") == 1 for nodeid in nodeids)
-    assert "tests != 8 or skipped != 0" in step
+    assert "tests != 9 or skipped != 0" in step
 
 
 @pytest.mark.parametrize("workflow_name", ["release.yml", "desktop-installers.yml"])

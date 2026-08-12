@@ -13,11 +13,13 @@ executed.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import ctypes
 import errno
 import hashlib
 import json
 import os
+import selectors
 import shutil
 import stat
 import subprocess
@@ -64,9 +66,10 @@ SEALED_REQUIREMENTS_NAME = "authority-requirements.lock"
 INSTALLATION_JOURNAL_NAME = ".tobkiri-packaging-transaction.v1.json"
 INSTALLATION_JOURNAL_SCHEMA = "tobkiri.packaging-python-transaction.v1"
 PROVISIONAL_PREFIX = ".tobkiri-packaging-python-"
-DISPLACEMENT_JOURNAL_NAME = ".tobkiri-packaging-displacement.v1.json"
+DISPLACEMENT_JOURNAL_PREFIX = ".tobkiri-packaging-displacement-"
 DISPLACEMENT_JOURNAL_SCHEMA = "tobkiri.packaging-python-displacement.v1"
 DISPLACED_PREFIX = ".tobkiri-packaging-displaced-"
+INSTALLATION_LOCK_NAME = ".tobkiri-packaging-python.lock"
 ANCESTOR_JOURNAL_PREFIX = "ancestor-"
 ANCESTOR_JOURNAL_SCHEMA = "tobkiri.packaging-python-ancestor.v1"
 ANCESTOR_PROVISIONAL_PREFIX = ".tobkiri-packaging-parent-"
@@ -1059,6 +1062,7 @@ def ensure_installation_parent(
     subprocess.run(
         [
             "/usr/bin/sudo",
+            "-n",
             "/usr/bin/python3",
             "-I",
             "-B",
@@ -1087,6 +1091,7 @@ def cleanup_created_ancestors(
     subprocess.run(
         [
             "/usr/bin/sudo",
+            "-n",
             "/usr/bin/python3",
             "-I",
             "-B",
@@ -1107,14 +1112,175 @@ def cleanup_created_ancestors(
     )
 
 
+ROOT_INSTALLATION_LOCK_CODE = r"""
+import ctypes, errno, fcntl, json, os, stat, subprocess, sys
+parent_path, lock_name, token = sys.argv[1:4]
+owner = int(sys.argv[4]); caller_uid = int(sys.argv[5])
+caller_groups = {int(value) for value in sys.argv[6].split(',') if value}
+if len(token) != 32 or any(c not in '0123456789abcdef' for c in token):
+    raise SystemExit('invalid lock token')
+def caller_can_write(info):
+    mode = stat.S_IMODE(info.st_mode)
+    if info.st_uid == caller_uid: return bool(mode & 0o200)
+    if info.st_gid in caller_groups: return bool(mode & 0o020)
+    return bool(mode & 0o002)
+def nontrivial_acl(fd):
+    if sys.platform != 'darwin': return False
+    lib=ctypes.CDLL(None,use_errno=True); lib.acl_get_fd_np.argtypes=[ctypes.c_int,ctypes.c_int]; lib.acl_get_fd_np.restype=ctypes.c_void_p
+    lib.acl_free.argtypes=[ctypes.c_void_p]; lib.acl_free.restype=ctypes.c_int
+    ctypes.set_errno(0); acl=lib.acl_get_fd_np(fd,0x100)
+    if not acl:
+        if ctypes.get_errno()==errno.ENOENT: return False
+        raise SystemExit('ACL inspection failed')
+    if lib.acl_free(acl) != 0: raise SystemExit('ACL release failed')
+    return True
+def process_start(pid):
+    result = subprocess.run(['/bin/ps','-o','lstart=','-p',str(pid)],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                            text=True, check=False,
+                            env={'PATH':'/usr/bin:/bin','LC_ALL':'C'})
+    value = result.stdout.strip()
+    if result.returncode or not value or len(value) > 64:
+        raise SystemExit('could not bind lock owner process start')
+    return value
+if not parent_path.startswith('/') or os.path.normpath(parent_path) != parent_path:
+    raise SystemExit('unsafe lock parent path')
+parts = [part for part in parent_path.split('/') if part]
+current = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    root_info = os.fstat(current)
+    if root_info.st_uid != owner or caller_can_write(root_info) or \
+       nontrivial_acl(current):
+        raise SystemExit('unsafe lock root authority')
+    for index, part in enumerate(parts):
+        child = os.open(
+            part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current
+        )
+        child_info = os.fstat(child)
+        sticky_root = child_info.st_uid == owner and \
+            bool(child_info.st_mode & stat.S_ISVTX)
+        final = index == len(parts) - 1
+        if child_info.st_uid != owner or \
+           (caller_can_write(child_info) and (final or not sticky_root)) or \
+           nontrivial_acl(child):
+            os.close(child)
+            raise SystemExit('unsafe lock parent authority')
+        os.close(current); current = child
+    try:
+        lock = os.open(lock_name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                       0o400, dir_fd=current)
+        os.fchown(lock, owner, -1); os.fchmod(lock, 0o400); os.fsync(current)
+    except FileExistsError:
+        lock = os.open(lock_name, os.O_RDWR | os.O_NOFOLLOW, dir_fd=current)
+    info = os.fstat(lock)
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != owner or \
+       stat.S_IMODE(info.st_mode) != 0o400 or info.st_nlink != 1 or \
+       nontrivial_acl(lock):
+        raise SystemExit('unsafe installation lock authority')
+    try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError: raise SystemExit('packaging installation transaction is active')
+    payload = json.dumps({'pid':os.getpid(),'schema':'tobkiri.packaging-python-lock.v1',
+                          'start':process_start(os.getpid()),'token':token},
+                         sort_keys=True,separators=(',',':')).encode()+b'\n'
+    os.ftruncate(lock,0); os.lseek(lock,0,os.SEEK_SET)
+    offset=0
+    while offset < len(payload): offset += os.write(lock,payload[offset:])
+    os.fsync(lock); print('READY',flush=True)
+    while os.read(0,4096): pass
+finally:
+    try: os.close(lock)
+    except (NameError,OSError): pass
+    os.close(current)
+"""
+
+
+@contextlib.contextmanager
+def _installation_lock(provenance: InstallerProvenance, token: str) -> Any:
+    """Hold the root-owned OS lock for one complete mutation transaction."""
+    caller_uid, caller_groups = _caller_identity_arguments()
+    holder = subprocess.Popen(
+        [
+            "/usr/bin/sudo",
+            "-n",
+            "/usr/bin/python3",
+            "-I",
+            "-B",
+            "-c",
+            ROOT_INSTALLATION_LOCK_CODE,
+            provenance.install_root.parent,
+            INSTALLATION_LOCK_NAME,
+            token,
+            "0",
+            caller_uid,
+            caller_groups,
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={"PATH": "/usr/bin:/bin"},
+    )
+    readiness = selectors.DefaultSelector()
+    if holder.stdout is not None:
+        readiness.register(holder.stdout, selectors.EVENT_READ)
+    events = readiness.select(timeout=10)
+    readiness.close()
+    ready = (
+        "" if not events or holder.stdout is None else holder.stdout.readline().strip()
+    )
+    if ready != "READY":
+        if holder.poll() is None:
+            holder.kill()
+        error = "" if holder.stderr is None else holder.stderr.read().strip()
+        holder.wait(timeout=5)
+        raise ToolIdentityError(
+            f"could not acquire installation transaction lock: {error}"
+        )
+    primary: BaseException | None = None
+    traceback = None
+    try:
+        yield
+    except BaseException as error:
+        primary = error
+        traceback = error.__traceback__
+    finally:
+        release_error: BaseException | None = None
+        if holder.stdin is not None:
+            holder.stdin.close()
+        try:
+            status = holder.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            holder.kill()
+            holder.wait(timeout=5)
+            release_error = ToolIdentityError(
+                "installation lock holder did not terminate"
+            )
+            status = holder.returncode
+        if status != 0 and release_error is None:
+            error = "" if holder.stderr is None else holder.stderr.read().strip()
+            release_error = ToolIdentityError(
+                f"installation lock holder failed: {error}"
+            )
+        if primary is not None:
+            if release_error is not None:
+                raise ToolIdentityError(
+                    f"installation transaction failed: {primary}; "
+                    f"lock release failed: {release_error}"
+                ) from primary
+            raise primary.with_traceback(traceback)
+        if release_error is not None:
+            raise release_error
+
+
 ROOT_CREATE_INSTALLATION_CODE = r"""
-import ctypes, errno, json, os, signal, stat, sys
-parent_path, fixed, token, journal_name, schema, staging_path, displacement_name, displacement_schema, displaced_prefix = sys.argv[1:10]
-owner = int(sys.argv[10]); caller_uid = int(sys.argv[11])
-caller_groups = {int(value) for value in sys.argv[12].split(',') if value}
-failpoint = sys.argv[13] if len(sys.argv) > 13 else ''
+import ctypes, errno, fcntl, json, os, signal, stat, subprocess, sys, time
+parent_path, fixed, token, journal_name, schema, staging_path, displacement_prefix, displacement_schema, displaced_prefix, lock_name = sys.argv[1:11]
+owner = int(sys.argv[11]); caller_uid = int(sys.argv[12])
+caller_groups = {int(value) for value in sys.argv[13].split(',') if value}
+failpoint = sys.argv[14] if len(sys.argv) > 14 else ''
 provisional = '.tobkiri-packaging-python-' + token
 displaced = displaced_prefix + token
+displacement_name = displacement_prefix + token + '.json'
 def nontrivial_acl(fd):
     if sys.platform != 'darwin': return False
     lib=ctypes.CDLL(None,use_errno=True); lib.acl_get_fd_np.argtypes=[ctypes.c_int,ctypes.c_int]; lib.acl_get_fd_np.restype=ctypes.c_void_p
@@ -1131,6 +1297,22 @@ parent = os.open(parent_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 staging = os.open(staging_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 def canonical(payload):
     return json.dumps(payload, sort_keys=True, separators=(',', ':')).encode() + b'\n'
+def strict(encoded, fields):
+    try:
+        pairs=json.loads(encoded,object_pairs_hook=lambda value:value)
+        if not isinstance(pairs,list): raise ValueError()
+        keys=[key for key,_ in pairs]
+        if len(keys)!=len(set(keys)): raise ValueError()
+        payload=dict(pairs)
+    except Exception: raise SystemExit('invalid lock metadata')
+    if len(encoded)>4096 or canonical(payload)!=encoded or set(payload)!=fields:
+        raise SystemExit('noncanonical lock metadata')
+    return payload
+def process_start(pid):
+    result=subprocess.run(['/bin/ps','-o','lstart=','-p',str(pid)],
+                          stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,
+                          check=False,env={'PATH':'/usr/bin:/bin','LC_ALL':'C'})
+    return result.stdout.strip() if result.returncode==0 else ''
 def caller_can_write(info):
     mode = stat.S_IMODE(info.st_mode)
     if info.st_uid == caller_uid: return bool(mode & 0o200)
@@ -1158,6 +1340,22 @@ try:
                           stat.S_IMODE(parent_info.st_mode)))
     if staging_info.st_uid != owner or caller_can_write(staging_info) or nontrivial_acl(staging):
         raise SystemExit('unsafe displacement journal authority')
+    lock=os.open(lock_name,os.O_RDONLY|os.O_NOFOLLOW,dir_fd=parent)
+    lock_info=os.fstat(lock)
+    if not stat.S_ISREG(lock_info.st_mode) or lock_info.st_uid!=owner or \
+       stat.S_IMODE(lock_info.st_mode)!=0o400 or lock_info.st_nlink!=1 or \
+       nontrivial_acl(lock): raise SystemExit('invalid installation lock authority')
+    try: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except BlockingIOError: pass
+    else:
+        fcntl.flock(lock,fcntl.LOCK_UN); raise SystemExit('installation lock is not held')
+    os.lseek(lock,0,os.SEEK_SET); lock_bytes=os.read(lock,4097)
+    lease=strict(lock_bytes,{'pid','schema','start','token'})
+    if lease['schema']!='tobkiri.packaging-python-lock.v1' or lease['token']!=token or \
+       not isinstance(lease['pid'],int) or lease['pid']<=0 or \
+       process_start(lease['pid'])!=lease['start']:
+        raise SystemExit('installation lock owner identity mismatch')
+    os.close(lock)
     os.mkdir(provisional, 0o700, dir_fd=parent)
     if failpoint == 'after_mkdir': os.kill(os.getpid(), signal.SIGKILL)
     root = os.open(provisional, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
@@ -1165,7 +1363,9 @@ try:
     if info.st_uid != owner or stat.S_IMODE(info.st_mode) != 0o700 or nontrivial_acl(root):
         raise SystemExit('unsafe provisional directory')
     target = os.path.join(parent_path, fixed)
-    payload = canonical({'dev': info.st_dev, 'ino': info.st_ino, 'schema': schema,
+    payload = canonical({'dev': info.st_dev, 'ino': info.st_ino,
+                         'owner_pid':os.getpid(),
+                         'owner_start':process_start(os.getpid()),'schema': schema,
                          'target': target, 'token': token})
     fd = os.open(journal_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                  0o400, dir_fd=root)
@@ -1192,11 +1392,13 @@ try:
             raise SystemExit('existing managed fixed prefix was not released')
         os.close(previous)
         displacement = canonical({'dev': previous_info.st_dev, 'displaced': displaced,
-                                  'ino': previous_info.st_ino,
+                                  'ino': previous_info.st_ino,'owner_pid':os.getpid(),
+                                  'owner_start':process_start(os.getpid()),
                                   'schema': displacement_schema, 'target': target,
-                                  'token': token})
+                                  'staging_dev':staging_info.st_dev,
+                                  'staging_ino':staging_info.st_ino,'token': token})
         displacement_fd = os.open(displacement_name, os.O_WRONLY | os.O_CREAT |
-                                  os.O_EXCL | os.O_NOFOLLOW, 0o400, dir_fd=staging)
+                                  os.O_EXCL | os.O_NOFOLLOW, 0o400, dir_fd=parent)
         try:
             os.fchown(displacement_fd, owner, -1); os.fchmod(displacement_fd, 0o400)
             offset = 0
@@ -1204,8 +1406,19 @@ try:
                 offset += os.write(displacement_fd, displacement[offset:])
             os.fsync(displacement_fd)
         finally: os.close(displacement_fd)
-        os.fsync(staging)
+        os.fsync(parent)
         if failpoint == 'after_displacement_journal': os.kill(os.getpid(), signal.SIGKILL)
+        if failpoint == 'barrier_after_displacement_journal':
+            barrier=os.open('.barrier-ready',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,
+                            0o400,dir_fd=staging); os.fsync(barrier); os.close(barrier)
+            os.fsync(staging); deadline=time.monotonic()+10
+            while True:
+                try: os.stat('.barrier-release',dir_fd=staging,follow_symlinks=False); break
+                except FileNotFoundError:
+                    if time.monotonic()>=deadline: raise SystemExit('barrier timed out')
+                    time.sleep(0.01)
+            os.unlink('.barrier-ready',dir_fd=staging)
+            os.unlink('.barrier-release',dir_fd=staging); os.fsync(staging)
         exclusive_rename(fixed, displaced); os.fsync(parent)
         if failpoint == 'after_displacement': os.kill(os.getpid(), signal.SIGKILL)
     exclusive_rename(provisional, fixed)
@@ -1219,10 +1432,10 @@ finally:
 
 
 ROOT_RECOVER_INSTALLATIONS_CODE = r"""
-import ctypes, errno, json, os, stat, sys
-parent_path, fixed, token_filter, journal_name, schema, staging_path, displacement_name, displacement_schema, displaced_prefix = sys.argv[1:10]
-owner = int(sys.argv[10]); caller_uid = int(sys.argv[11])
-caller_groups = {int(value) for value in sys.argv[12].split(',') if value}
+import ctypes, errno, fcntl, json, os, stat, subprocess, sys
+parent_path, fixed, token_filter, journal_name, schema, staging_path, displacement_prefix, displacement_schema, displaced_prefix, lock_name = sys.argv[1:11]
+owner = int(sys.argv[11]); caller_uid = int(sys.argv[12])
+caller_groups = {int(value) for value in sys.argv[13].split(',') if value}
 prefix = '.tobkiri-packaging-python-'
 def nontrivial_acl(fd):
     if sys.platform != 'darwin': return False
@@ -1255,17 +1468,26 @@ def journal(directory, expected_token):
         if len(keys) != len(set(keys)): raise ValueError()
         payload = dict(pairs)
     except Exception: raise SystemExit('partial or invalid transaction journal')
-    if canonical(payload) != encoded or set(payload) != {'dev','ino','schema','target','token'}:
+    if canonical(payload) != encoded or \
+       set(payload) != {'dev','ino','owner_pid','owner_start','schema','target','token'}:
         raise SystemExit('noncanonical transaction journal')
     if payload['schema'] != schema or (expected_token and payload['token'] != expected_token):
         raise SystemExit('transaction journal authority mismatch')
+    if not isinstance(payload['owner_pid'],int) or payload['owner_pid']<=0 or \
+       not isinstance(payload['owner_start'],str) or len(payload['owner_start'])>64:
+        raise SystemExit('transaction owner identity is invalid')
     return payload
-def displacement_journal():
-    info = os.stat(displacement_name, dir_fd=staging, follow_symlinks=False)
+def process_start(pid):
+    result=subprocess.run(['/bin/ps','-o','lstart=','-p',str(pid)],
+                          stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,
+                          check=False,env={'PATH':'/usr/bin:/bin','LC_ALL':'C'})
+    return result.stdout.strip() if result.returncode==0 else ''
+def displacement_journal(name):
+    info = os.stat(name, dir_fd=parent, follow_symlinks=False)
     if not stat.S_ISREG(info.st_mode) or info.st_uid != owner or \
        stat.S_IMODE(info.st_mode) != 0o400 or info.st_nlink != 1:
         raise SystemExit('invalid displacement journal metadata')
-    fd = os.open(displacement_name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=staging)
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent)
     try: encoded = os.read(fd, 8193)
     finally: os.close(fd)
     if len(encoded) > 8192: raise SystemExit('oversized displacement journal')
@@ -1277,10 +1499,13 @@ def displacement_journal():
         payload = dict(pairs)
     except Exception: raise SystemExit('partial or invalid displacement journal')
     if canonical(payload) != encoded or \
-       set(payload) != {'dev','displaced','ino','schema','target','token'} or \
-       payload['schema'] != displacement_schema or payload['token'] != token_filter or \
+       set(payload) != {'dev','displaced','ino','owner_pid','owner_start','schema','staging_dev','staging_ino','target','token'} or \
+       payload['schema'] != displacement_schema or \
        payload['target'] != os.path.join(parent_path, fixed) or \
-       payload['displaced'] != displaced_prefix + token_filter:
+       payload['displaced'] != displaced_prefix + payload['token'] or \
+       name != displacement_prefix + payload['token'] + '.json' or \
+       not isinstance(payload['owner_pid'],int) or payload['owner_pid']<=0 or \
+       not isinstance(payload['owner_start'],str) or len(payload['owner_start'])>64:
         raise SystemExit('displacement journal authority mismatch')
     return payload
 def exclusive_rename(source, destination):
@@ -1334,14 +1559,53 @@ try:
                         staging_mode & 0o002)
     if staging_info.st_uid != owner or staging_writable or nontrivial_acl(staging):
         raise SystemExit('unsafe displacement recovery authority')
-    try: displacement = displacement_journal()
-    except FileNotFoundError: displacement = None
+    lock=os.open(lock_name,os.O_RDONLY|os.O_NOFOLLOW,dir_fd=parent)
+    lock_info=os.fstat(lock)
+    if not stat.S_ISREG(lock_info.st_mode) or lock_info.st_uid!=owner or \
+       stat.S_IMODE(lock_info.st_mode)!=0o400 or lock_info.st_nlink!=1 or \
+       nontrivial_acl(lock): raise SystemExit('invalid installation lock authority')
+    try: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except BlockingIOError: pass
+    else:
+        fcntl.flock(lock,fcntl.LOCK_UN); raise SystemExit('installation lock is not held')
+    os.close(lock)
+    displacement_names=[]
+    for name in sorted(os.listdir(parent)):
+        if not name.startswith(displacement_prefix): continue
+        suffix=name[len(displacement_prefix):]
+        if not suffix.endswith('.json') or len(suffix)!=37 or \
+           any(c not in '0123456789abcdef' for c in suffix[:-5]):
+            raise SystemExit('unknown displacement journal entry')
+        displacement_names.append(name)
+    if len(displacement_names)>1:
+        raise SystemExit('multiple displacement journals are ambiguous')
+    displacement = None if not displacement_names else \
+        displacement_journal(displacement_names[0])
+    if displacement is not None:
+        staging_basename=os.path.basename(staging_path)
+        if not staging_basename.endswith(token_filter):
+            raise SystemExit('current staging name does not bind its token')
+        staging_prefix=staging_basename[:-len(token_filter)]
+        staging_parent=os.open(os.path.dirname(staging_path),os.O_RDONLY|
+                               os.O_DIRECTORY|os.O_NOFOLLOW)
+        try:
+            recorded=os.open(staging_prefix+displacement['token'],os.O_RDONLY|
+                             os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=staging_parent)
+            recorded_info=os.fstat(recorded)
+            if recorded_info.st_uid!=owner or nontrivial_acl(recorded) or \
+               (recorded_info.st_dev,recorded_info.st_ino)!= \
+               (displacement['staging_dev'],displacement['staging_ino']):
+                raise SystemExit('recorded staging authority changed')
+            os.close(recorded)
+        finally: os.close(staging_parent)
+    if displacement is not None and \
+       process_start(displacement['owner_pid'])==displacement['owner_start']:
+        raise SystemExit('displacement owner process is still live')
     for name in sorted(os.listdir(parent)):
         if not name.startswith(prefix): continue
         token = name[len(prefix):]
         if len(token) != 32 or any(c not in '0123456789abcdef' for c in token):
             raise SystemExit('invalid stale provisional name')
-        if token_filter and token != token_filter: continue
         directory = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
         info = os.fstat(directory)
         entries = os.listdir(directory)
@@ -1350,6 +1614,8 @@ try:
             if entries: raise SystemExit('unjournaled nonempty provisional transaction')
             remove_named(name, (info.st_dev, info.st_ino), 0o700); continue
         payload = journal(directory, token); os.close(directory)
+        if process_start(payload['owner_pid'])==payload['owner_start']:
+            raise SystemExit('provisional owner process is still live')
         if payload['target'] != os.path.join(parent_path, fixed) or \
            (payload['dev'], payload['ino']) != (info.st_dev, info.st_ino):
             raise SystemExit('provisional transaction journal mismatch')
@@ -1372,10 +1638,10 @@ try:
                     os.close(fixed_dir); fixed_dir = None
             if fixed_dir is None: pass
             else:
-                payload = journal(fixed_dir, token_filter)
+                payload = journal(fixed_dir, '')
                 info = os.fstat(fixed_dir); os.close(fixed_dir)
-                if token_filter and payload['token'] != token_filter:
-                    raise SystemExit('fixed prefix belongs to another transaction')
+                if process_start(payload['owner_pid'])==payload['owner_start']:
+                    raise SystemExit('fixed transaction owner process is still live')
                 if payload['target'] != os.path.join(parent_path, fixed) or \
                    (payload['dev'], payload['ino']) != (info.st_dev, info.st_ino):
                     raise SystemExit('fixed transaction journal mismatch')
@@ -1405,12 +1671,12 @@ try:
             exclusive_rename(displaced_name, fixed); os.fsync(parent)
         if current is not None: os.close(current)
         if displaced is not None: os.close(displaced)
-        os.unlink(displacement_name, dir_fd=staging); os.fsync(staging)
-    elif token_filter:
-        try: os.stat(displaced_prefix + token_filter, dir_fd=parent,
-                     follow_symlinks=False)
-        except FileNotFoundError: pass
-        else: raise SystemExit('displaced prefix lacks an authority journal')
+        journal_entry=displacement_prefix+displacement['token']+'.json'
+        os.unlink(journal_entry, dir_fd=parent); os.fsync(parent)
+    displaced_entries=[name for name in os.listdir(parent)
+                       if name.startswith(displaced_prefix)]
+    if displaced_entries:
+        raise SystemExit('displaced prefix lacks a unique authority journal')
 finally:
     os.close(staging)
     os.close(parent)
@@ -1436,9 +1702,10 @@ def _create_installation_root(
             INSTALLATION_JOURNAL_NAME,
             INSTALLATION_JOURNAL_SCHEMA,
             staging,
-            DISPLACEMENT_JOURNAL_NAME,
+            DISPLACEMENT_JOURNAL_PREFIX,
             DISPLACEMENT_JOURNAL_SCHEMA,
             DISPLACED_PREFIX,
+            INSTALLATION_LOCK_NAME,
             "0",
             caller_uid,
             caller_groups,
@@ -1466,9 +1733,10 @@ def recover_stale_installations(
             INSTALLATION_JOURNAL_NAME,
             INSTALLATION_JOURNAL_SCHEMA,
             staging,
-            DISPLACEMENT_JOURNAL_NAME,
+            DISPLACEMENT_JOURNAL_PREFIX,
             DISPLACEMENT_JOURNAL_SCHEMA,
             DISPLACED_PREFIX,
+            INSTALLATION_LOCK_NAME,
             "0",
             caller_uid,
             caller_groups,
@@ -1479,7 +1747,7 @@ def recover_stale_installations(
 
 
 def cleanup_transaction(token: str) -> None:
-    """Recover only the prefix inode recorded by this root-owned transaction."""
+    """Recover only recorded inodes while holding the installation OS lock."""
     staging = _transaction_path(token)
     try:
         _root_owned_path(staging, "packaging transaction", sticky=STAGING_PARENT)
@@ -1495,9 +1763,10 @@ def cleanup_transaction(token: str) -> None:
     provenance = _parse_provenance(
         provenance_bytes, requirements_bytes, "sealed trusted Git provenance"
     )
-    recover_stale_installations(provenance, staging, token)
-    cleanup_created_ancestors(provenance, staging, token)
-    _remove_root_tree(staging)
+    with _installation_lock(provenance, token):
+        recover_stale_installations(provenance, staging, token)
+        cleanup_created_ancestors(provenance, staging, token)
+        _remove_root_tree(staging)
 
 
 def _transaction_is_absent(token: str) -> bool:
@@ -1541,11 +1810,16 @@ def _installation_receipt(
         or stat.S_IMODE(metadata.st_mode) != 0o400
         or metadata.st_nlink != 1
         or _canonical_json(payload) != encoded
-        or set(payload) != {"dev", "ino", "schema", "target", "token"}
+        or set(payload)
+        != {"dev", "ino", "owner_pid", "owner_start", "schema", "target", "token"}
         or payload.get("schema") != INSTALLATION_JOURNAL_SCHEMA
         or payload.get("target") != os.fspath(provenance.install_root)
         or (payload.get("dev"), payload.get("ino"))
         != (root_metadata.st_dev, root_metadata.st_ino)
+        or not isinstance(payload.get("owner_pid"), int)
+        or payload["owner_pid"] <= 0
+        or not isinstance(payload.get("owner_start"), str)
+        or len(payload["owner_start"]) > 64
         or not isinstance(token, str)
         or len(token) != 32
         or any(character not in "0123456789abcdef" for character in token)
@@ -2152,13 +2426,13 @@ def smoke_macos_installation(installation: MacOSPythonInstallation) -> None:
                     )
 
 
-def prepare_macos_installation(
+def _prepare_macos_installation_locked(
     provenance: InstallerProvenance, staging: Path, token: str
 ) -> MacOSPythonInstallation:
     """Install official Python and hash-locked dependencies into root authority."""
     package = staging / f"python-{provenance.version}.pkg"
     try:
-        ensure_installation_parent(provenance, staging, token)
+        recover_stale_installations(provenance, staging, token)
         _remove_previous_installation(provenance)
         _create_installation_root(provenance, staging, token)
         subprocess.run(["/usr/bin/sudo", "/bin/chmod", "0700", staging], check=True)
@@ -2323,7 +2597,9 @@ def prepare_macos_installation(
     except Exception as primary:
         cleanup_errors: list[str] = []
         try:
-            cleanup_transaction(token)
+            recover_stale_installations(provenance, staging, token)
+            cleanup_created_ancestors(provenance, staging, token)
+            _remove_root_tree(staging)
         except Exception as cleanup:
             cleanup_errors.append(str(cleanup))
         if cleanup_errors:
@@ -2332,6 +2608,15 @@ def prepare_macos_installation(
                 + "; ".join(cleanup_errors)
             ) from primary
         raise
+
+
+def prepare_macos_installation(
+    provenance: InstallerProvenance, staging: Path, token: str
+) -> MacOSPythonInstallation:
+    """Create and seal the installation under one root-owned OS lock lease."""
+    ensure_installation_parent(provenance, staging, token)
+    with _installation_lock(provenance, token):
+        return _prepare_macos_installation_locked(provenance, staging, token)
 
 
 def cleanup_macos_installation(
