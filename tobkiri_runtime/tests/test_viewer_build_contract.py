@@ -17,6 +17,7 @@ SHELL_TAURI_CONFIG = TAURI_ROOT / "tauri.shell.conf.json"
 SHELL_RUNTIME = TAURI_ROOT / "src" / "shell_runtime.rs"
 LAUNCHER_RUNTIME = TAURI_ROOT / "src" / "lib.rs"
 RESOURCE_PREPARER = ROOT / ".github" / "scripts" / "prepare_tauri_resources.py"
+TOOLCHAIN_BINDER = ROOT / ".github" / "scripts" / "packaging_toolchain_identity.py"
 PACK_SHELL_SEALER = ROOT / ".github" / "scripts" / "seal_pack_shell.py"
 UPDATER = TAURI_ROOT / "src" / "updater.rs"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
@@ -33,6 +34,7 @@ VIEWER_BUILD_WORKFLOWS = (
     ROOT / ".github" / "workflows" / "desktop-installers.yml",
     ROOT / ".github" / "workflows" / "release.yml",
 )
+BUILD_RS = TAURI_ROOT / "build.rs"
 PLATFORM_TARGETS = {
     "windows": ["nsis"],
     "macos": ["dmg"],
@@ -125,6 +127,11 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
         assert ".github/scripts/prepare_tauri_resources.py" in build_contents
         assert "--check" in build_contents
         assert "--env-output" in build_contents
+        assert "Bind verified packaging tool identities" in build_contents
+        assert "TOBKIRI_PACKAGING_PYTHON" in build_contents
+        assert "TOBKIRI_PACKAGING_PYTHON_SHA256" in build_contents
+        assert "TOBKIRI_PACKAGING_GIT" in build_contents
+        assert "TOBKIRI_PACKAGING_GIT_SHA256" in build_contents
         assert "aarch64-apple-darwin" in build_contents
         assert "x86_64-apple-darwin" in build_contents
         for forbidden in (
@@ -137,6 +144,20 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
             "Sign and verify Windows installer",
         ):
             assert forbidden not in build_contents
+
+
+def test_rust_packaging_callers_require_formal_absolute_tool_identities():
+    """Rust release/build callers cannot fall back to ambient tools."""
+    build = BUILD_RS.read_text(encoding="utf-8")
+    assert TOOLCHAIN_BINDER.is_file()
+    assert "packaging_toolchain.rs" in build
+    assert "verified_tool_executable(\"python\")" in build
+    assert "verified_tool_executable(\"git\")" in build
+    assert "scripts.generator_source_manifest" in build
+    assert "source closure failed before isolated generation" in build
+    assert 'Command::new("git")' not in build
+    assert 'var_os("PYTHON")' not in build
+    assert 'unwrap_or_else(|| "python"' not in build
 
 
 def test_macos_installer_uses_finder_free_verified_dmg_packager():

@@ -34,10 +34,6 @@ SOURCE_FILES = (
 )
 MANIFEST_KEYS = ("schema", "roots", "files")
 FILE_KEYS = ("path", "type", "size", "sha256", "executable")
-_IGNORED_DIRECTORY_NAMES = frozenset(
-    {"__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache"}
-)
-_IGNORED_SUFFIXES = frozenset({".pyc", ".pyo"})
 _ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -87,14 +83,6 @@ def _walk_regular_files(root: Path) -> Iterator[Path]:
         raise ValueError(f"source closure root is not a real directory: {root}")
     with os.scandir(root) as entries:
         for entry in sorted(entries, key=lambda item: item.name):
-            if entry.name in _IGNORED_DIRECTORY_NAMES:
-                if entry.is_symlink():
-                    raise ValueError(f"source closure contains a symlink: {entry.path}")
-                continue
-            if Path(entry.name).suffix in _IGNORED_SUFFIXES:
-                if entry.is_symlink():
-                    raise ValueError(f"source closure contains a symlink: {entry.path}")
-                continue
             path = Path(entry.path)
             entry_metadata = entry.stat(follow_symlinks=False)
             if entry.is_symlink():

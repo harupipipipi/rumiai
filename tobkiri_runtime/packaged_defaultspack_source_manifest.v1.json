@@ -306,8 +306,8 @@
     {
       "path": "scripts/generator_source_manifest.py",
       "type": "regular-file",
-      "size": 10513,
-      "sha256": "f326e3b97cfd584fcfb5dc622ebaca80dd8788ae690ad84f6e7eafdc60d9381e",
+      "size": 9936,
+      "sha256": "b4899c85d0ed270328f22a3f55b76aa3e94d87b01ab19893d86f32de98fb28c4",
       "executable": false
     },
     {
@@ -341,8 +341,8 @@
     {
       "path": "scripts/packaging_cleanup.py",
       "type": "regular-file",
-      "size": 62992,
-      "sha256": "3dfe13166a70503dc4929dc4ae8b47e53c1159e04498a726b70352cf04324685",
+      "size": 93191,
+      "sha256": "bd09d4bcd6b32a1f0a3b6ac1296e74752831d94c1ca8710e669fb22ec69cf1a7",
       "executable": false
     },
     {

@@ -6,6 +6,8 @@ use std::process::Command;
 
 #[path = "src/artifact_integrity.rs"]
 mod artifact_integrity;
+#[path = "src/packaging_toolchain.rs"]
+mod packaging_toolchain;
 #[allow(dead_code)]
 #[path = "src/sealed_python_protocol.rs"]
 mod sealed_python_protocol;
@@ -937,7 +939,8 @@ fn release_entrypoint(artifact: &Path, entrypoint: &str) -> io::Result<PathBuf> 
 }
 
 fn git_value(repo_root: &Path, args: &[&str], label: &str) -> io::Result<String> {
-    let output = Command::new("git")
+    let git = packaging_toolchain::verified_tool_executable("git")?;
+    let output = Command::new(git)
         .args(args)
         .current_dir(repo_root)
         .output()
@@ -1874,10 +1877,28 @@ fn stage_presentation_release_from_snapshot(
             &repository_root.join("tobkiri_runtime/packaged_defaultspack_source_manifest.v1.json"),
             "packaged Profile generator source manifest",
         )?;
+        let python = packaging_toolchain::verified_tool_executable("python")?;
+        let mut source_check = isolated_python_module_command(
+            python.clone().into(),
+            &repository_root.join("tobkiri_runtime"),
+            "scripts.generator_source_manifest",
+        )?;
+        source_check
+            .arg("--check")
+            .current_dir(repository_root.join("tobkiri_runtime"));
+        let source_check_status = source_check.status().map_err(|error| {
+            invalid_release(format!(
+                "failed to run packaged Profile source-closure verifier: {error}"
+            ))
+        })?;
+        if !source_check_status.success() {
+            return Err(invalid_release(
+                "packaged Profile source closure failed before isolated generation",
+            ));
+        }
         let source_revision = current_source_revision(&repository_root)?;
-        let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
         let mut child = isolated_python_module_command(
-            python,
+            python.into(),
             &repository_root.join("tobkiri_runtime"),
             "scripts.generate_packaged_defaultspack_v4_bundle",
         )?
@@ -1943,7 +1964,8 @@ fn stage_presentation_release_from_snapshot(
 }
 
 fn current_source_revision(repository_root: &Path) -> io::Result<String> {
-    let revision = Command::new("git")
+    let git = packaging_toolchain::verified_tool_executable("git")?;
+    let revision = Command::new(&git)
         .args(["rev-parse", "--verify", "HEAD^{commit}"])
         .current_dir(repository_root)
         .output()
@@ -1964,7 +1986,7 @@ fn current_source_revision(repository_root: &Path) -> io::Result<String> {
             "production source revision must be a full lowercase commit SHA",
         ));
     }
-    let dirty = Command::new("git")
+    let dirty = Command::new(&git)
         .args(["status", "--porcelain=v1", "--untracked-files=all"])
         .current_dir(repository_root)
         .output()
@@ -2511,7 +2533,8 @@ fn copy_file(src: &Path, dst: &Path) -> io::Result<u64> {
 }
 
 fn copy_tracked_runtime_tree(repo_root: &Path, staged_root: &Path) -> io::Result<bool> {
-    let output = match Command::new("git")
+    let git = packaging_toolchain::verified_tool_executable("git")?;
+    let output = match Command::new(git)
         .args(["ls-files", "-z", "--", APP_SOURCE_DIR])
         .current_dir(repo_root)
         .output()
@@ -3786,7 +3809,8 @@ mod tests {
         fs::create_dir_all(&package_root).expect("package fixture root should be creatable");
         let package_test = repository_root
             .join("tobkiri_launcher/scripts/tests/test_package_presentation_artifact.py");
-        let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
+        let python = packaging_toolchain::verified_tool_executable("python")
+            .expect("formal packaging Python binding should be available");
         let status = Command::new(python)
             .args([
                 "-c",

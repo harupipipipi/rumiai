@@ -10,6 +10,10 @@ use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+#[cfg(test)]
+#[path = "packaging_toolchain.rs"]
+mod packaging_toolchain;
+
 use crate::config::AppConfig;
 
 const DEFAULT_PROFILE_ID: &str = "defaults";
@@ -717,6 +721,7 @@ fn verify_pack_artifact_index(pack_root: &Path, bundle_root: &Path) -> Result<()
 
 #[cfg(test)]
 mod tests {
+    use super::packaging_toolchain;
     use super::*;
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -754,6 +759,16 @@ mod tests {
         "USERPROFILE",
         "WINDIR",
     ];
+
+    fn verified_git() -> PathBuf {
+        packaging_toolchain::verified_tool_executable("git")
+            .expect("formal packaging Git binding should be available")
+    }
+
+    fn verified_python() -> PathBuf {
+        packaging_toolchain::verified_tool_executable("python")
+            .expect("formal packaging Python binding should be available")
+    }
 
     fn rewrite_locked_document(
         config: &AppConfig,
@@ -995,7 +1010,7 @@ mod tests {
     }
 
     fn clone_authoritative_fixture_source(repository: &Path, destination: &Path) -> String {
-        let status = Command::new("git")
+        let status = Command::new(verified_git())
             .args(["clone", "--quiet", "--shared", "--no-checkout", "--no-tags"])
             .arg(repository)
             .arg(destination)
@@ -1012,7 +1027,7 @@ mod tests {
         }
         sparse_paths.push(SOURCE_MANIFEST_RELATIVE.to_owned());
         sparse_paths.push("tobkiri_launcher/src-tauri/bundled".to_owned());
-        let status = Command::new("git")
+        let status = Command::new(verified_git())
             .args(&sparse_paths)
             .current_dir(destination)
             .status()
@@ -1021,13 +1036,13 @@ mod tests {
             status.success(),
             "authoritative fixture sparse checkout failed"
         );
-        let status = Command::new("git")
+        let status = Command::new(verified_git())
             .args(["checkout", "--quiet", "HEAD"])
             .current_dir(destination)
             .status()
             .expect("authoritative fixture checkout should run");
         assert!(status.success(), "authoritative fixture checkout failed");
-        let revision = Command::new("git")
+        let revision = Command::new(verified_git())
             .args(["rev-parse", "--verify", "HEAD^{commit}"])
             .current_dir(destination)
             .output()
@@ -1053,7 +1068,7 @@ mod tests {
     }
 
     fn assert_clean_fixture_source(source_checkout: &Path) {
-        let status = Command::new("git")
+        let status = Command::new(verified_git())
             .args(["status", "--porcelain=v1", "--untracked-files=all"])
             .current_dir(source_checkout)
             .output()
@@ -1102,7 +1117,7 @@ mod tests {
         )
         .unwrap();
 
-        let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
+        let python = verified_python();
         let hostile = config.app_dir.join("hostile-generator-input");
         fs::create_dir_all(hostile.join("scripts")).unwrap();
         let marker = hostile.join("executed.marker");

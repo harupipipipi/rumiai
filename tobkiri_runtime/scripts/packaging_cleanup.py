@@ -15,10 +15,11 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import time
 import uuid
 from ctypes import wintypes
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping, Optional, Sequence, Union
 
@@ -42,6 +43,7 @@ _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
 _WINDOWS_DELETE = 0x00010000
 _WINDOWS_FILE_READ_ATTRIBUTES = 0x00000080
 _WINDOWS_FILE_LIST_DIRECTORY = 0x00000001
+_WINDOWS_FILE_TRAVERSE = 0x00000020
 _WINDOWS_FILE_ATTRIBUTE_DIRECTORY = 0x00000010
 _WINDOWS_FILE_SHARE_READ = 0x00000001
 _WINDOWS_FILE_SHARE_WRITE = 0x00000002
@@ -51,6 +53,7 @@ _WINDOWS_OPEN_EXISTING = 3
 _WINDOWS_FILE_RENAME_INFO_CLASS = 3
 _WINDOWS_FILE_DISPOSITION_INFO_CLASS = 4
 _WINDOWS_INVALID_HANDLE = ctypes.c_void_p(-1).value
+_PosixMountIdentity = tuple[str, int]
 
 
 class _WindowsByHandleFileInformation(ctypes.Structure):
@@ -74,10 +77,10 @@ class _WindowsFileRenameInfo(ctypes.Structure):
     """Prefix of the variable-length FILE_RENAME_INFO structure."""
 
     _fields_ = [
-        ("ReplaceIfExists", wintypes.BOOLEAN),
-        ("RootDirectory", wintypes.HANDLE),
-        ("FileNameLength", wintypes.DWORD),
-        ("FileName", wintypes.WCHAR * 1),
+        ("ReplaceIfExists", ctypes.c_ubyte),
+        ("RootDirectory", ctypes.c_void_p),
+        ("FileNameLength", ctypes.c_uint32),
+        ("FileName", ctypes.c_uint16 * 1),
     ]
 
 
@@ -94,6 +97,23 @@ class _WindowsFileIdentity:
     volume_serial: int
     file_index: int
     file_attributes: int
+
+
+@dataclass(frozen=True)
+class _WindowsHandleRecord:
+    """An owned native handle and the identity that makes retry safe."""
+
+    path: Path
+    handle: int
+    identity: Optional[_WindowsFileIdentity]
+
+
+@dataclass
+class _WindowsCloseReport:
+    """Close errors plus handles whose ownership must remain explicit."""
+
+    errors: list[OSError] = field(default_factory=list)
+    unclosed: list[_WindowsHandleRecord] = field(default_factory=list)
 
 
 class _WindowsApi:
@@ -153,7 +173,9 @@ class _WindowsApi:
         access = _WINDOWS_DELETE | _WINDOWS_FILE_READ_ATTRIBUTES
         flags = _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT
         if directory:
-            access |= _WINDOWS_FILE_LIST_DIRECTORY
+            # Root/ancestor handles are also the non-delete-sharing trust
+            # boundary for relative traversal and identity checks.
+            access |= _WINDOWS_FILE_LIST_DIRECTORY | _WINDOWS_FILE_TRAVERSE
             flags |= _WINDOWS_FILE_FLAG_BACKUP_SEMANTICS
         handle = self._create_file(
             os.fspath(path),
@@ -193,23 +215,34 @@ class _WindowsApi:
         )
 
     def rename_relative(self, handle: int, parent_handle: int, name: str) -> None:
-        """Atomically rename an open object relative to its open parent."""
+        """Rename an open object in place while its parent remains pinned."""
 
+        if not parent_handle:
+            raise ValueError("Windows quarantine rename requires a held parent")
+        if name in ("", ".", "..") or "\\" in name or "/" in name or "\0" in name:
+            raise ValueError("Windows quarantine rename requires a simple filename")
         encoded_name = name.encode("utf-16-le")
         file_name_offset = _WindowsFileRenameInfo.FileName.offset
-        buffer_size = file_name_offset + len(encoded_name)
+        required_size = file_name_offset + len(encoded_name) + 2
+        alignment = ctypes.alignment(_WindowsFileRenameInfo)
+        buffer_size = (required_size + alignment - 1) // alignment * alignment
         buffer = ctypes.create_string_buffer(buffer_size)
         information = ctypes.cast(
             buffer, ctypes.POINTER(_WindowsFileRenameInfo)
         ).contents
-        information.ReplaceIfExists = wintypes.BOOLEAN(False)
-        information.RootDirectory = wintypes.HANDLE(parent_handle)
+        information.ReplaceIfExists = False
+        # FILE_RENAME_INFO requires NULL when only renaming within the
+        # source directory. The separately held parent handle pins that
+        # directory against rename/delete; it is not a destination root.
+        information.RootDirectory = None
         information.FileNameLength = len(encoded_name)
         ctypes.memmove(
             ctypes.addressof(buffer) + file_name_offset,
             encoded_name,
             len(encoded_name),
         )
+        # create_string_buffer zero-initializes the explicit UTF-16 NUL and
+        # any trailing alignment padding. FileNameLength excludes the NUL.
         if not self._set_file_information(
             wintypes.HANDLE(handle),
             _WINDOWS_FILE_RENAME_INFO_CLASS,
@@ -231,10 +264,57 @@ class _WindowsApi:
             raise self._last_error(Path("<native-handle>"))
 
 
+def _close_windows_handle(
+    api: _WindowsApi,
+    record: _WindowsHandleRecord,
+) -> _WindowsCloseReport:
+    """Close once, then retry only after revalidating the handle identity."""
+
+    try:
+        api.close(record.handle)
+        return _WindowsCloseReport()
+    except OSError as first_error:
+        report = _WindowsCloseReport(errors=[first_error])
+
+    # A record created immediately after CreateFileW may not have a native
+    # identity yet because the first identity query failed.  The handle is
+    # still exclusively owned by this cleanup transaction: revalidate it now,
+    # then permit the same single bounded retry.  If revalidation fails, keep
+    # the numeric handle owned and report it rather than guessing.
+    try:
+        current_identity = api.identity(record.handle)
+    except OSError as identity_error:
+        report.errors.append(identity_error)
+        report.unclosed.append(record)
+        return report
+    if record.identity is not None and current_identity != record.identity:
+        report.errors.append(
+            OSError(
+                errno.EIO,
+                f"handle {record.handle} identity changed before close retry",
+            )
+        )
+        report.unclosed.append(record)
+        return report
+
+    try:
+        api.close(record.handle)
+    except OSError as retry_error:
+        report.errors.append(retry_error)
+        report.unclosed.append(record)
+    else:
+        return _WindowsCloseReport()
+    return report
+
+
 _WINDOWS_API: Optional[_WindowsApi] = None
 # Test-only seam.  Production callers leave this unset; tests can install a
 # disposable-fixture callback to exercise the exact validation/mutation race.
 _BEFORE_WINDOWS_QUARANTINE_MUTATION: Optional[Callable[[Path], None]] = None
+# Test-only seam for deterministic POSIX rename/substitution races. Production
+# leaves this unset. Every invocation is followed by identity revalidation
+# before the descriptor-relative mutation.
+_BEFORE_POSIX_MUTATION: Optional[Callable[[Path], None]] = None
 
 
 def _get_windows_api(*, operation: str, path: Path) -> _WindowsApi:
@@ -272,6 +352,8 @@ class _WindowsBindingState:
     target_identity: Optional[_WindowsFileIdentity]
     target_is_directory: bool
     deletion_marked: bool = False
+    recursive_close_errors: list[OSError] = field(default_factory=list)
+    recursive_unclosed: list[_WindowsHandleRecord] = field(default_factory=list)
 
     @property
     def parent_handle(self) -> int:
@@ -367,24 +449,39 @@ class _WindowsBindingState:
             )
             raise PackagingCleanupError(diagnostic) from error
 
-    def close(self) -> None:
-        """Close target and parent handles after mutation or failure."""
+    def close(self) -> _WindowsCloseReport:
+        """Attempt every bound close and retain persistent failures."""
 
-        errors: list[OSError] = []
+        report = _WindowsCloseReport(
+            errors=list(self.recursive_close_errors),
+            unclosed=list(self.recursive_unclosed),
+        )
         if self.target_handle is not None:
-            try:
-                self.api.close(self.target_handle)
-            except OSError as error:
-                errors.append(error)
-            self.target_handle = None
-        for _ancestor_path, handle, _identity in reversed(self.ancestor_handles):
-            try:
-                self.api.close(handle)
-            except OSError as error:
-                errors.append(error)
-        self.ancestor_handles = ()
-        if errors:
-            raise errors[0]
+            target_record = _WindowsHandleRecord(
+                path=Path("<bound-target>"),
+                handle=self.target_handle,
+                identity=self.target_identity,
+            )
+            target_report = _close_windows_handle(self.api, target_record)
+            report.errors.extend(target_report.errors)
+            report.unclosed.extend(target_report.unclosed)
+            self.target_handle = (
+                target_record.handle if target_report.unclosed else None
+            )
+        remaining_ancestors: list[tuple[Path, int, _WindowsFileIdentity]] = []
+        for ancestor_path, handle, identity in reversed(self.ancestor_handles):
+            ancestor_record = _WindowsHandleRecord(
+                path=ancestor_path,
+                handle=handle,
+                identity=identity,
+            )
+            ancestor_report = _close_windows_handle(self.api, ancestor_record)
+            report.errors.extend(ancestor_report.errors)
+            report.unclosed.extend(ancestor_report.unclosed)
+            if ancestor_report.unclosed:
+                remaining_ancestors.append((ancestor_path, handle, identity))
+        self.ancestor_handles = tuple(reversed(remaining_ancestors))
+        return report
 
 
 @dataclass(frozen=True)
@@ -404,6 +501,7 @@ class _PathBinding:
     owner: Path
     identities: tuple[_PathIdentity, ...]
     directory_fds: tuple[int, ...] = ()
+    posix_mount_identity: Optional[_PosixMountIdentity] = None
     windows_state: Optional[_WindowsBindingState] = None
     quarantine_path: Optional[Path] = None
     quarantine_signature: Optional[
@@ -456,24 +554,20 @@ class _PathBinding:
         self.quarantine_path = path
         self.quarantine_signature = _inspect_existing_identity(path)
 
-    def close(self) -> None:
-        """Close all held directory descriptors from deepest to shallowest."""
+    def close(self) -> _WindowsCloseReport:
+        """Close every held descriptor and retain all closure failures."""
 
+        report = _WindowsCloseReport()
         if self.windows_state is not None:
-            try:
-                self.windows_state.close()
-            except OSError:
-                # Native handle closure is best effort after the mutation or
-                # an already-recorded failure.  All handles are attempted by
-                # _WindowsBindingState.close before any error is suppressed.
-                pass
+            windows_report = self.windows_state.close()
+            report.errors.extend(windows_report.errors)
+            report.unclosed.extend(windows_report.unclosed)
         for descriptor in reversed(self.directory_fds):
             try:
                 os.close(descriptor)
-            except OSError:
-                # Cleanup is already complete or already failing; descriptor
-                # closure must not turn a useful packaging error into success.
-                pass
+            except OSError as error:
+                report.errors.append(error)
+        return report
 
 
 @dataclass(frozen=True)
@@ -515,9 +609,49 @@ class CleanupDiagnostic:
 class PackagingCleanupError(RuntimeError):
     """Raised when owned packaging output cannot be safely cleaned."""
 
+    cleanup_close_failures: tuple[OSError, ...]
+    cleanup_unclosed_windows: tuple[_WindowsHandleRecord, ...]
+
     def __init__(self, diagnostic: CleanupDiagnostic) -> None:
         self.diagnostic = diagnostic
+        self.close_failures: tuple[OSError, ...] = ()
+        self.unclosed_windows: tuple[_WindowsHandleRecord, ...] = ()
+        self.cleanup_close_failures = ()
+        self.cleanup_unclosed_windows = ()
         super().__init__(diagnostic.format_message())
+
+    def record_close_failures(
+        self,
+        errors: Sequence[OSError],
+        unclosed: Sequence[_WindowsHandleRecord] = (),
+    ) -> str:
+        """Expose close failures without replacing this primary exception."""
+
+        self.close_failures += tuple(errors)
+        self.unclosed_windows += tuple(unclosed)
+        self._set_close_failure_attributes()
+        unclosed_text = (
+            f"; retained handles={[record.handle for record in unclosed]}"
+            if unclosed
+            else ""
+        )
+        message = (
+            "; ".join(
+                [
+                    f"failed to close {len(errors)} cleanup handle(s)",
+                    *(f"close error: {error}" for error in errors),
+                ]
+            )
+            + unclosed_text
+        )
+        self.args = (f"{self.diagnostic.format_message()}; {message}",)
+        return message
+
+    def _set_close_failure_attributes(self) -> None:
+        """Expose close metadata through the common wrapper attributes."""
+
+        self.cleanup_close_failures = self.close_failures
+        self.cleanup_unclosed_windows = self.unclosed_windows
 
     @property
     def path(self) -> Path:
@@ -530,6 +664,114 @@ class PackagingCleanupError(RuntimeError):
         """Return the number of removal attempts made."""
 
         return self.diagnostic.attempts
+
+
+def _close_failure_error(
+    *,
+    operation: str,
+    path: Path,
+    attempts: int,
+    errors: Sequence[OSError],
+    unclosed: Sequence[_WindowsHandleRecord] = (),
+) -> PackagingCleanupError:
+    """Build a failure for one or more cleanup-handle close errors."""
+
+    first = errors[0]
+    retained_text = (
+        f"; retained handles={[record.handle for record in unclosed]}"
+        if unclosed
+        else ""
+    )
+    result = PackagingCleanupError(
+        _diagnostic(
+            operation=operation,
+            path=path,
+            attempts=attempts,
+            error=first,
+            reason=(f"failed to close {len(errors)} cleanup handle(s){retained_text}"),
+        )
+    )
+    result.close_failures = tuple(errors)
+    result.unclosed_windows = tuple(unclosed)
+    result._set_close_failure_attributes()
+    return result
+
+
+def _note_close_failures(
+    primary: BaseException,
+    *,
+    operation: str,
+    path: Path,
+    attempts: int,
+    errors: Sequence[OSError],
+    unclosed: Sequence[_WindowsHandleRecord] = (),
+) -> None:
+    """Preserve a primary exception while exposing every close failure."""
+
+    close_error = _close_failure_error(
+        operation=operation,
+        path=path,
+        attempts=attempts,
+        errors=errors,
+        unclosed=unclosed,
+    )
+    if isinstance(primary, PackagingCleanupError):
+        message = primary.record_close_failures(errors, unclosed)
+    else:
+        message = close_error.diagnostic.format_message()
+        try:
+            previous_errors = getattr(primary, "cleanup_close_failures", ())
+            previous_unclosed = getattr(primary, "cleanup_unclosed_windows", ())
+            setattr(
+                primary,
+                "cleanup_close_failures",
+                tuple(previous_errors) + tuple(errors),
+            )
+            setattr(
+                primary,
+                "cleanup_unclosed_windows",
+                tuple(previous_unclosed) + tuple(unclosed),
+            )
+        except Exception:
+            # The primary exception type may not allow custom attributes, but
+            # retaining its identity and cause is still safer than replacing
+            # it with a close diagnostic.
+            pass
+    add_note = getattr(primary, "add_note", None)
+    if callable(add_note):
+        add_note(message)
+
+
+def _finish_binding_close(
+    binding: _PathBinding,
+    *,
+    operation: str,
+    path: Path,
+    attempts: int,
+    primary: Optional[BaseException],
+) -> None:
+    """Report close failures without replacing an earlier cleanup error."""
+
+    report = binding.close()
+    if not report.errors:
+        return
+    if primary is not None:
+        _note_close_failures(
+            primary,
+            operation=operation,
+            path=path,
+            attempts=attempts,
+            errors=report.errors,
+            unclosed=report.unclosed,
+        )
+        return
+    raise _close_failure_error(
+        operation=operation,
+        path=path,
+        attempts=attempts,
+        errors=report.errors,
+        unclosed=report.unclosed,
+    )
 
 
 def _diagnostic(
@@ -637,6 +879,147 @@ def _identity_signature(
         stat.S_IFMT(result.st_mode),
         getattr(result, "st_file_attributes", None),
     )
+
+
+def _parse_linux_mount_id(lines: Sequence[str]) -> int:
+    """Parse exactly one valid ``mnt_id`` field from Linux fdinfo."""
+
+    mount_ids: list[int] = []
+    for line in lines:
+        key, separator, value = line.partition(":")
+        if key.strip() != "mnt_id" or not separator:
+            continue
+        parsed = value.strip()
+        if not parsed.isdigit():
+            raise ValueError("fdinfo mnt_id is not decimal")
+        mount_ids.append(int(parsed))
+    if len(mount_ids) != 1 or mount_ids[0] <= 0:
+        raise ValueError("fdinfo mnt_id is missing or ambiguous")
+    return mount_ids[0]
+
+
+def _linux_fdinfo_mount_identity(fd: int) -> _PosixMountIdentity:
+    """Read fdinfo through an identity-checked CLOEXEC duplicate."""
+
+    duplicate: Optional[int] = None
+    result: Optional[_PosixMountIdentity] = None
+    primary_error: Optional[BaseException] = None
+    close_error: Optional[OSError] = None
+    try:
+        duplicate = os.dup(fd)
+        if duplicate == fd:
+            raise OSError(errno.EIO, "fd duplication reused the original descriptor")
+        os.set_inheritable(duplicate, False)
+        original_before = os.fstat(fd)
+        duplicate_before = os.fstat(duplicate)
+        if _posix_identity(original_before) != _posix_identity(duplicate_before):
+            raise OSError(errno.EIO, "POSIX mount identity duplicate mismatch")
+
+        with open(
+            f"/proc/self/fdinfo/{duplicate}",
+            "r",
+            encoding="ascii",
+        ) as fdinfo:
+            mount_id = _parse_linux_mount_id(list(fdinfo))
+
+        duplicate_after = os.fstat(duplicate)
+        original_after = os.fstat(fd)
+        if _posix_identity(duplicate_before) != _posix_identity(duplicate_after):
+            raise OSError(errno.EIO, "duplicated POSIX FD identity changed")
+        if _posix_identity(original_before) != _posix_identity(original_after):
+            raise OSError(errno.EIO, "original POSIX FD identity changed")
+        if _posix_identity(original_after) != _posix_identity(duplicate_after):
+            raise OSError(errno.EIO, "POSIX FD identities diverged after fdinfo read")
+        result = ("linux-mnt-id", mount_id)
+    except BaseException as error:
+        primary_error = error
+    finally:
+        if duplicate is not None:
+            try:
+                os.close(duplicate)
+            except OSError as error:
+                close_error = error
+
+    if close_error is not None:
+        if primary_error is not None:
+            raise OSError(
+                getattr(errno, "ENOTSUP", errno.EINVAL),
+                f"could not close fdinfo duplicate {duplicate}: {close_error}",
+            ) from primary_error
+        raise close_error
+    if primary_error is not None:
+        raise primary_error
+    if result is None:
+        raise OSError(errno.EIO, "Linux fdinfo mount identity was not produced")
+    return result
+
+
+def _posix_mount_identity(fd: int) -> _PosixMountIdentity:
+    """Return a kernel-backed mount identity for an open POSIX descriptor.
+
+    Linux ``st_dev`` is not sufficient for bind mounts: a bind mount can
+    retain the same device number while changing the mount instance.  Linux
+    procfs exposes the mount ID for the descriptor itself, so use that rather
+    than resolving a pathname.  On Darwin and other POSIX systems, the
+    descriptor's filesystem ID is the available volume/mount identity.  An
+    unavailable or malformed identity is a security failure; callers must
+    never fall back to pathname or ``st_dev`` alone.
+    """
+
+    if sys.platform == "linux":
+        try:
+            return _linux_fdinfo_mount_identity(fd)
+        except (OSError, UnicodeError, ValueError) as error:
+            raise OSError(
+                getattr(errno, "ENOTSUP", errno.EINVAL),
+                f"could not obtain Linux fd mount identity for {fd}",
+            ) from error
+
+    try:
+        filesystem = os.fstatvfs(fd)
+        fsid = getattr(filesystem, "f_fsid", None)
+        if fsid is None or int(fsid) <= 0:
+            raise ValueError("descriptor filesystem identity is unavailable")
+        return ("posix-fsid", int(fsid))
+    except (OSError, TypeError, ValueError) as error:
+        raise OSError(
+            getattr(errno, "ENOTSUP", errno.EINVAL),
+            f"could not obtain POSIX fd mount identity for {fd}",
+        ) from error
+
+
+def _assert_posix_mount_identity(
+    fd: int,
+    expected: _PosixMountIdentity,
+    *,
+    path: Path,
+    operation: str,
+    attempts: int,
+) -> None:
+    """Require an opened descriptor to remain on the bound mount."""
+
+    try:
+        actual = _posix_mount_identity(fd)
+    except OSError as error:
+        diagnostic = _diagnostic(
+            operation=operation,
+            path=path,
+            attempts=attempts,
+            error=error,
+            reason="could not obtain descriptor mount identity",
+        )
+        raise PackagingCleanupError(diagnostic) from error
+    if actual != expected:
+        raise _security_error(
+            operation=operation,
+            path=path,
+            reason=(
+                "descriptor crossed a mount boundary: "
+                f"expected {expected[0]}={expected[1]}, "
+                f"got {actual[0]}={actual[1]}"
+            ),
+            attempts=attempts,
+        )
 
 
 def _inspect_existing_identity(
@@ -855,19 +1238,38 @@ def _close_windows_handles(
     api: _WindowsApi,
     target_handle: Optional[int],
     ancestor_handles: Sequence[tuple[Path, int, _WindowsFileIdentity]],
-) -> None:
-    """Close every partially-created native binding after a failed bind."""
+    target_identity: Optional[_WindowsFileIdentity] = None,
+) -> _WindowsCloseReport:
+    """Close every partial binding and retain persistent failures."""
 
+    records: list[_WindowsHandleRecord] = []
     if target_handle is not None:
-        try:
-            api.close(target_handle)
-        except OSError:
-            pass
-    for _path, handle, _identity in reversed(ancestor_handles):
-        try:
-            api.close(handle)
-        except OSError:
-            pass
+        records.append(
+            _WindowsHandleRecord(
+                path=Path("<partial-target>"),
+                handle=target_handle,
+                identity=target_identity,
+            )
+        )
+    records.extend(
+        _WindowsHandleRecord(path, handle, identity)
+        for path, handle, identity in reversed(ancestor_handles)
+    )
+    return _close_windows_records(api, records)
+
+
+def _close_windows_records(
+    api: _WindowsApi,
+    records: Sequence[_WindowsHandleRecord],
+) -> _WindowsCloseReport:
+    """Close an active ownership set in reverse-open order."""
+
+    report = _WindowsCloseReport()
+    for record in records:
+        close_report = _close_windows_handle(api, record)
+        report.errors.extend(close_report.errors)
+        report.unclosed.extend(close_report.unclosed)
+    return report
 
 
 def _bind_windows_handles(
@@ -890,7 +1292,9 @@ def _bind_windows_handles(
 
     api = _get_windows_api(operation=operation, path=target)
     ancestor_handles: list[tuple[Path, int, _WindowsFileIdentity]] = []
+    owned_handles: list[_WindowsHandleRecord] = []
     target_handle: Optional[int] = None
+    target_identity: Optional[_WindowsFileIdentity] = None
     try:
         for expected in identities[:-1]:
             if not expected.exists:
@@ -904,7 +1308,13 @@ def _bind_windows_handles(
                 directory=True,
                 share_mode=_WINDOWS_HANDLE_SHARE_MODE,
             )
+            owned_handles.append(_WindowsHandleRecord(expected.path, handle, None))
             native_identity = api.identity(handle)
+            owned_handles[-1] = _WindowsHandleRecord(
+                expected.path,
+                handle,
+                native_identity,
+            )
             _assert_native_identity_matches_path(
                 native_identity,
                 expected,
@@ -918,14 +1328,19 @@ def _bind_windows_handles(
         target_is_directory = bool(
             expected_target.exists and stat.S_ISDIR(expected_target.signature[2])
         )
-        target_identity: Optional[_WindowsFileIdentity] = None
         if expected_target.exists:
             target_handle = api.open(
                 target,
                 directory=target_is_directory,
                 share_mode=_WINDOWS_HANDLE_SHARE_MODE,
             )
+            owned_handles.append(_WindowsHandleRecord(target, target_handle, None))
             target_identity = api.identity(target_handle)
+            owned_handles[-1] = _WindowsHandleRecord(
+                target,
+                target_handle,
+                target_identity,
+            )
             _assert_native_identity_matches_path(
                 target_identity,
                 expected_target,
@@ -955,8 +1370,17 @@ def _bind_windows_handles(
             )
         state.assert_current(operation=operation, path=target, attempts=0)
         return state
-    except BaseException:
-        _close_windows_handles(api, target_handle, ancestor_handles)
+    except BaseException as error:
+        close_report = _close_windows_records(api, list(reversed(owned_handles)))
+        if close_report.errors:
+            _note_close_failures(
+                error,
+                operation=operation,
+                path=target,
+                attempts=0,
+                errors=close_report.errors,
+                unclosed=close_report.unclosed,
+            )
         raise
 
 
@@ -994,8 +1418,38 @@ def _bind_owned_path(
         owner,
         operation=operation,
     )
+    posix_mount_identity: Optional[_PosixMountIdentity] = None
     windows_state: Optional[_WindowsBindingState] = None
     try:
+        if not _IS_WINDOWS:
+            if not descriptors:
+                raise _security_error(
+                    operation=operation,
+                    path=target,
+                    reason=(
+                        "descriptor-relative POSIX cleanup requires a held "
+                        "mount identity; pathname fallback is forbidden"
+                    ),
+                )
+            try:
+                posix_mount_identity = _posix_mount_identity(descriptors[0])
+            except OSError as error:
+                diagnostic = _diagnostic(
+                    operation=operation,
+                    path=target,
+                    attempts=0,
+                    error=error,
+                    reason="could not obtain owned root mount identity",
+                )
+                raise PackagingCleanupError(diagnostic) from error
+            for descriptor in descriptors[1:]:
+                _assert_posix_mount_identity(
+                    descriptor,
+                    posix_mount_identity,
+                    path=target,
+                    operation=operation,
+                    attempts=0,
+                )
         if _REAL_WINDOWS:
             windows_state = _bind_windows_handles(
                 target,
@@ -1003,22 +1457,35 @@ def _bind_owned_path(
                 operation=operation,
             )
         binding = _PathBinding(
-            target,
-            owner,
-            identities,
-            descriptors,
+            target=target,
+            owner=owner,
+            identities=identities,
+            directory_fds=descriptors,
+            posix_mount_identity=posix_mount_identity,
             windows_state=windows_state,
         )
         binding.assert_current(operation=operation, attempts=0)
-    except BaseException:
+    except BaseException as error:
+        close_report = _WindowsCloseReport()
         if windows_state is not None:
-            windows_state.close()
+            windows_report = windows_state.close()
+            close_report.errors.extend(windows_report.errors)
+            close_report.unclosed.extend(windows_report.unclosed)
         else:
             for descriptor in reversed(descriptors):
                 try:
                     os.close(descriptor)
-                except OSError:
-                    pass
+                except OSError as close_error:
+                    close_report.errors.append(close_error)
+        if close_report.errors:
+            _note_close_failures(
+                error,
+                operation=operation,
+                path=target,
+                attempts=0,
+                errors=close_report.errors,
+                unclosed=close_report.unclosed,
+            )
         raise
     return binding
 
@@ -1117,7 +1584,7 @@ def _open_windows_child_handle(
     result: os.stat_result,
     *,
     operation: str,
-) -> int:
+) -> tuple[int, _WindowsFileIdentity]:
     """Open and identity-bind one quarantined child without following links."""
 
     expected = _PathIdentity(path, True, _identity_signature(result))
@@ -1127,6 +1594,7 @@ def _open_windows_child_handle(
         directory=is_directory,
         share_mode=_WINDOWS_HANDLE_SHARE_MODE,
     )
+    native_identity: Optional[_WindowsFileIdentity] = None
     try:
         native_identity = api.identity(handle)
         _assert_native_identity_matches_path(
@@ -1136,12 +1604,21 @@ def _open_windows_child_handle(
             operation=operation,
             path=path,
         )
-        return handle
-    except BaseException:
-        try:
-            api.close(handle)
-        except OSError:
-            pass
+        return handle, native_identity
+    except BaseException as error:
+        close_report = _close_windows_handle(
+            api,
+            _WindowsHandleRecord(path, handle, native_identity),
+        )
+        if close_report.errors:
+            _note_close_failures(
+                error,
+                operation=operation,
+                path=path,
+                attempts=0,
+                errors=close_report.errors,
+                unclosed=close_report.unclosed,
+            )
         raise
 
 
@@ -1297,7 +1774,7 @@ def _remove_windows_tree_by_handles(
                     attempts=attempts,
                 )
 
-            child_handle = _open_windows_child_handle(
+            child_handle, child_identity = _open_windows_child_handle(
                 state.api,
                 child,
                 child_result,
@@ -1324,10 +1801,21 @@ def _remove_windows_tree_by_handles(
                 else:
                     state.api.mark_delete(child_handle)
             finally:
-                try:
-                    state.api.close(child_handle)
-                except OSError:
-                    pass
+                child_report = _close_windows_handle(
+                    state.api,
+                    _WindowsHandleRecord(child, child_handle, child_identity),
+                )
+                state.recursive_close_errors.extend(child_report.errors)
+                state.recursive_unclosed.extend(child_report.unclosed)
+
+            if state.recursive_close_errors:
+                raise _close_failure_error(
+                    operation=operation,
+                    path=child,
+                    attempts=attempts,
+                    errors=state.recursive_close_errors,
+                    unclosed=state.recursive_unclosed,
+                )
 
         _assert_windows_directory_current(
             directory,
@@ -1516,6 +2004,306 @@ def _remove_windows_with_quarantine(
         os.unlink(quarantine_path)
 
 
+def _posix_identity(result: os.stat_result) -> tuple[int, int, int]:
+    """Return the mandatory identity fields for one descriptor-bound object."""
+
+    return (int(result.st_dev), int(result.st_ino), stat.S_IFMT(result.st_mode))
+
+
+def _assert_posix_object(
+    result: os.stat_result,
+    expected: os.stat_result,
+    *,
+    path: Path,
+    operation: str,
+    attempts: int,
+    root_device: Optional[int],
+) -> None:
+    """Reject replacement, mount crossing, links, and unsupported object types."""
+
+    if _posix_identity(result) != _posix_identity(expected):
+        raise _security_error(
+            operation=operation,
+            path=path,
+            reason="descriptor-bound POSIX object identity changed",
+            attempts=attempts,
+        )
+    if root_device is None or int(result.st_dev) != int(root_device):
+        raise _security_error(
+            operation=operation,
+            path=path,
+            reason="descriptor-bound POSIX tree crossed a mount/device boundary",
+            attempts=attempts,
+        )
+    if stat.S_ISLNK(result.st_mode):
+        raise _security_error(
+            operation=operation,
+            path=path,
+            reason="descriptor-bound POSIX tree contains a symlink",
+            attempts=attempts,
+        )
+    if stat.S_ISREG(result.st_mode) and int(result.st_nlink) != 1:
+        raise _security_error(
+            operation=operation,
+            path=path,
+            reason="descriptor-bound POSIX tree contains a hard-linked file",
+            attempts=attempts,
+        )
+    if not stat.S_ISDIR(result.st_mode) and not stat.S_ISREG(result.st_mode):
+        raise _security_error(
+            operation=operation,
+            path=path,
+            reason="descriptor-bound POSIX tree contains an unsupported object type",
+            attempts=attempts,
+        )
+
+
+def _lstat_at(parent_fd: int, name: str) -> os.stat_result:
+    """Inspect one child relative to a held parent without following links."""
+
+    return os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+
+
+def _run_posix_mutation_hook(path: Path) -> None:
+    """Run the deterministic POSIX race seam, when installed by a test."""
+
+    if _BEFORE_POSIX_MUTATION is not None:
+        _BEFORE_POSIX_MUTATION(path)
+
+
+def _new_posix_quarantine_name(parent_fd: int, path: Path, *, operation: str) -> str:
+    """Allocate an absent sibling name through the already-bound parent fd."""
+
+    for _ in range(8):
+        name = f".tobkiri-cleanup-{uuid.uuid4().hex}"
+        try:
+            _lstat_at(parent_fd, name)
+        except FileNotFoundError:
+            return name
+        except OSError as error:
+            diagnostic = _diagnostic(
+                operation=operation,
+                path=path,
+                attempts=0,
+                error=error,
+                reason="could not inspect descriptor-relative quarantine destination",
+            )
+            raise PackagingCleanupError(diagnostic) from error
+    raise _security_error(
+        operation=operation,
+        path=path,
+        reason="could not allocate a descriptor-relative quarantine destination",
+    )
+
+
+def _quarantine_posix_target(
+    parent_fd: int,
+    name: str,
+    path: Path,
+    *,
+    expected: os.stat_result,
+    binding: _PathBinding,
+    operation: str,
+    attempts: int,
+    root_device: Optional[int],
+) -> tuple[str, os.stat_result]:
+    """Atomically move the bound target aside, then verify what was moved."""
+
+    quarantine_name = _new_posix_quarantine_name(parent_fd, path, operation=operation)
+    _run_posix_mutation_hook(path)
+    binding.assert_current(operation=operation, attempts=attempts)
+    os.rename(
+        name,
+        quarantine_name,
+        src_dir_fd=parent_fd,
+        dst_dir_fd=parent_fd,
+    )
+    moved = _lstat_at(parent_fd, quarantine_name)
+    _assert_posix_object(
+        moved,
+        expected,
+        path=path,
+        operation=operation,
+        attempts=attempts,
+        root_device=root_device,
+    )
+    binding.quarantine_path = path.parent / quarantine_name
+    binding.quarantine_signature = _identity_signature(moved)
+    binding.assert_current(operation=operation, attempts=attempts)
+    return quarantine_name, moved
+
+
+def _open_posix_at(parent_fd: int, name: str, *, directory: bool) -> int:
+    """Open one already-lstatted object through its held parent descriptor."""
+
+    required = ("O_NOFOLLOW", "O_CLOEXEC")
+    if not all(hasattr(os, flag) for flag in required):
+        raise OSError(errno.ENOTSUP, "required no-follow open flags are unavailable")
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
+    if directory:
+        if not hasattr(os, "O_DIRECTORY"):
+            raise OSError(errno.ENOTSUP, "required directory open flag is unavailable")
+        flags |= os.O_DIRECTORY
+    else:
+        flags |= getattr(os, "O_NONBLOCK", 0)
+    return os.open(name, flags, dir_fd=parent_fd)
+
+
+def _remove_posix_file_at(
+    parent_fd: int,
+    name: str,
+    path: Path,
+    *,
+    expected: os.stat_result,
+    binding: _PathBinding,
+    operation: str,
+    attempts: int,
+    root_device: Optional[int],
+    root_mount_identity: _PosixMountIdentity,
+) -> None:
+    """Unlink one regular file only while its open identity remains current."""
+
+    _assert_posix_object(
+        expected,
+        expected,
+        path=path,
+        operation=operation,
+        attempts=attempts,
+        root_device=root_device,
+    )
+    descriptor = _open_posix_at(parent_fd, name, directory=False)
+    try:
+        _assert_posix_mount_identity(
+            descriptor,
+            root_mount_identity,
+            path=path,
+            operation=operation,
+            attempts=attempts,
+        )
+        opened = os.fstat(descriptor)
+        _assert_posix_object(
+            opened,
+            expected,
+            path=path,
+            operation=operation,
+            attempts=attempts,
+            root_device=root_device,
+        )
+        _run_posix_mutation_hook(path)
+        binding.assert_current(operation=operation, attempts=attempts)
+        current = _lstat_at(parent_fd, name)
+        _assert_posix_object(
+            current,
+            opened,
+            path=path,
+            operation=operation,
+            attempts=attempts,
+            root_device=root_device,
+        )
+        os.unlink(name, dir_fd=parent_fd)
+    finally:
+        os.close(descriptor)
+
+
+def _remove_posix_tree_at(
+    parent_fd: int,
+    name: str,
+    path: Path,
+    *,
+    expected: os.stat_result,
+    binding: _PathBinding,
+    operation: str,
+    attempts: int,
+    root_device: Optional[int],
+    root_mount_identity: _PosixMountIdentity,
+) -> None:
+    """Recursively remove a directory using only no-follow held descriptors."""
+
+    _assert_posix_object(
+        expected,
+        expected,
+        path=path,
+        operation=operation,
+        attempts=attempts,
+        root_device=root_device,
+    )
+    directory_fd = _open_posix_at(parent_fd, name, directory=True)
+    try:
+        _assert_posix_mount_identity(
+            directory_fd,
+            root_mount_identity,
+            path=path,
+            operation=operation,
+            attempts=attempts,
+        )
+        opened = os.fstat(directory_fd)
+        _assert_posix_object(
+            opened,
+            expected,
+            path=path,
+            operation=operation,
+            attempts=attempts,
+            root_device=root_device,
+        )
+        for child_name in os.listdir(directory_fd):
+            if not isinstance(child_name, str) or child_name in ("", ".", ".."):
+                raise _security_error(
+                    operation=operation,
+                    path=path,
+                    reason="descriptor-relative directory enumeration returned an unsafe name",
+                    attempts=attempts,
+                )
+            child_path = path / child_name
+            child_result = _lstat_at(directory_fd, child_name)
+            _assert_posix_object(
+                child_result,
+                child_result,
+                path=child_path,
+                operation=operation,
+                attempts=attempts,
+                root_device=root_device,
+            )
+            if stat.S_ISDIR(child_result.st_mode):
+                _remove_posix_tree_at(
+                    directory_fd,
+                    child_name,
+                    child_path,
+                    expected=child_result,
+                    binding=binding,
+                    operation=operation,
+                    attempts=attempts,
+                    root_device=root_device,
+                    root_mount_identity=root_mount_identity,
+                )
+            else:
+                _remove_posix_file_at(
+                    directory_fd,
+                    child_name,
+                    child_path,
+                    expected=child_result,
+                    binding=binding,
+                    operation=operation,
+                    attempts=attempts,
+                    root_device=root_device,
+                    root_mount_identity=root_mount_identity,
+                )
+
+        _run_posix_mutation_hook(path)
+        binding.assert_current(operation=operation, attempts=attempts)
+        current = _lstat_at(parent_fd, name)
+        _assert_posix_object(
+            current,
+            opened,
+            path=path,
+            operation=operation,
+            attempts=attempts,
+            root_device=root_device,
+        )
+        os.rmdir(name, dir_fd=parent_fd)
+    finally:
+        os.close(directory_fd)
+
+
 def _remove_once(
     path: Path,
     *,
@@ -1553,36 +2341,63 @@ def _remove_once(
                 path=path,
                 reason="target became a symlink or reparse point during cleanup",
             )
-        if stat.S_ISDIR(result.st_mode):
-            if not getattr(shutil.rmtree, "avoids_symlink_attacks", False):
-                raise _security_error(
-                    operation=operation,
-                    path=path,
-                    reason="safe descriptor-based recursive removal is unavailable",
-                )
-            shutil.rmtree(name, dir_fd=parent_fd)
+        if binding is None:
+            raise _security_error(
+                operation=operation,
+                path=path,
+                reason="POSIX cleanup requires an identity binding",
+            )
+        if binding.posix_mount_identity is None:
+            raise _security_error(
+                operation=operation,
+                path=path,
+                reason="POSIX cleanup has no verified root mount identity",
+                attempts=attempts,
+            )
+        root_device = binding.identities[0].signature[0]
+        quarantine_name, quarantine_result = _quarantine_posix_target(
+            parent_fd,
+            name,
+            path,
+            expected=result,
+            binding=binding,
+            operation=operation,
+            attempts=attempts,
+            root_device=root_device,
+        )
+        if stat.S_ISDIR(quarantine_result.st_mode):
+            _remove_posix_tree_at(
+                parent_fd,
+                quarantine_name,
+                path,
+                expected=quarantine_result,
+                binding=binding,
+                operation=operation,
+                attempts=attempts,
+                root_device=root_device,
+                root_mount_identity=binding.posix_mount_identity,
+            )
             return
-        if not stat.S_ISREG(result.st_mode):
+        if not stat.S_ISREG(quarantine_result.st_mode):
             raise OSError(errno.EINVAL, f"unsupported packaging output type: {path}")
-        os.unlink(name, dir_fd=parent_fd)
+        _remove_posix_file_at(
+            parent_fd,
+            quarantine_name,
+            path,
+            expected=quarantine_result,
+            binding=binding,
+            operation=operation,
+            attempts=attempts,
+            root_device=root_device,
+            root_mount_identity=binding.posix_mount_identity,
+        )
         return
 
-    try:
-        result = _lstat_no_follow(path)
-    except FileNotFoundError:
-        return
-    if stat.S_ISLNK(result.st_mode) or _is_reparse_point(path, result):
-        raise _security_error(
-            operation=operation,
-            path=path,
-            reason="target became a symlink or reparse point during cleanup",
-        )
-    if stat.S_ISDIR(result.st_mode):
-        shutil.rmtree(path)
-        return
-    if not stat.S_ISREG(result.st_mode):
-        raise OSError(errno.EINVAL, f"unsupported packaging output type: {path}")
-    os.unlink(path)
+    raise _security_error(
+        operation=operation,
+        path=path,
+        reason="descriptor-relative POSIX cleanup is unavailable; pathname fallback is forbidden",
+    )
 
 
 def _close_child_streams(child: object) -> None:
@@ -1592,6 +2407,24 @@ def _close_child_streams(child: object) -> None:
         stream = getattr(child, stream_name, None)
         if stream is not None and not getattr(stream, "closed", False):
             stream.close()
+
+
+def run_process_and_wait(
+    command: Sequence[Union[str, os.PathLike[str]]],
+    *,
+    cwd: Path,
+    env: Mapping[str, str] | None = None,
+) -> None:
+    """Run a packaging child to completion and close its process handles."""
+
+    popen_kwargs: dict[str, object] = {"cwd": os.fspath(cwd)}
+    if env is not None:
+        popen_kwargs["env"] = dict(env)
+    with subprocess.Popen(command, **popen_kwargs) as child:
+        return_code = child.wait()
+        _close_child_streams(child)
+    if return_code:
+        raise subprocess.CalledProcessError(return_code, command)
 
 
 _ISOLATED_ENVIRONMENT_KEYS = frozenset(
@@ -1624,7 +2457,9 @@ def isolated_packaging_environment(
     """Rebuild a neutral environment for an official source generator child."""
     inherited = os.environ if source is None else source
     environment = {
-        key: value for key, value in inherited.items() if key in _ISOLATED_ENVIRONMENT_KEYS
+        key: value
+        for key, value in inherited.items()
+        if key in _ISOLATED_ENVIRONMENT_KEYS
     }
     environment["GIT_CONFIG_GLOBAL"] = os.devnull
     environment["GIT_CONFIG_NOSYSTEM"] = "1"
@@ -1661,26 +2496,6 @@ def isolated_python_module_command(
         module,
         *arguments,
     ]
-
-
-def run_process_and_wait(
-    command: Sequence[Union[str, os.PathLike[str]]],
-    *,
-    cwd: Path,
-    env: Mapping[str, str] | None = None,
-) -> None:
-    """Run a packaging child to completion and close its process handles."""
-
-    popen_kwargs: dict[str, object] = {"cwd": os.fspath(cwd)}
-    if env is not None:
-        popen_kwargs["env"] = dict(env)
-    with subprocess.Popen(command, **popen_kwargs) as child:
-        return_code = child.wait()
-        _close_child_streams(child)
-    if return_code:
-        raise subprocess.CalledProcessError(return_code, command)
-
-
 def _ensure_child_exited(child: object, *, operation: str, path: Path) -> None:
     """Refuse cleanup while a child is alive, then close its streams."""
 
@@ -1746,6 +2561,16 @@ def remove_owned_path(
         except PackagingCleanupError:
             raise
         except OSError as error:
+            retained = getattr(error, "cleanup_unclosed_windows", ())
+            if retained:
+                close_errors = getattr(error, "cleanup_close_failures", (error,))
+                raise _close_failure_error(
+                    operation=operation,
+                    path=_absolute_lexical_path(Path(path)),
+                    attempts=bind_attempt,
+                    errors=close_errors,
+                    unclosed=retained,
+                ) from error
             transient = is_transient_windows_cleanup_error(error)
             if not transient or bind_attempt == max_attempts:
                 diagnostic = _diagnostic(
@@ -1771,12 +2596,21 @@ def remove_owned_path(
     if child is not None:
         try:
             _ensure_child_exited(child, operation=operation, path=target)
-        except BaseException:
-            binding.close()
+        except BaseException as error:
+            _finish_binding_close(
+                binding,
+                operation=operation,
+                path=target,
+                attempts=0,
+                primary=error,
+            )
             raise
 
+    primary_error: Optional[BaseException] = None
+    last_attempt = 0
     try:
         for attempt in range(1, max_attempts + 1):
+            last_attempt = attempt
             binding.assert_current(operation=operation, attempts=attempt)
             try:
                 _remove_once(
@@ -1790,6 +2624,16 @@ def remove_owned_path(
             except PackagingCleanupError:
                 raise
             except OSError as error:
+                retained = getattr(error, "cleanup_unclosed_windows", ())
+                if retained:
+                    close_errors = getattr(error, "cleanup_close_failures", (error,))
+                    raise _close_failure_error(
+                        operation=operation,
+                        path=target,
+                        attempts=attempt,
+                        errors=close_errors,
+                        unclosed=retained,
+                    ) from error
                 transient = is_transient_windows_cleanup_error(error)
                 if not transient or attempt == max_attempts:
                     diagnostic = _diagnostic(
@@ -1809,5 +2653,14 @@ def remove_owned_path(
                 if backoff_seconds:
                     delay_index = min(attempt - 1, len(backoff_seconds) - 1)
                     sleep(backoff_seconds[delay_index])
+    except BaseException as error:
+        primary_error = error
+        raise
     finally:
-        binding.close()
+        _finish_binding_close(
+            binding,
+            operation=operation,
+            path=target,
+            attempts=last_attempt,
+            primary=primary_error,
+        )

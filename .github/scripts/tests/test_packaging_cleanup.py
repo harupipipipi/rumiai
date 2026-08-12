@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ctypes
 import errno
 import importlib.util
+import os
 import stat
 import subprocess
 import sys
@@ -105,12 +107,26 @@ class _FakeHandleRecord(TypedDict):
 class _FakeWindowsApi:
     """Disposable-fixture simulation of the native handle operations."""
 
-    def __init__(self, *, open_failures: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        open_failures: int = 0,
+        identity_failures: set[int] | None = None,
+        persistent_identity_failures: set[int] | None = None,
+        close_failures: set[int] | None = None,
+        persistent_close_failures: set[int] | None = None,
+    ) -> None:
         self._next_handle = 100
         self.open_failures = open_failures
+        self.identity_failures = set(identity_failures or ())
+        self.persistent_identity_failures = set(persistent_identity_failures or ())
+        self.close_failures = set(close_failures or ())
+        self.persistent_close_failures = set(persistent_close_failures or ())
         self.handles: dict[int, _FakeHandleRecord] = {}
         self.open_share_modes: list[int] = []
         self.rename_calls: list[tuple[int, int, str]] = []
+        self.close_attempts: list[int] = []
+        self.identity_attempts: list[int] = []
 
     def open(
         self,
@@ -138,6 +154,12 @@ class _FakeWindowsApi:
         return handle
 
     def identity(self, handle: int) -> Any:
+        self.identity_attempts.append(handle)
+        if handle in self.persistent_identity_failures:
+            raise OSError(errno.EIO, "simulated identity failure")
+        if handle in self.identity_failures:
+            self.identity_failures.remove(handle)
+            raise OSError(errno.EIO, "simulated identity failure")
         record = self.handles[handle]
         return cleanup._WindowsFileIdentity(
             volume_serial=1,
@@ -161,6 +183,12 @@ class _FakeWindowsApi:
             path.unlink()
 
     def close(self, handle: int) -> None:
+        self.close_attempts.append(handle)
+        if handle in self.persistent_close_failures:
+            raise _windows_error(5)
+        if handle in self.close_failures:
+            self.close_failures.remove(handle)
+            raise _windows_error(5)
         self.handles.pop(handle)
 
     def attempt_rename(self, source: Path, destination: Path) -> None:
@@ -246,6 +274,107 @@ def test_windows_native_file_cleanup_uses_bound_handles(
     assert not list(scope.glob(".tobkiri-cleanup-*"))
 
 
+def test_windows_rename_info_uses_null_root_terminated_aligned_utf16() -> None:
+    """The Win32 rename buffer matches FILE_RENAME_INFO's exact ABI."""
+
+    calls: list[tuple[int, int, bytes]] = []
+    api = cleanup._WindowsApi.__new__(cleanup._WindowsApi)
+
+    def set_file_information(
+        handle: Any,
+        information_class: int,
+        information: Any,
+        buffer_size: int,
+    ) -> bool:
+        address = ctypes.cast(information, ctypes.c_void_p).value
+        assert address is not None
+        calls.append(
+            (
+                int(getattr(handle, "value", handle)),
+                information_class,
+                ctypes.string_at(address, buffer_size),
+            )
+        )
+        return True
+
+    api._set_file_information = set_file_information
+    name = ".tobkiri-cleanup-native"
+    api.rename_relative(41, 42, name)
+
+    assert len(calls) == 1
+    handle, information_class, raw = calls[0]
+    assert handle == 41
+    assert information_class == cleanup._WINDOWS_FILE_RENAME_INFO_CLASS
+    assert len(raw) % ctypes.alignment(cleanup._WindowsFileRenameInfo) == 0
+    information = cleanup._WindowsFileRenameInfo.from_buffer_copy(raw)
+    assert information.ReplaceIfExists == 0
+    assert information.RootDirectory is None
+    encoded_name = name.encode("utf-16-le")
+    assert information.FileNameLength == len(encoded_name)
+    offset = cleanup._WindowsFileRenameInfo.FileName.offset
+    assert raw[offset : offset + len(encoded_name)] == encoded_name
+    assert raw[offset + len(encoded_name) : offset + len(encoded_name) + 2] == b"\0\0"
+
+
+@pytest.mark.parametrize("name", ["", ".", "..", "nested/name", "nested\\name", "x\0y"])
+def test_windows_rename_info_rejects_non_simple_names(name: str) -> None:
+    """A quarantine rename cannot smuggle a path into FILE_RENAME_INFO."""
+
+    api = cleanup._WindowsApi.__new__(cleanup._WindowsApi)
+    api._set_file_information = lambda *_args: True
+
+    with pytest.raises(ValueError, match="simple filename"):
+        api.rename_relative(41, 42, name)
+
+
+def test_windows_directory_open_requests_traverse_and_read_attributes() -> None:
+    """Held parent directories request every right used by the trust walk."""
+
+    accesses: list[int] = []
+    api = cleanup._WindowsApi.__new__(cleanup._WindowsApi)
+
+    def create_file(
+        _path: str,
+        access: int,
+        _share_mode: int,
+        _security: object,
+        _creation: int,
+        _flags: int,
+        _template: object,
+    ) -> int:
+        accesses.append(access)
+        return 123
+
+    api._create_file = create_file
+    assert api.open(Path("held-parent"), directory=True) == 123
+    assert len(accesses) == 1
+    assert accesses[0] & cleanup._WINDOWS_FILE_LIST_DIRECTORY
+    assert accesses[0] & cleanup._WINDOWS_FILE_TRAVERSE
+    assert accesses[0] & cleanup._WINDOWS_FILE_READ_ATTRIBUTES
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires native Windows handles")
+def test_windows_native_quarantine_rename_accepts_packager_output(
+    tmp_path: Path,
+) -> None:
+    """Native SetFileInformationByHandle accepts the quarantine rename ABI."""
+
+    scope = tmp_path / "scope"
+    scope.mkdir()
+    target = scope / "owned.bin"
+    target.write_bytes(b"owned")
+    setattr(cleanup, "_WINDOWS_API", None)
+
+    cleanup.remove_owned_path(
+        target,
+        owner_root=scope,
+        operation="test native quarantine ABI",
+    )
+
+    assert not target.exists()
+    assert not list(scope.glob(".tobkiri-cleanup-*"))
+
+
 def test_windows_bound_chain_excludes_delete_sharing_and_blocks_move(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -320,6 +449,114 @@ def test_windows_native_binding_retries_transient_handle_lock(
     assert fake_api.handles == {}
 
 
+def test_windows_partial_binding_one_shot_close_reaches_zero_handles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Partial construction retries a transient close and releases all handles."""
+
+    scope = tmp_path / "scope"
+    nested = scope / "nested"
+    target = nested / "owned.bin"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"owned")
+    fake_api = _FakeWindowsApi(open_failures=1, close_failures={101})
+    _use_fake_windows_native_api(monkeypatch, fake_api)
+
+    cleanup.remove_owned_path(
+        target,
+        owner_root=scope,
+        operation="test partial one-shot close",
+    )
+
+    assert fake_api.handles == {}
+    assert not target.exists()
+
+
+def test_windows_partial_binding_persistent_close_retains_handle_and_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Partial construction never retries after persistent close ownership loss."""
+
+    scope = tmp_path / "scope"
+    nested = scope / "nested"
+    target = nested / "owned.bin"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"owned")
+    fake_api = _FakeWindowsApi(open_failures=1, persistent_close_failures={101})
+    _use_fake_windows_native_api(monkeypatch, fake_api)
+
+    with pytest.raises(cleanup.PackagingCleanupError, match="retained handles"):
+        cleanup.remove_owned_path(
+            target,
+            owner_root=scope,
+            operation="test partial persistent close",
+        )
+
+    assert set(fake_api.handles) == {101}
+    assert target.exists()
+
+
+def test_windows_ancestor_identity_failure_closes_new_handle_once_owned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ancestor is owned before identity failure and one-shot close drains it."""
+
+    scope = tmp_path / "scope"
+    nested = scope / "nested"
+    target = nested / "owned.bin"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"owned")
+    fake_api = _FakeWindowsApi(identity_failures={100}, close_failures={100})
+    _use_fake_windows_native_api(monkeypatch, fake_api)
+
+    with pytest.raises(cleanup.PackagingCleanupError) as raised:
+        cleanup.remove_owned_path(
+            target,
+            owner_root=scope,
+            operation="test ancestor identity one-shot close",
+        )
+
+    assert isinstance(raised.value.__cause__, OSError)
+    assert "simulated identity failure" in str(raised.value.__cause__)
+    assert fake_api.close_attempts == [100, 100]
+    assert fake_api.handles == {}
+    assert target.exists()
+
+
+def test_windows_ancestor_identity_failure_retains_persistent_close_handle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ancestor identity failure reports a persistent close residue."""
+
+    scope = tmp_path / "scope"
+    nested = scope / "nested"
+    target = nested / "owned.bin"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"owned")
+    fake_api = _FakeWindowsApi(
+        identity_failures={100},
+        persistent_close_failures={100},
+    )
+    _use_fake_windows_native_api(monkeypatch, fake_api)
+
+    with pytest.raises(
+        cleanup.PackagingCleanupError, match="retained handles"
+    ) as raised:
+        cleanup.remove_owned_path(
+            target,
+            owner_root=scope,
+            operation="test ancestor identity persistent close",
+        )
+
+    assert isinstance(raised.value.__cause__, OSError)
+    assert "simulated identity failure" in str(raised.value.__cause__)
+    assert fake_api.close_attempts == [100, 100]
+    assert set(fake_api.handles) == {100}
+    assert [record.handle for record in raised.value.unclosed_windows] == [100]
+    assert [record.handle for record in raised.value.cleanup_unclosed_windows] == [100]
+    assert target.exists()
+
+
 def test_windows_native_tree_cleanup_uses_child_handles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -342,6 +579,280 @@ def test_windows_native_tree_cleanup_uses_child_handles(
     assert not target.exists()
     assert not list(scope.glob(".tobkiri-cleanup-*"))
     assert fake_api.handles == {}
+
+
+def test_windows_target_one_shot_close_failure_retries_to_zero_handles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A target close failure is retried after identity validation."""
+
+    scope = tmp_path / "scope"
+    scope.mkdir()
+    target = scope / "owned.bin"
+    target.write_bytes(b"owned")
+    fake_api = _FakeWindowsApi(close_failures={101})
+    _use_fake_windows_native_api(monkeypatch, fake_api)
+
+    cleanup.remove_owned_path(
+        target,
+        owner_root=scope,
+        operation="test target close failure",
+    )
+
+    assert fake_api.close_attempts == [101, 101, 100]
+    assert fake_api.handles == {}
+    assert not target.exists()
+
+
+def test_windows_ancestor_one_shot_close_failure_retries_to_zero_handles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ancestor close failure is retried without losing handle ownership."""
+
+    scope = tmp_path / "scope"
+    nested = scope / "nested"
+    target = nested / "owned.bin"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"owned")
+    fake_api = _FakeWindowsApi(close_failures={100})
+    _use_fake_windows_native_api(monkeypatch, fake_api)
+
+    cleanup.remove_owned_path(
+        target,
+        owner_root=scope,
+        operation="test ancestor close failure",
+    )
+
+    assert fake_api.close_attempts == [102, 101, 100, 100]
+    assert fake_api.handles == {}
+    assert not target.exists()
+
+
+def test_windows_recursive_child_one_shot_close_retries_to_zero_handles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A recursive child close failure is retried before parent deletion."""
+
+    scope = tmp_path / "scope"
+    target = scope / "owned"
+    target.mkdir(parents=True)
+    (target / "child.txt").write_text("owned", encoding="utf-8")
+    fake_api = _FakeWindowsApi(close_failures={102})
+    _use_fake_windows_native_api(monkeypatch, fake_api)
+
+    cleanup.remove_owned_path(
+        target,
+        owner_root=scope,
+        operation="test recursive child close failure",
+    )
+
+    assert fake_api.close_attempts == [102, 102, 101, 100]
+    assert fake_api.handles == {}
+    assert not target.exists()
+
+
+def test_windows_persistent_target_close_retains_handle_and_reports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Persistent target close failure retains the handle and fails closed."""
+
+    scope = tmp_path / "scope"
+    scope.mkdir()
+    target = scope / "owned.bin"
+    target.write_bytes(b"owned")
+    fake_api = _FakeWindowsApi(persistent_close_failures={101})
+    _use_fake_windows_native_api(monkeypatch, fake_api)
+
+    with pytest.raises(
+        cleanup.PackagingCleanupError, match="retained handles"
+    ) as raised:
+        cleanup.remove_owned_path(
+            target,
+            owner_root=scope,
+            operation="test persistent target close failure",
+        )
+
+    assert fake_api.close_attempts == [101, 101, 100]
+    assert set(fake_api.handles) == {101}
+    assert raised.value.unclosed_windows[0].handle == 101
+    assert not target.exists()
+
+
+def test_windows_persistent_ancestor_close_retains_handle_and_reports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Persistent ancestor close failure retains that ancestor ownership."""
+
+    scope = tmp_path / "scope"
+    nested = scope / "nested"
+    target = nested / "owned.bin"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"owned")
+    fake_api = _FakeWindowsApi(persistent_close_failures={100})
+    _use_fake_windows_native_api(monkeypatch, fake_api)
+
+    with pytest.raises(cleanup.PackagingCleanupError, match="retained handles"):
+        cleanup.remove_owned_path(
+            target,
+            owner_root=scope,
+            operation="test persistent ancestor close failure",
+        )
+
+    assert fake_api.close_attempts == [102, 101, 100, 100]
+    assert set(fake_api.handles) == {100}
+    assert target.exists() is False
+
+
+def test_windows_close_retry_rejects_reused_handle_identity(
+    tmp_path: Path,
+) -> None:
+    """A failed close is never retried against a reused handle number."""
+
+    target = tmp_path / "owned.bin"
+    target.write_bytes(b"owned")
+    fake_api = _FakeWindowsApi(close_failures={100})
+    handle = fake_api.open(target, directory=False)
+    identity = fake_api.identity(handle)
+
+    def changed_identity(_handle: int) -> Any:
+        return cleanup._WindowsFileIdentity(
+            volume_serial=identity.volume_serial,
+            file_index=identity.file_index + 1,
+            file_attributes=identity.file_attributes,
+        )
+
+    fake_api.identity = changed_identity  # type: ignore[assignment]
+    report = cleanup._close_windows_handle(
+        fake_api,
+        cleanup._WindowsHandleRecord(target, handle, identity),
+    )
+
+    assert len(report.errors) == 2
+    assert [handle for handle in fake_api.close_attempts] == [100]
+    assert [record.handle for record in report.unclosed] == [100]
+    assert set(fake_api.handles) == {100}
+
+
+def test_windows_persistent_recursive_child_close_retains_residue_and_handle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Persistent child close failure leaves safe quarantine residue and handle."""
+
+    scope = tmp_path / "scope"
+    target = scope / "owned"
+    target.mkdir(parents=True)
+    (target / "child.txt").write_text("owned", encoding="utf-8")
+    fake_api = _FakeWindowsApi(persistent_close_failures={102})
+    _use_fake_windows_native_api(monkeypatch, fake_api)
+
+    with pytest.raises(cleanup.PackagingCleanupError, match="retained handles"):
+        cleanup.remove_owned_path(
+            target,
+            owner_root=scope,
+            operation="test persistent recursive child close failure",
+        )
+
+    assert fake_api.close_attempts == [102, 102, 101, 100]
+    assert set(fake_api.handles) == {102}
+    quarantine = next(scope.glob(".tobkiri-cleanup-*"))
+    assert quarantine.is_dir()
+
+
+def test_windows_recursive_child_identity_failure_one_shot_close_preserves_primary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A one-shot child close failure does not leak after identity failure."""
+
+    scope = tmp_path / "scope"
+    target = scope / "owned"
+    target.mkdir(parents=True)
+    (target / "child.txt").write_text("owned", encoding="utf-8")
+    fake_api = _FakeWindowsApi(identity_failures={102}, close_failures={102})
+    _use_fake_windows_native_api(monkeypatch, fake_api)
+
+    with pytest.raises(cleanup.PackagingCleanupError) as raised:
+        cleanup.remove_owned_path(
+            target,
+            owner_root=scope,
+            operation="test child identity one-shot close",
+        )
+
+    assert isinstance(raised.value.__cause__, OSError)
+    assert "simulated identity failure" in str(raised.value.__cause__)
+    assert fake_api.close_attempts == [102, 102, 101, 100]
+    assert fake_api.handles == {}
+    quarantine = next(scope.glob(".tobkiri-cleanup-*"))
+    assert quarantine.is_dir()
+
+
+def test_windows_recursive_child_identity_failure_reports_persistent_close(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A child identity failure propagates retained close metadata and cause."""
+
+    scope = tmp_path / "scope"
+    target = scope / "owned"
+    target.mkdir(parents=True)
+    (target / "child.txt").write_text("owned", encoding="utf-8")
+    fake_api = _FakeWindowsApi(
+        identity_failures={102},
+        persistent_close_failures={102},
+    )
+    _use_fake_windows_native_api(monkeypatch, fake_api)
+
+    with pytest.raises(
+        cleanup.PackagingCleanupError, match="retained handles"
+    ) as raised:
+        cleanup.remove_owned_path(
+            target,
+            owner_root=scope,
+            operation="test child identity persistent close",
+        )
+
+    assert isinstance(raised.value.__cause__, OSError)
+    assert "simulated identity failure" in str(raised.value.__cause__)
+    assert fake_api.close_attempts == [102, 102, 101, 100]
+    assert set(fake_api.handles) == {102}
+    assert [record.handle for record in raised.value.unclosed_windows] == [102]
+    assert [record.handle for record in raised.value.cleanup_unclosed_windows] == [102]
+    cause = raised.value.__cause__
+    assert cause is not None
+    assert [
+        record.handle for record in getattr(cause, "cleanup_unclosed_windows", ())
+    ] == [102]
+    quarantine = next(scope.glob(".tobkiri-cleanup-*"))
+    assert quarantine.is_dir()
+
+
+def test_close_failure_is_not_allowed_to_mask_primary_cleanup_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The original cleanup error remains primary while close failure is noted."""
+
+    scope = tmp_path / "scope"
+    scope.mkdir()
+    target = scope / "owned.bin"
+    target.write_bytes(b"owned")
+    fake_api = _FakeWindowsApi(persistent_close_failures={101})
+    _use_fake_windows_native_api(monkeypatch, fake_api)
+
+    def fail_remove(_path: Path, **_kwargs: object) -> None:
+        raise OSError(errno.EIO, "primary cleanup failure")
+
+    monkeypatch.setattr(cleanup, "_remove_once", fail_remove)
+
+    with pytest.raises(cleanup.PackagingCleanupError) as raised:
+        cleanup.remove_owned_path(
+            target,
+            owner_root=scope,
+            operation="test primary plus close failure",
+        )
+
+    assert raised.value.diagnostic.reason == "non-retryable cleanup error"
+    assert "failed to close" in str(raised.value)
+    assert fake_api.close_attempts == [101, 101, 100]
+    assert set(fake_api.handles) == {101}
+    assert target.exists()
 
 
 def test_windows_component_swap_at_mutation_boundary_fails_closed(
@@ -405,6 +916,433 @@ def test_symlinked_ancestor_is_rejected_without_following(
         )
 
     assert target.exists()
+
+
+@pytest.mark.skipif(cleanup._IS_WINDOWS, reason="POSIX descriptor contract")
+def test_recursive_cleanup_does_not_call_shutil_rmtree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Python 3.10 cleanup uses the local fd walker, not rmtree(dir_fd=...)."""
+
+    target = tmp_path / "owned" / "nested"
+    (target / "deeper").mkdir(parents=True)
+    (target / "deeper" / "payload.bin").write_bytes(b"payload")
+
+    def forbidden_rmtree(*args: object, **kwargs: object) -> None:
+        raise AssertionError(f"shutil.rmtree must not be called: {args!r} {kwargs!r}")
+
+    monkeypatch.setattr(cleanup.shutil, "rmtree", forbidden_rmtree)
+    cleanup.remove_owned_path(
+        target,
+        owner_root=tmp_path / "owned",
+        operation="test Python 3.10 descriptor cleanup",
+    )
+
+    assert not target.exists()
+
+
+@pytest.mark.skipif(cleanup._IS_WINDOWS, reason="POSIX descriptor contract")
+def test_recursive_cleanup_rejects_hardlink_and_preserves_external_victim(
+    tmp_path: Path,
+) -> None:
+    """A tree entry linked to an external inode is never unlinked."""
+
+    owner = tmp_path / "owned"
+    target = owner / "tree"
+    target.mkdir(parents=True)
+    victim = tmp_path / "external-victim.bin"
+    victim.write_bytes(b"preserve")
+    os.link(victim, target / "linked.bin")
+
+    with pytest.raises(cleanup.PackagingCleanupError, match="hard-linked"):
+        cleanup.remove_owned_path(
+            target,
+            owner_root=owner,
+            operation="test hardlink cleanup",
+        )
+
+    assert victim.read_bytes() == b"preserve"
+    quarantine = next(owner.glob(".tobkiri-cleanup-*"))
+    assert (quarantine / "linked.bin").exists()
+
+
+@pytest.mark.skipif(cleanup._IS_WINDOWS, reason="POSIX descriptor contract")
+def test_recursive_cleanup_rejects_nested_symlink_without_touching_victim(
+    tmp_path: Path,
+) -> None:
+    """A nested symlink is residue, never a traversal or unlink target."""
+
+    owner = tmp_path / "owned"
+    target = owner / "tree"
+    target.mkdir(parents=True)
+    victim = tmp_path / "external-victim.bin"
+    victim.write_bytes(b"preserve")
+    (target / "linked.bin").symlink_to(victim)
+
+    with pytest.raises(cleanup.PackagingCleanupError, match="symlink"):
+        cleanup.remove_owned_path(
+            target,
+            owner_root=owner,
+            operation="test nested symlink cleanup",
+        )
+
+    assert victim.read_bytes() == b"preserve"
+    quarantine = next(owner.glob(".tobkiri-cleanup-*"))
+    assert (quarantine / "linked.bin").is_symlink()
+
+
+@pytest.mark.skipif(cleanup._IS_WINDOWS, reason="POSIX descriptor contract")
+def test_missing_descriptor_support_has_no_pathname_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unsupported dirfd platforms fail closed before touching the target."""
+
+    owner = tmp_path / "owned"
+    target = owner / "tree"
+    target.mkdir(parents=True)
+    (target / "payload.bin").write_bytes(b"preserve")
+    monkeypatch.setattr(cleanup, "_open_parent_directories", lambda *args, **kwargs: ())
+
+    with pytest.raises(
+        cleanup.PackagingCleanupError, match="pathname fallback is forbidden"
+    ):
+        cleanup.remove_owned_path(
+            target,
+            owner_root=owner,
+            operation="test unavailable descriptor cleanup",
+        )
+
+    assert (target / "payload.bin").read_bytes() == b"preserve"
+
+
+@pytest.mark.skipif(cleanup._IS_WINDOWS, reason="POSIX descriptor contract")
+def test_file_replacement_at_unlink_boundary_fails_without_deleting_victim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A final-component rename swap is detected after the file is opened."""
+
+    owner = tmp_path / "owned"
+    target = owner / "tree"
+    target.mkdir(parents=True)
+    payload = target / "payload.bin"
+    payload.write_bytes(b"owned")
+    original = target / "payload-original.bin"
+    victim = tmp_path / "external-victim.bin"
+    victim.write_bytes(b"external")
+    swapped = False
+
+    def replace_before_unlink(path: Path) -> None:
+        nonlocal swapped
+        if path == payload and not swapped:
+            swapped = True
+            quarantine = next(owner.glob(".tobkiri-cleanup-*"))
+            actual_payload = quarantine / payload.name
+            actual_payload.rename(quarantine / original.name)
+            victim.rename(actual_payload)
+
+    monkeypatch.setattr(cleanup, "_BEFORE_POSIX_MUTATION", replace_before_unlink)
+    with pytest.raises(cleanup.PackagingCleanupError, match="identity changed"):
+        cleanup.remove_owned_path(
+            target,
+            owner_root=owner,
+            operation="test file replacement cleanup",
+        )
+
+    assert swapped
+    quarantine = next(owner.glob(".tobkiri-cleanup-*"))
+    assert (quarantine / payload.name).read_bytes() == b"external"
+    assert (quarantine / original.name).read_bytes() == b"owned"
+
+
+@pytest.mark.skipif(cleanup._IS_WINDOWS, reason="POSIX descriptor contract")
+def test_target_swap_before_quarantine_never_deletes_external_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The atomic quarantine step validates the exact object it will delete."""
+
+    owner = tmp_path / "owned"
+    target = owner / "tree"
+    target.mkdir(parents=True)
+    (target / "owned.bin").write_bytes(b"owned")
+    original = owner / "tree-original"
+    external = tmp_path / "external"
+    external.mkdir()
+    (external / "victim.bin").write_bytes(b"preserve")
+    swapped = False
+
+    def replace_target(path: Path) -> None:
+        nonlocal swapped
+        if path == target and not swapped:
+            swapped = True
+            target.rename(original)
+            external.rename(target)
+
+    monkeypatch.setattr(cleanup, "_BEFORE_POSIX_MUTATION", replace_target)
+    with pytest.raises(cleanup.PackagingCleanupError, match="identity changed"):
+        cleanup.remove_owned_path(
+            target,
+            owner_root=owner,
+            operation="test target swap before quarantine",
+        )
+
+    assert swapped
+    assert (target / "victim.bin").read_bytes() == b"preserve"
+    assert (original / "owned.bin").read_bytes() == b"owned"
+
+
+@pytest.mark.skipif(cleanup._IS_WINDOWS, reason="POSIX descriptor contract")
+def test_ancestor_swap_during_fd_walk_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Held dirfds never redirect deletion through a substituted ancestor."""
+
+    owner = tmp_path / "owned"
+    ancestor = owner / "ancestor"
+    target = ancestor / "tree"
+    target.mkdir(parents=True)
+    payload = target / "payload.bin"
+    payload.write_bytes(b"owned")
+    held_ancestor = owner / "ancestor-held"
+    external = tmp_path / "external"
+    external.mkdir()
+    victim = external / "victim.bin"
+    victim.write_bytes(b"preserve")
+    swapped = False
+
+    def replace_ancestor(path: Path) -> None:
+        nonlocal swapped
+        if path == payload and not swapped:
+            swapped = True
+            ancestor.rename(held_ancestor)
+            ancestor.symlink_to(external, target_is_directory=True)
+
+    monkeypatch.setattr(cleanup, "_BEFORE_POSIX_MUTATION", replace_ancestor)
+    with pytest.raises(cleanup.PackagingCleanupError, match="symlink or reparse"):
+        cleanup.remove_owned_path(
+            target,
+            owner_root=owner,
+            operation="test ancestor swap during descriptor cleanup",
+        )
+
+    assert swapped
+    assert victim.read_bytes() == b"preserve"
+    quarantine = next(held_ancestor.glob(".tobkiri-cleanup-*"))
+    assert (quarantine / "payload.bin").read_bytes() == b"owned"
+
+
+@pytest.mark.skipif(cleanup._IS_WINDOWS, reason="POSIX descriptor contract")
+def test_nested_device_substitution_during_fd_walk_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The descriptor walker refuses an entry whose device leaves the owner."""
+
+    owner = tmp_path / "owned"
+    target = owner / "tree"
+    nested = target / "mounted"
+    nested.mkdir(parents=True)
+    original_lstat_at = cleanup._lstat_at
+
+    def changed_device(parent_fd: int, name: str) -> Any:
+        result = original_lstat_at(parent_fd, name)
+        if name != "mounted":
+            return result
+        return SimpleNamespace(
+            st_dev=result.st_dev + 1,
+            st_ino=result.st_ino,
+            st_mode=result.st_mode,
+            st_nlink=result.st_nlink,
+        )
+
+    monkeypatch.setattr(cleanup, "_lstat_at", changed_device)
+    with pytest.raises(cleanup.PackagingCleanupError, match="mount/device"):
+        cleanup.remove_owned_path(
+            target,
+            owner_root=owner,
+            operation="test nested device substitution",
+        )
+
+    quarantine = next(owner.glob(".tobkiri-cleanup-*"))
+    assert (quarantine / nested.name).exists()
+
+
+@pytest.mark.skipif(cleanup._IS_WINDOWS, reason="POSIX descriptor contract")
+def test_same_device_different_mount_identity_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A same-device mount substitution is rejected by descriptor mount ID."""
+
+    owner = tmp_path / "owned"
+    target = owner / "tree"
+    target.mkdir(parents=True)
+    (target / "payload.bin").write_bytes(b"owned")
+    original_mount_identity = cleanup._posix_mount_identity
+    calls = 0
+
+    def changed_mount_identity(fd: int) -> tuple[str, int]:
+        nonlocal calls
+        calls += 1
+        identity = original_mount_identity(fd)
+        if calls == 2:
+            return (identity[0], identity[1] + 1)
+        return identity
+
+    monkeypatch.setattr(cleanup, "_posix_mount_identity", changed_mount_identity)
+    with pytest.raises(cleanup.PackagingCleanupError, match="mount boundary"):
+        cleanup.remove_owned_path(
+            target,
+            owner_root=owner,
+            operation="test same-device mount identity substitution",
+        )
+
+    assert calls >= 2
+    quarantine = next(owner.glob(".tobkiri-cleanup-*"))
+    assert (quarantine / "payload.bin").read_bytes() == b"owned"
+
+
+@pytest.mark.skipif(cleanup._IS_WINDOWS, reason="POSIX descriptor contract")
+def test_mount_identity_unavailable_fails_closed_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Missing platform mount identity never permits pathname cleanup."""
+
+    owner = tmp_path / "owned"
+    target = owner / "tree"
+    target.mkdir(parents=True)
+    (target / "payload.bin").write_bytes(b"preserve")
+
+    def unavailable(_fd: int) -> tuple[str, int]:
+        raise OSError(errno.ENOTSUP, "mount identity unavailable")
+
+    monkeypatch.setattr(cleanup, "_posix_mount_identity", unavailable)
+    with pytest.raises(
+        cleanup.PackagingCleanupError, match="owned root mount identity"
+    ):
+        cleanup.remove_owned_path(
+            target,
+            owner_root=owner,
+            operation="test unavailable mount identity",
+        )
+
+    assert (target / "payload.bin").read_bytes() == b"preserve"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux fdinfo contract")
+def test_linux_mount_identity_reads_held_descriptor_mount_id(
+    tmp_path: Path,
+) -> None:
+    """Linux mount identity comes from fdinfo for the held descriptor."""
+
+    descriptor = os.open(tmp_path, os.O_RDONLY)
+    try:
+        kind, mount_id = cleanup._posix_mount_identity(descriptor)
+    finally:
+        os.close(descriptor)
+
+    assert kind == "linux-mnt-id"
+    assert mount_id > 0
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        [],
+        ["mnt_id: 7\n", "mnt_id: 8\n"],
+        ["mnt_id: not-a-number\n"],
+        ["mnt_id: 0\n"],
+    ],
+)
+def test_linux_mount_id_parser_rejects_missing_duplicate_or_malformed(
+    lines: list[str],
+) -> None:
+    """fdinfo parsing is strict and never invents a mount identity."""
+
+    with pytest.raises(ValueError):
+        cleanup._parse_linux_mount_id(lines)
+
+
+def test_linux_fdinfo_rejects_deterministic_original_fd_reuse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reused original FD is detected by before/after identity checks."""
+
+    class _FdInfo:
+        def __enter__(self) -> "_FdInfo":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def __iter__(self):
+            return iter(["mnt_id: 42\n"])
+
+    identities = [
+        _fake_stat(stat.S_IFDIR, inode=1),
+        _fake_stat(stat.S_IFDIR, inode=1),
+        _fake_stat(stat.S_IFDIR, inode=1),
+        _fake_stat(stat.S_IFDIR, inode=2),
+    ]
+    close_calls: list[int] = []
+    inheritable_calls: list[tuple[int, bool]] = []
+
+    monkeypatch.setattr(cleanup.os, "dup", lambda _fd: 11)
+    monkeypatch.setattr(
+        cleanup.os,
+        "set_inheritable",
+        lambda fd, inheritable: inheritable_calls.append((fd, inheritable)),
+    )
+    monkeypatch.setattr(cleanup.os, "fstat", lambda _fd: identities.pop(0))
+    monkeypatch.setattr(cleanup.os, "close", lambda fd: close_calls.append(fd))
+    monkeypatch.setattr(
+        cleanup,
+        "open",
+        lambda *_args, **_kwargs: _FdInfo(),
+        raising=False,
+    )
+
+    with pytest.raises(OSError, match="original POSIX FD identity changed"):
+        cleanup._linux_fdinfo_mount_identity(10)
+
+    assert inheritable_calls == [(11, False)]
+    assert close_calls == [11]
+
+
+def test_linux_fdinfo_duplicate_close_failure_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A duplicate FD close failure is surfaced after identity validation."""
+
+    class _FdInfo:
+        def __enter__(self) -> "_FdInfo":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def __iter__(self):
+            return iter(["mnt_id: 42\n"])
+
+    identity = _fake_stat(stat.S_IFDIR, inode=1)
+    close_calls: list[int] = []
+    monkeypatch.setattr(cleanup.os, "dup", lambda _fd: 11)
+    monkeypatch.setattr(cleanup.os, "set_inheritable", lambda *_args: None)
+    monkeypatch.setattr(cleanup.os, "fstat", lambda _fd: identity)
+
+    def fail_close(fd: int) -> None:
+        close_calls.append(fd)
+        raise OSError(errno.EIO, "duplicate close failed")
+
+    monkeypatch.setattr(cleanup.os, "close", fail_close)
+    monkeypatch.setattr(
+        cleanup,
+        "open",
+        lambda *_args, **_kwargs: _FdInfo(),
+        raising=False,
+    )
+
+    with pytest.raises(OSError, match="duplicate close failed"):
+        cleanup._linux_fdinfo_mount_identity(10)
+
+    assert close_calls == [11]
 
 
 def test_final_symlink_is_rejected_even_when_contained(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import importlib.util
 import json
+import py_compile
 import shutil
 import subprocess
 import sys
@@ -271,7 +272,16 @@ def test_relocated_generator_rejects_manifest_missing_tamper_extra_and_symlink(
     tmp_path: Path,
 ) -> None:
     """The shared source manifest fails closed for every closure mutation."""
-    cases = ("missing", "tampered", "extra", "symlink")
+    cases = (
+        "missing",
+        "tampered",
+        "extra",
+        "symlink",
+        "pyc",
+        "pyo",
+        "cache",
+        "valid-hash-pyc",
+    )
     for case in cases:
         checkout, _, _ = _fixture(tmp_path / case)
         manifest = _source_manifest()
@@ -286,6 +296,24 @@ def test_relocated_generator_rejects_manifest_missing_tamper_extra_and_symlink(
         elif case == "extra":
             extra = checkout / "tobkiri_runtime/scripts/extra-source.py"
             extra.write_text("extra = True\n", encoding="utf-8")
+        elif case in {"pyc", "pyo"}:
+            extra = checkout / f"tobkiri_runtime/scripts/extra-source.{case}"
+            extra.write_bytes(b"\x00pyc-extra-attack\x00")
+        elif case == "cache":
+            extra = checkout / "tobkiri_runtime/scripts/__pycache__/extra.pyc"
+            extra.parent.mkdir(parents=True, exist_ok=True)
+            extra.write_bytes(b"\x00pyc-cache-attack\x00")
+        elif case == "valid-hash-pyc":
+            source = tmp_path / "valid_hash_extra.py"
+            source.write_text("extra = 'valid hash pyc'\n", encoding="utf-8")
+            extra = checkout / "tobkiri_runtime/scripts/__pycache__/extra.pyc"
+            extra.parent.mkdir(parents=True, exist_ok=True)
+            py_compile.compile(
+                os.fspath(source),
+                cfile=os.fspath(extra),
+                doraise=True,
+                invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH,
+            )
         else:
             outside = tmp_path / "outside.py"
             outside.write_text("outside = True\n", encoding="utf-8")

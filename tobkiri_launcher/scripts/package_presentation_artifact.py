@@ -59,6 +59,23 @@ remove_owned_path = _PACKAGING_CLEANUP.remove_owned_path
 run_process_and_wait = _PACKAGING_CLEANUP.run_process_and_wait
 
 
+def _load_source_manifest_verifier():
+    """Load the canonical source-closure verifier without search-path changes."""
+    verifier_path = REPOSITORY_ROOT / "tobkiri_runtime/scripts/generator_source_manifest.py"
+    spec = importlib.util.spec_from_file_location(
+        "tobkiri_generator_source_manifest", verifier_path
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"source closure verifier is unavailable: {verifier_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module.verify_source_closure
+
+
+verify_source_closure = _load_source_manifest_verifier()
+
+
 def artifact_digest(path: Path) -> str:
     """Return the canonical artifact digest for compatibility with callers."""
     return artifact_digest_and_size(path)[0]
@@ -911,6 +928,7 @@ def _project_packaged_defaultspack(
     artifact_root = transaction_root / "platform-artifacts"
     shutil.copytree(source_bundle, bundle_root)
     source_root = repository_root / "tobkiri_runtime"
+    verify_source_closure(source_root)
     run_process_and_wait(
         isolated_python_module_command(
             sys.executable,

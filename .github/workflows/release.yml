@@ -59,6 +59,41 @@ jobs:
             tobkiri_runtime/requirements.txt
             tobkiri_runtime/requirements-dev.txt
 
+      - name: Bind verified packaging tool identities
+        shell: python
+        env:
+          TOOLCHAIN_ENV: ${{ runner.temp }}/tobkiri-packaging-toolchain.env
+        run: |
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          output = Path(os.environ["TOOLCHAIN_ENV"])
+          subprocess.run(
+              [
+                  sys.executable,
+                  "-B",
+                  ".github/scripts/packaging_toolchain_identity.py",
+                  "--python",
+                  str(Path(sys.executable).resolve()),
+                  "--env-output",
+                  str(output),
+              ],
+              check=True,
+          )
+          payload = output.read_text(encoding="utf-8")
+          required = (
+              "TOBKIRI_PACKAGING_PYTHON=",
+              "TOBKIRI_PACKAGING_PYTHON_SHA256=",
+              "TOBKIRI_PACKAGING_GIT=",
+              "TOBKIRI_PACKAGING_GIT_SHA256=",
+          )
+          if any(marker not in payload for marker in required):
+              raise SystemExit("formal packaging tool identity output is incomplete")
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as env_file:
+              env_file.write(payload)
+
       - name: Resolve checked-out source revision
         id: checked_out_source
         shell: python

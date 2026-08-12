@@ -18,6 +18,11 @@ the packaged application never downloads on first launch.
 Before generation, the pinned uv executable must report the structured official
 0.11.14 identity with a valid revision/date and the exact requested target
 triple; arbitrary prefixes, suffixes, versions, and architectures are rejected.
+Production Rust packaging callers receive Python and Git through the formal
+`TOBKIRI_PACKAGING_PYTHON`/`TOBKIRI_PACKAGING_GIT` absolute-path bindings and
+their lowercase raw `*_SHA256` values. They re-hash and re-check file identity
+before each use; `PYTHON`, `PATH`, and ambient tool discovery are not accepted
+by the build script or its authoritative-source fixtures.
 
 ## Resource contract
 
