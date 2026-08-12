@@ -415,15 +415,9 @@ def entry(fd,name,relative,mutate,device):
     if before.st_dev!=device: raise SystemExit('mount boundary in sealed tree: '+relative)
     if stat.S_ISLNK(before.st_mode):
         if before.st_nlink!=1: raise SystemExit('hardlinked tree symlink: '+relative)
+        # Name mutation is controlled by the held, root-owned parent directory;
+        # symlink permission/ACL bits do not grant rename authority on macOS.
         target=os.readlink(name,dir_fd=fd)
-        if sys.platform=='darwin':
-            if not hasattr(os,'O_SYMLINK'): raise SystemExit('symlink descriptor API absent')
-            linkfd=os.open(name,os.O_RDONLY|os.O_SYMLINK,dir_fd=fd)
-            try:
-                opened=os.fstat(linkfd)
-                if (before.st_dev,before.st_ino,before.st_mode)!=(opened.st_dev,opened.st_ino,opened.st_mode) or acl(linkfd):
-                    raise SystemExit('symlink identity or ACL changed: '+relative)
-            finally: os.close(linkfd)
         after=os.stat(name,dir_fd=fd,follow_symlinks=False)
         if (before.st_dev,before.st_ino,before.st_mode)!=(after.st_dev,after.st_ino,after.st_mode):
             raise SystemExit('symlink changed during inventory: '+relative)
@@ -485,7 +479,8 @@ def check_cycles(records,prefix=''):
 root=os.open(root_path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
 try:
     info=os.fstat(root)
-    if info.st_uid!=owner or acl(root): raise SystemExit('unsafe sealed tree root')
+    if info.st_uid!=owner or stat.S_IMODE(info.st_mode)!=0o700 or acl(root):
+        raise SystemExit('unsafe sealed tree root')
     first=walk(root,'',True,info.st_dev); check_cycles(first)
     os.fchmod(root,root_mode); os.fsync(root)
     if barrier:
@@ -2120,24 +2115,12 @@ def _inventory_entries(root: Path) -> list[dict[str, Any]]:
         elif stat.S_ISLNK(metadata.st_mode):
             if metadata.st_nlink != 1:
                 raise ToolIdentityError(f"hardlinked Python symlink: {relative}")
+            # The fully sealed parent directories deny caller rename authority,
+            # so lstat/readlink/lstat binds the link without opening its target.
             target = os.readlink(path)
             after = path.lstat()
             if _file_identity(metadata) != _file_identity(after):
                 raise ToolIdentityError(f"Python symlink changed: {relative}")
-            if sys.platform == "darwin":
-                if not hasattr(os, "O_SYMLINK"):
-                    raise ToolIdentityError("macOS symlink descriptor API is absent")
-                descriptor = os.open(path, os.O_RDONLY | os.O_SYMLINK)
-                try:
-                    opened = os.fstat(descriptor)
-                    if _file_identity(metadata) != _file_identity(
-                        opened
-                    ) or _fd_has_nontrivial_acl(descriptor):
-                        raise ToolIdentityError(
-                            f"Python symlink identity changed or has ACL: {relative}"
-                        )
-                finally:
-                    os.close(descriptor)
             if not target or "\x00" in target or target.startswith("/"):
                 raise ToolIdentityError(
                     f"Python symlink is absolute or empty: {relative}"

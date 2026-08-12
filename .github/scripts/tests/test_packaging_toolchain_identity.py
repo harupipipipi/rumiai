@@ -52,14 +52,22 @@ _REQUIRE_ROOT_PROCESS_TESTS = (
 
 
 def _seal_tree_helper(
-    root: Path, barrier: Path | None = None
+    root: Path, barrier: Path | None = None, *, hide_o_symlink: bool = False
 ) -> subprocess.CompletedProcess[bytes]:
+    root.chmod(0o700)
+    code = _MODULE.ROOT_SEAL_TREE_CODE
+    if hide_o_symlink:
+        code = (
+            "import os\n"
+            "if hasattr(os, 'O_SYMLINK'): delattr(os, 'O_SYMLINK')\n"
+            f"exec(compile({code!r}, '<tree-sealer>', 'exec'))\n"
+        )
     arguments = [
         sys.executable,
         "-I",
         "-B",
         "-c",
-        _MODULE.ROOT_SEAL_TREE_CODE,
+        code,
         root,
         str(os.geteuid()),
         "0555",
@@ -292,20 +300,23 @@ def test_opened_inode_without_extended_acl_is_accepted(tmp_path: Path) -> None:
 
 
 def test_fd_sealer_records_broken_internal_symlink_without_following(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An inert relative broken link is inventoried, never chmodded or followed."""
     root = tmp_path / "tree"
     root.mkdir()
+    root.chmod(0o700)
     link = root / "Python"
     link.symlink_to("missing-python")
     link_mode = stat.S_IMODE(link.lstat().st_mode)
     try:
-        result = _seal_tree_helper(root)
+        assert "O_SYMLINK" not in _MODULE.ROOT_SEAL_TREE_CODE
+        result = _seal_tree_helper(root, hide_o_symlink=True)
         assert result.returncode == 0, result.stderr
         assert link.is_symlink()
         assert os.readlink(link) == "missing-python"
         assert root.stat().st_mode & 0o7777 == 0o555
+        monkeypatch.delattr(_MODULE.os, "O_SYMLINK", raising=False)
         assert _MODULE._inventory_entries(root) == [
             {
                 "gid": link.lstat().st_gid,
@@ -328,6 +339,7 @@ def test_fd_sealer_preserves_regular_bytes_and_extended_attributes(
     """Sealing changes permission bits only, preserving signed payload metadata."""
     root = tmp_path / "tree"
     root.mkdir()
+    root.chmod(0o700)
     executable = root / "Python"
     executable.write_bytes(b"signed payload bytes")
     executable.chmod(0o755)
@@ -404,6 +416,7 @@ def test_fd_sealer_detects_name_replacement_between_inventories(
     """A post-open rename/replacement cannot become the sealed inventory."""
     root = tmp_path / "tree"
     root.mkdir()
+    root.chmod(0o700)
     entry = root / "module.py"
     entry.write_bytes(b"original")
     barrier = tmp_path / "seal-barrier"
@@ -438,6 +451,54 @@ def test_fd_sealer_detects_name_replacement_between_inventories(
         assert b"sealed tree changed" in stderr
         assert saved.read_bytes() == b"original"
         assert entry.read_bytes() == b"replacement"
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        _restore_test_tree_permissions(root)
+
+
+def test_fd_sealer_detects_symlink_replacement_between_inventories(
+    tmp_path: Path,
+) -> None:
+    """A symlink name/target swap is detected without opening either target."""
+    root = tmp_path / "tree"
+    root.mkdir()
+    root.chmod(0o700)
+    link = root / "Python"
+    link.symlink_to("original-missing")
+    barrier = tmp_path / "symlink-barrier"
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            _MODULE.ROOT_SEAL_TREE_CODE,
+            root,
+            str(os.geteuid()),
+            "0555",
+            barrier,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not barrier.with_suffix(".ready").exists():
+            if time.monotonic() >= deadline:
+                pytest.fail("tree sealer did not reach symlink inventory barrier")
+            time.sleep(0.01)
+        root.chmod(0o700)
+        saved = root / "saved-link"
+        link.rename(saved)
+        link.symlink_to("replacement-missing")
+        barrier.with_suffix(".release").write_bytes(b"release")
+        _stdout, stderr = process.communicate(timeout=5)
+        assert process.returncode != 0
+        assert b"sealed tree changed" in stderr
+        assert os.readlink(saved) == "original-missing"
+        assert os.readlink(link) == "replacement-missing"
     finally:
         if process.poll() is None:
             process.kill()
