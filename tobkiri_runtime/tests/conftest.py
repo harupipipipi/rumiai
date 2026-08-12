@@ -582,7 +582,6 @@ def _verified_packaged_profile_bundle(tmp_path_factory):
     if not git_value:
         raise RuntimeError("an absolute Git executable is required for packaged fixtures")
     git = Path(git_value).resolve()
-    git_digest = hashlib.sha256(git.read_bytes()).hexdigest()
     git_environment = {
         "GIT_CONFIG_GLOBAL": "NUL" if os.name == "nt" else os.devnull,
         "GIT_CONFIG_NOSYSTEM": "1",
@@ -618,15 +617,13 @@ def _verified_packaged_profile_bundle(tmp_path_factory):
     ).stdout.strip()
     assert not source_status, "packaged fixture source must start from a clean checkout"
     injection = pytest.MonkeyPatch()
-    injection.setenv("TOBKIRI_PACKAGING_GIT", str(git))
-    injection.setenv("TOBKIRI_PACKAGING_GIT_SHA256", git_digest)
-    injection.setenv("TOBKIRI_PACKAGING_SOURCE_COMMIT", revision)
-    injection.setenv("TOBKIRI_PACKAGING_SOURCE_TREE", source_tree)
-    injection.setenv("TOBKIRI_PACKAGING_SOURCE_CLEAN", "1")
     bundle = build_packaged_profile_bundle(
         source_bundle,
         tmp_path_factory.mktemp("verified-packaged-profile"),
         source_commit=revision,
+        source_tree=source_tree,
+        source_clean=True,
+        source_snapshot_root=_PROJECT_ROOT,
     )
     from core_runtime.bootstrap import profile_capture, runtime
 

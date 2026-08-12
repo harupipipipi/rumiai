@@ -60,7 +60,7 @@ run_process_and_wait = _PACKAGING_CLEANUP.run_process_and_wait
 
 
 def _load_source_manifest_verifier():
-    """Load the canonical source-closure verifier without search-path changes."""
+    """Load canonical source-closure tools without search-path changes."""
     verifier_path = REPOSITORY_ROOT / "tobkiri_runtime/scripts/generator_source_manifest.py"
     spec = importlib.util.spec_from_file_location(
         "tobkiri_generator_source_manifest", verifier_path
@@ -70,10 +70,10 @@ def _load_source_manifest_verifier():
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    return module.verify_source_closure
+    return module.verify_source_closure, module.materialize_source_snapshot
 
 
-verify_source_closure = _load_source_manifest_verifier()
+verify_source_closure, materialize_source_snapshot = _load_source_manifest_verifier()
 
 
 def artifact_digest(path: Path) -> str:
@@ -137,8 +137,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--repository-root",
         type=Path,
-        help="Checkout whose HEAD and origin identify the release source.",
+        help="Checkout used only to materialize the verified source snapshot.",
     )
+    parser.add_argument("--source-commit", required=True)
+    parser.add_argument("--source-tree", required=True)
+    parser.add_argument("--source-clean", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -191,88 +194,30 @@ def _required_text(value: Mapping[str, Any], name: str) -> str:
     return result
 
 
-def _git_output(repository_root: Path, *args: str) -> str:
-    """Read one exact value from the checkout's Git metadata."""
-    try:
-        result = subprocess.run(
-            ["git", *args],
-            cwd=repository_root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise RuntimeError(
-            f"unable to read current release source from {repository_root}: {error}"
-        ) from error
-    value = result.stdout.strip()
-    if not value:
-        raise RuntimeError(f"Git returned an empty release source value: {args!r}")
-    return value
-
-
-def _git_status(repository_root: Path) -> str:
-    """Return Git porcelain status, allowing a clean empty result."""
-    try:
-        result = subprocess.run(
-            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
-            cwd=repository_root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise RuntimeError(
-            f"unable to inspect current release source {repository_root}: {error}"
-        ) from error
-    return result.stdout.strip()
-
-
-def source_identity_for_repository(repository_root: Path) -> str:
-    """Return the stable source identity used by v4 release records."""
-    remote = _git_output(repository_root, "config", "--get", "remote.origin.url")
-    value = remote.removesuffix("/").removesuffix(".git")
-    if value.startswith("https://github.com/"):
-        return "github:" + value.removeprefix("https://github.com/")
-    if value.startswith("http://github.com/"):
-        return "github:" + value.removeprefix("http://github.com/")
-    if value.startswith("git@github.com:"):
-        return "github:" + value.removeprefix("git@github.com:")
-    return "git:" + remote
-
-
-def source_revision_for_repository(repository_root: Path) -> str:
-    """Return the full current Git commit used for a production package."""
-    revision = _git_output(repository_root, "rev-parse", "--verify", "HEAD")
-    if GIT_REVISION_RE.fullmatch(revision) is None:
-        raise RuntimeError(f"current Git revision is not a full commit SHA: {revision}")
-    return revision
-
-
 def _validate_current_source(
-    build_output: Mapping[str, Any], repository_root: Path | None
+    build_output: Mapping[str, Any],
+    repository_root: Path | None,
+    *,
+    source_commit: str | None,
+    source_tree: str | None,
+    source_clean: bool | None,
 ) -> None:
-    """Reject release manifests produced from another checkout revision/identity."""
+    """Validate formal provenance without consulting checkout or Git metadata."""
     if repository_root is None:
         return
-    root = repository_root.expanduser().absolute()
-    dirty = _git_status(root)
-    if dirty:
+    if source_commit is None or source_tree is None or source_clean is not True:
         raise RuntimeError(
-            "release packaging refuses a dirty source checkout; source revision "
-            "must not describe uncommitted tracked, staged, submodule, or generated input"
+            "formal source provenance requires source commit, source tree, "
+            "and source-clean=true"
         )
-    expected_revision = source_revision_for_repository(root)
-    expected_identity = source_identity_for_repository(root)
-    if build_output.get("source_revision") != expected_revision:
+    if GIT_REVISION_RE.fullmatch(source_commit) is None or len(set(source_commit)) <= 1:
+        raise RuntimeError("source commit must be a full lowercase 40-hex identity")
+    if GIT_REVISION_RE.fullmatch(source_tree) is None or len(set(source_tree)) <= 1:
+        raise RuntimeError("source tree must be a full lowercase 40-hex identity")
+    if build_output.get("source_revision") != source_commit:
         raise RuntimeError(
             "build-output manifest source revision is stale: "
-            f"expected {expected_revision}, got {build_output.get('source_revision')!r}"
-        )
-    if build_output.get("source_identity") != expected_identity:
-        raise RuntimeError(
-            "build-output manifest source identity does not match the checkout: "
-            f"expected {expected_identity!r}, got {build_output.get('source_identity')!r}"
+            f"expected {source_commit}, got {build_output.get('source_revision')!r}"
         )
 
 
@@ -681,8 +626,37 @@ def _new_staging_directory(parent: Path, prefix: str) -> Path:
     return staging
 
 
+def _make_owned_tree_writable(path: Path) -> None:
+    """Make an owned, link-free staging tree writable without following links."""
+    if path.is_symlink() or not path.is_dir():
+        raise RuntimeError(f"owned staging tree is not a real directory: {path}")
+    for child in sorted(path.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        metadata = child.stat(follow_symlinks=False)
+        if child.is_symlink() or not (
+            stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)
+        ):
+            raise RuntimeError(f"owned staging tree contains an unsafe entry: {child}")
+        mode = stat.S_IMODE(metadata.st_mode)
+        child.chmod(mode | (0o700 if stat.S_ISDIR(metadata.st_mode) else 0o600))
+    path.chmod(stat.S_IMODE(path.stat(follow_symlinks=False).st_mode) | 0o700)
+
+
 def _remove_tree(path: Path) -> None:
     """Remove only a transaction-owned path during cleanup."""
+    if path.exists() and not path.is_symlink():
+        # Source snapshots are deliberately non-writable while a child uses
+        # them.  Once the child has exited, make only this owned transaction
+        # removable before handing it to the descriptor-relative cleanup
+        # walker; the immutable snapshot is never reused after this point.
+        for child in sorted(path.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+            metadata = child.stat(follow_symlinks=False)
+            if child.is_symlink() or not (
+                stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)
+            ):
+                raise RuntimeError(f"owned transaction contains an unsafe entry: {child}")
+            mode = stat.S_IMODE(metadata.st_mode)
+            child.chmod(mode | (0o300 if stat.S_ISDIR(metadata.st_mode) else 0o200))
+        path.chmod(stat.S_IMODE(path.stat(follow_symlinks=False).st_mode) | 0o300)
     remove_owned_path(
         path,
         owner_root=path.parent,
@@ -912,28 +886,27 @@ def _project_packaged_defaultspack(
     architecture: str,
     bundle_identity: str,
     source_revision: str,
+    source_tree: str,
+    source_clean: bool,
     transaction_root: Path,
 ) -> dict[str, Any]:
     """Generate the exact packaged Profile projection before release signing."""
-    source_bundle = repository_root / "tobkiri_runtime/ecosystem/defaultspack/v4"
-    generator = (
-        repository_root
-        / "tobkiri_runtime/scripts/generate_packaged_defaultspack_v4_bundle.py"
-    )
-    if source_bundle.is_symlink() or not source_bundle.is_dir():
-        raise RuntimeError(f"canonical Defaults v4 bundle is unavailable: {source_bundle}")
-    if generator.is_symlink() or not generator.is_file():
-        raise RuntimeError(f"packaged Profile generator is unavailable: {generator}")
+    source_root = repository_root / "tobkiri_runtime"
+    if source_root.is_symlink() or not source_root.is_dir():
+        raise RuntimeError(f"canonical runtime source is unavailable: {source_root}")
     bundle_root = transaction_root / "v4"
     artifact_root = transaction_root / "platform-artifacts"
-    shutil.copytree(source_bundle, bundle_root)
-    source_root = repository_root / "tobkiri_runtime"
+    source_snapshot_root = transaction_root / "source-snapshot" / "tobkiri_runtime"
     verify_source_closure(source_root)
+    materialize_source_snapshot(source_root, source_snapshot_root)
+    source_bundle = source_snapshot_root / "ecosystem/defaultspack/v4"
+    shutil.copytree(source_bundle, bundle_root)
+    _make_owned_tree_writable(bundle_root)
     run_process_and_wait(
         isolated_python_module_command(
             sys.executable,
             "scripts.generate_packaged_defaultspack_v4_bundle",
-            source_root,
+            source_snapshot_root,
             [
                 "--source-artifact",
                 os.fspath(source_artifact),
@@ -953,9 +926,14 @@ def _project_packaged_defaultspack(
                 bundle_identity,
                 "--source-commit",
                 source_revision,
+                "--source-tree",
+                source_tree,
+                "--source-clean",
+                "--source-snapshot-root",
+                os.fspath(source_snapshot_root),
             ],
         ),
-        cwd=source_root,
+        cwd=source_snapshot_root,
         env=isolated_packaging_environment(),
     )
     profile = bundle_root / "defaults.profile.v4.json"
@@ -1038,6 +1016,9 @@ def package_artifact(
     signing_key_id: str,
     output_dir: Path,
     repository_root: Path | None = None,
+    source_commit: str | None = None,
+    source_tree: str | None = None,
+    source_clean: bool | None = None,
 ) -> dict[str, Any]:
     """Verify and atomically bind one exact build output into a Shell v4 release."""
     if not signing_key_id.strip():
@@ -1051,7 +1032,13 @@ def package_artifact(
     build_output = _load_object(
         manifest_path, BUILD_OUTPUT_SCHEMA, "build-output manifest"
     )
-    _validate_current_source(build_output, repository_root)
+    _validate_current_source(
+        build_output,
+        repository_root,
+        source_commit=source_commit,
+        source_tree=source_tree,
+        source_clean=source_clean,
+    )
     artifact_id = _required_text(build_output, "artifact_id")
     platform = _required_text(build_output, "platform")
     architecture = _required_text(build_output, "architecture")
@@ -1225,6 +1212,8 @@ def package_artifact(
                     architecture=architecture,
                     bundle_identity=bundle_identity,
                     source_revision=source_revision,
+                    source_tree=source_tree,
+                    source_clean=bool(source_clean),
                     transaction_root=projection_root,
                 )
             finally:
@@ -1365,6 +1354,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.signing_key_id,
         args.output_dir,
         args.repository_root,
+        args.source_commit,
+        args.source_tree,
+        args.source_clean,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0

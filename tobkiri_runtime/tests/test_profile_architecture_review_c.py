@@ -51,6 +51,16 @@ SOURCE_COMMIT = subprocess.run(
 assert len(SOURCE_COMMIT) == 40 and all(
     character in "0123456789abcdef" for character in SOURCE_COMMIT
 )
+SOURCE_TREE = subprocess.run(
+    ["git", "rev-parse", "--verify", "HEAD^{tree}"],
+    cwd=ROOT.parent,
+    check=True,
+    capture_output=True,
+    text=True,
+).stdout.strip()
+assert len(SOURCE_TREE) == 40 and all(
+    character in "0123456789abcdef" for character in SOURCE_TREE
+)
 
 
 def _edge_key(edge: dict[str, object]) -> str:
@@ -70,6 +80,9 @@ def _packaged_catalog(tmp_path: Path) -> BundledCatalog:
         SOURCE_BUNDLE,
         tmp_path,
         source_commit=SOURCE_COMMIT,
+        source_tree=SOURCE_TREE,
+        source_clean=True,
+        source_snapshot_root=ROOT,
     )
     return BundledCatalog.load(bundle)
 
@@ -93,7 +106,10 @@ def _packaged_catalog_revision(tmp_path: Path, marker: bytes) -> BundledCatalog:
         platform="linux",
         architecture="x86_64",
         bundle_identity="io.tobkiri.shell.tauri",
-        source_commit=None,
+        source_commit=SOURCE_COMMIT,
+        source_tree=SOURCE_TREE,
+        source_clean=True,
+        source_snapshot_root=ROOT,
     )
     return BundledCatalog.load(bundle)
 
@@ -526,6 +542,9 @@ def test_packaged_generator_binds_macos_tree_and_entrypoint_digests(
         architecture="arm64",
         bundle_identity="io.tobkiri.shell.tauri",
         source_commit=SOURCE_COMMIT,
+        source_tree=SOURCE_TREE,
+        source_clean=True,
+        source_snapshot_root=ROOT,
     )
     shell = json.loads((bundle / "shell.tauri.default.shell.v1.json").read_text())
     variant = shell["launch"]["variants"][0]
@@ -590,6 +609,9 @@ def test_installed_bundle_is_exactly_bound_to_resource_manifest(tmp_path: Path) 
         SOURCE_BUNDLE,
         runtime_root / "ecosystem",
         source_commit=SOURCE_COMMIT,
+        source_tree=SOURCE_TREE,
+        source_clean=True,
+        source_snapshot_root=ROOT,
     )
     artifact_root = bundle_root.parent / "platform-artifacts"
     entries = []

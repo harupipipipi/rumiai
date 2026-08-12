@@ -18,11 +18,13 @@ the packaged application never downloads on first launch.
 Before generation, the pinned uv executable must report the structured official
 0.11.14 identity with a valid revision/date and the exact requested target
 triple; arbitrary prefixes, suffixes, versions, and architectures are rejected.
-Production Rust packaging callers receive Python and Git through the formal
-`TOBKIRI_PACKAGING_PYTHON`/`TOBKIRI_PACKAGING_GIT` absolute-path bindings and
-their lowercase raw `*_SHA256` values. They re-hash and re-check file identity
-before each use; `PYTHON`, `PATH`, and ambient tool discovery are not accepted
-by the build script or its authoritative-source fixtures.
+The packaged Defaults projection generator receives only the verified absolute
+Python executable, formal `--source-commit`, `--source-tree`,
+`--source-clean`, and `--source-snapshot-root` inputs. The snapshot includes
+the trusted `packaged_defaultspack_source_manifest.v1.json`; the generator
+revalidates that manifest and never reads a checkout, Git metadata, or `PATH`.
+Callers may inspect a checkout once to materialize the non-writable snapshot,
+then all generation runs from that snapshot-only closure.
 
 ## Resource contract
 

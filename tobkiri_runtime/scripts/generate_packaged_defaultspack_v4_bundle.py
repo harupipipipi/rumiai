@@ -9,21 +9,18 @@ import json
 import os
 import shutil
 import stat
-import subprocess
 import tempfile
 from pathlib import Path, PureWindowsPath
-from typing import Any, Mapping, Sequence, TypedDict
+from typing import Any, Mapping, TypedDict
 
-from .generator_source_manifest import verify_source_closure
+from .generator_source_manifest import (
+    SOURCE_MANIFEST_FILENAME,
+    reject_symlink_components,
+    verify_source_closure,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 verify_source_closure(ROOT)
-
-_PACKAGING_GIT_ENV = "TOBKIRI_PACKAGING_GIT"
-_PACKAGING_GIT_SHA256_ENV = "TOBKIRI_PACKAGING_GIT_SHA256"
-_PACKAGING_SOURCE_COMMIT_ENV = "TOBKIRI_PACKAGING_SOURCE_COMMIT"
-_PACKAGING_SOURCE_TREE_ENV = "TOBKIRI_PACKAGING_SOURCE_TREE"
-_PACKAGING_SOURCE_CLEAN_ENV = "TOBKIRI_PACKAGING_SOURCE_CLEAN"
 
 from .generate_defaultspack_v4_bundle import (  # noqa: E402
     _generated_provenance,
@@ -36,7 +33,6 @@ from tobkiri_protocol.platform_artifact import (  # noqa: E402
     artifact_digest,
     verify_platform_artifact,
 )
-from tobkiri_protocol.provenance import informational_source_commit  # noqa: E402
 from tobkiri_protocol.validation import validate_document  # noqa: E402
 
 
@@ -394,198 +390,69 @@ def _write_json(path: Path, value: Mapping[str, Any]) -> None:
     path.chmod(0o600)
 
 
-def _valid_raw_sha256(value: str) -> bool:
-    """Return whether ``value`` is a lowercase, unprefixed SHA-256."""
-    return len(value) == 64 and all(
-        character in "0123456789abcdef" for character in value
-    )
-
-
 def _valid_source_identity(value: str, field: str) -> None:
-    """Require one non-degenerate full lowercase Git object identity."""
+    """Require one non-degenerate, full lowercase source identity."""
     if (
         len(value) != 40
         or len(set(value)) <= 1
         or any(character not in "0123456789abcdef" for character in value)
     ):
-        label = (
-            "full lowercase checkout SHA"
-            if field.endswith("source revision")
-            else "full lowercase Git SHA"
-        )
-        raise ValueError(f"{field} must be a {label}")
+        raise ValueError(f"{field} must be a full lowercase 40-hex identity")
 
 
-def _formal_text(value: str | Path | None, environment_key: str) -> str | None:
-    """Resolve one explicit formal input without consulting PATH."""
-    if value is not None:
-        return os.fspath(value)
-    return os.environ.get(environment_key)
-
-
-def _formal_clean(value: bool | None) -> bool | None:
-    """Resolve the explicit clean-checkout assertion."""
-    if value is not None:
-        return value
-    inherited = os.environ.get(_PACKAGING_SOURCE_CLEAN_ENV)
-    if inherited is None:
-        return None
-    if inherited != "1":
-        raise ValueError(
-            f"{_PACKAGING_SOURCE_CLEAN_ENV} must be the exact value '1'"
-        )
-    return True
-
-
-def _verify_bound_git(path_value: str | Path | None, expected: str | None) -> tuple[Path, str]:
-    """Verify the absolute Git executable and return its binding."""
-    path_text = _formal_text(path_value, _PACKAGING_GIT_ENV)
-    digest = _formal_text(expected, _PACKAGING_GIT_SHA256_ENV)
-    if path_text is None or digest is None:
-        raise ValueError(
-            "packaged Profile source verification requires an absolute Git path "
-            "and raw Git executable SHA-256"
-        )
-    if not _valid_raw_sha256(digest):
-        raise ValueError(
-            f"{_PACKAGING_GIT_SHA256_ENV} must be lowercase raw SHA-256"
-        )
+def _sealed_snapshot_root(value: str | Path | None) -> Path:
+    """Require the caller's root to be the module's verified source snapshot."""
+    if value is None:
+        raise ValueError("packaged Profile source snapshot root is required")
+    supplied = Path(os.fspath(value))
+    reject_symlink_components(supplied)
+    if not supplied.is_absolute() or supplied.is_symlink():
+        raise ValueError("packaged Profile source snapshot root must be absolute")
     try:
-        path = Path(path_text)
-        before = path.stat(follow_symlinks=False)
-    except (OSError, TypeError, ValueError) as error:
-        raise ValueError("bound Git executable is unavailable") from error
-    if not path.is_absolute():
-        raise ValueError("bound Git executable path must be absolute")
-    if path.is_symlink() or not stat.S_ISREG(before.st_mode):
-        raise ValueError("bound Git executable must be a regular non-symlink file")
-    if os.name == "nt":
-        executable = os.access(path, os.X_OK)
-    else:
-        mode = stat.S_IMODE(before.st_mode)
-        executable = bool(mode & 0o111) and not bool(mode & 0o022)
-    if not executable:
-        raise ValueError("bound Git executable must be executable and immutable")
-    try:
-        if path.resolve(strict=True) != path:
-            raise ValueError("bound Git executable path must be canonical")
-        hasher = hashlib.sha256()
-        with path.open("rb") as source:
-            for chunk in iter(lambda: source.read(1024 * 1024), b""):
-                hasher.update(chunk)
-        after = path.stat(follow_symlinks=False)
-    except (OSError, ValueError) as error:
-        raise ValueError("bound Git executable could not be hashed") from error
-    if path.is_symlink() or not stat.S_ISREG(after.st_mode):
-        raise ValueError("bound Git executable changed into a non-regular file")
-    if _path_identity(before) != _path_identity(after):
-        raise ValueError("bound Git executable changed while hashed")
-    actual = hasher.hexdigest()
-    if actual != digest:
-        raise ValueError(
-            f"bound Git executable digest mismatch: expected {digest}, got {actual}"
-        )
-    return path, digest
-
-
-def _run_bound_git(
-    executable: Path,
-    digest: str,
-    arguments: Sequence[str],
-) -> subprocess.CompletedProcess[str]:
-    """Run Git by verified absolute path with PATH and user config removed."""
-    _verify_bound_git(executable, digest)
-    environment = {
-        "GIT_CONFIG_GLOBAL": "NUL" if os.name == "nt" else os.devnull,
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_TERMINAL_PROMPT": "0",
-    }
-    if os.name == "nt" and os.environ.get("SystemRoot"):
-        environment["SystemRoot"] = os.environ["SystemRoot"]
-    try:
-        result = subprocess.run(
-            [os.fspath(executable), *arguments],
-            cwd=ROOT.parent,
-            env=environment,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        snapshot = supplied.resolve(strict=True)
+        module_root = ROOT.resolve(strict=True)
     except OSError as error:
-        raise ValueError("bound Git executable could not be started") from error
-    _verify_bound_git(executable, digest)
-    return result
+        raise ValueError("packaged Profile source snapshot root is unavailable") from error
+    if snapshot != module_root or not snapshot.is_dir():
+        raise ValueError(
+            "packaged Profile source snapshot root must exactly bind the module root"
+        )
+    manifest = snapshot / SOURCE_MANIFEST_FILENAME
+    try:
+        metadata = manifest.stat(follow_symlinks=False)
+    except OSError as error:
+        raise ValueError("packaged Profile source snapshot manifest is unavailable") from error
+    if (
+        manifest.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != 1
+    ):
+        raise ValueError("packaged Profile source snapshot manifest is unsafe")
+    try:
+        verify_source_closure(snapshot)
+    except (OSError, ValueError) as error:
+        raise ValueError("packaged Profile source snapshot closure is invalid") from error
+    return snapshot
 
 
-def _source_commit(
+def _preverified_source_commit(
     explicit: str | None,
     *,
-    git_executable: str | Path | None = None,
-    git_sha256: str | None = None,
-    source_tree: str | None = None,
-    source_clean: bool | None = None,
+    source_tree: str | None,
+    source_clean: bool | None,
+    source_snapshot_root: str | Path | None,
 ) -> str:
-    """Verify explicit commit, tree, clean state, and bound Git identity."""
-    explicit = _formal_text(explicit, _PACKAGING_SOURCE_COMMIT_ENV)
+    """Accept only formal provenance bound to an exact sealed source snapshot."""
     if explicit is None:
-        return informational_source_commit(ROOT.parent, None)
+        raise ValueError("packaged Profile source revision is required")
     _valid_source_identity(explicit, "packaged Profile source revision")
-    source_tree = _formal_text(source_tree, _PACKAGING_SOURCE_TREE_ENV)
     if source_tree is None:
-        raise ValueError(
-            f"{_PACKAGING_SOURCE_TREE_ENV} is required with a source revision"
-        )
+        raise ValueError("packaged Profile source tree is required")
     _valid_source_identity(source_tree, "packaged Profile source tree")
-    if _formal_clean(source_clean) is not True:
-        raise ValueError(
-            f"{_PACKAGING_SOURCE_CLEAN_ENV} must explicitly attest to a clean checkout"
-        )
-    executable, digest = _verify_bound_git(git_executable, git_sha256)
-    supplied_commit = _run_bound_git(
-        executable,
-        digest,
-        ["rev-parse", "--verify", f"{explicit}^{{commit}}"],
-    )
-    if (
-        supplied_commit.returncode != 0
-        or supplied_commit.stdout.strip() != explicit
-    ):
-        raise ValueError(
-            "packaged Profile source revision must resolve in the checkout"
-        )
-    result = _run_bound_git(
-        executable,
-        digest,
-        ["status", "--porcelain=v1", "--untracked-files=all"],
-    )
-    if result.returncode != 0:
-        raise ValueError("unable to inspect source checkout status")
-    if result.stdout.strip():
-        raise ValueError(
-            "packaged Profile generation refuses a dirty checkout when a "
-            "clean source revision is requested"
-        )
-    head_tree = _run_bound_git(
-        executable,
-        digest,
-        ["rev-parse", "--verify", "HEAD^{tree}"],
-    )
-    supplied_tree = _run_bound_git(
-        executable,
-        digest,
-        ["rev-parse", "--verify", f"{explicit}^{{tree}}"],
-    )
-    if (
-        head_tree.returncode != 0
-        or supplied_tree.returncode != 0
-        or head_tree.stdout.strip() != source_tree
-        or supplied_tree.stdout.strip() != source_tree
-    ):
-        raise ValueError(
-            "packaged Profile source revision must match the clean checkout "
-            "HEAD tree"
-        )
-    return informational_source_commit(ROOT.parent, explicit)
+    if source_clean is not True:
+        raise ValueError("packaged Profile source clean attestation must be true")
+    _sealed_snapshot_root(source_snapshot_root)
+    return explicit
 
 
 def _validate_staged_bundle(
@@ -677,20 +544,18 @@ def _package_transaction(
     architecture: str,
     bundle_identity: str,
     source_commit: str | None,
-    git_executable: str | Path | None = None,
-    git_sha256: str | None = None,
     source_tree: str | None = None,
     source_clean: bool | None = None,
+    source_snapshot_root: str | Path | None = None,
 ) -> None:
     """Build both output roots fully in one same-filesystem transaction."""
     relative_path = _normalize_relative_path(relative_path, "packaged artifact path")
     entrypoint = _normalize_relative_path(entrypoint, "packaged entrypoint")
-    commit = _source_commit(
+    commit = _preverified_source_commit(
         source_commit,
-        git_executable=git_executable,
-        git_sha256=git_sha256,
         source_tree=source_tree,
         source_clean=source_clean,
+        source_snapshot_root=source_snapshot_root,
     )
     bundle_root = bundle_root.expanduser().absolute()
     artifact_root = artifact_root.expanduser().absolute()
@@ -885,10 +750,9 @@ def stage_packaged_bundle(
     architecture: str,
     bundle_identity: str,
     source_commit: str | None = None,
-    git_executable: str | Path | None = None,
-    git_sha256: str | None = None,
     source_tree: str | None = None,
     source_clean: bool | None = None,
+    source_snapshot_root: str | Path | None = None,
 ) -> None:
     """Snapshot, verify, and atomically publish a packaged Profile bundle."""
     _package_transaction(
@@ -901,10 +765,9 @@ def stage_packaged_bundle(
         architecture=architecture,
         bundle_identity=bundle_identity,
         source_commit=source_commit,
-        git_executable=git_executable,
-        git_sha256=git_sha256,
         source_tree=source_tree,
         source_clean=source_clean,
+        source_snapshot_root=source_snapshot_root,
     )
 
 
@@ -918,10 +781,9 @@ def package_bundle(
     architecture: str,
     bundle_identity: str,
     source_commit: str | None = None,
-    git_executable: str | Path | None = None,
-    git_sha256: str | None = None,
     source_tree: str | None = None,
     source_clean: bool | None = None,
+    source_snapshot_root: str | Path | None = None,
 ) -> None:
     """Verify existing staged artifact bytes and atomically rewrite the bundle."""
     _package_transaction(
@@ -934,10 +796,9 @@ def package_bundle(
         architecture=architecture,
         bundle_identity=bundle_identity,
         source_commit=source_commit,
-        git_executable=git_executable,
-        git_sha256=git_sha256,
         source_tree=source_tree,
         source_clean=source_clean,
+        source_snapshot_root=source_snapshot_root,
     )
 
 
@@ -951,11 +812,10 @@ def main() -> int:
     parser.add_argument("--platform", choices=("macos", "windows", "linux"), required=True)
     parser.add_argument("--architecture", choices=("arm64", "x86_64"), required=True)
     parser.add_argument("--bundle-identity", required=True)
-    parser.add_argument("--source-commit")
-    parser.add_argument("--git-executable")
-    parser.add_argument("--git-sha256")
-    parser.add_argument("--source-tree")
-    parser.add_argument("--source-clean", action="store_true", default=None)
+    parser.add_argument("--source-commit", required=True)
+    parser.add_argument("--source-tree", required=True)
+    parser.add_argument("--source-clean", action="store_true")
+    parser.add_argument("--source-snapshot-root", type=Path, required=True)
     args = parser.parse_args()
     operation = stage_packaged_bundle if args.source_artifact else package_bundle
     operation(
@@ -968,10 +828,9 @@ def main() -> int:
         architecture=args.architecture,
         bundle_identity=args.bundle_identity,
         source_commit=args.source_commit,
-        git_executable=args.git_executable,
-        git_sha256=args.git_sha256,
         source_tree=args.source_tree,
         source_clean=args.source_clean,
+        source_snapshot_root=args.source_snapshot_root,
     )
     return 0
 

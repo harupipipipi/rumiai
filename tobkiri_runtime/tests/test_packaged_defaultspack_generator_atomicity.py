@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import hashlib
-import os
 import json
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -14,6 +11,8 @@ from scripts import generate_packaged_defaultspack_v4_bundle as generator
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
+SOURCE_COMMIT = "0123456789abcdef0123456789abcdef01234567"
+SOURCE_TREE = "89abcdef0123456789abcdef0123456789abcdef"
 
 
 def _linux_source(path: Path, payload: bytes = b"original") -> Path:
@@ -64,6 +63,10 @@ def _stage(
         platform="linux",
         architecture="x86_64",
         bundle_identity="io.tobkiri.shell.tauri",
+        source_commit=SOURCE_COMMIT,
+        source_tree=SOURCE_TREE,
+        source_clean=True,
+        source_snapshot_root=ROOT,
     )
 
 
@@ -207,13 +210,15 @@ def test_generator_existing_output_rollback_on_publish_fault(
     assert _bytes(artifacts) == before_artifacts
 
 
-@pytest.mark.parametrize("source_commit", ["working-tree", "short", "a" * 40, "refs/heads/main"])
-def test_generator_rejects_non_checkout_source_revision(
+@pytest.mark.parametrize(
+    "source_commit", ["working-tree", "short", "a" * 40, "refs/heads/main"]
+)
+def test_generator_rejects_unverified_source_revision(
     tmp_path: Path, source_commit: str
 ) -> None:
     bundle, artifacts = _bundle_roots(tmp_path)
     source = _linux_source(tmp_path / "source")
-    with pytest.raises(ValueError, match="full lowercase checkout SHA"):
+    with pytest.raises(ValueError, match="full lowercase 40-hex identity"):
         generator._package_transaction(
             source_artifact=source,
             bundle_root=bundle,
@@ -224,102 +229,34 @@ def test_generator_rejects_non_checkout_source_revision(
             architecture="x86_64",
             bundle_identity="io.tobkiri.shell.tauri",
             source_commit=source_commit,
+            source_tree=SOURCE_TREE,
+            source_clean=True,
+            source_snapshot_root=ROOT,
         )
 
 
-def _git(repository: Path, *args: str) -> str:
-    """Run a deterministic Git fixture command through an absolute executable."""
-    executable = os.environ.get("TOBKIRI_PACKAGING_GIT") or shutil.which("git")
-    if not executable:
-        pytest.skip("an absolute Git executable is required for source identity tests")
-    return subprocess.run(
-        [str(Path(executable).resolve()), *args],
-        cwd=repository,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-
-
-def _git_binding() -> tuple[Path, str]:
-    """Return the absolute Git fixture executable and its raw digest."""
-    executable = os.environ.get("TOBKIRI_PACKAGING_GIT") or shutil.which("git")
-    if not executable:
-        pytest.skip("an absolute Git executable is required for source identity tests")
-    path = Path(executable).resolve()
-    return path, hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def _source_contract(repository: Path, commit: str) -> dict[str, object]:
-    """Build the explicit source identity contract consumed by the generator."""
-    executable, digest = _git_binding()
-    return {
-        "git_executable": executable,
-        "git_sha256": digest,
-        "source_tree": _git(repository, "rev-parse", f"{commit}^{{tree}}"),
-        "source_clean": True,
-    }
-
-
-def _source_revision_repository(tmp_path: Path) -> tuple[Path, str, str]:
-    """Create distinct commits with identical trees for PR-topology tests."""
-    repository = tmp_path / "repository"
-    repository.mkdir()
-    _git(repository, "init", "--quiet")
-    _git(repository, "config", "user.name", "Tobkiri Test")
-    _git(repository, "config", "user.email", "tobkiri@example.invalid")
-    (repository / "source.txt").write_text("same tree\n", encoding="utf-8")
-    _git(repository, "add", "source.txt")
-    _git(repository, "commit", "--quiet", "-m", "source head")
-    source_head = _git(repository, "rev-parse", "--verify", "HEAD^{commit}")
-    _git(repository, "commit", "--quiet", "--allow-empty", "-m", "synthetic merge")
-    synthetic_head = _git(repository, "rev-parse", "--verify", "HEAD^{commit}")
-    assert source_head != synthetic_head
-    assert _git(repository, "rev-parse", f"{source_head}^{{tree}}") == _git(
-        repository, "rev-parse", f"{synthetic_head}^{{tree}}"
-    )
-    return repository, source_head, synthetic_head
-
-
-def test_generator_accepts_exact_clean_checkout_head(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repository, _, synthetic_head = _source_revision_repository(tmp_path)
-    monkeypatch.setattr(generator, "ROOT", repository / "tobkiri_runtime")
-    assert (
-        generator._source_commit(
-            synthetic_head,
-            **_source_contract(repository, synthetic_head),
+def test_generator_requires_exact_clean_snapshot_provenance(tmp_path: Path) -> None:
+    """Formal source identity and clean state are required before staging."""
+    bundle, artifacts = _bundle_roots(tmp_path)
+    source = _linux_source(tmp_path / "source")
+    with pytest.raises(ValueError, match="clean attestation"):
+        generator._package_transaction(
+            source_artifact=source,
+            bundle_root=bundle,
+            artifact_root=artifacts,
+            relative_path="Tobkiri.AppImage",
+            entrypoint="Tobkiri.AppImage",
+            platform="linux",
+            architecture="x86_64",
+            bundle_identity="io.tobkiri.shell.tauri",
+            source_commit=SOURCE_COMMIT,
+            source_tree=SOURCE_TREE,
+            source_clean=False,
+            source_snapshot_root=ROOT,
         )
-        == synthetic_head
-    )
 
 
-def test_generator_accepts_distinct_commit_with_identical_checkout_tree(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repository, source_head, _ = _source_revision_repository(tmp_path)
-    monkeypatch.setattr(generator, "ROOT", repository / "tobkiri_runtime")
-    assert (
-        generator._source_commit(
-            source_head,
-            **_source_contract(repository, source_head),
-        )
-        == source_head
-    )
-
-
-def test_generator_rejects_resolved_commit_with_different_checkout_tree(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repository, source_head, _ = _source_revision_repository(tmp_path)
-    (repository / "source.txt").write_text("different tree\n", encoding="utf-8")
-    _git(repository, "add", "source.txt")
-    _git(repository, "commit", "--quiet", "-m", "different source")
-    monkeypatch.setattr(generator, "ROOT", repository / "tobkiri_runtime")
-
-    with pytest.raises(ValueError, match="match the clean checkout HEAD tree"):
-        generator._source_commit(
-            source_head,
-            **_source_contract(repository, source_head),
-        )
+def test_generator_has_no_git_subprocess_boundary() -> None:
+    """The generator module cannot spawn or discover Git."""
+    assert not hasattr(generator, "subprocess")
+    assert not hasattr(generator, "_run_bound_git")

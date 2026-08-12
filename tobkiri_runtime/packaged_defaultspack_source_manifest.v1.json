@@ -299,15 +299,15 @@
     {
       "path": "scripts/generate_packaged_defaultspack_v4_bundle.py",
       "type": "regular-file",
-      "size": 39792,
-      "sha256": "88582711583b97e9626759b5a276eeeccc1cd597f475100cadd6abfa7a5558d7",
+      "size": 34778,
+      "sha256": "fbef76a1026ee9f49181d8d59c065be0f337bce176e471d9c66a84f3f90a64e5",
       "executable": false
     },
     {
       "path": "scripts/generator_source_manifest.py",
       "type": "regular-file",
-      "size": 9936,
-      "sha256": "b4899c85d0ed270328f22a3f55b76aa3e94d87b01ab19893d86f32de98fb28c4",
+      "size": 15557,
+      "sha256": "7c8e4f3c64d7f83dbfe219d2541dfc236676ab54ecdd3bc0a19a8369543cb93c",
       "executable": false
     },
     {
@@ -341,8 +341,8 @@
     {
       "path": "scripts/packaging_cleanup.py",
       "type": "regular-file",
-      "size": 93374,
-      "sha256": "1adebbee0f087ee767ecc195ce59ac4e84171402b035ed0cba79286f781a2580",
+      "size": 93175,
+      "sha256": "b11a29cd5baf00241ca654a897858f46753736cd7b97915651fe5c15bd452d43",
       "executable": false
     },
     {

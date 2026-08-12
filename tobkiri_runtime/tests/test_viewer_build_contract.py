@@ -139,6 +139,9 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
         assert "TOBKIRI_PACKAGING_GIT_SHA256" in build_contents
         assert "TOBKIRI_PACKAGING_SOURCE_TREE" in build_contents
         assert "TOBKIRI_PACKAGING_SOURCE_CLEAN" in build_contents
+        assert "--source-commit" in build_contents
+        assert "--source-tree" in build_contents
+        assert "--source-clean" in build_contents
         assert 'PYTHONDONTWRITEBYTECODE: "1"' in contents
         assert "aarch64-apple-darwin" in build_contents
         assert "x86_64-apple-darwin" in build_contents
@@ -154,20 +157,21 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
             assert forbidden not in build_contents
 
 
-def test_python_generator_requires_bound_git_and_never_uses_path():
-    """The relocated generator must use only formal, digest-bound Git input."""
+def test_python_generator_requires_snapshot_provenance_and_never_uses_git():
+    """The relocated generator must use only formal snapshot provenance."""
     generator = PACKAGED_GENERATOR.read_text(encoding="utf-8")
-    assert '["git"' not in generator
-    assert "['git'" not in generator
+    assert "subprocess" not in generator
+    assert "_run_bound_git" not in generator
+    assert "_verify_bound_git" not in generator
+    assert "TOBKIRI_PACKAGING_GIT" not in generator
     for marker in (
-        "TOBKIRI_PACKAGING_GIT",
-        "TOBKIRI_PACKAGING_GIT_SHA256",
-        "TOBKIRI_PACKAGING_SOURCE_COMMIT",
-        "TOBKIRI_PACKAGING_SOURCE_TREE",
-        "TOBKIRI_PACKAGING_SOURCE_CLEAN",
-        "_verify_bound_git",
-        "_run_bound_git",
-        '"GIT_CONFIG_NOSYSTEM"',
+        "--source-commit",
+        "--source-tree",
+        "--source-clean",
+        "--source-snapshot-root",
+        "_preverified_source_commit",
+        "_sealed_snapshot_root",
+        "verify_source_closure",
     ):
         assert marker in generator
 

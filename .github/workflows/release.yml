@@ -396,6 +396,9 @@ jobs:
             --signing-key "$RUNNER_TEMP/tobkiri-presentation-signing-key.raw" \
             --signing-key-id 'github-actions:${{ github.run_id }}:${{ matrix.target }}' \
             --repository-root "$GITHUB_WORKSPACE" \
+            --source-commit '${{ steps.checked_out_source.outputs.source_revision }}' \
+            --source-tree '${{ steps.checked_out_source.outputs.source_tree }}' \
+            --source-clean \
             --output-dir "$RELEASE_ROOT"
 
       - name: Build signed macOS application

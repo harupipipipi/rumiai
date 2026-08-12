@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import importlib.util
 import json
@@ -85,26 +84,12 @@ def _fixture(root: Path) -> tuple[Path, Path, Path]:
     return checkout, bundle, artifact
 
 
-def _bound_git_fixture(root: Path) -> dict[str, str]:
-    """Create a verified absolute Git fixture for relocated generation."""
-    root.mkdir(parents=True, exist_ok=True)
-    executable = root / "formal-git"
-    executable.write_text(
-        "#!/bin/sh\n"
-        "case \"$*\" in\n"
-        f"  *'^{{commit}}') printf '%s\\n' '{_SOURCE_COMMIT}' ;;\n"
-        f"  *'^{{tree}}') printf '%s\\n' '{_SOURCE_TREE}' ;;\n"
-        "  'status --porcelain=v1 --untracked-files=all') : ;;\n"
-        "  *) exit 2 ;;\n"
-        "esac\n",
-        encoding="utf-8",
-    )
-    executable.chmod(0o755)
+def _source_contract(checkout: Path) -> dict[str, str]:
+    """Return formal provenance bound to the relocated snapshot root."""
     return {
-        "git_executable": os.fspath(executable),
-        "git_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
         "source_commit": _SOURCE_COMMIT,
         "source_tree": _SOURCE_TREE,
+        "source_snapshot_root": os.fspath(checkout / "tobkiri_runtime"),
     }
 
 
@@ -144,11 +129,9 @@ def _generator_process(
                 source_contract["source_commit"],
                 "--source-tree",
                 source_contract["source_tree"],
-                "--git-executable",
-                source_contract["git_executable"],
-                "--git-sha256",
-                source_contract["git_sha256"],
                 "--source-clean",
+                "--source-snapshot-root",
+                source_contract["source_snapshot_root"],
             ]
         )
     return subprocess.run(
@@ -168,7 +151,12 @@ def _generator_process(
 
 def _run_generator(checkout: Path, bundle: Path, artifact: Path) -> None:
     """Require a successful official generator run."""
-    result = _generator_process(checkout, bundle, artifact)
+    result = _generator_process(
+        checkout,
+        bundle,
+        artifact,
+        source_contract=_source_contract(checkout),
+    )
     assert result.returncode == 0, result.stderr
 
 
@@ -284,17 +272,17 @@ def test_isolated_launcher_rejects_hostile_hooks_packages_and_cwd(
         artifact,
         environment=poisoned,
         cwd=hostile,
+        source_contract=_source_contract(checkout),
     )
     assert safe.returncode == 0, safe.stderr
     assert not marker.exists(), "isolated launch executed hostile Python input"
 
 
-def test_relocated_generator_uses_bound_git_and_not_path_git(
+def test_relocated_generator_never_spawns_path_git(
     tmp_path: Path,
 ) -> None:
-    """Formal Git identity is used even when PATH contains a marker executable."""
-    checkout, bundle, artifact = _fixture(tmp_path / "bound-git")
-    contract = _bound_git_fixture(tmp_path / "bound-git-input")
+    """The preverified generator never spawns a Git executable from PATH."""
+    checkout, bundle, artifact = _fixture(tmp_path / "no-git")
     fake_path = tmp_path / "fake-path"
     fake_path.mkdir()
     marker = tmp_path / "path-git-executed"
@@ -313,19 +301,19 @@ def test_relocated_generator_uses_bound_git_and_not_path_git(
         bundle,
         artifact,
         environment=environment,
-        source_contract=contract,
+        source_contract=_source_contract(checkout),
     )
     assert result.returncode == 0, result.stderr
-    assert not marker.exists(), "generator executed Git selected through PATH"
+    assert not marker.exists(), "generator spawned Git selected through PATH"
 
 
-def test_relocated_generator_rejects_mismatched_bound_git_digest(
+def test_relocated_generator_rejects_malformed_source_provenance(
     tmp_path: Path,
 ) -> None:
-    """A source revision cannot proceed with a mismatched Git executable digest."""
-    checkout, bundle, artifact = _fixture(tmp_path / "bad-git")
-    contract = _bound_git_fixture(tmp_path / "bad-git-input")
-    contract["git_sha256"] = "0123456789abcdef" * 4
+    """Formal source provenance must be a complete lowercase identity."""
+    checkout, bundle, artifact = _fixture(tmp_path / "bad-provenance")
+    contract = _source_contract(checkout)
+    contract["source_tree"] = "not-a-source-tree"
     result = _generator_process(
         checkout,
         bundle,
@@ -333,7 +321,7 @@ def test_relocated_generator_rejects_mismatched_bound_git_digest(
         source_contract=contract,
     )
     assert result.returncode != 0
-    assert "digest mismatch" in result.stderr.lower()
+    assert "source tree" in result.stderr.lower()
 
 
 def test_relocated_generator_rejects_missing_tampered_or_external_cleanup(tmp_path: Path) -> None:
@@ -370,6 +358,7 @@ def test_relocated_generator_rejects_manifest_missing_tamper_extra_and_symlink(
         "pyc",
         "pyo",
         "cache",
+        "empty-cache",
         "valid-hash-pyc",
     )
     for case in cases:
@@ -393,6 +382,8 @@ def test_relocated_generator_rejects_manifest_missing_tamper_extra_and_symlink(
             extra = checkout / "tobkiri_runtime/scripts/__pycache__/extra.pyc"
             extra.parent.mkdir(parents=True, exist_ok=True)
             extra.write_bytes(b"\x00pyc-cache-attack\x00")
+        elif case == "empty-cache":
+            (checkout / "tobkiri_runtime/scripts/__pycache__").mkdir()
         elif case == "valid-hash-pyc":
             source = tmp_path / "valid_hash_extra.py"
             source.write_text("extra = 'valid hash pyc'\n", encoding="utf-8")
@@ -418,6 +409,11 @@ def test_relocated_generator_rejects_missing_authoritative_input(tmp_path: Path)
     """A missing canonical source input cannot be silently regenerated."""
     checkout, bundle, artifact = _fixture(tmp_path / "missing-input")
     (bundle / "bundle.lock.json").unlink()
-    result = _generator_process(checkout, bundle, artifact)
+    result = _generator_process(
+        checkout,
+        bundle,
+        artifact,
+        source_contract=_source_contract(checkout),
+    )
     assert result.returncode != 0
     assert "bundle.lock.json" in result.stderr

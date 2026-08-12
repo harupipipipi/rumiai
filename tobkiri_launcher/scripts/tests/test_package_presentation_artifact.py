@@ -24,6 +24,31 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 artifact_digest = MODULE.artifact_digest
 package_artifact = MODULE.package_artifact
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _git_revision(expression: str) -> str:
+    """Read a test fixture's formal revision from the checkout under test."""
+    return subprocess.run(
+        ["git", "rev-parse", "--verify", expression],
+        cwd=REPOSITORY_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+SOURCE_COMMIT = _git_revision("HEAD^{commit}")
+SOURCE_TREE = _git_revision("HEAD^{tree}")
+
+
+def _source_provenance() -> dict[str, object]:
+    """Return explicit preverified provenance for canonical-source fixtures."""
+    return {
+        "source_commit": SOURCE_COMMIT,
+        "source_tree": SOURCE_TREE,
+        "source_clean": True,
+    }
 
 
 def _catalog(entrypoint: str = "true") -> dict[str, object]:
@@ -167,7 +192,7 @@ def test_windows_absolute_artifact_path_requires_windows_and_repository_root() -
 
 @pytest.mark.skipif(os.name != "nt", reason="requires native Windows Path semantics")
 def test_windows_absolute_artifact_path_packages_native_manifest() -> None:
-    repository_root = Path(__file__).resolve().parents[3]
+    repository_root = REPOSITORY_ROOT
     ignored_target = repository_root / "tobkiri_launcher/src-tauri/target"
     ignored_target.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(
@@ -199,12 +224,8 @@ def test_windows_absolute_artifact_path_packages_native_manifest() -> None:
                     "platform": "windows",
                     "architecture": "x86_64",
                     "build_profile": "release",
-                    "source_identity": MODULE.source_identity_for_repository(
-                        repository_root
-                    ),
-                    "source_revision": MODULE.source_revision_for_repository(
-                        repository_root
-                    ),
+                    "source_identity": "github:example/tobkiri",
+                    "source_revision": SOURCE_COMMIT,
                 }
             ),
             encoding="utf-8",
@@ -219,6 +240,7 @@ def test_windows_absolute_artifact_path_packages_native_manifest() -> None:
             "windows-path-test-key",
             root / "release",
             repository_root,
+            **_source_provenance(),
         )
         assert "\\" not in str(report["path"])
         index = json.loads(
@@ -231,7 +253,7 @@ def test_windows_absolute_artifact_path_packages_native_manifest() -> None:
 
 
 def _canonical_fixture(root: Path) -> tuple[Path, Path, Path, Path, Path]:
-    repository_root = Path(__file__).resolve().parents[3]
+    repository_root = REPOSITORY_ROOT
     catalog = (
         repository_root
         / "tobkiri_launcher/src-tauri/bundled/presentation_catalog.json"
@@ -279,8 +301,8 @@ def _canonical_fixture(root: Path) -> tuple[Path, Path, Path, Path, Path]:
                 "platform": platform_name,
                 "architecture": architecture,
                 "build_profile": "release",
-                "source_identity": MODULE.source_identity_for_repository(repository_root),
-                "source_revision": MODULE.source_revision_for_repository(repository_root),
+                "source_identity": "github:example/tobkiri",
+                "source_revision": SOURCE_COMMIT,
             }
         ),
         encoding="utf-8",
@@ -299,6 +321,7 @@ def _package(root: Path, output_name: str = "release") -> dict[str, object]:
         "test-release-key",
         root / output_name,
         repository_root,
+        **_source_provenance(),
     )
 
 
@@ -367,7 +390,13 @@ def test_package_preserves_valid_macos_resource_envelope() -> None:
         root = Path(temp)
         catalog, manifest, key, repository_root, _ = _canonical_fixture(root)
         report = package_artifact(
-            catalog, manifest, key, "key", root / "release", repository_root
+            catalog,
+            manifest,
+            key,
+            "key",
+            root / "release",
+            repository_root,
+            **_source_provenance(),
         )
         staged = root / "release" / str(report["path"])
         assert (staged / "Contents/_CodeSignature/CodeResources").is_file()
@@ -405,6 +434,7 @@ def test_package_rejects_invalid_macos_resource_envelope(tamper: str) -> None:
                 "key",
                 root / "release",
                 repository_root,
+                **_source_provenance(),
             )
         assert not (root / "release").exists()
 
@@ -620,162 +650,51 @@ def test_package_rejects_stale_catalog_and_artifact_path_escape() -> None:
             package_artifact(catalog, manifest, key, "key", root / "escape-output")
 
 
-def test_package_rejects_source_revision_from_another_checkout() -> None:
-    repository_root = Path(__file__).resolve().parents[3]
-    with TemporaryDirectory(prefix="tobkiri-presentation-source-stale-") as temp:
+def test_package_requires_formal_source_provenance() -> None:
+    """A checkout cannot substitute for explicit preverified provenance."""
+    with TemporaryDirectory(prefix="tobkiri-presentation-source-contract-") as temp:
         root = Path(temp)
-        catalog, manifest, key = _fixture(root)
+        _, manifest, _ = _fixture(root)
         build = json.loads(manifest.read_text())
-        build["source_identity"] = MODULE.source_identity_for_repository(repository_root)
-        build["source_revision"] = MODULE.source_revision_for_repository(repository_root)
-        manifest.write_text(json.dumps(build))
-        MODULE._validate_current_source(build, repository_root)
-
-        build["source_revision"] = "0" * 40
-        manifest.write_text(json.dumps(build))
-        with pytest.raises(RuntimeError, match="source revision is stale"):
-            MODULE._validate_current_source(build, repository_root)
-
-
-def test_package_rejects_dirty_release_checkout() -> None:
-    with TemporaryDirectory(prefix="tobkiri-presentation-source-dirty-") as temp:
-        root = Path(temp)
-        repository_root = root / "source"
-        repository_root.mkdir()
-        subprocess.run(
-            ["git", "init", "--quiet"],
-            cwd=repository_root,
-            check=True,
-        )
-        marker = repository_root / "tracked.txt"
-        marker.write_text("clean\n", encoding="utf-8")
-        subprocess.run(["git", "add", "."], cwd=repository_root, check=True)
-        subprocess.run(
-            [
-                "git",
-                "-c",
-                "user.name=Tobkiri Test",
-                "-c",
-                "user.email=test@invalid",
-                "commit",
-                "--quiet",
-                "-m",
-                "fixture",
-            ],
-            cwd=repository_root,
-            check=True,
-        )
-        subprocess.run(
-            [
-                "git",
-                "remote",
-                "add",
-                "origin",
-                "https://github.com/example/tobkiri.git",
-            ],
-            cwd=repository_root,
-            check=True,
-        )
-        fixture_root = root / "fixture"
-        fixture_root.mkdir()
-        catalog, manifest, key = _fixture(fixture_root)
-        build = json.loads(manifest.read_text())
-        build["source_identity"] = MODULE.source_identity_for_repository(
-            repository_root
-        )
-        build["source_revision"] = MODULE.source_revision_for_repository(
-            repository_root
-        )
-        manifest.write_text(json.dumps(build))
-
-        marker.write_text("dirty\n", encoding="utf-8")
-        with pytest.raises(RuntimeError, match="dirty source checkout"):
-            package_artifact(
-                catalog,
-                manifest,
-                key,
-                "key",
-                root / "dirty-output",
-                repository_root,
+        with pytest.raises(RuntimeError, match="formal source provenance"):
+            MODULE._validate_current_source(
+                build,
+                REPOSITORY_ROOT,
+                source_commit=None,
+                source_tree=None,
+                source_clean=None,
             )
-        assert not (root / "dirty-output").exists()
-
-
-def test_package_accepts_isolated_panel_regeneration_but_rejects_unrelated_dirt() -> None:
-    with TemporaryDirectory(prefix="tobkiri-presentation-isolated-panel-") as temp:
-        root = Path(temp)
-        repository_root = root / "source"
-        panel = repository_root / (
-            "tobkiri_runtime/core_runtime/core_pack/core_control_panel/web"
-        )
-        panel.mkdir(parents=True)
-        marker = repository_root / "unrelated.txt"
-        marker.write_text("clean\n", encoding="utf-8")
-        (panel / "index.html").write_text("checked-in\n", encoding="utf-8")
-        subprocess.run(["git", "init", "--quiet"], cwd=repository_root, check=True)
-        subprocess.run(["git", "add", "."], cwd=repository_root, check=True)
-        subprocess.run(
-            [
-                "git",
-                "-c",
-                "user.name=Tobkiri Test",
-                "-c",
-                "user.email=test@invalid",
-                "commit",
-                "--quiet",
-                "-m",
-                "fixture",
-            ],
-            cwd=repository_root,
-            check=True,
-        )
-        subprocess.run(
-            [
-                "git",
-                "remote",
-                "add",
-                "origin",
-                "https://github.com/example/tobkiri.git",
-            ],
-            cwd=repository_root,
-            check=True,
-        )
-
-        fixture_root = root / "fixture"
-        fixture_root.mkdir()
-        catalog, manifest, key = _fixture(fixture_root)
-        build = json.loads(manifest.read_text())
-        build["source_identity"] = MODULE.source_identity_for_repository(
-            repository_root
-        )
-        build["source_revision"] = MODULE.source_revision_for_repository(
-            repository_root
-        )
-        manifest.write_text(json.dumps(build), encoding="utf-8")
-
-        isolated_panel = root / "runner-temp" / "tobkiri-panel-build"
-        isolated_panel.mkdir(parents=True)
-        (isolated_panel / "index.html").write_text("regenerated\n", encoding="utf-8")
-        MODULE._validate_current_source(build, repository_root)
-        assert (
-            (panel / "index.html").read_text(encoding="utf-8") == "checked-in\n"
-        )
-        assert (
-            (isolated_panel / "index.html").read_text(encoding="utf-8")
-            == "regenerated\n"
-        )
-
-        marker.write_text("tampered\n", encoding="utf-8")
-        with pytest.raises(RuntimeError, match="dirty source checkout"):
-            package_artifact(
-                catalog,
-                manifest,
-                key,
-                "key",
-                root / "tampered-output",
-                repository_root,
+        with pytest.raises(RuntimeError, match="source tree"):
+            MODULE._validate_current_source(
+                build,
+                REPOSITORY_ROOT,
+                source_commit=SOURCE_COMMIT,
+                source_tree="0" * 40,
+                source_clean=True,
             )
-        assert not (root / "tampered-output").exists()
+        with pytest.raises(RuntimeError, match="source-clean=true"):
+            MODULE._validate_current_source(
+                build,
+                REPOSITORY_ROOT,
+                source_commit=SOURCE_COMMIT,
+                source_tree=SOURCE_TREE,
+                source_clean=False,
+            )
+
+
+def test_package_projection_contract_is_snapshot_only() -> None:
+    """The non-core caller passes the trusted manifest-bound snapshot contract."""
+    source = SCRIPT_PATH.read_text(encoding="utf-8")
+    for marker in (
+        "materialize_source_snapshot",
+        "verify_source_closure(source_root)",
+        "--source-snapshot-root",
+        "--source-tree",
+        "--source-clean",
+    ):
+        assert marker in source
+    assert "source_identity_for_repository" not in source
+    assert "source_revision_for_repository" not in source
 
 
 def _file_bytes(root: Path) -> dict[str, bytes]:
@@ -835,7 +754,13 @@ def test_package_normalizes_entrypoint_and_rolls_back_write_fault(
         monkeypatch.setattr(MODULE, "_write_json", fail_on_second)
         with pytest.raises(OSError, match="injected pack write fault"):
             package_artifact(
-                catalog, manifest, key, "key", output, repository_root
+                catalog,
+                manifest,
+                key,
+                "key",
+                output,
+                repository_root,
+                **_source_provenance(),
             )
         assert _file_bytes(output) == before
         assert not list(root.glob(".tobkiri-presentation-stage-*"))
@@ -863,6 +788,7 @@ def test_package_uses_one_source_snapshot_and_revalidates_staged_signature(
             "key",
             root / "release",
             repository_root,
+            **_source_provenance(),
         )
         staged = root / "release" / str(report["path"])
         assert staged.exists()
@@ -876,8 +802,24 @@ def test_package_two_passes_are_byte_identical() -> None:
         catalog, manifest, key, repository_root, _ = _canonical_fixture(root)
         first = root / "release-one"
         second = root / "release-two"
-        package_artifact(catalog, manifest, key, "key", first, repository_root)
-        package_artifact(catalog, manifest, key, "key", second, repository_root)
+        package_artifact(
+            catalog,
+            manifest,
+            key,
+            "key",
+            first,
+            repository_root,
+            **_source_provenance(),
+        )
+        package_artifact(
+            catalog,
+            manifest,
+            key,
+            "key",
+            second,
+            repository_root,
+            **_source_provenance(),
+        )
         assert _file_bytes(first) == _file_bytes(second)
 
 

@@ -39,8 +39,16 @@ def build_packaged_profile_bundle(
     destination: Path,
     *,
     source_commit: str,
+    source_tree: str,
+    source_clean: bool,
+    source_snapshot_root: Path,
 ) -> Path:
-    """Build a verified Linux/x86_64 Profile bundle around fixture bytes."""
+    """Build a verified Linux/x86_64 Profile bundle around fixture bytes.
+
+    The generator is intentionally a preverified-snapshot consumer.  Keep the
+    provenance arguments explicit here so conformance fixtures exercise the
+    same boundary as release packaging and cannot silently rediscover Git.
+    """
 
     bundle = destination / "defaultspack" / "v4"
     artifacts = destination / "defaultspack" / "platform-artifacts"
@@ -59,6 +67,9 @@ def build_packaged_profile_bundle(
         architecture="x86_64",
         bundle_identity="io.tobkiri.shell.tauri",
         source_commit=source_commit,
+        source_tree=source_tree,
+        source_clean=source_clean,
+        source_snapshot_root=source_snapshot_root,
     )
     catalog = BundledCatalog.load(bundle)
     shell = catalog.shells["shell.tauri.default"]

@@ -29,6 +29,22 @@ def _load(name: str):
 
 VERIFY = _load("verify_presentation_release")
 PACKAGE = _load("package_presentation_artifact")
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _git_revision(expression: str) -> str:
+    """Read formal fixture provenance from the checkout under test."""
+    return subprocess.run(
+        ["git", "rev-parse", "--verify", expression],
+        cwd=REPOSITORY_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+SOURCE_COMMIT = _git_revision("HEAD^{commit}")
+SOURCE_TREE = _git_revision("HEAD^{tree}")
 
 
 def _resign_catalog_revision(resource_root: Path, catalog: dict[str, object]) -> None:
@@ -57,7 +73,7 @@ def _resign_catalog_revision(resource_root: Path, catalog: dict[str, object]) ->
 
 
 def _release(root: Path) -> tuple[Path, dict[str, object]]:
-    repository_root = Path(__file__).resolve().parents[3]
+    repository_root = REPOSITORY_ROOT
     source_catalog_path = (
         repository_root
         / "tobkiri_launcher"
@@ -110,8 +126,8 @@ def _release(root: Path) -> tuple[Path, dict[str, object]]:
                 "platform": platform_name,
                 "architecture": architecture,
                 "build_profile": "release",
-                "source_identity": PACKAGE.source_identity_for_repository(repository_root),
-                "source_revision": PACKAGE.source_revision_for_repository(repository_root),
+                    "source_identity": "github:example/tobkiri",
+                    "source_revision": SOURCE_COMMIT,
             }
         )
     )
@@ -125,6 +141,9 @@ def _release(root: Path) -> tuple[Path, dict[str, object]]:
         "headless-test-key",
         release,
         repository_root,
+        source_commit=SOURCE_COMMIT,
+        source_tree=SOURCE_TREE,
+        source_clean=True,
     )
     catalog_output = release / "presentation_catalog.json"
     packaged_catalog = release / "bundled" / "presentation_catalog.json"
