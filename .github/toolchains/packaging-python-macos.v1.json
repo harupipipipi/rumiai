@@ -1,7 +1,7 @@
 {
   "code_identifier": "org.python.python",
   "executable": "tobkiri-packaging-venv/bin/python3.13",
-  "install_root": "/Library/Frameworks/Python.framework/Versions/3.13",
+  "install_root": "/Library/TobkiriPackaging/Python.framework/Versions/3.13",
   "installer_sha256": "a909cb655af5db67d5a90b3603437a1d58bec3446d624e4034e278ac62023cc9",
   "installer_signer": "Developer ID Installer: Python Software Foundation (BMM5U3QVKW)",
   "installer_team_id": "BMM5U3QVKW",

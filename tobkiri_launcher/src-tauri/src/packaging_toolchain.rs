@@ -1434,7 +1434,7 @@ fn macos_python_installation_lease(path: &Path) -> io::Result<MacOSPythonInstall
     if !root.is_absolute() || root.canonicalize()? != root {
         return Err(invalid("macOS Python installation root is not canonical"));
     }
-    let expected_root = Path::new("/Library/Frameworks/Python.framework/Versions/3.13");
+    let expected_root = Path::new("/Library/TobkiriPackaging/Python.framework/Versions/3.13");
     if root != expected_root {
         return Err(invalid(
             "macOS Python installation root is not the fixed authority",

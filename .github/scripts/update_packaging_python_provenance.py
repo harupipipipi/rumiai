@@ -17,6 +17,7 @@ PSF_TEAM_ID = "BMM5U3QVKW"
 PSF_INSTALLER_SIGNER = "Developer ID Installer: Python Software Foundation (BMM5U3QVKW)"
 PSF_CODE_IDENTIFIER = "org.python.python"
 API_ROOT = "https://www.python.org/api/v2/downloads"
+INSTALL_ROOT = "/Library/TobkiriPackaging/Python.framework/Versions"
 
 
 def _read_json(url: str) -> Any:
@@ -66,7 +67,7 @@ def generate(version: str, requirements: Path) -> dict[str, str]:
     return {
         "code_identifier": PSF_CODE_IDENTIFIER,
         "executable": f"tobkiri-packaging-venv/bin/python{series}",
-        "install_root": f"/Library/Frameworks/Python.framework/Versions/{series}",
+        "install_root": f"{INSTALL_ROOT}/{series}",
         "installer_sha256": installer_sha256,
         "installer_signer": PSF_INSTALLER_SIGNER,
         "installer_team_id": PSF_TEAM_ID,

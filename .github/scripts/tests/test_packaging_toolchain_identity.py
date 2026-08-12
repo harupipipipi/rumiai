@@ -134,6 +134,9 @@ def test_checked_provenance_matches_python_org_release_metadata(
         expected["version"], Path(expected["requirements_path"])
     )
     assert generated == expected
+    assert expected["install_root"] == (
+        "/Library/TobkiriPackaging/Python.framework/Versions/3.13"
+    )
 
 
 def test_provenance_rejects_unknown_fields_and_requirement_tamper(
@@ -590,7 +593,7 @@ def _ancestor_helper(
     if code == _MODULE.ROOT_ENSURE_PARENT_CODE:
         arguments.extend(
             [
-                "Library/Frameworks/Python.framework/Versions",
+                "Library/TobkiriPackaging/Python.framework/Versions",
                 staging,
                 token,
                 _MODULE.ANCESTOR_JOURNAL_SCHEMA,
@@ -603,7 +606,7 @@ def _ancestor_helper(
     else:
         arguments.extend(
             [
-                "Library/Frameworks/Python.framework/Versions",
+                "Library/TobkiriPackaging/Python.framework/Versions",
                 staging,
                 token,
                 _MODULE.ANCESTOR_JOURNAL_SCHEMA,
@@ -648,7 +651,7 @@ def test_process_creates_and_rolls_back_clean_framework_ancestors(
     _require_privileged_ancestor_result(
         _ancestor_helper(_MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token)
     )
-    versions = anchor / "Library/Frameworks/Python.framework/Versions"
+    versions = anchor / "Library/TobkiriPackaging/Python.framework/Versions"
     assert versions.is_dir()
     assert len(list(staging.glob("ancestor-*.json"))) == 4
     assert (
@@ -664,14 +667,14 @@ def test_process_preserves_preexisting_ancestor_modes(tmp_path: Path) -> None:
     """Preexisting safe hierarchy is validated but never journaled or modified."""
     anchor = tmp_path / "root"
     staging = tmp_path / "staging"
-    versions = anchor / "Library/Frameworks/Python.framework/Versions"
+    versions = anchor / "Library/TobkiriPackaging/Python.framework/Versions"
     versions.mkdir(parents=True, mode=0o750)
     staging.mkdir(mode=0o700)
     hierarchy = [
         anchor,
         anchor / "Library",
-        anchor / "Library/Frameworks",
-        anchor / "Library/Frameworks/Python.framework",
+        anchor / "Library/TobkiriPackaging",
+        anchor / "Library/TobkiriPackaging/Python.framework",
         versions,
     ]
     for path in hierarchy:
@@ -712,7 +715,7 @@ def test_process_recovers_kill_midway_through_ancestor_creation(
     _require_privileged_ancestor_result(
         _ancestor_helper(_MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token)
     )
-    assert (anchor / "Library/Frameworks/Python.framework/Versions").is_dir()
+    assert (anchor / "Library/TobkiriPackaging/Python.framework/Versions").is_dir()
 
 
 def test_process_cleanup_removes_unjournaled_empty_ancestor_provisional(
@@ -863,6 +866,83 @@ def test_process_rejects_unsafe_existing_ancestor(tmp_path: Path, unsafe: str) -
     assert result.returncode != 0
     if unsafe == "writable":
         assert library.stat().st_mode & 0o7777 == 0o777
+        assert b"component=Library" in result.stderr
+        assert b"uid=" in result.stderr
+        assert b"gid=" in result.stderr
+        assert b"mode=0o777" in result.stderr
+
+
+def test_unrelated_unsafe_system_frameworks_is_not_install_authority(
+    tmp_path: Path,
+) -> None:
+    """The dedicated namespace never traverses an unsafe system Frameworks tree."""
+    anchor = tmp_path / "root"
+    staging = tmp_path / "staging"
+    frameworks = anchor / "Library/Frameworks"
+    frameworks.mkdir(parents=True, mode=0o755)
+    frameworks.chmod(0o777)
+    staging.mkdir(mode=0o700)
+    token = "8" * 32
+    result = _ancestor_helper(_MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token)
+    _require_privileged_ancestor_result(result)
+    assert frameworks.stat().st_mode & 0o7777 == 0o777
+    assert (anchor / "Library/TobkiriPackaging/Python.framework/Versions").is_dir()
+    cleanup = _ancestor_helper(
+        _MODULE.ROOT_RECOVER_ANCESTORS_CODE, anchor, staging, token
+    )
+    assert cleanup.returncode == 0, cleanup.stderr.decode(errors="replace")
+    assert frameworks.stat().st_mode & 0o7777 == 0o777
+
+
+def test_process_rejects_other_uid_existing_ancestor_when_available(
+    tmp_path: Path,
+) -> None:
+    """A nofollow directory owned by another UID never becomes system authority."""
+    sudo = subprocess.run(
+        ["/usr/bin/sudo", "-n", "/usr/bin/true"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if sudo.returncode != 0:
+        if _REQUIRE_ROOT_PROCESS_TESTS:
+            pytest.fail("passwordless sudo is required for other-UID authority test")
+        pytest.skip("passwordless sudo is unavailable")
+    anchor = tmp_path / "root"
+    staging = tmp_path / "staging"
+    library = anchor / "Library"
+    library.mkdir(parents=True, mode=0o755)
+    staging.mkdir(mode=0o700)
+    try:
+        subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "-n",
+                "/usr/sbin/chown",
+                "-R",
+                "nobody:nobody",
+                library,
+            ],
+            check=True,
+        )
+        result = _ancestor_helper(
+            _MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, "9" * 32
+        )
+        assert result.returncode != 0
+        assert b"component=Library" in result.stderr
+        assert b"uid=" in result.stderr
+    finally:
+        subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "-n",
+                "/usr/sbin/chown",
+                "-R",
+                f"{os.getuid()}:{os.getgid()}",
+                library,
+            ],
+            check=True,
+        )
 
 
 def test_process_retains_created_ancestor_that_becomes_nonempty(
@@ -877,7 +957,7 @@ def test_process_retains_created_ancestor_that_becomes_nonempty(
     _require_privileged_ancestor_result(
         _ancestor_helper(_MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token)
     )
-    versions = anchor / "Library/Frameworks/Python.framework/Versions"
+    versions = anchor / "Library/TobkiriPackaging/Python.framework/Versions"
     (versions / "external").write_bytes(b"preserve")
     assert (
         _ancestor_helper(
@@ -1100,6 +1180,10 @@ def test_workflow_cleanup_preserves_primary_failure(workflow_name: str) -> None:
     )
     cleanup = payload[payload.index("- name: Clean packaging Python installation") :]
     assert "PRIMARY_JOB_STATUS: ${{ job.status }}" in cleanup
+    assert cleanup.index("set +e") < cleanup.index("packaging_toolchain_identity.py")
+    assert cleanup.index("cleanup_status=$?") > cleanup.index(
+        "packaging_toolchain_identity.py"
+    )
     assert 'if test "$PRIMARY_JOB_STATUS" = success' in cleanup
     assert 'exit "$cleanup_status"' in cleanup
     assert "cleanup failed after primary job failure" in cleanup
@@ -1111,6 +1195,22 @@ def test_repository_attributes_require_blob_identical_command_scripts() -> None:
     assert "*.bat text eol=lf" in attributes
     assert "*.cmd text eol=lf" in attributes
     assert "eol=crlf" not in attributes
+
+
+def test_private_packaging_install_root_matches_rust_lease() -> None:
+    """Python producer and Rust consumer share the dedicated root-owned namespace."""
+    expected = "/Library/TobkiriPackaging/Python.framework/Versions/3.13"
+    provenance = json.loads(
+        (
+            _SCRIPT.parents[2] / ".github/toolchains/packaging-python-macos.v1.json"
+        ).read_text(encoding="utf-8")
+    )
+    rust = (
+        _SCRIPT.parents[2] / "tobkiri_launcher/src-tauri/src/packaging_toolchain.rs"
+    ).read_text(encoding="utf-8")
+    assert provenance["install_root"] == expected
+    assert expected in rust
+    assert "/Library/Frameworks/Python.framework/Versions/3.13" not in rust
 
 
 def test_formal_git_environment_contract_is_identical_across_consumers() -> None:
@@ -1177,6 +1277,8 @@ def test_workflows_require_exact_root_process_tests_without_skips(
         "test_process_creates_and_rolls_back_clean_framework_ancestors",
         "test_process_recovers_kill_midway_through_ancestor_creation",
         "test_process_retains_created_ancestor_that_becomes_nonempty",
+        "test_unrelated_unsafe_system_frameworks_is_not_install_authority",
+        "test_process_rejects_other_uid_existing_ancestor_when_available",
         "test_published_ancestor_is_traversable_by_nonroot_process_when_available",
     )
     step = payload[
@@ -1188,7 +1290,7 @@ def test_workflows_require_exact_root_process_tests_without_skips(
     assert "python -m pytest -q -rs" in step
     assert '--junitxml="$ROOT_PROCESS_JUNIT"' in step
     assert all(step.count(f"::{nodeid}") == 1 for nodeid in nodeids)
-    assert "tests != 4 or skipped != 0" in step
+    assert "tests != 6 or skipped != 0" in step
 
 
 def test_windows_python_smoke_propagates_each_pytest_exit_code() -> None:

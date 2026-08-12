@@ -203,7 +203,7 @@ def _parse_provenance(
         raise ToolIdentityError("release_page does not match the pinned version")
     install_root = Path(payload["install_root"])
     if install_root != Path(
-        f"/Library/Frameworks/Python.framework/Versions/{'.'.join(version.split('.')[:2])}"
+        f"/Library/TobkiriPackaging/Python.framework/Versions/{'.'.join(version.split('.')[:2])}"
     ):
         raise ToolIdentityError("install_root does not match the pinned Python series")
     requirements_relative = _safe_relative(
@@ -748,7 +748,8 @@ try:
     for descriptor in (anchor, staging):
         info = os.fstat(descriptor)
         if info.st_uid != owner or info.st_gid != group or info.st_mode & 0o022:
-            raise SystemExit('unsafe ancestor authority')
+            raise SystemExit('unsafe ancestor authority: uid=%d gid=%d mode=%#o' %
+                             (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)))
     traversed = []
     for index, part in enumerate(parts):
         traversed.append(part)
@@ -811,7 +812,9 @@ try:
                             dir_fd=current)
         info = os.fstat(child)
         if info.st_uid != owner or info.st_mode & 0o022:
-            raise SystemExit('unsafe existing ancestor')
+            raise SystemExit('unsafe existing ancestor: component=%s uid=%d gid=%d mode=%#o' %
+                             (target, info.st_uid, info.st_gid,
+                              stat.S_IMODE(info.st_mode)))
         if payload is not None and (info.st_gid != group or
            stat.S_IMODE(info.st_mode) != 0o555 or payload['target'] != target or
            (payload['dev'], payload['ino']) != (info.st_dev, info.st_ino)):
@@ -976,7 +979,9 @@ parent = os.open(parent_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 try:
     parent_info = os.fstat(parent)
     if parent_info.st_uid != owner or parent_info.st_mode & 0o022:
-        raise SystemExit('unsafe target parent')
+        raise SystemExit('unsafe target parent: path=%s uid=%d gid=%d mode=%#o' %
+                         (parent_path, parent_info.st_uid, parent_info.st_gid,
+                          stat.S_IMODE(parent_info.st_mode)))
     os.mkdir(provisional, 0o700, dir_fd=parent)
     if failpoint == 'after_mkdir': os.kill(os.getpid(), signal.SIGKILL)
     root = os.open(provisional, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
@@ -1070,7 +1075,9 @@ def remove_named(name, expected, exact_mode=None):
 try:
     parent_info = os.fstat(parent)
     if parent_info.st_uid != owner or parent_info.st_mode & 0o022:
-        raise SystemExit('unsafe transaction parent')
+        raise SystemExit('unsafe transaction parent: path=%s uid=%d gid=%d mode=%#o' %
+                         (parent_path, parent_info.st_uid, parent_info.st_gid,
+                          stat.S_IMODE(parent_info.st_mode)))
     for name in sorted(os.listdir(parent)):
         if not name.startswith(prefix): continue
         token = name[len(prefix):]
@@ -1495,10 +1502,8 @@ def prepare_macos_installation(
         )
         subprocess.run(["/usr/bin/sudo", "/bin/chmod", "0555", staging], check=True)
         payload_executable_suffix = (
-            Path("Payload/Library/Frameworks/Python.framework")
-            / provenance.install_root.relative_to(
-                "/Library/Frameworks/Python.framework"
-            )
+            Path("Payload/Library/Frameworks/Python.framework/Versions")
+            / ".".join(provenance.version.split(".")[:2])
             / "bin"
             / f"python{'.'.join(provenance.version.split('.')[:2])}"
         )
