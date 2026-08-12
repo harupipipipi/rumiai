@@ -279,8 +279,43 @@ def test_workflow_uses_snapshot_builder_and_has_no_sudo(workflow_name: str) -> N
     assert "internal-root" not in source
     assert 'cat-file blob "$identity_oid" > "$identity_launcher"' in source
     assert 'hash-object "$identity_launcher"' in source
-    assert 'python3 -I -B "/dev/fd/$identity_fd"' in source
+    assert 'exec 9< "$identity_launcher"' in source
+    assert 'python3 -I -B "/dev/fd/9"' in source
+    assert 'exec 9<&-' in source
+    assert "exec {identity_fd}" not in source
+    assert "/dev/fd/$identity_fd" not in source
+    assert source.count('exec 9< "$identity_launcher"') == 1
+    assert source.count("exec 9<&-") == 1
+    assert source.index('exec 9<&-') > source.rfind('formal_identity \\\n')
     assert "/usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py" not in source
+
+
+def test_fixed_identity_fd_is_bash_3_2_compatible(tmp_path: Path) -> None:
+    """Bash 3.2 can inherit fixed FD 9 and closes it after the child runs."""
+    launcher = tmp_path / "identity launcher.py"
+    launcher.write_text(
+        "import sys\nsys.stdout.write('trusted')\n", encoding="utf-8"
+    )
+    script = r"""
+set -euo pipefail
+identity_launcher="$1"
+python="$2"
+exec 9< "$identity_launcher"
+output="$("$python" -I -B /dev/fd/9)"
+test "$output" = trusted
+exec 9<&-
+if "$python" -I -B /dev/fd/9 >/dev/null 2>&1; then
+  exit 1
+fi
+"""
+    result = subprocess.run(
+        ["/bin/bash", "-c", script, "fixed-fd-test", str(launcher), sys.executable],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_private_fd_launcher_ignores_checkout_path_swap(tmp_path: Path) -> None:

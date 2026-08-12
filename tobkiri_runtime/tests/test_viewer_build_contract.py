@@ -124,13 +124,13 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
         assert "cargo tauri build" in build_contents
         assert "Prepare bundled Rumi runtime" not in build_contents
         assert "python .github/scripts/prepare_tauri_resources.py" not in build_contents
-        bind_at = build_contents.index("Bind verified packaging tool identities")
+        rootless_at = build_contents.index("Build rootless sealed packaging Python")
         source_at = build_contents.index("Resolve checked-out source revision")
+        assert rootless_at < source_at
         cargo_positions = [
             match.start() for match in re.finditer(r"cargo tauri build", build_contents)
         ]
         assert cargo_positions and all(position > source_at for position in cargo_positions)
-        assert bind_at < source_at
         clean_at = build_contents.index("source_clean = subprocess.run(")
         untracked_at = build_contents.index('"ls-files"')
         output_at = build_contents.index('output.write(f"source_revision=')
@@ -146,22 +146,37 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
         assert "TOBKIRI_PACKAGING_PYTHON_SHA256" in build_contents
         assert "TOBKIRI_PACKAGING_GIT" in build_contents
         assert "TOBKIRI_PACKAGING_GIT_SHA256" in build_contents
+        assert 'cat-file blob "$identity_oid" > "$identity_launcher"' in build_contents
+        assert 'hash-object "$identity_launcher"' in build_contents
+        assert 'exec 9< "$identity_launcher"' in build_contents
+        assert 'python3 -I -B "/dev/fd/9"' in build_contents
+        assert 'exec 9<&-' in build_contents
+        assert "exec {identity_fd}" not in build_contents
+        assert "/dev/fd/$identity_fd" not in build_contents
+        assert build_contents.count('exec 9< "$identity_launcher"') == 1
+        assert build_contents.count("exec 9<&-") == 1
+        assert build_contents.index("exec 9<&-") > build_contents.rfind(
+            "formal_identity \\\n"
+        )
         assert "source_revision=" in build_contents
         assert "source_tree=" in build_contents
         assert "TOBKIRI_PACKAGING_SOURCE_PROVENANCE_FILE" not in build_contents
         assert "--source-provenance-file" not in build_contents
-        assert "/usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py" in build_contents
+        assert (
+            '/usr/bin/python3 -B "$source_snapshot/.github/scripts/'
+            "prepare_tauri_resources.py\""
+        ) in build_contents
         assert (
             "--provenance .github/toolchains/packaging-python-macos.v1.json"
             in build_contents
         )
         assert build_contents.count('--source-commit "$GITHUB_SHA"') == 2
         assert (
-            '--transaction-token "$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"'
+            "--snapshot-source"
             in build_contents
         )
-        assert "--prepare-macos-installation" in build_contents
-        assert "--source-tree" not in build_contents
+        assert "--source-tree" in build_contents
+        assert "--prepare-macos-installation" not in build_contents
         assert "--source-clean" not in build_contents
         assert 'PYTHONDONTWRITEBYTECODE: "1"' in contents
         assert "aarch64-apple-darwin" in build_contents

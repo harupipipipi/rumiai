@@ -127,9 +127,9 @@ jobs:
           "$formal_git" -C "$GITHUB_WORKSPACE" cat-file blob "$identity_oid" > "$identity_launcher"
           test "$("$formal_git" -C "$GITHUB_WORKSPACE" hash-object "$identity_launcher")" = "$identity_oid"
           /bin/chmod 0400 "$identity_launcher"
-          exec {identity_fd}< "$identity_launcher"
+          exec 9< "$identity_launcher"
           formal_identity() {
-            PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I -B "/dev/fd/$identity_fd" "$@"
+            PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I -B "/dev/fd/9" "$@"
           }
           formal_identity \
             --bind-git-env --env-output "$pre_git_env"
@@ -167,6 +167,7 @@ jobs:
             --env-output "$TOOLCHAIN_ENV"
           formal_identity \
             --bind-git-env --env-output "$TOOLCHAIN_ENV"
+          exec 9<&-
           for marker in \
             TOBKIRI_PACKAGING_PYTHON \
             TOBKIRI_PACKAGING_PYTHON_SHA256 \
