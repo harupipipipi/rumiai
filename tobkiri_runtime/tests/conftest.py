@@ -10,6 +10,8 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import os
+import shutil
 import subprocess
 import sys
 import types
@@ -563,7 +565,6 @@ _REAL_GET_CONTAINER = _REAL_DI_CONTAINER_MODULE.get_container
 # ---------------------------------------------------------------------------
 # 共通 fixture
 # ---------------------------------------------------------------------------
-import os  # noqa: E402
 import pytest  # noqa: E402
 
 
@@ -577,24 +578,57 @@ def _verified_packaged_profile_bundle(tmp_path_factory):
     )
 
     source_bundle = _PROJECT_ROOT / "ecosystem" / "defaultspack" / "v4"
+    git_value = os.environ.get("TOBKIRI_PACKAGING_GIT") or shutil.which("git")
+    if not git_value:
+        raise RuntimeError("an absolute Git executable is required for packaged fixtures")
+    git = Path(git_value).resolve()
+    git_digest = hashlib.sha256(git.read_bytes()).hexdigest()
+    git_environment = {
+        "GIT_CONFIG_GLOBAL": "NUL" if os.name == "nt" else os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }
+    if os.name == "nt" and os.environ.get("SystemRoot"):
+        git_environment["SystemRoot"] = os.environ["SystemRoot"]
     revision = subprocess.run(
-        ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+        [str(git), "rev-parse", "--verify", "HEAD^{commit}"],
         cwd=_PROJECT_PARENT,
         check=True,
         capture_output=True,
         text=True,
+        env=git_environment,
     ).stdout.strip()
     assert len(revision) == 40 and all(
         character in "0123456789abcdef" for character in revision
     )
+    source_tree = subprocess.run(
+        [str(git), "rev-parse", "--verify", "HEAD^{tree}"],
+        cwd=_PROJECT_PARENT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=git_environment,
+    ).stdout.strip()
+    source_status = subprocess.run(
+        [str(git), "status", "--porcelain=v1", "--untracked-files=all"],
+        cwd=_PROJECT_PARENT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=git_environment,
+    ).stdout.strip()
+    assert not source_status, "packaged fixture source must start from a clean checkout"
+    injection = pytest.MonkeyPatch()
+    injection.setenv("TOBKIRI_PACKAGING_GIT", str(git))
+    injection.setenv("TOBKIRI_PACKAGING_GIT_SHA256", git_digest)
+    injection.setenv("TOBKIRI_PACKAGING_SOURCE_COMMIT", revision)
+    injection.setenv("TOBKIRI_PACKAGING_SOURCE_TREE", source_tree)
+    injection.setenv("TOBKIRI_PACKAGING_SOURCE_CLEAN", "1")
     bundle = build_packaged_profile_bundle(
         source_bundle,
         tmp_path_factory.mktemp("verified-packaged-profile"),
         source_commit=revision,
     )
     from core_runtime.bootstrap import profile_capture, runtime
-
-    injection = pytest.MonkeyPatch()
 
     def provider(_base_dir=None):
         return bundle

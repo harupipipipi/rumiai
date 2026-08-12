@@ -18,6 +18,7 @@ SHELL_RUNTIME = TAURI_ROOT / "src" / "shell_runtime.rs"
 LAUNCHER_RUNTIME = TAURI_ROOT / "src" / "lib.rs"
 RESOURCE_PREPARER = ROOT / ".github" / "scripts" / "prepare_tauri_resources.py"
 TOOLCHAIN_BINDER = ROOT / ".github" / "scripts" / "packaging_toolchain_identity.py"
+LOCKED_TEST_HELPER = ROOT / ".github" / "scripts" / "install_locked_python_test_dependencies.py"
 PACK_SHELL_SEALER = ROOT / ".github" / "scripts" / "seal_pack_shell.py"
 UPDATER = TAURI_ROOT / "src" / "updater.rs"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
@@ -28,6 +29,10 @@ MACOS_RELEASE_VERIFIER = ROOT / "tobkiri_launcher" / "scripts" / "verify_macos_r
 MACOS_DMG_PACKAGER = ROOT / "tobkiri_launcher" / "scripts" / "package_macos_dmg.sh"
 RELEASE_GATE = ROOT / "scripts" / "release_gate.py"
 TEST_WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
+PACKAGED_GENERATOR = (
+    ROOT / "tobkiri_runtime" / "scripts" / "generate_packaged_defaultspack_v4_bundle.py"
+)
+PACKAGING_CLEANUP = ROOT / "tobkiri_runtime" / "scripts" / "packaging_cleanup.py"
 DEV_REQUIREMENTS = ROOT / "tobkiri_runtime" / "requirements-dev.txt"
 DEV_PYPROJECT = ROOT / "tobkiri_runtime" / "pyproject.toml"
 VIEWER_BUILD_WORKFLOWS = (
@@ -132,6 +137,9 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
         assert "TOBKIRI_PACKAGING_PYTHON_SHA256" in build_contents
         assert "TOBKIRI_PACKAGING_GIT" in build_contents
         assert "TOBKIRI_PACKAGING_GIT_SHA256" in build_contents
+        assert "TOBKIRI_PACKAGING_SOURCE_TREE" in build_contents
+        assert "TOBKIRI_PACKAGING_SOURCE_CLEAN" in build_contents
+        assert 'PYTHONDONTWRITEBYTECODE: "1"' in contents
         assert "aarch64-apple-darwin" in build_contents
         assert "x86_64-apple-darwin" in build_contents
         for forbidden in (
@@ -144,6 +152,39 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
             "Sign and verify Windows installer",
         ):
             assert forbidden not in build_contents
+
+
+def test_python_generator_requires_bound_git_and_never_uses_path():
+    """The relocated generator must use only formal, digest-bound Git input."""
+    generator = PACKAGED_GENERATOR.read_text(encoding="utf-8")
+    assert '["git"' not in generator
+    assert "['git'" not in generator
+    for marker in (
+        "TOBKIRI_PACKAGING_GIT",
+        "TOBKIRI_PACKAGING_GIT_SHA256",
+        "TOBKIRI_PACKAGING_SOURCE_COMMIT",
+        "TOBKIRI_PACKAGING_SOURCE_TREE",
+        "TOBKIRI_PACKAGING_SOURCE_CLEAN",
+        "_verify_bound_git",
+        "_run_bound_git",
+        '"GIT_CONFIG_NOSYSTEM"',
+    ):
+        assert marker in generator
+
+    cleanup = PACKAGING_CLEANUP.read_text(encoding="utf-8")
+    isolated_keys = cleanup.split("_ISOLATED_ENVIRONMENT_KEYS", 1)[1].split(
+        "_ISOLATED_MODULE_CODE", 1
+    )[0]
+    assert '"PATH"' not in isolated_keys
+
+
+def test_packaging_test_jobs_disable_bytecode_and_locked_installs_do_not_compile():
+    """Every packaging/test workflow and the locked helper keep closure trees source-only."""
+    for workflow in (*VIEWER_BUILD_WORKFLOWS, TEST_WORKFLOW):
+        assert 'PYTHONDONTWRITEBYTECODE: "1"' in workflow.read_text(encoding="utf-8")
+    helper = LOCKED_TEST_HELPER.read_text(encoding="utf-8")
+    assert '"--no-compile"' in helper
+    assert 'environment["PYTHONDONTWRITEBYTECODE"] = "1"' in helper
 
 
 def test_rust_packaging_callers_require_formal_absolute_tool_identities():

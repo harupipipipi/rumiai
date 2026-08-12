@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import importlib.util
 import json
 import py_compile
+import shlex
 import shutil
 import subprocess
 import sys
@@ -29,6 +31,8 @@ def _load_packaging_helpers() -> ModuleType:
 
 
 _PACKAGING_HELPERS = _load_packaging_helpers()
+_SOURCE_COMMIT = "0123456789abcdef0123456789abcdef01234567"
+_SOURCE_TREE = "89abcdef0123456789abcdef0123456789abcdef"
 
 
 def _clean_environment(source: dict[str, str] | None = None) -> dict[str, str]:
@@ -81,6 +85,29 @@ def _fixture(root: Path) -> tuple[Path, Path, Path]:
     return checkout, bundle, artifact
 
 
+def _bound_git_fixture(root: Path) -> dict[str, str]:
+    """Create a verified absolute Git fixture for relocated generation."""
+    root.mkdir(parents=True, exist_ok=True)
+    executable = root / "formal-git"
+    executable.write_text(
+        "#!/bin/sh\n"
+        "case \"$*\" in\n"
+        f"  *'^{{commit}}') printf '%s\\n' '{_SOURCE_COMMIT}' ;;\n"
+        f"  *'^{{tree}}') printf '%s\\n' '{_SOURCE_TREE}' ;;\n"
+        "  'status --porcelain=v1 --untracked-files=all') : ;;\n"
+        "  *) exit 2 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    return {
+        "git_executable": os.fspath(executable),
+        "git_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+        "source_commit": _SOURCE_COMMIT,
+        "source_tree": _SOURCE_TREE,
+    }
+
+
 def _generator_process(
     checkout: Path,
     bundle: Path,
@@ -88,32 +115,48 @@ def _generator_process(
     *,
     environment: dict[str, str] | None = None,
     cwd: Path | None = None,
+    source_contract: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run the official generator from the relocated runtime package root."""
     source_root = checkout / "tobkiri_runtime"
+    arguments = [
+        "--source-artifact",
+        os.fspath(artifact),
+        "--bundle-root",
+        os.fspath(bundle),
+        "--artifact-root",
+        os.fspath(bundle.parent / "platform-artifacts"),
+        "--relative-path",
+        "Tobkiri.AppImage",
+        "--entrypoint",
+        "Tobkiri.AppImage",
+        "--platform",
+        "linux",
+        "--architecture",
+        "x86_64",
+        "--bundle-identity",
+        "io.tobkiri.shell.tauri",
+    ]
+    if source_contract is not None:
+        arguments.extend(
+            [
+                "--source-commit",
+                source_contract["source_commit"],
+                "--source-tree",
+                source_contract["source_tree"],
+                "--git-executable",
+                source_contract["git_executable"],
+                "--git-sha256",
+                source_contract["git_sha256"],
+                "--source-clean",
+            ]
+        )
     return subprocess.run(
         _PACKAGING_HELPERS.isolated_python_module_command(
             sys.executable,
             "scripts.generate_packaged_defaultspack_v4_bundle",
             source_root,
-            [
-                "--source-artifact",
-                os.fspath(artifact),
-                "--bundle-root",
-                os.fspath(bundle),
-                "--artifact-root",
-                os.fspath(bundle.parent / "platform-artifacts"),
-                "--relative-path",
-                "Tobkiri.AppImage",
-                "--entrypoint",
-                "Tobkiri.AppImage",
-                "--platform",
-                "linux",
-                "--architecture",
-                "x86_64",
-                "--bundle-identity",
-                "io.tobkiri.shell.tauri",
-            ],
+            arguments,
         ),
         cwd=source_root if cwd is None else cwd,
         env=_clean_environment() if environment is None else _clean_environment(environment),
@@ -244,6 +287,53 @@ def test_isolated_launcher_rejects_hostile_hooks_packages_and_cwd(
     )
     assert safe.returncode == 0, safe.stderr
     assert not marker.exists(), "isolated launch executed hostile Python input"
+
+
+def test_relocated_generator_uses_bound_git_and_not_path_git(
+    tmp_path: Path,
+) -> None:
+    """Formal Git identity is used even when PATH contains a marker executable."""
+    checkout, bundle, artifact = _fixture(tmp_path / "bound-git")
+    contract = _bound_git_fixture(tmp_path / "bound-git-input")
+    fake_path = tmp_path / "fake-path"
+    fake_path.mkdir()
+    marker = tmp_path / "path-git-executed"
+    fake_git = fake_path / "git"
+    fake_git.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' path-git > {shlex.quote(os.fspath(marker))}\n"
+        "exit 97\n",
+        encoding="utf-8",
+    )
+    fake_git.chmod(0o755)
+    environment = {"PATH": os.fspath(fake_path)}
+    assert "PATH" not in _clean_environment(environment)
+    result = _generator_process(
+        checkout,
+        bundle,
+        artifact,
+        environment=environment,
+        source_contract=contract,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not marker.exists(), "generator executed Git selected through PATH"
+
+
+def test_relocated_generator_rejects_mismatched_bound_git_digest(
+    tmp_path: Path,
+) -> None:
+    """A source revision cannot proceed with a mismatched Git executable digest."""
+    checkout, bundle, artifact = _fixture(tmp_path / "bad-git")
+    contract = _bound_git_fixture(tmp_path / "bad-git-input")
+    contract["git_sha256"] = "0123456789abcdef" * 4
+    result = _generator_process(
+        checkout,
+        bundle,
+        artifact,
+        source_contract=contract,
+    )
+    assert result.returncode != 0
+    assert "digest mismatch" in result.stderr.lower()
 
 
 def test_relocated_generator_rejects_missing_tampered_or_external_cleanup(tmp_path: Path) -> None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import os
 import json
 import shutil
 import subprocess
@@ -226,14 +228,37 @@ def test_generator_rejects_non_checkout_source_revision(
 
 
 def _git(repository: Path, *args: str) -> str:
-    """Run a deterministic Git fixture command and return stdout."""
+    """Run a deterministic Git fixture command through an absolute executable."""
+    executable = os.environ.get("TOBKIRI_PACKAGING_GIT") or shutil.which("git")
+    if not executable:
+        pytest.skip("an absolute Git executable is required for source identity tests")
     return subprocess.run(
-        ["git", *args],
+        [str(Path(executable).resolve()), *args],
         cwd=repository,
         capture_output=True,
         text=True,
         check=True,
     ).stdout.strip()
+
+
+def _git_binding() -> tuple[Path, str]:
+    """Return the absolute Git fixture executable and its raw digest."""
+    executable = os.environ.get("TOBKIRI_PACKAGING_GIT") or shutil.which("git")
+    if not executable:
+        pytest.skip("an absolute Git executable is required for source identity tests")
+    path = Path(executable).resolve()
+    return path, hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _source_contract(repository: Path, commit: str) -> dict[str, object]:
+    """Build the explicit source identity contract consumed by the generator."""
+    executable, digest = _git_binding()
+    return {
+        "git_executable": executable,
+        "git_sha256": digest,
+        "source_tree": _git(repository, "rev-parse", f"{commit}^{{tree}}"),
+        "source_clean": True,
+    }
 
 
 def _source_revision_repository(tmp_path: Path) -> tuple[Path, str, str]:
@@ -261,7 +286,13 @@ def test_generator_accepts_exact_clean_checkout_head(
 ) -> None:
     repository, _, synthetic_head = _source_revision_repository(tmp_path)
     monkeypatch.setattr(generator, "ROOT", repository / "tobkiri_runtime")
-    assert generator._source_commit(synthetic_head) == synthetic_head
+    assert (
+        generator._source_commit(
+            synthetic_head,
+            **_source_contract(repository, synthetic_head),
+        )
+        == synthetic_head
+    )
 
 
 def test_generator_accepts_distinct_commit_with_identical_checkout_tree(
@@ -269,7 +300,13 @@ def test_generator_accepts_distinct_commit_with_identical_checkout_tree(
 ) -> None:
     repository, source_head, _ = _source_revision_repository(tmp_path)
     monkeypatch.setattr(generator, "ROOT", repository / "tobkiri_runtime")
-    assert generator._source_commit(source_head) == source_head
+    assert (
+        generator._source_commit(
+            source_head,
+            **_source_contract(repository, source_head),
+        )
+        == source_head
+    )
 
 
 def test_generator_rejects_resolved_commit_with_different_checkout_tree(
@@ -282,4 +319,7 @@ def test_generator_rejects_resolved_commit_with_different_checkout_tree(
     monkeypatch.setattr(generator, "ROOT", repository / "tobkiri_runtime")
 
     with pytest.raises(ValueError, match="match the clean checkout HEAD tree"):
-        generator._source_commit(source_head)
+        generator._source_commit(
+            source_head,
+            **_source_contract(repository, source_head),
+        )

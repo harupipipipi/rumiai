@@ -14,6 +14,7 @@ permissions:
 
 env:
   TOBKIRI_RELEASE_REPOSITORY: harupipipipi/tobkiri
+  PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
   build:
@@ -101,21 +102,57 @@ jobs:
           import os
           import subprocess
 
+          git = os.environ["TOBKIRI_PACKAGING_GIT"]
+          git_environment = {
+              "GIT_CONFIG_GLOBAL": "NUL" if os.name == "nt" else os.devnull,
+              "GIT_CONFIG_NOSYSTEM": "1",
+          }
+          if os.name == "nt" and os.environ.get("SystemRoot"):
+              git_environment["SystemRoot"] = os.environ["SystemRoot"]
           source_revision = subprocess.check_output(
-              ["git", "rev-parse", "--verify", "HEAD"], text=True
+              [git, "rev-parse", "--verify", "HEAD"],
+              text=True,
+              env=git_environment,
           ).strip()
           if len(source_revision) != 40 or any(
               character not in "0123456789abcdef" for character in source_revision
           ):
               raise SystemExit("checked-out source revision is not a full lowercase SHA")
-          tag_revision = subprocess.check_output(
-              ["git", "rev-parse", "--verify", f"{os.environ['GITHUB_REF_NAME']}^{{commit}}"],
+          source_tree = subprocess.check_output(
+              [git, "rev-parse", "--verify", "HEAD^{tree}"],
               text=True,
+              env=git_environment,
+          ).strip()
+          if len(source_tree) != 40 or any(
+              character not in "0123456789abcdef" for character in source_tree
+          ):
+              raise SystemExit("checked-out source tree is not a full lowercase SHA")
+          source_status = subprocess.check_output(
+              [git, "status", "--porcelain=v1", "--untracked-files=all"],
+              text=True,
+              env=git_environment,
+          )
+          if source_status.strip():
+              raise SystemExit("checked-out source must be clean before packaging")
+          tag_revision = subprocess.check_output(
+              [
+                  git,
+                  "rev-parse",
+                  "--verify",
+                  f"{os.environ['GITHUB_REF_NAME']}^{{commit}}",
+              ],
+              text=True,
+              env=git_environment,
           ).strip()
           if tag_revision != source_revision:
               raise SystemExit("checked-out source revision does not match the release tag")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"source_revision={source_revision}\n")
+              output.write(f"source_tree={source_tree}\n")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as environment:
+              environment.write(f"TOBKIRI_PACKAGING_SOURCE_COMMIT={source_revision}\n")
+              environment.write(f"TOBKIRI_PACKAGING_SOURCE_TREE={source_tree}\n")
+              environment.write("TOBKIRI_PACKAGING_SOURCE_CLEAN=1\n")
 
       - name: Verify exact release tag, versions, and production trust policy
         shell: python

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -26,9 +27,12 @@ def main() -> int:
         raise SystemExit(f"locked dependency export is missing: {missing_paths}")
 
     command = [sys.executable, "-m", "pip", "install"]
+    command.append("--no-compile")
     for requirements in LOCKED_REQUIREMENTS:
         command.extend(("-r", str(requirements)))
-    subprocess.run(command, check=True, cwd=REPOSITORY_ROOT)
+    environment = os.environ.copy()
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    subprocess.run(command, check=True, cwd=REPOSITORY_ROOT, env=environment)
     return 0
 
 

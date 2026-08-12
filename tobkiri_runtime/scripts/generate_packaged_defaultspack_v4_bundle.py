@@ -12,12 +12,18 @@ import stat
 import subprocess
 import tempfile
 from pathlib import Path, PureWindowsPath
-from typing import Any, Mapping, TypedDict
+from typing import Any, Mapping, Sequence, TypedDict
 
 from .generator_source_manifest import verify_source_closure
 
 ROOT = Path(__file__).resolve().parents[1]
 verify_source_closure(ROOT)
+
+_PACKAGING_GIT_ENV = "TOBKIRI_PACKAGING_GIT"
+_PACKAGING_GIT_SHA256_ENV = "TOBKIRI_PACKAGING_GIT_SHA256"
+_PACKAGING_SOURCE_COMMIT_ENV = "TOBKIRI_PACKAGING_SOURCE_COMMIT"
+_PACKAGING_SOURCE_TREE_ENV = "TOBKIRI_PACKAGING_SOURCE_TREE"
+_PACKAGING_SOURCE_CLEAN_ENV = "TOBKIRI_PACKAGING_SOURCE_CLEAN"
 
 from .generate_defaultspack_v4_bundle import (  # noqa: E402
     _generated_provenance,
@@ -388,68 +394,197 @@ def _write_json(path: Path, value: Mapping[str, Any]) -> None:
     path.chmod(0o600)
 
 
-def _source_commit(explicit: str | None) -> str:
-    """Reject explicit clean-commit claims from a dirty checkout."""
-    if explicit is not None:
-        if (
-            len(explicit) != 40
-            or len(set(explicit)) <= 1
-            or any(character not in "0123456789abcdef" for character in explicit)
-        ):
-            raise ValueError(
-                "packaged Profile source revision must be a full lowercase checkout SHA"
-            )
-        supplied_commit = subprocess.run(
-            ["git", "rev-parse", "--verify", f"{explicit}^{{commit}}"],
-            cwd=ROOT.parent,
-            capture_output=True,
-            text=True,
-            check=False,
+def _valid_raw_sha256(value: str) -> bool:
+    """Return whether ``value`` is a lowercase, unprefixed SHA-256."""
+    return len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
+def _valid_source_identity(value: str, field: str) -> None:
+    """Require one non-degenerate full lowercase Git object identity."""
+    if (
+        len(value) != 40
+        or len(set(value)) <= 1
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        label = (
+            "full lowercase checkout SHA"
+            if field.endswith("source revision")
+            else "full lowercase Git SHA"
         )
-        if (
-            supplied_commit.returncode != 0
-            or supplied_commit.stdout.strip() != explicit
-        ):
-            raise ValueError(
-                "packaged Profile source revision must resolve in the checkout"
-            )
+        raise ValueError(f"{field} must be a {label}")
+
+
+def _formal_text(value: str | Path | None, environment_key: str) -> str | None:
+    """Resolve one explicit formal input without consulting PATH."""
+    if value is not None:
+        return os.fspath(value)
+    return os.environ.get(environment_key)
+
+
+def _formal_clean(value: bool | None) -> bool | None:
+    """Resolve the explicit clean-checkout assertion."""
+    if value is not None:
+        return value
+    inherited = os.environ.get(_PACKAGING_SOURCE_CLEAN_ENV)
+    if inherited is None:
+        return None
+    if inherited != "1":
+        raise ValueError(
+            f"{_PACKAGING_SOURCE_CLEAN_ENV} must be the exact value '1'"
+        )
+    return True
+
+
+def _verify_bound_git(path_value: str | Path | None, expected: str | None) -> tuple[Path, str]:
+    """Verify the absolute Git executable and return its binding."""
+    path_text = _formal_text(path_value, _PACKAGING_GIT_ENV)
+    digest = _formal_text(expected, _PACKAGING_GIT_SHA256_ENV)
+    if path_text is None or digest is None:
+        raise ValueError(
+            "packaged Profile source verification requires an absolute Git path "
+            "and raw Git executable SHA-256"
+        )
+    if not _valid_raw_sha256(digest):
+        raise ValueError(
+            f"{_PACKAGING_GIT_SHA256_ENV} must be lowercase raw SHA-256"
+        )
+    try:
+        path = Path(path_text)
+        before = path.stat(follow_symlinks=False)
+    except (OSError, TypeError, ValueError) as error:
+        raise ValueError("bound Git executable is unavailable") from error
+    if not path.is_absolute():
+        raise ValueError("bound Git executable path must be absolute")
+    if path.is_symlink() or not stat.S_ISREG(before.st_mode):
+        raise ValueError("bound Git executable must be a regular non-symlink file")
+    if os.name == "nt":
+        executable = os.access(path, os.X_OK)
+    else:
+        mode = stat.S_IMODE(before.st_mode)
+        executable = bool(mode & 0o111) and not bool(mode & 0o022)
+    if not executable:
+        raise ValueError("bound Git executable must be executable and immutable")
+    try:
+        if path.resolve(strict=True) != path:
+            raise ValueError("bound Git executable path must be canonical")
+        hasher = hashlib.sha256()
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                hasher.update(chunk)
+        after = path.stat(follow_symlinks=False)
+    except (OSError, ValueError) as error:
+        raise ValueError("bound Git executable could not be hashed") from error
+    if path.is_symlink() or not stat.S_ISREG(after.st_mode):
+        raise ValueError("bound Git executable changed into a non-regular file")
+    if _path_identity(before) != _path_identity(after):
+        raise ValueError("bound Git executable changed while hashed")
+    actual = hasher.hexdigest()
+    if actual != digest:
+        raise ValueError(
+            f"bound Git executable digest mismatch: expected {digest}, got {actual}"
+        )
+    return path, digest
+
+
+def _run_bound_git(
+    executable: Path,
+    digest: str,
+    arguments: Sequence[str],
+) -> subprocess.CompletedProcess[str]:
+    """Run Git by verified absolute path with PATH and user config removed."""
+    _verify_bound_git(executable, digest)
+    environment = {
+        "GIT_CONFIG_GLOBAL": "NUL" if os.name == "nt" else os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+    if os.name == "nt" and os.environ.get("SystemRoot"):
+        environment["SystemRoot"] = os.environ["SystemRoot"]
+    try:
         result = subprocess.run(
-            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            [os.fspath(executable), *arguments],
             cwd=ROOT.parent,
+            env=environment,
             capture_output=True,
             text=True,
             check=False,
         )
-        if result.returncode != 0:
-            raise ValueError("unable to inspect source checkout status")
-        if result.stdout.strip():
-            raise ValueError(
-                "packaged Profile generation refuses a dirty checkout when a "
-                "clean source revision is requested"
-            )
-        head_tree = subprocess.run(
-            ["git", "rev-parse", "--verify", "HEAD^{tree}"],
-            cwd=ROOT.parent,
-            capture_output=True,
-            text=True,
-            check=False,
+    except OSError as error:
+        raise ValueError("bound Git executable could not be started") from error
+    _verify_bound_git(executable, digest)
+    return result
+
+
+def _source_commit(
+    explicit: str | None,
+    *,
+    git_executable: str | Path | None = None,
+    git_sha256: str | None = None,
+    source_tree: str | None = None,
+    source_clean: bool | None = None,
+) -> str:
+    """Verify explicit commit, tree, clean state, and bound Git identity."""
+    explicit = _formal_text(explicit, _PACKAGING_SOURCE_COMMIT_ENV)
+    if explicit is None:
+        return informational_source_commit(ROOT.parent, None)
+    _valid_source_identity(explicit, "packaged Profile source revision")
+    source_tree = _formal_text(source_tree, _PACKAGING_SOURCE_TREE_ENV)
+    if source_tree is None:
+        raise ValueError(
+            f"{_PACKAGING_SOURCE_TREE_ENV} is required with a source revision"
         )
-        supplied_tree = subprocess.run(
-            ["git", "rev-parse", "--verify", f"{explicit}^{{tree}}"],
-            cwd=ROOT.parent,
-            capture_output=True,
-            text=True,
-            check=False,
+    _valid_source_identity(source_tree, "packaged Profile source tree")
+    if _formal_clean(source_clean) is not True:
+        raise ValueError(
+            f"{_PACKAGING_SOURCE_CLEAN_ENV} must explicitly attest to a clean checkout"
         )
-        if (
-            head_tree.returncode != 0
-            or supplied_tree.returncode != 0
-            or head_tree.stdout.strip() != supplied_tree.stdout.strip()
-        ):
-            raise ValueError(
-                "packaged Profile source revision must match the clean checkout "
-                "HEAD tree"
-            )
+    executable, digest = _verify_bound_git(git_executable, git_sha256)
+    supplied_commit = _run_bound_git(
+        executable,
+        digest,
+        ["rev-parse", "--verify", f"{explicit}^{{commit}}"],
+    )
+    if (
+        supplied_commit.returncode != 0
+        or supplied_commit.stdout.strip() != explicit
+    ):
+        raise ValueError(
+            "packaged Profile source revision must resolve in the checkout"
+        )
+    result = _run_bound_git(
+        executable,
+        digest,
+        ["status", "--porcelain=v1", "--untracked-files=all"],
+    )
+    if result.returncode != 0:
+        raise ValueError("unable to inspect source checkout status")
+    if result.stdout.strip():
+        raise ValueError(
+            "packaged Profile generation refuses a dirty checkout when a "
+            "clean source revision is requested"
+        )
+    head_tree = _run_bound_git(
+        executable,
+        digest,
+        ["rev-parse", "--verify", "HEAD^{tree}"],
+    )
+    supplied_tree = _run_bound_git(
+        executable,
+        digest,
+        ["rev-parse", "--verify", f"{explicit}^{{tree}}"],
+    )
+    if (
+        head_tree.returncode != 0
+        or supplied_tree.returncode != 0
+        or head_tree.stdout.strip() != source_tree
+        or supplied_tree.stdout.strip() != source_tree
+    ):
+        raise ValueError(
+            "packaged Profile source revision must match the clean checkout "
+            "HEAD tree"
+        )
     return informational_source_commit(ROOT.parent, explicit)
 
 
@@ -542,11 +677,21 @@ def _package_transaction(
     architecture: str,
     bundle_identity: str,
     source_commit: str | None,
+    git_executable: str | Path | None = None,
+    git_sha256: str | None = None,
+    source_tree: str | None = None,
+    source_clean: bool | None = None,
 ) -> None:
     """Build both output roots fully in one same-filesystem transaction."""
     relative_path = _normalize_relative_path(relative_path, "packaged artifact path")
     entrypoint = _normalize_relative_path(entrypoint, "packaged entrypoint")
-    commit = _source_commit(source_commit)
+    commit = _source_commit(
+        source_commit,
+        git_executable=git_executable,
+        git_sha256=git_sha256,
+        source_tree=source_tree,
+        source_clean=source_clean,
+    )
     bundle_root = bundle_root.expanduser().absolute()
     artifact_root = artifact_root.expanduser().absolute()
     transaction: Path | None = _new_transaction(bundle_root, artifact_root)
@@ -740,6 +885,10 @@ def stage_packaged_bundle(
     architecture: str,
     bundle_identity: str,
     source_commit: str | None = None,
+    git_executable: str | Path | None = None,
+    git_sha256: str | None = None,
+    source_tree: str | None = None,
+    source_clean: bool | None = None,
 ) -> None:
     """Snapshot, verify, and atomically publish a packaged Profile bundle."""
     _package_transaction(
@@ -752,6 +901,10 @@ def stage_packaged_bundle(
         architecture=architecture,
         bundle_identity=bundle_identity,
         source_commit=source_commit,
+        git_executable=git_executable,
+        git_sha256=git_sha256,
+        source_tree=source_tree,
+        source_clean=source_clean,
     )
 
 
@@ -765,6 +918,10 @@ def package_bundle(
     architecture: str,
     bundle_identity: str,
     source_commit: str | None = None,
+    git_executable: str | Path | None = None,
+    git_sha256: str | None = None,
+    source_tree: str | None = None,
+    source_clean: bool | None = None,
 ) -> None:
     """Verify existing staged artifact bytes and atomically rewrite the bundle."""
     _package_transaction(
@@ -777,6 +934,10 @@ def package_bundle(
         architecture=architecture,
         bundle_identity=bundle_identity,
         source_commit=source_commit,
+        git_executable=git_executable,
+        git_sha256=git_sha256,
+        source_tree=source_tree,
+        source_clean=source_clean,
     )
 
 
@@ -791,6 +952,10 @@ def main() -> int:
     parser.add_argument("--architecture", choices=("arm64", "x86_64"), required=True)
     parser.add_argument("--bundle-identity", required=True)
     parser.add_argument("--source-commit")
+    parser.add_argument("--git-executable")
+    parser.add_argument("--git-sha256")
+    parser.add_argument("--source-tree")
+    parser.add_argument("--source-clean", action="store_true", default=None)
     args = parser.parse_args()
     operation = stage_packaged_bundle if args.source_artifact else package_bundle
     operation(
@@ -803,6 +968,10 @@ def main() -> int:
         architecture=args.architecture,
         bundle_identity=args.bundle_identity,
         source_commit=args.source_commit,
+        git_executable=args.git_executable,
+        git_sha256=args.git_sha256,
+        source_tree=args.source_tree,
+        source_clean=args.source_clean,
     )
     return 0
 
