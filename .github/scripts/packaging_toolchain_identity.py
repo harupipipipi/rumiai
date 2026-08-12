@@ -389,9 +389,10 @@ def _root_owned_path(path: Path, label: str, *, sticky: Path | None = None) -> N
 
 
 ROOT_SEAL_TREE_CODE = r"""
-import ctypes, errno, json, os, posixpath, stat, sys, time
+import ctypes, errno, hashlib, json, os, posixpath, stat, sys, time
 root_path=sys.argv[1]; owner=int(sys.argv[2]); root_mode=int(sys.argv[3],8)
-barrier=sys.argv[4] if len(sys.argv)>4 else ''
+normalize_ownership=sys.argv[4]=='1'
+barrier=sys.argv[5] if len(sys.argv)>5 else ''
 def acl(fd):
     if sys.platform!='darwin': return False
     lib=ctypes.CDLL(None,use_errno=True); lib.acl_get_fd_np.argtypes=[ctypes.c_int,ctypes.c_int]; lib.acl_get_fd_np.restype=ctypes.c_void_p
@@ -409,10 +410,22 @@ def safe_target(relative,target):
     if normalized in ('','.') or normalized=='..' or normalized.startswith('../'):
         raise SystemExit('symlink escapes sealed tree: '+relative)
     return normalized
-def entry(fd,name,relative,mutate,device):
+def digest(fd):
+    hasher=hashlib.sha256(); os.lseek(fd,0,os.SEEK_SET)
+    while True:
+        block=os.read(fd,1024*1024)
+        if not block: break
+        hasher.update(block)
+    os.lseek(fd,0,os.SEEK_SET)
+    return 'sha256:'+hasher.hexdigest()
+def entry(fd,name,relative,mutate,device,permit_nonowner=False):
     before=os.stat(name,dir_fd=fd,follow_symlinks=False)
-    if before.st_uid!=owner: raise SystemExit('non-owner tree entry: '+relative)
+    if before.st_uid!=owner and not permit_nonowner:
+        raise SystemExit('non-owner tree entry: path=%s uid=%d gid=%d mode=%04o' %
+                         (relative,before.st_uid,before.st_gid,stat.S_IMODE(before.st_mode)))
     if before.st_dev!=device: raise SystemExit('mount boundary in sealed tree: '+relative)
+    if stat.S_IMODE(before.st_mode)&0o7000:
+        raise SystemExit('special permission bits in sealed tree: '+relative)
     if stat.S_ISLNK(before.st_mode):
         if before.st_nlink!=1: raise SystemExit('hardlinked tree symlink: '+relative)
         # Name mutation is controlled by the held, root-owned parent directory;
@@ -421,8 +434,10 @@ def entry(fd,name,relative,mutate,device):
         after=os.stat(name,dir_fd=fd,follow_symlinks=False)
         if (before.st_dev,before.st_ino,before.st_mode)!=(after.st_dev,after.st_ino,after.st_mode):
             raise SystemExit('symlink changed during inventory: '+relative)
-        return ('symlink',before.st_dev,before.st_ino,stat.S_IMODE(before.st_mode),target,
-                safe_target(relative,target))
+        return ('symlink',before.st_dev,before.st_ino,stat.S_IMODE(before.st_mode),
+                before.st_uid,before.st_gid,target,safe_target(relative,target))
+    if not stat.S_ISREG(before.st_mode) and not stat.S_ISDIR(before.st_mode):
+        raise SystemExit('special file in sealed tree: '+relative)
     flags=os.O_RDONLY|os.O_NOFOLLOW
     if stat.S_ISDIR(before.st_mode): flags|=os.O_DIRECTORY
     opened=os.open(name,flags,dir_fd=fd)
@@ -435,30 +450,32 @@ def entry(fd,name,relative,mutate,device):
             if current.st_nlink!=1: raise SystemExit('hardlinked tree file: '+relative)
             if mutate: os.fchmod(opened,stat.S_IMODE(current.st_mode)&~0o222)
             sealed=os.fstat(opened)
-            return ('file',sealed.st_dev,sealed.st_ino,stat.S_IMODE(sealed.st_mode),'','')
+            return ('file',sealed.st_dev,sealed.st_ino,stat.S_IMODE(sealed.st_mode),
+                    sealed.st_uid,sealed.st_gid,digest(opened),'')
         if not stat.S_ISDIR(current.st_mode):
             raise SystemExit('special file in sealed tree: '+relative)
-        children=walk(opened,relative,mutate,device)
+        children=walk(opened,relative,mutate,device,permit_nonowner)
         if mutate: os.fchmod(opened,stat.S_IMODE(current.st_mode)&~0o222)
         sealed=os.fstat(opened)
-        return ('directory',sealed.st_dev,sealed.st_ino,stat.S_IMODE(sealed.st_mode),'',
+        return ('directory',sealed.st_dev,sealed.st_ino,stat.S_IMODE(sealed.st_mode),
+                sealed.st_uid,sealed.st_gid,'',
                 json.dumps(children,sort_keys=True,separators=(',',':')))
     finally: os.close(opened)
-def walk(fd,prefix,mutate,device):
+def walk(fd,prefix,mutate,device,permit_nonowner=False):
     result={}
     for name in sorted(os.listdir(fd)):
         if not name or name in ('.','..') or '/' in name or '\x00' in name:
             raise SystemExit('invalid tree entry name')
         relative=name if not prefix else prefix+'/'+name
-        result[name]=entry(fd,name,relative,mutate,device)
+        result[name]=entry(fd,name,relative,mutate,device,permit_nonowner)
     return result
 def check_cycles(records,prefix=''):
     links={}
     def collect(values,base=''):
         for name,value in values.items():
             path=name if not base else base+'/'+name
-            if value[0]=='symlink': links[path]=value[5]
-            elif value[0]=='directory': collect(json.loads(value[5]),path)
+            if value[0]=='symlink': links[path]=value[7]
+            elif value[0]=='directory': collect(json.loads(value[7]),path)
     collect(records)
     for origin,target in links.items():
         value=target; seen={origin}
@@ -476,13 +493,67 @@ def check_cycles(records,prefix=''):
             if value=='..' or value.startswith('../') or value.startswith('/'):
                 raise SystemExit('symlink chain escapes sealed tree: '+origin)
         else: raise SystemExit('symlink chain exceeds bound: '+origin)
+def same_entry(current,expected,relative):
+    actual=(current.st_dev,current.st_ino,stat.S_IMODE(current.st_mode),
+            current.st_uid,current.st_gid)
+    wanted=(expected[1],expected[2],expected[3],expected[4],expected[5])
+    if actual!=wanted:
+        raise SystemExit('tree entry changed before ownership normalization: '+relative)
+def normalize(fd,prefix,records,device):
+    names=sorted(os.listdir(fd))
+    if names!=sorted(records):
+        raise SystemExit('tree inventory changed before ownership normalization')
+    for name in names:
+        relative=name if not prefix else prefix+'/'+name
+        expected=records[name]
+        before=os.stat(name,dir_fd=fd,follow_symlinks=False)
+        same_entry(before,expected,relative)
+        if expected[0]=='symlink':
+            target=os.readlink(name,dir_fd=fd)
+            if target!=expected[6]:
+                raise SystemExit('symlink changed before ownership normalization: '+relative)
+            if before.st_uid!=owner:
+                if os.chown not in os.supports_dir_fd or \
+                   os.chown not in os.supports_follow_symlinks:
+                    raise SystemExit('nofollow symlink ownership API unavailable')
+                # This is fchownat(parent_fd, name, ..., AT_SYMLINK_NOFOLLOW)
+                # through Python's checked dir_fd/follow_symlinks interface.
+                os.chown(name,owner,-1,dir_fd=fd,follow_symlinks=False)
+            after=os.stat(name,dir_fd=fd,follow_symlinks=False)
+            if (after.st_dev,after.st_ino,stat.S_IFMT(after.st_mode),after.st_uid)!= \
+               (before.st_dev,before.st_ino,stat.S_IFMT(before.st_mode),owner):
+                raise SystemExit('symlink changed during ownership normalization: '+relative)
+            if os.readlink(name,dir_fd=fd)!=target:
+                raise SystemExit('symlink target changed during ownership normalization: '+relative)
+            continue
+        flags=os.O_RDONLY|os.O_NOFOLLOW
+        if expected[0]=='directory': flags|=os.O_DIRECTORY
+        opened=os.open(name,flags,dir_fd=fd)
+        try:
+            current=os.fstat(opened); same_entry(current,expected,relative)
+            if expected[0]=='directory':
+                normalize(opened,relative,json.loads(expected[7]),device)
+            if current.st_uid!=owner: os.fchown(opened,owner,-1)
+            after=os.fstat(opened)
+            if (after.st_dev,after.st_ino,stat.S_IFMT(after.st_mode),after.st_uid)!= \
+               (current.st_dev,current.st_ino,stat.S_IFMT(current.st_mode),owner):
+                raise SystemExit('tree entry changed during ownership normalization: '+relative)
+        finally: os.close(opened)
+def owner_records(records):
+    result={}
+    for name,value in records.items():
+        updated=list(value); updated[4]=owner
+        if value[0]=='directory':
+            updated[7]=json.dumps(owner_records(json.loads(value[7])),sort_keys=True,
+                                  separators=(',',':'))
+        result[name]=tuple(updated)
+    return result
 root=os.open(root_path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
 try:
     info=os.fstat(root)
     if info.st_uid!=owner or stat.S_IMODE(info.st_mode)!=0o700 or acl(root):
         raise SystemExit('unsafe sealed tree root')
-    first=walk(root,'',True,info.st_dev); check_cycles(first)
-    os.fchmod(root,root_mode); os.fsync(root)
+    first=walk(root,'',False,info.st_dev,normalize_ownership); check_cycles(first)
     if barrier:
         ready=barrier+'.ready'; release=barrier+'.release'
         with open(ready,'xb') as output: output.write(b'ready'); output.flush(); os.fsync(output.fileno())
@@ -490,8 +561,15 @@ try:
         while not os.path.exists(release):
             if time.monotonic()>=deadline: raise SystemExit('seal test barrier timed out')
             time.sleep(0.01)
+    if normalize_ownership:
+        normalize(root,'',first,info.st_dev)
+        normalized=walk(root,'',False,info.st_dev); check_cycles(normalized)
+        if normalized!=owner_records(first):
+            raise SystemExit('ownership normalization changed sealed tree metadata')
+    sealed=walk(root,'',True,info.st_dev); check_cycles(sealed)
+    os.fchmod(root,root_mode); os.fsync(root)
     second=walk(root,'',False,info.st_dev); check_cycles(second)
-    if first!=second: raise SystemExit('sealed tree changed during verification')
+    if sealed!=second: raise SystemExit('sealed tree changed during verification')
     final=os.fstat(root)
     if (final.st_dev,final.st_ino)!=(info.st_dev,info.st_ino) or \
        stat.S_IMODE(final.st_mode)!=root_mode or acl(root):
@@ -500,7 +578,9 @@ finally: os.close(root)
 """
 
 
-def _seal_root_tree(root: Path, label: str) -> None:
+def _seal_root_tree(
+    root: Path, label: str, *, normalize_ownership: bool = False
+) -> None:
     """Seal a root-owned tree by inode without following or chmodding symlinks."""
     result = subprocess.run(
         [
@@ -514,6 +594,7 @@ def _seal_root_tree(root: Path, label: str) -> None:
             root,
             "0",
             "0555",
+            "1" if normalize_ownership else "0",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -2685,7 +2766,11 @@ def _prepare_macos_installation_locked(
             check=True,
             env={"PATH": "/usr/bin:/bin"},
         )
-        _seal_root_tree(staging, "expanded official installer")
+        _seal_root_tree(
+            staging,
+            "expanded official installer",
+            normalize_ownership=True,
+        )
         payload_executable_suffix = (
             Path("Payload/Library/Frameworks/Python.framework/Versions")
             / ".".join(provenance.version.split(".")[:2])

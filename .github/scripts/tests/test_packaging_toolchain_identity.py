@@ -52,7 +52,11 @@ _REQUIRE_ROOT_PROCESS_TESTS = (
 
 
 def _seal_tree_helper(
-    root: Path, barrier: Path | None = None, *, hide_o_symlink: bool = False
+    root: Path,
+    barrier: Path | None = None,
+    *,
+    hide_o_symlink: bool = False,
+    normalize_ownership: bool = False,
 ) -> subprocess.CompletedProcess[bytes]:
     root.chmod(0o700)
     code = _MODULE.ROOT_SEAL_TREE_CODE
@@ -71,6 +75,7 @@ def _seal_tree_helper(
         root,
         str(os.geteuid()),
         "0555",
+        "1" if normalize_ownership else "0",
     ]
     if barrier is not None:
         arguments.append(barrier)
@@ -354,7 +359,7 @@ def test_fd_sealer_preserves_regular_bytes_and_extended_attributes(
         check=True,
     )
     try:
-        result = _seal_tree_helper(root)
+        result = _seal_tree_helper(root, normalize_ownership=True)
         assert result.returncode == 0, result.stderr
         assert executable.read_bytes() == b"signed payload bytes"
         attribute = subprocess.run(
@@ -410,6 +415,29 @@ def test_fd_sealer_rejects_symlink_chain_escape_and_cycle(tmp_path: Path) -> Non
             _restore_test_tree_permissions(root)
 
 
+@pytest.mark.parametrize("entry_kind", ["fifo", "hardlink"])
+def test_fd_sealer_rejects_unsafe_entry_before_ownership_normalization(
+    tmp_path: Path, entry_kind: str
+) -> None:
+    """Trusted-package ownership normalization never adopts unsafe inode types."""
+    root = tmp_path / "tree"
+    root.mkdir()
+    if entry_kind == "fifo":
+        os.mkfifo(root / "payload")
+        expected = b"special file"
+    else:
+        payload = root / "payload"
+        payload.write_bytes(b"payload")
+        os.link(payload, root / "alias")
+        expected = b"hardlinked tree file"
+    try:
+        result = _seal_tree_helper(root, normalize_ownership=True)
+        assert result.returncode != 0
+        assert expected in result.stderr
+    finally:
+        _restore_test_tree_permissions(root)
+
+
 def test_fd_sealer_detects_name_replacement_between_inventories(
     tmp_path: Path,
 ) -> None:
@@ -430,6 +458,7 @@ def test_fd_sealer_detects_name_replacement_between_inventories(
             root,
             str(os.geteuid()),
             "0555",
+            "1",
             barrier,
         ],
         stdout=subprocess.PIPE,
@@ -448,7 +477,7 @@ def test_fd_sealer_detects_name_replacement_between_inventories(
         barrier.with_suffix(".release").write_bytes(b"release")
         _stdout, stderr = process.communicate(timeout=5)
         assert process.returncode != 0
-        assert b"sealed tree changed" in stderr
+        assert b"changed" in stderr
         assert saved.read_bytes() == b"original"
         assert entry.read_bytes() == b"replacement"
     finally:
@@ -478,6 +507,7 @@ def test_fd_sealer_detects_symlink_replacement_between_inventories(
             root,
             str(os.geteuid()),
             "0555",
+            "1",
             barrier,
         ],
         stdout=subprocess.PIPE,
@@ -496,7 +526,7 @@ def test_fd_sealer_detects_symlink_replacement_between_inventories(
         barrier.with_suffix(".release").write_bytes(b"release")
         _stdout, stderr = process.communicate(timeout=5)
         assert process.returncode != 0
-        assert b"sealed tree changed" in stderr
+        assert b"changed" in stderr
         assert os.readlink(saved) == "original-missing"
         assert os.readlink(link) == "replacement-missing"
     finally:
@@ -2186,6 +2216,104 @@ def test_root_process_lock_excludes_concurrency_and_releases_after_kill() -> Non
         _MODULE._remove_root_tree(parent, parent_identity)
 
 
+def test_root_process_normalizes_signed_extract_ownership_by_inode() -> None:
+    """The privileged sealer adopts validated PKG metadata without path traversal."""
+    sudo = subprocess.run(
+        ["/usr/bin/sudo", "-n", "/usr/bin/true"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if sudo.returncode != 0:
+        if _REQUIRE_ROOT_PROCESS_TESTS:
+            pytest.fail(
+                "passwordless sudo is required for ownership normalization test"
+            )
+        pytest.skip("passwordless sudo is unavailable")
+    root = Path("/private/tmp") / (
+        f"tobkiri-packaging-owner-test-{secrets.token_hex(16)}"
+    )
+    subprocess.run(
+        ["/usr/bin/sudo", "-n", "/bin/mkdir", "-m", "0700", root], check=True
+    )
+    root_identity = (root.stat().st_dev, root.stat().st_ino)
+    caller = f"{os.geteuid()}:{os.getegid()}"
+    scripts = root / "Scripts"
+    module = scripts / "module.py"
+    link = root / "Python"
+    try:
+        subprocess.run(
+            ["/usr/bin/sudo", "-n", "/bin/mkdir", "-m", "0755", scripts],
+            check=True,
+        )
+        subprocess.run(
+            ["/usr/bin/sudo", "-n", "/usr/bin/tee", module],
+            input=b"signed package bytes",
+            stdout=subprocess.DEVNULL,
+            check=True,
+        )
+        subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "-n",
+                "/usr/bin/xattr",
+                "-w",
+                "com.tobkiri.seal-test",
+                "preserve",
+                module,
+            ],
+            check=True,
+        )
+        subprocess.run(
+            ["/usr/bin/sudo", "-n", "/bin/ln", "-s", "missing-python", link],
+            check=True,
+        )
+        subprocess.run(
+            ["/usr/bin/sudo", "-n", "/usr/sbin/chown", caller, scripts, module],
+            check=True,
+        )
+        subprocess.run(
+            ["/usr/bin/sudo", "-n", "/usr/sbin/chown", "-h", caller, link],
+            check=True,
+        )
+        assert scripts.stat().st_uid == os.geteuid()
+        assert module.stat().st_uid == os.geteuid()
+        assert link.lstat().st_uid == os.geteuid()
+        result = subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "-n",
+                "/usr/bin/python3",
+                "-I",
+                "-B",
+                "-c",
+                _MODULE.ROOT_SEAL_TREE_CODE,
+                root,
+                "0",
+                "0555",
+                "1",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        assert result.returncode == 0, result.stderr
+        assert scripts.stat().st_uid == 0
+        assert module.stat().st_uid == 0
+        assert link.lstat().st_uid == 0
+        assert link.is_symlink() and os.readlink(link) == "missing-python"
+        assert module.read_bytes() == b"signed package bytes"
+        attribute = subprocess.run(
+            ["/usr/bin/xattr", "-p", "com.tobkiri.seal-test", module],
+            stdout=subprocess.PIPE,
+            check=True,
+        ).stdout
+        assert attribute == b"preserve\n"
+    finally:
+        _MODULE._remove_root_tree(root, root_identity)
+
+
 def test_root_process_preserves_preinstalled_framework_leaf() -> None:
     """The CI root path quarantines then restores the exact host Framework inode."""
     sudo = subprocess.run(
@@ -2417,6 +2545,10 @@ def test_prefix_journal_precedes_ditto_and_cancellation_cleanup_is_persistent() 
     assert "cleanup_created_ancestors(provenance, staging, token)" in prepare
     assert "_remove_root_tree(staging)" in prepare
     assert prepare.count("_seal_root_tree(") == 2
+    assert prepare.count("normalize_ownership=True") == 1
+    assert prepare.index("normalize_ownership=True") < prepare.index(
+        '"packaging Python installation"'
+    )
     assert '"/bin/chmod", "-RN"' not in prepare
     assert '"/bin/chmod", "-R"' not in prepare
     assert '"/usr/sbin/chown", "-R"' not in prepare
@@ -2645,6 +2777,7 @@ def test_workflows_require_exact_root_process_tests_without_skips(
         "test_root_owned_group_writable_ancestor_requires_caller_nonmembership",
         "test_process_rejects_effective_acl_and_acl_identity_swap",
         "test_process_rejects_other_uid_existing_ancestor_when_available",
+        "test_root_process_normalizes_signed_extract_ownership_by_inode",
         "test_root_process_preserves_preinstalled_framework_leaf",
         "test_root_process_lock_excludes_concurrency_and_releases_after_kill",
         "test_published_ancestor_is_traversable_by_nonroot_process_when_available",
@@ -2658,7 +2791,7 @@ def test_workflows_require_exact_root_process_tests_without_skips(
     assert "python -m pytest -q -rs" in step
     assert '--junitxml="$ROOT_PROCESS_JUNIT"' in step
     assert all(step.count(f"::{nodeid}") == 1 for nodeid in nodeids)
-    assert "tests != 9 or skipped != 0" in step
+    assert "tests != 10 or skipped != 0" in step
 
 
 @pytest.mark.parametrize("workflow_name", ["release.yml", "desktop-installers.yml"])
