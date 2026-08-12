@@ -32,6 +32,9 @@ TEST_WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
 PACKAGED_GENERATOR = (
     ROOT / "tobkiri_runtime" / "scripts" / "generate_packaged_defaultspack_v4_bundle.py"
 )
+PACKAGING_SOURCE_MANIFEST = (
+    ROOT / "tobkiri_runtime" / "scripts" / "generator_source_manifest.py"
+)
 PACKAGING_CLEANUP = ROOT / "tobkiri_runtime" / "scripts" / "packaging_cleanup.py"
 DEV_REQUIREMENTS = ROOT / "tobkiri_runtime" / "requirements-dev.txt"
 DEV_PYPROJECT = ROOT / "tobkiri_runtime" / "pyproject.toml"
@@ -121,25 +124,22 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
         assert "cargo tauri build" in build_contents
         assert "Prepare bundled Rumi runtime" not in build_contents
         assert "python .github/scripts/prepare_tauri_resources.py" not in build_contents
-        prepare_at = build_contents.index(
-            "Prepare sealed Python environment and export manifest binding"
-        )
+        bind_at = build_contents.index("Bind verified packaging tool identities")
+        source_at = build_contents.index("Resolve checked-out source revision")
         cargo_positions = [
             match.start() for match in re.finditer(r"cargo tauri build", build_contents)
         ]
-        assert cargo_positions and all(position > prepare_at for position in cargo_positions)
-        assert "TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256" in build_contents
-        assert ".github/scripts/prepare_tauri_resources.py" in build_contents
-        assert "--check" in build_contents
-        assert "--env-output" in build_contents
-        assert "Bind verified packaging tool identities" in build_contents
+        assert cargo_positions and all(position > source_at for position in cargo_positions)
+        assert bind_at < source_at
         assert "TOBKIRI_PACKAGING_PYTHON" in build_contents
         assert "TOBKIRI_PACKAGING_PYTHON_SHA256" in build_contents
         assert "TOBKIRI_PACKAGING_GIT" in build_contents
         assert "TOBKIRI_PACKAGING_GIT_SHA256" in build_contents
-        assert "TOBKIRI_PACKAGING_SOURCE_PROVENANCE_FILE" in build_contents
-        assert "--source-provenance-file" in build_contents
-        assert "packaging-source-provenance.v1.json" in build_contents
+        assert "source_revision=" in build_contents
+        assert "source_tree=" in build_contents
+        assert "source_status" in build_contents
+        assert "TOBKIRI_PACKAGING_SOURCE_PROVENANCE_FILE" not in build_contents
+        assert "--source-provenance-file" not in build_contents
         assert "--source-commit" not in build_contents
         assert "--source-tree" not in build_contents
         assert "--source-clean" not in build_contents
@@ -166,7 +166,6 @@ def test_python_generator_requires_snapshot_provenance_and_never_uses_git():
     assert "_verify_bound_git" not in generator
     assert "TOBKIRI_PACKAGING_GIT" not in generator
     assert "--source-provenance-file" in generator
-    assert "packaging-source-provenance.v1.json" in generator
     assert "_preverified_source_provenance" in generator
     assert "load_source_provenance" in generator
     for marker in (
@@ -177,6 +176,9 @@ def test_python_generator_requires_snapshot_provenance_and_never_uses_git():
         "_sealed_snapshot_root",
     ):
         assert marker not in generator
+
+    source_manifest = PACKAGING_SOURCE_MANIFEST.read_text(encoding="utf-8")
+    assert 'SOURCE_PROVENANCE_FILENAME = "packaging-source-provenance.v1.json"' in source_manifest
 
     cleanup = PACKAGING_CLEANUP.read_text(encoding="utf-8")
     isolated_keys = cleanup.split("_ISOLATED_ENVIRONMENT_KEYS", 1)[1].split(
@@ -198,11 +200,12 @@ def test_rust_packaging_callers_require_formal_absolute_tool_identities():
     """Rust release/build callers cannot fall back to ambient tools."""
     build = BUILD_RS.read_text(encoding="utf-8")
     assert TOOLCHAIN_BINDER.is_file()
+    assert "packaged_source.rs" in build
     assert "packaging_toolchain.rs" in build
-    assert "verified_tool_executable(\"python\")" in build
-    assert "verified_tool_executable(\"git\")" in build
-    assert "scripts.generator_source_manifest" in build
-    assert "source closure failed before isolated generation" in build
+    assert 'packaging_toolchain::verified_tool("python")' in build
+    assert 'packaging_toolchain::verified_tool("git")' in build
+    assert "packaged_source::verify_and_snapshot_against_manifest" in build
+    assert "trusted Rust source verification failed" in build
     assert 'Command::new("git")' not in build
     assert 'var_os("PYTHON")' not in build
     assert 'unwrap_or_else(|| "python"' not in build
