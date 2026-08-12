@@ -11,6 +11,7 @@ import { normalizeLocale, t } from "../lib/i18n";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement, type PlacementManifest } from "../lib/placement";
 import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } from "../lib/modelApiRoutes";
 import { settingsFieldSearchText, settingsSectionSearchText } from "../lib/settingsSearch";
+import { resolveSettingsState } from "../lib/settingsState";
 import { reviewConnectionDraft, reviewOAuthDestination, type CredentialImportReview, type OAuthDestinationReview } from "../lib/oauthConnectionReview";
 import { settingsApiResources } from "../features/settings/resources/settingsApiResources";
 import { availabilityCopy, type ModelAvailabilityAfterKeySave } from "../features/settings/resources/useModelAvailability";
@@ -3457,8 +3458,8 @@ export function SettingsModalRenderer({
   catalog,
   health,
   previewsCount,
-  settingsSections,
-  settingsValues,
+  settingsSections: providedSettingsSections,
+  settingsValues: providedSettingsValues,
   desktopSystemInfo,
   modelProfiles = [],
   activeModelProfileId,
@@ -3475,6 +3476,13 @@ export function SettingsModalRenderer({
   onRetrySave,
   onSettingChange,
 }: SettingsModalRendererProps) {
+  const { sections: settingsSections, values: settingsValues } = useMemo(
+    () => resolveSettingsState(
+      { sections: providedSettingsSections, values: providedSettingsValues },
+      catalog,
+    ),
+    [catalog, providedSettingsSections, providedSettingsValues],
+  );
   const isJapanese = normalizeLocale(locale) === "ja";
   const localizedCopy = (english: string, japanese: string) => isJapanese ? japanese : english;
   const prefersReducedMotion = useReducedMotion();
