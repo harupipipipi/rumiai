@@ -35,6 +35,9 @@ SEALED_REQUIREMENTS_NAME = "authority-requirements.lock"
 INSTALLATION_JOURNAL_NAME = ".tobkiri-packaging-transaction.v1.json"
 INSTALLATION_JOURNAL_SCHEMA = "tobkiri.packaging-python-transaction.v1"
 PROVISIONAL_PREFIX = ".tobkiri-packaging-python-"
+ANCESTOR_JOURNAL_PREFIX = "ancestor-"
+ANCESTOR_JOURNAL_SCHEMA = "tobkiri.packaging-python-ancestor.v1"
+ANCESTOR_PROVISIONAL_PREFIX = ".tobkiri-packaging-parent-"
 
 PROVENANCE_FIELDS = frozenset(
     {
@@ -528,6 +531,252 @@ def _remove_root_tree(path: Path, identity: tuple[int, int] | None = None) -> No
         )
 
 
+ROOT_ENSURE_PARENT_CODE = r"""
+import ctypes, errno, json, os, signal, stat, sys
+anchor_path, relative, staging_path, token, journal_schema, provisional_prefix = sys.argv[1:7]
+owner = int(sys.argv[7]); failpoint = sys.argv[8] if len(sys.argv) > 8 else ''
+parts = relative.split('/')
+if not parts or any(not part or part in ('.', '..') or '/' in part for part in parts):
+    raise SystemExit('unsafe ancestor path')
+if len(token) != 32 or any(c not in '0123456789abcdef' for c in token):
+    raise SystemExit('invalid transaction token')
+def canonical(payload):
+    return json.dumps(payload, sort_keys=True, separators=(',', ':')).encode() + b'\n'
+def exclusive_rename(parent, source, destination):
+    if sys.platform == 'darwin':
+        function = ctypes.CDLL(None, use_errno=True).renameatx_np
+        function.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                             ctypes.c_char_p, ctypes.c_uint]
+        if function(parent, os.fsencode(source), parent, os.fsencode(destination), 4):
+            raise OSError(ctypes.get_errno(), 'exclusive rename failed')
+    else:
+        try: os.stat(destination, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError: pass
+        else: raise FileExistsError(errno.EEXIST, 'ancestor already exists')
+        os.rename(source, destination, src_dir_fd=parent, dst_dir_fd=parent)
+def read_journal(staging, name):
+    info = os.stat(name, dir_fd=staging, follow_symlinks=False)
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != owner or \
+       stat.S_IMODE(info.st_mode) != 0o400 or info.st_nlink != 1:
+        raise SystemExit('invalid ancestor journal metadata')
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=staging)
+    try: encoded = os.read(fd, 4097)
+    finally: os.close(fd)
+    try:
+        pairs = json.loads(encoded, object_pairs_hook=lambda value: value)
+        if not isinstance(pairs, list): raise ValueError()
+        keys = [key for key, _ in pairs]
+        if len(keys) != len(set(keys)): raise ValueError()
+        payload = dict(pairs)
+    except Exception: raise SystemExit('partial or invalid ancestor journal')
+    if len(encoded) > 4096 or canonical(payload) != encoded or \
+       set(payload) != {'dev','ino','schema','target','token'}:
+        raise SystemExit('noncanonical ancestor journal')
+    if payload['schema'] != journal_schema or payload['token'] != token:
+        raise SystemExit('ancestor journal authority mismatch')
+    return payload
+anchor = os.open(anchor_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+staging = os.open(staging_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+current = anchor
+try:
+    for descriptor in (anchor, staging):
+        info = os.fstat(descriptor)
+        if info.st_uid != owner or info.st_mode & 0o022:
+            raise SystemExit('unsafe ancestor authority')
+    traversed = []
+    for index, part in enumerate(parts):
+        traversed.append(part)
+        target = '/'.join(traversed)
+        journal_name = f'ancestor-{index:04d}.json'
+        provisional = f'{provisional_prefix}{token}-{index:04d}'
+        try: payload = read_journal(staging, journal_name)
+        except FileNotFoundError: payload = None
+        try:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                            dir_fd=current)
+        except FileNotFoundError:
+            child = None
+        if child is None and payload is not None:
+            provisional_fd = os.open(provisional, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                     dir_fd=current)
+            info = os.fstat(provisional_fd); os.close(provisional_fd)
+            if payload['target'] != target or (payload['dev'], payload['ino']) != \
+               (info.st_dev, info.st_ino):
+                raise SystemExit('ancestor provisional identity mismatch')
+            exclusive_rename(current, provisional, part); os.fsync(current)
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                            dir_fd=current)
+        elif child is None:
+            try:
+                stale = os.open(provisional, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                dir_fd=current)
+            except FileNotFoundError: stale = None
+            if stale is not None:
+                stale_info = os.fstat(stale); entries = os.listdir(stale); os.close(stale)
+                if stale_info.st_uid != owner or stat.S_IMODE(stale_info.st_mode) != 0o700 or entries:
+                    raise SystemExit('unsafe unjournaled ancestor provisional')
+                os.rmdir(provisional, dir_fd=current); os.fsync(current)
+            os.mkdir(provisional, 0o700, dir_fd=current)
+            if failpoint == f'after_mkdir:{index}': os.kill(os.getpid(), signal.SIGKILL)
+            provisional_fd = os.open(provisional, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                     dir_fd=current)
+            os.fchown(provisional_fd, owner, -1); os.fchmod(provisional_fd, 0o700)
+            info = os.fstat(provisional_fd)
+            payload = {'dev': info.st_dev, 'ino': info.st_ino, 'schema': journal_schema,
+                       'target': target, 'token': token}
+            encoded = canonical(payload)
+            journal = os.open(journal_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                              os.O_NOFOLLOW, 0o400, dir_fd=staging)
+            try:
+                offset = 0
+                while offset < len(encoded): offset += os.write(journal, encoded[offset:])
+                os.fsync(journal)
+            finally: os.close(journal)
+            os.fsync(provisional_fd); os.fsync(staging); os.fsync(current)
+            exclusive_rename(current, provisional, part); os.fsync(current)
+            os.close(provisional_fd)
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                            dir_fd=current)
+        info = os.fstat(child)
+        if info.st_uid != owner or info.st_mode & 0o022:
+            raise SystemExit('unsafe existing ancestor')
+        if payload is not None and (payload['target'] != target or
+           (payload['dev'], payload['ino']) != (info.st_dev, info.st_ino)):
+            raise SystemExit('created ancestor identity changed')
+        if current != anchor: os.close(current)
+        current = child
+finally:
+    if current != anchor: os.close(current)
+    os.close(anchor); os.close(staging)
+"""
+
+
+ROOT_CLEANUP_ANCESTORS_CODE = r"""
+import errno, json, os, stat, sys
+anchor_path, relative, staging_path, token, journal_schema = sys.argv[1:6]
+owner = int(sys.argv[6]); provisional_prefix = '.tobkiri-packaging-parent-'
+def canonical(payload):
+    return json.dumps(payload, sort_keys=True, separators=(',', ':')).encode() + b'\n'
+staging = os.open(staging_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    journals = sorted(name for name in os.listdir(staging)
+                      if name.startswith('ancestor-') and name.endswith('.json'))
+    payloads = []
+    for name in journals:
+        info = os.stat(name, dir_fd=staging, follow_symlinks=False)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != owner or \
+           stat.S_IMODE(info.st_mode) != 0o400 or info.st_nlink != 1:
+            raise SystemExit('invalid ancestor journal metadata')
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=staging)
+        try: encoded = os.read(fd, 4097)
+        finally: os.close(fd)
+        try:
+            pairs = json.loads(encoded, object_pairs_hook=lambda value: value)
+            keys = [key for key, _ in pairs]
+            if len(keys) != len(set(keys)): raise ValueError()
+            payload = dict(pairs)
+        except Exception: raise SystemExit('partial or invalid ancestor journal')
+        if len(encoded) > 4096 or canonical(payload) != encoded or \
+           set(payload) != {'dev','ino','schema','target','token'} or \
+           payload['schema'] != journal_schema or payload['token'] != token:
+            raise SystemExit('ancestor journal authority mismatch')
+        payloads.append(payload)
+finally: os.close(staging)
+parent = os.open(anchor_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    for index, part in enumerate(relative.split('/')):
+        provisional = f'{provisional_prefix}{token}-{index:04d}'
+        try:
+            stale = os.open(provisional, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                            dir_fd=parent)
+        except FileNotFoundError: stale = None
+        if stale is not None:
+            info = os.fstat(stale); entries = os.listdir(stale); os.close(stale)
+            if info.st_uid != owner or stat.S_IMODE(info.st_mode) != 0o700 or entries:
+                raise SystemExit('unsafe unjournaled ancestor provisional')
+            os.rmdir(provisional, dir_fd=parent); os.fsync(parent)
+        try:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                            dir_fd=parent)
+        except FileNotFoundError: break
+        os.close(parent); parent = child
+finally: os.close(parent)
+for payload in reversed(payloads):
+    parts = payload['target'].split('/')
+    if not parts or any(not part or part in ('.', '..') for part in parts):
+        raise SystemExit('unsafe ancestor journal target')
+    parent = os.open(anchor_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                            dir_fd=parent)
+            os.close(parent); parent = child
+        try:
+            target = os.open(parts[-1], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                             dir_fd=parent)
+        except FileNotFoundError: continue
+        info = os.fstat(target); os.close(target)
+        if info.st_uid != owner or (info.st_dev, info.st_ino) != \
+           (payload['dev'], payload['ino']):
+            raise SystemExit('ancestor cleanup identity mismatch')
+        current = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
+            raise SystemExit('ancestor cleanup name changed')
+        try: os.rmdir(parts[-1], dir_fd=parent); os.fsync(parent)
+        except OSError as error:
+            if error.errno not in (errno.ENOTEMPTY, errno.EEXIST): raise
+    finally: os.close(parent)
+"""
+
+
+def ensure_installation_parent(
+    provenance: InstallerProvenance, staging: Path, token: str
+) -> None:
+    relative = provenance.install_root.parent.relative_to("/")
+    subprocess.run(
+        [
+            "/usr/bin/sudo",
+            "/usr/bin/python3",
+            "-I",
+            "-B",
+            "-c",
+            ROOT_ENSURE_PARENT_CODE,
+            "/",
+            relative,
+            staging,
+            token,
+            ANCESTOR_JOURNAL_SCHEMA,
+            ANCESTOR_PROVISIONAL_PREFIX,
+            "0",
+        ],
+        check=True,
+        env={"PATH": "/usr/bin:/bin"},
+    )
+
+
+def cleanup_created_ancestors(
+    provenance: InstallerProvenance, staging: Path, token: str
+) -> None:
+    subprocess.run(
+        [
+            "/usr/bin/sudo",
+            "/usr/bin/python3",
+            "-I",
+            "-B",
+            "-c",
+            ROOT_CLEANUP_ANCESTORS_CODE,
+            "/",
+            provenance.install_root.parent.relative_to("/"),
+            staging,
+            token,
+            ANCESTOR_JOURNAL_SCHEMA,
+            "0",
+        ],
+        check=True,
+        env={"PATH": "/usr/bin:/bin"},
+    )
+
+
 ROOT_CREATE_INSTALLATION_CODE = r"""
 import ctypes, errno, json, os, signal, stat, sys
 parent_path, fixed, token, journal_name, schema = sys.argv[1:6]
@@ -584,7 +833,8 @@ ROOT_RECOVER_INSTALLATIONS_CODE = r"""
 import json, os, stat, sys
 parent_path, fixed, token_filter, journal_name, schema = sys.argv[1:6]
 owner = int(sys.argv[6]); prefix = '.tobkiri-packaging-python-'
-parent = os.open(parent_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try: parent = os.open(parent_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+except FileNotFoundError: raise SystemExit(0)
 def canonical(payload):
     return json.dumps(payload, sort_keys=True, separators=(',', ':')).encode() + b'\n'
 def journal(directory, expected_token):
@@ -734,6 +984,7 @@ def cleanup_transaction(token: str) -> None:
         provenance_bytes, requirements_bytes, "sealed trusted Git provenance"
     )
     recover_stale_installations(provenance, token)
+    cleanup_created_ancestors(provenance, staging, token)
     _remove_root_tree(staging)
 
 
@@ -1005,6 +1256,7 @@ def prepare_macos_installation(
     """Install official Python and hash-locked dependencies into root authority."""
     package = staging / f"python-{provenance.version}.pkg"
     try:
+        ensure_installation_parent(provenance, staging, token)
         recover_stale_installations(provenance)
         subprocess.run(["/usr/bin/sudo", "/bin/chmod", "0700", staging], check=True)
         subprocess.run(

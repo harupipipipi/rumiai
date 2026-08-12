@@ -289,6 +289,200 @@ def _recovery_helper(
     return _installation_helper(_MODULE.ROOT_RECOVER_INSTALLATIONS_CODE, parent, token)
 
 
+def _ancestor_helper(
+    code: str,
+    anchor: Path,
+    staging: Path,
+    token: str,
+    failpoint: str = "",
+) -> subprocess.CompletedProcess[bytes]:
+    arguments = [sys.executable, "-I", "-B", "-c", code, anchor]
+    if code == _MODULE.ROOT_ENSURE_PARENT_CODE:
+        arguments.extend(
+            [
+                "Library/Frameworks/Python.framework/Versions",
+                staging,
+                token,
+                _MODULE.ANCESTOR_JOURNAL_SCHEMA,
+                _MODULE.ANCESTOR_PROVISIONAL_PREFIX,
+                str(os.getuid()),
+                failpoint,
+            ]
+        )
+    else:
+        arguments.extend(
+            [
+                "Library/Frameworks/Python.framework/Versions",
+                staging,
+                token,
+                _MODULE.ANCESTOR_JOURNAL_SCHEMA,
+                str(os.getuid()),
+            ]
+        )
+    return subprocess.run(
+        arguments,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
+def test_process_creates_and_rolls_back_clean_framework_ancestors(
+    tmp_path: Path,
+) -> None:
+    """A clean macOS-like root gains only journaled ancestors, then loses them."""
+    anchor = tmp_path / "root"
+    staging = tmp_path / "staging"
+    anchor.mkdir(mode=0o700)
+    staging.mkdir(mode=0o700)
+    token = "1" * 32
+    assert (
+        _ancestor_helper(
+            _MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token
+        ).returncode
+        == 0
+    )
+    versions = anchor / "Library/Frameworks/Python.framework/Versions"
+    assert versions.is_dir()
+    assert len(list(staging.glob("ancestor-*.json"))) == 4
+    assert (
+        _ancestor_helper(
+            _MODULE.ROOT_CLEANUP_ANCESTORS_CODE, anchor, staging, token
+        ).returncode
+        == 0
+    )
+    assert not (anchor / "Library").exists()
+
+
+def test_process_preserves_preexisting_ancestor_modes(tmp_path: Path) -> None:
+    """Preexisting safe hierarchy is validated but never journaled or modified."""
+    anchor = tmp_path / "root"
+    staging = tmp_path / "staging"
+    versions = anchor / "Library/Frameworks/Python.framework/Versions"
+    versions.mkdir(parents=True, mode=0o750)
+    staging.mkdir(mode=0o700)
+    hierarchy = [
+        anchor,
+        anchor / "Library",
+        anchor / "Library/Frameworks",
+        anchor / "Library/Frameworks/Python.framework",
+        versions,
+    ]
+    for path in hierarchy:
+        path.chmod(0o750)
+    before = {path: path.stat().st_mode & 0o7777 for path in hierarchy}
+    token = "2" * 32
+    assert (
+        _ancestor_helper(
+            _MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token
+        ).returncode
+        == 0
+    )
+    assert list(staging.glob("ancestor-*.json")) == []
+    assert {path: path.stat().st_mode & 0o7777 for path in hierarchy} == before
+
+
+def test_process_recovers_kill_midway_through_ancestor_creation(
+    tmp_path: Path,
+) -> None:
+    """A killed mkdir is recovered from prior journals and strict provisional name."""
+    anchor = tmp_path / "root"
+    staging = tmp_path / "staging"
+    anchor.mkdir(mode=0o700)
+    staging.mkdir(mode=0o700)
+    token = "3" * 32
+    killed = _ancestor_helper(
+        _MODULE.ROOT_ENSURE_PARENT_CODE,
+        anchor,
+        staging,
+        token,
+        "after_mkdir:1",
+    )
+    assert killed.returncode < 0
+    assert (
+        _ancestor_helper(
+            _MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token
+        ).returncode
+        == 0
+    )
+    assert (anchor / "Library/Frameworks/Python.framework/Versions").is_dir()
+
+
+def test_process_cleanup_removes_unjournaled_empty_ancestor_provisional(
+    tmp_path: Path,
+) -> None:
+    """Always-cleanup removes the exact empty nonce left before journal creation."""
+    anchor = tmp_path / "root"
+    staging = tmp_path / "staging"
+    anchor.mkdir(mode=0o700)
+    staging.mkdir(mode=0o700)
+    token = "6" * 32
+    killed = _ancestor_helper(
+        _MODULE.ROOT_ENSURE_PARENT_CODE,
+        anchor,
+        staging,
+        token,
+        "after_mkdir:0",
+    )
+    assert killed.returncode < 0
+    assert (
+        _ancestor_helper(
+            _MODULE.ROOT_CLEANUP_ANCESTORS_CODE, anchor, staging, token
+        ).returncode
+        == 0
+    )
+    assert list(anchor.iterdir()) == []
+
+
+@pytest.mark.parametrize("unsafe", ["symlink", "writable"])
+def test_process_rejects_unsafe_existing_ancestor(tmp_path: Path, unsafe: str) -> None:
+    """Symlinked or writable ancestor authority fails closed without mutation."""
+    anchor = tmp_path / "root"
+    staging = tmp_path / "staging"
+    anchor.mkdir(mode=0o700)
+    staging.mkdir(mode=0o700)
+    library = anchor / "Library"
+    if unsafe == "symlink":
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        library.symlink_to(outside, target_is_directory=True)
+    else:
+        library.mkdir(mode=0o700)
+        library.chmod(0o777)
+    result = _ancestor_helper(
+        _MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, "4" * 32
+    )
+    assert result.returncode != 0
+    if unsafe == "writable":
+        assert library.stat().st_mode & 0o7777 == 0o777
+
+
+def test_process_retains_created_ancestor_that_becomes_nonempty(
+    tmp_path: Path,
+) -> None:
+    """Rollback retains journaled ancestors when external content makes them nonempty."""
+    anchor = tmp_path / "root"
+    staging = tmp_path / "staging"
+    anchor.mkdir(mode=0o700)
+    staging.mkdir(mode=0o700)
+    token = "5" * 32
+    assert (
+        _ancestor_helper(
+            _MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token
+        ).returncode
+        == 0
+    )
+    versions = anchor / "Library/Frameworks/Python.framework/Versions"
+    (versions / "external").write_bytes(b"preserve")
+    assert (
+        _ancestor_helper(
+            _MODULE.ROOT_CLEANUP_ANCESTORS_CODE, anchor, staging, token
+        ).returncode
+        == 0
+    )
+    assert (versions / "external").read_bytes() == b"preserve"
+
+
 def test_process_recovers_kill_immediately_after_provisional_mkdir(
     tmp_path: Path,
 ) -> None:
@@ -410,6 +604,9 @@ def test_prefix_journal_precedes_ditto_and_cancellation_cleanup_is_persistent() 
     )
     assert prepare.index("recover_stale_installations(") < prepare.index(
         "_remove_previous_installation("
+    )
+    assert prepare.index("ensure_installation_parent(") < prepare.index(
+        "recover_stale_installations("
     )
     assert "cleanup_transaction(token)" in prepare
     assert "_remove_root_tree(staging)" not in prepare
