@@ -3117,17 +3117,18 @@ fn verify_allowed_generated_untracked(repository_root: &Path, relative: &str) ->
             "generated untracked root has unsafe type: {root}"
         )));
     }
+    if allow_symlink {
+        return verify_node_modules_generated_path(&current, descendant, relative);
+    }
     let components = descendant.components().collect::<Vec<_>>();
     for (index, component) in components.iter().enumerate() {
         current.push(component.as_os_str());
         metadata = fs::symlink_metadata(&current)?;
         let is_leaf = index + 1 == components.len();
         if metadata.file_type().is_symlink() {
-            if !(is_leaf && allow_symlink) {
-                return Err(invalid_release(format!(
-                    "generated untracked path contains a symlink: {relative}"
-                )));
-            }
+            return Err(invalid_release(format!(
+                "generated untracked path contains a symlink: {relative}"
+            )));
         } else if is_leaf {
             if !(metadata.is_file() || metadata.is_dir()) {
                 return Err(invalid_release(format!(
@@ -3150,6 +3151,231 @@ fn verify_allowed_generated_untracked(repository_root: &Path, relative: &str) ->
         }
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn verify_node_modules_generated_path(
+    root: &Path,
+    descendant: &Path,
+    relative: &str,
+) -> io::Result<()> {
+    const MAX_SYMLINK_HOPS: usize = 40;
+    use std::ffi::{CString, OsStr, OsString};
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+    use std::os::unix::fs::MetadataExt;
+
+    fn open_root(root: &Path, relative: &str) -> io::Result<File> {
+        let before = fs::symlink_metadata(root)?;
+        if before.file_type().is_symlink() || !before.is_dir() {
+            return Err(invalid_release(format!(
+                "generated node_modules root has unsafe type: {relative}"
+            )));
+        }
+        let encoded = CString::new(root.as_os_str().as_bytes())
+            .map_err(|_| invalid_release("generated node_modules root contains NUL"))?;
+        let fd = unsafe {
+            libc::open(
+                encoded.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if fd == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        let handle = unsafe { File::from_raw_fd(fd) };
+        let opened = handle.metadata()?;
+        let after = fs::symlink_metadata(root)?;
+        if !same_source_object(&before, &opened) || !same_source_object(&opened, &after) {
+            return Err(invalid_release(format!(
+                "generated node_modules root identity changed during verification: {relative}"
+            )));
+        }
+        Ok(handle)
+    }
+
+    fn lstat_at(directory: &File, name: &OsStr) -> io::Result<libc::stat> {
+        let encoded = CString::new(name.as_bytes())
+            .map_err(|_| invalid_release("generated node_modules component contains NUL"))?;
+        let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
+        if unsafe {
+            libc::fstatat(
+                directory.as_raw_fd(),
+                encoded.as_ptr(),
+                status.as_mut_ptr(),
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        } == -1
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(unsafe { status.assume_init() })
+    }
+
+    fn readlink_at(directory: &File, name: &OsStr) -> io::Result<PathBuf> {
+        const MAX_LINK_BYTES: usize = 65_536;
+        let encoded = CString::new(name.as_bytes())
+            .map_err(|_| invalid_release("generated node_modules symlink contains NUL"))?;
+        let mut capacity = 256_usize;
+        loop {
+            let mut bytes = vec![0_u8; capacity];
+            let length = unsafe {
+                libc::readlinkat(
+                    directory.as_raw_fd(),
+                    encoded.as_ptr(),
+                    bytes.as_mut_ptr().cast(),
+                    bytes.len(),
+                )
+            };
+            if length == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            let length = length as usize;
+            if length < bytes.len() {
+                bytes.truncate(length);
+                return Ok(PathBuf::from(OsString::from_vec(bytes)));
+            }
+            if capacity == MAX_LINK_BYTES {
+                return Err(invalid_release(
+                    "generated node_modules symlink target is too long",
+                ));
+            }
+            capacity = (capacity * 2).min(MAX_LINK_BYTES);
+        }
+    }
+
+    fn open_at(directory: &File, name: &OsStr, directory_only: bool) -> io::Result<File> {
+        let encoded = CString::new(name.as_bytes())
+            .map_err(|_| invalid_release("generated node_modules component contains NUL"))?;
+        let mut flags = libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+        if directory_only {
+            flags |= libc::O_DIRECTORY;
+        }
+        let fd = unsafe { libc::openat(directory.as_raw_fd(), encoded.as_ptr(), flags) };
+        if fd == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(unsafe { File::from_raw_fd(fd) })
+        }
+    }
+
+    fn same_stat_object(status: &libc::stat, metadata: &fs::Metadata) -> bool {
+        status.st_dev as u64 == metadata.dev()
+            && status.st_ino as u64 == metadata.ino()
+            && (status.st_mode as u32 & libc::S_IFMT as u32)
+                == (metadata.mode() & libc::S_IFMT as u32)
+    }
+
+    let root_handle = open_root(root, relative)?;
+    let mut directory = root_handle.try_clone()?;
+    let mut pending = descendant
+        .components()
+        .map(|component| component.as_os_str().to_owned())
+        .collect::<std::collections::VecDeque<_>>();
+    let mut resolved = Vec::<OsString>::new();
+    let mut visited_links = std::collections::HashSet::<PathBuf>::new();
+    let mut hops = 0_usize;
+
+    if pending.is_empty() {
+        return verify_generated_open_target(&root_handle, relative);
+    }
+    while let Some(component) = pending.pop_front() {
+        let status = lstat_at(&directory, &component)?;
+        let logical = resolved
+            .iter()
+            .fold(PathBuf::new(), |path, component| path.join(component))
+            .join(&component);
+        if status.st_mode as u32 & libc::S_IFMT as u32 == libc::S_IFLNK as u32 {
+            hops += 1;
+            if hops > MAX_SYMLINK_HOPS || !visited_links.insert(logical) {
+                return Err(invalid_release(format!(
+                    "generated node_modules symlink chain is cyclic or too deep: {relative}"
+                )));
+            }
+            let target = readlink_at(&directory, &component)?;
+            if target.is_absolute() {
+                return Err(invalid_release(format!(
+                    "generated node_modules symlink target is absolute: {relative}"
+                )));
+            }
+            let mut replacement = resolved.clone();
+            for target_component in target.components() {
+                match target_component {
+                    Component::CurDir => {}
+                    Component::Normal(value) => replacement.push(value.to_owned()),
+                    Component::ParentDir => {
+                        if replacement.pop().is_none() {
+                            return Err(invalid_release(format!(
+                                "generated node_modules symlink escapes its root: {relative}"
+                            )));
+                        }
+                    }
+                    Component::RootDir | Component::Prefix(_) => {
+                        return Err(invalid_release(format!(
+                            "generated node_modules symlink target is absolute: {relative}"
+                        )))
+                    }
+                }
+            }
+            replacement.extend(pending.drain(..));
+            pending = replacement.into();
+            resolved.clear();
+            directory = root_handle.try_clone()?;
+            continue;
+        }
+
+        let is_leaf = pending.is_empty();
+        let opened = open_at(&directory, &component, !is_leaf)?;
+        let metadata = opened.metadata()?;
+        let after = lstat_at(&directory, &component)?;
+        if !same_stat_object(&status, &metadata) || !same_stat_object(&after, &metadata) {
+            return Err(invalid_release(format!(
+                "generated node_modules component identity changed: {relative}"
+            )));
+        }
+        if is_leaf {
+            return verify_generated_open_target(&opened, relative);
+        }
+        if !metadata.is_dir() {
+            return Err(invalid_release(format!(
+                "generated node_modules ancestor is not a directory: {relative}"
+            )));
+        }
+        directory = opened;
+        resolved.push(component);
+    }
+    Err(invalid_release(format!(
+        "generated node_modules path has no target: {relative}"
+    )))
+}
+
+#[cfg(unix)]
+fn verify_generated_open_target(handle: &File, relative: &str) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = handle.metadata()?;
+    if !(metadata.is_file() || metadata.is_dir()) {
+        return Err(invalid_release(format!(
+            "generated untracked target has unsafe type: {relative}"
+        )));
+    }
+    if metadata.is_file() && metadata.nlink() != 1 {
+        return Err(invalid_release(format!(
+            "generated untracked target is hardlinked: {relative}"
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn verify_node_modules_generated_path(
+    _root: &Path,
+    _descendant: &Path,
+    _relative: &str,
+) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "node_modules generated output requires Unix FD-relative verification",
+    ))
 }
 
 fn verify_tracked_worktree_bytes(
@@ -4579,6 +4805,109 @@ mod tests {
                 "tobkiri_launcher/src-tauri/gen/app/device-like",
             )
             .expect_err("generated special file must be rejected");
+
+            let modules = tree.path().join("tobkiri_launcher/frontend/node_modules");
+            let package_bin = modules.join("package/bin");
+            fs::create_dir_all(&package_bin).unwrap();
+            fs::write(package_bin.join("tool.js"), b"legitimate npm bin").unwrap();
+            fs::create_dir_all(modules.join(".bin")).unwrap();
+            fs::create_dir_all(modules.join("links")).unwrap();
+            symlink("../package/bin/tool.js", modules.join("links/tool")).unwrap();
+            symlink("../links/tool", modules.join(".bin/tool")).unwrap();
+            verify_allowed_generated_untracked(
+                tree.path(),
+                "tobkiri_launcher/frontend/node_modules/.bin/tool",
+            )
+            .expect("bounded relative npm bin symlink chain should be allowed");
+
+            symlink("/tmp/attacker", modules.join(".bin/absolute")).unwrap();
+            verify_allowed_generated_untracked(
+                tree.path(),
+                "tobkiri_launcher/frontend/node_modules/.bin/absolute",
+            )
+            .expect_err("absolute npm symlink target must be rejected");
+
+            symlink("../../../outside", modules.join(".bin/escape")).unwrap();
+            verify_allowed_generated_untracked(
+                tree.path(),
+                "tobkiri_launcher/frontend/node_modules/.bin/escape",
+            )
+            .expect_err("npm symlink target outside node_modules must be rejected");
+
+            symlink("../missing/tool", modules.join(".bin/broken")).unwrap();
+            verify_allowed_generated_untracked(
+                tree.path(),
+                "tobkiri_launcher/frontend/node_modules/.bin/broken",
+            )
+            .expect_err("broken npm symlink must be rejected");
+
+            symlink("cycle-b", modules.join(".bin/cycle-a")).unwrap();
+            symlink("cycle-a", modules.join(".bin/cycle-b")).unwrap();
+            verify_allowed_generated_untracked(
+                tree.path(),
+                "tobkiri_launcher/frontend/node_modules/.bin/cycle-a",
+            )
+            .expect_err("cyclic npm symlink chain must be rejected");
+
+            let deep = modules.join("deep");
+            fs::create_dir_all(&deep).unwrap();
+            for index in 0..41 {
+                let target = if index == 40 {
+                    "../package/bin/tool.js".to_owned()
+                } else {
+                    format!("link-{}", index + 1)
+                };
+                symlink(target, deep.join(format!("link-{index}"))).unwrap();
+            }
+            verify_allowed_generated_untracked(
+                tree.path(),
+                "tobkiri_launcher/frontend/node_modules/deep/link-0",
+            )
+            .expect_err("overlong npm symlink chain must be rejected");
+
+            verify_allowed_generated_untracked(
+                tree.path(),
+                "tobkiri_launcher/frontend/node_modules/.bin/../package/bin/tool.js",
+            )
+            .expect_err("non-normalized generated path must be rejected");
+
+            let module_socket = modules.join("package/bin/socket");
+            let _module_listener = UnixListener::bind(&module_socket).unwrap();
+            symlink("../package/bin/socket", modules.join(".bin/socket")).unwrap();
+            verify_allowed_generated_untracked(
+                tree.path(),
+                "tobkiri_launcher/frontend/node_modules/.bin/socket",
+            )
+            .expect_err("npm symlink to a special file must be rejected");
+
+            let outside = tree.path().join("outside-hardlink");
+            fs::write(&outside, b"attacker helper").unwrap();
+            fs::hard_link(&outside, package_bin.join("hardlinked-helper")).unwrap();
+            symlink(
+                "../package/bin/hardlinked-helper",
+                modules.join(".bin/hardlinked"),
+            )
+            .unwrap();
+            verify_allowed_generated_untracked(
+                tree.path(),
+                "tobkiri_launcher/frontend/node_modules/.bin/hardlinked",
+            )
+            .expect_err("npm symlink to a hardlinked helper must be rejected");
+
+            let symlinked_tree = TestTree::new("symlinked-gen-root");
+            let replacement = symlinked_tree.path().join("replacement");
+            fs::create_dir_all(&replacement).unwrap();
+            fs::create_dir_all(symlinked_tree.path().join("tobkiri_launcher/src-tauri")).unwrap();
+            symlink(
+                &replacement,
+                symlinked_tree.path().join("tobkiri_launcher/src-tauri/gen"),
+            )
+            .unwrap();
+            verify_allowed_generated_untracked(
+                symlinked_tree.path(),
+                "tobkiri_launcher/src-tauri/gen",
+            )
+            .expect_err("generated runtime root symlink must remain forbidden");
         }
     }
 
