@@ -202,6 +202,35 @@ test("tool previews include opened localhost urls", () => {
   assert.equal(previews.some((preview) => preview.data.type === "web" && preview.data.url === "http://127.0.0.1:5173/"), true);
 });
 
+test("tool previews include activity detail for completed calculator events without artifacts", () => {
+  const message = assistantMessage({
+    events: [
+      {
+        type: "tool_call_completed",
+        phase: "tool_call_completed",
+        tool_name: "calculator",
+        tool_call_id: "call_calc",
+        arguments: { expression: "2 + 2" },
+        display_text: "2 + 2 = 4",
+        result: { status: "ok", data: { result: 4 } },
+        timestamp: 2_000,
+      },
+    ],
+  });
+
+  const previews = toolPreviewsFromMessages([message]);
+  const detail = previews.find((preview) => preview.toolStepId === "call_calc");
+
+  assert.equal(previews.length, 1);
+  assert.equal(detail?.data.type, "file");
+  if (detail?.data.type === "file") {
+    assert.equal(detail.data.filename, "calculator.activity.md");
+    assert.match(detail.data.content ?? "", /Tool activity detail/);
+    assert.match(detail.data.content ?? "", /2 \+ 2/);
+    assert.match(detail.data.content ?? "", /"result": 4/);
+  }
+});
+
 test("tool previews ignore failed tool artifacts and generic remote hrefs", () => {
   const message = assistantMessage({
     tool_logs: [
