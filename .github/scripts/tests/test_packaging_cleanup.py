@@ -167,6 +167,16 @@ class _FakeWindowsApi:
             file_attributes=int(record["attributes"]),
         )
 
+    def path_identity(self, path: Path, *, directory: bool) -> Any:
+        result = cleanup._lstat_no_follow(path)
+        attributes = cleanup._WINDOWS_FILE_ATTRIBUTE_DIRECTORY if directory else 0
+        attributes |= int(getattr(result, "st_file_attributes", 0) or 0)
+        return cleanup._WindowsFileIdentity(
+            volume_serial=1,
+            file_index=int(result.st_ino),
+            file_attributes=attributes,
+        )
+
     def rename_same_parent(
         self,
         handle: int,
@@ -399,6 +409,7 @@ def test_windows_quarantine_rejects_cross_volume_bound_handles(
     target.write_bytes(b"owned")
     fake_api = _FakeWindowsApi()
     original_identity = fake_api.identity
+    original_path_identity = fake_api.path_identity
 
     def cross_volume_identity(handle: int) -> Any:
         identity = original_identity(handle)
@@ -410,7 +421,18 @@ def test_windows_quarantine_rejects_cross_volume_bound_handles(
             )
         return identity
 
+    def cross_volume_path_identity(path: Path, *, directory: bool) -> Any:
+        identity = original_path_identity(path, directory=directory)
+        if path == target:
+            return cleanup._WindowsFileIdentity(
+                volume_serial=identity.volume_serial + 1,
+                file_index=identity.file_index,
+                file_attributes=identity.file_attributes,
+            )
+        return identity
+
     fake_api.identity = cross_volume_identity  # type: ignore[assignment]
+    fake_api.path_identity = cross_volume_path_identity  # type: ignore[assignment]
     _use_fake_windows_native_api(monkeypatch, fake_api)
 
     with pytest.raises(cleanup.PackagingCleanupError, match="different volumes"):
@@ -471,6 +493,45 @@ def test_windows_directory_open_requests_traverse_and_read_attributes() -> None:
     assert accesses[0] & cleanup._WINDOWS_FILE_LIST_DIRECTORY
     assert accesses[0] & cleanup._WINDOWS_FILE_TRAVERSE
     assert accesses[0] & cleanup._WINDOWS_FILE_READ_ATTRIBUTES
+
+
+def test_windows_path_probe_is_nofollow_identity_only_and_closes() -> None:
+    """Path remap probes are compatible with held no-delete-sharing handles."""
+
+    calls: list[tuple[int, int, int]] = []
+    closed: list[int] = []
+    api = cleanup._WindowsApi.__new__(cleanup._WindowsApi)
+    expected = cleanup._WindowsFileIdentity(7, 11, 0)
+
+    def create_file(
+        _path: str,
+        access: int,
+        share_mode: int,
+        _security: object,
+        _creation: int,
+        flags: int,
+        _template: object,
+    ) -> int:
+        calls.append((access, share_mode, flags))
+        return 321
+
+    api._create_file = create_file
+    api.identity = lambda handle: expected if handle == 321 else None
+    api.close = closed.append
+
+    actual = api.path_identity(Path("C:/scope/owned.bin"), directory=False)
+
+    assert actual == expected
+    assert calls == [
+        (
+            cleanup._WINDOWS_FILE_READ_ATTRIBUTES,
+            cleanup._WINDOWS_FILE_SHARE_READ
+            | cleanup._WINDOWS_FILE_SHARE_WRITE
+            | cleanup._WINDOWS_FILE_SHARE_DELETE,
+            cleanup._WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
+        )
+    ]
+    assert closed == [321]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="requires native Windows handles")
@@ -1551,6 +1612,12 @@ def test_ancestor_replacement_between_attempts_fails_closed(
     nested = scope / "nested"
     target = nested / "owned"
     target.mkdir(parents=True)
+    external = tmp_path / "external-victim"
+    external.mkdir()
+    victim = external / "sentinel.txt"
+    victim.write_text("preserve", encoding="utf-8")
+    fake_api = _FakeWindowsApi()
+    _use_fake_windows_native_api(monkeypatch, fake_api)
     calls = 0
     original_remove = cleanup._remove_once
 
@@ -1561,10 +1628,10 @@ def test_ancestor_replacement_between_attempts_fails_closed(
             original_nested = scope / "nested-original"
             nested.rename(original_nested)
             nested.mkdir()
+            external.rename(target)
             raise _windows_error(32)
         original_remove(path, **kwargs)
 
-    monkeypatch.setattr(cleanup, "_IS_WINDOWS", True)
     monkeypatch.setattr(cleanup, "_remove_once", replace_ancestor_then_lock)
 
     with pytest.raises(cleanup.PackagingCleanupError, match="identity changed"):
@@ -1578,6 +1645,58 @@ def test_ancestor_replacement_between_attempts_fails_closed(
     assert calls == 1
     assert (scope / "nested-original" / "owned").exists()
     assert nested.exists()
+    assert (target / "sentinel.txt").read_text(encoding="utf-8") == "preserve"
+    assert fake_api.rename_calls == []
+
+
+def test_windows_retry_rejects_ancestor_that_becomes_reparse_point(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A junction/reparse substitution between retries is never traversed."""
+
+    scope = tmp_path / "scope"
+    nested = scope / "nested"
+    target = nested / "owned.bin"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"owned")
+    victim = tmp_path / "external-victim.txt"
+    victim.write_text("preserve", encoding="utf-8")
+    fake_api = _FakeWindowsApi()
+    _use_fake_windows_native_api(monkeypatch, fake_api)
+    original_path_identity = fake_api.path_identity
+    reparse = False
+
+    def path_identity(path: Path, *, directory: bool) -> Any:
+        identity = original_path_identity(path, directory=directory)
+        if reparse and path == nested:
+            return cleanup._WindowsFileIdentity(
+                volume_serial=identity.volume_serial,
+                file_index=identity.file_index,
+                file_attributes=(
+                    identity.file_attributes | cleanup._FILE_ATTRIBUTE_REPARSE_POINT
+                ),
+            )
+        return identity
+
+    def lock_then_reparse(_path: Path, **_kwargs: object) -> None:
+        nonlocal reparse
+        reparse = True
+        raise _windows_error(32)
+
+    fake_api.path_identity = path_identity  # type: ignore[assignment]
+    monkeypatch.setattr(cleanup, "_remove_once", lock_then_reparse)
+
+    with pytest.raises(cleanup.PackagingCleanupError, match="identity changed"):
+        cleanup.remove_owned_path(
+            target,
+            owner_root=scope,
+            operation="test retry reparse substitution",
+            sleep=lambda _delay: None,
+        )
+
+    assert target.read_bytes() == b"owned"
+    assert victim.read_text(encoding="utf-8") == "preserve"
+    assert fake_api.rename_calls == []
 
 
 def test_persistent_windows_lock_fails_closed_after_bounded_retries(

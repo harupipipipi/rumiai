@@ -341,8 +341,8 @@
     {
       "path": "scripts/packaging_cleanup.py",
       "type": "regular-file",
-      "size": 96233,
-      "sha256": "08e2609f9de17a4f5d13c2f801c3ee36598f659be6e9277e7d51737efdc81e3f",
+      "size": 98738,
+      "sha256": "18c4a9146fec37f37f01a58dbed5b38376f70adb529daf657f04ef8529510f92",
       "executable": false
     },
     {

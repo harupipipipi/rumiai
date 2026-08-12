@@ -220,6 +220,38 @@ class _WindowsApi:
             file_attributes=int(information.dwFileAttributes),
         )
 
+    def path_identity(self, path: Path, *, directory: bool) -> _WindowsFileIdentity:
+        """Probe the current no-follow pathname mapping by native file identity.
+
+        The long-lived ownership handles intentionally deny delete sharing.
+        This short-lived probe requests no delete access and permits delete
+        sharing, making it compatible with those handles while independently
+        proving that the pathname still resolves to the bound object.
+        """
+
+        flags = _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT
+        if directory:
+            flags |= _WINDOWS_FILE_FLAG_BACKUP_SEMANTICS
+        handle = self._create_file(
+            os.fspath(path),
+            _WINDOWS_FILE_READ_ATTRIBUTES,
+            _WINDOWS_FILE_SHARE_READ
+            | _WINDOWS_FILE_SHARE_WRITE
+            | _WINDOWS_FILE_SHARE_DELETE,
+            None,
+            _WINDOWS_OPEN_EXISTING,
+            flags,
+            None,
+        )
+        value = getattr(handle, "value", handle)
+        if value is None or int(value) == _WINDOWS_INVALID_HANDLE:
+            raise self._last_error(path)
+        probe = int(value)
+        try:
+            return self.identity(probe)
+        finally:
+            self.close(probe)
+
     def rename_same_parent(
         self,
         handle: int,
@@ -400,7 +432,14 @@ class _WindowsBindingState:
 
         return self.ancestor_handles[-1][2]
 
-    def assert_current(self, *, operation: str, path: Path, attempts: int) -> None:
+    def assert_current(
+        self,
+        *,
+        operation: str,
+        path: Path,
+        attempts: int,
+        target_path: Optional[Path] = None,
+    ) -> None:
         """Reject native handle identity or reparse changes before mutation."""
 
         try:
@@ -432,6 +471,20 @@ class _WindowsBindingState:
                         path=path,
                         reason=(
                             "bound Windows ancestor became a reparse point: "
+                            f"{ancestor_path}"
+                        ),
+                        attempts=attempts,
+                    )
+                pathname_identity = self.api.path_identity(
+                    ancestor_path,
+                    directory=True,
+                )
+                if pathname_identity != expected:
+                    raise _security_error(
+                        operation=operation,
+                        path=path,
+                        reason=(
+                            "bound Windows ancestor pathname identity changed: "
                             f"{ancestor_path}"
                         ),
                         attempts=attempts,
@@ -468,6 +521,18 @@ class _WindowsBindingState:
                         operation=operation,
                         path=path,
                         reason="bound Windows target became a reparse point",
+                        attempts=attempts,
+                    )
+                current_target_path = target_path or path
+                pathname_identity = self.api.path_identity(
+                    current_target_path,
+                    directory=self.target_is_directory,
+                )
+                if pathname_identity != self.target_identity:
+                    raise _security_error(
+                        operation=operation,
+                        path=path,
+                        reason="bound Windows target pathname identity changed",
                         attempts=attempts,
                     )
         except PackagingCleanupError:
@@ -579,6 +644,7 @@ class _PathBinding:
                 operation=operation,
                 path=self.target,
                 attempts=attempts,
+                target_path=self.quarantine_path,
             )
 
     def bind_quarantine(self, path: Path) -> None:

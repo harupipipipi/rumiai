@@ -879,7 +879,9 @@ jobs:
       - name: Test native Windows presentation artifact paths
         run: |
           python -m pytest -q .github/scripts/tests/test_packaging_cleanup.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pytest -q tobkiri_launcher/scripts/tests/test_package_presentation_artifact.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Set up Node
         uses: actions/setup-node@v4

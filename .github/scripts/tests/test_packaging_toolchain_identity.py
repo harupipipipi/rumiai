@@ -3290,6 +3290,25 @@ def test_windows_python_smoke_propagates_each_pytest_exit_code() -> None:
     assert f"{second_pytest}\n          {guard}" in step
 
 
+def test_windows_launcher_propagates_each_pytest_exit_code() -> None:
+    """A later launcher pytest cannot overwrite cleanup-suite failure."""
+    workflow = _SCRIPT.parents[1] / "workflows" / "test.yml"
+    payload = workflow.read_text(encoding="utf-8")
+    step = payload[payload.index("  tobkiri-launcher-windows:") :]
+
+    guard = "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
+    assert step.count(guard) == 2
+    first_pytest = (
+        "python -m pytest -q .github/scripts/tests/test_packaging_cleanup.py"
+    )
+    second_pytest = (
+        "python -m pytest -q "
+        "tobkiri_launcher/scripts/tests/test_package_presentation_artifact.py"
+    )
+    assert f"{first_pytest}\n          {guard}" in step
+    assert f"{second_pytest}\n          {guard}" in step
+
+
 def test_desktop_installer_paths_trigger_for_root_process_contract() -> None:
     """Both push and pull-request filters include the privileged contract tests."""
     workflow = _SCRIPT.parents[1] / "workflows" / "desktop-installers.yml"
