@@ -1014,6 +1014,136 @@ def test_inventory_digest_swap_is_rejected(
         _MODULE.verify_macos_installation(installation, provenance)
 
 
+def _framework_component_fixture(
+    root: Path,
+    *,
+    wrong_identifier: bool = False,
+    duplicate: bool = False,
+    unknown: bool = False,
+) -> tuple[_MODULE.InstallerProvenance, Path]:
+    series = "3.13"
+    framework_id = f"org.python.Python.PythonFramework-{series}"
+    applications_id = f"org.python.Python.PythonApplications-{series}"
+    references = [
+        (framework_id, "Python_Framework.pkg"),
+        (applications_id, "Python_Applications.pkg"),
+    ]
+    if duplicate:
+        references.append((f"{framework_id}.decoy", "Decoy_Framework.pkg"))
+    distribution_refs = "".join(
+        f'<pkg-ref id="{identifier}">#{name}</pkg-ref>'
+        for identifier, name in references
+    )
+    root.mkdir()
+    (root / "Resources").mkdir()
+    (root / "Distribution").write_text(
+        '<?xml version="1.0"?><installer-gui-script>'
+        f"{distribution_refs}</installer-gui-script>",
+        encoding="utf-8",
+    )
+    for identifier, name in references:
+        package = root / name
+        package.mkdir()
+        actual_identifier = identifier
+        if name == "Python_Framework.pkg" and wrong_identifier:
+            actual_identifier = f"{framework_id}.wrong"
+        if name == "Decoy_Framework.pkg":
+            actual_identifier = framework_id
+        if name == "Python_Framework.pkg":
+            package_info = (
+                f'<pkg-info identifier="{actual_identifier}" auth="root" '
+                'relocatable="false" '
+                'install-location="/Library/Frameworks/Python.framework">'
+                '<payload numberOfFiles="4018" installKBytes="109549"/>'
+                '<bundle id="org.python.python" '
+                'CFBundleShortVersionString="3.13.13" '
+                'CFBundleVersion="3.13.13"/>'
+                '<scripts><postinstall file="./postinstall"/></scripts>'
+                "</pkg-info>"
+            )
+            (package / "Bom").write_bytes(b"trusted bom")
+            (package / "Payload").write_bytes(b"compressed framework payload")
+            scripts = package / "Scripts"
+            scripts.mkdir()
+            (scripts / "postinstall").write_text(
+                "#!/bin/sh\ntouch should-never-exist\n", encoding="utf-8"
+            )
+        else:
+            package_info = f'<pkg-info identifier="{actual_identifier}"/>'
+            (package / "Payload").write_bytes(b"irrelevant application payload")
+        (package / "PackageInfo").write_text(package_info, encoding="utf-8")
+    if unknown:
+        unknown_package = root / "Unknown.pkg"
+        unknown_package.mkdir()
+        (unknown_package / "PackageInfo").write_text(
+            '<pkg-info identifier="unknown.component"/>', encoding="utf-8"
+        )
+    provenance = _MODULE.InstallerProvenance(
+        code_identifier="org.python.python",
+        executable=_MODULE.PurePosixPath("venv/bin/python3.13"),
+        install_root=Path("/Library/Frameworks/Python.framework/Versions/3.13"),
+        installer_sha256="1" * 64,
+        installer_signer="Developer ID Installer: Python Software Foundation (BMM5U3QVKW)",
+        installer_team_id="BMM5U3QVKW",
+        installer_url="https://www.python.org/ftp/python/3.13.13/python-3.13.13-macos11.pkg",
+        release_page="https://www.python.org/downloads/release/python-31313/",
+        requirements_path=_MODULE.PurePosixPath("requirements.lock"),
+        requirements_sha256="2" * 64,
+        requirements_bytes=b"requirements",
+        version="3.13.13",
+    )
+    return provenance, root / "Python_Framework.pkg"
+
+
+def test_framework_component_selector_uses_distribution_and_package_info(
+    tmp_path: Path,
+) -> None:
+    """Only the exact traditional Framework component becomes payload authority."""
+    metadata = tmp_path / "metadata"
+    provenance, expected = _framework_component_fixture(metadata)
+    irrelevant = tmp_path / "application-expanded" / "IDLE.app" / "Contents" / "MacOS"
+    irrelevant.mkdir(parents=True)
+    (irrelevant / "Python").symlink_to("/Library/Frameworks/Python.framework/Python")
+    selected = _MODULE._select_framework_component(metadata, provenance)
+    assert selected.package == expected
+    assert (
+        selected.payload_sha256
+        == hashlib.sha256(b"compressed framework payload").hexdigest()
+    )
+    assert not (tmp_path / "should-never-exist").exists()
+    assert (irrelevant / "Python").is_symlink()
+
+
+@pytest.mark.parametrize("failure", ["duplicate", "unknown", "wrong_identifier"])
+def test_framework_component_selector_rejects_decoy_or_wrong_component(
+    tmp_path: Path, failure: str
+) -> None:
+    """A duplicate claimant or PackageInfo mismatch cannot replace the component."""
+    metadata = tmp_path / "metadata"
+    provenance, _expected = _framework_component_fixture(
+        metadata,
+        duplicate=failure == "duplicate",
+        unknown=failure == "unknown",
+        wrong_identifier=failure == "wrong_identifier",
+    )
+    with pytest.raises(ToolIdentityError, match="component|identifier"):
+        _MODULE._select_framework_component(metadata, provenance)
+
+
+def test_selected_framework_absolute_symlink_remains_rejected(tmp_path: Path) -> None:
+    """Scoping out Applications never weakens the selected Framework closure."""
+    root = tmp_path / "framework-expanded"
+    payload = root / "Payload" / "Versions" / "3.13"
+    payload.mkdir(parents=True)
+    (payload / "Python").symlink_to("/outside/attacker")
+    try:
+        result = _seal_tree_helper(root, normalize_ownership=True)
+        assert result.returncode != 0
+        assert b"unsafe absolute" in result.stderr
+    finally:
+        _restore_test_tree_permissions(root)
+
+
 def test_inventory_receipt_rejects_installer_signer_mismatch(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -2659,10 +2789,21 @@ def test_prefix_journal_precedes_ditto_and_cancellation_cleanup_is_persistent() 
     assert "recover_stale_installations(provenance, staging, token)" in prepare
     assert "cleanup_created_ancestors(provenance, staging, token)" in prepare
     assert "_remove_root_tree(staging)" in prepare
-    assert prepare.count("_seal_root_tree(") == 2
-    assert prepare.count("normalize_ownership=True") == 1
-    assert prepare.index("normalize_ownership=True") < prepare.index(
+    assert prepare.count("_seal_root_tree(") == 3
+    assert prepare.count("normalize_ownership=True") == 2
+    assert prepare.rindex("normalize_ownership=True") < prepare.index(
         '"packaging Python installation"'
+    )
+    assert prepare.index('"--expand"') < prepare.index("_select_framework_component(")
+    assert prepare.index("_select_framework_component(") < prepare.index('"--flatten"')
+    assert prepare.index('"--flatten"') < prepare.index('"--expand-full"')
+    assert prepare.count('"--expand-full"') == 1
+    assert "expanded.rglob" not in prepare
+    assert '"/usr/sbin/installer"' not in prepare
+    assert "postinstall" not in prepare
+    assert (
+        '"/usr/bin/ditto",\n                "--noqtn",\n                payload_root'
+        in prepare
     )
     assert '"/bin/chmod", "-RN"' not in prepare
     assert '"/bin/chmod", "-R"' not in prepare

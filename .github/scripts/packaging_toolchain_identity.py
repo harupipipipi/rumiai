@@ -26,6 +26,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -139,6 +140,16 @@ class MacOSPythonInstallation:
     root: Path
     executable: Path
     inventory_sha256: str
+
+
+@dataclass(frozen=True)
+class FrameworkComponent:
+    """Exact traditional Framework component selected from the pinned meta-PKG."""
+
+    package: Path
+    package_info_sha256: str
+    bom_sha256: str
+    payload_sha256: str
 
 
 def _valid_sha256(value: object) -> bool:
@@ -2240,6 +2251,146 @@ def _verify_installer(path: Path, provenance: InstallerProvenance) -> None:
         )
 
 
+def _bounded_regular_bytes(path: Path, limit: int, label: str) -> bytes:
+    metadata = path.lstat()
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != 1
+        or metadata.st_size > limit
+    ):
+        raise ToolIdentityError(f"invalid {label} metadata")
+    encoded = path.read_bytes()
+    if len(encoded) != metadata.st_size:
+        raise ToolIdentityError(f"{label} changed while read")
+    after = path.lstat()
+    if _file_identity(metadata) != _file_identity(after):
+        raise ToolIdentityError(f"{label} identity changed")
+    return encoded
+
+
+def _bounded_xml(path: Path, limit: int, label: str) -> ET.Element:
+    encoded = _bounded_regular_bytes(path, limit, label)
+    if b"<!DOCTYPE" in encoded.upper() or b"<!ENTITY" in encoded.upper():
+        raise ToolIdentityError(f"unsafe declarations in {label}")
+    try:
+        return ET.fromstring(encoded)
+    except ET.ParseError as error:
+        raise ToolIdentityError(f"invalid {label} XML") from error
+
+
+def _select_framework_component(
+    metadata_root: Path, provenance: InstallerProvenance
+) -> FrameworkComponent:
+    """Select the sole traditional Framework component without expanding scripts."""
+    series = ".".join(provenance.version.split(".")[:2])
+    expected_id = f"org.python.Python.PythonFramework-{series}"
+    expected_name = "Python_Framework.pkg"
+    distribution = _bounded_xml(
+        metadata_root / "Distribution", 256 * 1024, "installer Distribution"
+    )
+    if distribution.tag != "installer-gui-script":
+        raise ToolIdentityError("unexpected installer Distribution root")
+    references: dict[str, str] = {}
+    referenced_names: set[str] = set()
+    for reference in distribution.iter("pkg-ref"):
+        text = (reference.text or "").strip()
+        if not text:
+            continue
+        identifier = reference.get("id")
+        name = text[1:] if text.startswith("#") else ""
+        if (
+            not isinstance(identifier, str)
+            or not identifier
+            or not name.endswith(".pkg")
+            or PurePosixPath(name).name != name
+            or identifier in references
+            or name in referenced_names
+        ):
+            raise ToolIdentityError("ambiguous or unsafe installer component reference")
+        references[identifier] = name
+        referenced_names.add(name)
+    if not references or len(references) > 64:
+        raise ToolIdentityError("invalid installer component reference count")
+    if references.get(expected_id) != expected_name:
+        raise ToolIdentityError("traditional Framework component reference mismatch")
+    direct_entries = {entry.name: entry for entry in metadata_root.iterdir()}
+    package_names = {name for name in direct_entries if name.endswith(".pkg")}
+    if package_names != referenced_names or set(direct_entries) != {
+        "Distribution",
+        "Resources",
+        *package_names,
+    }:
+        raise ToolIdentityError("installer component inventory is ambiguous")
+    resources = direct_entries["Resources"].lstat()
+    if not stat.S_ISDIR(resources.st_mode):
+        raise ToolIdentityError("invalid installer Resources directory")
+    identifiers: set[str] = set()
+    selected: Path | None = None
+    selected_info = b""
+    for identifier, name in references.items():
+        package = direct_entries[name]
+        package_metadata = package.lstat()
+        if not stat.S_ISDIR(package_metadata.st_mode):
+            raise ToolIdentityError("invalid installer component directory")
+        package_info = _bounded_regular_bytes(
+            package / "PackageInfo", 64 * 1024, f"{name} PackageInfo"
+        )
+        if b"<!DOCTYPE" in package_info.upper() or b"<!ENTITY" in package_info.upper():
+            raise ToolIdentityError("unsafe declarations in component PackageInfo")
+        try:
+            info = ET.fromstring(package_info)
+        except ET.ParseError as error:
+            raise ToolIdentityError("invalid component PackageInfo XML") from error
+        actual_identifier = info.get("identifier")
+        if (
+            info.tag != "pkg-info"
+            or actual_identifier != identifier
+            or actual_identifier in identifiers
+        ):
+            raise ToolIdentityError("component PackageInfo identifier mismatch")
+        identifiers.add(actual_identifier)
+        if identifier == expected_id:
+            bundles = info.findall("bundle")
+            payloads = info.findall("payload")
+            number_of_files = (
+                payloads[0].get("numberOfFiles") if len(payloads) == 1 else ""
+            ) or ""
+            install_kbytes = (
+                payloads[0].get("installKBytes") if len(payloads) == 1 else ""
+            ) or ""
+            if (
+                info.get("install-location") != "/Library/Frameworks/Python.framework"
+                or info.get("auth") != "root"
+                or info.get("relocatable") != "false"
+                or len(bundles) != 1
+                or bundles[0].get("id") != provenance.code_identifier
+                or bundles[0].get("CFBundleShortVersionString") != provenance.version
+                or bundles[0].get("CFBundleVersion") != provenance.version
+                or len(payloads) != 1
+                or not number_of_files.isdigit()
+                or len(number_of_files) > 10
+                or not 1 <= int(number_of_files) <= 1_000_000
+                or not install_kbytes.isdigit()
+                or len(install_kbytes) > 10
+                or not 1 <= int(install_kbytes) <= 2_000_000
+            ):
+                raise ToolIdentityError("traditional Framework PackageInfo mismatch")
+            selected = package
+            selected_info = package_info
+    if selected is None or len(identifiers) != len(references):
+        raise ToolIdentityError("traditional Framework component is missing")
+    bom = selected / "Bom"
+    payload = selected / "Payload"
+    _bounded_regular_bytes(bom, 16 * 1024 * 1024, "Framework Bom")
+    _bounded_regular_bytes(payload, 512 * 1024 * 1024, "Framework Payload")
+    return FrameworkComponent(
+        package=selected,
+        package_info_sha256=hashlib.sha256(selected_info).hexdigest(),
+        bom_sha256=_sha256_file(bom),
+        payload_sha256=_sha256_file(payload),
+    )
+
+
 def _inventory_entries(root: Path) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     symlinks: dict[str, str] = {}
@@ -2847,38 +2998,67 @@ def _prepare_macos_installation_locked(
         _root_owned_path(staging, "installer staging", sticky=STAGING_PARENT)
         _verify_installer(package, provenance)
         subprocess.run(["/usr/bin/sudo", "/bin/chmod", "0700", staging], check=True)
-        expanded = staging / "expanded"
+        metadata_root = staging / "metadata"
         subprocess.run(
-            ["/usr/bin/sudo", "/usr/sbin/pkgutil", "--expand-full", package, expanded],
+            ["/usr/bin/sudo", "/usr/sbin/pkgutil", "--expand", package, metadata_root],
             check=True,
             env={"PATH": "/usr/bin:/bin"},
         )
         _seal_root_tree(
-            staging,
-            "expanded official installer",
+            metadata_root,
+            "expanded official installer metadata",
             normalize_ownership=True,
         )
-        payload_executable_suffix = (
-            Path("Payload/Library/Frameworks/Python.framework/Versions")
-            / ".".join(provenance.version.split(".")[:2])
-            / "bin"
-            / f"python{'.'.join(provenance.version.split('.')[:2])}"
+        component = _select_framework_component(metadata_root, provenance)
+        if _sha256_file(component.package / "Payload") != component.payload_sha256:
+            raise ToolIdentityError(
+                "Framework component payload changed before expansion"
+            )
+        framework_package = staging / "framework.pkg"
+        subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "/usr/sbin/pkgutil",
+                "--flatten",
+                component.package,
+                framework_package,
+            ],
+            check=True,
+            env={"PATH": "/usr/bin:/bin"},
         )
-        payload_executables = [
-            candidate
-            for candidate in expanded.rglob(payload_executable_suffix.name)
-            if candidate.as_posix().endswith(payload_executable_suffix.as_posix())
-            and candidate.is_file()
-            and not candidate.is_symlink()
-        ]
-        if len(payload_executables) != 1:
-            raise ToolIdentityError("official installer Framework payload is ambiguous")
-        payload_root = payload_executables[0].parents[1]
+        framework_expanded = staging / "framework-expanded"
+        subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "/usr/sbin/pkgutil",
+                "--expand-full",
+                framework_package,
+                framework_expanded,
+            ],
+            check=True,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        _seal_root_tree(
+            framework_expanded,
+            "expanded official Framework component",
+            normalize_ownership=True,
+        )
+        if (
+            _sha256_file(framework_expanded / "PackageInfo")
+            != component.package_info_sha256
+            or _sha256_file(framework_expanded / "Bom") != component.bom_sha256
+        ):
+            raise ToolIdentityError(
+                "Framework component metadata changed during expansion"
+            )
+        series = ".".join(provenance.version.split(".")[:2])
+        payload_root = framework_expanded / "Payload" / "Versions" / series
+        payload_executable = payload_root / "bin" / f"python{series}"
         _root_owned_path(
             payload_root, "official installer payload", sticky=STAGING_PARENT
         )
         _require_code_authority(
-            payload_executables[0],
+            payload_executable,
             identifier=provenance.code_identifier,
             team_identifier=provenance.installer_team_id,
             label="official installer Python payload",
