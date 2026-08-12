@@ -365,7 +365,7 @@ def test_release_workflow_has_one_gather_attestation_and_no_matrix_draft_upload(
     assert "github.sha" not in workflow_text
     assert workflow_text.count("fetch-depth: 0") == 2
     assert workflow_text.count('"rev-parse", "--verify", "HEAD"') == 2
-    assert '[git, "rev-parse", "--verify", "HEAD"]' in workflow_text
+    assert '[*git_arguments, "rev-parse", "--verify", "HEAD"]' in workflow_text
     assert '["git", "rev-parse", "--verify", "HEAD"]' in workflow_text
     assert "does not match the release tag" in workflow_text
     assert "scripts/release_gate.py" in workflow_text
