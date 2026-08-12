@@ -68,6 +68,14 @@ jobs:
             --output .github/toolchains/packaging-python-macos.v1.json \
             --check
 
+      - name: Allocate packaging transaction
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="$(/usr/bin/uuidgen | /usr/bin/tr -d '-' | /usr/bin/tr '[:upper:]' '[:lower:]')"
+          test "${#token}" -eq 32
+          echo "TOBKIRI_PACKAGING_TRANSACTION_TOKEN=$token" >> "$GITHUB_ENV"
+
       - name: Bind verified packaging tool identities
         shell: bash
         env:
@@ -77,6 +85,8 @@ jobs:
           /usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py \
             --repository-root "$GITHUB_WORKSPACE" \
             --provenance .github/toolchains/packaging-python-macos.v1.json \
+            --source-commit "$GITHUB_SHA" \
+            --transaction-token "$TOBKIRI_PACKAGING_TRANSACTION_TOKEN" \
             --prepare-macos-installation \
             --env-output "$TOOLCHAIN_ENV"
           for marker in \
@@ -97,7 +107,7 @@ jobs:
           set -euo pipefail
           /usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py \
             --repository-root "$GITHUB_WORKSPACE" \
-            --provenance .github/toolchains/packaging-python-macos.v1.json \
+            --transaction-token "$TOBKIRI_PACKAGING_TRANSACTION_TOKEN" \
             --verify-macos-installation "$TOBKIRI_PACKAGING_PYTHON_SNAPSHOT" \
             --inventory-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256"
 
@@ -467,13 +477,15 @@ jobs:
           if-no-files-found: warn
 
       - name: Clean packaging Python installation
-        if: always() && env.TOBKIRI_PACKAGING_PYTHON_SNAPSHOT != ''
+        if: always() && env.TOBKIRI_PACKAGING_TRANSACTION_TOKEN != ''
         run: |
-          /usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py \
-            --repository-root "$GITHUB_WORKSPACE" \
-            --provenance .github/toolchains/packaging-python-macos.v1.json \
-            --cleanup-macos-installation "$TOBKIRI_PACKAGING_PYTHON_SNAPSHOT" \
-            --inventory-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256"
+          set -euo pipefail
+          args=(--transaction-token "$TOBKIRI_PACKAGING_TRANSACTION_TOKEN" --cleanup-transaction)
+          if test -n "${TOBKIRI_PACKAGING_PYTHON_SNAPSHOT:-}"; then
+            args+=(--cleanup-macos-installation "$TOBKIRI_PACKAGING_PYTHON_SNAPSHOT")
+            args+=(--inventory-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256")
+          fi
+          /usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py "${args[@]}"
 
   gather:
     name: Gather, verify, and attest release assets

@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import os
-import sys
 import json
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -215,6 +217,114 @@ def test_inventory_digest_swap_is_rejected(
         _MODULE.verify_macos_installation(installation, provenance)
 
 
+def test_production_authority_reads_exact_head_blobs_not_checkout(
+    tmp_path: Path,
+) -> None:
+    """A same-UID checkout swap/restore cannot alter committed authority bytes."""
+    git_path = Path(shutil.which("git") or "")
+    if not git_path.is_absolute():
+        pytest.skip("Git fixture is unavailable")
+    subprocess.run([git_path, "init", "-q", tmp_path], check=True)
+    subprocess.run(
+        [git_path, "-C", tmp_path, "config", "user.email", "fixture@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        [git_path, "-C", tmp_path, "config", "user.name", "Fixture"], check=True
+    )
+    authority = tmp_path / "authority.json"
+    authority.write_bytes(b"trusted committed bytes\n")
+    subprocess.run([git_path, "-C", tmp_path, "add", "authority.json"], check=True)
+    subprocess.run([git_path, "-C", tmp_path, "commit", "-qm", "fixture"], check=True)
+    commit = subprocess.check_output(
+        [git_path, "-C", tmp_path, "rev-parse", "HEAD"], text=True
+    ).strip()
+    git = _MODULE.ToolIdentity(
+        git_path.resolve(), hashlib.sha256(git_path.read_bytes()).hexdigest()
+    )
+
+    authority.write_bytes(b"same uid tamper\n")
+    assert (
+        _MODULE._committed_blob(
+            git, tmp_path, commit, _MODULE.PurePosixPath("authority.json")
+        )
+        == b"trusted committed bytes\n"
+    )
+    authority.write_bytes(b"trusted committed bytes\n")
+    assert (
+        _MODULE._committed_blob(
+            git, tmp_path, commit, _MODULE.PurePosixPath("authority.json")
+        )
+        == b"trusted committed bytes\n"
+    )
+
+
+def test_transaction_cleanup_rejects_another_prefix(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A transaction token cannot authorize deletion of a different prefix."""
+    token = "a" * 32
+    monkeypatch.setattr(_MODULE, "STAGING_PARENT", tmp_path)
+    monkeypatch.setattr(_MODULE, "_root_owned_path", lambda *_args, **_kwargs: None)
+    staging = _MODULE._transaction_path(token)
+    staging.mkdir()
+    (staging / _MODULE.INSTALLATION_JOURNAL_NAME).write_text(
+        json.dumps(
+            {"dev": 1, "ino": 2, "target": "/Library/Frameworks/Other", "token": token}
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ToolIdentityError, match="target is not authorized"):
+        _MODULE.cleanup_transaction(token)
+
+
+def test_transaction_cleanup_retains_residue_on_identity_replacement(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A replaced fixed-prefix name is never deleted under journal authority."""
+    token = "b" * 32
+    monkeypatch.setattr(_MODULE, "STAGING_PARENT", tmp_path)
+    monkeypatch.setattr(_MODULE, "_root_owned_path", lambda *_args, **_kwargs: None)
+    staging = _MODULE._transaction_path(token)
+    staging.mkdir()
+    (staging / _MODULE.INSTALLATION_JOURNAL_NAME).write_text(
+        json.dumps(
+            {
+                "dev": 11,
+                "ino": 22,
+                "target": "/Library/Frameworks/Python.framework/Versions/3.13",
+                "token": token,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def reject_replacement(path: Path, identity: tuple[int, int] | None = None) -> None:
+        assert path == Path("/Library/Frameworks/Python.framework/Versions/3.13")
+        assert identity == (11, 22)
+        raise ToolIdentityError("removal target does not match transaction journal")
+
+    monkeypatch.setattr(_MODULE, "_remove_root_tree", reject_replacement)
+    with pytest.raises(ToolIdentityError, match="does not match"):
+        _MODULE.cleanup_transaction(token)
+    assert staging.exists()
+
+
+def test_prefix_journal_precedes_ditto_and_cancellation_cleanup_is_persistent() -> None:
+    """Partial copy is journaled before ditto and retained for always cleanup."""
+    source = _SCRIPT.read_text(encoding="utf-8")
+    prepare = source[
+        source.index("def prepare_macos_installation") : source.index(
+            "def cleanup_macos_installation"
+        )
+    ]
+    assert prepare.index("_create_installation_root(") < prepare.index(
+        '"/usr/bin/ditto"'
+    )
+    assert "cleanup_transaction(token)" in prepare
+    assert "_remove_root_tree(staging)" not in prepare
+
+
 def test_formal_source_never_copies_actions_setup_python() -> None:
     """Only the pinned installer payload is copied to its designated prefix."""
     source = _SCRIPT.read_text(encoding="utf-8")
@@ -241,4 +351,6 @@ def test_workflows_run_real_installation_e2e_and_cleanup(workflow_name: str) -> 
     assert "--verify-macos-installation" in payload
     assert "--cleanup-macos-installation" in payload
     assert '--inventory-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256"' in payload
-    assert "if: always() && env.TOBKIRI_PACKAGING_PYTHON_SNAPSHOT != ''" in payload
+    assert '--source-commit "$GITHUB_SHA"' in payload
+    assert '--transaction-token "$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"' in payload
+    assert "if: always() && env.TOBKIRI_PACKAGING_TRANSACTION_TOKEN != ''" in payload

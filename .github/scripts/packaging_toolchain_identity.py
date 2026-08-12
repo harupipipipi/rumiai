@@ -13,7 +13,6 @@ import argparse
 import hashlib
 import json
 import os
-import secrets
 import shutil
 import stat
 import subprocess
@@ -31,6 +30,9 @@ APPLE_TEAM_ID = "59GAB85EFG"
 APPLE_GIT_IDENTIFIER = "com.apple.git"
 STAGING_PARENT = Path("/private/var/tmp")
 STAGING_PREFIX = "tobkiri-python-installer-"
+SEALED_PROVENANCE_NAME = "authority-provenance.json"
+SEALED_REQUIREMENTS_NAME = "authority-requirements.lock"
+INSTALLATION_JOURNAL_NAME = "installation-journal.json"
 
 PROVENANCE_FIELDS = frozenset(
     {
@@ -119,7 +121,7 @@ def _safe_relative(value: object, label: str) -> PurePosixPath:
     return path
 
 
-def _strict_json(path: Path) -> dict[str, Any]:
+def _strict_json_bytes(encoded: bytes, label: str) -> dict[str, Any]:
     def reject_duplicate(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for key, value in pairs:
@@ -129,17 +131,26 @@ def _strict_json(path: Path) -> dict[str, Any]:
         return result
 
     try:
-        payload = json.loads(path.read_bytes(), object_pairs_hook=reject_duplicate)
+        payload = json.loads(encoded, object_pairs_hook=reject_duplicate)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ToolIdentityError(f"invalid JSON: {path}: {error}") from error
+        raise ToolIdentityError(f"invalid JSON: {label}: {error}") from error
     if not isinstance(payload, dict):
-        raise ToolIdentityError(f"JSON object required: {path}")
+        raise ToolIdentityError(f"JSON object required: {label}")
     return payload
 
 
-def load_provenance(path: Path, repository_root: Path) -> InstallerProvenance:
-    """Load the exact checked-in installer and dependency authority."""
-    payload = _strict_json(path)
+def _strict_json(path: Path) -> dict[str, Any]:
+    try:
+        encoded = path.read_bytes()
+    except OSError as error:
+        raise ToolIdentityError(f"invalid JSON: {path}: {error}") from error
+    return _strict_json_bytes(encoded, os.fspath(path))
+
+
+def _parse_provenance(
+    encoded: bytes, requirements_bytes: bytes, label: str
+) -> InstallerProvenance:
+    payload = _strict_json_bytes(encoded, label)
     if set(payload) != PROVENANCE_FIELDS or payload.get("schema") != PROVENANCE_SCHEMA:
         raise ToolIdentityError("packaging Python provenance schema/fields mismatch")
     for field in ("installer_sha256", "requirements_sha256"):
@@ -169,13 +180,6 @@ def load_provenance(path: Path, repository_root: Path) -> InstallerProvenance:
     requirements_relative = _safe_relative(
         payload["requirements_path"], "requirements_path"
     )
-    requirements = repository_root / requirements_relative
-    try:
-        requirements_bytes = requirements.read_bytes()
-    except OSError as error:
-        raise ToolIdentityError(
-            "hash-locked packaging requirements are unavailable"
-        ) from error
     if hashlib.sha256(requirements_bytes).hexdigest() != payload["requirements_sha256"]:
         raise ToolIdentityError("hash-locked packaging requirements digest mismatch")
     for field in (
@@ -201,6 +205,20 @@ def load_provenance(path: Path, repository_root: Path) -> InstallerProvenance:
         requirements_sha256=payload["requirements_sha256"],
         requirements_bytes=requirements_bytes,
         version=version,
+    )
+
+
+def load_provenance(path: Path, repository_root: Path) -> InstallerProvenance:
+    """Load checkout bytes for review tooling, never for production binding."""
+    encoded = path.read_bytes()
+    payload = _strict_json_bytes(encoded, os.fspath(path))
+    requirements_relative = _safe_relative(
+        payload.get("requirements_path"), "requirements_path"
+    )
+    return _parse_provenance(
+        encoded,
+        (repository_root / requirements_relative).read_bytes(),
+        os.fspath(path),
     )
 
 
@@ -311,9 +329,140 @@ def _require_code_authority(
     return identity
 
 
+def _valid_commit(value: str) -> bool:
+    return len(value) == 40 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
+def _valid_transaction_token(value: str) -> bool:
+    return len(value) == 32 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
+def _transaction_path(token: str) -> Path:
+    if not _valid_transaction_token(token):
+        raise ToolIdentityError(
+            "transaction token must be 32 lowercase hexadecimal bytes"
+        )
+    return STAGING_PARENT / f"{STAGING_PREFIX}{token}"
+
+
+def _git_output(git: ToolIdentity, repository_root: Path, *arguments: str) -> bytes:
+    result = subprocess.run(
+        [git.path, "-C", repository_root, "--no-replace-objects", *arguments],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        env={
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+            "PATH": "/usr/bin:/bin",
+        },
+    )
+    if result.returncode != 0:
+        raise ToolIdentityError(
+            f"trusted Git object read failed: {result.stderr.decode(errors='replace')}"
+        )
+    return result.stdout
+
+
+def _committed_blob(
+    git: ToolIdentity, repository_root: Path, commit: str, relative: PurePosixPath
+) -> bytes:
+    if not _valid_commit(commit):
+        raise ToolIdentityError("source commit must be a full lowercase Git SHA")
+    head = _git_output(git, repository_root, "rev-parse", "--verify", "HEAD^{commit}")
+    if head != f"{commit}\n".encode():
+        raise ToolIdentityError("source commit does not match checked-out HEAD")
+    return _git_output(git, repository_root, "show", f"{commit}:{relative.as_posix()}")
+
+
+def _seal_root_bytes(path: Path, encoded: bytes) -> None:
+    result = subprocess.run(
+        ["/usr/bin/sudo", "/usr/bin/tee", path],
+        input=encoded,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ToolIdentityError(
+            f"could not seal authority bytes: {result.stderr.decode()}"
+        )
+    subprocess.run(["/usr/bin/sudo", "/usr/sbin/chown", "root:wheel", path], check=True)
+    subprocess.run(["/usr/bin/sudo", "/bin/chmod", "0444", path], check=True)
+
+
+def seal_committed_authority(
+    git: ToolIdentity,
+    repository_root: Path,
+    commit: str,
+    provenance_relative: PurePosixPath,
+    token: str,
+) -> tuple[InstallerProvenance, Path]:
+    """Seal exact HEAD blobs once; production never reopens checkout files."""
+    staging = _transaction_path(token)
+    subprocess.run(["/usr/bin/sudo", "/bin/mkdir", "-m", "0700", staging], check=True)
+    try:
+        provenance_bytes = _committed_blob(
+            git, repository_root, commit, provenance_relative
+        )
+        preview = _strict_json_bytes(provenance_bytes, "trusted Git provenance blob")
+        requirements_relative = _safe_relative(
+            preview.get("requirements_path"), "requirements_path"
+        )
+        requirements_bytes = _committed_blob(
+            git, repository_root, commit, requirements_relative
+        )
+        _seal_root_bytes(staging / SEALED_PROVENANCE_NAME, provenance_bytes)
+        _seal_root_bytes(staging / SEALED_REQUIREMENTS_NAME, requirements_bytes)
+        subprocess.run(["/usr/bin/sudo", "/bin/chmod", "0555", staging], check=True)
+        _root_owned_path(staging, "sealed packaging authority", sticky=STAGING_PARENT)
+        sealed_provenance = (staging / SEALED_PROVENANCE_NAME).read_bytes()
+        sealed_requirements = (staging / SEALED_REQUIREMENTS_NAME).read_bytes()
+        if (
+            sealed_provenance != provenance_bytes
+            or sealed_requirements != requirements_bytes
+        ):
+            raise ToolIdentityError(
+                "sealed packaging authority changed during creation"
+            )
+        return (
+            _parse_provenance(
+                sealed_provenance,
+                sealed_requirements,
+                "sealed trusted Git provenance",
+            ),
+            staging,
+        )
+    except Exception:
+        try:
+            _remove_root_tree(staging)
+        except Exception:
+            pass
+        raise
+
+
+def load_sealed_authority(token: str) -> tuple[InstallerProvenance, Path]:
+    staging = _transaction_path(token)
+    _root_owned_path(staging, "sealed packaging authority", sticky=STAGING_PARENT)
+    provenance_bytes = (staging / SEALED_PROVENANCE_NAME).read_bytes()
+    requirements_bytes = (staging / SEALED_REQUIREMENTS_NAME).read_bytes()
+    return (
+        _parse_provenance(
+            provenance_bytes, requirements_bytes, "sealed trusted Git provenance"
+        ),
+        staging,
+    )
+
+
 ROOT_REMOVE_CODE = r"""
 import os, stat, sys
 target = os.path.normpath(sys.argv[1])
+expected = None if len(sys.argv) == 2 else (int(sys.argv[2]), int(sys.argv[3]))
 if not target.startswith('/') or target == '/': raise SystemExit('unsafe removal target')
 parts = [part for part in target.split('/') if part]
 parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
@@ -327,6 +476,8 @@ try:
     try: root = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
     except FileNotFoundError: raise SystemExit(0)
     before = os.fstat(root)
+    if expected is not None and (before.st_dev, before.st_ino) != expected:
+        raise SystemExit('removal target does not match transaction journal')
     def empty(fd):
         os.fchown(fd, 0, 0); os.fchmod(fd, 0o700)
         for entry in os.listdir(fd):
@@ -344,9 +495,20 @@ finally: os.close(parent)
 """
 
 
-def _remove_root_tree(path: Path) -> None:
+def _remove_root_tree(path: Path, identity: tuple[int, int] | None = None) -> None:
+    arguments: list[object] = [
+        "/usr/bin/sudo",
+        "/usr/bin/python3",
+        "-I",
+        "-B",
+        "-c",
+        ROOT_REMOVE_CODE,
+        path,
+    ]
+    if identity is not None:
+        arguments.extend(str(value) for value in identity)
     result = subprocess.run(
-        ["/usr/bin/sudo", "/usr/bin/python3", "-I", "-B", "-c", ROOT_REMOVE_CODE, path],
+        arguments,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -356,6 +518,81 @@ def _remove_root_tree(path: Path) -> None:
         raise ToolIdentityError(
             f"root cleanup failed for {path}: {result.stderr.strip()}"
         )
+
+
+ROOT_CREATE_INSTALLATION_CODE = r"""
+import json, os, stat, sys
+target, journal, token = map(os.path.normpath, sys.argv[1:])
+if not target.startswith('/') or not journal.startswith('/'): raise SystemExit('unsafe path')
+parts = [part for part in target.split('/') if part]
+parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+try:
+    for part in parts[:-1]:
+        child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        info = os.fstat(child)
+        if info.st_uid != 0 or info.st_mode & 0o022: raise SystemExit('unsafe target parent')
+        os.close(parent); parent = child
+    os.mkdir(parts[-1], 0o700, dir_fd=parent)
+    root = os.open(parts[-1], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+    info = os.fstat(root); os.close(root)
+    payload = json.dumps({'dev': info.st_dev, 'ino': info.st_ino, 'target': target,
+                          'token': token}, sort_keys=True, separators=(',', ':')).encode() + b'\n'
+    fd = os.open(journal, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+    try:
+        offset = 0
+        while offset < len(payload): offset += os.write(fd, payload[offset:])
+        os.fsync(fd)
+    finally: os.close(fd)
+except Exception:
+    try: os.rmdir(parts[-1], dir_fd=parent)
+    except Exception: pass
+    raise
+finally: os.close(parent)
+"""
+
+
+def _create_installation_root(
+    provenance: InstallerProvenance, staging: Path, token: str
+) -> None:
+    subprocess.run(
+        [
+            "/usr/bin/sudo",
+            "/usr/bin/python3",
+            "-I",
+            "-B",
+            "-c",
+            ROOT_CREATE_INSTALLATION_CODE,
+            provenance.install_root,
+            staging / INSTALLATION_JOURNAL_NAME,
+            token,
+        ],
+        check=True,
+        env={"PATH": "/usr/bin:/bin"},
+    )
+
+
+def cleanup_transaction(token: str) -> None:
+    """Recover only the prefix inode recorded by this root-owned transaction."""
+    staging = _transaction_path(token)
+    try:
+        _root_owned_path(staging, "packaging transaction", sticky=STAGING_PARENT)
+    except FileNotFoundError:
+        return
+    journal = staging / INSTALLATION_JOURNAL_NAME
+    if journal.exists():
+        payload = _strict_json(journal)
+        if (
+            set(payload) != {"dev", "ino", "target", "token"}
+            or payload.get("token") != token
+        ):
+            raise ToolIdentityError("packaging transaction journal mismatch")
+        target = Path(payload["target"])
+        if target != Path("/Library/Frameworks/Python.framework/Versions/3.13"):
+            raise ToolIdentityError("packaging transaction target is not authorized")
+        if not isinstance(payload["dev"], int) or not isinstance(payload["ino"], int):
+            raise ToolIdentityError("packaging transaction identity is invalid")
+        _remove_root_tree(target, (payload["dev"], payload["ino"]))
+    _remove_root_tree(staging)
 
 
 def _remove_verified_installation(
@@ -621,18 +858,12 @@ def smoke_macos_installation(installation: MacOSPythonInstallation) -> None:
 
 
 def prepare_macos_installation(
-    provenance: InstallerProvenance, repository_root: Path
+    provenance: InstallerProvenance, staging: Path, token: str
 ) -> MacOSPythonInstallation:
     """Install official Python and hash-locked dependencies into root authority."""
-    staging = STAGING_PARENT / f"{STAGING_PREFIX}{secrets.token_hex(16)}"
     package = staging / f"python-{provenance.version}.pkg"
-    created = False
-    installed = False
     try:
-        subprocess.run(
-            ["/usr/bin/sudo", "/bin/mkdir", "-m", "0700", staging], check=True
-        )
-        created = True
+        subprocess.run(["/usr/bin/sudo", "/bin/chmod", "0700", staging], check=True)
         subprocess.run(
             [
                 "/usr/bin/sudo",
@@ -699,6 +930,7 @@ def prepare_macos_installation(
             label="official installer Python payload",
         )
         _remove_previous_installation(provenance)
+        _create_installation_root(provenance, staging, token)
         subprocess.run(
             [
                 "/usr/bin/sudo",
@@ -710,7 +942,6 @@ def prepare_macos_installation(
             check=True,
             env={"PATH": "/usr/bin:/bin"},
         )
-        installed = True
         base_python = (
             provenance.install_root
             / "bin"
@@ -794,21 +1025,13 @@ def prepare_macos_installation(
         )
         verify_macos_installation(installation, provenance)
         smoke_macos_installation(installation)
-        _remove_root_tree(staging)
-        created = False
         return installation
     except Exception as primary:
         cleanup_errors: list[str] = []
-        if installed:
-            try:
-                _remove_root_tree(provenance.install_root)
-            except Exception as cleanup:
-                cleanup_errors.append(str(cleanup))
-        if created:
-            try:
-                _remove_root_tree(staging)
-            except Exception as cleanup:
-                cleanup_errors.append(str(cleanup))
+        try:
+            cleanup_transaction(token)
+        except Exception as cleanup:
+            cleanup_errors.append(str(cleanup))
         if cleanup_errors:
             raise ToolIdentityError(
                 f"packaging Python construction failed: {primary}; cleanup failed: "
@@ -918,20 +1141,43 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repository-root", type=Path, default=Path.cwd())
     parser.add_argument("--provenance", type=Path)
+    parser.add_argument("--source-commit")
+    parser.add_argument("--transaction-token")
     parser.add_argument("--git")
     parser.add_argument("--env-output", type=Path)
     parser.add_argument("--prepare-macos-installation", action="store_true")
     parser.add_argument("--verify-macos-installation", type=Path)
     parser.add_argument("--inventory-sha256")
     parser.add_argument("--cleanup-macos-installation", type=Path)
+    parser.add_argument("--cleanup-transaction", action="store_true")
     args = parser.parse_args()
     installation: MacOSPythonInstallation | None = None
     provenance: InstallerProvenance | None = None
     try:
-        if args.provenance is None:
-            raise ToolIdentityError("--provenance is required")
         repository_root = args.repository_root.resolve(strict=True)
-        provenance = load_provenance(args.provenance, repository_root)
+        if args.transaction_token is None:
+            raise ToolIdentityError("--transaction-token is required")
+        if args.cleanup_transaction and args.cleanup_macos_installation is None:
+            cleanup_transaction(args.transaction_token)
+            return 0
+        if args.prepare_macos_installation:
+            if args.provenance is None or args.source_commit is None:
+                raise ToolIdentityError(
+                    "--provenance and --source-commit are required for preparation"
+                )
+            provenance_relative = _safe_relative(
+                args.provenance.as_posix(), "provenance"
+            )
+            git_identity = bind_git(args.git)
+            provenance, staging = seal_committed_authority(
+                git_identity,
+                repository_root,
+                args.source_commit,
+                provenance_relative,
+                args.transaction_token,
+            )
+        else:
+            provenance, staging = load_sealed_authority(args.transaction_token)
         if args.cleanup_macos_installation is not None:
             if not _valid_sha256(args.inventory_sha256):
                 raise ToolIdentityError("--inventory-sha256 is required")
@@ -940,6 +1186,10 @@ def main() -> int:
                 provenance,
                 args.inventory_sha256,
             )
+        if args.cleanup_transaction:
+            cleanup_transaction(args.transaction_token)
+            return 0
+        if args.cleanup_macos_installation is not None:
             return 0
         if args.verify_macos_installation is not None:
             if not _valid_sha256(args.inventory_sha256):
@@ -955,10 +1205,12 @@ def main() -> int:
             raise ToolIdentityError(
                 "formal macOS binding requires --prepare-macos-installation"
             )
-        installation = prepare_macos_installation(provenance, repository_root)
+        installation = prepare_macos_installation(
+            provenance, staging, args.transaction_token
+        )
         identities = {
             "python": verify_macos_installation(installation, provenance),
-            "git": bind_git(args.git),
+            "git": git_identity,
         }
         payload = environment_lines(identities, installation)
         if args.env_output is None:
@@ -973,6 +1225,8 @@ def main() -> int:
                     provenance,
                     installation.inventory_sha256,
                 )
+                if args.transaction_token is not None:
+                    cleanup_transaction(args.transaction_token)
             except Exception as cleanup:
                 parser.error(f"{error}; cleanup failed: {cleanup}")
         parser.error(str(error))
