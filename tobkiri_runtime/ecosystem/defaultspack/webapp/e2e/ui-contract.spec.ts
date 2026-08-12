@@ -99,6 +99,9 @@ type ApiMockOptions = {
   codingApprovalAfterTerminal?: boolean;
   codingApprovalAfterRestore?: boolean;
   structuredComposer?: boolean;
+  desktopListResponse?: (
+    requestIndex: number,
+  ) => Promise<{ desktops: Record<string, unknown>[] }> | { desktops: Record<string, unknown>[] };
 };
 
 function ok(data: unknown) {
@@ -623,6 +626,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
   const mcpServers = [
     { server_id: "filesystem", name: "Filesystem MCP", transport: "stdio", connected: true, permissions: { approved: true }, tools: ["mcp_fs_read_file"] },
   ];
+  let desktopListRequestCount = 0;
 
   await page.route("**/api/contracts/defaultspack/**", async (route) => {
     const request = route.request();
@@ -687,6 +691,63 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
         }] : [],
         skills: catalogSkills,
         extension_points: [],
+      });
+    }
+
+    if (path === routeKey("api/desktops") && method === "GET") {
+      const requestIndex = desktopListRequestCount;
+      desktopListRequestCount += 1;
+      try {
+        const response = await options.desktopListResponse?.(requestIndex)
+          ?? { desktops: [] };
+        return fulfill(route, response);
+      } catch {
+        return route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            status: "error",
+            error: { message: "Desktop fixture unavailable." },
+          }),
+        });
+      }
+    }
+
+    if (path === routeKey("api/runtime/providers")) {
+      return fulfill(route, {
+        selected_provider_id: "linux_native",
+        providers: [{
+          provider_id: "linux_native",
+          label: "Linux Native",
+          status: "ready",
+          available: true,
+          installed: true,
+          ready: true,
+          capabilities: ["sandbox.desktop", "sandbox.desktop_input"],
+        }],
+      });
+    }
+
+    if (path === routeKey("api/runtime/doctor")) {
+      return fulfill(route, { status: "ok" });
+    }
+
+    if (path === routeKey("api/sandbox/templates")) {
+      return fulfill(route, { templates: [] });
+    }
+
+    if (path.endsWith("/access-exchanges") && method === "POST") {
+      return fulfill(route, { exchange_code: "desktop-ui-contract-exchange" });
+    }
+
+    if (path.endsWith("/access-grants") && method === "GET") {
+      return fulfill(route, { grants: [] });
+    }
+
+    if (path === routeKey("api/desktop-access/exchange") && method === "POST") {
+      return fulfill(route, {
+        seat_id: "seat-live",
+        session_credential: "desktop-ui-contract-session",
       });
     }
 
@@ -1186,6 +1247,126 @@ async function openCodingWidget(page: Page, options: ApiMockOptions = {}) {
   await expect(page.locator(".coding-cockpit")).toBeVisible();
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
 }
+
+function liveDesktopFixture() {
+  return {
+    seat_id: "seat-live",
+    sandbox_id: "seat-live",
+    name: "Live QA Desktop",
+    status: "running",
+    provider_id: "linux_native",
+    resolution: { width: 1280, height: 720 },
+  };
+}
+
+test("chat to Desktops navigation keeps pending counts honest and restores live seats", async ({ page }) => {
+  test.setTimeout(150_000);
+  let releaseDesktopList: (() => void) | undefined;
+  const desktopListGate = new Promise<void>((resolve) => {
+    releaseDesktopList = resolve;
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installDefaultspackApiMocks(page, {
+    desktopListResponse: async () => {
+      await desktopListGate;
+      return { desktops: [liveDesktopFixture()] };
+    },
+  });
+  await page.goto("/chat");
+  await expect(page.locator("textarea.rumi-composer-textarea")).toBeVisible({ timeout: 60_000 });
+
+  const desktopsButton = page.getByRole("button", { name: "Desktops", exact: true });
+  await desktopsButton.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/desktops(?:\?|$)/);
+
+  const workspace = page.getByRole("region", { name: "Desktops workspace" });
+  await expect(workspace.getByText("Refreshing", { exact: true })).toBeVisible();
+  await expect(workspace.getByText("Loading seats...", { exact: true })).toBeVisible();
+  await expect(workspace.getByText("Loading desktop selection", { exact: true })).toBeVisible();
+  await expect(workspace).not.toContainText("0 running");
+  await expect(workspace).not.toContainText("0 seats");
+  await expect(workspace.getByRole("status", { name: "Loading desktop seats" })).toHaveAttribute("aria-busy", "true");
+
+  releaseDesktopList?.();
+  await expect(workspace.getByRole("button", { name: "Live QA Desktop linux_native" })).toBeVisible();
+  await expect(workspace.getByText("1 running", { exact: true })).toBeVisible();
+  await expect(workspace).toContainText("1 seats");
+  await expect(workspace).not.toContainText("Loading seats...");
+  await expect(workspace).not.toContainText("No desktop selected");
+  await expect.poll(() => workspace.evaluate((element) => (
+    element.scrollWidth <= element.clientWidth + 1
+  ))).toBe(true);
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/chat(?:\?|$)/);
+  await page.goForward();
+  await expect(page).toHaveURL(/\/desktops(?:\?|$)/);
+  await expect(page.getByRole("button", { name: "Live QA Desktop linux_native" })).toBeVisible();
+});
+
+test("direct Desktops refresh preserves seats across failure and clears the alert after recovery", async ({ page }) => {
+  test.setTimeout(150_000);
+  let allowRecovery = false;
+  await installDefaultspackApiMocks(page, {
+    desktopListResponse: (requestIndex) => {
+      if (requestIndex > 0 && !allowRecovery) {
+        throw new Error("Transient refresh failure.");
+      }
+      return { desktops: [liveDesktopFixture()] };
+    },
+  });
+  await page.goto("/desktops");
+
+  const workspace = page.getByRole("region", { name: "Desktops workspace" });
+  await expect(workspace.getByRole("button", { name: "Live QA Desktop linux_native" })).toBeVisible({ timeout: 60_000 });
+
+  const refreshAlert = workspace.getByRole("alert");
+  await expect(refreshAlert).toContainText("Unable to refresh desktop seats.", { timeout: 30_000 });
+  await expect(refreshAlert).toContainText("Showing the last available snapshots.");
+  await expect(workspace.getByRole("button", { name: "Live QA Desktop linux_native" })).toBeVisible();
+  await expect(workspace).toContainText("1 seats");
+
+  allowRecovery = true;
+  await expect(refreshAlert).toBeHidden({ timeout: 30_000 });
+  await expect(workspace.getByRole("button", { name: "Live QA Desktop linux_native" })).toBeVisible();
+});
+
+test("initial Desktops failure retries through pending state before confirming live seats", async ({ page }) => {
+  test.setTimeout(150_000);
+  let allowRetry = false;
+  let releaseRetry: (() => void) | undefined;
+  const retryGate = new Promise<void>((resolve) => {
+    releaseRetry = resolve;
+  });
+  await installDefaultspackApiMocks(page, {
+    desktopListResponse: async () => {
+      if (!allowRetry) {
+        throw new Error("Initial fixture failure.");
+      }
+      await retryGate;
+      return { desktops: [liveDesktopFixture()] };
+    },
+  });
+  await page.goto("/desktops?desktop=seat-live");
+
+  const workspace = page.getByRole("region", { name: "Desktops workspace" });
+  const loadAlert = workspace.getByRole("alert");
+  await expect(loadAlert).toContainText("Unable to load desktop seats.", { timeout: 60_000 });
+  await expect(workspace).toContainText("Desktop seats could not be refreshed");
+  await expect(workspace).not.toContainText("The backend returned an empty desktop list.");
+
+  allowRetry = true;
+  await loadAlert.getByRole("button", { name: "Retry desktop list" }).click();
+  await expect(workspace.getByText("Loading seats...", { exact: true })).toBeVisible();
+  await expect(workspace).not.toContainText("0 seats");
+
+  releaseRetry?.();
+  await expect(loadAlert).toBeHidden();
+  await expect(workspace.getByRole("button", { name: "Live QA Desktop linux_native" })).toBeVisible();
+  await expect(workspace).toContainText("1 seats");
+  await expect(page).toHaveURL(/\/desktops\?desktop=seat-live/);
+});
 
 test("manual runtime mode control is hidden by default and available after explicit opt-in", async ({ page }) => {
   await openDefaultspack(page, "/chat");

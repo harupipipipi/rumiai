@@ -23,6 +23,9 @@
 ### Fixed
 - Fixed broken internal links in documentation
 - Improved documentation consistency across project
+- Prevented the Desktops workspace from announcing definitive zero-seat counts
+  while its initial live-seat refresh is still pending, while preserving the
+  last available seats and clearly identifying refresh failures.
 
 ## Previous Changes
 

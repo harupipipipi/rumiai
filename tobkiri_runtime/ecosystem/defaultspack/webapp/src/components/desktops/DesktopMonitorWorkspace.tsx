@@ -29,6 +29,16 @@ export function shouldShowDesktopList({
   return runtimeReady || desktopCount > 0 || loading || Boolean(error);
 }
 
+export function isDesktopBootstrapPending({
+  desktopCount,
+  loading,
+}: {
+  desktopCount: number;
+  loading: boolean;
+}) {
+  return loading && desktopCount === 0;
+}
+
 export function resolveVisibleSelectedDesktop(
   visibleDesktops: DesktopInstance[],
   selectedSeatId: string | null,
@@ -302,12 +312,17 @@ export function DesktopMonitorWorkspace() {
     loading: desktopInstances.loading,
     error: desktopInstances.error,
   });
+  const desktopBootstrapPending = isDesktopBootstrapPending({
+    desktopCount: desktopInstances.desktops.length,
+    loading: desktopInstances.loading,
+  });
 
   return (
     <section className="relative flex h-full min-h-0 flex-1 flex-col bg-[#09090b] text-zinc-300" aria-label="Desktops workspace">
       <DesktopToolbar
         totalCount={desktopInstances.desktops.length}
         runningCount={runningCount}
+        loading={desktopInstances.loading}
         filter={filter}
         density={density}
         doctorLoading={runtime.doctorLoading}
@@ -322,11 +337,23 @@ export function DesktopMonitorWorkspace() {
         <div className="grid gap-2">
           {providerNotice}
           {surfaceError && (
-            <div className={cn(
+            <div
+              role={setupMessage ? "status" : "alert"}
+              className={cn(
               "rounded-lg border px-3 py-2 text-xs",
               setupMessage ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-100" : "border-red-500/25 bg-red-500/10 text-red-100",
-            )}>
+              )}
+            >
               {surfaceError}
+              {desktopInstances.error && (
+                <button
+                  type="button"
+                  className="ml-2 rounded border border-red-300/30 px-2 py-1 font-semibold text-red-50 hover:bg-red-200/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
+                  onClick={() => void desktopInstances.refresh()}
+                >
+                  Retry desktop list
+                </button>
+              )}
             </div>
           )}
 
@@ -338,7 +365,11 @@ export function DesktopMonitorWorkspace() {
                 selectedSeatId={visibleSelectedSeatId}
                 density={density}
                 leaseSeatId={control.lease?.seat_id ?? null}
-                emptyReason={desktopInstances.desktops.length > 0 ? "filter" : "backend"}
+                emptyReason={desktopInstances.desktops.length > 0
+                  ? "filter"
+                  : desktopInstances.error
+                    ? "error"
+                    : "backend"}
                 accessKeys={accessKeys}
                 controlBusy={control.busy}
                 onSelect={handleSelectDesktop}
@@ -352,6 +383,7 @@ export function DesktopMonitorWorkspace() {
               />
               <DesktopInspector
                 desktop={selectedDesktop}
+                loading={desktopBootstrapPending}
                 hasLease={Boolean(control.lease)}
                 leaseError={control.error}
                 actionError={actionError}

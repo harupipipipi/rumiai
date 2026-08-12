@@ -5,6 +5,42 @@ import type { DesktopInstance, SandboxInstance } from "./types";
 
 type SandboxInstancesClient = Pick<typeof sandboxesApi, "listSandboxes" | "listDesktops">;
 
+export type DesktopRefreshSnapshot = {
+  desktops: DesktopInstance[];
+  error: string | null;
+};
+
+function desktopErrorDetail(error: unknown): string {
+  return error instanceof Error ? error.message : "Desktop lookup failed.";
+}
+
+export function desktopRefreshFailed(
+  current: DesktopInstance[],
+  error: unknown,
+  { hasSuccessfulRequest = false }: { hasSuccessfulRequest?: boolean } = {},
+): DesktopRefreshSnapshot {
+  const detail = desktopErrorDetail(error);
+  if (!hasSuccessfulRequest) {
+    return {
+      desktops: [],
+      error: `Unable to load desktop seats. ${detail}`,
+    };
+  }
+  const preservationDetail = current.length > 0
+    ? "Showing the last available snapshots."
+    : "The last completed snapshot was empty.";
+  return {
+    desktops: current,
+    error: `Unable to refresh desktop seats. ${preservationDetail} ${detail}`,
+  };
+}
+
+export function desktopRefreshSucceeded(
+  desktops: DesktopInstance[],
+): DesktopRefreshSnapshot {
+  return { desktops, error: null };
+}
+
 export function useSandboxInstances({
   enabled = true,
   client = sandboxesApi,
@@ -54,6 +90,7 @@ export function useDesktopInstances({
   const [error, setError] = useState<string | null>(null);
   const refreshInFlightRef = useRef(false);
   const desktopsRef = useRef<DesktopInstance[]>([]);
+  const hasSuccessfulRequestRef = useRef(false);
 
   const refresh = useCallback(async (options: { silent?: boolean } = {}) => {
     if (!enabled) return [];
@@ -62,14 +99,20 @@ export function useDesktopInstances({
     if (!options.silent) setLoading(true);
     try {
       const result = await client.listDesktops();
-      desktopsRef.current = result.desktops;
-      setDesktops(result.desktops);
-      setError(null);
-      return result.desktops;
+      const snapshot = desktopRefreshSucceeded(result.desktops);
+      desktopsRef.current = snapshot.desktops;
+      hasSuccessfulRequestRef.current = true;
+      setDesktops(snapshot.desktops);
+      setError(snapshot.error);
+      return snapshot.desktops;
     } catch (desktopError) {
-      setDesktops(desktopsRef.current);
-      setError(desktopError instanceof Error ? desktopError.message : "Desktop lookup failed.");
-      return desktopsRef.current;
+      const snapshot = desktopRefreshFailed(desktopsRef.current, desktopError, {
+        hasSuccessfulRequest: hasSuccessfulRequestRef.current,
+      });
+      desktopsRef.current = snapshot.desktops;
+      setDesktops(snapshot.desktops);
+      setError(snapshot.error);
+      return snapshot.desktops;
     } finally {
       refreshInFlightRef.current = false;
       if (!options.silent) setLoading(false);
