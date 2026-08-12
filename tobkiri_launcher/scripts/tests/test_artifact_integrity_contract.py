@@ -23,7 +23,6 @@ def _load(name: str):
 
 
 INTEGRITY = _load("artifact_integrity")
-PACKAGE = _load("package_presentation_artifact")
 
 
 def _materialize(root: Path, fixture: dict[str, object]) -> Path:
@@ -136,18 +135,10 @@ def test_python_created_file_digest_and_size_match_cross_language_vector(
         signing_key = root / "signing-key.raw"
         signing_key.write_bytes(bytes(range(32)))
 
-        assert PACKAGE.artifact_digest_and_size(source) == (
+        assert INTEGRITY.artifact_digest_and_size(source) == (
             fixture["sha256"],
             fixture["size"],
         )
-        with pytest.raises(RuntimeError, match="repository_root is required"):
-            PACKAGE.package_artifact(
-                catalog_path,
-                manifest_path,
-                signing_key,
-                "artifact-integrity-test-key",
-                root / "release",
-            )
 
 
 def test_mac_app_directory_vector_remains_recursive_and_symlink_safe() -> None:

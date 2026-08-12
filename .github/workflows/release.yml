@@ -281,68 +281,6 @@ jobs:
           --target ${{ matrix.target }}
           --profile release
 
-      - name: Prepare sealed Python environment and export manifest binding
-        shell: python
-        env:
-          SEALED_TARGET: ${{ matrix.target }}
-          SEALED_BINDING: ${{ runner.temp }}/sealed-python-binding.env
-        run: |
-          import importlib.util
-          import os
-          import subprocess
-          import sys
-          from pathlib import Path
-
-          root = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          target = os.environ["SEALED_TARGET"]
-          builder_path = root / ".github/scripts/build_sealed_python_environment.py"
-          spec = importlib.util.spec_from_file_location("sealed_target_check", builder_path)
-          if spec is None or spec.loader is None:
-              raise SystemExit(f"Unable to load {builder_path}")
-          module = importlib.util.module_from_spec(spec)
-          sys.modules[spec.name] = module
-          spec.loader.exec_module(module)
-          module.target_spec(target)
-
-          subprocess.run(
-              [
-                  sys.executable,
-                  ".github/scripts/prepare_tauri_resources.py",
-                  "--repo-root",
-                  str(root),
-                  "--target",
-                  target,
-                  "--uv-version",
-                  module.UV_VERSION,
-                  "--require-runtime-tools",
-              ],
-              cwd=root,
-              check=True,
-          )
-          binding = Path(os.environ["SEALED_BINDING"])
-          subprocess.run(
-              [
-                  sys.executable,
-                  str(builder_path),
-                  "--repo-root",
-                  str(root),
-                  "--target",
-                  target,
-                  "--check",
-                  "--env-output",
-                  str(binding),
-              ],
-              cwd=root,
-              check=True,
-          )
-          text = binding.read_text(encoding="utf-8")
-          prefix = "TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256="
-          digest = text.removeprefix(prefix).strip()
-          if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
-              raise SystemExit("sealed Python manifest binding is not a lowercase SHA-256")
-          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as output:
-              output.write(text if text.endswith("\n") else text + "\n")
-
       - name: Build verified Tauri Shell artifact
         working-directory: tobkiri_launcher
         env:
@@ -372,34 +310,10 @@ jobs:
             --app-bundle "$artifact" \
             --artifact "$artifact"
 
-      - name: Stage verified macOS Tauri Shell artifact
-        if: runner.os == 'macOS'
-        shell: bash
-        env:
-          RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
-        run: |
-          artifact="$(find "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -type d -name 'Tobkiri.app' -print -quit)"
-          test -n "$artifact"
-          python -c 'import secrets,sys; open(sys.argv[1], "wb").write(secrets.token_bytes(32))' "$RUNNER_TEMP/tobkiri-presentation-signing-key.raw"
-          python tobkiri_launcher/scripts/write_shell_build_output.py \
-            --artifact-id '${{ matrix.presentation_variant }}' --artifact "$artifact" \
-            --platform '${{ matrix.presentation_platform }}' --architecture '${{ matrix.presentation_architecture }}' \
-            --source-identity 'github:${{ github.repository }}' --source-revision '${{ steps.checked_out_source.outputs.source_revision }}' \
-            --output "$RUNNER_TEMP/shell-build-output.v4.json"
-          python tobkiri_launcher/scripts/package_presentation_artifact.py \
-            --catalog tobkiri_launcher/src-tauri/bundled/presentation_catalog.json \
-            --build-output-manifest "$RUNNER_TEMP/shell-build-output.v4.json" \
-            --signing-key "$RUNNER_TEMP/tobkiri-presentation-signing-key.raw" \
-            --signing-key-id 'github-actions:${{ github.run_id }}:${{ matrix.target }}' \
-            --repository-root "$GITHUB_WORKSPACE" \
-            --source-provenance-file "${TOBKIRI_PACKAGING_SOURCE_PROVENANCE_FILE:?core-bound packaging provenance is required}" \
-            --output-dir "$RELEASE_ROOT"
-
       - name: Build signed macOS application
         if: runner.os == 'macOS'
         working-directory: tobkiri_launcher
         env:
-          TOBKIRI_PRESENTATION_RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
           TOBKIRI_PANEL_BUILD_DIR: ${{ runner.temp }}/tobkiri-panel-build
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -424,7 +338,6 @@ jobs:
         working-directory: tobkiri_launcher
         shell: bash
         env:
-          TOBKIRI_PRESENTATION_RELEASE_ROOT: ${{ runner.temp }}/tobkiri-presentation-release
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           set -o pipefail

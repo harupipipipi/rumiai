@@ -1,871 +1,116 @@
+"""Contract tests for the retired direct presentation-packaging caller."""
+
 from __future__ import annotations
 
-import base64
-import hashlib
+import ast
 import importlib.util
-import json
 import os
-import plistlib
-import shutil
 import subprocess
 import sys
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "package_presentation_artifact.py"
-SPEC = importlib.util.spec_from_file_location(
-    "package_presentation_artifact", SCRIPT_PATH
-)
-assert SPEC and SPEC.loader
-MODULE = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(MODULE)
-artifact_digest = MODULE.artifact_digest
-package_artifact = MODULE.package_artifact
-REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-SOURCE_MANIFEST_SPEC = importlib.util.spec_from_file_location(
-    "presentation_generator_source_manifest",
-    REPOSITORY_ROOT / "tobkiri_runtime/scripts/generator_source_manifest.py",
-)
-assert SOURCE_MANIFEST_SPEC and SOURCE_MANIFEST_SPEC.loader
-SOURCE_MANIFEST_MODULE = importlib.util.module_from_spec(SOURCE_MANIFEST_SPEC)
-SOURCE_MANIFEST_SPEC.loader.exec_module(SOURCE_MANIFEST_MODULE)
-materialize_source_snapshot = SOURCE_MANIFEST_MODULE.materialize_source_snapshot
 
 
-def _git_revision(expression: str) -> str:
-    """Read a test fixture's formal revision from the checkout under test."""
-    return subprocess.run(
-        ["git", "rev-parse", "--verify", expression],
-        cwd=REPOSITORY_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-
-SOURCE_COMMIT = _git_revision("HEAD^{commit}")
-SOURCE_TREE = _git_revision("HEAD^{tree}")
-
-
-def _source_provenance(root: Path) -> dict[str, object]:
-    """Create and return the private snapshot contract for one test root."""
-    owner = root / "sealed-source-owner"
-    snapshot = owner / "source"
-    provenance = snapshot / "packaging-source-provenance.v1.json"
-    if not snapshot.exists():
-        owner.mkdir(parents=True, exist_ok=True, mode=0o700)
-        owner.chmod(0o700)
-        materialize_source_snapshot(REPOSITORY_ROOT / "tobkiri_runtime", snapshot)
-        snapshot.chmod(0o755)
-        manifest = snapshot / "packaged_defaultspack_source_manifest.v1.json"
-        provenance.write_bytes(
-            json.dumps(
-                {
-                    "schema": "io.tobkiri.packaging-source-provenance.v1",
-                    "source_commit": SOURCE_COMMIT,
-                    "source_tree": SOURCE_TREE,
-                    "source_clean": True,
-                    "source_manifest_sha256": hashlib.sha256(
-                        manifest.read_bytes()
-                    ).hexdigest(),
-                },
-                separators=(",", ":"),
-            ).encode("utf-8")
-        )
-        provenance.chmod(0o400)
-        snapshot.chmod(0o555)
-    return {
-        "source_provenance_file": provenance,
-    }
-
-
-def _catalog(entrypoint: str = "true") -> dict[str, object]:
-    return {
-        "schema": "io.tobkiri.launcher.presentation-catalog.v1",
-        "default_selection": {
-            "base_pack_id": "defaults-basepack",
-            "shell_provider_id": "shell.cli.default",
-        },
-        "shell_providers": [
-            {
-                "provider_id": "shell.cli.default",
-                "artifact_variants": [
-                    {
-                        "artifact_id": "shell.cli.default.linux-x86_64",
-                        "variant": "linux-x86_64",
-                        "platform": "linux",
-                        "architecture": "x86_64",
-                        "entrypoint": entrypoint,
-                        "prebuilt": True,
-                        "production": True,
-                        "development_command": None,
-                    }
-                ],
-            }
-        ],
-    }
-
-
-def _windows_catalog(entrypoint: str = "tobkiri-shell.exe") -> dict[str, object]:
-    """Return the production Windows variant used by path portability tests."""
-    catalog = _catalog(entrypoint)
-    variant = catalog["shell_providers"][0]["artifact_variants"][0]
-    variant.update(
-        artifact_id="shell.cli.default.windows-x86_64",
-        variant="windows-x86_64",
-        platform="windows",
+def _load_module():
+    """Load the compatibility shim without adding the repository to sys.path."""
+    spec = importlib.util.spec_from_file_location(
+        "retired_package_presentation_artifact", SCRIPT_PATH
     )
-    return catalog
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def _fixture(
-    root: Path, *, artifact_path: str | None = None
-) -> tuple[Path, Path, Path]:
-    catalog_path = root / "presentation_catalog.json"
-    catalog_path.write_text(json.dumps(_catalog()), encoding="utf-8")
-    source = Path(shutil.which("true") or "/usr/bin/true")
-    manifest = root / "shell_build_output.v4.json"
-    manifest.write_text(
-        json.dumps(
-            {
-                "schema": "io.tobkiri.shell.build-output.v4",
-                "artifact_id": "shell.cli.default.linux-x86_64",
-                "artifact_path": artifact_path or os.fspath(source),
-                "platform": "linux",
-                "architecture": "x86_64",
-                "build_profile": "release",
-                "source_identity": "github:example/tobkiri",
-                "source_revision": "a974ec811bd189c413557a00b4b073bc5898bd41",
-            }
-        ),
-        encoding="utf-8",
-    )
-    key = root / "signing-key.raw"
-    key.write_bytes(bytes(range(32)))
-    return catalog_path, manifest, key
+MODULE = _load_module()
 
 
-def test_windows_absolute_artifact_path_accepts_canonical_contained_path() -> None:
-    value = (
-        r"D:\a\tobkiri\tobkiri\tobkiri_launcher\src-tauri\target"
-        r"\x86_64-pc-windows-msvc\release\tobkiri-shell.exe"
-    )
-    result = MODULE._canonical_windows_absolute_artifact_path(
-        value, r"d:\A\TOBKIRI\TOBKIRI"
-    )
-    assert str(result) == value
-
-
-@pytest.mark.parametrize(
-    "value",
-    [
-        r"E:\a\tobkiri\tobkiri\tobkiri-shell.exe",
-        r"C:tobkiri-shell.exe",
-        r"D:\a\tobkiri\tobkiri\..\outside\tobkiri-shell.exe",
-        r"\\server\share\tobkiri\tobkiri-shell.exe",
-        r"\\?\D:\a\tobkiri\tobkiri\tobkiri-shell.exe",
-        r"\\.\D:\a\tobkiri\tobkiri\tobkiri-shell.exe",
-        r"D:/a/tobkiri/tobkiri/tobkiri-shell.exe",
-        r"D:\a/tobkiri\tobkiri\tobkiri-shell.exe",
-        r"D:\a\\tobkiri\tobkiri\tobkiri-shell.exe",
-        r"D:\a\.\tobkiri\tobkiri\tobkiri-shell.exe",
-        "D:\\a\\tobkiri\\tobkiri\\tobkiri-shell.exe\x00ignored",
-        r"D:\a\tobkiri\outside\tobkiri-shell.exe",
-        r"D:\a\tobkiri\tobkiri\release.\tobkiri-shell.exe",
-        r"D:\a\tobkiri\tobkiri\CON\tobkiri-shell.exe",
-        r"D:\a\tobkiri\tobkiri\CONIN$\tobkiri-shell.exe",
-        r"D:\a\tobkiri\tobkiri\CONOUT$.txt\tobkiri-shell.exe",
-        r"D:\a\tobkiri\tobkiri\COM¹\tobkiri-shell.exe",
-        r"D:\a\tobkiri\tobkiri\COM².txt\tobkiri-shell.exe",
-        r"D:\a\tobkiri\tobkiri\COM³\tobkiri-shell.exe",
-        r"D:\a\tobkiri\tobkiri\LPT¹\tobkiri-shell.exe",
-        r"D:\a\tobkiri\tobkiri\LPT².txt\tobkiri-shell.exe",
-        r"D:\a\tobkiri\tobkiri\LPT³\tobkiri-shell.exe",
-        r"D:\a\tobkiri\tobkiri\tobkiri-shell.exe:payload",
-    ],
-)
-def test_windows_absolute_artifact_path_rejects_noncanonical_or_escape(
-    value: str,
+def test_direct_caller_fails_closed_without_inspecting_snapshot_inputs(
+    tmp_path: Path,
 ) -> None:
-    with pytest.raises(RuntimeError, match="release artifact path"):
-        MODULE._canonical_windows_absolute_artifact_path(
-            value, r"D:\a\tobkiri\tobkiri"
-        )
-
-
-def test_windows_absolute_artifact_path_requires_windows_and_repository_root() -> None:
-    with TemporaryDirectory(prefix="tobkiri-windows-path-gate-") as temp:
-        root = Path(temp)
-        catalog, manifest, key = _fixture(root)
-        build = json.loads(manifest.read_text())
-        build.update(
-            artifact_id="shell.cli.default.windows-x86_64",
-            artifact_path=r"D:\a\tobkiri\tobkiri\tobkiri-shell.exe",
-            platform="windows",
-        )
-        catalog.write_text(json.dumps(_windows_catalog()), encoding="utf-8")
-        manifest.write_text(json.dumps(build), encoding="utf-8")
-        with pytest.raises(RuntimeError, match="release artifact path is unsafe"):
-            package_artifact(catalog, manifest, key, "key", root / "release")
-
-        build.update(
-            artifact_id="shell.cli.default.linux-x86_64",
-            platform="linux",
-        )
-        catalog.write_text(json.dumps(_catalog()), encoding="utf-8")
-        manifest.write_text(json.dumps(build), encoding="utf-8")
-        with pytest.raises(RuntimeError, match="release artifact path is unsafe"):
-            package_artifact(catalog, manifest, key, "key", root / "linux-release")
-
-
-@pytest.mark.skipif(os.name != "nt", reason="requires native Windows Path semantics")
-def test_windows_absolute_artifact_path_packages_native_manifest() -> None:
-    repository_root = REPOSITORY_ROOT
-    ignored_target = repository_root / "tobkiri_launcher/src-tauri/target"
-    ignored_target.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(
-        prefix="tobkiri-windows-path-", dir=ignored_target
-    ) as source_temp, TemporaryDirectory(
-        prefix="tobkiri-windows-output-"
-    ) as output_temp:
-        source = Path(source_temp) / "tobkiri-shell.exe"
-        pe_stub = bytearray(88)
-        pe_stub[:2] = b"MZ"
-        pe_stub[60:64] = (64).to_bytes(4, "little")
-        pe_stub[64:68] = b"PE\0\0"
-        pe_stub[68:70] = (0x8664).to_bytes(2, "little")
-        source.write_bytes(pe_stub)
-        source.chmod(0o755)
-
-        root = Path(output_temp)
-        catalog = (
-            repository_root
-            / "tobkiri_launcher/src-tauri/bundled/presentation_catalog.json"
-        )
-        manifest = root / "shell_build_output.v4.json"
-        manifest.write_text(
-            json.dumps(
-                {
-                    "schema": "io.tobkiri.shell.build-output.v4",
-                    "artifact_id": "shell.tauri.default.windows-x86_64",
-                    "artifact_path": os.fspath(source.resolve()),
-                    "platform": "windows",
-                    "architecture": "x86_64",
-                    "build_profile": "release",
-                    "source_identity": "github:example/tobkiri",
-                    "source_revision": SOURCE_COMMIT,
-                }
-            ),
-            encoding="utf-8",
-        )
-        key = root / "signing-key.raw"
-        key.write_bytes(bytes(range(32)))
-
-        report = package_artifact(
-            catalog,
-            manifest,
-            key,
-            "windows-path-test-key",
-            root / "release",
-            repository_root,
-            **_source_provenance(root),
-        )
-        assert "\\" not in str(report["path"])
-        index = json.loads(
-            (root / "release/bundled/shell_artifact_index.v4.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        assert index["path"] == report["path"]
-        assert "\\" not in index["path"]
-
-
-def _canonical_fixture(root: Path) -> tuple[Path, Path, Path, Path, Path]:
-    repository_root = REPOSITORY_ROOT
-    catalog = (
-        repository_root
-        / "tobkiri_launcher/src-tauri/bundled/presentation_catalog.json"
-    )
-    if sys.platform == "darwin":
-        platform_name = "macos"
-        architecture = "arm64" if os.uname().machine.lower() in {"arm64", "aarch64"} else "x86_64"
-        artifact = root / "Tobkiri.app"
-        executable = artifact / "Contents/MacOS/tobkiri-shell"
-        executable.parent.mkdir(parents=True)
-        subprocess.run(
-            [
-                "/usr/bin/lipo",
-                "/usr/bin/true",
-                "-thin",
-                "arm64e" if architecture == "arm64" else architecture,
-                "-output",
-                executable,
-            ],
-            check=True,
-        )
-        executable.chmod(0o755)
-        plist = artifact / "Contents/Info.plist"
-        plist.write_bytes(
-            plistlib.dumps(
-                {
-                    "CFBundleExecutable": "tobkiri-shell",
-                    "CFBundleIdentifier": "io.tobkiri.shell.tauri",
-                    "CFBundlePackageType": "APPL",
-                }
-            )
-        )
-        _codesign_app(artifact)
-    else:
-        platform_name = "linux"
-        architecture = "x86_64"
-        artifact = Path(shutil.which("true") or "/usr/bin/true")
-    manifest = root / "shell_build_output.v4.json"
-    manifest.write_text(
-        json.dumps(
-            {
-                "schema": "io.tobkiri.shell.build-output.v4",
-                "artifact_id": f"shell.tauri.default.{platform_name}-{architecture}",
-                "artifact_path": os.fspath(artifact),
-                "platform": platform_name,
-                "architecture": architecture,
-                "build_profile": "release",
-                "source_identity": "github:example/tobkiri",
-                "source_revision": SOURCE_COMMIT,
-            }
-        ),
+    """A stale Python caller cannot select a source tree or publish output."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    marker = outside / "imported.marker"
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "generator_source_manifest.py").write_text(
+        f"from pathlib import Path; Path({marker!r}).write_text('executed')\n",
         encoding="utf-8",
     )
-    key = root / "signing-key.raw"
-    key.write_bytes(bytes(range(32)))
-    return catalog, manifest, key, repository_root, artifact
 
-
-def _package(root: Path, output_name: str = "release") -> dict[str, object]:
-    catalog, manifest, key, repository_root, _ = _canonical_fixture(root)
-    return package_artifact(
-        catalog,
-        manifest,
-        key,
-        "test-release-key",
-        root / output_name,
-        repository_root,
-        **_source_provenance(root),
-    )
-
-
-def _macos_fixture(root: Path) -> tuple[Path, Path, Path, Path]:
-    """Create the smallest real macOS application fixture accepted by codesign."""
-    app = root / "Tobkiri.app"
-    executable = app / "Contents" / "MacOS" / "tobkiri-shell"
-    executable.parent.mkdir(parents=True)
-    shutil.copyfile("/usr/bin/true", executable)
-    executable.chmod(0o755)
-    resources = app / "Contents" / "Resources"
-    resources.mkdir()
-    (resources / "presentation.json").write_text("sealed fixture\n", encoding="utf-8")
-    with (app / "Contents" / "Info.plist").open("wb") as handle:
-        plistlib.dump(
-            {
-                "CFBundleExecutable": "tobkiri-shell",
-                "CFBundleIdentifier": "io.tobkiri.shell.tauri",
-                "CFBundlePackageType": "APPL",
-            },
-            handle,
+    with pytest.raises(RuntimeError) as raised:
+        MODULE.package_artifact(
+            snapshot,
+            tmp_path / "catalog.json",
+            tmp_path / "release-manifest.json",
+            tmp_path / "signing-key.raw",
+            tmp_path / "release",
         )
-    catalog = _catalog("Tobkiri.app/Contents/MacOS/tobkiri-shell")
-    variant = catalog["shell_providers"][0]["artifact_variants"][0]
-    variant.update(
-        artifact_id="shell.cli.default.macos-arm64",
-        platform="macos",
-        architecture="arm64",
-        bundle_identifier="io.tobkiri.shell.tauri",
-    )
-    catalog_path = root / "presentation_catalog.json"
-    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
-    manifest = root / "shell_build_output.v4.json"
-    manifest.write_text(
-        json.dumps(
-            {
-                "schema": "io.tobkiri.shell.build-output.v4",
-                "artifact_id": "shell.cli.default.macos-arm64",
-                "artifact_path": os.fspath(app),
-                "platform": "macos",
-                "architecture": "arm64",
-                "build_profile": "release",
-                "source_identity": "github:example/tobkiri",
-                "source_revision": "a974ec811bd189c413557a00b4b073bc5898bd41",
-            }
-        ),
-        encoding="utf-8",
-    )
-    key = root / "signing-key.raw"
-    key.write_bytes(bytes(range(32)))
-    return catalog_path, manifest, key, app
+
+    message = str(raised.value)
+    assert "run_formal_defaults_packaging" in message
+    assert "tobkiri-core-package-defaults-v1" in message
+    assert "verified_catalog" in message
+    assert not marker.exists()
 
 
-def _codesign_app(app: Path) -> None:
-    subprocess.run(
-        ["/usr/bin/codesign", "--force", "--sign", "-", os.fspath(app)],
-        check=True,
+def test_root_swap_and_missing_core_descriptor_are_the_same_fail_closed_path(
+    tmp_path: Path,
+) -> None:
+    """Untrusted roots and missing core descriptors never reach filesystem code."""
+    root = tmp_path / "source"
+    root.mkdir()
+    replacement = tmp_path / "replacement"
+    replacement.mkdir()
+    root.rmdir()
+    root.symlink_to(replacement, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match="direct presentation packaging is disabled"):
+        MODULE.package_artifact(root, tmp_path / "not-a-descriptor")
+
+
+def test_cli_fails_closed_before_reading_environment_or_cwd(tmp_path: Path) -> None:
+    """The old executable name cannot become a second packaging boundary."""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", str(SCRIPT_PATH), "--anything"],
+        cwd=tmp_path,
+        env={"PATH": os.environ.get("PATH", "")},
         capture_output=True,
         text=True,
+        check=False,
     )
+    assert result.returncode != 0
+    assert "tobkiri-core-package-defaults-v1" in result.stderr
+    assert "run_formal_defaults_packaging" in result.stderr
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="requires macOS codesign")
-def test_package_preserves_valid_macos_resource_envelope() -> None:
-    with TemporaryDirectory(prefix="tobkiri-presentation-macos-valid-") as temp:
-        root = Path(temp)
-        catalog, manifest, key, repository_root, _ = _canonical_fixture(root)
-        report = package_artifact(
-            catalog,
-            manifest,
-            key,
-            "key",
-            root / "release",
-            repository_root,
-            **_source_provenance(root),
-        )
-        staged = root / "release" / str(report["path"])
-        assert (staged / "Contents/_CodeSignature/CodeResources").is_file()
-        subprocess.run(
-            [
-                "/usr/bin/codesign",
-                "--verify",
-                "--deep",
-                "--strict",
-                os.fspath(staged),
-            ],
-            check=True,
-        )
-
-
-@pytest.mark.skipif(sys.platform != "darwin", reason="requires macOS codesign")
-@pytest.mark.parametrize("tamper", ["missing-code-resources", "resource-mismatch"])
-def test_package_rejects_invalid_macos_resource_envelope(tamper: str) -> None:
-    with TemporaryDirectory(prefix="tobkiri-presentation-macos-invalid-") as temp:
-        root = Path(temp)
-        catalog, manifest, key, repository_root, app = _canonical_fixture(root)
-        if tamper == "missing-code-resources":
-            (app / "Contents/_CodeSignature/CodeResources").unlink()
-        else:
-            resource = app / "Contents/Resources/presentation.json"
-            resource.parent.mkdir(parents=True, exist_ok=True)
-            resource.write_text(
-                "tampered fixture\n", encoding="utf-8"
-            )
-        with pytest.raises(RuntimeError, match="signature verification failed"):
-            package_artifact(
-                catalog,
-                manifest,
-                key,
-                "key",
-                root / "release",
-                repository_root,
-                **_source_provenance(root),
-            )
-        assert not (root / "release").exists()
-
-
-def test_desktop_installer_signs_macos_shell_after_build_before_packaging() -> None:
-    workflow = (
-        Path(__file__).resolve().parents[3]
-        / ".github/workflows/desktop-installers.yml"
-    ).read_text(encoding="utf-8")
-    build = workflow.index("- name: Build verified Tauri Shell artifact")
-    sign = workflow.index("- name: Ad-hoc sign macOS Tauri Shell artifact")
-    stage = workflow.index("- name: Stage verified macOS Tauri Shell artifact")
-    assert build < sign < stage
-    signing_step = workflow[sign:stage]
-    assert "/usr/bin/codesign --force --sign - \"$artifact\"" in signing_step
-    assert (
-        "/usr/bin/codesign --verify --deep --strict --verbose=2 \"$artifact\""
-        in signing_step
-    )
-
-
-def test_package_binds_exact_build_output_to_signed_index_and_lock() -> None:
-    with TemporaryDirectory(prefix="tobkiri-presentation-package-test-") as temp:
-        root = Path(temp)
-        report = _package(root)
-        output = root / "release"
-        staged = output / str(report["path"])
-        assert staged.exists()
-        assert report["sha256"] == artifact_digest(staged)
-        entrypoint = (
-            staged / "Contents/MacOS/tobkiri-shell" if staged.is_dir() else staged
-        )
-        assert entrypoint.is_file() and os.access(entrypoint, os.X_OK)
-        assert report["entrypoint_sha256"] == MODULE.file_digest(entrypoint)
-        assert report["size"] == MODULE.artifact_size(staged)
-        if sys.platform != "darwin":
-            subprocess.run([entrypoint], check=True)
-
-        catalog = json.loads((output / "presentation_catalog.json").read_text())
-        _, variant = MODULE._find_variant(catalog, str(report["artifact_id"]))
-        assert variant["platform"] == report["platform"]
-        assert variant["architecture"] == report["architecture"]
-        assert isinstance(variant["path"], str)
-        assert isinstance(variant["size"], int)
-        assert variant["path"] == report["path"]
-        assert variant["sha256"] == report["sha256"]
-        assert variant["entrypoint_sha256"] == report["entrypoint_sha256"]
-        assert variant["size"] == report["size"]
-        assert variant["source_revision"] == report["source_revision"]
-        index = json.loads(
-            (output / "bundled/shell_artifact_index.v4.json").read_text()
-        )
-        lock = json.loads((output / "bundled/shell_profile_lock.v4.json").read_text())
-        assert index["artifact_id"] == lock["artifact_id"] == report["artifact_id"]
-        assert lock["artifact_sha256"] == report["sha256"]
-        assert (
-            index["entrypoint_sha256"]
-            == lock["entrypoint_sha256"]
-            == report["entrypoint_sha256"]
-        )
-
-        release = json.loads(
-            (output / "bundled/presentation_release.v4.json").read_text()
-        )
-        profile_path = output / release["default_profile_path"]
-        defaultspack_lock_path = output / release["defaultspack_lock_path"]
-        assert release["default_profile_sha256"] == MODULE.file_digest(profile_path)
-        assert release["defaultspack_lock_sha256"] == MODULE.file_digest(
-            defaultspack_lock_path
-        )
-        assert catalog["default_profile_digest"] == release["default_profile_sha256"]
-        defaultspack_lock = json.loads(defaultspack_lock_path.read_text())
-        profile_entry = next(
-            entry
-            for entry in defaultspack_lock["entries"]
-            if entry["path"] == "defaults.profile.v4.json"
-        )
-        assert profile_entry["digest"] == release["default_profile_sha256"]
-        message = MODULE._signature_message(release)
-        Ed25519PublicKey.from_public_bytes(
-            base64.b64decode(release["public_key"])
-        ).verify(base64.b64decode(release["signature"]), message)
-
-
-def test_package_rejects_missing_symlink_wrong_platform_and_dev_metadata() -> None:
-    with TemporaryDirectory(prefix="tobkiri-presentation-package-negative-") as temp:
-        root = Path(temp)
-        catalog, manifest, key = _fixture(root, artifact_path="missing")
-        with pytest.raises(RuntimeError, match="missing or symlinked"):
-            package_artifact(catalog, manifest, key, "key", root / "missing-output")
-
-        source = Path(shutil.which("true") or "/usr/bin/true")
-        symlink = root / "symlink"
-        symlink.symlink_to(source)
-        build = json.loads(manifest.read_text())
-        build["artifact_path"] = os.fspath(symlink)
-        manifest.write_text(json.dumps(build))
-        with pytest.raises(RuntimeError, match="missing or symlinked"):
-            package_artifact(catalog, manifest, key, "key", root / "symlink-output")
-
-        build["artifact_path"] = os.fspath(source)
-        build["platform"] = "macos"
-        manifest.write_text(json.dumps(build))
-        with pytest.raises(RuntimeError, match="platform/architecture"):
-            package_artifact(catalog, manifest, key, "key", root / "platform-output")
-
-        build["platform"] = "linux"
-        build["architecture"] = "arm64"
-        manifest.write_text(json.dumps(build))
-        with pytest.raises(RuntimeError, match="unsupported platform/architecture"):
-            package_artifact(catalog, manifest, key, "key", root / "architecture-output")
-
-        untrusted = _catalog()
-        untrusted["shell_providers"][0]["artifact_variants"][0][
-            "development_command"
-        ] = "cargo tauri dev"
-        catalog.write_text(json.dumps(untrusted))
-        build["platform"] = "linux"
-        manifest.write_text(json.dumps(build))
-        with pytest.raises(RuntimeError, match="development command"):
-            package_artifact(catalog, manifest, key, "key", root / "dev-output")
-
-
-def test_package_rejects_empty_source_identity_and_bad_key() -> None:
-    with TemporaryDirectory(prefix="tobkiri-presentation-source-negative-") as temp:
-        root = Path(temp)
-        catalog, manifest, key = _fixture(root)
-        build = json.loads(manifest.read_text())
-        build["source_revision"] = ""
-        manifest.write_text(json.dumps(build))
-        with pytest.raises(RuntimeError, match="source_revision"):
-            package_artifact(catalog, manifest, key, "key", root / "source-output")
-
-        build["source_revision"] = "a" * 40
-        manifest.write_text(json.dumps(build))
-        key.write_bytes(b"short")
-        with pytest.raises(RuntimeError, match="32 raw seed bytes"):
-            package_artifact(catalog, manifest, key, "key", root / "key-output")
-
-
-def test_package_rejects_unknown_stale_profile_and_wrong_bundle_identity() -> None:
-    with TemporaryDirectory(prefix="tobkiri-presentation-identity-negative-") as temp:
-        root = Path(temp)
-        catalog, manifest, key = _fixture(root)
-        build = json.loads(manifest.read_text())
-
-        build["artifact_id"] = "shell.unknown.linux-x86_64"
-        manifest.write_text(json.dumps(build))
-        with pytest.raises(RuntimeError, match="not declared"):
-            package_artifact(catalog, manifest, key, "key", root / "unknown-output")
-
-        build["artifact_id"] = "shell.cli.default.linux-x86_64"
-        manifest.write_text(json.dumps(build))
-        stale = json.loads(catalog.read_text())
-        stale["default_selection"]["shell_provider_id"] = "shell.other.default"
-        catalog.write_text(json.dumps(stale))
-        with pytest.raises(RuntimeError, match="default Profile Shell"):
-            package_artifact(catalog, manifest, key, "key", root / "stale-output")
-
-        app = root / "Tobkiri.app"
-        executable = app / "Contents" / "MacOS" / "tobkiri-shell"
-        executable.parent.mkdir(parents=True)
-        executable.write_bytes(b"#!/bin/sh\nexit 0\n")
-        executable.chmod(0o755)
-        plist = app / "Contents" / "Info.plist"
-        plist.write_bytes(
-            b'<?xml version="1.0" encoding="UTF-8"?>\n'
-            b'<plist version="1.0"><dict><key>CFBundleIdentifier</key>'
-            b'<string>io.tobkiri.shell.wrong</string></dict></plist>\n'
-        )
-        mac_catalog = _catalog("Tobkiri.app/Contents/MacOS/tobkiri-shell")
-        variant = mac_catalog["shell_providers"][0]["artifact_variants"][0]
-        variant.update(
-            artifact_id="shell.cli.default.macos-arm64",
-            platform="macos",
-            architecture="arm64",
-            bundle_identifier="io.tobkiri.shell.cli.default",
-        )
-        catalog.write_text(json.dumps(mac_catalog))
-        build.update(
-            artifact_id="shell.cli.default.macos-arm64",
-            artifact_path=os.fspath(app),
-            platform="macos",
-            architecture="arm64",
-        )
-        manifest.write_text(json.dumps(build))
-        with pytest.raises(RuntimeError, match="bundle identity does not match"):
-            package_artifact(catalog, manifest, key, "key", root / "bundle-output")
-
-        variant["bundle_identifier"] = None
-        catalog.write_text(json.dumps(mac_catalog))
-        with pytest.raises(RuntimeError, match="no declared bundle identity"):
-            package_artifact(catalog, manifest, key, "key", root / "missing-bundle-output")
-
-
-def test_package_rejects_stale_catalog_and_artifact_path_escape() -> None:
-    with TemporaryDirectory(prefix="tobkiri-presentation-package-path-negative-") as temp:
-        root = Path(temp)
-        catalog, manifest, key = _fixture(root)
-        stale = json.loads(catalog.read_text())
-        stale["shell_providers"][0]["artifact_variants"][0]["path"] = (
-            "bundled/presentation-artifacts/old/true"
-        )
-        catalog.write_text(json.dumps(stale))
-        with pytest.raises(RuntimeError, match="stale installed metadata"):
-            package_artifact(catalog, manifest, key, "key", root / "stale-output")
-
-        catalog, manifest, key, repository_root, _ = _canonical_fixture(root)
-        build = json.loads(manifest.read_text())
-        build["artifact_path"] = "../outside/true"
-        manifest.write_text(json.dumps(build))
-        with pytest.raises(RuntimeError, match="escapes its manifest"):
-            package_artifact(catalog, manifest, key, "key", root / "escape-output")
-
-
-def test_package_requires_formal_source_provenance() -> None:
-    """A checkout cannot substitute for explicit preverified provenance."""
-    with TemporaryDirectory(prefix="tobkiri-presentation-source-contract-") as temp:
-        root = Path(temp)
-        catalog, manifest, key = _fixture(root)
-        build = json.loads(manifest.read_text())
-        build["source_revision"] = SOURCE_COMMIT
-        manifest.write_text(json.dumps(build), encoding="utf-8")
-        with pytest.raises(RuntimeError, match="source provenance file"):
-            package_artifact(
-                catalog,
-                manifest,
-                key,
-                "key",
-                root / "release",
-                REPOSITORY_ROOT,
-            )
-
-        contract = _source_provenance(root)
-        provenance = Path(contract["source_provenance_file"])
-        value = json.loads(provenance.read_text(encoding="utf-8"))
-        value["source_tree"] = "not-a-tree"
-        provenance.chmod(0o600)
-        provenance.write_text(json.dumps(value), encoding="utf-8")
-        provenance.chmod(0o400)
-        with pytest.raises(RuntimeError, match="sealed source"):
-            package_artifact(
-                catalog,
-                manifest,
-                key,
-                "key",
-                root / "bad-release",
-                REPOSITORY_ROOT,
-                **contract,
-            )
-
-
-def test_package_projection_contract_is_snapshot_only() -> None:
-    """The non-core caller passes the trusted manifest-bound snapshot contract."""
+def test_shim_has_no_snapshot_loader_or_child_execution_surface() -> None:
+    """The direct caller must not execute pre-verification source code."""
     source = SCRIPT_PATH.read_text(encoding="utf-8")
-    assert "--source-provenance-file" in source
-    assert "materialize_source_snapshot" not in source
-    assert "verify_source_closure(source_root)" not in source
-    assert "--source-tree" not in source
-    assert "--source-clean" not in source
-    assert "source_identity_for_repository" not in source
-    assert "source_revision_for_repository" not in source
+    tree = ast.parse(source, filename=os.fspath(SCRIPT_PATH))
+    assert not [node for node in ast.walk(tree) if isinstance(node, ast.Import)]
+    assert not [node for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
+    for forbidden in (
+        "importlib",
+        "exec_module",
+        "subprocess",
+        "source-provenance-file",
+        "TOBKIRI_PACKAGING_SOURCE_PROVENANCE_FILE",
+        "TOBKIRI_PRESENTATION_RELEASE_ROOT",
+        "generator_source_manifest",
+    ):
+        assert forbidden not in source
 
 
-def _file_bytes(root: Path) -> dict[str, bytes]:
-    """Return a deterministic byte snapshot for transaction assertions."""
-    return {
-        path.relative_to(root).as_posix(): path.read_bytes()
-        for path in sorted(root.rglob("*"))
-        if path.is_file() and not path.is_symlink()
-    }
-
-
-def _linux_source(path: Path, payload: bytes = b"old-source") -> Path:
-    """Create a small recognized x86_64 ELF fixture."""
-    path.write_bytes(
-        b"\x7fELF\x02\x01\x01\x00"
-        + b"\x00" * 10
-        + b">\x00"
-        + payload
+def test_core_contract_constants_are_explicit() -> None:
+    """The compatibility diagnostic names the one permitted producer/consumer."""
+    assert MODULE.FORMAL_BOUNDARY_LABEL == "tobkiri-core-package-defaults-v1"
+    assert MODULE.FORMAL_API == (
+        "run_formal_defaults_packaging(DefaultsPackagingRequest)"
     )
-    path.chmod(0o755)
-    return path
-
-
-def test_package_normalizes_entrypoint_and_rolls_back_write_fault(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    with TemporaryDirectory(prefix="tobkiri-presentation-atomic-escape-") as temp:
-        root = Path(temp)
-        catalog, manifest, key = _fixture(root)
-        unsafe = json.loads(catalog.read_text())
-        unsafe["shell_providers"][0]["artifact_variants"][0]["entrypoint"] = (
-            "../true"
-        )
-        catalog.write_text(json.dumps(unsafe))
-        outside = root / "outside"
-        outside.write_bytes(b"sentinel")
-        with pytest.raises(RuntimeError, match="entrypoint is unsafe"):
-            package_artifact(catalog, manifest, key, "key", root / "escape-output")
-        assert outside.read_bytes() == b"sentinel"
-        assert not (root / "escape-output").exists()
-
-        catalog, manifest, key, repository_root, _ = _canonical_fixture(root)
-        original = MODULE._write_json
-        calls = 0
-
-        def fail_on_second(path: Path, value: object) -> None:
-            nonlocal calls
-            calls += 1
-            if calls == 2:
-                raise OSError("injected pack write fault")
-            original(path, value)
-
-        output = root / "existing-output"
-        output.mkdir()
-        (output / "sentinel").write_bytes(b"keep-existing-bytes")
-        before = _file_bytes(output)
-        monkeypatch.setattr(MODULE, "_write_json", fail_on_second)
-        with pytest.raises(OSError, match="injected pack write fault"):
-            package_artifact(
-                catalog,
-                manifest,
-                key,
-                "key",
-                output,
-                repository_root,
-                **_source_provenance(root),
-            )
-        assert _file_bytes(output) == before
-        assert not list(root.glob(".tobkiri-presentation-stage-*"))
-
-
-def test_package_uses_one_source_snapshot_and_revalidates_staged_signature(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    with TemporaryDirectory(prefix="tobkiri-presentation-snapshot-") as temp:
-        root = Path(temp)
-        catalog, manifest, key, repository_root, source = _canonical_fixture(root)
-        original_snapshot = MODULE._snapshot_artifact
-        snapshots: list[Path] = []
-
-        def record_snapshot(source_path: Path, destination: Path) -> Path:
-            result = original_snapshot(source_path, destination)
-            snapshots.append(destination)
-            return result
-
-        monkeypatch.setattr(MODULE, "_snapshot_artifact", record_snapshot)
-        report = package_artifact(
-            catalog,
-            manifest,
-            key,
-            "key",
-            root / "release",
-            repository_root,
-            **_source_provenance(root),
-        )
-        staged = root / "release" / str(report["path"])
-        assert staged.exists()
-        assert snapshots
-        assert all(path.is_relative_to(root) for path in snapshots)
-
-
-def test_package_two_passes_are_byte_identical() -> None:
-    with TemporaryDirectory(prefix="tobkiri-presentation-deterministic-") as temp:
-        root = Path(temp)
-        catalog, manifest, key, repository_root, _ = _canonical_fixture(root)
-        first = root / "release-one"
-        second = root / "release-two"
-        package_artifact(
-            catalog,
-            manifest,
-            key,
-            "key",
-            first,
-            repository_root,
-            **_source_provenance(root),
-        )
-        package_artifact(
-            catalog,
-            manifest,
-            key,
-            "key",
-            second,
-            repository_root,
-            **_source_provenance(root),
-        )
-        assert _file_bytes(first) == _file_bytes(second)
-
-
-def test_package_rejects_absolute_entrypoint_before_creating_output() -> None:
-    with TemporaryDirectory(prefix="tobkiri-presentation-absolute-") as temp:
-        root = Path(temp)
-        catalog, manifest, key = _fixture(root)
-        value = json.loads(catalog.read_text())
-        value["shell_providers"][0]["artifact_variants"][0]["entrypoint"] = os.fspath(
-            Path("/tmp/outside-shell")
-        )
-        catalog.write_text(json.dumps(value))
-        with pytest.raises(RuntimeError, match="entrypoint is unsafe"):
-            package_artifact(catalog, manifest, key, "key", root / "release")
-        assert not (root / "release").exists()
+    assert MODULE.VERIFIED_OUTPUT == "verified_catalog"
