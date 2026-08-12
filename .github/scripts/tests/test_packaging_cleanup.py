@@ -99,6 +99,7 @@ class _FakeHandleRecord(TypedDict):
     """State held by one disposable native-handle simulation."""
 
     path: Path
+    volume_serial: int
     file_index: int
     attributes: int
     share_mode: int
@@ -128,6 +129,20 @@ class _FakeWindowsApi:
         self.close_attempts: list[int] = []
         self.identity_attempts: list[int] = []
 
+    @staticmethod
+    def _path_identity(path: Path, *, directory: bool) -> Any:
+        """Model GetFileInformationByHandle for one no-follow path open."""
+
+        result = cleanup._lstat_no_follow(path)
+        attributes = int(getattr(result, "st_file_attributes", 0) or 0)
+        if directory:
+            attributes |= cleanup._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+        return cleanup._WindowsFileIdentity(
+            volume_serial=int(result.st_dev),
+            file_index=int(result.st_ino),
+            file_attributes=attributes,
+        )
+
     def open(
         self,
         path: Path,
@@ -141,14 +156,14 @@ class _FakeWindowsApi:
         if share_mode & cleanup._WINDOWS_FILE_SHARE_DELETE:
             raise AssertionError("simulation received FILE_SHARE_DELETE")
         self.open_share_modes.append(share_mode)
-        result = cleanup._lstat_no_follow(path)
+        identity = self._path_identity(path, directory=directory)
         handle = self._next_handle
         self._next_handle += 1
-        attributes = cleanup._WINDOWS_FILE_ATTRIBUTE_DIRECTORY if directory else 0
         self.handles[handle] = {
             "path": Path(path),
-            "file_index": int(result.st_ino),
-            "attributes": attributes,
+            "volume_serial": identity.volume_serial,
+            "file_index": identity.file_index,
+            "attributes": identity.file_attributes,
             "share_mode": share_mode,
         }
         return handle
@@ -162,20 +177,13 @@ class _FakeWindowsApi:
             raise OSError(errno.EIO, "simulated identity failure")
         record = self.handles[handle]
         return cleanup._WindowsFileIdentity(
-            volume_serial=1,
+            volume_serial=int(record["volume_serial"]),
             file_index=int(record["file_index"]),
             file_attributes=int(record["attributes"]),
         )
 
     def path_identity(self, path: Path, *, directory: bool) -> Any:
-        result = cleanup._lstat_no_follow(path)
-        attributes = cleanup._WINDOWS_FILE_ATTRIBUTE_DIRECTORY if directory else 0
-        attributes |= int(getattr(result, "st_file_attributes", 0) or 0)
-        return cleanup._WindowsFileIdentity(
-            volume_serial=1,
-            file_index=int(result.st_ino),
-            file_attributes=attributes,
-        )
+        return self._path_identity(path, directory=directory)
 
     def rename_same_parent(
         self,
@@ -231,6 +239,38 @@ def _use_fake_windows_native_api(
     monkeypatch.setattr(cleanup, "_IS_WINDOWS", True)
     monkeypatch.setattr(cleanup, "_REAL_WINDOWS", True)
     monkeypatch.setattr(cleanup, "_WINDOWS_API", fake_api)
+
+
+def test_fake_windows_path_probe_matches_bound_handle_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fake models one native volume/file/attribute identity domain."""
+
+    target = tmp_path / "owned.bin"
+    target.write_bytes(b"owned")
+    file_attributes = 0x20  # FILE_ATTRIBUTE_ARCHIVE on Windows fixtures.
+    _patch_lstat_component(
+        monkeypatch,
+        target,
+        _fake_stat(
+            stat.S_IFREG,
+            device=17,
+            inode=23,
+            file_attributes=file_attributes,
+        ),
+    )
+    fake_api = _FakeWindowsApi()
+
+    handle = fake_api.open(target, directory=False)
+    bound = fake_api.identity(handle)
+    probed = fake_api.path_identity(target, directory=False)
+
+    assert bound == probed
+    assert bound.volume_serial == 17
+    assert bound.file_index == 23
+    assert bound.file_attributes == file_attributes
+    fake_api.close(handle)
+    assert fake_api.handles == {}
 
 
 def test_transient_windows_lock_retries_then_releases(
