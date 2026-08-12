@@ -58,6 +58,103 @@ const ISOLATED_ENVIRONMENT_KEYS: &[&str] = &[
     "WINDIR",
 ];
 
+/// Formal Rust-owned packaging boundary used by release staging.
+///
+/// Contract name: `tobkiri-core-package-defaults-v1`.
+/// Inputs are typed below; no shell or caller-provided environment is used.
+/// The source snapshot and provenance path are private implementation details:
+/// the lease remains owned by this call through child exit, output validation,
+/// and identity-safe cleanup. Successful output is the verified staged catalog.
+const FORMAL_DEFAULTS_PACKAGING_COMMAND: &str = "tobkiri-core-package-defaults-v1";
+const FORMAL_DEFAULTS_PACKAGING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+struct DefaultsPackagingProjection<'a> {
+    source_artifact: &'a Path,
+    bundle_root: &'a Path,
+    artifact_root: &'a Path,
+    relative_path: &'a str,
+    entrypoint: &'a str,
+    platform: &'a str,
+    architecture: &'a str,
+    bundle_identity: &'a str,
+}
+
+impl DefaultsPackagingProjection<'_> {
+    fn validate(&self) -> io::Result<()> {
+        for (label, path) in [
+            ("source artifact", self.source_artifact),
+            ("bundle root", self.bundle_root),
+            ("artifact root", self.artifact_root),
+        ] {
+            if !path.is_absolute() {
+                return Err(invalid_release(format!(
+                    "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: {label} must be absolute"
+                )));
+            }
+        }
+        if safe_release_relative_path(self.relative_path, "projection relative path").is_err()
+            || [
+                self.entrypoint,
+                self.platform,
+                self.architecture,
+                self.bundle_identity,
+            ]
+            .iter()
+            .any(|value| value.is_empty() || value.contains('\0'))
+        {
+            return Err(invalid_release(format!(
+                "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: projection text is invalid"
+            )));
+        }
+        Ok(())
+    }
+
+    fn argv(&self) -> Vec<std::ffi::OsString> {
+        [
+            std::ffi::OsString::from("--source-artifact"),
+            self.source_artifact.as_os_str().to_owned(),
+            std::ffi::OsString::from("--bundle-root"),
+            self.bundle_root.as_os_str().to_owned(),
+            std::ffi::OsString::from("--artifact-root"),
+            self.artifact_root.as_os_str().to_owned(),
+            std::ffi::OsString::from("--relative-path"),
+            std::ffi::OsString::from(self.relative_path),
+            std::ffi::OsString::from("--entrypoint"),
+            std::ffi::OsString::from(self.entrypoint),
+            std::ffi::OsString::from("--platform"),
+            std::ffi::OsString::from(self.platform),
+            std::ffi::OsString::from("--architecture"),
+            std::ffi::OsString::from(self.architecture),
+            std::ffi::OsString::from("--bundle-identity"),
+            std::ffi::OsString::from(self.bundle_identity),
+            std::ffi::OsString::from("--source-provenance-file"),
+            std::ffi::OsString::from("packaging-source-provenance.v1.json"),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    fn append_argv(&self, command: &mut packaging_toolchain::VerifiedCommand<'_>) {
+        command.args(self.argv());
+    }
+}
+
+struct DefaultsPackagingRequest<'a> {
+    repository_root: &'a Path,
+    snapshot_parent: &'a Path,
+    trusted_source_manifest: &'a [u8],
+    source_revision: &'a str,
+    source_tree: &'a str,
+    staged_root: &'a Path,
+    staged_catalog: &'a Path,
+    expected_release: &'a VerifiedPresentationRelease,
+    projection: DefaultsPackagingProjection<'a>,
+}
+
+struct DefaultsPackagingOutput {
+    verified_catalog: PathBuf,
+}
+
 #[cfg(not(test))]
 fn main() {
     println!("cargo:rerun-if-changed=splash/index.html");
@@ -129,13 +226,138 @@ fn isolated_python_module_command<'a>(
     Ok(command)
 }
 
-fn bind_source_provenance_command(
-    command: &mut packaging_toolchain::VerifiedCommand<'_>,
-    _path: &Path,
-) {
-    command
-        .arg("--source-provenance-file")
-        .arg("packaging-source-provenance.v1.json");
+fn run_formal_defaults_packaging(
+    request: DefaultsPackagingRequest<'_>,
+) -> io::Result<DefaultsPackagingOutput> {
+    request.projection.validate()?;
+    for (label, path) in [
+        ("repository root", request.repository_root),
+        ("snapshot parent", request.snapshot_parent),
+        ("staged root", request.staged_root),
+        ("staged catalog", request.staged_catalog),
+    ] {
+        if !path.is_absolute() {
+            return Err(invalid_release(format!(
+                "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: {label} must be absolute"
+            )));
+        }
+    }
+    let mut source = packaged_source::verify_and_snapshot_against_manifest(
+        &request.repository_root.join("tobkiri_runtime"),
+        request.snapshot_parent,
+        request.trusted_source_manifest,
+    )
+    .map_err(|error| {
+        invalid_release(format!(
+            "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: trusted Rust source verification failed: {error}"
+        ))
+    })?;
+    let mut cleanup_authorized = true;
+    let execution = (|| -> io::Result<DefaultsPackagingOutput> {
+        let provenance = serde_json::to_vec(&serde_json::json!({
+            "schema": "io.tobkiri.packaging-source-provenance.v1",
+            "source_commit": request.source_revision,
+            "source_tree": request.source_tree,
+            "source_clean": true,
+            "source_manifest_sha256": raw_byte_digest(request.trusted_source_manifest),
+        }))
+        .map_err(io::Error::other)?;
+        source.bind_provenance(&provenance)?;
+        let python = packaging_toolchain::verified_tool("python")?;
+        source.verify_unchanged()?;
+        let mut command = isolated_python_module_command(
+            &python,
+            &source,
+            "scripts.generate_packaged_defaultspack_v4_bundle",
+        )?;
+        request.projection.append_argv(&mut command);
+        let mut child = command.spawn().map_err(|error| {
+            invalid_release(format!(
+                "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: generator spawn failed: {error}"
+            ))
+        })?;
+        cleanup_authorized = false;
+        let deadline = std::time::Instant::now() + FORMAL_DEFAULTS_PACKAGING_TIMEOUT;
+        let status = match child.wait_until(deadline) {
+            Ok(Some(status)) => {
+                cleanup_authorized = true;
+                status
+            }
+            Ok(None) => {
+                let kill = child.kill();
+                let reap =
+                    child.wait_until(std::time::Instant::now() + std::time::Duration::from_secs(2));
+                if matches!(reap, Ok(Some(_))) {
+                    cleanup_authorized = true;
+                }
+                return Err(invalid_release(format!(
+                    "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: generator timed out; kill={kill:?}; reap={reap:?}"
+                )));
+            }
+            Err(error) => {
+                return Err(invalid_release(format!(
+                    "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: generator identity was lost while waiting: {error}; signaling was stopped to avoid PID reuse"
+                )));
+            }
+        };
+        if !status.success() {
+            return Err(invalid_release(format!(
+                "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: generator exited with {status}"
+            )));
+        }
+        source.verify_unchanged()?;
+        let profile = request
+            .projection
+            .bundle_root
+            .join("defaults.profile.v4.json");
+        let lock = request.projection.bundle_root.join("bundle.lock.json");
+        let profile_digest = byte_digest(&fs::read(&profile)?);
+        let lock_digest = byte_digest(&fs::read(&lock)?);
+        if profile_digest != request.expected_release.default_profile_sha256
+            || lock_digest != request.expected_release.defaultspack_lock_sha256
+        {
+            return Err(invalid_release(format!(
+                "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: packaged Defaults identity drift: profile={profile_digest}, lock={lock_digest}"
+            )));
+        }
+        let staged_verified =
+            verify_presentation_release_at(request.staged_root, request.staged_catalog)?;
+        if staged_verified.default_profile_sha256 != request.expected_release.default_profile_sha256
+            || staged_verified.defaultspack_lock_sha256
+                != request.expected_release.defaultspack_lock_sha256
+            || staged_verified.artifact_ref != request.expected_release.artifact_ref
+            || staged_verified.entrypoint != request.expected_release.entrypoint
+        {
+            return Err(invalid_release(format!(
+                "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: staged presentation projection differs from its verified snapshot"
+            )));
+        }
+        Ok(DefaultsPackagingOutput {
+            verified_catalog: request.staged_catalog.to_path_buf(),
+        })
+    })();
+    if !cleanup_authorized {
+        std::mem::forget(source);
+        return Err(match execution {
+            Ok(_) => invalid_release(format!(
+                "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: child containment was not proven; private snapshot retained fail-closed"
+            )),
+            Err(error) => invalid_release(format!(
+                "{error}; {FORMAL_DEFAULTS_PACKAGING_COMMAND}: child containment was not proven, so the private snapshot was retained fail-closed"
+            )),
+        });
+    }
+    let cleanup = source.cleanup();
+    match (execution, cleanup) {
+        (Ok(output), Ok(())) => Ok(output),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(cleanup)) => Err(invalid_release(format!(
+            "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: snapshot cleanup failed: {cleanup}"
+        ))),
+        (Err(error), Err(cleanup)) => Err(invalid_release(format!(
+            "{error}; {FORMAL_DEFAULTS_PACKAGING_COMMAND}: snapshot cleanup also failed: {cleanup}"
+        ))),
+    }
 }
 
 fn warn_legacy_defaultspack_app_bundle() {
@@ -1879,110 +2101,32 @@ fn stage_presentation_release_from_snapshot(
         let snapshot_parent = std::env::var_os("OUT_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| staged_root.join(".verified-source-snapshots"));
-        let mut verified_source = packaged_source::verify_and_snapshot_against_manifest(
-            &repository_root.join("tobkiri_runtime"),
-            &snapshot_parent,
-            &trusted_source_manifest,
-        )
-        .map_err(|error| {
-            invalid_release(format!(
-                "trusted Rust packaged Profile source-closure verification failed: {error}"
-            ))
-        })?;
-        let execution = (|| -> io::Result<_> {
-            let source_provenance = serde_json::to_vec(&serde_json::json!({
-                "schema": "io.tobkiri.packaging-source-provenance.v1",
-                "source_commit": &source_revision,
-                "source_tree": &source_tree,
-                "source_clean": true,
-                "source_manifest_sha256": raw_byte_digest(&trusted_source_manifest),
-            }))
-            .map_err(io::Error::other)?;
-            let provenance_path = verified_source.bind_provenance(&source_provenance)?;
-            let python = packaging_toolchain::verified_tool("python")?;
-            verified_source.verify_unchanged()?;
-            let mut command = isolated_python_module_command(
-                &python,
-                &verified_source,
-                "scripts.generate_packaged_defaultspack_v4_bundle",
-            )?;
-            command
-                .arg("--source-artifact")
-                .arg(&verified.artifact_path)
-                .arg("--bundle-root")
-                .arg(&bundle_root)
-                .arg("--artifact-root")
-                .arg(staged_root.join("ecosystem/defaultspack/platform-artifacts"))
-                .arg("--relative-path")
-                .arg(&verified.artifact_ref)
-                .arg("--entrypoint")
-                .arg(&verified.entrypoint)
-                .arg("--platform")
-                .arg(&verified.platform)
-                .arg("--architecture")
-                .arg(&verified.architecture)
-                .arg("--bundle-identity")
-                .arg(&verified.bundle_identity);
-            bind_source_provenance_command(&mut command, &provenance_path);
-            let mut child = command.spawn().map_err(|error| {
-                invalid_release(format!("failed to run packaged Profile generator: {error}"))
-            })?;
-            match child.wait() {
-                Ok(status) => Ok(status),
-                Err(error) => {
-                    let kill = child.kill();
-                    let reap = child.wait();
-                    Err(invalid_release(format!(
-                        "failed waiting for packaged Profile generator: {error}; kill={kill:?}; reap={reap:?}"
-                    )))
-                }
-            }
-        })()
-        .and_then(|status| {
-            verified_source.verify_unchanged()?;
-            Ok(status)
-        });
-        let cleanup = verified_source.cleanup();
-        let status = match (execution, cleanup) {
-            (Ok(status), Ok(())) => status,
-            (Err(error), Ok(())) => return Err(error),
-            (Ok(_), Err(cleanup)) => {
-                return Err(invalid_release(format!(
-                    "verified source snapshot cleanup failed: {cleanup}"
-                )))
-            }
-            (Err(error), Err(cleanup)) => {
-                return Err(invalid_release(format!(
-                    "{error}; verified source snapshot cleanup also failed: {cleanup}"
-                )))
-            }
-        };
-        if !status.success() {
-            return Err(invalid_release(format!(
-                "packaged Profile generator exited with {status}"
-            )));
-        }
-        let profile = bundle_root.join("defaults.profile.v4.json");
-        let lock = bundle_root.join("bundle.lock.json");
-        let profile_digest = byte_digest(&fs::read(&profile)?);
-        let lock_digest = byte_digest(&fs::read(&lock)?);
-        if profile_digest != verified.default_profile_sha256
-            || lock_digest != verified.defaultspack_lock_sha256
-        {
-            return Err(invalid_release(format!(
-                "packaged Defaults identity drift: profile={profile_digest}, lock={lock_digest}"
-            )));
-        }
+        let artifact_root = staged_root.join("ecosystem/defaultspack/platform-artifacts");
         let staged_catalog = staged_bundled.join(PRESENTATION_CATALOG_FILENAME);
-        let staged_verified = verify_presentation_release_at(staged_root, &staged_catalog)?;
-        if staged_verified.default_profile_sha256 != verified.default_profile_sha256
-            || staged_verified.defaultspack_lock_sha256 != verified.defaultspack_lock_sha256
-            || staged_verified.artifact_ref != verified.artifact_ref
-            || staged_verified.entrypoint != verified.entrypoint
-        {
-            return Err(invalid_release(
-                "complete staged presentation release differs from its verified snapshot",
-            ));
+        let output = run_formal_defaults_packaging(DefaultsPackagingRequest {
+            repository_root: &repository_root,
+            snapshot_parent: &snapshot_parent,
+            trusted_source_manifest: &trusted_source_manifest,
+            source_revision: &source_revision,
+            source_tree: &source_tree,
+            staged_root,
+            staged_catalog: &staged_catalog,
+            expected_release: &verified,
+            projection: DefaultsPackagingProjection {
+                source_artifact: &verified.artifact_path,
+                bundle_root: &bundle_root,
+                artifact_root: &artifact_root,
+                relative_path: &verified.artifact_ref,
+                entrypoint: &verified.entrypoint,
+                platform: &verified.platform,
+                architecture: &verified.architecture,
+                bundle_identity: &verified.bundle_identity,
+            },
+        })?;
+        if output.verified_catalog != staged_catalog {
+            return Err(invalid_release(format!(
+                "{FORMAL_DEFAULTS_PACKAGING_COMMAND}: verified output path changed"
+            )));
         }
     }
     let staged_catalog = staged_bundled.join(PRESENTATION_CATALOG_FILENAME);
@@ -2927,6 +3071,80 @@ mod tests {
                 .canonicalize()
                 .expect("fixture path should remain canonical")
         );
+    }
+
+    #[test]
+    fn formal_defaults_packaging_contract_has_typed_fixed_argv() {
+        let projection = DefaultsPackagingProjection {
+            source_artifact: Path::new("/trusted/source artifact"),
+            bundle_root: Path::new("/staging/bundle"),
+            artifact_root: Path::new("/staging/artifacts"),
+            relative_path: "platform-artifacts/Tobkiri.app",
+            entrypoint: "Contents/MacOS/Tobkiri",
+            platform: "macos",
+            architecture: "arm64",
+            bundle_identity: "io.tobkiri.test",
+        };
+        assert_eq!(
+            FORMAL_DEFAULTS_PACKAGING_COMMAND,
+            "tobkiri-core-package-defaults-v1"
+        );
+        assert_eq!(
+            projection.argv(),
+            vec![
+                "--source-artifact",
+                "/trusted/source artifact",
+                "--bundle-root",
+                "/staging/bundle",
+                "--artifact-root",
+                "/staging/artifacts",
+                "--relative-path",
+                "platform-artifacts/Tobkiri.app",
+                "--entrypoint",
+                "Contents/MacOS/Tobkiri",
+                "--platform",
+                "macos",
+                "--architecture",
+                "arm64",
+                "--bundle-identity",
+                "io.tobkiri.test",
+                "--source-provenance-file",
+                "packaging-source-provenance.v1.json",
+            ]
+            .into_iter()
+            .map(OsString::from)
+            .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn formal_defaults_packaging_contract_never_exports_snapshot_paths() {
+        assert!(!ISOLATED_ENVIRONMENT_KEYS
+            .iter()
+            .any(|key| key.contains("SOURCE") || key.contains("PROVENANCE")));
+        assert_eq!(
+            Path::new("packaging-source-provenance.v1.json")
+                .components()
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn formal_defaults_packaging_cleanup_requires_confirmed_reap() {
+        #[derive(Clone, Copy)]
+        enum WaitResult {
+            Reaped,
+            TimedOutThenReaped,
+            TimedOutUncontained,
+            IdentityLost,
+        }
+        let cleanup_authorized =
+            |result| matches!(result, WaitResult::Reaped | WaitResult::TimedOutThenReaped);
+        assert!(cleanup_authorized(WaitResult::Reaped));
+        assert!(cleanup_authorized(WaitResult::TimedOutThenReaped));
+        assert!(!cleanup_authorized(WaitResult::TimedOutUncontained));
+        assert!(!cleanup_authorized(WaitResult::IdentityLost));
     }
 
     #[test]

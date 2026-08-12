@@ -274,6 +274,20 @@ impl VerifiedChild {
             Self::Darwin(child) => child.kill(),
         }
     }
+
+    pub fn wait_until(&mut self, deadline: std::time::Instant) -> io::Result<Option<ExitStatus>> {
+        loop {
+            let status = match self {
+                Self::Standard(child) => child.try_wait()?,
+                #[cfg(target_os = "macos")]
+                Self::Darwin(child) => child.wait_nonblocking_until(deadline)?,
+            };
+            if status.is_some() || std::time::Instant::now() >= deadline {
+                return Ok(status);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
 }
 
 impl<'a> VerifiedCommand<'a> {
