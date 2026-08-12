@@ -6,6 +6,8 @@ use std::process::Command;
 
 #[path = "src/artifact_integrity.rs"]
 mod artifact_integrity;
+#[path = "src/packaged_source.rs"]
+mod packaged_source;
 #[path = "src/packaging_toolchain.rs"]
 mod packaging_toolchain;
 #[allow(dead_code)]
@@ -1870,36 +1872,26 @@ fn stage_presentation_release_from_snapshot(
             .map_err(|error| {
                 invalid_release(format!("failed to resolve repository root: {error}"))
             })?;
-        let generator = repository_root
-            .join("tobkiri_runtime/scripts/generate_packaged_defaultspack_v4_bundle.py");
-        require_regular_file(&generator, "packaged Profile generator")?;
-        require_regular_file(
-            &repository_root.join("tobkiri_runtime/packaged_defaultspack_source_manifest.v1.json"),
-            "packaged Profile generator source manifest",
-        )?;
-        let python = packaging_toolchain::verified_tool_executable("python")?;
-        let mut source_check = isolated_python_module_command(
-            python.clone().into(),
+        let source_revision = current_source_revision(&repository_root)?;
+        let trusted_source_manifest =
+            committed_source_manifest(&repository_root, &source_revision)?;
+        let snapshot_parent = std::env::var_os("OUT_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| staged_root.join(".verified-source-snapshots"));
+        let verified_source = packaged_source::verify_and_snapshot_against_manifest(
             &repository_root.join("tobkiri_runtime"),
-            "scripts.generator_source_manifest",
-        )?;
-        source_check
-            .arg("--check")
-            .current_dir(repository_root.join("tobkiri_runtime"));
-        let source_check_status = source_check.status().map_err(|error| {
+            &snapshot_parent,
+            &trusted_source_manifest,
+        )
+        .map_err(|error| {
             invalid_release(format!(
-                "failed to run packaged Profile source-closure verifier: {error}"
+                "trusted Rust packaged Profile source-closure verification failed: {error}"
             ))
         })?;
-        if !source_check_status.success() {
-            return Err(invalid_release(
-                "packaged Profile source closure failed before isolated generation",
-            ));
-        }
-        let source_revision = current_source_revision(&repository_root)?;
+        let python = packaging_toolchain::verified_tool_executable("python")?;
         let mut child = isolated_python_module_command(
             python.into(),
-            &repository_root.join("tobkiri_runtime"),
+            verified_source.root(),
             "scripts.generate_packaged_defaultspack_v4_bundle",
         )?
         .arg("--source-artifact")
@@ -1920,7 +1912,7 @@ fn stage_presentation_release_from_snapshot(
         .arg(&verified.bundle_identity)
         .arg("--source-commit")
         .arg(source_revision)
-        .current_dir(repository_root.join("tobkiri_runtime"))
+        .current_dir(verified_source.root())
         .spawn()
         .map_err(|error| {
             invalid_release(format!("failed to run packaged Profile generator: {error}"))
@@ -2002,6 +1994,25 @@ fn current_source_revision(repository_root: &Path) -> io::Result<String> {
         ));
     }
     Ok(value)
+}
+
+fn committed_source_manifest(repository_root: &Path, revision: &str) -> io::Result<Vec<u8>> {
+    let git = packaging_toolchain::verified_tool_executable("git")?;
+    let object =
+        format!("{revision}:tobkiri_runtime/packaged_defaultspack_source_manifest.v1.json");
+    let output = Command::new(git)
+        .args(["show", &object])
+        .current_dir(repository_root)
+        .output()
+        .map_err(|error| {
+            invalid_release(format!("failed to read committed source manifest: {error}"))
+        })?;
+    if !output.status.success() || output.stdout.len() > 4 * 1024 * 1024 {
+        return Err(invalid_release(
+            "committed packaged source manifest is unavailable or oversized",
+        ));
+    }
+    Ok(output.stdout)
 }
 
 fn verify_staged_catalog(source_catalog: &Path, staged_catalog: &Path) -> io::Result<()> {
