@@ -534,7 +534,8 @@ def _remove_root_tree(path: Path, identity: tuple[int, int] | None = None) -> No
 ROOT_ENSURE_PARENT_CODE = r"""
 import ctypes, errno, json, os, signal, stat, sys
 anchor_path, relative, staging_path, token, journal_schema, provisional_prefix = sys.argv[1:7]
-owner = int(sys.argv[7]); failpoint = sys.argv[8] if len(sys.argv) > 8 else ''
+owner = int(sys.argv[7]); group = int(sys.argv[8])
+failpoint = sys.argv[9] if len(sys.argv) > 9 else ''
 parts = relative.split('/')
 if not parts or any(not part or part in ('.', '..') or '/' in part for part in parts):
     raise SystemExit('unsafe ancestor path')
@@ -556,7 +557,7 @@ def exclusive_rename(parent, source, destination):
         os.rename(source, destination, src_dir_fd=parent, dst_dir_fd=parent)
 def read_journal(staging, name):
     info = os.stat(name, dir_fd=staging, follow_symlinks=False)
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != owner or \
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != owner or info.st_gid != group or \
        stat.S_IMODE(info.st_mode) != 0o400 or info.st_nlink != 1:
         raise SystemExit('invalid ancestor journal metadata')
     fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=staging)
@@ -581,7 +582,7 @@ current = anchor
 try:
     for descriptor in (anchor, staging):
         info = os.fstat(descriptor)
-        if info.st_uid != owner or info.st_mode & 0o022:
+        if info.st_uid != owner or info.st_gid != group or info.st_mode & 0o022:
             raise SystemExit('unsafe ancestor authority')
     traversed = []
     for index, part in enumerate(parts):
@@ -600,8 +601,9 @@ try:
             provisional_fd = os.open(provisional, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                                      dir_fd=current)
             info = os.fstat(provisional_fd); os.close(provisional_fd)
-            if payload['target'] != target or (payload['dev'], payload['ino']) != \
-               (info.st_dev, info.st_ino):
+            if info.st_uid != owner or info.st_gid != group or \
+               stat.S_IMODE(info.st_mode) != 0o555 or payload['target'] != target or \
+               (payload['dev'], payload['ino']) != (info.st_dev, info.st_ino):
                 raise SystemExit('ancestor provisional identity mismatch')
             exclusive_rename(current, provisional, part); os.fsync(current)
             child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
@@ -613,14 +615,15 @@ try:
             except FileNotFoundError: stale = None
             if stale is not None:
                 stale_info = os.fstat(stale); entries = os.listdir(stale); os.close(stale)
-                if stale_info.st_uid != owner or stat.S_IMODE(stale_info.st_mode) != 0o700 or entries:
+                if stale_info.st_uid != owner or stale_info.st_gid != group or \
+                   stat.S_IMODE(stale_info.st_mode) != 0o700 or entries:
                     raise SystemExit('unsafe unjournaled ancestor provisional')
                 os.rmdir(provisional, dir_fd=current); os.fsync(current)
             os.mkdir(provisional, 0o700, dir_fd=current)
             if failpoint == f'after_mkdir:{index}': os.kill(os.getpid(), signal.SIGKILL)
             provisional_fd = os.open(provisional, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                                      dir_fd=current)
-            os.fchown(provisional_fd, owner, -1); os.fchmod(provisional_fd, 0o700)
+            os.fchown(provisional_fd, owner, group); os.fchmod(provisional_fd, 0o700)
             info = os.fstat(provisional_fd)
             payload = {'dev': info.st_dev, 'ino': info.st_ino, 'schema': journal_schema,
                        'target': target, 'token': token}
@@ -628,11 +631,15 @@ try:
             journal = os.open(journal_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
                               os.O_NOFOLLOW, 0o400, dir_fd=staging)
             try:
+                os.fchown(journal, owner, group); os.fchmod(journal, 0o400)
                 offset = 0
                 while offset < len(encoded): offset += os.write(journal, encoded[offset:])
                 os.fsync(journal)
             finally: os.close(journal)
+            os.fchown(provisional_fd, owner, group); os.fchmod(provisional_fd, 0o555)
             os.fsync(provisional_fd); os.fsync(staging); os.fsync(current)
+            if failpoint == f'after_publish_mode:{index}':
+                os.kill(os.getpid(), signal.SIGKILL)
             exclusive_rename(current, provisional, part); os.fsync(current)
             os.close(provisional_fd)
             child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
@@ -640,7 +647,8 @@ try:
         info = os.fstat(child)
         if info.st_uid != owner or info.st_mode & 0o022:
             raise SystemExit('unsafe existing ancestor')
-        if payload is not None and (payload['target'] != target or
+        if payload is not None and (info.st_gid != group or
+           stat.S_IMODE(info.st_mode) != 0o555 or payload['target'] != target or
            (payload['dev'], payload['ino']) != (info.st_dev, info.st_ino)):
             raise SystemExit('created ancestor identity changed')
         if current != anchor: os.close(current)
@@ -654,7 +662,8 @@ finally:
 ROOT_CLEANUP_ANCESTORS_CODE = r"""
 import errno, json, os, stat, sys
 anchor_path, relative, staging_path, token, journal_schema = sys.argv[1:6]
-owner = int(sys.argv[6]); provisional_prefix = '.tobkiri-packaging-parent-'
+owner = int(sys.argv[6]); group = int(sys.argv[7])
+provisional_prefix = '.tobkiri-packaging-parent-'
 def canonical(payload):
     return json.dumps(payload, sort_keys=True, separators=(',', ':')).encode() + b'\n'
 staging = os.open(staging_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -662,9 +671,13 @@ try:
     journals = sorted(name for name in os.listdir(staging)
                       if name.startswith('ancestor-') and name.endswith('.json'))
     payloads = []
+    payload_by_index = {}
     for name in journals:
+        suffix = name[len('ancestor-'):-len('.json')]
+        if len(suffix) != 4 or not suffix.isdigit() or int(suffix) in payload_by_index:
+            raise SystemExit('invalid ancestor journal name')
         info = os.stat(name, dir_fd=staging, follow_symlinks=False)
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != owner or \
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != owner or info.st_gid != group or \
            stat.S_IMODE(info.st_mode) != 0o400 or info.st_nlink != 1:
             raise SystemExit('invalid ancestor journal metadata')
         fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=staging)
@@ -681,6 +694,7 @@ try:
            payload['schema'] != journal_schema or payload['token'] != token:
             raise SystemExit('ancestor journal authority mismatch')
         payloads.append(payload)
+        payload_by_index[int(suffix)] = payload
 finally: os.close(staging)
 parent = os.open(anchor_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 try:
@@ -692,7 +706,13 @@ try:
         except FileNotFoundError: stale = None
         if stale is not None:
             info = os.fstat(stale); entries = os.listdir(stale); os.close(stale)
-            if info.st_uid != owner or stat.S_IMODE(info.st_mode) != 0o700 or entries:
+            payload = payload_by_index.get(index)
+            expected_mode = 0o555 if payload is not None else 0o700
+            target = '/'.join(relative.split('/')[:index + 1])
+            if info.st_uid != owner or info.st_gid != group or entries or \
+               stat.S_IMODE(info.st_mode) != expected_mode or \
+               (payload is not None and (payload['target'] != target or
+                (payload['dev'], payload['ino']) != (info.st_dev, info.st_ino))):
                 raise SystemExit('unsafe unjournaled ancestor provisional')
             os.rmdir(provisional, dir_fd=parent); os.fsync(parent)
         try:
@@ -716,8 +736,9 @@ for payload in reversed(payloads):
                              dir_fd=parent)
         except FileNotFoundError: continue
         info = os.fstat(target); os.close(target)
-        if info.st_uid != owner or (info.st_dev, info.st_ino) != \
-           (payload['dev'], payload['ino']):
+        if info.st_uid != owner or info.st_gid != group or \
+           stat.S_IMODE(info.st_mode) != 0o555 or \
+           (info.st_dev, info.st_ino) != (payload['dev'], payload['ino']):
             raise SystemExit('ancestor cleanup identity mismatch')
         current = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
         if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
@@ -748,6 +769,7 @@ def ensure_installation_parent(
             ANCESTOR_JOURNAL_SCHEMA,
             ANCESTOR_PROVISIONAL_PREFIX,
             "0",
+            "0",
         ],
         check=True,
         env={"PATH": "/usr/bin:/bin"},
@@ -770,6 +792,7 @@ def cleanup_created_ancestors(
             staging,
             token,
             ANCESTOR_JOURNAL_SCHEMA,
+            "0",
             "0",
         ],
         check=True,

@@ -9,6 +9,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -306,6 +307,7 @@ def _ancestor_helper(
                 _MODULE.ANCESTOR_JOURNAL_SCHEMA,
                 _MODULE.ANCESTOR_PROVISIONAL_PREFIX,
                 str(os.getuid()),
+                str(os.getgid()),
                 failpoint,
             ]
         )
@@ -317,6 +319,7 @@ def _ancestor_helper(
                 token,
                 _MODULE.ANCESTOR_JOURNAL_SCHEMA,
                 str(os.getuid()),
+                str(os.getgid()),
             ]
         )
     return subprocess.run(
@@ -325,6 +328,18 @@ def _ancestor_helper(
         stderr=subprocess.PIPE,
         check=False,
     )
+
+
+def _require_privileged_ancestor_result(
+    result: subprocess.CompletedProcess[bytes],
+) -> None:
+    if (
+        result.returncode != 0
+        and os.geteuid() != 0
+        and b"exclusive rename failed" in result.stderr
+    ):
+        pytest.skip("macOS requires root to rename a published 0555 directory")
+    assert result.returncode == 0
 
 
 def test_process_creates_and_rolls_back_clean_framework_ancestors(
@@ -336,11 +351,8 @@ def test_process_creates_and_rolls_back_clean_framework_ancestors(
     anchor.mkdir(mode=0o700)
     staging.mkdir(mode=0o700)
     token = "1" * 32
-    assert (
-        _ancestor_helper(
-            _MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token
-        ).returncode
-        == 0
+    _require_privileged_ancestor_result(
+        _ancestor_helper(_MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token)
     )
     versions = anchor / "Library/Frameworks/Python.framework/Versions"
     assert versions.is_dir()
@@ -372,11 +384,8 @@ def test_process_preserves_preexisting_ancestor_modes(tmp_path: Path) -> None:
         path.chmod(0o750)
     before = {path: path.stat().st_mode & 0o7777 for path in hierarchy}
     token = "2" * 32
-    assert (
-        _ancestor_helper(
-            _MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token
-        ).returncode
-        == 0
+    _require_privileged_ancestor_result(
+        _ancestor_helper(_MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token)
     )
     assert list(staging.glob("ancestor-*.json")) == []
     assert {path: path.stat().st_mode & 0o7777 for path in hierarchy} == before
@@ -398,12 +407,11 @@ def test_process_recovers_kill_midway_through_ancestor_creation(
         token,
         "after_mkdir:1",
     )
+    if killed.returncode > 0 and b"exclusive rename failed" in killed.stderr:
+        pytest.skip("macOS requires root to reach the second missing ancestor")
     assert killed.returncode < 0
-    assert (
-        _ancestor_helper(
-            _MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token
-        ).returncode
-        == 0
+    _require_privileged_ancestor_result(
+        _ancestor_helper(_MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token)
     )
     assert (anchor / "Library/Frameworks/Python.framework/Versions").is_dir()
 
@@ -432,6 +440,105 @@ def test_process_cleanup_removes_unjournaled_empty_ancestor_provisional(
         == 0
     )
     assert list(anchor.iterdir()) == []
+
+
+def test_process_distinguishes_published_and_unknown_provisional_modes(
+    tmp_path: Path,
+) -> None:
+    """Journal authority requires 0555; an unknown published mode fails closed."""
+    anchor = tmp_path / "root"
+    staging = tmp_path / "staging"
+    anchor.mkdir(mode=0o700)
+    staging.mkdir(mode=0o700)
+    token = "7" * 32
+    killed = _ancestor_helper(
+        _MODULE.ROOT_ENSURE_PARENT_CODE,
+        anchor,
+        staging,
+        token,
+        "after_publish_mode:0",
+    )
+    assert killed.returncode < 0
+    provisional = anchor / f"{_MODULE.ANCESTOR_PROVISIONAL_PREFIX}{token}-0000"
+    assert provisional.stat().st_mode & 0o7777 == 0o555
+    provisional.chmod(0o500)
+    recovered = _ancestor_helper(
+        _MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token
+    )
+    assert recovered.returncode != 0
+    assert b"ancestor provisional identity mismatch" in recovered.stderr
+    assert provisional.is_dir()
+
+
+def test_process_cleanup_removes_journaled_0555_provisional(tmp_path: Path) -> None:
+    """Rollback removes a published provisional only by journaled identity."""
+    anchor = tmp_path / "root"
+    staging = tmp_path / "staging"
+    anchor.mkdir(mode=0o700)
+    staging.mkdir(mode=0o700)
+    token = "9" * 32
+    killed = _ancestor_helper(
+        _MODULE.ROOT_ENSURE_PARENT_CODE,
+        anchor,
+        staging,
+        token,
+        "after_publish_mode:0",
+    )
+    assert killed.returncode < 0
+    assert (
+        _ancestor_helper(
+            _MODULE.ROOT_CLEANUP_ANCESTORS_CODE, anchor, staging, token
+        ).returncode
+        == 0
+    )
+    assert list(anchor.iterdir()) == []
+
+
+def test_published_ancestor_is_traversable_by_nonroot_process_when_available() -> None:
+    """A nobody process can read and traverse the helper's published 0555 inode."""
+    sudo = subprocess.run(
+        ["/usr/bin/sudo", "-n", "/usr/bin/true"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if sudo.returncode != 0:
+        pytest.skip("passwordless nobody process is unavailable")
+    base = Path(tempfile.mkdtemp(prefix="tobkiri-ancestor-", dir="/private/tmp"))
+    try:
+        base.chmod(0o755)
+        anchor = base / "root"
+        staging = base / "staging"
+        anchor.mkdir(mode=0o755)
+        staging.mkdir(mode=0o700)
+        token = "8" * 32
+        killed = _ancestor_helper(
+            _MODULE.ROOT_ENSURE_PARENT_CODE,
+            anchor,
+            staging,
+            token,
+            "after_publish_mode:0",
+        )
+        assert killed.returncode < 0
+        provisional = anchor / f"{_MODULE.ANCESTOR_PROVISIONAL_PREFIX}{token}-0000"
+        probe = subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "-n",
+                "-u",
+                "nobody",
+                "/usr/bin/python3",
+                "-I",
+                "-B",
+                "-c",
+                "import os,sys; p=sys.argv[1]; assert os.access(p, os.R_OK|os.X_OK); os.listdir(p)",
+                provisional,
+            ],
+            check=False,
+        )
+        assert probe.returncode == 0
+    finally:
+        shutil.rmtree(base)
 
 
 @pytest.mark.parametrize("unsafe", ["symlink", "writable"])
@@ -466,11 +573,8 @@ def test_process_retains_created_ancestor_that_becomes_nonempty(
     anchor.mkdir(mode=0o700)
     staging.mkdir(mode=0o700)
     token = "5" * 32
-    assert (
-        _ancestor_helper(
-            _MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token
-        ).returncode
-        == 0
+    _require_privileged_ancestor_result(
+        _ancestor_helper(_MODULE.ROOT_ENSURE_PARENT_CODE, anchor, staging, token)
     )
     versions = anchor / "Library/Frameworks/Python.framework/Versions"
     (versions / "external").write_bytes(b"preserve")
