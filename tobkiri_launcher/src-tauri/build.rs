@@ -1407,7 +1407,7 @@ fn verify_presentation_release_at(
         ));
     }
     if byte_digest(&fs::read(release_profile)?) != default_profile_sha256
-        || byte_digest(&fs::read(release_defaultspack_lock)?) != defaultspack_lock_sha256
+        || byte_digest(&fs::read(&release_defaultspack_lock)?) != defaultspack_lock_sha256
     {
         return Err(invalid_release(
             "release packaged Defaults bytes differ from signed identities",
@@ -2572,7 +2572,7 @@ fn produce_and_stage_core_presentation_release(staged_root: &Path) -> io::Result
         let parent = staged_root
             .parent()
             .ok_or_else(|| invalid_release("staged root has no Core transaction parent"))?;
-        let transaction = CoreTransactionGuard::create(parent)?;
+        let mut transaction = CoreTransactionGuard::create(parent)?;
         let transaction_path = transaction.path().to_owned();
         let result = (|| -> io::Result<Option<PathBuf>> {
             let release_root = transaction_path.join("release");
