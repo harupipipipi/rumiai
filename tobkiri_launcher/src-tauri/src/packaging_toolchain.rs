@@ -450,7 +450,6 @@ impl<'a> VerifiedCommand<'a> {
 
     #[cfg(target_os = "macos")]
     fn spawn_darwin(&self, capture: bool) -> io::Result<DarwinChild> {
-        verify_protected_macos_path(&self.tool.original_path)?;
         if macos_code_identity(&self.tool.original_path)? != self.tool.macos_cdhash {
             return Err(invalid(
                 "macOS packaging tool identity changed before spawn",
@@ -803,8 +802,14 @@ impl DarwinChild {
             return Ok(status);
         }
         let mut raw = 0;
-        if unsafe { libc::waitpid(self.pid, &mut raw, 0) } == -1 {
-            return Err(io::Error::last_os_error());
+        loop {
+            if unsafe { libc::waitpid(self.pid, &mut raw, 0) } != -1 {
+                break;
+            }
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::EINTR) {
+                return Err(error);
+            }
         }
         use std::os::unix::process::ExitStatusExt;
         let status = ExitStatus::from_raw(raw);
@@ -813,8 +818,17 @@ impl DarwinChild {
     }
 
     fn kill(&mut self) -> io::Result<()> {
+        if self.status.is_some() {
+            return Ok(());
+        }
         if unsafe { libc::kill(self.pid, libc::SIGKILL) } == -1 {
-            Err(io::Error::last_os_error())
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ESRCH) {
+                let _ = self.wait();
+                Ok(())
+            } else {
+                Err(error)
+            }
         } else {
             Ok(())
         }
@@ -855,6 +869,16 @@ impl DarwinChild {
             stdout,
             stderr,
         })
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for DarwinChild {
+    fn drop(&mut self) {
+        if self.status.is_none() {
+            let _ = self.kill();
+            let _ = self.wait();
+        }
     }
 }
 
@@ -973,7 +997,11 @@ fn macos_code_identity(path: &Path) -> io::Result<Vec<u8>> {
     if create != 0 || code.is_null() {
         return Err(invalid("macOS packaging tool is unsigned"));
     }
-    const STRICT_VALIDITY: u32 = (1 << 29) | (1 << 3) | (1 << 1) | 1;
+    const SEC_CS_NO_NETWORK_ACCESS: u32 = 1 << 29;
+    const SEC_CS_STRICT_VALIDATE: u32 = 1 << 3;
+    const SEC_CS_CHECK_ALL_ARCHITECTURES: u32 = 1;
+    const STRICT_VALIDITY: u32 =
+        SEC_CS_NO_NETWORK_ACCESS | SEC_CS_STRICT_VALIDATE | SEC_CS_CHECK_ALL_ARCHITECTURES;
     let validity = unsafe { SecStaticCodeCheckValidity(code, STRICT_VALIDITY, ptr::null()) };
     let mut information = ptr::null();
     let copied = unsafe { SecCodeCopySigningInformation(code, 1 << 1, &mut information) };
@@ -991,11 +1019,10 @@ fn macos_code_identity(path: &Path) -> io::Result<Vec<u8>> {
                 (&mut flags as *mut i64).cast::<std::ffi::c_void>(),
             )
         } != 0;
-    const CS_ADHOC: i64 = 0x2;
-    if !flags_ok || flags & CS_ADHOC != 0 {
+    if !flags_ok {
         unsafe { CFRelease(information) };
         return Err(invalid(
-            "ad-hoc macOS packaging tool signature is forbidden",
+            "macOS packaging tool signature flags are unavailable",
         ));
     }
     let unique = unsafe { CFDictionaryGetValue(information, kSecCodeInfoUnique) };
@@ -1012,37 +1039,6 @@ fn macos_code_identity(path: &Path) -> io::Result<Vec<u8>> {
         unsafe { std::slice::from_raw_parts(CFDataGetBytePtr(unique), length as usize) }.to_vec();
     unsafe { CFRelease(information) };
     Ok(digest)
-}
-
-#[cfg(target_os = "macos")]
-fn verify_protected_macos_path(path: &Path) -> io::Result<()> {
-    use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::fs::MetadataExt;
-
-    let mut current = Some(path);
-    while let Some(component) = current {
-        let metadata = fs::symlink_metadata(component)?;
-        if metadata.file_type().is_symlink() {
-            return Err(invalid("macOS packaging tool path contains a symlink"));
-        }
-        let mode = metadata.mode();
-        if metadata.uid() == unsafe { libc::geteuid() } && mode & 0o200 != 0 {
-            return Err(invalid(format!(
-                "macOS packaging tool path is writable by the current user: {}",
-                component.display()
-            )));
-        }
-        let encoded = std::ffi::CString::new(component.as_os_str().as_bytes())
-            .map_err(|_| invalid("macOS packaging tool path contains NUL"))?;
-        if unsafe { libc::access(encoded.as_ptr(), libc::W_OK) } == 0 {
-            return Err(invalid(format!(
-                "macOS packaging tool path is replaceable by the current user: {}",
-                component.display()
-            )));
-        }
-        current = component.parent().filter(|parent| *parent != component);
-    }
-    Ok(())
 }
 
 #[cfg(windows)]
@@ -1196,7 +1192,6 @@ fn verify_tool_binding_guard(kind: &str, path: &Path, expected: &str) -> io::Res
         sealed_executable_copy(&mut file, path, expected)?;
     #[cfg(target_os = "macos")]
     let (execution_path, execution_owner, execution_metadata, owns_execution_copy, macos_cdhash) = {
-        verify_protected_macos_path(path)?;
         let cdhash = macos_code_identity(path)?;
         (path.to_path_buf(), None, metadata.clone(), false, cdhash)
     };

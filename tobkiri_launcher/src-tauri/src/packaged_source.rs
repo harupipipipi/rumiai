@@ -129,10 +129,12 @@ impl VerifiedSourceSnapshot {
                 .set_permissions(fs::Permissions::from_mode(0o700))?;
         }
         let path = self.root.join(PROVENANCE_FILENAME);
+        #[cfg(unix)]
+        let mut output =
+            create_relative_file(&self.root_handle, Path::new(PROVENANCE_FILENAME), 0o400)?;
+        #[cfg(unix)]
+        let provisional_identity = identity(&output.metadata()?);
         let result = (|| {
-            #[cfg(unix)]
-            let mut output =
-                create_relative_file(&self.root_handle, Path::new(PROVENANCE_FILENAME), 0o400)?;
             #[cfg(not(unix))]
             let mut output = OpenOptions::new()
                 .write(true)
@@ -149,15 +151,42 @@ impl VerifiedSourceSnapshot {
             }
             Ok::<_, io::Error>(())
         })();
-        if result.is_err() {
+        if let Err(primary) = result {
             #[cfg(unix)]
-            {
+            let cleanup = {
                 use std::os::unix::fs::PermissionsExt;
-                let _ = self
+                drop(output);
+                let unlink = verify_named_identity(
+                    &self.root_handle,
+                    std::ffi::OsStr::new(PROVENANCE_FILENAME),
+                    provisional_identity,
+                )
+                .and_then(|()| {
+                    unlinkat_name(
+                        &self.root_handle,
+                        std::ffi::OsStr::new(PROVENANCE_FILENAME),
+                        0,
+                    )
+                });
+                let reseal = self
                     .root_handle
                     .set_permissions(fs::Permissions::from_mode(0o500));
-            }
-            return result.map(|_| path);
+                match (unlink, reseal) {
+                    (Ok(()), Ok(())) => Ok(()),
+                    (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+                    (Err(unlink), Err(reseal)) => Err(invalid(format!(
+                        "provenance unlink failed: {unlink}; root reseal also failed: {reseal}"
+                    ))),
+                }
+            };
+            #[cfg(not(unix))]
+            let cleanup = fs::remove_file(&path);
+            return match cleanup {
+                Ok(()) => Err(primary),
+                Err(cleanup) => Err(invalid(format!(
+                    "{primary}; provisional provenance cleanup also failed: {cleanup}"
+                ))),
+            };
         }
         self.provenance = Some(bytes.to_vec());
         self.root_identity = identity(&self.root_handle.metadata()?);
@@ -349,6 +378,12 @@ fn identity(metadata: &fs::Metadata) -> (u64, u64, u64, i64, i64) {
     )
 }
 
+#[cfg(unix)]
+fn same_object(metadata: &fs::Metadata, expected: (u64, u64, u64, i64, i64)) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    metadata.dev() == expected.0 && metadata.ino() == expected.1
+}
+
 #[cfg(not(unix))]
 fn identity(metadata: &fs::Metadata) -> (u64, u64, u64, i64, i64) {
     let modified = metadata
@@ -468,6 +503,102 @@ struct SnapshotCreation {
     root_handle: File,
     #[cfg(unix)]
     owner_name: std::ffi::OsString,
+    #[cfg(unix)]
+    owner_identity: (u64, u64, u64, i64, i64),
+    #[cfg(unix)]
+    root_identity: (u64, u64, u64, i64, i64),
+    armed: bool,
+}
+
+#[cfg(unix)]
+struct OwnerCreationGuard {
+    parent: File,
+    owner: File,
+    name: std::ffi::OsString,
+    identity: (u64, u64, u64, i64, i64),
+    armed: bool,
+}
+
+#[cfg(unix)]
+impl OwnerCreationGuard {
+    fn cleanup_inner(&mut self) -> io::Result<()> {
+        if let Ok(root) = openat_nofollow(
+            &self.owner,
+            std::ffi::OsStr::new("source"),
+            libc::O_RDONLY | libc::O_DIRECTORY,
+        ) {
+            let mut files = BTreeMap::new();
+            let mut identities = BTreeMap::new();
+            walk_snapshot_at(&root, "", &mut files, &mut identities)?;
+            remove_snapshot_at(&root, &identities)?;
+            unlinkat_name(
+                &self.owner,
+                std::ffi::OsStr::new("source"),
+                libc::AT_REMOVEDIR,
+            )?;
+        }
+        verify_named_identity(&self.parent, &self.name, self.identity)?;
+        unlinkat_name(&self.parent, &self.name, libc::AT_REMOVEDIR)?;
+        self.armed = false;
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+impl Drop for OwnerCreationGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self.cleanup_inner();
+        }
+    }
+}
+
+impl SnapshotCreation {
+    fn cleanup_inner(&mut self) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            let mut files = BTreeMap::new();
+            let mut identities = BTreeMap::new();
+            walk_snapshot_at(&self.root_handle, "", &mut files, &mut identities)?;
+            remove_snapshot_at(&self.root_handle, &identities)?;
+            verify_named_identity(
+                &self.owner_handle,
+                std::ffi::OsStr::new("source"),
+                self.root_identity,
+            )?;
+            unlinkat_name(
+                &self.owner_handle,
+                std::ffi::OsStr::new("source"),
+                libc::AT_REMOVEDIR,
+            )?;
+            verify_named_identity(&self.parent_handle, &self.owner_name, self.owner_identity)?;
+            unlinkat_name(&self.parent_handle, &self.owner_name, libc::AT_REMOVEDIR)?;
+        }
+        #[cfg(not(unix))]
+        {
+            make_tree_owner_writable(&self.root)?;
+            fs::remove_dir_all(&self.root)?;
+            fs::remove_dir(&self.owner)?;
+        }
+        self.armed = false;
+        Ok(())
+    }
+
+    fn cleanup(mut self) -> io::Result<()> {
+        self.cleanup_inner()
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for SnapshotCreation {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self.cleanup_inner();
+        }
+    }
 }
 
 fn create_snapshot(parent: &Path) -> io::Result<SnapshotCreation> {
@@ -511,19 +642,31 @@ fn create_snapshot(parent: &Path) -> io::Result<SnapshotCreation> {
         match creation {
             Ok(()) => {
                 #[cfg(unix)]
-                {
+                let mut owner_guard = {
                     use std::os::unix::fs::MetadataExt;
                     use std::os::unix::fs::PermissionsExt;
-                    fs::set_permissions(&owner, fs::Permissions::from_mode(0o700))?;
-                    if fs::symlink_metadata(&owner)?.uid() != unsafe { libc::geteuid() } {
+                    let owner_handle = openat_nofollow(
+                        &parent_handle,
+                        &owner_name,
+                        libc::O_RDONLY | libc::O_DIRECTORY,
+                    )?;
+                    owner_handle.set_permissions(fs::Permissions::from_mode(0o700))?;
+                    if owner_handle.metadata()?.uid() != unsafe { libc::geteuid() } {
                         return Err(invalid("source snapshot owner has the wrong user"));
                     }
-                }
+                    OwnerCreationGuard {
+                        parent: parent_handle.try_clone()?,
+                        identity: identity(&owner_handle.metadata()?),
+                        owner: owner_handle,
+                        name: owner_name.clone(),
+                        armed: true,
+                    }
+                };
                 let root = owner.join("source");
                 #[cfg(unix)]
                 let (owner_handle, root_handle) = {
                     use std::os::fd::AsRawFd;
-                    let owner_handle = File::open(&owner)?;
+                    let owner_handle = owner_guard.owner.try_clone()?;
                     let name = b"source\0";
                     if unsafe {
                         libc::mkdirat(owner_handle.as_raw_fd(), name.as_ptr().cast(), 0o700)
@@ -545,7 +688,7 @@ fn create_snapshot(parent: &Path) -> io::Result<SnapshotCreation> {
                     use std::os::unix::fs::PermissionsExt;
                     fs::set_permissions(&root, fs::Permissions::from_mode(0o700))?;
                 }
-                return Ok(SnapshotCreation {
+                let creation = SnapshotCreation {
                     owner,
                     root,
                     #[cfg(unix)]
@@ -556,7 +699,17 @@ fn create_snapshot(parent: &Path) -> io::Result<SnapshotCreation> {
                     root_handle,
                     #[cfg(unix)]
                     owner_name,
-                });
+                    #[cfg(unix)]
+                    owner_identity: identity(&owner_handle.metadata()?),
+                    #[cfg(unix)]
+                    root_identity: identity(&root_handle.metadata()?),
+                    armed: true,
+                };
+                #[cfg(unix)]
+                {
+                    owner_guard.armed = false;
+                }
+                return Ok(creation);
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(error),
@@ -903,7 +1056,11 @@ fn remove_snapshot_at(
         expected: &BTreeMap<String, (u64, u64, u64, i64, i64)>,
     ) -> io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
-        if expected.get(relative) != Some(&identity(&directory.metadata()?)) {
+        let directory_metadata = directory.metadata()?;
+        if !expected
+            .get(relative)
+            .is_some_and(|expected| same_object(&directory_metadata, *expected))
+        {
             return Err(invalid("refusing cleanup of replaced snapshot directory"));
         }
         directory.set_permissions(fs::Permissions::from_mode(0o700))?;
@@ -922,7 +1079,11 @@ fn remove_snapshot_at(
                     }
                     Err(error) => return Err(error),
                 };
-            if expected.get(&child_relative) != Some(&identity(&child.metadata()?)) {
+            let child_metadata = child.metadata()?;
+            if !expected
+                .get(&child_relative)
+                .is_some_and(|expected| same_object(&child_metadata, *expected))
+            {
                 return Err(invalid(
                     "refusing cleanup of replaced or extra snapshot entry",
                 ));
@@ -962,7 +1123,7 @@ fn verify_named_identity(
     expected: (u64, u64, u64, i64, i64),
 ) -> io::Result<()> {
     let child = openat_nofollow(directory, name, libc::O_RDONLY | libc::O_DIRECTORY)?;
-    if identity(&child.metadata()?) != expected {
+    if !same_object(&child.metadata()?, expected) {
         return Err(invalid("refusing cleanup of replaced snapshot name"));
     }
     Ok(())
@@ -1284,7 +1445,7 @@ fn verify_and_snapshot_against_manifest_with_hook(
         ));
     }
     before_copy();
-    let creation = create_snapshot(snapshot_parent)?;
+    let mut creation = create_snapshot(snapshot_parent)?;
     let snapshot_owner = creation.owner.clone();
     let snapshot_root = creation.root.clone();
     let result = (|| {
@@ -1329,7 +1490,7 @@ fn verify_and_snapshot_against_manifest_with_hook(
             walk_snapshot_at(&root_handle, "", &mut files, &mut directories)?;
             directories
         };
-        Ok(VerifiedSourceSnapshot {
+        let snapshot = VerifiedSourceSnapshot {
             owner_identity: identity(&fs::symlink_metadata(&snapshot_owner)?),
             root_identity: identity(&root_handle.metadata()?),
             owner: snapshot_owner.clone(),
@@ -1346,38 +1507,19 @@ fn verify_and_snapshot_against_manifest_with_hook(
             trusted_manifest: trusted_manifest.to_vec(),
             provenance: None,
             cleanup_attempted: false,
-        })
+        };
+        creation.disarm();
+        Ok(snapshot)
     })();
-    if result.is_err() {
-        #[cfg(unix)]
-        {
-            if let (Ok(root), Ok(owner), Ok(parent), Some(owner_name)) = (
-                File::open(&snapshot_root),
-                File::open(&snapshot_owner),
-                snapshot_owner
-                    .parent()
-                    .ok_or_else(|| invalid("snapshot owner has no parent"))
-                    .and_then(File::open),
-                snapshot_owner.file_name(),
-            ) {
-                let mut files = BTreeMap::new();
-                let mut identities = BTreeMap::new();
-                if walk_snapshot_at(&root, "", &mut files, &mut identities).is_ok() {
-                    let _ = remove_snapshot_at(&root, &identities);
-                    let _ =
-                        unlinkat_name(&owner, std::ffi::OsStr::new("source"), libc::AT_REMOVEDIR);
-                    let _ = unlinkat_name(&parent, owner_name, libc::AT_REMOVEDIR);
-                }
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = make_tree_owner_writable(&snapshot_root);
-            let _ = fs::remove_dir_all(&snapshot_root);
-            let _ = fs::remove_dir(&snapshot_owner);
-        }
+    match result {
+        Ok(snapshot) => Ok(snapshot),
+        Err(primary) => match creation.cleanup() {
+            Ok(()) => Err(primary),
+            Err(cleanup) => Err(invalid(format!(
+                "{primary}; snapshot construction cleanup also failed: {cleanup}"
+            ))),
+        },
     }
-    result
 }
 
 #[cfg(test)]
