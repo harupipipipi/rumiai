@@ -14,8 +14,8 @@ from pathlib import Path, PureWindowsPath
 from typing import Any, Mapping, TypedDict
 
 from .generator_source_manifest import (
-    SOURCE_MANIFEST_FILENAME,
-    reject_symlink_components,
+    SourceProvenance,
+    load_source_provenance,
     verify_source_closure,
 )
 
@@ -390,69 +390,18 @@ def _write_json(path: Path, value: Mapping[str, Any]) -> None:
     path.chmod(0o600)
 
 
-def _valid_source_identity(value: str, field: str) -> None:
-    """Require one non-degenerate, full lowercase source identity."""
-    if (
-        len(value) != 40
-        or len(set(value)) <= 1
-        or any(character not in "0123456789abcdef" for character in value)
-    ):
-        raise ValueError(f"{field} must be a full lowercase 40-hex identity")
-
-
-def _sealed_snapshot_root(value: str | Path | None) -> Path:
-    """Require the caller's root to be the module's verified source snapshot."""
-    if value is None:
-        raise ValueError("packaged Profile source snapshot root is required")
-    supplied = Path(os.fspath(value))
-    reject_symlink_components(supplied)
-    if not supplied.is_absolute() or supplied.is_symlink():
-        raise ValueError("packaged Profile source snapshot root must be absolute")
+def _preverified_source_provenance(
+    provenance_file: str | Path | None,
+) -> SourceProvenance:
+    """Accept only the core-bound provenance file inside a sealed snapshot."""
+    if provenance_file is None:
+        raise ValueError("packaged Profile source provenance file is required")
+    candidate = Path(provenance_file).expanduser()
+    source_root = candidate.parent if candidate.is_absolute() else ROOT
     try:
-        snapshot = supplied.resolve(strict=True)
-        module_root = ROOT.resolve(strict=True)
-    except OSError as error:
-        raise ValueError("packaged Profile source snapshot root is unavailable") from error
-    if snapshot != module_root or not snapshot.is_dir():
-        raise ValueError(
-            "packaged Profile source snapshot root must exactly bind the module root"
-        )
-    manifest = snapshot / SOURCE_MANIFEST_FILENAME
-    try:
-        metadata = manifest.stat(follow_symlinks=False)
-    except OSError as error:
-        raise ValueError("packaged Profile source snapshot manifest is unavailable") from error
-    if (
-        manifest.is_symlink()
-        or not stat.S_ISREG(metadata.st_mode)
-        or metadata.st_nlink != 1
-    ):
-        raise ValueError("packaged Profile source snapshot manifest is unsafe")
-    try:
-        verify_source_closure(snapshot)
+        return load_source_provenance(source_root, candidate)
     except (OSError, ValueError) as error:
-        raise ValueError("packaged Profile source snapshot closure is invalid") from error
-    return snapshot
-
-
-def _preverified_source_commit(
-    explicit: str | None,
-    *,
-    source_tree: str | None,
-    source_clean: bool | None,
-    source_snapshot_root: str | Path | None,
-) -> str:
-    """Accept only formal provenance bound to an exact sealed source snapshot."""
-    if explicit is None:
-        raise ValueError("packaged Profile source revision is required")
-    _valid_source_identity(explicit, "packaged Profile source revision")
-    if source_tree is None:
-        raise ValueError("packaged Profile source tree is required")
-    _valid_source_identity(source_tree, "packaged Profile source tree")
-    if source_clean is not True:
-        raise ValueError("packaged Profile source clean attestation must be true")
-    _sealed_snapshot_root(source_snapshot_root)
-    return explicit
+        raise ValueError("packaged Profile source provenance is invalid") from error
 
 
 def _validate_staged_bundle(
@@ -543,20 +492,13 @@ def _package_transaction(
     platform: str,
     architecture: str,
     bundle_identity: str,
-    source_commit: str | None,
-    source_tree: str | None = None,
-    source_clean: bool | None = None,
-    source_snapshot_root: str | Path | None = None,
+    source_provenance_file: str | Path | None,
 ) -> None:
     """Build both output roots fully in one same-filesystem transaction."""
     relative_path = _normalize_relative_path(relative_path, "packaged artifact path")
     entrypoint = _normalize_relative_path(entrypoint, "packaged entrypoint")
-    commit = _preverified_source_commit(
-        source_commit,
-        source_tree=source_tree,
-        source_clean=source_clean,
-        source_snapshot_root=source_snapshot_root,
-    )
+    provenance = _preverified_source_provenance(source_provenance_file)
+    commit = provenance.source_commit
     bundle_root = bundle_root.expanduser().absolute()
     artifact_root = artifact_root.expanduser().absolute()
     transaction: Path | None = _new_transaction(bundle_root, artifact_root)
@@ -749,10 +691,7 @@ def stage_packaged_bundle(
     platform: str,
     architecture: str,
     bundle_identity: str,
-    source_commit: str | None = None,
-    source_tree: str | None = None,
-    source_clean: bool | None = None,
-    source_snapshot_root: str | Path | None = None,
+    source_provenance_file: str | Path | None = None,
 ) -> None:
     """Snapshot, verify, and atomically publish a packaged Profile bundle."""
     _package_transaction(
@@ -764,10 +703,7 @@ def stage_packaged_bundle(
         platform=platform,
         architecture=architecture,
         bundle_identity=bundle_identity,
-        source_commit=source_commit,
-        source_tree=source_tree,
-        source_clean=source_clean,
-        source_snapshot_root=source_snapshot_root,
+        source_provenance_file=source_provenance_file,
     )
 
 
@@ -780,10 +716,7 @@ def package_bundle(
     platform: str,
     architecture: str,
     bundle_identity: str,
-    source_commit: str | None = None,
-    source_tree: str | None = None,
-    source_clean: bool | None = None,
-    source_snapshot_root: str | Path | None = None,
+    source_provenance_file: str | Path | None = None,
 ) -> None:
     """Verify existing staged artifact bytes and atomically rewrite the bundle."""
     _package_transaction(
@@ -795,10 +728,7 @@ def package_bundle(
         platform=platform,
         architecture=architecture,
         bundle_identity=bundle_identity,
-        source_commit=source_commit,
-        source_tree=source_tree,
-        source_clean=source_clean,
-        source_snapshot_root=source_snapshot_root,
+        source_provenance_file=source_provenance_file,
     )
 
 
@@ -812,10 +742,7 @@ def main() -> int:
     parser.add_argument("--platform", choices=("macos", "windows", "linux"), required=True)
     parser.add_argument("--architecture", choices=("arm64", "x86_64"), required=True)
     parser.add_argument("--bundle-identity", required=True)
-    parser.add_argument("--source-commit", required=True)
-    parser.add_argument("--source-tree", required=True)
-    parser.add_argument("--source-clean", action="store_true")
-    parser.add_argument("--source-snapshot-root", type=Path, required=True)
+    parser.add_argument("--source-provenance-file", required=True)
     args = parser.parse_args()
     operation = stage_packaged_bundle if args.source_artifact else package_bundle
     operation(
@@ -827,10 +754,7 @@ def main() -> int:
         platform=args.platform,
         architecture=args.architecture,
         bundle_identity=args.bundle_identity,
-        source_commit=args.source_commit,
-        source_tree=args.source_tree,
-        source_clean=args.source_clean,
-        source_snapshot_root=args.source_snapshot_root,
+        source_provenance_file=args.source_provenance_file,
     )
     return 0
 

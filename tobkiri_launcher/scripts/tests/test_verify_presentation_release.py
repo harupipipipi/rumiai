@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import importlib.util
 import json
 import os
@@ -30,6 +31,14 @@ def _load(name: str):
 VERIFY = _load("verify_presentation_release")
 PACKAGE = _load("package_presentation_artifact")
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+SOURCE_MANIFEST_SPEC = importlib.util.spec_from_file_location(
+    "release_generator_source_manifest",
+    REPOSITORY_ROOT / "tobkiri_runtime/scripts/generator_source_manifest.py",
+)
+assert SOURCE_MANIFEST_SPEC and SOURCE_MANIFEST_SPEC.loader
+SOURCE_MANIFEST_MODULE = importlib.util.module_from_spec(SOURCE_MANIFEST_SPEC)
+SOURCE_MANIFEST_SPEC.loader.exec_module(SOURCE_MANIFEST_MODULE)
+materialize_source_snapshot = SOURCE_MANIFEST_MODULE.materialize_source_snapshot
 
 
 def _git_revision(expression: str) -> str:
@@ -45,6 +54,37 @@ def _git_revision(expression: str) -> str:
 
 SOURCE_COMMIT = _git_revision("HEAD^{commit}")
 SOURCE_TREE = _git_revision("HEAD^{tree}")
+
+
+def _source_provenance(root: Path) -> dict[str, object]:
+    """Create the private sealed snapshot contract used by release fixtures."""
+    owner = root / "sealed-source-owner"
+    snapshot = owner / "source"
+    provenance = snapshot / "packaging-source-provenance.v1.json"
+    owner.mkdir(parents=True, exist_ok=True, mode=0o700)
+    owner.chmod(0o700)
+    materialize_source_snapshot(REPOSITORY_ROOT / "tobkiri_runtime", snapshot)
+    snapshot.chmod(0o755)
+    manifest = snapshot / "packaged_defaultspack_source_manifest.v1.json"
+    provenance.write_bytes(
+        json.dumps(
+            {
+                "schema": "io.tobkiri.packaging-source-provenance.v1",
+                "source_commit": SOURCE_COMMIT,
+                "source_tree": SOURCE_TREE,
+                "source_clean": True,
+                "source_manifest_sha256": hashlib.sha256(
+                    manifest.read_bytes()
+                ).hexdigest(),
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    provenance.chmod(0o400)
+    snapshot.chmod(0o555)
+    return {
+        "source_provenance_file": provenance,
+    }
 
 
 def _resign_catalog_revision(resource_root: Path, catalog: dict[str, object]) -> None:
@@ -141,9 +181,7 @@ def _release(root: Path) -> tuple[Path, dict[str, object]]:
         "headless-test-key",
         release,
         repository_root,
-        source_commit=SOURCE_COMMIT,
-        source_tree=SOURCE_TREE,
-        source_clean=True,
+        **_source_provenance(root),
     )
     catalog_output = release / "presentation_catalog.json"
     packaged_catalog = release / "bundled" / "presentation_catalog.json"

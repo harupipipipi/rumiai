@@ -19,12 +19,21 @@ Before generation, the pinned uv executable must report the structured official
 0.11.14 identity with a valid revision/date and the exact requested target
 triple; arbitrary prefixes, suffixes, versions, and architectures are rejected.
 The packaged Defaults projection generator receives only the verified absolute
-Python executable, formal `--source-commit`, `--source-tree`,
-`--source-clean`, and `--source-snapshot-root` inputs. The snapshot includes
-the trusted `packaged_defaultspack_source_manifest.v1.json`; the generator
-revalidates that manifest and never reads a checkout, Git metadata, or `PATH`.
-Callers may inspect a checkout once to materialize the non-writable snapshot,
-then all generation runs from that snapshot-only closure.
+Python executable and one core-bound `--source-provenance-file` input. That
+file is `packaging-source-provenance.v1.json` and has exactly these fields:
+`schema`, `source_commit`, `source_tree`, `source_clean`, and
+`source_manifest_sha256`. Its schema is
+`io.tobkiri.packaging-source-provenance.v1`; identities are lowercase raw
+hex, and `source_manifest_sha256` must match the exact bytes of the checked-in
+source manifest in the sealed snapshot. Rust creates and binds this file only
+after verified Git-tree materialization. Python never creates provenance,
+re-reads Git, or treats a mutable checkout or regenerated manifest as
+authority. Direct Python presentation packaging requires the core-provided
+private snapshot and provenance file (and is refused on Windows); no implicit
+checkout-to-snapshot fallback exists.
+The macOS workflow passes the provenance path through
+`TOBKIRI_PACKAGING_SOURCE_PROVENANCE_FILE` and fails closed until the core
+sealed-source step exports that exact file.
 
 ## Resource contract
 

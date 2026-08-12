@@ -167,10 +167,6 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"source_revision={source_revision}\n")
               output.write(f"source_tree={source_tree}\n")
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as environment:
-              environment.write(f"TOBKIRI_PACKAGING_SOURCE_COMMIT={source_revision}\n")
-              environment.write(f"TOBKIRI_PACKAGING_SOURCE_TREE={source_tree}\n")
-              environment.write("TOBKIRI_PACKAGING_SOURCE_CLEAN=1\n")
 
       - name: Install locked runtime and test dependencies
         run: python .github/scripts/install_locked_python_test_dependencies.py
@@ -358,9 +354,7 @@ jobs:
             --signing-key "$RUNNER_TEMP/tobkiri-presentation-signing-key.raw" \
             --signing-key-id 'github-actions:${{ github.run_id }}:${{ matrix.target }}' \
             --repository-root "$GITHUB_WORKSPACE" \
-            --source-commit '${{ steps.checked_out_source.outputs.source_revision }}' \
-            --source-tree '${{ steps.checked_out_source.outputs.source_tree }}' \
-            --source-clean \
+            --source-provenance-file "${TOBKIRI_PACKAGING_SOURCE_PROVENANCE_FILE:?core-bound packaging provenance is required}" \
             --output-dir "$RELEASE_ROOT"
 
       - name: Build local macOS application (ad-hoc)

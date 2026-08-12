@@ -25,7 +25,10 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
     ProfileResolutionDenied,
     resolve_default_profile,
 )
-from tests.conformance_support.packaged_profile import build_packaged_profile_bundle
+from tests.conformance_support.packaged_profile import (
+    build_packaged_profile_bundle,
+    create_test_source_provenance,
+)
 from tobkiri_protocol.canonical import canonical_digest, canonical_json
 from tobkiri_protocol.profile_scope import normalize_requested_scope_template
 from tobkiri_protocol.platform_artifact import artifact_digest, verify_platform_artifact
@@ -76,13 +79,19 @@ def _edge_key(edge: dict[str, object]) -> str:
 
 
 def _packaged_catalog(tmp_path: Path) -> BundledCatalog:
+    provenance = create_test_source_provenance(
+        ROOT,
+        tmp_path,
+        provenance_record={
+            "source_commit": SOURCE_COMMIT,
+            "source_tree": SOURCE_TREE,
+            "source_clean": True,
+        },
+    )
     bundle = build_packaged_profile_bundle(
         SOURCE_BUNDLE,
         tmp_path,
-        source_commit=SOURCE_COMMIT,
-        source_tree=SOURCE_TREE,
-        source_clean=True,
-        source_snapshot_root=ROOT,
+        source_provenance_file=provenance,
     )
     return BundledCatalog.load(bundle)
 
@@ -97,6 +106,15 @@ def _packaged_catalog_revision(tmp_path: Path, marker: bytes) -> BundledCatalog:
     executable.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 10 + b">\x00fixture-" + marker)
     executable.chmod(0o755)
     shutil.copytree(SOURCE_BUNDLE, bundle)
+    provenance = create_test_source_provenance(
+        ROOT,
+        tmp_path,
+        provenance_record={
+            "source_commit": SOURCE_COMMIT,
+            "source_tree": SOURCE_TREE,
+            "source_clean": True,
+        },
+    )
     stage_packaged_bundle(
         source_artifact=executable,
         bundle_root=bundle,
@@ -106,10 +124,7 @@ def _packaged_catalog_revision(tmp_path: Path, marker: bytes) -> BundledCatalog:
         platform="linux",
         architecture="x86_64",
         bundle_identity="io.tobkiri.shell.tauri",
-        source_commit=SOURCE_COMMIT,
-        source_tree=SOURCE_TREE,
-        source_clean=True,
-        source_snapshot_root=ROOT,
+        source_provenance_file=provenance,
     )
     return BundledCatalog.load(bundle)
 
@@ -532,6 +547,15 @@ def test_packaged_generator_binds_macos_tree_and_entrypoint_digests(
     bundle = tmp_path / "staged" / "defaultspack" / "v4"
     artifacts = tmp_path / "staged" / "defaultspack" / "platform-artifacts"
     shutil.copytree(SOURCE_BUNDLE, bundle)
+    provenance = create_test_source_provenance(
+        ROOT,
+        tmp_path,
+        provenance_record={
+            "source_commit": SOURCE_COMMIT,
+            "source_tree": SOURCE_TREE,
+            "source_clean": True,
+        },
+    )
     stage_packaged_bundle(
         source_artifact=source_app,
         bundle_root=bundle,
@@ -541,10 +565,7 @@ def test_packaged_generator_binds_macos_tree_and_entrypoint_digests(
         platform="macos",
         architecture="arm64",
         bundle_identity="io.tobkiri.shell.tauri",
-        source_commit=SOURCE_COMMIT,
-        source_tree=SOURCE_TREE,
-        source_clean=True,
-        source_snapshot_root=ROOT,
+        source_provenance_file=provenance,
     )
     shell = json.loads((bundle / "shell.tauri.default.shell.v1.json").read_text())
     variant = shell["launch"]["variants"][0]
@@ -608,10 +629,15 @@ def test_installed_bundle_is_exactly_bound_to_resource_manifest(tmp_path: Path) 
     bundle_root = build_packaged_profile_bundle(
         SOURCE_BUNDLE,
         runtime_root / "ecosystem",
-        source_commit=SOURCE_COMMIT,
-        source_tree=SOURCE_TREE,
-        source_clean=True,
-        source_snapshot_root=ROOT,
+        source_provenance_file=create_test_source_provenance(
+            ROOT,
+            runtime_root / "ecosystem",
+            provenance_record={
+                "source_commit": SOURCE_COMMIT,
+                "source_tree": SOURCE_TREE,
+                "source_clean": True,
+            },
+        ),
     )
     artifact_root = bundle_root.parent / "platform-artifacts"
     entries = []

@@ -14,12 +14,15 @@ import os
 import shutil
 import stat
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterator
+from typing import Any, Iterator, Mapping
 
 
 SOURCE_MANIFEST_FILENAME = "packaged_defaultspack_source_manifest.v1.json"
 SOURCE_MANIFEST_SCHEMA = "io.tobkiri.packaged-defaultspack-source.v1"
+SOURCE_PROVENANCE_FILENAME = "packaging-source-provenance.v1.json"
+SOURCE_PROVENANCE_SCHEMA = "io.tobkiri.packaging-source-provenance.v1"
 SOURCE_ROOTS = (
     "scripts",
     "tobkiri_protocol",
@@ -35,7 +38,35 @@ SOURCE_FILES = (
 )
 MANIFEST_KEYS = ("schema", "roots", "files")
 FILE_KEYS = ("path", "type", "size", "sha256", "executable")
+PROVENANCE_KEYS = (
+    "schema",
+    "source_commit",
+    "source_tree",
+    "source_clean",
+    "source_manifest_sha256",
+)
 _ROOT = Path(__file__).resolve().parents[1]
+
+
+@dataclass(frozen=True)
+class SourceProvenance:
+    """The exact provenance bound by the Rust sealed-source owner."""
+
+    source_commit: str
+    source_tree: str
+    source_clean: bool
+    source_manifest_sha256: str
+    path: Path
+
+
+def _strict_object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject duplicate JSON object keys instead of silently overwriting them."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate source provenance field: {key}")
+        result[key] = value
+    return result
 
 
 def reject_symlink_components(path: Path) -> None:
@@ -284,6 +315,263 @@ def verify_source_closure(root: Path = _ROOT) -> dict[str, Any]:
     if actual != expected:
         raise ValueError("packaged Defaults source closure differs from its manifest")
     return expected
+
+
+def _valid_provenance_identity(value: Any, field: str) -> str:
+    """Validate one full lowercase Git identity from sealed provenance."""
+    if (
+        not isinstance(value, str)
+        or len(value) != 40
+        or len(set(value)) <= 1
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"{field} must be a full lowercase 40-hex identity")
+    return value
+
+
+def _valid_provenance_digest(value: Any, field: str) -> str:
+    """Validate one raw lowercase SHA-256 digest from sealed provenance."""
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"{field} must be a raw lowercase 64-hex SHA-256")
+    return value
+
+
+def _regular_file(path: Path, label: str) -> os.stat_result:
+    """Return metadata for a regular, non-hardlinked, non-symlinked file."""
+    metadata = path.stat(follow_symlinks=False)
+    if (
+        path.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != 1
+    ):
+        raise ValueError(f"{label} is not a regular non-hardlinked file: {path}")
+    return metadata
+
+
+def load_source_provenance(
+    root: Path = _ROOT,
+    provenance_file: str | Path | None = None,
+) -> SourceProvenance:
+    """Load the one core-bound provenance file and its manifest byte digest.
+
+    The Rust core creates this file only after it has materialized and verified a
+    private source snapshot.  Python accepts the filename as an input, but never
+    creates provenance or derives its identities from a checkout or Git.
+    """
+    root = root.expanduser().absolute()
+    reject_symlink_components(root)
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError(f"source provenance root is not a real directory: {root}")
+    root = root.resolve(strict=True)
+    expected_path = root / SOURCE_PROVENANCE_FILENAME
+    supplied = expected_path if provenance_file is None else Path(provenance_file)
+    if supplied.is_absolute():
+        supplied = supplied.absolute()
+        if supplied != expected_path:
+            raise ValueError(
+                "source provenance path must bind the snapshot root's canonical file"
+            )
+        path = supplied
+    else:
+        if supplied.as_posix() != SOURCE_PROVENANCE_FILENAME:
+            raise ValueError(
+                "source provenance path must be the canonical snapshot-relative filename"
+            )
+        path = root / SOURCE_PROVENANCE_FILENAME
+    metadata = _regular_file(path, "source provenance")
+    if metadata.st_mode & 0o222:
+        raise ValueError("source provenance must not be owner-writable")
+    try:
+        raw = path.read_bytes()
+        value = json.loads(
+            raw.decode("utf-8"), object_pairs_hook=_strict_object_pairs
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("source provenance JSON is invalid") from error
+    if not isinstance(value, dict) or tuple(value) != PROVENANCE_KEYS:
+        raise ValueError("source provenance has unexpected top-level fields")
+    if value["schema"] != SOURCE_PROVENANCE_SCHEMA:
+        raise ValueError("source provenance schema is invalid")
+    source_commit = _valid_provenance_identity(
+        value["source_commit"], "source_commit"
+    )
+    source_tree = _valid_provenance_identity(value["source_tree"], "source_tree")
+    if value["source_clean"] is not True:
+        raise ValueError("source_clean must be true")
+    source_manifest_sha256 = _valid_provenance_digest(
+        value["source_manifest_sha256"], "source_manifest_sha256"
+    )
+    manifest = root / SOURCE_MANIFEST_FILENAME
+    _regular_file(manifest, "source manifest")
+    actual_manifest_sha256 = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    if actual_manifest_sha256 != source_manifest_sha256:
+        raise ValueError("source provenance manifest digest does not match its bytes")
+    verify_source_closure(root)
+    return SourceProvenance(
+        source_commit=source_commit,
+        source_tree=source_tree,
+        source_clean=True,
+        source_manifest_sha256=source_manifest_sha256,
+        path=path,
+    )
+
+
+def _snapshot_inventory(root: Path) -> dict[str, tuple[Any, ...]]:
+    """Return exact immutable identity records for every snapshot entry."""
+    inventory: dict[str, tuple[Any, ...]] = {}
+
+    def visit(path: Path, relative: str) -> None:
+        metadata = path.stat(follow_symlinks=False)
+        if path.is_symlink():
+            raise ValueError(f"source snapshot contains a symlink: {path}")
+        mode = stat.S_IMODE(metadata.st_mode)
+        if mode & 0o222:
+            raise ValueError(f"source snapshot entry is owner-writable: {path}")
+        if stat.S_ISDIR(metadata.st_mode):
+            inventory[relative] = (
+                "directory",
+                metadata.st_dev,
+                metadata.st_ino,
+                metadata.st_nlink,
+                mode,
+            )
+            with os.scandir(path) as entries:
+                for entry in sorted(entries, key=lambda item: item.name):
+                    child = Path(entry.path)
+                    child_relative = (
+                        entry.name if not relative else f"{relative}/{entry.name}"
+                    )
+                    visit(child, child_relative)
+            return
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise ValueError(f"source snapshot contains an unsupported file: {path}")
+        inventory[relative] = (
+            "regular-file",
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_nlink,
+            metadata.st_size,
+            mode,
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+        )
+
+    visit(root, "")
+    return inventory
+
+
+def _expected_snapshot_paths(manifest: Mapping[str, Any]) -> tuple[set[str], set[str]]:
+    """Return exact file and directory paths allowed in a sealed snapshot."""
+    files = {
+        str(entry["path"])
+        for entry in manifest["files"]
+        if isinstance(entry, dict)
+    }
+    files.update({SOURCE_MANIFEST_FILENAME, SOURCE_PROVENANCE_FILENAME})
+    directories = set(_required_directories())
+    directories.add("")
+    for relative in files:
+        parent = PurePosixPath(relative).parent
+        while parent != PurePosixPath("."):
+            directories.add(parent.as_posix())
+            parent = parent.parent
+    return files, directories
+
+
+class SourceSnapshotLease:
+    """Hold a private snapshot directory open across a Python child process."""
+
+    def __init__(self, root: Path, provenance: SourceProvenance) -> None:
+        self.root = root
+        self.provenance = provenance
+        self._owner = root.parent
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        self._owner_fd = os.open(os.fspath(self._owner), flags)
+        try:
+            self._root_fd = os.open(os.fspath(root), flags)
+        except Exception:
+            os.close(self._owner_fd)
+            raise
+        self._owner_identity = self._identity(self._owner_fd)
+        self._root_identity = self._identity(self._root_fd)
+        self._inventory = _snapshot_inventory(root)
+
+    @staticmethod
+    def _identity(descriptor: int) -> tuple[int, int, int, int, int]:
+        metadata = os.fstat(descriptor)
+        return (
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_mode,
+            metadata.st_nlink,
+            metadata.st_size,
+        )
+
+    def verify_unchanged(self) -> None:
+        """Reject root replacement, chmod, links, extra paths, or byte changes."""
+        if self._identity(self._owner_fd) != self._owner_identity:
+            raise ValueError("source snapshot owner identity changed")
+        if self._identity(self._root_fd) != self._root_identity:
+            raise ValueError("source snapshot root identity changed")
+        if self._inventory != _snapshot_inventory(self.root):
+            raise ValueError("source snapshot inventory changed")
+
+    def close(self) -> None:
+        """Close the owner and root descriptors held by this lease."""
+        for attribute in ("_root_fd", "_owner_fd"):
+            descriptor = getattr(self, attribute, None)
+            if descriptor is not None:
+                os.close(descriptor)
+                setattr(self, attribute, None)
+
+    def __enter__(self) -> "SourceSnapshotLease":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+
+def open_source_snapshot_lease(
+    root: Path,
+    provenance_file: str | Path | None = None,
+) -> SourceSnapshotLease:
+    """Open a private immutable snapshot for a direct Python packaging caller."""
+    if os.name == "nt":
+        raise ValueError(
+            "direct Python source snapshot packaging is disabled on Windows; "
+            "use the Rust sealed-source path"
+        )
+    root = root.expanduser().absolute()
+    reject_symlink_components(root)
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError("source snapshot root is unavailable")
+    owner = root.parent
+    owner_metadata = owner.stat(follow_symlinks=False)
+    if owner.is_symlink() or not stat.S_ISDIR(owner_metadata.st_mode):
+        raise ValueError("source snapshot owner is not a directory")
+    if hasattr(os, "geteuid") and owner_metadata.st_uid != os.geteuid():
+        raise ValueError("source snapshot owner has the wrong user")
+    if stat.S_IMODE(owner_metadata.st_mode) & 0o077:
+        raise ValueError("source snapshot owner directory is not private")
+    root_metadata = root.stat(follow_symlinks=False)
+    if stat.S_IMODE(root_metadata.st_mode) & 0o222:
+        raise ValueError("source snapshot root must be read-only")
+    provenance = load_source_provenance(root, provenance_file)
+    manifest = load_source_manifest(root)
+    inventory = _snapshot_inventory(root)
+    expected_files, expected_directories = _expected_snapshot_paths(manifest)
+    actual_files = {
+        path for path, record in inventory.items() if record[0] == "regular-file"
+    }
+    actual_directories = {
+        path for path, record in inventory.items() if record[0] == "directory"
+    }
+    if actual_files != expected_files or actual_directories != expected_directories:
+        raise ValueError("source snapshot inventory is not the exact sealed closure")
+    return SourceSnapshotLease(root, provenance)
 
 
 def materialize_source_snapshot(

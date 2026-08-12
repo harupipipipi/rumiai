@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -7,12 +8,15 @@ from pathlib import Path
 import pytest
 
 from scripts import generate_packaged_defaultspack_v4_bundle as generator
+from scripts import generator_source_manifest
+from scripts.generator_source_manifest import materialize_source_snapshot
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 SOURCE_COMMIT = "0123456789abcdef0123456789abcdef01234567"
 SOURCE_TREE = "89abcdef0123456789abcdef0123456789abcdef"
+_SOURCE_PROVENANCE: Path | None = None
 
 
 def _linux_source(path: Path, payload: bytes = b"original") -> Path:
@@ -29,6 +33,32 @@ def _linux_source(path: Path, payload: bytes = b"original") -> Path:
 
 def _bundle_roots(root: Path) -> tuple[Path, Path]:
     """Create a clean source bundle and empty artifact output roots."""
+    global _SOURCE_PROVENANCE
+    owner = root / "sealed-source-owner"
+    owner.mkdir(parents=True, exist_ok=True, mode=0o700)
+    owner.chmod(0o700)
+    snapshot = owner / "source"
+    materialize_source_snapshot(ROOT, snapshot)
+    snapshot.chmod(0o755)
+    manifest = snapshot / "packaged_defaultspack_source_manifest.v1.json"
+    provenance = snapshot / "packaging-source-provenance.v1.json"
+    provenance.write_bytes(
+        json.dumps(
+            {
+                "schema": "io.tobkiri.packaging-source-provenance.v1",
+                "source_commit": SOURCE_COMMIT,
+                "source_tree": SOURCE_TREE,
+                "source_clean": True,
+                "source_manifest_sha256": hashlib.sha256(
+                    manifest.read_bytes()
+                ).hexdigest(),
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    provenance.chmod(0o400)
+    snapshot.chmod(0o555)
+    _SOURCE_PROVENANCE = provenance
     bundle = root / "defaultspack" / "v4"
     artifacts = root / "defaultspack" / "platform-artifacts"
     shutil.copytree(SOURCE_BUNDLE, bundle)
@@ -54,6 +84,8 @@ def _stage(
     relative_path: str = "Tobkiri.AppImage",
     entrypoint: str = "Tobkiri.AppImage",
 ) -> None:
+    if _SOURCE_PROVENANCE is None:
+        raise AssertionError("test source provenance was not initialized")
     generator.stage_packaged_bundle(
         source_artifact=source,
         bundle_root=bundle,
@@ -63,10 +95,7 @@ def _stage(
         platform="linux",
         architecture="x86_64",
         bundle_identity="io.tobkiri.shell.tauri",
-        source_commit=SOURCE_COMMIT,
-        source_tree=SOURCE_TREE,
-        source_clean=True,
-        source_snapshot_root=ROOT,
+        source_provenance_file=_SOURCE_PROVENANCE,
     )
 
 
@@ -218,42 +247,48 @@ def test_generator_rejects_unverified_source_revision(
 ) -> None:
     bundle, artifacts = _bundle_roots(tmp_path)
     source = _linux_source(tmp_path / "source")
+    assert _SOURCE_PROVENANCE is not None
+    provenance = json.loads(_SOURCE_PROVENANCE.read_text())
+    provenance["source_commit"] = source_commit
+    _SOURCE_PROVENANCE.chmod(0o600)
+    _SOURCE_PROVENANCE.write_text(
+        json.dumps(provenance, separators=(",", ":")), encoding="utf-8"
+    )
+    _SOURCE_PROVENANCE.chmod(0o400)
     with pytest.raises(ValueError, match="full lowercase 40-hex identity"):
-        generator._package_transaction(
-            source_artifact=source,
-            bundle_root=bundle,
-            artifact_root=artifacts,
-            relative_path="Tobkiri.AppImage",
-            entrypoint="Tobkiri.AppImage",
-            platform="linux",
-            architecture="x86_64",
-            bundle_identity="io.tobkiri.shell.tauri",
-            source_commit=source_commit,
-            source_tree=SOURCE_TREE,
-            source_clean=True,
-            source_snapshot_root=ROOT,
-        )
+        _stage(source, bundle, artifacts)
 
 
 def test_generator_requires_exact_clean_snapshot_provenance(tmp_path: Path) -> None:
     """Formal source identity and clean state are required before staging."""
     bundle, artifacts = _bundle_roots(tmp_path)
     source = _linux_source(tmp_path / "source")
-    with pytest.raises(ValueError, match="clean attestation"):
-        generator._package_transaction(
-            source_artifact=source,
-            bundle_root=bundle,
-            artifact_root=artifacts,
-            relative_path="Tobkiri.AppImage",
-            entrypoint="Tobkiri.AppImage",
-            platform="linux",
-            architecture="x86_64",
-            bundle_identity="io.tobkiri.shell.tauri",
-            source_commit=SOURCE_COMMIT,
-            source_tree=SOURCE_TREE,
-            source_clean=False,
-            source_snapshot_root=ROOT,
-        )
+    assert _SOURCE_PROVENANCE is not None
+    provenance = json.loads(_SOURCE_PROVENANCE.read_text())
+    provenance["source_clean"] = False
+    _SOURCE_PROVENANCE.chmod(0o600)
+    _SOURCE_PROVENANCE.write_text(
+        json.dumps(provenance, separators=(",", ":")), encoding="utf-8"
+    )
+    _SOURCE_PROVENANCE.chmod(0o400)
+    with pytest.raises(ValueError, match="source_clean"):
+        _stage(source, bundle, artifacts)
+
+
+def test_source_snapshot_lease_rejects_chmod_and_root_swap(tmp_path: Path) -> None:
+    """A direct Python caller keeps the private snapshot identity pinned."""
+    _bundle_roots(tmp_path)
+    assert _SOURCE_PROVENANCE is not None
+    snapshot = _SOURCE_PROVENANCE.parent
+    lease = generator_source_manifest.open_source_snapshot_lease(
+        snapshot, _SOURCE_PROVENANCE
+    )
+    try:
+        snapshot.chmod(0o755)
+        with pytest.raises(ValueError, match="owner-writable|inventory changed"):
+            lease.verify_unchanged()
+    finally:
+        lease.close()
 
 
 def test_generator_has_no_git_subprocess_boundary() -> None:

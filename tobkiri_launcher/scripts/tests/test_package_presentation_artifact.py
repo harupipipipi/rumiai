@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import importlib.util
 import json
 import os
@@ -25,6 +26,14 @@ SPEC.loader.exec_module(MODULE)
 artifact_digest = MODULE.artifact_digest
 package_artifact = MODULE.package_artifact
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+SOURCE_MANIFEST_SPEC = importlib.util.spec_from_file_location(
+    "presentation_generator_source_manifest",
+    REPOSITORY_ROOT / "tobkiri_runtime/scripts/generator_source_manifest.py",
+)
+assert SOURCE_MANIFEST_SPEC and SOURCE_MANIFEST_SPEC.loader
+SOURCE_MANIFEST_MODULE = importlib.util.module_from_spec(SOURCE_MANIFEST_SPEC)
+SOURCE_MANIFEST_SPEC.loader.exec_module(SOURCE_MANIFEST_MODULE)
+materialize_source_snapshot = SOURCE_MANIFEST_MODULE.materialize_source_snapshot
 
 
 def _git_revision(expression: str) -> str:
@@ -42,12 +51,35 @@ SOURCE_COMMIT = _git_revision("HEAD^{commit}")
 SOURCE_TREE = _git_revision("HEAD^{tree}")
 
 
-def _source_provenance() -> dict[str, object]:
-    """Return explicit preverified provenance for canonical-source fixtures."""
+def _source_provenance(root: Path) -> dict[str, object]:
+    """Create and return the private snapshot contract for one test root."""
+    owner = root / "sealed-source-owner"
+    snapshot = owner / "source"
+    provenance = snapshot / "packaging-source-provenance.v1.json"
+    if not snapshot.exists():
+        owner.mkdir(parents=True, exist_ok=True, mode=0o700)
+        owner.chmod(0o700)
+        materialize_source_snapshot(REPOSITORY_ROOT / "tobkiri_runtime", snapshot)
+        snapshot.chmod(0o755)
+        manifest = snapshot / "packaged_defaultspack_source_manifest.v1.json"
+        provenance.write_bytes(
+            json.dumps(
+                {
+                    "schema": "io.tobkiri.packaging-source-provenance.v1",
+                    "source_commit": SOURCE_COMMIT,
+                    "source_tree": SOURCE_TREE,
+                    "source_clean": True,
+                    "source_manifest_sha256": hashlib.sha256(
+                        manifest.read_bytes()
+                    ).hexdigest(),
+                },
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        provenance.chmod(0o400)
+        snapshot.chmod(0o555)
     return {
-        "source_commit": SOURCE_COMMIT,
-        "source_tree": SOURCE_TREE,
-        "source_clean": True,
+        "source_provenance_file": provenance,
     }
 
 
@@ -240,7 +272,7 @@ def test_windows_absolute_artifact_path_packages_native_manifest() -> None:
             "windows-path-test-key",
             root / "release",
             repository_root,
-            **_source_provenance(),
+            **_source_provenance(root),
         )
         assert "\\" not in str(report["path"])
         index = json.loads(
@@ -321,7 +353,7 @@ def _package(root: Path, output_name: str = "release") -> dict[str, object]:
         "test-release-key",
         root / output_name,
         repository_root,
-        **_source_provenance(),
+        **_source_provenance(root),
     )
 
 
@@ -396,7 +428,7 @@ def test_package_preserves_valid_macos_resource_envelope() -> None:
             "key",
             root / "release",
             repository_root,
-            **_source_provenance(),
+            **_source_provenance(root),
         )
         staged = root / "release" / str(report["path"])
         assert (staged / "Contents/_CodeSignature/CodeResources").is_file()
@@ -434,7 +466,7 @@ def test_package_rejects_invalid_macos_resource_envelope(tamper: str) -> None:
                 "key",
                 root / "release",
                 repository_root,
-                **_source_provenance(),
+                **_source_provenance(root),
             )
         assert not (root / "release").exists()
 
@@ -654,45 +686,47 @@ def test_package_requires_formal_source_provenance() -> None:
     """A checkout cannot substitute for explicit preverified provenance."""
     with TemporaryDirectory(prefix="tobkiri-presentation-source-contract-") as temp:
         root = Path(temp)
-        _, manifest, _ = _fixture(root)
+        catalog, manifest, key = _fixture(root)
         build = json.loads(manifest.read_text())
-        with pytest.raises(RuntimeError, match="formal source provenance"):
-            MODULE._validate_current_source(
-                build,
+        build["source_revision"] = SOURCE_COMMIT
+        manifest.write_text(json.dumps(build), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="source provenance file"):
+            package_artifact(
+                catalog,
+                manifest,
+                key,
+                "key",
+                root / "release",
                 REPOSITORY_ROOT,
-                source_commit=None,
-                source_tree=None,
-                source_clean=None,
             )
-        with pytest.raises(RuntimeError, match="source tree"):
-            MODULE._validate_current_source(
-                build,
+
+        contract = _source_provenance(root)
+        provenance = Path(contract["source_provenance_file"])
+        value = json.loads(provenance.read_text(encoding="utf-8"))
+        value["source_tree"] = "not-a-tree"
+        provenance.chmod(0o600)
+        provenance.write_text(json.dumps(value), encoding="utf-8")
+        provenance.chmod(0o400)
+        with pytest.raises(RuntimeError, match="sealed source"):
+            package_artifact(
+                catalog,
+                manifest,
+                key,
+                "key",
+                root / "bad-release",
                 REPOSITORY_ROOT,
-                source_commit=SOURCE_COMMIT,
-                source_tree="0" * 40,
-                source_clean=True,
-            )
-        with pytest.raises(RuntimeError, match="source-clean=true"):
-            MODULE._validate_current_source(
-                build,
-                REPOSITORY_ROOT,
-                source_commit=SOURCE_COMMIT,
-                source_tree=SOURCE_TREE,
-                source_clean=False,
+                **contract,
             )
 
 
 def test_package_projection_contract_is_snapshot_only() -> None:
     """The non-core caller passes the trusted manifest-bound snapshot contract."""
     source = SCRIPT_PATH.read_text(encoding="utf-8")
-    for marker in (
-        "materialize_source_snapshot",
-        "verify_source_closure(source_root)",
-        "--source-snapshot-root",
-        "--source-tree",
-        "--source-clean",
-    ):
-        assert marker in source
+    assert "--source-provenance-file" in source
+    assert "materialize_source_snapshot" not in source
+    assert "verify_source_closure(source_root)" not in source
+    assert "--source-tree" not in source
+    assert "--source-clean" not in source
     assert "source_identity_for_repository" not in source
     assert "source_revision_for_repository" not in source
 
@@ -760,7 +794,7 @@ def test_package_normalizes_entrypoint_and_rolls_back_write_fault(
                 "key",
                 output,
                 repository_root,
-                **_source_provenance(),
+                **_source_provenance(root),
             )
         assert _file_bytes(output) == before
         assert not list(root.glob(".tobkiri-presentation-stage-*"))
@@ -788,7 +822,7 @@ def test_package_uses_one_source_snapshot_and_revalidates_staged_signature(
             "key",
             root / "release",
             repository_root,
-            **_source_provenance(),
+            **_source_provenance(root),
         )
         staged = root / "release" / str(report["path"])
         assert staged.exists()
@@ -809,7 +843,7 @@ def test_package_two_passes_are_byte_identical() -> None:
             "key",
             first,
             repository_root,
-            **_source_provenance(),
+            **_source_provenance(root),
         )
         package_artifact(
             catalog,
@@ -818,7 +852,7 @@ def test_package_two_passes_are_byte_identical() -> None:
             "key",
             second,
             repository_root,
-            **_source_provenance(),
+            **_source_provenance(root),
         )
         assert _file_bytes(first) == _file_bytes(second)
 

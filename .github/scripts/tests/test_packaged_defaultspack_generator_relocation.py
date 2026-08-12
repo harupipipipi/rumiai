@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import os
+import hashlib
 import importlib.util
 import json
+import os
 import py_compile
 import shlex
 import shutil
@@ -66,6 +67,22 @@ def _copy_source_checkout(destination: Path) -> None:
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+    provenance_path = destination / "tobkiri_runtime/packaging-source-provenance.v1.json"
+    provenance_path.write_bytes(
+        json.dumps(
+            {
+                "schema": "io.tobkiri.packaging-source-provenance.v1",
+                "source_commit": _SOURCE_COMMIT,
+                "source_tree": _SOURCE_TREE,
+                "source_clean": True,
+                "source_manifest_sha256": hashlib.sha256(
+                    manifest_target.read_bytes()
+                ).hexdigest(),
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    provenance_path.chmod(0o400)
 
 
 def _fixture(root: Path) -> tuple[Path, Path, Path]:
@@ -85,11 +102,11 @@ def _fixture(root: Path) -> tuple[Path, Path, Path]:
 
 
 def _source_contract(checkout: Path) -> dict[str, str]:
-    """Return formal provenance bound to the relocated snapshot root."""
+    """Return the one formal provenance file bound to the relocated snapshot."""
     return {
-        "source_commit": _SOURCE_COMMIT,
-        "source_tree": _SOURCE_TREE,
-        "source_snapshot_root": os.fspath(checkout / "tobkiri_runtime"),
+        "source_provenance_file": os.fspath(
+            checkout / "tobkiri_runtime/packaging-source-provenance.v1.json"
+        ),
     }
 
 
@@ -125,13 +142,8 @@ def _generator_process(
     if source_contract is not None:
         arguments.extend(
             [
-                "--source-commit",
-                source_contract["source_commit"],
-                "--source-tree",
-                source_contract["source_tree"],
-                "--source-clean",
-                "--source-snapshot-root",
-                source_contract["source_snapshot_root"],
+                "--source-provenance-file",
+                source_contract["source_provenance_file"],
             ]
         )
     return subprocess.run(
@@ -313,7 +325,14 @@ def test_relocated_generator_rejects_malformed_source_provenance(
     """Formal source provenance must be a complete lowercase identity."""
     checkout, bundle, artifact = _fixture(tmp_path / "bad-provenance")
     contract = _source_contract(checkout)
-    contract["source_tree"] = "not-a-source-tree"
+    provenance_path = Path(contract["source_provenance_file"])
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    provenance["source_tree"] = "not-a-source-tree"
+    provenance_path.chmod(0o600)
+    provenance_path.write_text(
+        json.dumps(provenance, separators=(",", ":")), encoding="utf-8"
+    )
+    provenance_path.chmod(0o400)
     result = _generator_process(
         checkout,
         bundle,

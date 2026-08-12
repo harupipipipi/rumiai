@@ -137,11 +137,12 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
         assert "TOBKIRI_PACKAGING_PYTHON_SHA256" in build_contents
         assert "TOBKIRI_PACKAGING_GIT" in build_contents
         assert "TOBKIRI_PACKAGING_GIT_SHA256" in build_contents
-        assert "TOBKIRI_PACKAGING_SOURCE_TREE" in build_contents
-        assert "TOBKIRI_PACKAGING_SOURCE_CLEAN" in build_contents
-        assert "--source-commit" in build_contents
-        assert "--source-tree" in build_contents
-        assert "--source-clean" in build_contents
+        assert "TOBKIRI_PACKAGING_SOURCE_PROVENANCE_FILE" in build_contents
+        assert "--source-provenance-file" in build_contents
+        assert "packaging-source-provenance.v1.json" in build_contents
+        assert "--source-commit" not in build_contents
+        assert "--source-tree" not in build_contents
+        assert "--source-clean" not in build_contents
         assert 'PYTHONDONTWRITEBYTECODE: "1"' in contents
         assert "aarch64-apple-darwin" in build_contents
         assert "x86_64-apple-darwin" in build_contents
@@ -164,16 +165,18 @@ def test_python_generator_requires_snapshot_provenance_and_never_uses_git():
     assert "_run_bound_git" not in generator
     assert "_verify_bound_git" not in generator
     assert "TOBKIRI_PACKAGING_GIT" not in generator
+    assert "--source-provenance-file" in generator
+    assert "packaging-source-provenance.v1.json" in generator
+    assert "_preverified_source_provenance" in generator
+    assert "load_source_provenance" in generator
     for marker in (
         "--source-commit",
         "--source-tree",
         "--source-clean",
-        "--source-snapshot-root",
         "_preverified_source_commit",
         "_sealed_snapshot_root",
-        "verify_source_closure",
     ):
-        assert marker in generator
+        assert marker not in generator
 
     cleanup = PACKAGING_CLEANUP.read_text(encoding="utf-8")
     isolated_keys = cleanup.split("_ISOLATED_ENVIRONMENT_KEYS", 1)[1].split(

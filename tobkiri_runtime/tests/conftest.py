@@ -574,6 +574,7 @@ def _verified_packaged_profile_bundle(tmp_path_factory):
 
     from tests.conformance_support.packaged_profile import (
         build_packaged_profile_bundle,
+        create_test_source_provenance,
         inject_packaged_profile_bundle,
     )
 
@@ -617,13 +618,20 @@ def _verified_packaged_profile_bundle(tmp_path_factory):
     ).stdout.strip()
     assert not source_status, "packaged fixture source must start from a clean checkout"
     injection = pytest.MonkeyPatch()
+    fixture_root = tmp_path_factory.mktemp("verified-packaged-profile")
+    provenance = create_test_source_provenance(
+        _PROJECT_ROOT,
+        fixture_root,
+        provenance_record={
+            "source_commit": revision,
+            "source_tree": source_tree,
+            "source_clean": True,
+        },
+    )
     bundle = build_packaged_profile_bundle(
         source_bundle,
-        tmp_path_factory.mktemp("verified-packaged-profile"),
-        source_commit=revision,
-        source_tree=source_tree,
-        source_clean=True,
-        source_snapshot_root=_PROJECT_ROOT,
+        fixture_root,
+        source_provenance_file=provenance,
     )
     from core_runtime.bootstrap import profile_capture, runtime
 

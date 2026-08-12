@@ -59,21 +59,24 @@ remove_owned_path = _PACKAGING_CLEANUP.remove_owned_path
 run_process_and_wait = _PACKAGING_CLEANUP.run_process_and_wait
 
 
-def _load_source_manifest_verifier():
-    """Load canonical source-closure tools without search-path changes."""
-    verifier_path = REPOSITORY_ROOT / "tobkiri_runtime/scripts/generator_source_manifest.py"
+def _load_source_manifest_tools(source_root: Path):
+    """Load source-closure tools only from a supplied sealed snapshot."""
+    source_root = source_root.expanduser().absolute()
+    _reject_symlink_components(source_root)
+    if source_root.is_symlink() or not source_root.is_dir():
+        raise RuntimeError(f"sealed source snapshot is unavailable: {source_root}")
+    verifier_path = source_root / "scripts/generator_source_manifest.py"
+    if verifier_path.is_symlink() or not verifier_path.is_file():
+        raise RuntimeError(f"sealed source verifier is unavailable: {verifier_path}")
     spec = importlib.util.spec_from_file_location(
-        "tobkiri_generator_source_manifest", verifier_path
+        f"tobkiri_generator_source_manifest_{id(source_root)}", verifier_path
     )
     if spec is None or spec.loader is None:
         raise RuntimeError(f"source closure verifier is unavailable: {verifier_path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    return module.verify_source_closure, module.materialize_source_snapshot
-
-
-verify_source_closure, materialize_source_snapshot = _load_source_manifest_verifier()
+    return module
 
 
 def artifact_digest(path: Path) -> str:
@@ -137,11 +140,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--repository-root",
         type=Path,
-        help="Checkout used only to materialize the verified source snapshot.",
+        help="Checkout used only for the canonical presentation catalog identity.",
     )
-    parser.add_argument("--source-commit", required=True)
-    parser.add_argument("--source-tree", required=True)
-    parser.add_argument("--source-clean", action="store_true")
+    parser.add_argument(
+        "--source-provenance-file",
+        type=Path,
+        help="Core-bound packaging-source-provenance.v1.json in its sealed snapshot.",
+    )
     return parser.parse_args(argv)
 
 
@@ -196,24 +201,28 @@ def _required_text(value: Mapping[str, Any], name: str) -> str:
 
 def _validate_current_source(
     build_output: Mapping[str, Any],
-    repository_root: Path | None,
-    *,
-    source_commit: str | None,
-    source_tree: str | None,
-    source_clean: bool | None,
+    source_provenance: Any | None,
 ) -> None:
-    """Validate formal provenance without consulting checkout or Git metadata."""
-    if repository_root is None:
+    """Validate the core-bound provenance without consulting checkout or Git."""
+    if source_provenance is None:
         return
-    if source_commit is None or source_tree is None or source_clean is not True:
-        raise RuntimeError(
-            "formal source provenance requires source commit, source tree, "
-            "and source-clean=true"
-        )
-    if GIT_REVISION_RE.fullmatch(source_commit) is None or len(set(source_commit)) <= 1:
+    source_commit = getattr(source_provenance, "source_commit", None)
+    source_tree = getattr(source_provenance, "source_tree", None)
+    source_clean = getattr(source_provenance, "source_clean", None)
+    if (
+        not isinstance(source_commit, str)
+        or GIT_REVISION_RE.fullmatch(source_commit) is None
+        or len(set(source_commit)) <= 1
+    ):
         raise RuntimeError("source commit must be a full lowercase 40-hex identity")
-    if GIT_REVISION_RE.fullmatch(source_tree) is None or len(set(source_tree)) <= 1:
+    if (
+        not isinstance(source_tree, str)
+        or GIT_REVISION_RE.fullmatch(source_tree) is None
+        or len(set(source_tree)) <= 1
+    ):
         raise RuntimeError("source tree must be a full lowercase 40-hex identity")
+    if source_clean is not True:
+        raise RuntimeError("source provenance source_clean must be true")
     if build_output.get("source_revision") != source_commit:
         raise RuntimeError(
             "build-output manifest source revision is stale: "
@@ -879,6 +888,7 @@ def _signature_message(release: Mapping[str, Any]) -> bytes:
 def _project_packaged_defaultspack(
     *,
     repository_root: Path,
+    source_provenance_file: Path,
     source_artifact: Path,
     artifact_ref: str,
     entrypoint: str,
@@ -886,56 +896,65 @@ def _project_packaged_defaultspack(
     architecture: str,
     bundle_identity: str,
     source_revision: str,
-    source_tree: str,
-    source_clean: bool,
     transaction_root: Path,
 ) -> dict[str, Any]:
     """Generate the exact packaged Profile projection before release signing."""
-    source_root = repository_root / "tobkiri_runtime"
-    if source_root.is_symlink() or not source_root.is_dir():
-        raise RuntimeError(f"canonical runtime source is unavailable: {source_root}")
+    del repository_root
+    source_root = source_provenance_file.expanduser().absolute().parent
+    tools = _load_source_manifest_tools(source_root)
+    try:
+        lease = tools.open_source_snapshot_lease(
+            source_root, source_provenance_file
+        )
+    except (OSError, ValueError) as error:
+        raise RuntimeError(
+            "core-provided sealed source snapshot/provenance is invalid"
+        ) from error
     bundle_root = transaction_root / "v4"
     artifact_root = transaction_root / "platform-artifacts"
-    source_snapshot_root = transaction_root / "source-snapshot" / "tobkiri_runtime"
-    verify_source_closure(source_root)
-    materialize_source_snapshot(source_root, source_snapshot_root)
-    source_bundle = source_snapshot_root / "ecosystem/defaultspack/v4"
-    shutil.copytree(source_bundle, bundle_root)
-    _make_owned_tree_writable(bundle_root)
-    run_process_and_wait(
-        isolated_python_module_command(
-            sys.executable,
-            "scripts.generate_packaged_defaultspack_v4_bundle",
-            source_snapshot_root,
-            [
-                "--source-artifact",
-                os.fspath(source_artifact),
-                "--bundle-root",
-                os.fspath(bundle_root),
-                "--artifact-root",
-                os.fspath(artifact_root),
-                "--relative-path",
-                artifact_ref,
-                "--entrypoint",
-                entrypoint,
-                "--platform",
-                platform,
-                "--architecture",
-                architecture,
-                "--bundle-identity",
-                bundle_identity,
-                "--source-commit",
-                source_revision,
-                "--source-tree",
-                source_tree,
-                "--source-clean",
-                "--source-snapshot-root",
-                os.fspath(source_snapshot_root),
-            ],
-        ),
-        cwd=source_snapshot_root,
-        env=isolated_packaging_environment(),
-    )
+    try:
+        provenance = lease.provenance
+        if provenance.source_commit != source_revision:
+            raise RuntimeError(
+                "build-output source revision does not match sealed provenance"
+            )
+        source_bundle = source_root / "ecosystem/defaultspack/v4"
+        shutil.copytree(source_bundle, bundle_root)
+        _make_owned_tree_writable(bundle_root)
+        run_process_and_wait(
+            isolated_python_module_command(
+                sys.executable,
+                "scripts.generate_packaged_defaultspack_v4_bundle",
+                source_root,
+                [
+                    "--source-artifact",
+                    os.fspath(source_artifact),
+                    "--bundle-root",
+                    os.fspath(bundle_root),
+                    "--artifact-root",
+                    os.fspath(artifact_root),
+                    "--relative-path",
+                    artifact_ref,
+                    "--entrypoint",
+                    entrypoint,
+                    "--platform",
+                    platform,
+                    "--architecture",
+                    architecture,
+                    "--bundle-identity",
+                    bundle_identity,
+                    "--source-provenance-file",
+                    "packaging-source-provenance.v1.json",
+                ],
+            ),
+            cwd=source_root,
+            env=isolated_packaging_environment(),
+        )
+    finally:
+        try:
+            lease.verify_unchanged()
+        finally:
+            lease.close()
     profile = bundle_root / "defaults.profile.v4.json"
     lock_path = bundle_root / "bundle.lock.json"
     lock = _load_object(
@@ -1016,9 +1035,7 @@ def package_artifact(
     signing_key_id: str,
     output_dir: Path,
     repository_root: Path | None = None,
-    source_commit: str | None = None,
-    source_tree: str | None = None,
-    source_clean: bool | None = None,
+    source_provenance_file: Path | None = None,
 ) -> dict[str, Any]:
     """Verify and atomically bind one exact build output into a Shell v4 release."""
     if not signing_key_id.strip():
@@ -1032,13 +1049,21 @@ def package_artifact(
     build_output = _load_object(
         manifest_path, BUILD_OUTPUT_SCHEMA, "build-output manifest"
     )
-    _validate_current_source(
-        build_output,
-        repository_root,
-        source_commit=source_commit,
-        source_tree=source_tree,
-        source_clean=source_clean,
-    )
+    source_provenance: Any | None = None
+    if repository_root is not None:
+        if source_provenance_file is None:
+            raise RuntimeError("core-provided source provenance file is required")
+        source_snapshot = source_provenance_file.expanduser().absolute().parent
+        tools = _load_source_manifest_tools(source_snapshot)
+        try:
+            source_provenance = tools.load_source_provenance(
+                source_snapshot, source_provenance_file
+            )
+        except (OSError, ValueError) as error:
+            raise RuntimeError(
+                "core-provided sealed source snapshot/provenance is invalid"
+            ) from error
+    _validate_current_source(build_output, source_provenance)
     artifact_id = _required_text(build_output, "artifact_id")
     platform = _required_text(build_output, "platform")
     architecture = _required_text(build_output, "architecture")
@@ -1205,6 +1230,7 @@ def package_artifact(
             try:
                 packaged_projection = _project_packaged_defaultspack(
                     repository_root=repository,
+                    source_provenance_file=source_provenance_file,
                     source_artifact=staged,
                     artifact_ref=artifact_ref,
                     entrypoint=entrypoint,
@@ -1212,8 +1238,6 @@ def package_artifact(
                     architecture=architecture,
                     bundle_identity=bundle_identity,
                     source_revision=source_revision,
-                    source_tree=source_tree,
-                    source_clean=bool(source_clean),
                     transaction_root=projection_root,
                 )
             finally:
@@ -1354,9 +1378,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.signing_key_id,
         args.output_dir,
         args.repository_root,
-        args.source_commit,
-        args.source_tree,
-        args.source_clean,
+        args.source_provenance_file,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0
