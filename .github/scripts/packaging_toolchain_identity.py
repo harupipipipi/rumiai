@@ -1,26 +1,57 @@
-"""Bind the exact executable identities used by Rust packaging callers.
+"""Build and bind the closed macOS packaging toolchain.
 
-The workflow may use PATH once, during this explicit binding step, to discover
-the runner's already-installed tools.  The emitted absolute paths and raw
-SHA-256 digests are the formal inputs consumed by build.rs and Rust fixtures;
-those consumers never perform PATH lookup or trust PYTHON.
+The formal Python is installed from one checked-in, digest-pinned python.org
+installer.  No executable, library, or package is copied from actions/setup-
+python.  Runtime requirements are installed from the repository's hash lock
+into a root-owned environment inside the fixed Framework version.  Only after
+an exact inventory is sealed and reverified is that interpreter executed.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
+import secrets
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from typing import Any
+
+
+PROVENANCE_SCHEMA = "tobkiri.packaging-python-macos.v1"
+INVENTORY_SCHEMA = "tobkiri.packaging-python-installation.v1"
+INVENTORY_NAME = ".tobkiri-packaging-python.v1.json"
+APPLE_TEAM_ID = "59GAB85EFG"
+APPLE_GIT_IDENTIFIER = "com.apple.git"
+STAGING_PARENT = Path("/private/var/tmp")
+STAGING_PREFIX = "tobkiri-python-installer-"
+
+PROVENANCE_FIELDS = frozenset(
+    {
+        "code_identifier",
+        "executable",
+        "install_root",
+        "installer_sha256",
+        "installer_signer",
+        "installer_team_id",
+        "installer_url",
+        "release_page",
+        "requirements_path",
+        "requirements_sha256",
+        "schema",
+        "version",
+    }
+)
 
 
 class ToolIdentityError(ValueError):
-    """Raised when a packaging executable cannot be bound safely."""
+    """Raised when a packaging toolchain cannot be bound safely."""
 
 
 @dataclass(frozen=True)
@@ -31,94 +62,836 @@ class ToolIdentity:
     sha256: str
 
 
-def _file_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
-    """Return metadata used to detect replacement while hashing."""
+@dataclass(frozen=True)
+class CodeIdentity:
+    """Selected immutable fields from a verified macOS code signature."""
+
+    identifier: str
+    team_identifier: str
+    cdhash: str
+
+
+@dataclass(frozen=True)
+class InstallerProvenance:
+    """Strict checked-in authority for the official installer and lock."""
+
+    code_identifier: str
+    executable: PurePosixPath
+    install_root: Path
+    installer_sha256: str
+    installer_signer: str
+    installer_team_id: str
+    installer_url: str
+    release_page: str
+    requirements_path: PurePosixPath
+    requirements_sha256: str
+    requirements_bytes: bytes
+    version: str
+
+
+@dataclass(frozen=True)
+class MacOSPythonInstallation:
+    """A verified root-owned Python installation and inventory lease input."""
+
+    root: Path
+    executable: Path
+    inventory_sha256: str
+
+
+def _valid_sha256(value: object) -> bool:
     return (
-        getattr(metadata, "st_dev", 0),
-        getattr(metadata, "st_ino", 0),
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _safe_relative(value: object, label: str) -> PurePosixPath:
+    if not isinstance(value, str):
+        raise ToolIdentityError(f"{label} must be a string")
+    path = PurePosixPath(value)
+    if (
+        path.is_absolute()
+        or not path.parts
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        raise ToolIdentityError(f"{label} must be a safe relative path")
+    return path
+
+
+def _strict_json(path: Path) -> dict[str, Any]:
+    def reject_duplicate(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ToolIdentityError(f"duplicate JSON field: {key}")
+            result[key] = value
+        return result
+
+    try:
+        payload = json.loads(path.read_bytes(), object_pairs_hook=reject_duplicate)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ToolIdentityError(f"invalid JSON: {path}: {error}") from error
+    if not isinstance(payload, dict):
+        raise ToolIdentityError(f"JSON object required: {path}")
+    return payload
+
+
+def load_provenance(path: Path, repository_root: Path) -> InstallerProvenance:
+    """Load the exact checked-in installer and dependency authority."""
+    payload = _strict_json(path)
+    if set(payload) != PROVENANCE_FIELDS or payload.get("schema") != PROVENANCE_SCHEMA:
+        raise ToolIdentityError("packaging Python provenance schema/fields mismatch")
+    for field in ("installer_sha256", "requirements_sha256"):
+        if not _valid_sha256(payload[field]):
+            raise ToolIdentityError(f"{field} must be lowercase SHA-256")
+    url = payload["installer_url"]
+    if not isinstance(url, str) or not url.startswith(
+        "https://www.python.org/ftp/python/"
+    ):
+        raise ToolIdentityError("installer_url must be a fixed python.org HTTPS URL")
+    version = payload["version"]
+    expected_name = f"python-{version}-macos11.pkg"
+    if not url.endswith(f"/{version}/{expected_name}"):
+        raise ToolIdentityError("installer URL does not match the pinned version")
+    release_slug = version.replace(".", "")
+    release_page = payload["release_page"]
+    if (
+        release_page
+        != f"https://www.python.org/downloads/release/python-{release_slug}/"
+    ):
+        raise ToolIdentityError("release_page does not match the pinned version")
+    install_root = Path(payload["install_root"])
+    if install_root != Path(
+        f"/Library/Frameworks/Python.framework/Versions/{'.'.join(version.split('.')[:2])}"
+    ):
+        raise ToolIdentityError("install_root does not match the pinned Python series")
+    requirements_relative = _safe_relative(
+        payload["requirements_path"], "requirements_path"
+    )
+    requirements = repository_root / requirements_relative
+    try:
+        requirements_bytes = requirements.read_bytes()
+    except OSError as error:
+        raise ToolIdentityError(
+            "hash-locked packaging requirements are unavailable"
+        ) from error
+    if hashlib.sha256(requirements_bytes).hexdigest() != payload["requirements_sha256"]:
+        raise ToolIdentityError("hash-locked packaging requirements digest mismatch")
+    for field in (
+        "code_identifier",
+        "installer_signer",
+        "installer_team_id",
+        "version",
+    ):
+        if not isinstance(payload[field], str) or not payload[field]:
+            raise ToolIdentityError(f"{field} must be a nonempty string")
+    if payload["installer_team_id"] not in payload["installer_signer"]:
+        raise ToolIdentityError("installer signer is not bound to its pinned Team ID")
+    return InstallerProvenance(
+        code_identifier=payload["code_identifier"],
+        executable=_safe_relative(payload["executable"], "executable"),
+        install_root=install_root,
+        installer_sha256=payload["installer_sha256"],
+        installer_signer=payload["installer_signer"],
+        installer_team_id=payload["installer_team_id"],
+        installer_url=url,
+        release_page=release_page,
+        requirements_path=requirements_relative,
+        requirements_sha256=payload["requirements_sha256"],
+        requirements_bytes=requirements_bytes,
+        version=version,
+    )
+
+
+def _file_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
         metadata.st_size,
         metadata.st_mtime_ns,
         metadata.st_ctime_ns,
     )
 
 
-def _regular_executable(path: Path, label: str) -> ToolIdentity:
-    """Validate and hash one canonical, non-writable executable."""
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _canonical_absolute(path: Path, label: str) -> Path:
     if not path.is_absolute():
         raise ToolIdentityError(f"{label} path must be absolute: {path}")
     try:
-        before = path.stat(follow_symlinks=False)
+        canonical = path.resolve(strict=True)
     except OSError as error:
-        raise ToolIdentityError(f"{label} cannot be inspected: {path}: {error}") from error
+        raise ToolIdentityError(
+            f"{label} cannot be resolved: {path}: {error}"
+        ) from error
+    if canonical != path:
+        raise ToolIdentityError(f"{label} path is not canonical: {path}")
+    return path
+
+
+def _regular_executable(path: Path, label: str) -> ToolIdentity:
+    path = _canonical_absolute(path, label)
+    before = path.stat(follow_symlinks=False)
     if path.is_symlink() or not stat.S_ISREG(before.st_mode):
         raise ToolIdentityError(f"{label} is not a regular file: {path}")
-    if path.resolve(strict=True) != path:
-        raise ToolIdentityError(f"{label} path is not canonical: {path}")
-    if not os.access(path, os.X_OK):
-        raise ToolIdentityError(f"{label} is not executable: {path}")
-    if before.st_mode & 0o022:
-        raise ToolIdentityError(f"{label} is writable: {path}")
-
-    digest = hashlib.sha256()
-    try:
-        with path.open("rb") as source:
-            for chunk in iter(lambda: source.read(1024 * 1024), b""):
-                digest.update(chunk)
-        after = path.stat(follow_symlinks=False)
-    except OSError as error:
-        raise ToolIdentityError(f"{label} cannot be hashed: {path}: {error}") from error
-    if (
-        path.is_symlink()
-        or not stat.S_ISREG(after.st_mode)
-        or _file_identity(before) != _file_identity(after)
-    ):
+    if not os.access(path, os.X_OK) or before.st_mode & 0o022:
+        raise ToolIdentityError(f"{label} is not immutable and executable: {path}")
+    digest = _sha256_file(path)
+    after = path.stat(follow_symlinks=False)
+    if path.is_symlink() or _file_identity(before) != _file_identity(after):
         raise ToolIdentityError(f"{label} changed while hashed: {path}")
-    return ToolIdentity(path=path, sha256=digest.hexdigest())
+    return ToolIdentity(path, digest)
 
 
-def _resolve_requested(value: str | None, label: str) -> Path:
-    """Resolve the one discovery input used only by the explicit binder."""
+def _root_owned_path(path: Path, label: str, *, sticky: Path | None = None) -> None:
+    path = _canonical_absolute(path, label)
+    for component in (path, *path.parents):
+        metadata = component.stat(follow_symlinks=False)
+        sticky_root = (
+            sticky is not None
+            and component == sticky
+            and metadata.st_uid == 0
+            and stat.S_ISDIR(metadata.st_mode)
+            and bool(metadata.st_mode & stat.S_ISVTX)
+        )
+        if component.is_symlink() or metadata.st_uid != 0:
+            raise ToolIdentityError(f"{label} contains non-root authority: {component}")
+        if metadata.st_mode & 0o022 and not sticky_root:
+            raise ToolIdentityError(f"{label} contains writable authority: {component}")
+
+
+def _codesign_identity(path: Path) -> CodeIdentity:
+    verified = subprocess.run(
+        ["/usr/bin/codesign", "--verify", "--strict", "--all-architectures", path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if verified.returncode != 0:
+        raise ToolIdentityError(
+            f"invalid code signature: {path}: {verified.stderr.strip()}"
+        )
+    details = subprocess.run(
+        ["/usr/bin/codesign", "-d", "--verbose=4", path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    fields: dict[str, str] = {}
+    for line in details.stderr.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            fields[key] = value
+    flags = fields.get("CodeDirectory", "")
+    cdhash = fields.get("CDHash") or fields.get("CandidateCDHash")
+    if details.returncode != 0 or "adhoc" in flags or not cdhash:
+        raise ToolIdentityError(f"unusable macOS code identity: {path}")
+    return CodeIdentity(
+        fields.get("Identifier", ""), fields.get("TeamIdentifier", ""), cdhash
+    )
+
+
+def _require_code_authority(
+    path: Path, *, identifier: str, team_identifier: str, label: str
+) -> CodeIdentity:
+    identity = _codesign_identity(path)
+    if identity.identifier != identifier or identity.team_identifier != team_identifier:
+        raise ToolIdentityError(
+            f"{label} signer is not authorized: {identity.identifier}/{identity.team_identifier}"
+        )
+    return identity
+
+
+ROOT_REMOVE_CODE = r"""
+import os, stat, sys
+target = os.path.normpath(sys.argv[1])
+if not target.startswith('/') or target == '/': raise SystemExit('unsafe removal target')
+parts = [part for part in target.split('/') if part]
+parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+try:
+    for part in parts[:-1]:
+        child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        os.close(parent); parent = child
+    os.fchown(parent, 0, 0)
+    if not (os.fstat(parent).st_mode & stat.S_ISVTX): os.fchmod(parent, 0o755)
+    name = parts[-1]
+    try: root = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+    except FileNotFoundError: raise SystemExit(0)
+    before = os.fstat(root)
+    def empty(fd):
+        os.fchown(fd, 0, 0); os.fchmod(fd, 0o700)
+        for entry in os.listdir(fd):
+            info = os.stat(entry, dir_fd=fd, follow_symlinks=False)
+            if stat.S_ISDIR(info.st_mode):
+                child = os.open(entry, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                empty(child); os.close(child); os.rmdir(entry, dir_fd=fd)
+            else: os.unlink(entry, dir_fd=fd)
+    empty(root); os.close(root)
+    current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+    if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
+        raise SystemExit('removal target identity changed')
+    os.rmdir(name, dir_fd=parent)
+finally: os.close(parent)
+"""
+
+
+def _remove_root_tree(path: Path) -> None:
+    result = subprocess.run(
+        ["/usr/bin/sudo", "/usr/bin/python3", "-I", "-B", "-c", ROOT_REMOVE_CODE, path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ToolIdentityError(
+            f"root cleanup failed for {path}: {result.stderr.strip()}"
+        )
+
+
+def _remove_verified_installation(
+    root: Path, provenance: InstallerProvenance, inventory_sha256: str
+) -> None:
+    """Remove a completed installation only after re-establishing its authority."""
+    if root != provenance.install_root or not _valid_sha256(inventory_sha256):
+        raise ToolIdentityError("refusing to remove an unbound Python installation")
+    installation = MacOSPythonInstallation(
+        root, root / provenance.executable, inventory_sha256
+    )
+    verify_macos_installation(installation, provenance)
+    _remove_root_tree(root)
+
+
+def _remove_previous_installation(provenance: InstallerProvenance) -> None:
+    """Permit reruns only when the existing fixed root is a verified prior result."""
+    try:
+        root_metadata = provenance.install_root.lstat()
+    except FileNotFoundError:
+        return
+    if not stat.S_ISDIR(root_metadata.st_mode):
+        raise ToolIdentityError("fixed Python installation path has unknown authority")
+    inventory = provenance.install_root / INVENTORY_NAME
+    try:
+        inventory_sha256 = _sha256_file(inventory)
+    except OSError as error:
+        raise ToolIdentityError(
+            "existing fixed Python installation is not a verified prior result"
+        ) from error
+    _remove_verified_installation(provenance.install_root, provenance, inventory_sha256)
+
+
+def _verify_installer(path: Path, provenance: InstallerProvenance) -> None:
+    if _sha256_file(path) != provenance.installer_sha256:
+        raise ToolIdentityError("python.org installer digest mismatch")
+    signature = subprocess.run(
+        ["/usr/sbin/pkgutil", "--check-signature", path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+    if signature.returncode != 0 or provenance.installer_signer not in signature.stdout:
+        raise ToolIdentityError("python.org installer signer mismatch")
+    notarization = subprocess.run(
+        ["/usr/sbin/spctl", "-a", "-vv", "-t", "install", path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+    if (
+        notarization.returncode != 0
+        or "source=Notarized Developer ID" not in notarization.stdout
+        or provenance.installer_signer not in notarization.stdout
+    ):
+        raise ToolIdentityError(
+            "python.org installer is not notarized by the pinned signer"
+        )
+
+
+def _inventory_entries(root: Path) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
+        relative = path.relative_to(root).as_posix()
+        if relative == INVENTORY_NAME:
+            continue
+        metadata = path.lstat()
+        entry: dict[str, Any] = {
+            "gid": metadata.st_gid,
+            "mode": stat.S_IMODE(metadata.st_mode),
+            "nlink": metadata.st_nlink,
+            "path": relative,
+            "uid": metadata.st_uid,
+        }
+        if stat.S_ISREG(metadata.st_mode):
+            entry.update(type="file", size=metadata.st_size, sha256=_sha256_file(path))
+        elif stat.S_ISDIR(metadata.st_mode):
+            entry["type"] = "directory"
+        elif stat.S_ISLNK(metadata.st_mode):
+            target = os.readlink(path)
+            resolved = (path.parent / target).resolve(strict=True)
+            try:
+                resolved.relative_to(root)
+            except ValueError as error:
+                raise ToolIdentityError(
+                    f"Python symlink escapes installation: {relative}"
+                ) from error
+            entry.update(type="symlink", target=target)
+        else:
+            raise ToolIdentityError(f"special file in Python installation: {relative}")
+        entries.append(entry)
+    return entries
+
+
+def _canonical_json(payload: Any) -> bytes:
+    return (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def _write_inventory(
+    installation: MacOSPythonInstallation,
+    provenance: InstallerProvenance,
+    code_identity: CodeIdentity,
+) -> str:
+    payload = {
+        "code_identity": {
+            "cdhash": code_identity.cdhash,
+            "identifier": code_identity.identifier,
+            "team_identifier": code_identity.team_identifier,
+        },
+        "entries": _inventory_entries(installation.root),
+        "executable": installation.executable.relative_to(installation.root).as_posix(),
+        "installer_sha256": provenance.installer_sha256,
+        "installer_url": provenance.installer_url,
+        "requirements_sha256": provenance.requirements_sha256,
+        "schema": INVENTORY_SCHEMA,
+        "version": provenance.version,
+    }
+    encoded = _canonical_json(payload)
+    with tempfile.NamedTemporaryFile(delete=False) as output:
+        temporary = Path(output.name)
+        output.write(encoded)
+        output.flush()
+        os.fsync(output.fileno())
+    try:
+        subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "/usr/bin/install",
+                "-o",
+                "root",
+                "-g",
+                "wheel",
+                "-m",
+                "0444",
+                temporary,
+                installation.root / INVENTORY_NAME,
+            ],
+            check=True,
+        )
+    finally:
+        temporary.unlink(missing_ok=True)
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _require_inventory_metadata(manifest: Path) -> None:
+    metadata = manifest.stat(follow_symlinks=False)
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != 0
+        or stat.S_IMODE(metadata.st_mode) != 0o444
+        or metadata.st_nlink != 1
+    ):
+        raise ToolIdentityError("packaging Python inventory metadata mismatch")
+
+
+def verify_macos_installation(
+    installation: MacOSPythonInstallation, provenance: InstallerProvenance
+) -> ToolIdentity:
+    """Verify exact sealed bytes without executing the installed Python."""
+    _root_owned_path(installation.root, "packaging Python installation")
+    manifest = installation.root / INVENTORY_NAME
+    _require_inventory_metadata(manifest)
+    encoded = manifest.read_bytes()
+    payload = _strict_json(manifest)
+    if _canonical_json(payload) != encoded or payload.get("schema") != INVENTORY_SCHEMA:
+        raise ToolIdentityError("packaging Python inventory is not canonical v1")
+    if hashlib.sha256(encoded).hexdigest() != installation.inventory_sha256:
+        raise ToolIdentityError("packaging Python inventory digest mismatch")
+    if payload.get("entries") != _inventory_entries(installation.root):
+        raise ToolIdentityError(
+            "packaging Python inventory does not match exact installation"
+        )
+    for entry in payload["entries"]:
+        if entry.get("uid") != 0:
+            raise ToolIdentityError("packaging Python contains non-root-owned content")
+        if entry.get("type") in {"file", "directory"} and entry.get("mode", 0) & 0o022:
+            raise ToolIdentityError("packaging Python contains writable content")
+    expected = {
+        "installer_sha256": provenance.installer_sha256,
+        "installer_url": provenance.installer_url,
+        "requirements_sha256": provenance.requirements_sha256,
+        "version": provenance.version,
+    }
+    if any(payload.get(key) != value for key, value in expected.items()):
+        raise ToolIdentityError("packaging Python provenance binding mismatch")
+    relative = _safe_relative(payload.get("executable"), "inventory executable")
+    if installation.executable != installation.root / relative:
+        raise ToolIdentityError("packaging Python executable binding mismatch")
+    identity = _require_code_authority(
+        installation.executable,
+        identifier=provenance.code_identifier,
+        team_identifier=provenance.installer_team_id,
+        label="Python",
+    )
+    if payload.get("code_identity") != {
+        "cdhash": identity.cdhash,
+        "identifier": identity.identifier,
+        "team_identifier": identity.team_identifier,
+    }:
+        raise ToolIdentityError("packaging Python code identity changed")
+    return _regular_executable(installation.executable, "Python")
+
+
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(root.resolve(strict=True))
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return True
+
+
+def smoke_macos_installation(installation: MacOSPythonInstallation) -> None:
+    """Execute only the already-verified interpreter and prove its closure."""
+    probe = (
+        "import json,sys;print(json.dumps({'executable':sys.executable,"
+        "'prefix':sys.prefix,'base_prefix':sys.base_prefix,'path':sys.path},sort_keys=True))"
+    )
+    for include_site in (False, True):
+        arguments = [os.fspath(installation.executable), "-I", "-B"]
+        if not include_site:
+            arguments.append("-S")
+        code = probe
+        if include_site:
+            code = "import packaging,jsonschema;" + code
+        arguments.extend(["-c", code])
+        environment = {"PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1"}
+        if include_site:
+            environment["DYLD_PRINT_LIBRARIES"] = "1"
+        result = subprocess.run(
+            arguments,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            env=environment,
+        )
+        if result.returncode != 0:
+            raise ToolIdentityError(
+                f"packaging Python closure smoke failed: {result.stderr}"
+            )
+        report = json.loads(result.stdout)
+        for field in ("executable", "prefix", "base_prefix"):
+            if not _inside(Path(report[field]), installation.root):
+                raise ToolIdentityError(f"packaging Python {field} escapes closure")
+        for raw_path in report["path"]:
+            if raw_path and not _inside(Path(raw_path), installation.root):
+                raise ToolIdentityError(
+                    f"packaging Python sys.path escapes closure: {raw_path}"
+                )
+        if include_site:
+            for line in result.stderr.splitlines():
+                if not line.startswith("dyld[") or "> /" not in line:
+                    continue
+                loaded = Path(line.rsplit(" ", 1)[1])
+                if loaded.as_posix().startswith(("/usr/lib/", "/System/Library/")):
+                    continue
+                if not _inside(loaded, installation.root):
+                    raise ToolIdentityError(
+                        f"packaging Python dylib escapes closure: {loaded}"
+                    )
+
+
+def prepare_macos_installation(
+    provenance: InstallerProvenance, repository_root: Path
+) -> MacOSPythonInstallation:
+    """Install official Python and hash-locked dependencies into root authority."""
+    staging = STAGING_PARENT / f"{STAGING_PREFIX}{secrets.token_hex(16)}"
+    package = staging / f"python-{provenance.version}.pkg"
+    created = False
+    installed = False
+    try:
+        subprocess.run(
+            ["/usr/bin/sudo", "/bin/mkdir", "-m", "0700", staging], check=True
+        )
+        created = True
+        subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "/usr/bin/curl",
+                "--proto",
+                "=https",
+                "--tlsv1.2",
+                "--fail",
+                "--location",
+                "--silent",
+                "--show-error",
+                "--output",
+                package,
+                provenance.installer_url,
+            ],
+            check=True,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        subprocess.run(["/usr/bin/sudo", "/bin/chmod", "0555", staging], check=True)
+        subprocess.run(["/usr/bin/sudo", "/bin/chmod", "0444", package], check=True)
+        _root_owned_path(staging, "installer staging", sticky=STAGING_PARENT)
+        _verify_installer(package, provenance)
+        subprocess.run(["/usr/bin/sudo", "/bin/chmod", "0700", staging], check=True)
+        expanded = staging / "expanded"
+        subprocess.run(
+            ["/usr/bin/sudo", "/usr/sbin/pkgutil", "--expand-full", package, expanded],
+            check=True,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        subprocess.run(
+            ["/usr/bin/sudo", "/usr/sbin/chown", "-R", "root:wheel", staging],
+            check=True,
+        )
+        subprocess.run(["/usr/bin/sudo", "/bin/chmod", "-RN", staging], check=True)
+        subprocess.run(
+            ["/usr/bin/sudo", "/bin/chmod", "-R", "a-w", staging], check=True
+        )
+        subprocess.run(["/usr/bin/sudo", "/bin/chmod", "0555", staging], check=True)
+        payload_executable_suffix = (
+            Path("Payload/Library/Frameworks/Python.framework")
+            / provenance.install_root.relative_to(
+                "/Library/Frameworks/Python.framework"
+            )
+            / "bin"
+            / f"python{'.'.join(provenance.version.split('.')[:2])}"
+        )
+        payload_executables = [
+            candidate
+            for candidate in expanded.rglob(payload_executable_suffix.name)
+            if candidate.as_posix().endswith(payload_executable_suffix.as_posix())
+            and candidate.is_file()
+            and not candidate.is_symlink()
+        ]
+        if len(payload_executables) != 1:
+            raise ToolIdentityError("official installer Framework payload is ambiguous")
+        payload_root = payload_executables[0].parents[1]
+        _root_owned_path(
+            payload_root, "official installer payload", sticky=STAGING_PARENT
+        )
+        _require_code_authority(
+            payload_executables[0],
+            identifier=provenance.code_identifier,
+            team_identifier=provenance.installer_team_id,
+            label="official installer Python payload",
+        )
+        _remove_previous_installation(provenance)
+        subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "/usr/bin/ditto",
+                "--noqtn",
+                payload_root,
+                provenance.install_root,
+            ],
+            check=True,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        installed = True
+        base_python = (
+            provenance.install_root
+            / "bin"
+            / f"python{'.'.join(provenance.version.split('.')[:2])}"
+        )
+        _root_owned_path(provenance.install_root, "official Python installation")
+        _require_code_authority(
+            base_python,
+            identifier=provenance.code_identifier,
+            team_identifier=provenance.installer_team_id,
+            label="official Python",
+        )
+        venv = provenance.install_root / "tobkiri-packaging-venv"
+        subprocess.run(
+            ["/usr/bin/sudo", base_python, "-I", "-B", "-m", "venv", "--copies", venv],
+            check=True,
+            env={"PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        locked_copy = provenance.install_root / ".tobkiri-requirements.lock"
+        copied = subprocess.run(
+            ["/usr/bin/sudo", "/usr/bin/tee", locked_copy],
+            input=provenance.requirements_bytes,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        if copied.stderr:
+            raise ToolIdentityError("could not stage hash-locked requirements")
+        subprocess.run(
+            ["/usr/bin/sudo", "/usr/sbin/chown", "root:wheel", locked_copy],
+            check=True,
+        )
+        subprocess.run(["/usr/bin/sudo", "/bin/chmod", "0444", locked_copy], check=True)
+        executable = provenance.install_root / provenance.executable
+        subprocess.run(
+            [
+                "/usr/bin/sudo",
+                executable,
+                "-I",
+                "-B",
+                "-m",
+                "pip",
+                "install",
+                "--require-hashes",
+                "--only-binary=:all:",
+                "--no-cache-dir",
+                "--no-compile",
+                "-r",
+                locked_copy,
+            ],
+            check=True,
+            env={"PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "/usr/sbin/chown",
+                "-R",
+                "root:wheel",
+                provenance.install_root,
+            ],
+            check=True,
+        )
+        subprocess.run(
+            ["/usr/bin/sudo", "/bin/chmod", "-RN", provenance.install_root], check=True
+        )
+        subprocess.run(
+            ["/usr/bin/sudo", "/bin/chmod", "-R", "a-w", provenance.install_root],
+            check=True,
+        )
+        code_identity = _require_code_authority(
+            executable,
+            identifier=provenance.code_identifier,
+            team_identifier=provenance.installer_team_id,
+            label="packaging Python",
+        )
+        installation = MacOSPythonInstallation(provenance.install_root, executable, "")
+        inventory_sha256 = _write_inventory(installation, provenance, code_identity)
+        installation = MacOSPythonInstallation(
+            provenance.install_root, executable, inventory_sha256
+        )
+        verify_macos_installation(installation, provenance)
+        smoke_macos_installation(installation)
+        _remove_root_tree(staging)
+        created = False
+        return installation
+    except Exception as primary:
+        cleanup_errors: list[str] = []
+        if installed:
+            try:
+                _remove_root_tree(provenance.install_root)
+            except Exception as cleanup:
+                cleanup_errors.append(str(cleanup))
+        if created:
+            try:
+                _remove_root_tree(staging)
+            except Exception as cleanup:
+                cleanup_errors.append(str(cleanup))
+        if cleanup_errors:
+            raise ToolIdentityError(
+                f"packaging Python construction failed: {primary}; cleanup failed: "
+                + "; ".join(cleanup_errors)
+            ) from primary
+        raise
+
+
+def cleanup_macos_installation(
+    root: Path, provenance: InstallerProvenance, inventory_sha256: str
+) -> None:
+    """Remove only a reverified formal installation."""
+    _remove_verified_installation(root, provenance, inventory_sha256)
+
+
+def _resolve_git(value: str | None) -> Path:
     if value:
         return Path(value)
-    if label == "python":
-        return Path(sys.executable)
+    if sys.platform == "darwin":
+        developer = subprocess.run(
+            ["/usr/bin/xcode-select", "-p"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        return Path(developer) / "usr/bin/git"
     discovered = shutil.which("git")
     if discovered is None:
-        raise ToolIdentityError("git is unavailable for explicit identity binding")
+        raise ToolIdentityError("git is unavailable for explicit binding")
     return Path(discovered)
 
 
+def bind_git(path: str | None = None) -> ToolIdentity:
+    git = _canonical_absolute(_resolve_git(path), "Git")
+    if sys.platform == "darwin":
+        _root_owned_path(git, "Git")
+        _require_code_authority(
+            git,
+            identifier=APPLE_GIT_IDENTIFIER,
+            team_identifier=APPLE_TEAM_ID,
+            label="Git",
+        )
+    return _regular_executable(git, "Git")
+
+
 def bind_toolchain(
-    *,
-    python: str | None = None,
-    git: str | None = None,
+    *, python: str | None = None, git: str | None = None
 ) -> dict[str, ToolIdentity]:
-    """Return verified Python and Git identities for formal packaging input."""
+    """Generic explicit binder retained for non-macOS tests and callers."""
+    python_path = Path(python) if python else Path(sys.executable)
+    git_path = Path(git) if git else _resolve_git(None)
     return {
-        "python": _regular_executable(_resolve_requested(python, "python"), "Python"),
-        "git": _regular_executable(_resolve_requested(git, "git"), "Git"),
+        "python": _regular_executable(python_path, "Python"),
+        "git": _regular_executable(git_path, "Git"),
     }
 
 
-def environment_lines(identities: dict[str, ToolIdentity]) -> str:
-    """Serialize identities as shell-safe GitHub environment assignments."""
-    expected = {"python", "git"}
-    if set(identities) != expected:
+def environment_lines(
+    identities: dict[str, ToolIdentity],
+    installation: MacOSPythonInstallation | None = None,
+) -> str:
+    if set(identities) != {"python", "git"}:
         raise ToolIdentityError("toolchain identity set is incomplete")
-    return (
+    output = (
         f"TOBKIRI_PACKAGING_PYTHON={identities['python'].path}\n"
         f"TOBKIRI_PACKAGING_PYTHON_SHA256={identities['python'].sha256}\n"
         f"TOBKIRI_PACKAGING_GIT={identities['git'].path}\n"
         f"TOBKIRI_PACKAGING_GIT_SHA256={identities['git'].sha256}\n"
     )
+    if installation is not None:
+        output += (
+            f"TOBKIRI_PACKAGING_PYTHON_SNAPSHOT={installation.root}\n"
+            f"TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256={installation.inventory_sha256}\n"
+        )
+    return output
 
 
 def write_environment_file(path: Path, payload: str) -> None:
-    """Atomically publish the formal toolchain environment file."""
     if path.exists() or path.is_symlink():
         metadata = path.lstat()
         if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
-            raise ToolIdentityError(f"toolchain environment output is unsafe: {path}")
+            raise ToolIdentityError(f"unsafe environment output: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
     try:
@@ -142,19 +915,66 @@ def write_environment_file(path: Path, payload: str) -> None:
 
 
 def main() -> int:
-    """Bind and emit the exact Python/Git identities."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--python")
+    parser.add_argument("--repository-root", type=Path, default=Path.cwd())
+    parser.add_argument("--provenance", type=Path)
     parser.add_argument("--git")
     parser.add_argument("--env-output", type=Path)
+    parser.add_argument("--prepare-macos-installation", action="store_true")
+    parser.add_argument("--verify-macos-installation", type=Path)
+    parser.add_argument("--inventory-sha256")
+    parser.add_argument("--cleanup-macos-installation", type=Path)
     args = parser.parse_args()
+    installation: MacOSPythonInstallation | None = None
+    provenance: InstallerProvenance | None = None
     try:
-        payload = environment_lines(bind_toolchain(python=args.python, git=args.git))
+        if args.provenance is None:
+            raise ToolIdentityError("--provenance is required")
+        repository_root = args.repository_root.resolve(strict=True)
+        provenance = load_provenance(args.provenance, repository_root)
+        if args.cleanup_macos_installation is not None:
+            if not _valid_sha256(args.inventory_sha256):
+                raise ToolIdentityError("--inventory-sha256 is required")
+            cleanup_macos_installation(
+                args.cleanup_macos_installation,
+                provenance,
+                args.inventory_sha256,
+            )
+            return 0
+        if args.verify_macos_installation is not None:
+            if not _valid_sha256(args.inventory_sha256):
+                raise ToolIdentityError("--inventory-sha256 is required")
+            executable = args.verify_macos_installation / provenance.executable
+            installation = MacOSPythonInstallation(
+                args.verify_macos_installation, executable, args.inventory_sha256
+            )
+            verify_macos_installation(installation, provenance)
+            smoke_macos_installation(installation)
+            return 0
+        if sys.platform != "darwin" or not args.prepare_macos_installation:
+            raise ToolIdentityError(
+                "formal macOS binding requires --prepare-macos-installation"
+            )
+        installation = prepare_macos_installation(provenance, repository_root)
+        identities = {
+            "python": verify_macos_installation(installation, provenance),
+            "git": bind_git(args.git),
+        }
+        payload = environment_lines(identities, installation)
         if args.env_output is None:
             sys.stdout.write(payload)
         else:
             write_environment_file(args.env_output, payload)
-    except ToolIdentityError as error:
+    except (OSError, subprocess.SubprocessError, ToolIdentityError) as error:
+        if installation is not None and provenance is not None:
+            try:
+                cleanup_macos_installation(
+                    installation.root,
+                    provenance,
+                    installation.inventory_sha256,
+                )
+            except Exception as cleanup:
+                parser.error(f"{error}; cleanup failed: {cleanup}")
         parser.error(str(error))
     return 0
 

@@ -31,6 +31,10 @@ pub const PYTHON_PATH_ENV: &str = "TOBKIRI_PACKAGING_PYTHON";
 pub const PYTHON_SHA256_ENV: &str = "TOBKIRI_PACKAGING_PYTHON_SHA256";
 pub const GIT_PATH_ENV: &str = "TOBKIRI_PACKAGING_GIT";
 pub const GIT_SHA256_ENV: &str = "TOBKIRI_PACKAGING_GIT_SHA256";
+#[cfg(target_os = "macos")]
+pub const PYTHON_SNAPSHOT_ENV: &str = "TOBKIRI_PACKAGING_PYTHON_SNAPSHOT";
+#[cfg(target_os = "macos")]
+pub const PYTHON_INVENTORY_SHA256_ENV: &str = "TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256";
 
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message.into())
@@ -169,7 +173,36 @@ pub struct VerifiedTool {
     owns_execution_copy: bool,
     #[cfg(target_os = "macos")]
     macos_cdhash: Vec<u8>,
+    #[cfg(target_os = "macos")]
+    python_installation: Option<MacOSPythonInstallationLease>,
     lock: File,
+}
+
+#[cfg(target_os = "macos")]
+struct MacOSPythonInstallationLease {
+    root: PathBuf,
+    identity: (u64, u64, u64, u64, u64),
+    inventory: PathBuf,
+    inventory_sha256: String,
+    _root_handle: File,
+}
+
+#[cfg(target_os = "macos")]
+impl MacOSPythonInstallationLease {
+    fn verify_unchanged(&self) -> io::Result<()> {
+        let current = fs::symlink_metadata(&self.root)?;
+        if current.file_type().is_symlink()
+            || !current.is_dir()
+            || file_identity(&current) != self.identity
+        {
+            return Err(invalid("macOS Python installation root identity changed"));
+        }
+        let actual = format!("{:x}", Sha256::digest(fs::read(&self.inventory)?));
+        if actual != self.inventory_sha256 {
+            return Err(invalid("macOS Python installation inventory changed"));
+        }
+        Ok(())
+    }
 }
 
 impl VerifiedTool {
@@ -197,8 +230,13 @@ impl VerifiedTool {
                 return Err(invalid("sealed packaging tool copy was replaced"));
             }
             #[cfg(target_os = "macos")]
-            if macos_code_identity(&self.execution_path)? != self.macos_cdhash {
-                return Err(invalid("macOS packaging tool CDHash changed before spawn"));
+            {
+                if let Some(installation) = &self.python_installation {
+                    installation.verify_unchanged()?;
+                }
+                if macos_code_identity(&self.execution_path)? != self.macos_cdhash {
+                    return Err(invalid("macOS packaging tool CDHash changed before spawn"));
+                }
             }
             return Ok(VerifiedCommand::new(self));
         }
@@ -1328,6 +1366,74 @@ fn macos_code_identity(path: &Path) -> io::Result<Vec<u8>> {
     Ok(digest)
 }
 
+#[cfg(target_os = "macos")]
+fn macos_python_installation_lease(path: &Path) -> io::Result<MacOSPythonInstallationLease> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let raw_root = env::var_os(PYTHON_SNAPSHOT_ENV)
+        .ok_or_else(|| invalid(format!("{PYTHON_SNAPSHOT_ENV} is required for Python")))?;
+    let root = PathBuf::from(raw_root);
+    if !root.is_absolute() || root.canonicalize()? != root {
+        return Err(invalid("macOS Python installation root is not canonical"));
+    }
+    let expected_root = Path::new("/Library/Frameworks/Python.framework/Versions/3.13");
+    if root != expected_root {
+        return Err(invalid(
+            "macOS Python installation root is not the fixed authority",
+        ));
+    }
+    for component in std::iter::once(root.as_path()).chain(root.ancestors().skip(1)) {
+        let metadata = fs::symlink_metadata(component)?;
+        if metadata.file_type().is_symlink()
+            || !metadata.is_dir()
+            || metadata.uid() != 0
+            || metadata.permissions().mode() & 0o022 != 0
+        {
+            return Err(invalid(format!(
+                "macOS Python installation has writable/non-root ancestor: {}",
+                component.display()
+            )));
+        }
+    }
+    let before = fs::symlink_metadata(&root)?;
+    if !path.starts_with(&root) || path.canonicalize()? != path {
+        return Err(invalid("macOS Python executable escapes its installation"));
+    }
+    let inventory = root.join(".tobkiri-packaging-python.v1.json");
+    let inventory_metadata = fs::symlink_metadata(&inventory)?;
+    if inventory_metadata.file_type().is_symlink()
+        || !inventory_metadata.is_file()
+        || inventory_metadata.uid() != 0
+        || inventory_metadata.permissions().mode() & 0o022 != 0
+        || inventory_metadata.nlink() != 1
+    {
+        return Err(invalid("macOS Python inventory is not immutable"));
+    }
+    let inventory_sha256 = env::var(PYTHON_INVENTORY_SHA256_ENV).map_err(|_| {
+        invalid(format!(
+            "{PYTHON_INVENTORY_SHA256_ENV} is required for Python"
+        ))
+    })?;
+    if !valid_raw_sha256(&inventory_sha256) {
+        return Err(invalid(format!(
+            "{PYTHON_INVENTORY_SHA256_ENV} must be lowercase raw SHA-256"
+        )));
+    }
+    let root_handle = File::open(&root)?;
+    if file_identity(&root_handle.metadata()?) != file_identity(&before) {
+        return Err(invalid("macOS Python installation changed while leased"));
+    }
+    let lease = MacOSPythonInstallationLease {
+        root,
+        identity: file_identity(&before),
+        inventory,
+        inventory_sha256,
+        _root_handle: root_handle,
+    };
+    lease.verify_unchanged()?;
+    Ok(lease)
+}
+
 #[cfg(windows)]
 fn locked_windows_executable(path: &Path, expected: &str) -> io::Result<File> {
     use std::mem::{size_of, MaybeUninit};
@@ -1478,9 +1584,28 @@ fn verify_tool_binding_guard(kind: &str, path: &Path, expected: &str) -> io::Res
     let (execution_path, execution_owner, execution_metadata, owns_execution_copy) =
         sealed_executable_copy(&mut file, path, expected)?;
     #[cfg(target_os = "macos")]
-    let (execution_path, execution_owner, execution_metadata, owns_execution_copy, macos_cdhash) = {
+    let (
+        execution_path,
+        execution_owner,
+        execution_metadata,
+        owns_execution_copy,
+        macos_cdhash,
+        python_installation,
+    ) = {
         let cdhash = macos_code_identity(path)?;
-        (path.to_path_buf(), None, metadata.clone(), false, cdhash)
+        let installation = if kind == "python" {
+            Some(macos_python_installation_lease(path)?)
+        } else {
+            None
+        };
+        (
+            path.to_path_buf(),
+            None,
+            metadata.clone(),
+            false,
+            cdhash,
+            installation,
+        )
     };
     #[cfg(windows)]
     let locked_file = {
@@ -1503,6 +1628,8 @@ fn verify_tool_binding_guard(kind: &str, path: &Path, expected: &str) -> io::Res
         owns_execution_copy,
         #[cfg(target_os = "macos")]
         macos_cdhash,
+        #[cfg(target_os = "macos")]
+        python_installation,
         lock: {
             #[cfg(all(unix, not(target_os = "macos")))]
             {

@@ -6,6 +6,9 @@ on:
     branches: [master, soon]
     paths:
       - ".github/scripts/install_locked_python_test_dependencies.py"
+      - ".github/scripts/packaging_toolchain_identity.py"
+      - ".github/scripts/update_packaging_python_provenance.py"
+      - ".github/toolchains/packaging-python-macos.v1.json"
       - "tobkiri_runtime/scripts/packaging_cleanup.py"
       - ".github/scripts/prepare_tauri_resources.py"
       - ".github/scripts/build_sealed_python_environment.py"
@@ -23,6 +26,9 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - ".github/scripts/install_locked_python_test_dependencies.py"
+      - ".github/scripts/packaging_toolchain_identity.py"
+      - ".github/scripts/update_packaging_python_provenance.py"
+      - ".github/toolchains/packaging-python-macos.v1.json"
       - "tobkiri_runtime/scripts/packaging_cleanup.py"
       - ".github/scripts/prepare_tauri_resources.py"
       - ".github/scripts/build_sealed_python_environment.py"
@@ -90,40 +96,46 @@ jobs:
             tobkiri_runtime/requirements.txt
             tobkiri_runtime/requirements-dev.txt
 
+      - name: Check reviewed packaging Python provenance
+        run: |
+          /usr/bin/python3 -B .github/scripts/update_packaging_python_provenance.py \
+            --version 3.13.13 \
+            --requirements tobkiri_runtime/requirements.txt \
+            --output .github/toolchains/packaging-python-macos.v1.json \
+            --check
+
       - name: Bind verified packaging tool identities
-        shell: python
+        shell: bash
         env:
           TOOLCHAIN_ENV: ${{ runner.temp }}/tobkiri-packaging-toolchain.env
         run: |
-          import os
-          import subprocess
-          import sys
-          from pathlib import Path
+          set -euo pipefail
+          /usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py \
+            --repository-root "$GITHUB_WORKSPACE" \
+            --provenance .github/toolchains/packaging-python-macos.v1.json \
+            --prepare-macos-installation \
+            --env-output "$TOOLCHAIN_ENV"
+          for marker in \
+            TOBKIRI_PACKAGING_PYTHON \
+            TOBKIRI_PACKAGING_PYTHON_SHA256 \
+            TOBKIRI_PACKAGING_GIT \
+            TOBKIRI_PACKAGING_GIT_SHA256 \
+            TOBKIRI_PACKAGING_PYTHON_SNAPSHOT \
+            TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256
+          do
+            /usr/bin/grep -q "^${marker}=" "$TOOLCHAIN_ENV"
+          done
+          /bin/cat "$TOOLCHAIN_ENV" >> "$GITHUB_ENV"
 
-          output = Path(os.environ["TOOLCHAIN_ENV"])
-          subprocess.run(
-              [
-                  sys.executable,
-                  "-B",
-                  ".github/scripts/packaging_toolchain_identity.py",
-                  "--python",
-                  str(Path(sys.executable).resolve()),
-                  "--env-output",
-                  str(output),
-              ],
-              check=True,
-          )
-          payload = output.read_text(encoding="utf-8")
-          required = (
-              "TOBKIRI_PACKAGING_PYTHON=",
-              "TOBKIRI_PACKAGING_PYTHON_SHA256=",
-              "TOBKIRI_PACKAGING_GIT=",
-              "TOBKIRI_PACKAGING_GIT_SHA256=",
-          )
-          if any(marker not in payload for marker in required):
-              raise SystemExit("formal packaging tool identity output is incomplete")
-          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as env_file:
-              env_file.write(payload)
+      - name: Verify closed packaging Python installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py \
+            --repository-root "$GITHUB_WORKSPACE" \
+            --provenance .github/toolchains/packaging-python-macos.v1.json \
+            --verify-macos-installation "$TOBKIRI_PACKAGING_PYTHON_SNAPSHOT" \
+            --inventory-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256"
 
       - name: Resolve checked-out source revision
         id: checked_out_source
@@ -333,3 +345,12 @@ jobs:
             ${{ runner.temp }}/tobkiri-macos-dmg-${{ matrix.target }}.log
             ${{ runner.temp }}/tobkiri-macos-dmg-${{ matrix.target }}-diagnostic.txt
           if-no-files-found: warn
+
+      - name: Clean packaging Python installation
+        if: always() && env.TOBKIRI_PACKAGING_PYTHON_SNAPSHOT != ''
+        run: |
+          /usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py \
+            --repository-root "$GITHUB_WORKSPACE" \
+            --provenance .github/toolchains/packaging-python-macos.v1.json \
+            --cleanup-macos-installation "$TOBKIRI_PACKAGING_PYTHON_SNAPSHOT" \
+            --inventory-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256"
