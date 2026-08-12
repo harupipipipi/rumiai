@@ -171,15 +171,19 @@ jobs:
           git = os.environ["TOBKIRI_PACKAGING_GIT"]
           git_environment = {
               "GIT_ATTR_NOSYSTEM": "1",
+              "GIT_CEILING_DIRECTORIES": os.environ["GITHUB_WORKSPACE"],
+              "GIT_CONFIG": os.devnull,
               "GIT_CONFIG_GLOBAL": os.devnull,
               "GIT_CONFIG_SYSTEM": os.devnull,
               "GIT_CONFIG_NOSYSTEM": "1",
               "GIT_EXEC_PATH": "/private/var/empty",
               "GIT_OPTIONAL_LOCKS": "0",
+              "GIT_PAGER": "cat",
               "GIT_TERMINAL_PROMPT": "0",
               "HOME": "/private/var/empty",
               "LC_ALL": "C",
               "PATH": "/usr/bin:/bin",
+              "PAGER": "cat",
               "XDG_CONFIG_HOME": "/private/var/empty",
           }
           git_arguments = [
@@ -191,6 +195,13 @@ jobs:
               "-c", "core.hooksPath=/dev/null",
               "-c", "core.attributesFile=/dev/null",
               "-c", "diff.external=",
+              "-c", "filter.review.clean=",
+              "-c", "filter.review.smudge=",
+              "-c", "filter.review.process=",
+              "-c", "filter.review.required=false",
+              "-c", "core.sshCommand=false",
+              "-c", "core.pager=cat",
+              "-c", "pager.show=cat",
           ]
           source_revision = subprocess.check_output(
               [*git_arguments, "rev-parse", "--verify", "HEAD"],

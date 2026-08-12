@@ -226,13 +226,30 @@ impl VerifiedTool {
                 "core.attributesFile=/dev/null",
                 "-c",
                 "diff.external=",
+                "-c",
+                "filter.review.clean=",
+                "-c",
+                "filter.review.smudge=",
+                "-c",
+                "filter.review.process=",
+                "-c",
+                "filter.review.required=false",
+                "-c",
+                "core.sshCommand=false",
+                "-c",
+                "core.pager=cat",
+                "-c",
+                "pager.show=cat",
             ])
             .env("GIT_ATTR_NOSYSTEM", "1")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_OPTIONAL_LOCKS", "0")
+            .env("GIT_PAGER", "cat")
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("LC_ALL", "C")
             .env("PATH", "/usr/bin:/bin")
+            .env("PAGER", "cat")
+            .env("GIT_CONFIG", "/dev/null")
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")
             .env("GIT_EXEC_PATH", "/private/var/empty")
@@ -423,6 +440,13 @@ impl<'a> VerifiedCommand<'a> {
 
     pub fn current_dir<P: AsRef<Path>>(&mut self, path: P) -> io::Result<&mut Self> {
         self.current_dir = Some(path.as_ref().to_owned());
+        #[cfg(target_os = "macos")]
+        if self.tool.kind == "git" {
+            self.environment.insert(
+                std::ffi::OsString::from("GIT_CEILING_DIRECTORIES"),
+                path.as_ref().as_os_str().to_owned(),
+            );
+        }
         #[cfg(unix)]
         {
             use std::ffi::CString;

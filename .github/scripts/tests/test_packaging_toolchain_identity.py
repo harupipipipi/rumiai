@@ -235,6 +235,74 @@ def test_real_system_git_smoke_ignores_helper_and_config_injection(
     assert not marker.exists()
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS fixed Git authority")
+def test_formal_git_ignores_repository_config_and_attribute_filter(
+    tmp_path: Path,
+) -> None:
+    """Production Git reads ignore local/worktree config and external filters."""
+    git = _MODULE.bind_git()
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    subprocess.run([git.path, "init", "-q", repository], check=True)
+    subprocess.run(
+        [git.path, "-C", repository, "config", "user.email", "fixture@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        [git.path, "-C", repository, "config", "user.name", "Fixture"], check=True
+    )
+    authority = repository / "authority.txt"
+    tracked = repository / "tracked.txt"
+    authority.write_bytes(b"trusted authority\n")
+    tracked.write_bytes(b"AAAA\n")
+    subprocess.run([git.path, "-C", repository, "add", "."], check=True)
+    subprocess.run([git.path, "-C", repository, "commit", "-qm", "fixture"], check=True)
+    commit = subprocess.check_output(
+        [git.path, "-C", repository, "rev-parse", "HEAD"], text=True
+    ).strip()
+
+    marker = tmp_path / "external-marker"
+    helper = tmp_path / "external-helper"
+    helper.write_text(
+        f"#!/bin/sh\n/usr/bin/touch '{marker}'\n/bin/cat\n", encoding="utf-8"
+    )
+    helper.chmod(0o755)
+    malicious_include = tmp_path / "included.config"
+    malicious_include.write_text(f"[alias]\n\treview = !'{helper}'\n", encoding="utf-8")
+    local_values = {
+        "filter.review.clean": os.fspath(helper),
+        "filter.review.required": "true",
+        "alias.review": f"!{helper}",
+        "include.path": os.fspath(malicious_include),
+        "core.sshCommand": os.fspath(helper),
+        "core.pager": os.fspath(helper),
+        "pager.show": os.fspath(helper),
+        "extensions.worktreeConfig": "true",
+    }
+    for key, value in local_values.items():
+        subprocess.run(
+            [git.path, "-C", repository, "config", "--local", key, value],
+            check=True,
+        )
+    (repository / ".git" / "config.worktree").write_text(
+        f'[filter "review"]\n\tclean = {helper}\n', encoding="utf-8"
+    )
+    info_attributes = repository / ".git" / "info" / "attributes"
+    info_attributes.write_text("*.txt filter=review\n", encoding="utf-8")
+    tracked.write_bytes(b"BBBB\n")
+
+    with pytest.raises(ToolIdentityError, match="repository is not clean"):
+        _MODULE.smoke_git_authority(
+            git, repository, commit, _MODULE.PurePosixPath("authority.txt")
+        )
+    origins = _MODULE._git_output(
+        git, repository, "config", "--show-origin", "--list"
+    ).decode("utf-8")
+    assert ".git/config" not in origins
+    assert "config.worktree" not in origins
+    assert not marker.exists()
+
+
 def test_git_identity_swap_fails_before_process_creation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -864,6 +932,27 @@ def test_workflows_smoke_fixed_isolated_git_authority(workflow_name: str) -> Non
     assert '"rev-parse", "--verify", "HEAD^{commit}"' in smoke
     assert '"show", f"{commit}:{committed_path}"' in smoke
     assert '"status", "--porcelain=v1", "--untracked-files=all"' in smoke
+
+
+def test_formal_git_environment_contract_is_identical_across_consumers() -> None:
+    """Python, Rust, and both workflows disable repository config explicitly."""
+    python_source = _SCRIPT.read_text(encoding="utf-8")
+    rust_source = (
+        _SCRIPT.parents[2]
+        / "tobkiri_launcher"
+        / "src-tauri"
+        / "src"
+        / "packaging_toolchain.rs"
+    ).read_text(encoding="utf-8")
+    assert '"GIT_CONFIG": os.devnull' in python_source
+    assert '.env("GIT_CONFIG", "/dev/null")' in rust_source
+    assert '"GIT_CEILING_DIRECTORIES": os.fspath(repository_root)' in python_source
+    assert 'OsString::from("GIT_CEILING_DIRECTORIES")' in rust_source
+    for workflow_name in ("release.yml", "desktop-installers.yml"):
+        workflow = _SCRIPT.parents[1] / "workflows" / workflow_name
+        payload = workflow.read_text(encoding="utf-8")
+        assert '"GIT_CONFIG": os.devnull' in payload
+        assert '"GIT_CEILING_DIRECTORIES": os.environ["GITHUB_WORKSPACE"]' in payload
 
 
 @pytest.mark.parametrize("workflow_name", ["release.yml", "desktop-installers.yml"])
