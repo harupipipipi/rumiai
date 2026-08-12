@@ -185,11 +185,21 @@ struct MacOSPythonInstallationLease {
     inventory: PathBuf,
     inventory_sha256: String,
     _root_handle: File,
+    _authority_handles: Vec<File>,
+    _inventory_handle: File,
 }
 
 #[cfg(target_os = "macos")]
 impl MacOSPythonInstallationLease {
     fn verify_unchanged(&self) -> io::Result<()> {
+        for handle in &self._authority_handles {
+            if macos_fd_has_nontrivial_acl(handle)? {
+                return Err(invalid("macOS Python authority ACL changed"));
+            }
+        }
+        if macos_fd_has_nontrivial_acl(&self._inventory_handle)? {
+            return Err(invalid("macOS Python inventory ACL changed"));
+        }
         let current = fs::symlink_metadata(&self.root)?;
         if current.file_type().is_symlink()
             || !current.is_dir()
@@ -1451,11 +1461,96 @@ fn current_process_groups() -> io::Result<Vec<u32>> {
     if count > 0 && unsafe { libc::getgroups(count, raw.as_mut_ptr()) } < 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok(raw.into_iter().map(|group| group as u32).collect())
+    let mut groups = raw
+        .into_iter()
+        .map(|group| group as u32)
+        .collect::<Vec<_>>();
+    let effective = unsafe { libc::getegid() } as u32;
+    if !groups.contains(&effective) {
+        groups.push(effective);
+    }
+    Ok(groups)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_fd_has_nontrivial_acl(file: &File) -> io::Result<bool> {
+    use std::os::fd::AsRawFd;
+
+    unsafe extern "C" {
+        fn acl_get_fd_np(fd: libc::c_int, acl_type: libc::c_int) -> *mut std::ffi::c_void;
+        fn acl_free(value: *mut std::ffi::c_void) -> libc::c_int;
+    }
+    unsafe { *libc::__error() = 0 };
+    let acl = unsafe { acl_get_fd_np(file.as_raw_fd(), 0x0000_0100) };
+    if acl.is_null() {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ENOENT) {
+            return Ok(false);
+        }
+        return Err(error);
+    }
+    let freed = unsafe { acl_free(acl) };
+    if freed != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(true)
+}
+
+#[cfg(target_os = "macos")]
+fn open_macos_authority_chain(
+    root: &Path,
+    caller: u32,
+    caller_groups: &[u32],
+) -> io::Result<Vec<File>> {
+    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::path::Component;
+
+    let mut handles = vec![File::open("/")?];
+    for component in root.components() {
+        let Component::Normal(name) = component else {
+            continue;
+        };
+        let name = CString::new(name.as_bytes())
+            .map_err(|_| invalid("macOS Python authority component contains NUL"))?;
+        let descriptor = unsafe {
+            libc::openat(
+                handles.last().expect("root authority handle").as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+            )
+        };
+        if descriptor < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        handles.push(unsafe { File::from_raw_fd(descriptor) });
+    }
+    for handle in &handles {
+        let metadata = handle.metadata()?;
+        if !metadata.is_dir()
+            || metadata.uid() != 0
+            || mode_writable_by_caller(
+                metadata.uid(),
+                metadata.gid(),
+                metadata.permissions().mode(),
+                caller,
+                caller_groups,
+            )
+            || macos_fd_has_nontrivial_acl(handle)?
+        {
+            return Err(invalid(
+                "macOS Python authority chain is writable, non-root, or has an ACL",
+            ));
+        }
+    }
+    Ok(handles)
 }
 
 #[cfg(target_os = "macos")]
 fn macos_python_installation_lease(path: &Path) -> io::Result<MacOSPythonInstallationLease> {
+    use std::os::unix::fs::OpenOptionsExt;
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     let raw_root = env::var_os(PYTHON_SNAPSHOT_ENV)
@@ -1470,38 +1565,29 @@ fn macos_python_installation_lease(path: &Path) -> io::Result<MacOSPythonInstall
             "macOS Python installation root is not the fixed authority",
         ));
     }
-    let caller = unsafe { libc::getuid() } as u32;
+    let caller = unsafe { libc::geteuid() } as u32;
     let caller_groups = current_process_groups()?;
-    for component in std::iter::once(root.as_path()).chain(root.ancestors().skip(1)) {
-        let metadata = fs::symlink_metadata(component)?;
-        if metadata.file_type().is_symlink()
-            || !metadata.is_dir()
-            || metadata.uid() != 0
-            || mode_writable_by_caller(
-                metadata.uid(),
-                metadata.gid(),
-                metadata.permissions().mode(),
-                caller,
-                &caller_groups,
-            )
-        {
-            return Err(invalid(format!(
-                "macOS Python installation has writable/non-root ancestor: {}",
-                component.display()
-            )));
-        }
-    }
-    let before = fs::symlink_metadata(&root)?;
+    let authority_handles = open_macos_authority_chain(&root, caller, &caller_groups)?;
+    let root_handle = authority_handles
+        .last()
+        .ok_or_else(|| invalid("macOS Python authority chain is empty"))?
+        .try_clone()?;
+    let before = root_handle.metadata()?;
     if !path.starts_with(&root) || path.canonicalize()? != path {
         return Err(invalid("macOS Python executable escapes its installation"));
     }
     let inventory = root.join(".tobkiri-packaging-python.v1.json");
-    let inventory_metadata = fs::symlink_metadata(&inventory)?;
+    let inventory_handle = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(&inventory)?;
+    let inventory_metadata = inventory_handle.metadata()?;
     if inventory_metadata.file_type().is_symlink()
         || !inventory_metadata.is_file()
         || inventory_metadata.uid() != 0
         || inventory_metadata.permissions().mode() & 0o022 != 0
         || inventory_metadata.nlink() != 1
+        || macos_fd_has_nontrivial_acl(&inventory_handle)?
     {
         return Err(invalid("macOS Python inventory is not immutable"));
     }
@@ -1515,8 +1601,7 @@ fn macos_python_installation_lease(path: &Path) -> io::Result<MacOSPythonInstall
             "{PYTHON_INVENTORY_SHA256_ENV} must be lowercase raw SHA-256"
         )));
     }
-    let root_handle = File::open(&root)?;
-    if file_identity(&root_handle.metadata()?) != file_identity(&before) {
+    if file_identity(&fs::symlink_metadata(&root)?) != file_identity(&before) {
         return Err(invalid("macOS Python installation changed while leased"));
     }
     let lease = MacOSPythonInstallationLease {
@@ -1525,6 +1610,8 @@ fn macos_python_installation_lease(path: &Path) -> io::Result<MacOSPythonInstall
         inventory,
         inventory_sha256,
         _root_handle: root_handle,
+        _authority_handles: authority_handles,
+        _inventory_handle: inventory_handle,
     };
     lease.verify_unchanged()?;
     Ok(lease)

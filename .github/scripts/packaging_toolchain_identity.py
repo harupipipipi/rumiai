@@ -13,6 +13,8 @@ executed.
 from __future__ import annotations
 
 import argparse
+import ctypes
+import errno
 import hashlib
 import json
 import os
@@ -302,28 +304,71 @@ def _regular_executable(path: Path, label: str) -> ToolIdentity:
 
 def _caller_can_write(metadata: os.stat_result) -> bool:
     mode = stat.S_IMODE(metadata.st_mode)
-    if metadata.st_uid == os.getuid():
+    if metadata.st_uid == os.geteuid():
         return bool(mode & stat.S_IWUSR)
-    if metadata.st_gid in os.getgroups():
+    groups = {os.getegid(), *os.getgroups()}
+    if metadata.st_gid in groups:
         return bool(mode & stat.S_IWGRP)
     return bool(mode & stat.S_IWOTH)
 
 
+def _fd_has_nontrivial_acl(descriptor: int) -> bool:
+    """Fail closed on any macOS extended ACL attached to the opened inode."""
+    if sys.platform != "darwin":
+        return False
+    library = ctypes.CDLL(None, use_errno=True)
+    library.acl_get_fd_np.argtypes = [ctypes.c_int, ctypes.c_int]
+    library.acl_get_fd_np.restype = ctypes.c_void_p
+    library.acl_free.argtypes = [ctypes.c_void_p]
+    library.acl_free.restype = ctypes.c_int
+    ctypes.set_errno(0)
+    acl = library.acl_get_fd_np(descriptor, 0x00000100)
+    if not acl:
+        error = ctypes.get_errno()
+        if error == errno.ENOENT:
+            return False
+        raise ToolIdentityError(f"could not inspect macOS ACL: errno={error}")
+    if library.acl_free(acl) != 0:
+        raise ToolIdentityError("could not release macOS ACL")
+    return True
+
+
+def _require_opened_authority(
+    descriptor: int, component: Path, label: str, *, sticky: Path | None
+) -> None:
+    metadata = os.fstat(descriptor)
+    sticky_root = (
+        sticky is not None
+        and component == sticky
+        and metadata.st_uid == 0
+        and stat.S_ISDIR(metadata.st_mode)
+        and bool(metadata.st_mode & stat.S_ISVTX)
+    )
+    if metadata.st_uid != 0:
+        raise ToolIdentityError(f"{label} contains non-root authority: {component}")
+    if _fd_has_nontrivial_acl(descriptor):
+        raise ToolIdentityError(f"{label} contains nontrivial ACL: {component}")
+    if _caller_can_write(metadata) and not sticky_root:
+        raise ToolIdentityError(f"{label} contains writable authority: {component}")
+
+
 def _root_owned_path(path: Path, label: str, *, sticky: Path | None = None) -> None:
     path = _canonical_absolute(path, label)
-    for component in (path, *path.parents):
-        metadata = component.lstat()
-        sticky_root = (
-            sticky is not None
-            and component == sticky
-            and metadata.st_uid == 0
-            and stat.S_ISDIR(metadata.st_mode)
-            and bool(metadata.st_mode & stat.S_ISVTX)
-        )
-        if component.is_symlink() or metadata.st_uid != 0:
-            raise ToolIdentityError(f"{label} contains non-root authority: {component}")
-        if _caller_can_write(metadata) and not sticky_root:
-            raise ToolIdentityError(f"{label} contains writable authority: {component}")
+    descriptor = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    component = Path("/")
+    try:
+        _require_opened_authority(descriptor, component, label, sticky=sticky)
+        for index, part in enumerate(path.parts[1:]):
+            flags = os.O_RDONLY | os.O_NOFOLLOW
+            if index < len(path.parts[1:]) - 1:
+                flags |= os.O_DIRECTORY
+            child = os.open(part, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+            component /= part
+            _require_opened_authority(descriptor, component, label, sticky=sticky)
+    finally:
+        os.close(descriptor)
 
 
 def _codesign_identity(path: Path) -> CodeIdentity:
@@ -642,7 +687,7 @@ def load_sealed_authority(token: str) -> tuple[InstallerProvenance, Path]:
 
 
 ROOT_REMOVE_CODE = r"""
-import os, stat, sys
+import ctypes, errno, os, stat, sys
 target = os.path.normpath(sys.argv[1])
 owner = int(sys.argv[2])
 caller_uid = int(sys.argv[3]); caller_groups = {int(value) for value in sys.argv[4].split(',') if value}
@@ -653,22 +698,35 @@ def caller_can_write(info):
     if info.st_uid == caller_uid: return bool(mode & 0o200)
     if info.st_gid in caller_groups: return bool(mode & 0o020)
     return bool(mode & 0o002)
+def nontrivial_acl(fd):
+    if sys.platform != 'darwin': return False
+    lib=ctypes.CDLL(None,use_errno=True); lib.acl_get_fd_np.argtypes=[ctypes.c_int,ctypes.c_int]; lib.acl_get_fd_np.restype=ctypes.c_void_p
+    lib.acl_free.argtypes=[ctypes.c_void_p]; lib.acl_free.restype=ctypes.c_int
+    ctypes.set_errno(0); acl=lib.acl_get_fd_np(fd,0x100)
+    if not acl:
+        if ctypes.get_errno()==errno.ENOENT: return False
+        raise SystemExit('ACL inspection failed')
+    if lib.acl_free(acl) != 0: raise SystemExit('ACL release failed')
+    return True
 parts = [part for part in target.split('/') if part]
 parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
 try:
     root_info = os.fstat(parent)
-    if root_info.st_uid != 0 or caller_can_write(root_info): raise SystemExit('unsafe root')
+    if root_info.st_uid != 0 or caller_can_write(root_info) or nontrivial_acl(parent):
+        raise SystemExit('unsafe root authority or ACL')
     for part in parts[:-1]:
         child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
         info = os.fstat(child)
         sticky_root = info.st_uid == 0 and info.st_mode & stat.S_ISVTX
-        if info.st_uid not in (0, owner) or (caller_can_write(info) and not sticky_root):
+        if info.st_uid not in (0, owner) or nontrivial_acl(child) or \
+           (caller_can_write(info) and not sticky_root):
             raise SystemExit('unsafe removal ancestor')
         os.close(parent); parent = child
     name = parts[-1]
     try: root = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
     except FileNotFoundError: raise SystemExit(0)
     before = os.fstat(root)
+    if nontrivial_acl(root): raise SystemExit('removal target has nontrivial ACL')
     if expected is not None and (before.st_dev, before.st_ino) != expected:
         raise SystemExit('removal target does not match transaction journal')
     def empty(fd):
@@ -734,6 +792,16 @@ def caller_can_write(info):
     if info.st_uid == caller_uid: return bool(mode & 0o200)
     if info.st_gid in caller_groups: return bool(mode & 0o020)
     return bool(mode & 0o002)
+def nontrivial_acl(fd):
+    if sys.platform != 'darwin': return False
+    lib=ctypes.CDLL(None,use_errno=True); lib.acl_get_fd_np.argtypes=[ctypes.c_int,ctypes.c_int]; lib.acl_get_fd_np.restype=ctypes.c_void_p
+    lib.acl_free.argtypes=[ctypes.c_void_p]; lib.acl_free.restype=ctypes.c_int
+    ctypes.set_errno(0); acl=lib.acl_get_fd_np(fd,0x100)
+    if not acl:
+        if ctypes.get_errno()==errno.ENOENT: return False
+        raise SystemExit('ACL inspection failed')
+    if lib.acl_free(acl) != 0: raise SystemExit('ACL release failed')
+    return True
 def exclusive_rename(parent, source, destination):
     if sys.platform == 'darwin':
         function = ctypes.CDLL(None, use_errno=True).renameatx_np
@@ -773,9 +841,10 @@ current = anchor
 try:
     for descriptor in (anchor, staging):
         info = os.fstat(descriptor)
-        if info.st_uid != owner or info.st_gid != group or caller_can_write(info):
-            raise SystemExit('unsafe ancestor authority: uid=%d gid=%d mode=%#o' %
-                             (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)))
+        has_acl = nontrivial_acl(descriptor)
+        if info.st_uid != owner or info.st_gid != group or caller_can_write(info) or has_acl:
+            raise SystemExit('unsafe ancestor authority: uid=%d gid=%d mode=%#o acl=%d' %
+                             (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode), has_acl))
     traversed = []
     for index, part in enumerate(parts):
         traversed.append(part)
@@ -837,7 +906,7 @@ try:
             child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                             dir_fd=current)
         info = os.fstat(child)
-        if info.st_uid != owner or caller_can_write(info):
+        if info.st_uid != owner or caller_can_write(info) or nontrivial_acl(child):
             raise SystemExit('unsafe existing ancestor: component=%s uid=%d gid=%d mode=%#o' %
                              (target, info.st_uid, info.st_gid,
                               stat.S_IMODE(info.st_mode)))
@@ -854,7 +923,7 @@ finally:
 
 
 ROOT_CLEANUP_ANCESTORS_CODE = r"""
-import errno, json, os, stat, sys
+import ctypes, errno, json, os, stat, sys
 anchor_path, relative, staging_path, token, journal_schema = sys.argv[1:6]
 owner = int(sys.argv[6]); group = int(sys.argv[7])
 caller_uid = int(sys.argv[8]); caller_groups = {int(value) for value in sys.argv[9].split(',') if value}
@@ -866,9 +935,19 @@ def caller_can_write(info):
     if info.st_uid == caller_uid: return bool(mode & 0o200)
     if info.st_gid in caller_groups: return bool(mode & 0o020)
     return bool(mode & 0o002)
+def nontrivial_acl(fd):
+    if sys.platform != 'darwin': return False
+    lib=ctypes.CDLL(None,use_errno=True); lib.acl_get_fd_np.argtypes=[ctypes.c_int,ctypes.c_int]; lib.acl_get_fd_np.restype=ctypes.c_void_p
+    lib.acl_free.argtypes=[ctypes.c_void_p]; lib.acl_free.restype=ctypes.c_int
+    ctypes.set_errno(0); acl=lib.acl_get_fd_np(fd,0x100)
+    if not acl:
+        if ctypes.get_errno()==errno.ENOENT: return False
+        raise SystemExit('ACL inspection failed')
+    if lib.acl_free(acl) != 0: raise SystemExit('ACL release failed')
+    return True
 def verify_ancestor(fd):
     info = os.fstat(fd)
-    if info.st_uid != owner or caller_can_write(info):
+    if info.st_uid != owner or caller_can_write(info) or nontrivial_acl(fd):
         raise SystemExit('unsafe cleanup ancestor authority')
 staging = os.open(staging_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 try:
@@ -1019,6 +1098,16 @@ owner = int(sys.argv[6]); caller_uid = int(sys.argv[7])
 caller_groups = {int(value) for value in sys.argv[8].split(',') if value}
 failpoint = sys.argv[9] if len(sys.argv) > 9 else ''
 provisional = '.tobkiri-packaging-python-' + token
+def nontrivial_acl(fd):
+    if sys.platform != 'darwin': return False
+    lib=ctypes.CDLL(None,use_errno=True); lib.acl_get_fd_np.argtypes=[ctypes.c_int,ctypes.c_int]; lib.acl_get_fd_np.restype=ctypes.c_void_p
+    lib.acl_free.argtypes=[ctypes.c_void_p]; lib.acl_free.restype=ctypes.c_int
+    ctypes.set_errno(0); acl=lib.acl_get_fd_np(fd,0x100)
+    if not acl:
+        if ctypes.get_errno()==errno.ENOENT: return False
+        raise SystemExit('ACL inspection failed')
+    if lib.acl_free(acl) != 0: raise SystemExit('ACL release failed')
+    return True
 if len(token) != 32 or any(c not in '0123456789abcdef' for c in token):
     raise SystemExit('invalid transaction token')
 parent = os.open(parent_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -1027,7 +1116,7 @@ try:
     mode = stat.S_IMODE(parent_info.st_mode)
     caller_writable = (mode & 0o200 if parent_info.st_uid == caller_uid else
                        mode & 0o020 if parent_info.st_gid in caller_groups else mode & 0o002)
-    if parent_info.st_uid != owner or caller_writable:
+    if parent_info.st_uid != owner or caller_writable or nontrivial_acl(parent):
         raise SystemExit('unsafe target parent: path=%s uid=%d gid=%d mode=%#o' %
                          (parent_path, parent_info.st_uid, parent_info.st_gid,
                           stat.S_IMODE(parent_info.st_mode)))
@@ -1035,7 +1124,7 @@ try:
     if failpoint == 'after_mkdir': os.kill(os.getpid(), signal.SIGKILL)
     root = os.open(provisional, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
     info = os.fstat(root)
-    if info.st_uid != owner or stat.S_IMODE(info.st_mode) != 0o700:
+    if info.st_uid != owner or stat.S_IMODE(info.st_mode) != 0o700 or nontrivial_acl(root):
         raise SystemExit('unsafe provisional directory')
     target = os.path.join(parent_path, fixed)
     payload = json.dumps({'dev': info.st_dev, 'ino': info.st_ino, 'schema': schema,
@@ -1072,11 +1161,21 @@ finally:
 
 
 ROOT_RECOVER_INSTALLATIONS_CODE = r"""
-import json, os, stat, sys
+import ctypes, errno, json, os, stat, sys
 parent_path, fixed, token_filter, journal_name, schema = sys.argv[1:6]
 owner = int(sys.argv[6]); caller_uid = int(sys.argv[7])
 caller_groups = {int(value) for value in sys.argv[8].split(',') if value}
 prefix = '.tobkiri-packaging-python-'
+def nontrivial_acl(fd):
+    if sys.platform != 'darwin': return False
+    lib=ctypes.CDLL(None,use_errno=True); lib.acl_get_fd_np.argtypes=[ctypes.c_int,ctypes.c_int]; lib.acl_get_fd_np.restype=ctypes.c_void_p
+    lib.acl_free.argtypes=[ctypes.c_void_p]; lib.acl_free.restype=ctypes.c_int
+    ctypes.set_errno(0); acl=lib.acl_get_fd_np(fd,0x100)
+    if not acl:
+        if ctypes.get_errno()==errno.ENOENT: return False
+        raise SystemExit('ACL inspection failed')
+    if lib.acl_free(acl) != 0: raise SystemExit('ACL release failed')
+    return True
 try: parent = os.open(parent_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 except FileNotFoundError: raise SystemExit(0)
 def canonical(payload):
@@ -1114,7 +1213,8 @@ def empty(directory):
 def remove_named(name, expected, exact_mode=None):
     directory = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
     info = os.fstat(directory)
-    if info.st_uid != owner or (exact_mode is not None and stat.S_IMODE(info.st_mode) != exact_mode):
+    if info.st_uid != owner or nontrivial_acl(directory) or \
+       (exact_mode is not None and stat.S_IMODE(info.st_mode) != exact_mode):
         raise SystemExit('stale transaction metadata mismatch')
     if expected is not None and (info.st_dev, info.st_ino) != expected:
         raise SystemExit('stale transaction identity mismatch')
@@ -1128,7 +1228,7 @@ try:
     mode = stat.S_IMODE(parent_info.st_mode)
     caller_writable = (mode & 0o200 if parent_info.st_uid == caller_uid else
                        mode & 0o020 if parent_info.st_gid in caller_groups else mode & 0o002)
-    if parent_info.st_uid != owner or caller_writable:
+    if parent_info.st_uid != owner or caller_writable or nontrivial_acl(parent):
         raise SystemExit('unsafe transaction parent: path=%s uid=%d gid=%d mode=%#o' %
                          (parent_path, parent_info.st_uid, parent_info.st_gid,
                           stat.S_IMODE(parent_info.st_mode)))
@@ -1365,6 +1465,22 @@ def _inventory_entries(root: Path) -> list[dict[str, Any]]:
         if relative == INVENTORY_NAME:
             continue
         metadata = path.lstat()
+        if stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode):
+            flags = os.O_RDONLY | os.O_NOFOLLOW
+            if stat.S_ISDIR(metadata.st_mode):
+                flags |= os.O_DIRECTORY
+            descriptor = os.open(path, flags)
+            try:
+                opened = os.fstat(descriptor)
+                if (opened.st_dev, opened.st_ino) != (
+                    metadata.st_dev,
+                    metadata.st_ino,
+                ) or _fd_has_nontrivial_acl(descriptor):
+                    raise ToolIdentityError(
+                        f"Python entry identity changed or has ACL: {relative}"
+                    )
+            finally:
+                os.close(descriptor)
         entry: dict[str, Any] = {
             "gid": metadata.st_gid,
             "mode": stat.S_IMODE(metadata.st_mode),
@@ -1453,6 +1569,16 @@ def _require_inventory_metadata(manifest: Path) -> None:
         or metadata.st_nlink != 1
     ):
         raise ToolIdentityError("packaging Python inventory metadata mismatch")
+    descriptor = os.open(manifest, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        opened = os.fstat(descriptor)
+        if (opened.st_dev, opened.st_ino) != (
+            metadata.st_dev,
+            metadata.st_ino,
+        ) or _fd_has_nontrivial_acl(descriptor):
+            raise ToolIdentityError("packaging Python inventory has ACL or changed")
+    finally:
+        os.close(descriptor)
 
 
 def verify_macos_installation(
@@ -1527,8 +1653,144 @@ _MACHO_MAGICS = frozenset(
 )
 
 
+def _macho_command(path: Path, architecture: str, option: str) -> str:
+    result = subprocess.run(
+        ["/usr/bin/otool", "-arch", architecture, option, path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+        env={"PATH": "/usr/bin:/bin"},
+    )
+    if result.returncode != 0:
+        raise ToolIdentityError(
+            f"otool {option} rejected packaging Mach-O {path} ({architecture})"
+        )
+    return result.stdout
+
+
+def _macho_architectures(path: Path) -> tuple[str, ...]:
+    result = subprocess.run(
+        ["/usr/bin/lipo", "-archs", path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+        env={"PATH": "/usr/bin:/bin"},
+    )
+    architectures = tuple(result.stdout.split())
+    if (
+        result.returncode != 0
+        or not architectures
+        or len(architectures) != len(set(architectures))
+        or any(not value.replace("_", "").isalnum() for value in architectures)
+    ):
+        raise ToolIdentityError(f"could not enumerate Mach-O architectures: {path}")
+    return architectures
+
+
+def _macho_dependencies(output: str) -> tuple[str, ...]:
+    dependencies = tuple(
+        line.strip().split(" (", 1)[0]
+        for line in output.splitlines()
+        if line.startswith(("\t", " ")) and " (" in line
+    )
+    if not dependencies or len(dependencies) != len(set(dependencies)):
+        raise ToolIdentityError("Mach-O dependencies are empty or ambiguous")
+    return dependencies
+
+
+def _macho_rpaths(output: str) -> tuple[str, ...]:
+    lines = output.splitlines()
+    values: list[str] = []
+    for index, line in enumerate(lines):
+        if line.strip() != "cmd LC_RPATH":
+            continue
+        for candidate in lines[index + 1 : index + 5]:
+            stripped = candidate.strip()
+            if stripped.startswith("path ") and " (offset " in stripped:
+                values.append(stripped[5:].split(" (offset ", 1)[0])
+                break
+        else:
+            raise ToolIdentityError("LC_RPATH lacks a canonical path command")
+    if len(values) != len(set(values)):
+        raise ToolIdentityError("Mach-O LC_RPATH entries are duplicated")
+    return tuple(values)
+
+
+def _system_dyld_path(path: Path) -> bool:
+    value = path.as_posix()
+    return value.startswith(("/usr/lib/", "/System/Library/"))
+
+
+def _expand_dyld_path(value: str, image: Path, executable: Path) -> Path:
+    if "\x00" in value:
+        raise ToolIdentityError("Mach-O path contains NUL")
+    if value.startswith("@loader_path/"):
+        expanded = image.parent / value.removeprefix("@loader_path/")
+    elif value.startswith("@executable_path/"):
+        expanded = executable.parent / value.removeprefix("@executable_path/")
+    elif value.startswith("/"):
+        expanded = Path(value)
+    else:
+        raise ToolIdentityError(f"relative or unsupported Mach-O path: {value}")
+    normalized = Path(os.path.normpath(expanded))
+    if not normalized.is_absolute():
+        raise ToolIdentityError(f"Mach-O path is not absolute after expansion: {value}")
+    return normalized
+
+
+def _require_dyld_candidate(candidate: Path, root: Path, dependency: str) -> Path:
+    if _system_dyld_path(candidate):
+        return candidate
+    try:
+        resolved = candidate.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise ToolIdentityError(
+            f"unresolved Mach-O dependency: {dependency} -> {candidate}"
+        ) from error
+    if not _inside(resolved, root):
+        raise ToolIdentityError(
+            f"packaging Python Mach-O dependency escapes closure: {dependency}"
+        )
+    return resolved
+
+
+def _resolve_macho_dependency(
+    dependency: str,
+    rpaths: tuple[str, ...],
+    image: Path,
+    executable: Path,
+    root: Path,
+) -> Path:
+    if dependency.startswith("@rpath/"):
+        if not rpaths:
+            raise ToolIdentityError(f"@rpath dependency has no LC_RPATH: {dependency}")
+        suffix = dependency.removeprefix("@rpath/")
+        if not suffix or suffix.startswith("/"):
+            raise ToolIdentityError(f"unsafe @rpath dependency: {dependency}")
+        candidates: list[Path] = []
+        for raw_rpath in rpaths:
+            expanded_rpath = _expand_dyld_path(raw_rpath, image, executable)
+            if not (_system_dyld_path(expanded_rpath) or _inside(expanded_rpath, root)):
+                raise ToolIdentityError(f"external LC_RPATH: {raw_rpath}")
+            candidate = expanded_rpath / suffix
+            if candidate.exists():
+                candidates.append(_require_dyld_candidate(candidate, root, dependency))
+        unique = tuple(dict.fromkeys(candidates))
+        if len(unique) != 1:
+            raise ToolIdentityError(
+                f"unresolved or ambiguous @rpath dependency: {dependency}"
+            )
+        return unique[0]
+    expanded = _expand_dyld_path(dependency, image, executable)
+    return _require_dyld_candidate(expanded, root, dependency)
+
+
 def _verify_macho_dependency_closure(installation: MacOSPythonInstallation) -> None:
-    """Require every Mach-O dependency to resolve within the leaf or macOS."""
+    """Resolve every architecture's dependencies with exact dyld semantics."""
+    base_python = installation.root / "bin" / f"python{installation.root.name}"
+    executables = (base_python, installation.executable)
     for path in sorted(installation.root.rglob("*")):
         metadata = path.lstat()
         if not stat.S_ISREG(metadata.st_mode):
@@ -1536,49 +1798,20 @@ def _verify_macho_dependency_closure(installation: MacOSPythonInstallation) -> N
         with path.open("rb") as source:
             if source.read(4) not in _MACHO_MAGICS:
                 continue
-        result = subprocess.run(
-            ["/usr/bin/otool", "-L", path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-            env={"PATH": "/usr/bin:/bin"},
-        )
-        if result.returncode != 0:
-            raise ToolIdentityError(f"otool rejected packaging Mach-O: {path}")
-        for line in result.stdout.splitlines():
-            if not line.startswith(("\t", " ")):
-                continue
-            dependency = line.strip().split(" (", 1)[0]
-            if dependency.startswith(("/usr/lib/", "/System/Library/")):
-                continue
-            if dependency.startswith("/"):
-                candidates = [Path(dependency)]
-            elif dependency.startswith("@loader_path/"):
-                candidates = [path.parent / dependency.removeprefix("@loader_path/")]
-            elif dependency.startswith("@executable_path/"):
-                candidates = [
-                    installation.executable.parent
-                    / dependency.removeprefix("@executable_path/")
-                ]
-            elif dependency.startswith("@rpath/"):
-                suffix = PurePosixPath(dependency.removeprefix("@rpath/"))
-                if any(part in {"", ".", ".."} for part in suffix.parts):
-                    raise ToolIdentityError("unsafe @rpath dependency")
-                candidates = [
-                    candidate
-                    for candidate in installation.root.rglob(suffix.name)
-                    if candidate.as_posix().endswith(suffix.as_posix())
-                ]
-            else:
-                raise ToolIdentityError(f"unsupported Mach-O dependency: {dependency}")
-            if not candidates or not all(
-                candidate.exists() and _inside(candidate, installation.root)
-                for candidate in candidates
-            ):
-                raise ToolIdentityError(
-                    f"packaging Python Mach-O dependency escapes closure: {dependency}"
-                )
+        for architecture in _macho_architectures(path):
+            dependencies = _macho_dependencies(_macho_command(path, architecture, "-L"))
+            rpaths = _macho_rpaths(_macho_command(path, architecture, "-l"))
+            for dependency in dependencies:
+                resolutions = {
+                    _resolve_macho_dependency(
+                        dependency, rpaths, path, executable, installation.root
+                    )
+                    for executable in executables
+                }
+                if len(resolutions) != 1:
+                    raise ToolIdentityError(
+                        f"Mach-O dependency differs by executable: {dependency}"
+                    )
 
 
 def smoke_macos_installation(installation: MacOSPythonInstallation) -> None:

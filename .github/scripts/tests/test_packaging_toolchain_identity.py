@@ -195,6 +195,16 @@ def test_ancestor_write_authority_uses_effective_group_membership(
     assert _MODULE._caller_can_write(world_writable)
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS extended ACL contract")
+def test_opened_inode_without_extended_acl_is_accepted(tmp_path: Path) -> None:
+    """A normal mode-only inode is the sole accepted ACL state."""
+    descriptor = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        assert not _MODULE._fd_has_nontrivial_acl(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def test_git_hardlinks_are_permitted_by_exact_digest_binding(tmp_path: Path) -> None:
     """Normal Apple system tools are not rejected merely for hardlink count."""
     original = _executable(tmp_path / "git")
@@ -585,24 +595,88 @@ def test_macho_dependency_closure_rejects_external_authority(
     dependency = _executable(root / "libPython", b"library")
     installation = _MODULE.MacOSPythonInstallation(root, executable, "0" * 64)
 
-    def otool_result(_arguments: list[object], **_kwargs: object) -> object:
-        return subprocess.CompletedProcess(
-            [], 0, f"{executable}:\n\t{dependency} (compatibility version 1.0.0)\n", ""
-        )
+    def otool_result(arguments: list[object], **_kwargs: object) -> object:
+        if arguments[:2] == ["/usr/bin/lipo", "-archs"]:
+            return subprocess.CompletedProcess(arguments, 0, "arm64 x86_64\n", "")
+        if "-L" in arguments:
+            return subprocess.CompletedProcess(
+                arguments,
+                0,
+                f"{executable}:\n\t@loader_path/libPython (compatibility version 1.0.0)\n",
+                "",
+            )
+        return subprocess.CompletedProcess(arguments, 0, f"{executable}:\n", "")
 
     monkeypatch.setattr(_MODULE.subprocess, "run", otool_result)
     _MODULE._verify_macho_dependency_closure(installation)
 
     outside = _executable(tmp_path / "outside.dylib")
 
-    def escaped_result(_arguments: list[object], **_kwargs: object) -> object:
-        return subprocess.CompletedProcess(
-            [], 0, f"{executable}:\n\t{outside} (compatibility version 1.0.0)\n", ""
-        )
+    def escaped_result(arguments: list[object], **_kwargs: object) -> object:
+        if arguments[:2] == ["/usr/bin/lipo", "-archs"]:
+            return subprocess.CompletedProcess(arguments, 0, "arm64 x86_64\n", "")
+        if "-L" in arguments:
+            dependency_path = dependency if "arm64" in arguments else outside
+            return subprocess.CompletedProcess(
+                arguments,
+                0,
+                f"{executable}:\n\t{dependency_path} (compatibility version 1.0.0)\n",
+                "",
+            )
+        return subprocess.CompletedProcess(arguments, 0, f"{executable}:\n", "")
 
     monkeypatch.setattr(_MODULE.subprocess, "run", escaped_result)
     with pytest.raises(ToolIdentityError, match="dependency escapes closure"):
         _MODULE._verify_macho_dependency_closure(installation)
+
+
+def test_dyld_rpath_resolution_rejects_missing_external_ambiguous_and_suffix_fake(
+    tmp_path: Path,
+) -> None:
+    """LC_RPATH order and exact expansion replace unsafe basename searching."""
+    root = tmp_path / "3.13"
+    (root / "bin").mkdir(parents=True)
+    image = _executable(root / "extension.so")
+    executable = _executable(root / "bin/python3.13")
+    dependency = "@rpath/libcrypto.dylib"
+    with pytest.raises(ToolIdentityError, match="has no LC_RPATH"):
+        _MODULE._resolve_macho_dependency(dependency, (), image, executable, root)
+
+    inside = root / "lib"
+    inside.mkdir()
+    _executable(inside / "libcrypto.dylib")
+    with pytest.raises(ToolIdentityError, match="external LC_RPATH"):
+        _MODULE._resolve_macho_dependency(
+            dependency,
+            (os.fspath(tmp_path / "attacker"), os.fspath(inside)),
+            image,
+            executable,
+            root,
+        )
+
+    fake = root / "unrelated/libcrypto.dylib"
+    fake.parent.mkdir()
+    _executable(fake)
+    with pytest.raises(ToolIdentityError, match="unresolved or ambiguous"):
+        _MODULE._resolve_macho_dependency(
+            dependency, (os.fspath(root / "empty"),), image, executable, root
+        )
+
+    second = root / "second"
+    second.mkdir()
+    _executable(second / "libcrypto.dylib")
+    with pytest.raises(ToolIdentityError, match="unresolved or ambiguous"):
+        _MODULE._resolve_macho_dependency(
+            dependency,
+            (os.fspath(inside), os.fspath(second)),
+            image,
+            executable,
+            root,
+        )
+    with pytest.raises(ToolIdentityError, match="relative or unsupported"):
+        _MODULE._resolve_macho_dependency(
+            "libcrypto.dylib", (), image, executable, root
+        )
 
 
 def test_closure_smoke_executes_base_and_venv_in_isolated_modes(
@@ -722,7 +796,11 @@ def _ancestor_helper(
     failpoint: str = "",
     caller_uid: int = 2**31 - 1,
     caller_groups: tuple[int, ...] = (),
+    owner_uid: int | None = None,
+    owner_gid: int | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
+    owner_uid = os.getuid() if owner_uid is None else owner_uid
+    owner_gid = os.getgid() if owner_gid is None else owner_gid
     arguments = [sys.executable, "-I", "-B", "-c", code, anchor]
     if _REQUIRE_ROOT_PROCESS_TESTS:
         arguments = ["/usr/bin/sudo", "-n", *arguments]
@@ -734,8 +812,8 @@ def _ancestor_helper(
                 token,
                 _MODULE.ANCESTOR_JOURNAL_SCHEMA,
                 _MODULE.ANCESTOR_PROVISIONAL_PREFIX,
-                str(os.getuid()),
-                str(os.getgid()),
+                str(owner_uid),
+                str(owner_gid),
                 str(caller_uid),
                 ",".join(str(group) for group in caller_groups),
                 failpoint,
@@ -748,8 +826,8 @@ def _ancestor_helper(
                 staging,
                 token,
                 _MODULE.ANCESTOR_JOURNAL_SCHEMA,
-                str(os.getuid()),
-                str(os.getgid()),
+                str(owner_uid),
+                str(owner_gid),
                 str(caller_uid),
                 ",".join(str(group) for group in caller_groups),
             ]
@@ -1044,6 +1122,125 @@ def test_root_owned_group_writable_ancestor_requires_caller_nonmembership(
     assert b"component=Library/Frameworks" in rejected.stderr
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS extended ACL contract")
+def test_process_rejects_effective_acl_and_acl_identity_swap(tmp_path: Path) -> None:
+    """An ACL that grants a mode-0500 root inode authority always fails closed."""
+    sudo = subprocess.run(
+        ["/usr/bin/sudo", "-n", "/usr/bin/true"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if sudo.returncode != 0:
+        if _REQUIRE_ROOT_PROCESS_TESTS:
+            pytest.fail("passwordless sudo is required for extended ACL test")
+        pytest.skip("passwordless sudo is unavailable")
+    import pwd
+
+    anchor = tmp_path / "root"
+    staging = tmp_path / "staging"
+    anchor.mkdir(mode=0o700)
+    staging.mkdir(mode=0o700)
+    user = pwd.getpwuid(os.getuid()).pw_name
+    token = "b" * 32
+    try:
+        subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "-n",
+                "/usr/sbin/chown",
+                "-R",
+                "root:wheel",
+                anchor,
+                staging,
+            ],
+            check=True,
+        )
+        subprocess.run(
+            ["/usr/bin/sudo", "-n", "/bin/chmod", "0500", anchor, staging],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "-n",
+                "/bin/chmod",
+                "+a",
+                f"{user} allow list,search,add_file,add_subdirectory,delete_child",
+                anchor,
+            ],
+            check=True,
+        )
+        assert os.access(anchor, os.W_OK | os.X_OK)
+        rejected = _ancestor_helper(
+            _MODULE.ROOT_ENSURE_PARENT_CODE,
+            anchor,
+            staging,
+            token,
+            caller_uid=os.geteuid(),
+            caller_groups=tuple({os.getegid(), *os.getgroups()}),
+            owner_uid=0,
+            owner_gid=0,
+        )
+        assert rejected.returncode != 0
+        assert b"ACL" in rejected.stderr
+
+        subprocess.run(["/usr/bin/sudo", "-n", "/bin/chmod", "-N", anchor], check=True)
+        accepted = _ancestor_helper(
+            _MODULE.ROOT_ENSURE_PARENT_CODE,
+            anchor,
+            staging,
+            token,
+            caller_uid=os.geteuid(),
+            caller_groups=tuple({os.getegid(), *os.getgroups()}),
+            owner_uid=0,
+            owner_gid=0,
+        )
+        assert accepted.returncode == 0, accepted.stderr.decode(errors="replace")
+        frameworks = anchor / "Library/Frameworks"
+        displaced = anchor / "Library/Frameworks-owned"
+        subprocess.run(
+            ["/usr/bin/sudo", "-n", "/bin/mv", frameworks, displaced], check=True
+        )
+        subprocess.run(
+            ["/usr/bin/sudo", "-n", "/bin/mkdir", "-m", "0555", frameworks],
+            check=True,
+        )
+        swapped = _ancestor_helper(
+            _MODULE.ROOT_CLEANUP_ANCESTORS_CODE,
+            anchor,
+            staging,
+            token,
+            caller_uid=os.geteuid(),
+            caller_groups=tuple({os.getegid(), *os.getgroups()}),
+            owner_uid=0,
+            owner_gid=0,
+        )
+        assert swapped.returncode != 0
+        assert frameworks.is_dir() and displaced.is_dir()
+    finally:
+        subprocess.run(
+            ["/usr/bin/sudo", "-n", "/bin/chmod", "-RN", anchor, staging],
+            check=False,
+        )
+        subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "-n",
+                "/usr/sbin/chown",
+                "-R",
+                f"{os.getuid()}:{os.getgid()}",
+                anchor,
+                staging,
+            ],
+            check=False,
+        )
+        subprocess.run(
+            ["/usr/bin/sudo", "-n", "/bin/chmod", "-R", "u+rwX", anchor, staging],
+            check=False,
+        )
+
+
 def test_process_rejects_other_uid_existing_ancestor_when_available(
     tmp_path: Path,
 ) -> None:
@@ -1317,7 +1514,8 @@ def test_workflows_run_real_installation_e2e_and_cleanup(workflow_name: str) -> 
     assert '--transaction-token "$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"' in payload
     assert "if: always() && env.TOBKIRI_PACKAGING_TRANSACTION_TOKEN != ''" in payload
     source = _SCRIPT.read_text(encoding="utf-8")
-    assert '["/usr/bin/otool", "-L", path]' in source
+    assert '["/usr/bin/otool", "-arch", architecture, option, path]' in source
+    assert '["/usr/bin/lipo", "-archs", path]' in source
     assert "(base_python, False)" in source
     assert "(installation.executable, False)" in source
     assert "(installation.executable, True)" in source
@@ -1407,6 +1605,12 @@ def test_canonical_packaging_install_root_matches_rust_lease() -> None:
     ).read_text(encoding="utf-8")
     assert provenance["install_root"] == expected
     assert expected in rust
+    assert "libc::geteuid()" in rust
+    assert "libc::getegid()" in rust
+    assert "libc::getgroups" in rust
+    assert "acl_get_fd_np" in rust
+    assert "libc::openat" in rust
+    assert "_authority_handles: Vec<File>" in rust
 
 
 def test_formal_git_environment_contract_is_identical_across_consumers() -> None:
@@ -1474,6 +1678,7 @@ def test_workflows_require_exact_root_process_tests_without_skips(
         "test_process_recovers_kill_midway_through_ancestor_creation",
         "test_process_retains_created_ancestor_that_becomes_nonempty",
         "test_root_owned_group_writable_ancestor_requires_caller_nonmembership",
+        "test_process_rejects_effective_acl_and_acl_identity_swap",
         "test_process_rejects_other_uid_existing_ancestor_when_available",
         "test_published_ancestor_is_traversable_by_nonroot_process_when_available",
     )
@@ -1486,7 +1691,21 @@ def test_workflows_require_exact_root_process_tests_without_skips(
     assert "python -m pytest -q -rs" in step
     assert '--junitxml="$ROOT_PROCESS_JUNIT"' in step
     assert all(step.count(f"::{nodeid}") == 1 for nodeid in nodeids)
-    assert "tests != 6 or skipped != 0" in step
+    assert "tests != 7 or skipped != 0" in step
+
+
+@pytest.mark.parametrize("workflow_name", ["release.yml", "desktop-installers.yml"])
+def test_workflows_report_acl_authority_before_binding(workflow_name: str) -> None:
+    """Runner ACL diagnostics are emitted before any failing production bind."""
+    payload = (_SCRIPT.parents[1] / "workflows" / workflow_name).read_text(
+        encoding="utf-8"
+    )
+    report = payload.index("- name: Report packaging Framework ACL authority")
+    binder = payload.index("- name: Bind verified packaging tool identities")
+    assert report < binder
+    diagnostic = payload[report:binder]
+    assert "/usr/bin/stat -f 'path=%N uid=%u gid=%g mode=%Sp inode=%i'" in diagnostic
+    assert "/bin/ls -lde" in diagnostic
 
 
 def test_windows_python_smoke_propagates_each_pytest_exit_code() -> None:

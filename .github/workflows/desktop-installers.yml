@@ -97,6 +97,19 @@ jobs:
           test "${#token}" -eq 32
           echo "TOBKIRI_PACKAGING_TRANSACTION_TOKEN=$token" >> "$GITHUB_ENV"
 
+      - name: Report packaging Framework ACL authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in / /Library /Library/Frameworks /Library/Frameworks/Python.framework /Library/Frameworks/Python.framework/Versions; do
+            if test -e "$path"; then
+              /usr/bin/stat -f 'path=%N uid=%u gid=%g mode=%Sp inode=%i' "$path"
+              /bin/ls -lde "$path"
+            else
+              echo "path=$path absent"
+            fi
+          done
+
       - name: Bind verified packaging tool identities
         shell: bash
         env:
@@ -284,6 +297,7 @@ jobs:
             .github/scripts/tests/test_packaging_toolchain_identity.py::test_process_recovers_kill_midway_through_ancestor_creation \
             .github/scripts/tests/test_packaging_toolchain_identity.py::test_process_retains_created_ancestor_that_becomes_nonempty \
             .github/scripts/tests/test_packaging_toolchain_identity.py::test_root_owned_group_writable_ancestor_requires_caller_nonmembership \
+            .github/scripts/tests/test_packaging_toolchain_identity.py::test_process_rejects_effective_acl_and_acl_identity_swap \
             .github/scripts/tests/test_packaging_toolchain_identity.py::test_process_rejects_other_uid_existing_ancestor_when_available \
             .github/scripts/tests/test_packaging_toolchain_identity.py::test_published_ancestor_is_traversable_by_nonroot_process_when_available
           python - "$ROOT_PROCESS_JUNIT" <<'PY'
@@ -294,8 +308,8 @@ jobs:
           suites = [root] if root.tag == "testsuite" else list(root.findall("testsuite"))
           skipped = sum(int(suite.attrib.get("skipped", "0")) for suite in suites)
           tests = sum(int(suite.attrib.get("tests", "0")) for suite in suites)
-          if tests != 6 or skipped != 0:
-              raise SystemExit(f"root process contract requires 6 tests and 0 skips: {tests=}, {skipped=}")
+          if tests != 7 or skipped != 0:
+              raise SystemExit(f"root process contract requires 7 tests and 0 skips: {tests=}, {skipped=}")
           PY
 
       - name: Install Rust toolchain
