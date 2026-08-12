@@ -238,8 +238,8 @@ def test_all_root_helpers_receive_one_effective_caller_identity(
     _MODULE._remove_root_tree(tmp_path / "remove")
     _MODULE.ensure_installation_parent(provenance, staging, token)
     _MODULE.cleanup_created_ancestors(provenance, staging, token)
-    _MODULE._create_installation_root(provenance, token)
-    _MODULE.recover_stale_installations(provenance, token)
+    _MODULE._create_installation_root(provenance, staging, token)
+    _MODULE.recover_stale_installations(provenance, staging, token)
 
     assert len(calls) == 5
     assert all(call[-2:] == ["4242", "7,8,9"] for call in calls)
@@ -896,25 +896,41 @@ def test_production_authority_reads_exact_head_blobs_not_checkout(
 
 
 def _installation_helper(
-    code: str, parent: Path, token: str, failpoint: str = ""
+    code: str,
+    parent: Path,
+    token: str,
+    failpoint: str = "",
+    *,
+    privileged: bool = False,
+    owner_uid: int | None = None,
+    caller_uid: int = 2**31 - 1,
+    caller_groups: tuple[int, ...] = (),
 ) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(
+    staging = parent.parent / "staging"
+    staging.mkdir(mode=0o700, exist_ok=True)
+    owner_uid = os.getuid() if owner_uid is None else owner_uid
+    arguments = [sys.executable, "-I", "-B", "-c", code]
+    if privileged:
+        arguments = ["/usr/bin/sudo", "-n", *arguments]
+    arguments.extend(
         [
-            sys.executable,
-            "-I",
-            "-B",
-            "-c",
-            code,
             parent,
             "3.13",
             token,
             _MODULE.INSTALLATION_JOURNAL_NAME,
             _MODULE.INSTALLATION_JOURNAL_SCHEMA,
-            str(os.getuid()),
-            str(2**31 - 1),
-            "",
+            staging,
+            _MODULE.DISPLACEMENT_JOURNAL_NAME,
+            _MODULE.DISPLACEMENT_JOURNAL_SCHEMA,
+            _MODULE.DISPLACED_PREFIX,
+            str(owner_uid),
+            str(caller_uid),
+            ",".join(str(group) for group in caller_groups),
             failpoint,
-        ],
+        ]
+    )
+    return subprocess.run(
+        arguments,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
@@ -922,9 +938,11 @@ def _installation_helper(
 
 
 def _recovery_helper(
-    parent: Path, token: str = ""
+    parent: Path, token: str = "", **kwargs: object
 ) -> subprocess.CompletedProcess[bytes]:
-    return _installation_helper(_MODULE.ROOT_RECOVER_INSTALLATIONS_CODE, parent, token)
+    return _installation_helper(
+        _MODULE.ROOT_RECOVER_INSTALLATIONS_CODE, parent, token, **kwargs
+    )
 
 
 def _ancestor_helper(
@@ -1520,6 +1538,178 @@ def test_existing_unowned_version_leaf_fails_closed(tmp_path: Path) -> None:
     assert marker.read_bytes() == b"preserve"
 
 
+@pytest.mark.parametrize(
+    "failpoint",
+    ["", "after_mkdir", "after_displacement_journal", "after_displacement"],
+)
+def test_host_leaf_is_quarantined_and_restored_by_exact_inode(
+    tmp_path: Path, failpoint: str
+) -> None:
+    """A safe host leaf is never adopted or deleted across partial publication."""
+    parent = tmp_path / "versions"
+    fixed = parent / "3.13"
+    fixed.mkdir(parents=True, mode=0o700)
+    marker = fixed / "host-marker"
+    marker.write_bytes(b"preserve host Python")
+    marker.chmod(0o400)
+    original = (fixed.stat().st_dev, fixed.stat().st_ino)
+    token = "8" * 32
+
+    created = _installation_helper(
+        _MODULE.ROOT_CREATE_INSTALLATION_CODE, parent, token, failpoint
+    )
+    if failpoint:
+        assert created.returncode < 0
+    else:
+        assert created.returncode == 0
+        assert not (fixed / "host-marker").exists()
+    assert _recovery_helper(parent, token).returncode == 0
+    assert marker.read_bytes() == b"preserve host Python"
+    assert (fixed.stat().st_dev, fixed.stat().st_ino) == original
+    assert not (parent / f"{_MODULE.DISPLACED_PREFIX}{token}").exists()
+
+
+def test_existing_symlink_is_never_displaced_or_followed(tmp_path: Path) -> None:
+    """Reservation rejects a fixed-name symlink without touching its target."""
+    parent = tmp_path / "versions"
+    target = tmp_path / "outside"
+    target.mkdir()
+    marker = target / "marker"
+    marker.write_bytes(b"preserve")
+    parent.mkdir()
+    (parent / "3.13").symlink_to(target, target_is_directory=True)
+    result = _installation_helper(
+        _MODULE.ROOT_CREATE_INSTALLATION_CODE, parent, "7" * 32
+    )
+    assert result.returncode != 0
+    assert marker.read_bytes() == b"preserve"
+
+
+def test_same_uid_precreated_leaf_cannot_become_displacement_authority(
+    tmp_path: Path,
+) -> None:
+    """A caller-writable parent prevents adopting a same-UID planted leaf."""
+    parent = tmp_path / "versions"
+    fixed = parent / "3.13"
+    fixed.mkdir(parents=True)
+    marker = fixed / "marker"
+    marker.write_bytes(b"attacker-owned")
+    result = _installation_helper(
+        _MODULE.ROOT_CREATE_INSTALLATION_CODE,
+        parent,
+        "5" * 32,
+        caller_uid=os.geteuid(),
+        caller_groups=tuple({os.getegid(), *os.getgroups()}),
+    )
+    assert result.returncode != 0
+    assert b"unsafe target parent" in result.stderr
+    assert marker.read_bytes() == b"attacker-owned"
+
+
+def test_displaced_leaf_name_swap_is_retained_fail_closed(tmp_path: Path) -> None:
+    """Recovery never restores or deletes a replacement for the journaled inode."""
+    parent = tmp_path / "versions"
+    fixed = parent / "3.13"
+    fixed.mkdir(parents=True)
+    (fixed / "host-marker").write_bytes(b"host")
+    token = "4" * 32
+    assert (
+        _installation_helper(
+            _MODULE.ROOT_CREATE_INSTALLATION_CODE, parent, token
+        ).returncode
+        == 0
+    )
+    displaced = parent / f"{_MODULE.DISPLACED_PREFIX}{token}"
+    saved = parent / "saved-original"
+    displaced.rename(saved)
+    displaced.mkdir()
+    replacement = displaced / "replacement"
+    replacement.write_bytes(b"preserve")
+    recovered = _recovery_helper(parent, token)
+    assert recovered.returncode != 0
+    assert b"displaced fixed prefix authority changed" in recovered.stderr
+    assert replacement.read_bytes() == b"preserve"
+    assert (saved / "host-marker").read_bytes() == b"host"
+
+
+def test_root_process_preserves_preinstalled_framework_leaf(tmp_path: Path) -> None:
+    """The CI root path quarantines then restores the exact host Framework inode."""
+    sudo = subprocess.run(
+        ["/usr/bin/sudo", "-n", "/usr/bin/true"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if sudo.returncode != 0:
+        if _REQUIRE_ROOT_PROCESS_TESTS:
+            pytest.fail("passwordless sudo is required for Framework displacement test")
+        pytest.skip("passwordless sudo is unavailable")
+    parent = tmp_path / "versions"
+    fixed = parent / "3.13"
+    staging = tmp_path / "staging"
+    fixed.mkdir(parents=True)
+    staging.mkdir()
+    marker = fixed / "host-marker"
+    marker.write_bytes(b"host Framework")
+    token = "6" * 32
+    groups = tuple({os.getegid(), *os.getgroups()})
+    try:
+        subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "-n",
+                "/usr/sbin/chown",
+                "-R",
+                "root:wheel",
+                parent,
+                staging,
+            ],
+            check=True,
+        )
+        subprocess.run(
+            ["/usr/bin/sudo", "-n", "/bin/chmod", "0555", parent, fixed, staging],
+            check=True,
+        )
+        created = _installation_helper(
+            _MODULE.ROOT_CREATE_INSTALLATION_CODE,
+            parent,
+            token,
+            privileged=True,
+            owner_uid=0,
+            caller_uid=os.geteuid(),
+            caller_groups=groups,
+        )
+        assert created.returncode == 0, created.stderr
+        recovered = _recovery_helper(
+            parent,
+            token,
+            privileged=True,
+            owner_uid=0,
+            caller_uid=os.geteuid(),
+            caller_groups=groups,
+        )
+        assert recovered.returncode == 0, recovered.stderr
+        restored = subprocess.run(
+            ["/usr/bin/sudo", "-n", "/bin/cat", marker],
+            stdout=subprocess.PIPE,
+            check=True,
+        )
+        assert restored.stdout == b"host Framework"
+    finally:
+        subprocess.run(
+            [
+                "/usr/bin/sudo",
+                "-n",
+                "/usr/sbin/chown",
+                "-R",
+                f"{os.getuid()}:{os.getgid()}",
+                tmp_path,
+            ],
+            check=True,
+        )
+        subprocess.run(["/bin/chmod", "-R", "u+rwX", tmp_path], check=True)
+
+
 def test_version_transaction_preserves_other_versions_and_rejects_concurrency(
     tmp_path: Path,
 ) -> None:
@@ -1613,12 +1803,14 @@ def test_prefix_journal_precedes_ditto_and_cancellation_cleanup_is_persistent() 
     assert prepare.index("_create_installation_root(") < prepare.index(
         '"/usr/bin/ditto"'
     )
-    assert prepare.index("recover_stale_installations(") < prepare.index(
+    assert prepare.index("ensure_installation_parent(") < prepare.index(
         "_remove_previous_installation("
     )
-    assert prepare.index("ensure_installation_parent(") < prepare.index(
-        "recover_stale_installations("
+    assert prepare.index("_remove_previous_installation(") < prepare.index(
+        "_create_installation_root("
     )
+    assert prepare.index("_create_installation_root(") < prepare.index("installer_url")
+    assert "recover_stale_installations(" not in prepare
     assert "cleanup_transaction(token)" in prepare
     assert "_remove_root_tree(staging)" not in prepare
 
@@ -1819,6 +2011,7 @@ def test_workflows_require_exact_root_process_tests_without_skips(
         "test_root_owned_group_writable_ancestor_requires_caller_nonmembership",
         "test_process_rejects_effective_acl_and_acl_identity_swap",
         "test_process_rejects_other_uid_existing_ancestor_when_available",
+        "test_root_process_preserves_preinstalled_framework_leaf",
         "test_published_ancestor_is_traversable_by_nonroot_process_when_available",
     )
     step = payload[
@@ -1830,7 +2023,7 @@ def test_workflows_require_exact_root_process_tests_without_skips(
     assert "python -m pytest -q -rs" in step
     assert '--junitxml="$ROOT_PROCESS_JUNIT"' in step
     assert all(step.count(f"::{nodeid}") == 1 for nodeid in nodeids)
-    assert "tests != 7 or skipped != 0" in step
+    assert "tests != 8 or skipped != 0" in step
 
 
 @pytest.mark.parametrize("workflow_name", ["release.yml", "desktop-installers.yml"])

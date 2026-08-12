@@ -64,6 +64,9 @@ SEALED_REQUIREMENTS_NAME = "authority-requirements.lock"
 INSTALLATION_JOURNAL_NAME = ".tobkiri-packaging-transaction.v1.json"
 INSTALLATION_JOURNAL_SCHEMA = "tobkiri.packaging-python-transaction.v1"
 PROVISIONAL_PREFIX = ".tobkiri-packaging-python-"
+DISPLACEMENT_JOURNAL_NAME = ".tobkiri-packaging-displacement.v1.json"
+DISPLACEMENT_JOURNAL_SCHEMA = "tobkiri.packaging-python-displacement.v1"
+DISPLACED_PREFIX = ".tobkiri-packaging-displaced-"
 ANCESTOR_JOURNAL_PREFIX = "ancestor-"
 ANCESTOR_JOURNAL_SCHEMA = "tobkiri.packaging-python-ancestor.v1"
 ANCESTOR_PROVISIONAL_PREFIX = ".tobkiri-packaging-parent-"
@@ -1106,11 +1109,12 @@ def cleanup_created_ancestors(
 
 ROOT_CREATE_INSTALLATION_CODE = r"""
 import ctypes, errno, json, os, signal, stat, sys
-parent_path, fixed, token, journal_name, schema = sys.argv[1:6]
-owner = int(sys.argv[6]); caller_uid = int(sys.argv[7])
-caller_groups = {int(value) for value in sys.argv[8].split(',') if value}
-failpoint = sys.argv[9] if len(sys.argv) > 9 else ''
+parent_path, fixed, token, journal_name, schema, staging_path, displacement_name, displacement_schema, displaced_prefix = sys.argv[1:10]
+owner = int(sys.argv[10]); caller_uid = int(sys.argv[11])
+caller_groups = {int(value) for value in sys.argv[12].split(',') if value}
+failpoint = sys.argv[13] if len(sys.argv) > 13 else ''
 provisional = '.tobkiri-packaging-python-' + token
+displaced = displaced_prefix + token
 def nontrivial_acl(fd):
     if sys.platform != 'darwin': return False
     lib=ctypes.CDLL(None,use_errno=True); lib.acl_get_fd_np.argtypes=[ctypes.c_int,ctypes.c_int]; lib.acl_get_fd_np.restype=ctypes.c_void_p
@@ -1124,15 +1128,36 @@ def nontrivial_acl(fd):
 if len(token) != 32 or any(c not in '0123456789abcdef' for c in token):
     raise SystemExit('invalid transaction token')
 parent = os.open(parent_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+staging = os.open(staging_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+def canonical(payload):
+    return json.dumps(payload, sort_keys=True, separators=(',', ':')).encode() + b'\n'
+def caller_can_write(info):
+    mode = stat.S_IMODE(info.st_mode)
+    if info.st_uid == caller_uid: return bool(mode & 0o200)
+    if info.st_gid in caller_groups: return bool(mode & 0o020)
+    return bool(mode & 0o002)
+def exclusive_rename(source, destination):
+    if sys.platform == 'darwin':
+        function = ctypes.CDLL(None, use_errno=True).renameatx_np
+        function.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                             ctypes.c_char_p, ctypes.c_uint]
+        if function(parent, os.fsencode(source), parent, os.fsencode(destination), 4):
+            raise OSError(ctypes.get_errno(), 'exclusive rename failed')
+    else:
+        try: os.stat(destination, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError: pass
+        else: raise FileExistsError(errno.EEXIST, 'exclusive target exists')
+        os.rename(source, destination, src_dir_fd=parent, dst_dir_fd=parent)
 try:
     parent_info = os.fstat(parent)
+    staging_info = os.fstat(staging)
     mode = stat.S_IMODE(parent_info.st_mode)
-    caller_writable = (mode & 0o200 if parent_info.st_uid == caller_uid else
-                       mode & 0o020 if parent_info.st_gid in caller_groups else mode & 0o002)
-    if parent_info.st_uid != owner or caller_writable or nontrivial_acl(parent):
+    if parent_info.st_uid != owner or caller_can_write(parent_info) or nontrivial_acl(parent):
         raise SystemExit('unsafe target parent: path=%s uid=%d gid=%d mode=%#o' %
                          (parent_path, parent_info.st_uid, parent_info.st_gid,
                           stat.S_IMODE(parent_info.st_mode)))
+    if staging_info.st_uid != owner or caller_can_write(staging_info) or nontrivial_acl(staging):
+        raise SystemExit('unsafe displacement journal authority')
     os.mkdir(provisional, 0o700, dir_fd=parent)
     if failpoint == 'after_mkdir': os.kill(os.getpid(), signal.SIGKILL)
     root = os.open(provisional, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
@@ -1140,9 +1165,8 @@ try:
     if info.st_uid != owner or stat.S_IMODE(info.st_mode) != 0o700 or nontrivial_acl(root):
         raise SystemExit('unsafe provisional directory')
     target = os.path.join(parent_path, fixed)
-    payload = json.dumps({'dev': info.st_dev, 'ino': info.st_ino, 'schema': schema,
-                          'target': target, 'token': token},
-                         sort_keys=True, separators=(',', ':')).encode() + b'\n'
+    payload = canonical({'dev': info.st_dev, 'ino': info.st_ino, 'schema': schema,
+                         'target': target, 'token': token})
     fd = os.open(journal_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                  0o400, dir_fd=root)
     try:
@@ -1154,30 +1178,51 @@ try:
         os.fsync(fd)
     finally: os.close(fd)
     os.fsync(root); os.fsync(parent)
-    if sys.platform == 'darwin':
-        renameatx_np = ctypes.CDLL(None, use_errno=True).renameatx_np
-        renameatx_np.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
-                                 ctypes.c_char_p, ctypes.c_uint]
-        if renameatx_np(parent, os.fsencode(provisional), parent, os.fsencode(fixed), 4):
-            raise OSError(ctypes.get_errno(), 'exclusive rename failed')
-    else:
-        try: os.stat(fixed, dir_fd=parent, follow_symlinks=False)
-        except FileNotFoundError: pass
-        else: raise FileExistsError(errno.EEXIST, 'fixed target exists')
-        os.rename(provisional, fixed, src_dir_fd=parent, dst_dir_fd=parent)
+    try: previous = os.open(fixed, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                            dir_fd=parent)
+    except FileNotFoundError: previous = None
+    if previous is not None:
+        previous_info = os.fstat(previous)
+        previous_entries = os.listdir(previous)
+        if previous_info.st_uid != owner or caller_can_write(previous_info) or \
+           nontrivial_acl(previous):
+            raise SystemExit('unsafe existing fixed prefix authority')
+        if journal_name in previous_entries or \
+           '.tobkiri-packaging-python.v1.json' in previous_entries:
+            raise SystemExit('existing managed fixed prefix was not released')
+        os.close(previous)
+        displacement = canonical({'dev': previous_info.st_dev, 'displaced': displaced,
+                                  'ino': previous_info.st_ino,
+                                  'schema': displacement_schema, 'target': target,
+                                  'token': token})
+        displacement_fd = os.open(displacement_name, os.O_WRONLY | os.O_CREAT |
+                                  os.O_EXCL | os.O_NOFOLLOW, 0o400, dir_fd=staging)
+        try:
+            os.fchown(displacement_fd, owner, -1); os.fchmod(displacement_fd, 0o400)
+            offset = 0
+            while offset < len(displacement):
+                offset += os.write(displacement_fd, displacement[offset:])
+            os.fsync(displacement_fd)
+        finally: os.close(displacement_fd)
+        os.fsync(staging)
+        if failpoint == 'after_displacement_journal': os.kill(os.getpid(), signal.SIGKILL)
+        exclusive_rename(fixed, displaced); os.fsync(parent)
+        if failpoint == 'after_displacement': os.kill(os.getpid(), signal.SIGKILL)
+    exclusive_rename(provisional, fixed)
     os.fsync(parent)
     if failpoint == 'after_rename': os.kill(os.getpid(), signal.SIGKILL)
     os.close(root)
 finally:
+    os.close(staging)
     os.close(parent)
 """
 
 
 ROOT_RECOVER_INSTALLATIONS_CODE = r"""
 import ctypes, errno, json, os, stat, sys
-parent_path, fixed, token_filter, journal_name, schema = sys.argv[1:6]
-owner = int(sys.argv[6]); caller_uid = int(sys.argv[7])
-caller_groups = {int(value) for value in sys.argv[8].split(',') if value}
+parent_path, fixed, token_filter, journal_name, schema, staging_path, displacement_name, displacement_schema, displaced_prefix = sys.argv[1:10]
+owner = int(sys.argv[10]); caller_uid = int(sys.argv[11])
+caller_groups = {int(value) for value in sys.argv[12].split(',') if value}
 prefix = '.tobkiri-packaging-python-'
 def nontrivial_acl(fd):
     if sys.platform != 'darwin': return False
@@ -1191,6 +1236,7 @@ def nontrivial_acl(fd):
     return True
 try: parent = os.open(parent_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 except FileNotFoundError: raise SystemExit(0)
+staging = os.open(staging_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 def canonical(payload):
     return json.dumps(payload, sort_keys=True, separators=(',', ':')).encode() + b'\n'
 def journal(directory, expected_token):
@@ -1214,6 +1260,41 @@ def journal(directory, expected_token):
     if payload['schema'] != schema or (expected_token and payload['token'] != expected_token):
         raise SystemExit('transaction journal authority mismatch')
     return payload
+def displacement_journal():
+    info = os.stat(displacement_name, dir_fd=staging, follow_symlinks=False)
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != owner or \
+       stat.S_IMODE(info.st_mode) != 0o400 or info.st_nlink != 1:
+        raise SystemExit('invalid displacement journal metadata')
+    fd = os.open(displacement_name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=staging)
+    try: encoded = os.read(fd, 8193)
+    finally: os.close(fd)
+    if len(encoded) > 8192: raise SystemExit('oversized displacement journal')
+    try:
+        pairs = json.loads(encoded, object_pairs_hook=lambda value: value)
+        if not isinstance(pairs, list): raise ValueError()
+        keys = [key for key, _ in pairs]
+        if len(keys) != len(set(keys)): raise ValueError()
+        payload = dict(pairs)
+    except Exception: raise SystemExit('partial or invalid displacement journal')
+    if canonical(payload) != encoded or \
+       set(payload) != {'dev','displaced','ino','schema','target','token'} or \
+       payload['schema'] != displacement_schema or payload['token'] != token_filter or \
+       payload['target'] != os.path.join(parent_path, fixed) or \
+       payload['displaced'] != displaced_prefix + token_filter:
+        raise SystemExit('displacement journal authority mismatch')
+    return payload
+def exclusive_rename(source, destination):
+    if sys.platform == 'darwin':
+        function = ctypes.CDLL(None, use_errno=True).renameatx_np
+        function.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                             ctypes.c_char_p, ctypes.c_uint]
+        if function(parent, os.fsencode(source), parent, os.fsencode(destination), 4):
+            raise OSError(ctypes.get_errno(), 'exclusive restore failed')
+    else:
+        try: os.stat(destination, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError: pass
+        else: raise FileExistsError(errno.EEXIST, 'restore target exists')
+        os.rename(source, destination, src_dir_fd=parent, dst_dir_fd=parent)
 def empty(directory):
     os.fchmod(directory, 0o700)
     for name in os.listdir(directory):
@@ -1245,6 +1326,16 @@ try:
         raise SystemExit('unsafe transaction parent: path=%s uid=%d gid=%d mode=%#o' %
                          (parent_path, parent_info.st_uid, parent_info.st_gid,
                           stat.S_IMODE(parent_info.st_mode)))
+    staging_info = os.fstat(staging)
+    staging_mode = stat.S_IMODE(staging_info.st_mode)
+    staging_writable = (staging_mode & 0o200 if staging_info.st_uid == caller_uid else
+                        staging_mode & 0o020
+                        if staging_info.st_gid in caller_groups else
+                        staging_mode & 0o002)
+    if staging_info.st_uid != owner or staging_writable or nontrivial_acl(staging):
+        raise SystemExit('unsafe displacement recovery authority')
+    try: displacement = displacement_journal()
+    except FileNotFoundError: displacement = None
     for name in sorted(os.listdir(parent)):
         if not name.startswith(prefix): continue
         token = name[len(prefix):]
@@ -1269,21 +1360,66 @@ try:
         entries = os.listdir(fixed_dir)
         if '.tobkiri-packaging-python.v1.json' not in entries:
             if journal_name not in entries:
-                raise SystemExit('fixed prefix lacks a transaction journal')
-            payload = journal(fixed_dir, token_filter)
-            info = os.fstat(fixed_dir); os.close(fixed_dir)
-            if token_filter and payload['token'] != token_filter:
-                raise SystemExit('fixed prefix belongs to another transaction')
-            if payload['target'] != os.path.join(parent_path, fixed) or \
-               (payload['dev'], payload['ino']) != (info.st_dev, info.st_ino):
-                raise SystemExit('fixed transaction journal mismatch')
-            remove_named(fixed, (payload['dev'], payload['ino']))
+                info = os.fstat(fixed_dir)
+                expected = None if displacement is None else \
+                    (displacement['dev'], displacement['ino'])
+                if expected != (info.st_dev, info.st_ino):
+                    if displacement is None and token_filter:
+                        os.close(fixed_dir); fixed_dir = None
+                    else:
+                        raise SystemExit('fixed prefix lacks a transaction journal')
+                else:
+                    os.close(fixed_dir); fixed_dir = None
+            if fixed_dir is None: pass
+            else:
+                payload = journal(fixed_dir, token_filter)
+                info = os.fstat(fixed_dir); os.close(fixed_dir)
+                if token_filter and payload['token'] != token_filter:
+                    raise SystemExit('fixed prefix belongs to another transaction')
+                if payload['target'] != os.path.join(parent_path, fixed) or \
+                   (payload['dev'], payload['ino']) != (info.st_dev, info.st_ino):
+                    raise SystemExit('fixed transaction journal mismatch')
+                remove_named(fixed, (payload['dev'], payload['ino']))
         else: os.close(fixed_dir)
-finally: os.close(parent)
+    if displacement is not None:
+        displaced_name = displacement['displaced']
+        try: displaced = os.open(displaced_name, os.O_RDONLY | os.O_DIRECTORY |
+                                 os.O_NOFOLLOW, dir_fd=parent)
+        except FileNotFoundError: displaced = None
+        try: current = os.open(fixed, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                               dir_fd=parent)
+        except FileNotFoundError: current = None
+        expected = (displacement['dev'], displacement['ino'])
+        if displaced is None:
+            current_info = None if current is None else os.fstat(current)
+            if current_info is None or (current_info.st_dev, current_info.st_ino) != expected:
+                raise SystemExit('displaced fixed prefix identity is lost')
+        else:
+            displaced_info = os.fstat(displaced)
+            if displaced_info.st_uid != owner or nontrivial_acl(displaced) or \
+               (displaced_info.st_dev, displaced_info.st_ino) != expected:
+                raise SystemExit('displaced fixed prefix authority changed')
+            if current is not None:
+                raise SystemExit('fixed prefix blocks displaced restoration')
+            os.close(displaced); displaced = None
+            exclusive_rename(displaced_name, fixed); os.fsync(parent)
+        if current is not None: os.close(current)
+        if displaced is not None: os.close(displaced)
+        os.unlink(displacement_name, dir_fd=staging); os.fsync(staging)
+    elif token_filter:
+        try: os.stat(displaced_prefix + token_filter, dir_fd=parent,
+                     follow_symlinks=False)
+        except FileNotFoundError: pass
+        else: raise SystemExit('displaced prefix lacks an authority journal')
+finally:
+    os.close(staging)
+    os.close(parent)
 """
 
 
-def _create_installation_root(provenance: InstallerProvenance, token: str) -> None:
+def _create_installation_root(
+    provenance: InstallerProvenance, staging: Path, token: str
+) -> None:
     parent = provenance.install_root.parent
     caller_uid, caller_groups = _caller_identity_arguments()
     subprocess.run(
@@ -1299,6 +1435,10 @@ def _create_installation_root(provenance: InstallerProvenance, token: str) -> No
             token,
             INSTALLATION_JOURNAL_NAME,
             INSTALLATION_JOURNAL_SCHEMA,
+            staging,
+            DISPLACEMENT_JOURNAL_NAME,
+            DISPLACEMENT_JOURNAL_SCHEMA,
+            DISPLACED_PREFIX,
             "0",
             caller_uid,
             caller_groups,
@@ -1309,7 +1449,7 @@ def _create_installation_root(provenance: InstallerProvenance, token: str) -> No
 
 
 def recover_stale_installations(
-    provenance: InstallerProvenance, token: str = ""
+    provenance: InstallerProvenance, staging: Path, token: str
 ) -> None:
     caller_uid, caller_groups = _caller_identity_arguments()
     subprocess.run(
@@ -1325,6 +1465,10 @@ def recover_stale_installations(
             token,
             INSTALLATION_JOURNAL_NAME,
             INSTALLATION_JOURNAL_SCHEMA,
+            staging,
+            DISPLACEMENT_JOURNAL_NAME,
+            DISPLACEMENT_JOURNAL_SCHEMA,
+            DISPLACED_PREFIX,
             "0",
             caller_uid,
             caller_groups,
@@ -1351,7 +1495,7 @@ def cleanup_transaction(token: str) -> None:
     provenance = _parse_provenance(
         provenance_bytes, requirements_bytes, "sealed trusted Git provenance"
     )
-    recover_stale_installations(provenance, token)
+    recover_stale_installations(provenance, staging, token)
     cleanup_created_ancestors(provenance, staging, token)
     _remove_root_tree(staging)
 
@@ -1421,9 +1565,13 @@ def _remove_previous_installation(provenance: InstallerProvenance) -> None:
     inventory = provenance.install_root / INVENTORY_NAME
     try:
         inventory_sha256 = _sha256_file(inventory)
+    except FileNotFoundError:
+        # The root helper will quarantine this untrusted host leaf by inode.  It
+        # is never read, executed, adopted, or deleted by the formal closure.
+        return
     except OSError as error:
         raise ToolIdentityError(
-            "existing fixed Python installation is not a verified prior result"
+            "existing fixed Python inventory is unreadable"
         ) from error
     installation = MacOSPythonInstallation(
         provenance.install_root,
@@ -2011,7 +2159,8 @@ def prepare_macos_installation(
     package = staging / f"python-{provenance.version}.pkg"
     try:
         ensure_installation_parent(provenance, staging, token)
-        recover_stale_installations(provenance)
+        _remove_previous_installation(provenance)
+        _create_installation_root(provenance, staging, token)
         subprocess.run(["/usr/bin/sudo", "/bin/chmod", "0700", staging], check=True)
         subprocess.run(
             [
@@ -2076,8 +2225,6 @@ def prepare_macos_installation(
             team_identifier=provenance.installer_team_id,
             label="official installer Python payload",
         )
-        _remove_previous_installation(provenance)
-        _create_installation_root(provenance, token)
         subprocess.run(
             [
                 "/usr/bin/sudo",
