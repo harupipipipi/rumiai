@@ -392,7 +392,7 @@ def load_source_provenance(
         )
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise ValueError("source provenance JSON is invalid") from error
-    if not isinstance(value, dict) or tuple(value) != PROVENANCE_KEYS:
+    if not isinstance(value, dict) or set(value) != set(PROVENANCE_KEYS):
         raise ValueError("source provenance has unexpected top-level fields")
     if value["schema"] != SOURCE_PROVENANCE_SCHEMA:
         raise ValueError("source provenance schema is invalid")

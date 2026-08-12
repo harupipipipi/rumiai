@@ -8,23 +8,18 @@ verified source snapshot and lease alive, invokes the generator with its own
 trusted arguments, and returns only a verified catalog; it does not return a
 snapshot pathname or file descriptor to a Python caller.
 
-This module intentionally performs no filesystem, subprocess, import, or
+This module intentionally performs no filesystem, child-process, import, or
 environment discovery.  Keeping the former script name as a hard failure
 gives stale local commands a deterministic diagnostic without leaving a
 second packaging implementation available.
 """
-
-from __future__ import annotations
-
-from typing import Any, NoReturn, Sequence
-
 
 FORMAL_BOUNDARY_LABEL = "tobkiri-core-package-defaults-v1"
 FORMAL_API = "run_formal_defaults_packaging(DefaultsPackagingRequest)"
 VERIFIED_OUTPUT = "verified_catalog"
 
 
-def _reject_direct_caller() -> NoReturn:
+def _reject_direct_caller():
     """Reject every non-core invocation before inspecting caller inputs."""
     raise RuntimeError(
         "direct presentation packaging is disabled; use Rust "
@@ -33,17 +28,19 @@ def _reject_direct_caller() -> NoReturn:
     )
 
 
-def package_artifact(*args: Any, **kwargs: Any) -> NoReturn:
+def package_artifact(*args, **kwargs):
     """Reject the retired Python packaging API."""
     del args, kwargs
     _reject_direct_caller()
 
 
-def main(argv: Sequence[str] | None = None) -> NoReturn:
+def main(argv=None):
     """Reject the retired command-line entrypoint."""
     del argv
     _reject_direct_caller()
 
 
-if __name__ == "__main__":
-    main()
+# Keep the stale module name unusable even when imported rather than executed.
+# This is deliberately after the compatibility definitions so static callers
+# cannot mistake the file for an implementation while every real load fails.
+_reject_direct_caller()

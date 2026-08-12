@@ -1,0 +1,117 @@
+"""Focused tests for the sealed source-provenance JSON boundary."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+
+import pytest
+
+from scripts import generator_source_manifest
+
+
+COMMIT = "0123456789abcdef0123456789abcdef01234567"
+TREE = "89abcdef0123456789abcdef0123456789abcdef"
+
+
+def _provenance_bytes(manifest_digest: str, fields: list[tuple[str, object]]) -> bytes:
+    """Encode a provenance object with caller-selected field ordering."""
+    return json.dumps(dict(fields), separators=(",", ":")).encode("utf-8")
+
+
+def _root_with_provenance(tmp_path: Path, payload: bytes) -> Path:
+    """Create the minimum immutable parser fixture and bypass closure traversal."""
+    root = tmp_path / "snapshot"
+    root.mkdir()
+    manifest = root / generator_source_manifest.SOURCE_MANIFEST_FILENAME
+    manifest.write_bytes(b"manifest fixture")
+    provenance = root / generator_source_manifest.SOURCE_PROVENANCE_FILENAME
+    provenance.write_bytes(payload)
+    provenance.chmod(0o444)
+    root.chmod(0o555)
+    return root
+
+
+def test_provenance_field_order_is_not_a_security_condition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The exact key set is enforced while valid JSON ordering remains free."""
+    manifest_digest = hashlib.sha256(b"manifest fixture").hexdigest()
+    payload = _provenance_bytes(
+        manifest_digest,
+        [
+            ("source_manifest_sha256", manifest_digest),
+            ("source_clean", True),
+            ("source_tree", TREE),
+            ("schema", generator_source_manifest.SOURCE_PROVENANCE_SCHEMA),
+            ("source_commit", COMMIT),
+        ],
+    )
+    root = _root_with_provenance(tmp_path, payload)
+    monkeypatch.setattr(generator_source_manifest, "verify_source_closure", lambda _: {})
+
+    result = generator_source_manifest.load_source_provenance(root)
+
+    assert result.source_commit == COMMIT
+    assert result.source_tree == TREE
+    assert result.source_manifest_sha256 == manifest_digest
+
+
+def test_provenance_duplicate_key_is_rejected(tmp_path: Path) -> None:
+    """Duplicate JSON keys cannot smuggle a value past strict parsing."""
+    manifest_digest = hashlib.sha256(b"manifest fixture").hexdigest()
+    raw = (
+        b'{"schema":"'
+        + generator_source_manifest.SOURCE_PROVENANCE_SCHEMA.encode()
+        + b'","schema":"duplicate","source_commit":"'
+        + COMMIT.encode()
+        + b'","source_tree":"'
+        + TREE.encode()
+        + b'","source_clean":true,"source_manifest_sha256":"'
+        + manifest_digest.encode()
+        + b'"}'
+    )
+    root = _root_with_provenance(tmp_path, raw)
+
+    with pytest.raises(ValueError, match="duplicate source provenance field"):
+        generator_source_manifest.load_source_provenance(root)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "unknown",
+        "missing",
+        "wrong-type",
+        "wrong-digest",
+    ],
+)
+def test_provenance_exact_keys_types_and_digests_are_strict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    """Unknown/missing fields and invalid values fail closed."""
+    manifest_digest = hashlib.sha256(b"manifest fixture").hexdigest()
+    fields: dict[str, object] = {
+        "schema": generator_source_manifest.SOURCE_PROVENANCE_SCHEMA,
+        "source_commit": COMMIT,
+        "source_tree": TREE,
+        "source_clean": True,
+        "source_manifest_sha256": manifest_digest,
+    }
+    if mutation == "unknown":
+        fields["extra"] = "reject"
+    elif mutation == "missing":
+        del fields["source_tree"]
+    elif mutation == "wrong-type":
+        fields["source_clean"] = 1
+    else:
+        fields["source_manifest_sha256"] = "SHA256:" + manifest_digest
+    root = _root_with_provenance(
+        tmp_path,
+        json.dumps(fields, separators=(",", ":")).encode("utf-8"),
+    )
+    monkeypatch.setattr(generator_source_manifest, "verify_source_closure", lambda _: {})
+
+    with pytest.raises(ValueError):
+        generator_source_manifest.load_source_provenance(root)
