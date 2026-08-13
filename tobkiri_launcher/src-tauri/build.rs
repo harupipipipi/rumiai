@@ -576,23 +576,12 @@ fn bind_sealed_python_root(root: &Path) -> io::Result<()> {
         ));
     }
     let target = required_cargo_target()?;
-    let platform = if target.contains("windows") {
-        "windows"
-    } else if target.contains("apple-darwin") {
-        "macos"
-    } else if target.contains("linux") {
-        "linux"
-    } else {
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            format!("sealed Python target platform is unsupported: {target}"),
-        ));
-    };
+    let (platform, architecture) = expected_sealed_python_target(&target)?;
     if object.get("platform").and_then(serde_json::Value::as_str) != Some(platform)
         || object
             .get("architecture")
             .and_then(serde_json::Value::as_str)
-            != Some(expected_pack_shell_architecture(&target))
+            != Some(architecture)
     {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -4024,6 +4013,19 @@ fn expected_pack_shell_architecture(target: &str) -> &str {
     }
 }
 
+fn expected_sealed_python_target(target: &str) -> io::Result<(&'static str, &'static str)> {
+    match target {
+        "aarch64-apple-darwin" => Ok(("macos", "arm64")),
+        "x86_64-apple-darwin" => Ok(("macos", "x86_64")),
+        "x86_64-pc-windows-msvc" => Ok(("windows", "x86_64")),
+        "x86_64-unknown-linux-gnu" => Ok(("linux", "x86_64")),
+        _ => Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!("sealed Python target platform is unsupported: {target}"),
+        )),
+    }
+}
+
 fn pack_shell_binary_architecture(payload: &[u8], target: &str) -> io::Result<String> {
     let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidData, message);
     if target.contains("windows") || target.ends_with("-msvc") {
@@ -4737,7 +4739,7 @@ mod tests {
             "schema": SEALED_PYTHON_SCHEMA,
             "environment_digest": inventory_digest,
             "platform": "macos",
-            "architecture": expected_pack_shell_architecture(target),
+            "architecture": expected_sealed_python_target(target).unwrap().1,
             "python_version": "3.13.13",
             "package_provenance": {
                 "kind": "pinned-python-build-standalone-v1",
@@ -4785,6 +4787,42 @@ mod tests {
         )
         .unwrap();
         assert!(bind_sealed_python_root(&root).is_err());
+    }
+
+    #[test]
+    fn sealed_python_target_domain_is_derived_from_exact_cargo_target() {
+        assert_eq!(
+            expected_sealed_python_target("aarch64-apple-darwin").unwrap(),
+            ("macos", "arm64")
+        );
+        assert_eq!(
+            expected_sealed_python_target("x86_64-apple-darwin").unwrap(),
+            ("macos", "x86_64")
+        );
+        assert_eq!(
+            expected_sealed_python_target("x86_64-pc-windows-msvc").unwrap(),
+            ("windows", "x86_64")
+        );
+        assert_eq!(
+            expected_sealed_python_target("x86_64-unknown-linux-gnu").unwrap(),
+            ("linux", "x86_64")
+        );
+        assert_eq!(
+            expected_pack_shell_architecture("aarch64-apple-darwin"),
+            "aarch64"
+        );
+        for unsupported in [
+            "arm64-apple-darwin",
+            "aarch64-unknown-linux-gnu",
+            "x86_64-apple-darwin-extra",
+        ] {
+            assert_eq!(
+                expected_sealed_python_target(unsupported)
+                    .expect_err("unknown target must fail closed")
+                    .kind(),
+                io::ErrorKind::Unsupported
+            );
+        }
     }
 
     #[test]
