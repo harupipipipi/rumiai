@@ -16,6 +16,7 @@ the native Python prefix when the requested target is the current host.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import importlib.util
 import json
@@ -1288,11 +1289,12 @@ def validate_environment(
     *,
     expected_manifest_digest: str | None = None,
     run_native_smoke: bool = True,
+    require_sealed: bool = True,
 ) -> str:
     """Validate one sealed environment and return its raw manifest SHA-256."""
     spec = target_spec(target)
     root = _assert_root(root)
-    if root.lstat().st_mode & 0o222:
+    if require_sealed and root.lstat().st_mode & 0o222:
         raise SealedEnvironmentError("sealed snapshot root is writable")
     manifest_path = root / MANIFEST_FILENAME
     metadata = manifest_path.lstat() if manifest_path.exists() else None
@@ -1345,11 +1347,12 @@ def validate_environment(
         path = root / "sentinels" / SENTINEL_FILENAMES[name]
         if path.read_text(encoding="utf-8") != document["sentinels"][name] + "\n":
             raise SealedEnvironmentError(f"sealed sentinel payload mismatch: {path}")
-    for _relative, path, _kind, entry_metadata in _walk_tree(root):
-        if entry_metadata.st_mode & 0o222:
-            raise SealedEnvironmentError(
-                f"sealed snapshot entry is writable: {path.relative_to(root)}"
-            )
+    if require_sealed:
+        for _relative, path, _kind, entry_metadata in _walk_tree(root):
+            if entry_metadata.st_mode & 0o222:
+                raise SealedEnvironmentError(
+                    f"sealed snapshot entry is writable: {path.relative_to(root)}"
+                )
     if run_native_smoke:
         _verify_python_smoke(root, spec)
     return raw_digest
@@ -1375,6 +1378,134 @@ def _remove_owned_output(path: Path) -> None:
         owner_root=path.parent,
         operation="replace sealed Python environment",
     )
+
+
+def _assert_publish_destination_absent(path: Path) -> None:
+    """Reject any existing final destination without following its last path."""
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise SealedEnvironmentError(
+            f"cannot inspect publish destination: {path}"
+        ) from exc
+    raise SealedEnvironmentError(f"publish destination already exists: {path}")
+
+
+def _directory_identity(path: Path) -> tuple[int, int]:
+    """Return the device/inode identity of one real directory."""
+    metadata = path.lstat()
+    if (
+        path.is_symlink()
+        or _is_reparse_point(metadata)
+        or not stat.S_ISDIR(metadata.st_mode)
+    ):
+        raise SealedEnvironmentError(f"publish path is not a real directory: {path}")
+    return metadata.st_dev, metadata.st_ino
+
+
+def _make_tree_writable(root: Path) -> None:
+    """Unseal an owned tree only when cleanup must remove a failed publish."""
+    root = _assert_root(root)
+    entries = sorted(
+        root.rglob("*"),
+        key=lambda path: (len(path.relative_to(root).parts), path.as_posix()),
+    )
+    for path in entries:
+        metadata = path.lstat()
+        if path.is_symlink() or _is_reparse_point(metadata):
+            raise SealedEnvironmentError(
+                f"cannot cleanup a linked publish entry: {path}"
+            )
+        if stat.S_ISDIR(metadata.st_mode):
+            path.chmod(0o700)
+        elif stat.S_ISREG(metadata.st_mode):
+            path.chmod(0o600)
+        else:
+            raise SealedEnvironmentError(
+                f"cannot cleanup a special publish entry: {path}"
+            )
+    root.chmod(0o700)
+
+
+def _cleanup_published_output(path: Path) -> None:
+    """Remove a failed owned publish without following a changed destination."""
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return
+    _make_tree_writable(path)
+    _remove_owned_output(path)
+
+
+def _publish_staged_environment(
+    staged: Path,
+    output_root: Path,
+    target: str,
+) -> None:
+    """Publish a writable stage, verify it, and leave sealing to the caller.
+
+    A same-filesystem ``os.replace`` consumes the stage without copying.  If
+    the filesystem rejects that rename, the stage is copied into a private
+    writable sibling of the final parent, verified there, and atomically
+    published from that sibling.  No read-only tree enters a copy fallback.
+    """
+    spec = target_spec(target)
+    staged = _assert_root(Path(staged))
+    output_root = Path(output_root)
+    output_parent = _assert_root(output_root.parent)
+    output_root = output_parent / output_root.name
+    _assert_publish_destination_absent(output_root)
+    staged_identity = _directory_identity(staged)
+    fallback: Path | None = None
+    published = False
+    try:
+        try:
+            _assert_publish_destination_absent(output_root)
+            os.replace(staged, output_root)
+            published = True
+            if _directory_identity(output_root) != staged_identity:
+                raise SealedEnvironmentError(
+                    "published environment identity differs from its stage"
+                )
+        except OSError as exc:
+            if exc.errno != errno.EXDEV:
+                raise SealedEnvironmentError(
+                    f"cannot atomically publish sealed environment: {output_root}"
+                ) from exc
+            fallback = output_parent / (
+                f".{output_root.name}.{os.getpid()}.publish"
+            )
+            _assert_publish_destination_absent(fallback)
+            _copy_tree(staged, fallback, spec)
+            validate_environment(
+                fallback,
+                target,
+                run_native_smoke=False,
+                require_sealed=False,
+            )
+            fallback_identity = _directory_identity(fallback)
+            _assert_publish_destination_absent(output_root)
+            os.replace(fallback, output_root)
+            published = True
+            if _directory_identity(output_root) != fallback_identity:
+                raise SealedEnvironmentError(
+                    "published fallback identity differs from its stage"
+                )
+
+        validate_environment(
+            output_root,
+            target,
+            run_native_smoke=False,
+            require_sealed=False,
+        )
+    except BaseException:
+        if fallback is not None:
+            _cleanup_published_output(fallback)
+        if published:
+            _cleanup_published_output(output_root)
+        raise
 
 
 def parse_uv_version(
@@ -2083,8 +2214,9 @@ def assemble_environment(
     release_digest: str,
     application_source: Path | None = None,
     sealed_source_root: Path = SEALED_SOURCE_ROOT,
+    seal: bool = True,
 ) -> Path:
-    """Assemble a deterministic sealed tree from prepared runtime fixtures."""
+    """Assemble a deterministic tree, optionally applying its final seal."""
     spec = target_spec(target)
     if python_version != PYTHON_VERSION:
         raise SealedEnvironmentError(f"only CPython {PYTHON_VERSION} is supported")
@@ -2122,8 +2254,16 @@ def assemble_environment(
     _write_text(output_root / LEASE_FILENAME, LEASE_CONTENT)
     document = _expected_manifest(output_root, spec, python_version, release_digest)
     manifest_path = _write_manifest(output_root, document)
-    _freeze_tree(output_root, spec)
-    validate_environment(output_root, target, run_native_smoke=False)
+    if seal:
+        _freeze_tree(output_root, spec)
+        validate_environment(output_root, target, run_native_smoke=False)
+    else:
+        validate_environment(
+            output_root,
+            target,
+            run_native_smoke=False,
+            require_sealed=False,
+        )
     return manifest_path
 
 
@@ -2315,82 +2455,92 @@ def build_environment(
     source_parent = output_root.parent
     source_parent.mkdir(parents=True, exist_ok=True)
     _remove_owned_output(output_root)
-    with tempfile.TemporaryDirectory(
-        prefix=".sealed-python-build-", dir=source_parent
-    ) as raw:
-        work = Path(raw)
-        verified_source = _copy_verified_source_snapshot(
-            repo_root,
-            work / "source",
-            source_inventory_sha256 or "",
-            release_digest or "",
-        )
-        requirements_path = verified_source / DEFAULT_REQUIREMENTS_RELATIVE
-        cache = work / "cache"
-        cache.mkdir(mode=0o700)
-        archive = work / "python.tar.gz"
-        _download_pinned_python_archive(spec, archive)
-        runtime_source = _find_runtime(
-            _extract_pinned_python_archive(archive, work / "python-install"), spec
-        )
-        runtime_copy = work / "runtime"
-        _materialize_runtime_links(runtime_source, spec)
-        _copy_tree(runtime_source, runtime_copy, spec)
-        runtime_python = _runtime_python(runtime_copy, spec)
-        venv_source = work / "venv"
-        _run_uv(
-            uv,
-            [
-                "venv",
+    published = False
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix=".sealed-python-build-", dir=source_parent
+        ) as raw:
+            work = Path(raw)
+            verified_source = _copy_verified_source_snapshot(
+                repo_root,
+                work / "source",
+                source_inventory_sha256 or "",
+                release_digest or "",
+            )
+            requirements_path = verified_source / DEFAULT_REQUIREMENTS_RELATIVE
+            cache = work / "cache"
+            cache.mkdir(mode=0o700)
+            archive = work / "python.tar.gz"
+            _download_pinned_python_archive(spec, archive)
+            runtime_source = _find_runtime(
+                _extract_pinned_python_archive(archive, work / "python-install"),
+                spec,
+            )
+            runtime_copy = work / "runtime"
+            _materialize_runtime_links(runtime_source, spec)
+            _copy_tree(runtime_source, runtime_copy, spec)
+            runtime_python = _runtime_python(runtime_copy, spec)
+            venv_source = work / "venv"
+            _run_uv(
+                uv,
+                [
+                    "venv",
+                    venv_source,
+                    "--python",
+                    runtime_python,
+                    "--relocatable",
+                    "--link-mode",
+                    "copy",
+                    "--no-project",
+                ],
+                verified_source,
+                cache,
+            )
+            _normalize_venv_python(venv_source, runtime_copy, spec)
+            _run_uv(
+                uv,
+                [
+                    "pip",
+                    "sync",
+                    "--python",
+                    _venv_python(venv_source, spec),
+                    "--require-hashes",
+                    "--only-binary",
+                    ":all:",
+                    "--link-mode",
+                    "copy",
+                    "--python-platform",
+                    target,
+                    requirements_path,
+                ],
+                verified_source,
+                cache,
+            )
+            assembled = work / "python-runtime"
+            assemble_environment(
+                assembled,
+                runtime_copy,
                 venv_source,
-                "--python",
-                runtime_python,
-                "--relocatable",
-                "--link-mode",
-                "copy",
-                "--no-project",
-            ],
-            verified_source,
-            cache,
-        )
-        _normalize_venv_python(venv_source, runtime_copy, spec)
-        _run_uv(
-            uv,
-            [
-                "pip",
-                "sync",
-                "--python",
-                _venv_python(venv_source, spec),
-                "--require-hashes",
-                "--only-binary",
-                ":all:",
-                "--link-mode",
-                "copy",
-                "--python-platform",
                 target,
-                requirements_path,
-            ],
-            verified_source,
-            cache,
-        )
-        assembled = work / "python-runtime"
-        assemble_environment(
-            assembled,
-            runtime_copy,
-            venv_source,
-            target,
-            release_digest=release_digest,
-            application_source=verified_source / APP_SOURCE_ROOT,
-            sealed_source_root=(
-                verified_source / ".github/scripts/sealed_python_sources"
-            ),
-        )
-        validate_environment(assembled, target, run_native_smoke=False)
-        shutil.move(os.fspath(assembled), os.fspath(output_root))
-    manifest = output_root / MANIFEST_FILENAME
-    digest = validate_environment(output_root, target, run_native_smoke=True)
-    print(f"{MANIFEST_SHA_ENV}={digest}")
-    return manifest
+                release_digest=release_digest,
+                application_source=verified_source / APP_SOURCE_ROOT,
+                sealed_source_root=(
+                    verified_source / ".github/scripts/sealed_python_sources"
+                ),
+                seal=False,
+            )
+            _publish_staged_environment(assembled, output_root, target)
+            published = True
+            _freeze_tree(output_root, spec)
+            validate_environment(output_root, target, run_native_smoke=False)
+        manifest = output_root / MANIFEST_FILENAME
+        digest = validate_environment(output_root, target, run_native_smoke=True)
+        print(f"{MANIFEST_SHA_ENV}={digest}")
+        return manifest
+    except (OSError, SealedEnvironmentError, subprocess.CalledProcessError):
+        if published:
+            _cleanup_published_output(output_root)
+        raise
 
 
 def _write_binding(path: Path, digest: str) -> None:

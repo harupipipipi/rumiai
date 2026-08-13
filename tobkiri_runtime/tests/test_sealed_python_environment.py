@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import errno
 import importlib.util
 import io
 import hashlib
@@ -172,6 +173,126 @@ def _fixture_sources(base: Path, target: str) -> tuple[Path, Path, Path]:
         application_source=application,
     )
     return runtime, venv, output
+
+
+def _writable_staged_fixture(base: Path, target: str) -> Path:
+    """Copy one valid sealed fixture into a writable publish stage."""
+    sealed = _fixture_sources(base / "fixture", target)[2]
+    staged = base / "staged-python-runtime"
+    BUILDER._copy_tree(sealed, staged, BUILDER.target_spec(target))
+    return staged
+
+
+def test_staged_environment_is_verified_before_final_seal(tmp_path: Path) -> None:
+    """Placement leaves a writable tree until destination verification finishes."""
+    target = "x86_64-unknown-linux-gnu"
+    staged = _writable_staged_fixture(tmp_path, target)
+    output = tmp_path / "published-python-runtime"
+
+    BUILDER._publish_staged_environment(staged, output, target)
+
+    assert not staged.exists()
+    assert output.stat().st_mode & 0o222
+    assert BUILDER.validate_environment(
+        output,
+        target,
+        run_native_smoke=False,
+        require_sealed=False,
+    )
+
+    BUILDER._freeze_tree(output, BUILDER.target_spec(target))
+    assert not output.stat().st_mode & 0o222
+    BUILDER.validate_environment(output, target, run_native_smoke=False)
+
+
+def test_staged_environment_supports_exdev_before_seal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An EXDEV fallback copies writable bytes, then publishes atomically."""
+    target = "x86_64-unknown-linux-gnu"
+    staged = _writable_staged_fixture(tmp_path, target)
+    output = tmp_path / "published-python-runtime"
+    original_replace = os.replace
+    calls = 0
+
+    def replace_with_exdev(source: Path, destination: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError(errno.EXDEV, "simulated cross-device rename")
+        original_replace(source, destination)
+
+    monkeypatch.setattr(BUILDER.os, "replace", replace_with_exdev)
+    BUILDER._publish_staged_environment(staged, output, target)
+
+    assert calls == 2
+    assert staged.is_dir()
+    assert staged.stat().st_mode & 0o222
+    assert output.stat().st_mode & 0o222
+    BUILDER.validate_environment(
+        output,
+        target,
+        run_native_smoke=False,
+        require_sealed=False,
+    )
+
+
+@pytest.mark.parametrize("destination_kind", ("directory", "symlink"))
+def test_staged_environment_rejects_preexisting_destination(
+    tmp_path: Path,
+    destination_kind: str,
+) -> None:
+    """A preexisting directory or symlink is never replaced by the stage."""
+    target = "x86_64-unknown-linux-gnu"
+    staged = _writable_staged_fixture(tmp_path, target)
+    output = tmp_path / "published-python-runtime"
+    if destination_kind == "directory":
+        output.mkdir()
+        (output / "sentinel").write_text("untouched\n", encoding="utf-8")
+    else:
+        external = tmp_path / "external"
+        external.mkdir()
+        (external / "sentinel").write_text("untouched\n", encoding="utf-8")
+        output.symlink_to(external, target_is_directory=True)
+
+    with pytest.raises(
+        BUILDER.SealedEnvironmentError,
+        match="publish destination already exists",
+    ):
+        BUILDER._publish_staged_environment(staged, output, target)
+
+    assert staged.is_dir()
+    if destination_kind == "directory":
+        assert (output / "sentinel").read_text(encoding="utf-8") == "untouched\n"
+    else:
+        assert output.is_symlink()
+        assert (output / "sentinel").read_text(encoding="utf-8") == "untouched\n"
+
+
+def test_staged_environment_failure_cleans_published_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed destination verification removes only the newly published tree."""
+    target = "x86_64-unknown-linux-gnu"
+    staged = _writable_staged_fixture(tmp_path, target)
+    output = tmp_path / "published-python-runtime"
+
+    def reject_destination(root: Path, *_args: object, **_kwargs: object) -> str:
+        if Path(root) == output:
+            raise BUILDER.SealedEnvironmentError("simulated destination failure")
+        raise AssertionError(f"unexpected validation path: {root}")
+
+    monkeypatch.setattr(BUILDER, "validate_environment", reject_destination)
+    with pytest.raises(
+        BUILDER.SealedEnvironmentError,
+        match="simulated destination failure",
+    ):
+        BUILDER._publish_staged_environment(staged, output, target)
+
+    assert not output.exists()
+    assert not output.is_symlink()
 
 
 def test_rootless_packaging_binding_and_identity_safe_cleanup(
