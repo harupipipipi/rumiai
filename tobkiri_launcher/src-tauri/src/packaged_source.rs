@@ -1820,17 +1820,14 @@ fn verify_and_snapshot_against_manifest_with_hook(
         let owner_name = creation.owner_name.clone();
         #[cfg(unix)]
         let directory_identities = {
-            let root_identity = identity(&root_handle.metadata()?);
-            creation
-                .created_entries
-                .insert(String::new(), root_identity);
-            verify_snapshot_at(
-                &root_handle,
-                trusted_manifest,
-                None,
-                &creation.created_entries,
-            )?;
-            creation.created_entries.clone()
+            // Directory sealing updates directory timestamps.  Capture the
+            // anchored identities only after sealing so the stored snapshot
+            // describes the immutable state that verification will reopen.
+            let mut files = BTreeMap::new();
+            let mut directories = BTreeMap::new();
+            walk_snapshot_at(&root_handle, "", &mut files, &mut directories)?;
+            verify_snapshot_at(&root_handle, trusted_manifest, None, &directories)?;
+            directories
         };
         let snapshot = VerifiedSourceSnapshot {
             owner_identity: identity(&fs::symlink_metadata(&snapshot_owner)?),
@@ -2001,11 +1998,10 @@ mod tests {
         let fixture_root = tree.0.join("generator-fixture");
         let source_artifact = fixture_root.join("verified-release/Tobkiri.AppImage");
         fs::create_dir_all(source_artifact.parent().unwrap()).unwrap();
-        fs::write(
-            &source_artifact,
-            b"\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00>\x00fixture",
-        )
-        .unwrap();
+        let artifact = [
+            0x7f, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x3e, 0,
+        ];
+        fs::write(&source_artifact, artifact).unwrap();
         let bundle_root = fixture_root.join("defaultspack/v4");
         copy_fixture_tree(
             &runtime_root.join("ecosystem/defaultspack/v4"),

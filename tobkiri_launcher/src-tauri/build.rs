@@ -2645,6 +2645,9 @@ fn verify_catalog_source_manifest_digests(
         .get("source_manifest_digests")
         .and_then(serde_json::Value::as_object)
         .ok_or_else(|| invalid_release("catalog source_manifest_digests are missing"))?;
+    if actual.is_empty() {
+        return Err(invalid_release("catalog selected Pack set is empty"));
+    }
     let expected = selected_source_manifest_digests_from_lock(lock_path, actual)?;
     if actual != &expected {
         return Err(invalid_release(
@@ -4991,13 +4994,23 @@ mod tests {
             )
             .expect_err("generated hardlink must be rejected");
 
-            let special = gen_root.join("device-like");
+            // Keep the AF_UNIX fixture below macOS SUN_LEN even when the
+            // checkout itself has a long temporary path.  The generated-root
+            // allowlist contract, not this pathname length limit, is under
+            // test.  This short root is still an explicit test-owned
+            // directory; it is removed immediately after verification.
+            let special_repository_root =
+                PathBuf::from("/tmp").join(format!("tobkiri-generated-{}", std::process::id()));
+            let special_root = special_repository_root.join("pack-shell/target");
+            fs::create_dir_all(&special_root).unwrap();
+            let special = special_root.join("device-like");
             let _listener = UnixListener::bind(&special).unwrap();
             verify_allowed_generated_untracked(
-                tree.path(),
-                "tobkiri_launcher/src-tauri/gen/app/device-like",
+                &special_repository_root,
+                "pack-shell/target/device-like",
             )
             .expect_err("generated special file must be rejected");
+            fs::remove_dir_all(&special_repository_root).unwrap();
 
             let modules = tree.path().join("tobkiri_launcher/frontend/node_modules");
             let package_bin = modules.join("package/bin");
@@ -5064,14 +5077,27 @@ mod tests {
             )
             .expect_err("non-normalized generated path must be rejected");
 
-            let module_socket = modules.join("package/bin/socket");
-            let _module_listener = UnixListener::bind(&module_socket).unwrap();
-            symlink("../package/bin/socket", modules.join(".bin/socket")).unwrap();
+            // Use a short explicit test root for the AF_UNIX fixture.  The
+            // actual node_modules contract is still checked by the verifier,
+            // while macOS SUN_LEN must not depend on the long temp checkout
+            // path used by the other symlink cases.
+            let short_repository_root =
+                PathBuf::from("/tmp").join(format!("tobkiri-node-modules-{}", std::process::id()));
+            let short_modules =
+                short_repository_root.join("tobkiri_launcher/frontend/node_modules");
+            let short_package_bin = short_modules.join("package/bin");
+            fs::create_dir_all(&short_package_bin).unwrap();
+            fs::create_dir_all(short_modules.join(".bin")).unwrap();
+            let module_socket = short_package_bin.join("socket");
+            let module_listener = UnixListener::bind(&module_socket).unwrap();
+            symlink("../package/bin/socket", short_modules.join(".bin/socket")).unwrap();
             verify_allowed_generated_untracked(
-                tree.path(),
+                &short_repository_root,
                 "tobkiri_launcher/frontend/node_modules/.bin/socket",
             )
             .expect_err("npm symlink to a special file must be rejected");
+            drop(module_listener);
+            fs::remove_dir_all(&short_repository_root).unwrap();
 
             let outside = tree.path().join("outside-hardlink");
             fs::write(&outside, b"attacker helper").unwrap();
@@ -5792,6 +5818,11 @@ mod tests {
         let tree = TestTree::new("stage-verify");
         let (release_root, staged_root, catalog) = release_fixture(&tree);
 
+        let _tauri_config = EnvironmentGuard::set_value(
+            "TAURI_CONFIG",
+            r#"{"identifier":"io.tobkiri.shell.tauri","mainBinaryName":"tobkiri-shell"}"#,
+        );
+        let _target = EnvironmentGuard::set_value("TARGET", "x86_64-unknown-linux-gnu");
         let _release_root =
             EnvironmentGuard::set_path(PRESENTATION_RELEASE_ROOT_ENV, &release_root);
         let source_catalog = stage_presentation_release(&staged_root)
@@ -5920,7 +5951,15 @@ mod tests {
                 &release_root.join("ecosystem/defaultspack/v4/bundle.lock.json"),
             )
             .expect_err("Pack binding mismatch must fail closed");
-            assert!(error.to_string().contains("Pack set"));
+            let expected = match mutation {
+                "stale" | "wrong" => {
+                    "catalog selected Pack set differs from the exact Defaults lock Pack entries"
+                }
+                "missing" => "catalog selected Pack set is empty",
+                "extra" => "Defaults lock is missing a selected catalog Pack",
+                _ => unreachable!(),
+            };
+            assert!(error.to_string().contains(expected));
         }
     }
 
@@ -6201,50 +6240,69 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn packager_output_is_accepted_by_complete_build_staging() {
-        let tree = TestTree::new("packager-build-staging");
+    fn core_packager_output_uses_verified_runtime_and_stages_bundle() {
+        let _environment = environment_lock();
+        let tree = TestTree::new("core-packager-staging");
         let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .and_then(Path::parent)
             .expect("Launcher should live under the repository")
             .canonicalize()
             .expect("repository root should resolve");
-        let package_root = tree.path().join("package-input");
-        fs::create_dir_all(&package_root).expect("package fixture root should be creatable");
-        let package_test = repository_root
-            .join("tobkiri_launcher/scripts/tests/test_package_presentation_artifact.py");
-        let python = packaging_toolchain::verified_tool("python")
-            .expect("formal packaging Python binding should be available");
-        let status = python
-            .command()
-            .expect("verified Python command should be constructible")
-            .args([
-                "-c",
-                "import runpy,sys; from pathlib import Path; runpy.run_path(sys.argv[1])['_package'](Path(sys.argv[2]))",
-            ])
-            .arg(&package_test)
-            .arg(&package_root)
-            .current_dir(&repository_root)
-            .expect("repository cwd should be anchorable")
-            .status()
-            .expect("official packager fixture should run");
-        assert!(status.success(), "official packager fixture should succeed");
-
-        let staged_root = tree.path().join("staged");
+        let runtime_root = repository_root.join(APP_SOURCE_DIR);
+        let trusted_manifest =
+            fs::read(runtime_root.join("packaged_defaultspack_source_manifest.v1.json"))
+                .expect("committed source manifest should be readable");
+        let bundle_root = tree.path().join("staged/ecosystem/defaultspack/v4");
         copy_dir_recursive(
-            &repository_root.join("tobkiri_runtime/ecosystem/defaultspack/v4"),
-            &staged_root.join("ecosystem/defaultspack/v4"),
+            &runtime_root.join("ecosystem/defaultspack/v4"),
+            &bundle_root,
         )
         .expect("canonical Defaults bundle should stage");
-        fs::create_dir_all(staged_root.join("bundled"))
-            .expect("staged bundled directory should be creatable");
-
-        let staged_catalog =
-            stage_presentation_release_at(&staged_root, &package_root.join("release"))
-                .expect("build staging must accept the packager's exact output")
-                .expect("packager output should return its staged catalog");
-        verify_presentation_release_at(&staged_root, &staged_catalog)
-            .expect("complete staged output should remain verified");
+        let source_artifact = tree.path().join("source/Tobkiri.AppImage");
+        fs::create_dir_all(source_artifact.parent().expect("artifact has a parent"))
+            .expect("artifact fixture root should be creatable");
+        let artifact = [
+            0x7f, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x3e, 0,
+        ];
+        fs::write(&source_artifact, artifact).expect("artifact fixture should be writable");
+        let artifact_root = tree
+            .path()
+            .join("staged/ecosystem/defaultspack/platform-artifacts");
+        let source_revision = "0123456789abcdef0123456789abcdef01234567";
+        let source_tree = "89abcdef0123456789abcdef0123456789abcdef";
+        let snapshot_parent = tree.path().join("snapshots");
+        let projection = DefaultsPackagingProjection {
+            source_artifact: &source_artifact,
+            bundle_root: &bundle_root,
+            artifact_root: &artifact_root,
+            relative_path: "Tobkiri.AppImage",
+            entrypoint: "Tobkiri.AppImage",
+            platform: "linux",
+            architecture: "x86_64",
+            bundle_identity: "io.tobkiri.shell.tauri",
+        };
+        let output = run_formal_defaults_packaging(
+            DefaultsPackagingRequest {
+                repository_root: &repository_root,
+                snapshot_parent: &snapshot_parent,
+                trusted_source_manifest: &trusted_manifest,
+                source_revision,
+                source_tree,
+                projection,
+            },
+            |output| Ok(output),
+        )
+        .expect("core packager fixture should produce a verified bundle");
+        assert_eq!(
+            output.default_profile_sha256,
+            byte_digest(&fs::read(bundle_root.join("defaults.profile.v4.json")).unwrap())
+        );
+        assert_eq!(
+            output.defaultspack_lock_sha256,
+            byte_digest(&fs::read(bundle_root.join("bundle.lock.json")).unwrap())
+        );
+        assert!(artifact_root.join("Tobkiri.AppImage").is_file());
     }
 
     #[test]
