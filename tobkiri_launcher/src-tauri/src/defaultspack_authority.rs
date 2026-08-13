@@ -726,6 +726,9 @@ mod tests {
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     const RELOCATION_LAYOUTS: &[(&str, &[&str])] = &[
         (
             "macos-bundle",
