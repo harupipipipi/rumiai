@@ -178,6 +178,18 @@ def _fixture_sources(base: Path, target: str) -> tuple[Path, Path, Path]:
     return runtime, venv, output
 
 
+def _fixture_sys_path(output: Path, *, include_missing_zip: bool = False) -> list[str]:
+    """Return the exact Unix import roots emitted by isolated CPython."""
+    entries = [
+        output / "runtime/lib/python3.13",
+        output / "runtime/lib/python3.13/lib-dynload",
+        output / "venv/lib/python3.13/site-packages",
+    ]
+    if include_missing_zip:
+        entries.insert(0, output / "runtime/lib/python313.zip")
+    return [str(path) for path in entries]
+
+
 def _writable_staged_fixture(base: Path, target: str) -> Path:
     """Copy one valid sealed fixture into a writable publish stage."""
     sealed = _fixture_sources(base / "fixture", target)[2]
@@ -1309,10 +1321,7 @@ def test_bootstrap_wire_dispatches_all_roles_and_publishes_attestation(
     clean_env = _clean_sealed_test_environment()
     os.environ.clear()
     os.environ.update(clean_env)
-    sys.path = [
-        str(output / "venv/lib/python3.13/site-packages"),
-        str(output / "runtime/lib/python3.13"),
-    ]
+    sys.path = _fixture_sys_path(output, include_missing_zip=True)
     sys.prefix = str(output / "venv")
     sys.base_prefix = str(output / "runtime")
     sys.executable = str(output / "venv/bin/python3")
@@ -1328,10 +1337,7 @@ def test_bootstrap_wire_dispatches_all_roles_and_publishes_attestation(
         sys.path.insert(0, str(source_root))
         import tobkiri_sealed.bootstrap as bootstrap
 
-        sys.path = [
-            str(output / "venv/lib/python3.13/site-packages"),
-            str(output / "runtime/lib/python3.13"),
-        ]
+        sys.path = _fixture_sys_path(output, include_missing_zip=True)
 
         for role, role_args, expected_return in (
             ("typed", ("--health",), 7),
@@ -1402,10 +1408,7 @@ def test_bootstrap_wire_dispatches_all_roles_and_publishes_attestation(
                             *role_args,
                         ]
                     )
-            sys.path = [
-                str(output / "venv/lib/python3.13/site-packages"),
-                str(output / "runtime/lib/python3.13"),
-            ]
+            sys.path = _fixture_sys_path(output, include_missing_zip=True)
             sys.stdin = old_stdin
             sys.stdout = old_stdout
         records = [json.loads(line) for line in marker.read_text().splitlines()]
@@ -1427,6 +1430,127 @@ def test_bootstrap_wire_dispatches_all_roles_and_publishes_attestation(
         os.environ.update(old_env)
         sys.modules.pop("tobkiri_sealed.bootstrap", None)
         sys.modules.pop("tobkiri_sealed", None)
+
+
+def test_bootstrap_sys_path_is_exact_manifest_bound_import_set(tmp_path: Path) -> None:
+    """Only fixed inventory roots enter the attested isolated import set."""
+    output = _fixture_sources(tmp_path / "sealed", "x86_64-unknown-linux-gnu")[2]
+    document = json.loads(
+        (output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8")
+    )
+    source_root = ROOT / ".github" / "scripts" / "sealed_python_sources"
+    old_path = sys.path[:]
+    old_package = sys.modules.pop("tobkiri_sealed", None)
+    old_bootstrap = sys.modules.pop("tobkiri_sealed.bootstrap", None)
+    try:
+        sys.path.insert(0, str(source_root))
+        import tobkiri_sealed.bootstrap as bootstrap
+
+        expected = _fixture_sys_path(output)
+        sys.path = _fixture_sys_path(output, include_missing_zip=True)
+        assert bootstrap._normalize_sys_path(
+            output,
+            document,
+            include_application=False,
+        ) == expected
+        assert sys.path == expected
+
+        sys.path = [str(output / "app"), *expected]
+        assert set(
+            bootstrap._normalize_sys_path(
+                output,
+                document,
+                include_application=True,
+            )
+        ) == set(sys.path)
+
+        external = tmp_path / "external"
+        external.mkdir()
+        external_zip = external / "python313.zip"
+        external_zip.write_bytes(b"external")
+        user_site = external / "user-site/lib/python3.13/site-packages"
+        user_site.mkdir(parents=True)
+        lookalike = tmp_path / (output.name + "-lookalike")
+        lookalike.mkdir()
+        cwd = Path.cwd()
+        for injected in (
+            str(external_zip),
+            str(output / "runtime/lib"),
+            str(output / "lease.v1"),
+            str(lookalike),
+            "",
+            ".",
+            str(cwd),
+            str(user_site),
+        ):
+            sys.path = [*expected, injected]
+            with pytest.raises(bootstrap.SealedBootstrapError):
+                bootstrap._normalize_sys_path(
+                    output,
+                    document,
+                    include_application=False,
+                )
+
+        sys.path = [*expected, expected[0]]
+        with pytest.raises(bootstrap.SealedBootstrapError, match="duplicate"):
+            bootstrap._normalize_sys_path(
+                output,
+                document,
+                include_application=False,
+            )
+
+        manifested = tmp_path / "manifested-zip"
+        shutil.copytree(output, manifested)
+        for directory in (manifested, manifested / "runtime", manifested / "runtime/lib"):
+            _make_test_mutable(directory)
+        zip_path = manifested / "runtime/lib/python313.zip"
+        zip_path.write_bytes(b"PK\x05\x06" + b"\0" * 18)
+        zip_path.chmod(0o444)
+        (manifested / "runtime/lib").chmod(0o555)
+        (manifested / "runtime").chmod(0o555)
+        manifested.chmod(0o555)
+        manifested_document = json.loads(json.dumps(document))
+        manifested_document["files"].append(
+            {
+                "path": "runtime/lib/python313.zip",
+                "size": zip_path.stat().st_size,
+                "sha256": hashlib.sha256(zip_path.read_bytes()).hexdigest(),
+                "executable": False,
+            }
+        )
+        manifested_document["files"].sort(key=lambda entry: entry["path"])
+        manifested_expected = [
+            str(zip_path),
+            *_fixture_sys_path(manifested),
+        ]
+        sys.path = manifested_expected[:]
+        assert bootstrap._normalize_sys_path(
+            manifested,
+            manifested_document,
+            include_application=False,
+        ) == manifested_expected
+
+        for directory in (output, output / "runtime", output / "runtime/lib"):
+            _make_test_mutable(directory)
+        (output / "runtime/lib/python313.zip").symlink_to(external_zip)
+        (output / "runtime/lib").chmod(0o555)
+        (output / "runtime").chmod(0o555)
+        output.chmod(0o555)
+        sys.path = _fixture_sys_path(output, include_missing_zip=True)
+        with pytest.raises(bootstrap.SealedBootstrapError):
+            bootstrap._normalize_sys_path(
+                output,
+                document,
+                include_application=False,
+            )
+    finally:
+        sys.path = old_path
+        sys.modules.pop("tobkiri_sealed.bootstrap", None)
+        sys.modules.pop("tobkiri_sealed", None)
+        if old_package is not None:
+            sys.modules["tobkiri_sealed"] = old_package
+        if old_bootstrap is not None:
+            sys.modules["tobkiri_sealed.bootstrap"] = old_bootstrap
 
 
 def test_bootstrap_rejects_path_environment_and_external_import_metadata(
@@ -1466,10 +1590,7 @@ def test_bootstrap_rejects_path_environment_and_external_import_metadata(
         "LD_LIBRARY_PATH",
     )
     try:
-        sys.path = [
-            str(output / "venv/lib/python3.13/site-packages"),
-            str(output / "runtime/lib/python3.13"),
-        ]
+        sys.path = _fixture_sys_path(output)
         sys.prefix = str(output / "venv")
         sys.base_prefix = str(output / "runtime")
         sys.executable = str(output / "venv/bin/python3")
@@ -1500,11 +1621,7 @@ def test_bootstrap_rejects_path_environment_and_external_import_metadata(
             assert not attestation.exists()
             monkeypatch.delenv(key, raising=False)
 
-        sys.path = [
-            str(output / "venv/lib/python3.13/site-packages"),
-            str(output / "runtime/lib/python3.13"),
-            str(external),
-        ]
+        sys.path = [*_fixture_sys_path(output), str(external)]
         monkeypatch.chdir(external)
         attestation = attestation_dir / f"startup-{nonce}.json"
         with pytest.raises(bootstrap.SealedBootstrapError, match="escaped"):
@@ -1567,18 +1684,27 @@ attestation = Path(sys.argv[3])
 if os.name == "nt":
     site_packages = output / "venv/Lib/site-packages"
     stdlib = output / "runtime/Lib"
+    dynload = output / "runtime/DLLs"
+    runtime_zip = output / "runtime/python313.zip"
+    runtime_root = output / "runtime"
     executable = output / "venv/Scripts/python.exe"
 else:
     import fcntl
     site_packages = output / "venv/lib/python3.13/site-packages"
     stdlib = output / "runtime/lib/python3.13"
+    dynload = stdlib / "lib-dynload"
+    runtime_zip = output / "runtime/lib/python313.zip"
+    runtime_root = None
     executable = output / "venv/bin/python3"
 sys.path.insert(0, str(source_root))
 import tobkiri_sealed.bootstrap as bootstrap
 
 sealed_path = [
+    str(runtime_zip),
+    *([str(runtime_root)] if runtime_root is not None else []),
     str(site_packages),
     str(stdlib),
+    str(dynload),
 ]
 if os.environ.get("INJECT_EXTERNAL_PATH"):
     sys.path = [os.environ["INJECT_EXTERNAL_PATH"], *sealed_path]

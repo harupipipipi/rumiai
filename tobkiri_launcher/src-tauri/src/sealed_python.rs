@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
-use std::io::Read;
+use std::io::{self, Read};
 use std::ops::{Deref, DerefMut};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -1784,16 +1784,82 @@ fn validate_attestation(
     {
         bail!("[PYTHON_SEALED_ATTESTATION_INVALID] startup identity mismatch");
     }
-    if value.sys_path.is_empty()
-        || value.sys_path.iter().any(|path| {
-            fs::canonicalize(path)
-                .map(|path| !path.starts_with(&root))
-                .unwrap_or(true)
-        })
-    {
+    let expected_sys_path = expected_attested_sys_path(verified)?;
+    let mut actual_sys_path = HashSet::new();
+    for path in &value.sys_path {
+        let Ok(path) = fs::canonicalize(path) else {
+            bail!("[PYTHON_SEALED_ATTESTATION_INVALID] sys.path identity is invalid");
+        };
+        if !actual_sys_path.insert(path) {
+            bail!("[PYTHON_SEALED_ATTESTATION_INVALID] sys.path identity is invalid");
+        }
+    }
+    if actual_sys_path != expected_sys_path {
         bail!("[PYTHON_SEALED_ATTESTATION_INVALID] sys.path escaped sealed environment");
     }
     Ok(())
+}
+
+fn expected_attested_sys_path(verified: &VerifiedEnvironment) -> Result<HashSet<PathBuf>> {
+    let mut version = verified.manifest.python_version.split('.');
+    let major = version.next().unwrap_or_default();
+    let minor = version.next().unwrap_or_default();
+    if major.is_empty() || minor.is_empty() {
+        bail!("[PYTHON_SEALED_ATTESTATION_INVALID] Python version is invalid");
+    }
+    let (zip, directories) = if cfg!(windows) {
+        (
+            format!("runtime/python{major}{minor}.zip"),
+            vec![
+                "runtime".to_string(),
+                "runtime/Lib".to_string(),
+                "runtime/DLLs".to_string(),
+                "venv/Lib/site-packages".to_string(),
+                "app".to_string(),
+            ],
+        )
+    } else {
+        (
+            format!("runtime/lib/python{major}{minor}.zip"),
+            vec![
+                format!("runtime/lib/python{major}.{minor}"),
+                format!("runtime/lib/python{major}.{minor}/lib-dynload"),
+                format!("venv/lib/python{major}.{minor}/site-packages"),
+                "app".to_string(),
+            ],
+        )
+    };
+    let file_paths = verified
+        .manifest
+        .files
+        .iter()
+        .map(|entry| entry.path.as_str())
+        .collect::<HashSet<_>>();
+    let mut directory_paths = HashSet::new();
+    for entry in &verified.manifest.files {
+        let mut parent = Path::new(&entry.path).parent();
+        while let Some(path) = parent {
+            if path.as_os_str().is_empty() {
+                break;
+            }
+            directory_paths.insert(path.to_string_lossy().into_owned());
+            parent = path.parent();
+        }
+    }
+    if directories
+        .iter()
+        .any(|relative| !directory_paths.contains(relative))
+    {
+        bail!("[PYTHON_SEALED_ATTESTATION_INVALID] manifest omits an import root");
+    }
+    let mut expected = directories
+        .into_iter()
+        .map(|relative| fs::canonicalize(verified.root.join(relative)))
+        .collect::<io::Result<HashSet<_>>>()?;
+    if file_paths.contains(zip.as_str()) {
+        expected.insert(fs::canonicalize(verified.root.join(zip))?);
+    }
+    Ok(expected)
 }
 
 /// Prove that the bootstrap holds the environment lease before the child is
@@ -2771,9 +2837,26 @@ mod tests {
 
     #[test]
     fn attestation_binds_role_prefixes_paths_sentinels_and_digest() {
-        let (root, manifest) = materialized_environment();
-        fs::create_dir_all(root.join("runtime")).unwrap();
-        fs::create_dir_all(root.join("venv/lib")).unwrap();
+        let (root, mut manifest) = materialized_environment();
+        let import_files = [
+            "runtime/lib/python3.13/os.py",
+            "runtime/lib/python3.13/lib-dynload/_ssl.so",
+            "venv/lib/python3.13/site-packages/fixture.py",
+        ];
+        for relative in import_files {
+            let path = root.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, b"x").unwrap();
+            manifest.files.push(SealedFile {
+                path: relative.into(),
+                size: 1,
+                sha256: sha256_bytes(b"x"),
+                executable: false,
+            });
+        }
+        manifest
+            .files
+            .sort_by(|left, right| left.path.cmp(&right.path));
         let verified = VerifiedEnvironment {
             manifest_path: root.join(MANIFEST_FILENAME),
             _root_lease: open_directory(&root).unwrap(),
@@ -2801,16 +2884,31 @@ mod tests {
                 .unwrap()
                 .to_string_lossy()
                 .into_owned(),
-            sys_path: vec![fs::canonicalize(root.join("venv/lib"))
-                .unwrap()
-                .to_string_lossy()
-                .into_owned()],
+            sys_path: [
+                "app",
+                "runtime/lib/python3.13",
+                "runtime/lib/python3.13/lib-dynload",
+                "venv/lib/python3.13/site-packages",
+            ]
+            .into_iter()
+            .map(|relative| {
+                fs::canonicalize(root.join(relative))
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect(),
             stdlib_sha256: manifest.sentinels.stdlib_sha256.clone(),
             site_packages_sha256: manifest.sentinels.site_packages_sha256.clone(),
             native_sha256: manifest.sentinels.native_sha256.clone(),
             lifetime_lease: true,
         };
         validate_attestation(&attestation, "nonce", PythonRole::Kernel, &verified).unwrap();
+        attestation.sys_path.push(attestation.sys_path[0].clone());
+        assert!(
+            validate_attestation(&attestation, "nonce", PythonRole::Kernel, &verified).is_err()
+        );
+        attestation.sys_path.pop();
         attestation.environment_digest = digest('f');
         assert!(
             validate_attestation(&attestation, "nonce", PythonRole::Kernel, &verified).is_err()

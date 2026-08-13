@@ -46,8 +46,11 @@
     },
     "sys_path": {
       "type": "array",
+      "minItems": 4,
+      "uniqueItems": true,
       "items": {
-        "type": "string"
+        "type": "string",
+        "minLength": 1
       }
     },
     "stdlib_sha256": {
@@ -68,5 +71,6 @@
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     }
-  }
+  },
+  "$comment": "sys_path is the exact manifest-bound fixed import-root set: application root, runtime stdlib and dynload roots, venv site-packages, plus the runtime pythonXY.zip only when that regular file is inventoried. Relative, empty, duplicate, user-site, cwd, external, linked, and unmanifested entries are forbidden."
 }

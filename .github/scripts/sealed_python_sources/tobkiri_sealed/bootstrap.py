@@ -585,8 +585,58 @@ def _publish_attestation(path: Path, evidence: dict[str, Any]) -> None:
         raise SealedBootstrapError("published attestation permissions are not private")
 
 
+def _sys_path_contract(
+    root: Path,
+    document: dict[str, Any],
+    *,
+    include_application: bool,
+) -> tuple[list[str], str | None]:
+    """Return exact manifest-bound import roots and the optional zip spelling."""
+    major, minor, *_ = str(document["python_version"]).split(".")
+    compact = f"{major}{minor}"
+    if document["platform"] == "windows":
+        zip_relative = f"runtime/python{compact}.zip"
+        directories = (
+            "runtime",
+            "runtime/Lib",
+            "runtime/DLLs",
+            "venv/Lib/site-packages",
+        )
+    else:
+        zip_relative = f"runtime/lib/python{compact}.zip"
+        directories = (
+            f"runtime/lib/python{major}.{minor}",
+            f"runtime/lib/python{major}.{minor}/lib-dynload",
+            f"venv/lib/python{major}.{minor}/site-packages",
+        )
+    if include_application:
+        directories = (*directories, "app")
+
+    manifest_files = {str(entry["path"]) for entry in document["files"]}
+    manifest_directories = set(_expected_directories(document["files"]))
+    if any(relative not in manifest_directories for relative in directories):
+        raise SealedBootstrapError("sealed manifest omits a required import root")
+
+    expected: list[str] = []
+    zip_is_manifested = zip_relative in manifest_files
+    if zip_is_manifested:
+        zip_path = root / zip_relative
+        zip_metadata = zip_path.lstat()
+        if (
+            zip_path.is_symlink()
+            or _is_reparse_point(zip_metadata)
+            or not stat.S_ISREG(zip_metadata.st_mode)
+            or zip_metadata.st_nlink != 1
+            or zip_metadata.st_mode & 0o222
+        ):
+            raise SealedBootstrapError("sealed runtime zip identity is invalid")
+        expected.append(str(zip_path.resolve(strict=True)))
+    expected.extend(str((root / relative).resolve(strict=True)) for relative in directories)
+    return expected, None if zip_is_manifested else str(root / zip_relative)
+
+
 def _canonical_sys_path_entry(root: Path, value: object) -> str:
-    """Normalize one import path and require it to remain in the snapshot."""
+    """Normalize one import path and require a direct path inside the snapshot."""
     if not isinstance(value, (str, os.PathLike)) or not os.fspath(value):
         raise SealedBootstrapError("isolated Python sys.path contains an empty entry")
     candidate = Path(os.fspath(value))
@@ -599,14 +649,38 @@ def _canonical_sys_path_entry(root: Path, value: object) -> str:
         raise SealedBootstrapError(
             f"isolated Python sys.path escaped the sealed root: {value}"
         ) from exc
+    if candidate != canonical or candidate.is_symlink():
+        raise SealedBootstrapError("isolated Python sys.path contains a linked entry")
     return str(canonical)
 
 
-def _normalize_sys_path(root: Path) -> list[str]:
-    """Canonicalize import roots before the startup attestation is published."""
-    snapshot = [_canonical_sys_path_entry(root, item) for item in sys.path]
-    if not snapshot:
-        raise SealedBootstrapError("isolated Python sys.path is empty")
+def _normalize_sys_path(
+    root: Path,
+    document: dict[str, Any],
+    *,
+    include_application: bool,
+) -> list[str]:
+    """Require exactly the manifest-bound import roots in their isolated order."""
+    expected, absent_zip = _sys_path_contract(
+        root,
+        document,
+        include_application=include_application,
+    )
+    snapshot: list[str] = []
+    for item in sys.path:
+        if (
+            absent_zip is not None
+            and isinstance(item, (str, os.PathLike))
+            and os.fspath(item) == absent_zip
+            and not Path(absent_zip).exists()
+            and not Path(absent_zip).is_symlink()
+        ):
+            continue
+        snapshot.append(_canonical_sys_path_entry(root, item))
+    if len(snapshot) != len(set(snapshot)):
+        raise SealedBootstrapError("isolated Python sys.path contains a duplicate entry")
+    if set(snapshot) != set(expected):
+        raise SealedBootstrapError("isolated Python sys.path differs from sealed manifest")
     sys.path[:] = snapshot
     return snapshot
 
@@ -717,10 +791,19 @@ def _reject_launch_environment_injection() -> None:
         )
 
 
-def _validate_runtime_state(root: Path) -> list[str]:
+def _validate_runtime_state(
+    root: Path,
+    document: dict[str, Any],
+    *,
+    include_application: bool,
+) -> list[str]:
     """Validate prefixes, native import roots, and canonical sys.path."""
     _validate_python_identity(root)
-    return _normalize_sys_path(root)
+    return _normalize_sys_path(
+        root,
+        document,
+        include_application=include_application,
+    )
 
 
 def _validate_post_dispatch_state(
@@ -882,11 +965,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     with _LifetimeLease(root / LEASE_NAME):
         records = _verify_tree(root, manifest)
         sentinels = _sentinels_match(root, manifest, records)
-        _validate_runtime_state(root)
+        _validate_runtime_state(root, manifest, include_application=False)
         scope = _new_dispatch_scope(root, manifest, args.role)
         role_module, target = _load_role(root, args.role)
         role_main = _prepare_role(role_module, scope)
-        sys_path = _validate_runtime_state(root)
+        sys_path = _validate_runtime_state(root, manifest, include_application=True)
         sealed_sys_path = _SealedSysPath(root, sys_path)
         sys.path = sealed_sys_path
         evidence = _attestation(
