@@ -6,9 +6,33 @@ import React from 'react';
 import {renderToString} from 'react-dom/server';
 import {MemoryRouter, Route, Routes} from 'react-router';
 import {DefaultsReview} from './DefaultsReview';
+import type {DefaultsSetupState} from '@/src/lib/defaultsSetup';
 
 const setupSource = readFileSync(resolve(import.meta.dirname, 'Setup.tsx'), 'utf8');
 const appSource = readFileSync(resolve(import.meta.dirname, '..', 'App.tsx'), 'utf8');
+
+const reviewSetup = {
+  state: 'review_required',
+  recommended_default_profile: {
+    name: 'Defaults Profile',
+    base_pack: 'defaults-basepack',
+    shell: {provider_id: 'shell.tauri.default'},
+    conversation_provider: 'conversation.turn.complete',
+    packs: [
+      {pack_id: 'defaultspack', display_name: 'Defaults Pack'},
+      {pack_id: 'conversation', display_name: 'Conversation'},
+      {pack_id: 'workspace', display_name: 'Workspace'},
+    ],
+  },
+  required_transaction: [
+    'catalog.verify',
+    'profile.resolve',
+    'authority.snapshot',
+    'activation.prepare',
+    'activation.commit',
+    'runtime.capture',
+  ],
+} as unknown as DefaultsSetupState;
 
 test('the panel setup route renders the Defaults v4 review component', () => {
   const html = renderToString(
@@ -27,6 +51,28 @@ test('the panel setup route renders the Defaults v4 review component', () => {
   assert.match(html, /Defaults v4 bootstrap/);
   assert.match(html, /Activate Defaults Profile/);
   assert.match(html, /Loading verified catalog/);
+});
+
+test('review groups the verified composition and makes the confirmation commitment legible', () => {
+  const html = renderToString(<DefaultsReview
+    setup={reviewSetup}
+    reviewed={false}
+    activating={false}
+    error={null}
+    onReviewedChange={() => undefined}
+    onActivate={() => undefined}
+  />);
+
+  assert.match(html, /aria-label="Defaults Profile composition"/);
+  assert.match(html, /Defaults Profile/);
+  assert.match(html, /aria-label="3 selected packs"/);
+  assert.match(html, /Host activation ceremony/);
+  assert.match(html, /6(?:<!-- -->)? verified steps/);
+  assert.match(html, /I have reviewed this exact Profile activation/);
+  assert.match(html, /Activation sends only the exact Host-issued confirmation above/);
+  assert.match(html, /aria-describedby="defaults-review-confirmation"/);
+  assert.match(html, /aria-describedby="defaults-activation-note"/);
+  assert.match(html, /disabled=""/);
 });
 
 test('the setup component exposes verification instead of replay after an ambiguous commit', () => {
