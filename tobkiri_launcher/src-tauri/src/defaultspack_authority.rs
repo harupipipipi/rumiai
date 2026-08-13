@@ -765,8 +765,8 @@ mod tests {
             .expect("formal packaging Git binding should be available")
     }
 
-    fn verified_python() -> PathBuf {
-        packaging_toolchain::verified_tool_executable("python")
+    fn verified_python() -> packaging_toolchain::VerifiedTool {
+        packaging_toolchain::verified_tool("python")
             .expect("formal packaging Python binding should be available")
     }
 
@@ -1142,7 +1142,8 @@ mod tests {
             format!("from pathlib import Path; Path({marker_literal}).write_text('fake-module')\n"),
         )
         .unwrap();
-        let unsafe_status = Command::new(&python)
+        let mut unsafe_command = python.command().unwrap();
+        let unsafe_status = unsafe_command
             .args([
                 "-B",
                 "-m",
@@ -1150,7 +1151,6 @@ mod tests {
                 "--help",
             ])
             .env("PYTHONPATH", &hostile)
-            .current_dir(&hostile)
             .status()
             .unwrap();
         assert!(unsafe_status.success());
@@ -1164,7 +1164,7 @@ mod tests {
             .join("tobkiri_runtime")
             .canonicalize()
             .unwrap();
-        let mut isolated = Command::new(&python);
+        let mut isolated = python.command().unwrap();
         isolated
             .env_clear()
             .args(["-I", "-B", "-c", ISOLATED_MODULE_CODE])
@@ -1202,7 +1202,7 @@ mod tests {
                 isolated.env(key, value);
             }
         }
-        let status = isolated.current_dir(&hostile).status().unwrap();
+        let status = isolated.status().unwrap();
         assert!(
             status.success(),
             "official packaged Profile generator failed"
@@ -1211,6 +1211,9 @@ mod tests {
             !marker.exists(),
             "isolated fixture launch executed hostile input"
         );
+        drop(unsafe_command);
+        drop(isolated);
+        drop(python);
         assert_clean_fixture_source(source_checkout);
         let bundle_root = config.app_dir.join("ecosystem/defaultspack/v4");
         let profile_raw = fs::read(bundle_root.join(PROFILE_PATH)).unwrap();

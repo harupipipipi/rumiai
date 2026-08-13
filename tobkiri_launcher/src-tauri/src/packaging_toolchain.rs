@@ -429,6 +429,10 @@ impl VerifiedTool {
             }
             let mut command = VerifiedCommand::new(self);
             self.configure_command(&mut command);
+            #[cfg(target_os = "macos")]
+            if self.python_installation.is_some() {
+                command.bind_python_runtime_cwd()?;
+            }
             return Ok(command);
         }
         #[cfg(not(unix))]
@@ -610,6 +614,20 @@ impl<'a> VerifiedCommand<'a> {
     pub fn current_dir_handle(&mut self, directory: &File) -> io::Result<&mut Self> {
         self.current_dir = None;
         self.current_dir_handle = Some(directory.try_clone()?);
+        Ok(self)
+    }
+
+    #[cfg(target_os = "macos")]
+    /// Anchor a sealed Python child in the root that owns its manifest.
+    pub fn bind_python_runtime_cwd(&mut self) -> io::Result<&mut Self> {
+        let installation = self
+            .tool
+            .python_installation
+            .as_ref()
+            .ok_or_else(|| invalid("verified command is not bound to sealed Python"))?;
+        installation.verify_unchanged()?;
+        self.current_dir = None;
+        self.current_dir_handle = Some(installation._root_handle.try_clone()?);
         Ok(self)
     }
 
@@ -2359,13 +2377,20 @@ mod tests {
     }
 
     #[test]
-    fn mismatch_and_tamper_fail_closed_after_exact_binding() {
+    fn mismatch_lookalike_and_tamper_fail_closed_after_binding() {
         let tool = TestFile::new("tamper", b"trusted fixture executable");
         let mismatch = verify_tool_binding("python", &tool.path, &"0".repeat(64))
             .expect_err("digest mismatch must fail");
         assert!(mismatch.to_string().contains("digest mismatch"));
 
         let expected = tool.digest();
+        #[cfg(target_os = "macos")]
+        {
+            let lookalike = verify_tool_binding("python", &tool.path, &expected)
+                .expect_err("a digest-matching path outside the sealed root must fail");
+            assert!(lookalike.to_string().contains("escapes its installation"));
+        }
+        #[cfg(not(target_os = "macos"))]
         assert_eq!(
             verify_tool_binding("python", &tool.path, &expected)
                 .expect("exact tool identity should pass"),
@@ -2459,13 +2484,20 @@ mod tests {
 
     #[test]
     fn bound_real_python_and_git_remain_executable() {
-        for (kind, argument) in [("python", "--version"), ("git", "--version")] {
-            let tool = verified_tool(kind).unwrap();
-            let output = tool.command().unwrap().arg(argument).output().unwrap();
-            assert!(
-                output.status.success(),
-                "sealed {kind} must remain compatible"
-            );
-        }
+        let python = verified_tool("python").unwrap();
+        let output = python
+            .command()
+            .unwrap()
+            .args(["-c", "import encodings,sys; print(sys.prefix)"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "sealed Python must import its relocated standard library"
+        );
+
+        let git = verified_tool("git").unwrap();
+        let output = git.command().unwrap().arg("--version").output().unwrap();
+        assert!(output.status.success(), "sealed Git must remain compatible");
     }
 }

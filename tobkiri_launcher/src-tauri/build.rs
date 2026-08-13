@@ -222,7 +222,7 @@ fn isolated_python_module_command<'a>(
     command
         .env_clear()
         .args(["-I", "-B", "-c", ISOLATED_MODULE_CODE])
-        .arg(".")
+        .arg(source.root())
         .arg(module)
         .env(
             "GIT_CONFIG_GLOBAL",
@@ -235,6 +235,10 @@ fn isolated_python_module_command<'a>(
         }
     }
     source.bind_command_cwd(&mut command)?;
+    #[cfg(target_os = "macos")]
+    // The sealed venv's relative `home` is resolved from its verified root;
+    // the source snapshot is passed as an absolute import root above.
+    command.bind_python_runtime_cwd()?;
     Ok(command)
 }
 
