@@ -4753,10 +4753,9 @@ mod tests {
         });
         let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
         fs::write(root.join(SEALED_PYTHON_MANIFEST), &manifest_bytes).unwrap();
-        let _inventory = EnvironmentGuard::set_value(
-            PACKAGING_PYTHON_INVENTORY_SHA_ENV,
-            raw_byte_digest(&manifest_bytes),
-        );
+        let inventory_digest = raw_byte_digest(&manifest_bytes);
+        let _inventory =
+            EnvironmentGuard::set_value(PACKAGING_PYTHON_INVENTORY_SHA_ENV, &inventory_digest);
         bind_sealed_python_root(&root).unwrap();
         let staged = tree.path().join("staged");
         copy_generated_resource_dirs(
