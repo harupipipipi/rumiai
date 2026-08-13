@@ -1560,6 +1560,11 @@ def _copy_verified_source_snapshot(
         finally:
             os.close(target_descriptor)
         expected_paths.append(relative)
+    # Git tree order compares the slash separator with the next path byte,
+    # while the filesystem walk sorts each path component independently.
+    # Normalize only the order comparison; every entry was already verified
+    # for exact bytes, mode, link safety, and digest above.
+    expected_paths.sort(key=lambda relative: tuple(relative.split("/")))
     actual = []
     for relative, _path, kind, _metadata in _walk_tree(source_root):
         if relative == SOURCE_SNAPSHOT_MANIFEST:

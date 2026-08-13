@@ -286,6 +286,12 @@ def test_committed_source_inventory_copies_exact_bytes_and_rejects_tamper(
     source = tmp_path / "source"
     source.mkdir(mode=0o500)
     payloads = {
+        "tobkiri_runtime/docs/managed-sandbox-runtime-implementation-plan.md": (
+            b"implementation plan\n"
+        ),
+        "tobkiri_runtime/docs/managed-sandbox-runtime/01-overview.md": (
+            b"overview\n"
+        ),
         "tobkiri_runtime/module.py": b"VALUE = 1\n",
         "tobkiri_runtime/packaged_defaultspack_source_manifest.v1.json": b"{}\n",
     }
@@ -304,7 +310,12 @@ def test_committed_source_inventory_copies_exact_bytes_and_rejects_tamper(
                 "executable": False,
             }
         )
-    manifest_digest = entries[1]["sha256"]
+    manifest_digest = next(
+        entry["sha256"]
+        for entry in entries
+        if entry["path"]
+        == "tobkiri_runtime/packaged_defaultspack_source_manifest.v1.json"
+    )
     document = {
         "schema": BUILDER.SOURCE_SNAPSHOT_SCHEMA,
         "source_commit": "a" * 40,
@@ -334,6 +345,23 @@ def test_committed_source_inventory_copies_exact_bytes_and_rejects_tamper(
     )
     assert (copied / "tobkiri_runtime/module.py").read_bytes() == b"VALUE = 1\n"
     source.chmod(0o700)
+    (source / "tobkiri_runtime").chmod(0o700)
+    extra = source / "tobkiri_runtime" / "unexpected.py"
+    extra.write_bytes(b"EXTRA = True\n")
+    extra.chmod(0o400)
+    (source / "tobkiri_runtime").chmod(0o500)
+    source.chmod(0o500)
+    with pytest.raises(
+        BUILDER.SealedEnvironmentError,
+        match="missing or extra files",
+    ):
+        BUILDER._copy_verified_source_snapshot(
+            source, tmp_path / "rejected-extra", inventory_digest, release_digest
+        )
+    source.chmod(0o700)
+    (source / "tobkiri_runtime").chmod(0o700)
+    extra.unlink()
+    (source / "tobkiri_runtime").chmod(0o500)
     module = source / "tobkiri_runtime/module.py"
     module.chmod(0o600)
     module.write_bytes(b"ATTACKER = True\n")
