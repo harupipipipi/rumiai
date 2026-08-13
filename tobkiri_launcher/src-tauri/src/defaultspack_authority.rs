@@ -1015,7 +1015,7 @@ mod tests {
             "source_commit": source_revision,
             "source_tree": fixture_source_tree(source_checkout),
             "source_clean": true,
-            "source_manifest_sha256": sha256(&manifest_bytes),
+            "source_manifest_sha256": format!("{:x}", Sha256::digest(&manifest_bytes)),
         });
         fs::write(&provenance_path, serde_json::to_vec(&provenance).unwrap()).unwrap();
         set_fixture_permissions(&provenance_path, 0o400);
