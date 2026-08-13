@@ -339,6 +339,29 @@ def test_pinned_python_archive_materializes_idle3_like_internal_links(
     assert directory_alias.resolve() == extracted / "lib"
 
 
+def test_pinned_python_archive_creates_implicit_parent_directories(
+    tmp_path: Path,
+) -> None:
+    """PBS archives may omit directory entries for the python tree."""
+    archive = tmp_path / "implicit-parents.tar.gz"
+    target, target_payload = _archive_member(
+        "python/bin/idle3.13",
+        payload=b"idle\n",
+    )
+    link, link_payload = _archive_member(
+        "python/bin/idle3",
+        member_type=tarfile.SYMTYPE,
+        linkname="idle3.13",
+    )
+    _write_archive(archive, ((target, target_payload), (link, link_payload)))
+
+    extracted = BUILDER._extract_pinned_python_archive(archive, tmp_path / "output")
+    assert (extracted / "bin").is_dir()
+    assert (extracted / "bin/idle3.13").read_bytes() == b"idle\n"
+    assert (extracted / "bin/idle3").read_bytes() == b"idle\n"
+    assert not (extracted / "bin/idle3").is_symlink()
+
+
 def _archive_member(
     name: str,
     *,
@@ -484,6 +507,36 @@ def test_pinned_python_archive_rejects_link_graph_attacks(
 @pytest.mark.parametrize(
     "members",
     (
+        (_archive_member("python2/bin/python3"),),
+        (_archive_member("other/bin/python3"),),
+        (
+            _archive_member(
+                "python",
+                member_type=tarfile.SYMTYPE,
+                linkname="python2",
+            ),
+        ),
+        (_archive_member("python", payload=b"not-a-directory\n"),),
+    ),
+)
+def test_pinned_python_archive_rejects_missing_or_invalid_root(
+    tmp_path: Path,
+    members: tuple[tuple[tarfile.TarInfo, bytes], ...],
+) -> None:
+    """Only python-rooted entries or a real python directory are accepted."""
+    archive = tmp_path / "invalid-root.tar.gz"
+    _write_archive(archive, members)
+
+    with pytest.raises(
+        BUILDER.SealedEnvironmentError,
+        match="(unsafe pinned|python directory)",
+    ):
+        BUILDER._extract_pinned_python_archive(archive, tmp_path / "output")
+
+
+@pytest.mark.parametrize(
+    "members",
+    (
         (
             _archive_member("python", member_type=tarfile.DIRTYPE),
             _archive_member("python/bin/python3"),
@@ -519,11 +572,10 @@ def test_pinned_python_archive_rejects_duplicate_and_prefix_collisions(
 def test_pinned_python_archive_rejects_destination_symlink(tmp_path: Path) -> None:
     """A pre-existing destination symlink is never followed by extraction."""
     archive = tmp_path / "valid.tar.gz"
-    root, root_payload = _archive_member("python", member_type=tarfile.DIRTYPE)
     executable, executable_payload = _archive_member("python/bin/python3")
     _write_archive(
         archive,
-        ((root, root_payload), (executable, executable_payload)),
+        ((executable, executable_payload),),
     )
     real_destination = tmp_path / "real-output"
     real_destination.mkdir()

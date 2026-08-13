@@ -1588,7 +1588,11 @@ def _extract_pinned_python_archive(archive: Path, destination: Path) -> Path:
                 entries.append((member, parts))
 
             root_member = names.get(("python",))
-            if root_member is None or not root_member.isdir():
+            if root_member is not None and not root_member.isdir():
+                raise SealedEnvironmentError(
+                    "pinned CPython archive must contain a python directory"
+                )
+            if root_member is None and not any(len(parts) > 1 for parts in names):
                 raise SealedEnvironmentError(
                     "pinned CPython archive must contain a python directory"
                 )
