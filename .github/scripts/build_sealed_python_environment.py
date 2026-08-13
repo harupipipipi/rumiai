@@ -835,14 +835,20 @@ def _write_text(path: Path, text: str, mode: int = 0o644) -> None:
     path.chmod(mode)
 
 
-def _normalize_venv(root: Path, runtime_root: Path, spec: TargetSpec) -> None:
-    """Remove build-machine absolute paths from the relocatable venv."""
+def _normalize_venv(
+    root: Path,
+    runtime_root: Path,
+    spec: TargetSpec,
+    *,
+    home: str | None = None,
+) -> None:
+    """Remove build-machine paths and bind the venv home to its launch cwd."""
     cfg = root / "pyvenv.cfg"
     if not cfg.is_file() or cfg.is_symlink():
         raise SealedEnvironmentError(
             f"relocatable venv configuration is missing: {cfg}"
         )
-    home = "../runtime" if spec.windows else "../runtime/bin"
+    home = home or ("../runtime" if spec.windows else "../runtime/bin")
     lines = cfg.read_text(encoding="utf-8").splitlines()
     replaced = False
     normalized: list[str] = []
@@ -1231,7 +1237,8 @@ def _verify_python_smoke(root: Path, spec: TargetSpec) -> None:
         "import _hashlib, _ssl, json, sys; "
         "import cryptography; "
         "print(json.dumps({'version': '.'.join(map(str, sys.version_info[:3])), "
-        "'prefix': sys.prefix, 'base_prefix': sys.base_prefix}, sort_keys=True))"
+        "'executable': sys.executable, 'prefix': sys.prefix, "
+        "'base_prefix': sys.base_prefix}, sort_keys=True))"
     )
     environment = os.environ.copy()
     for key in list(environment):
@@ -1262,6 +1269,32 @@ def _verify_python_smoke(root: Path, spec: TargetSpec) -> None:
         raise SealedEnvironmentError(
             f"native Python version mismatch: {report.get('version')!r}"
         )
+    for field, expected in (
+        (
+            "executable",
+            root / ("venv/Scripts/python.exe" if spec.windows else "venv/bin/python3"),
+        ),
+        ("prefix", root / "venv"),
+        ("base_prefix", root / "runtime"),
+    ):
+        value = report.get(field)
+        if not isinstance(value, str):
+            raise SealedEnvironmentError(
+                f"native Python {field} identity is malformed"
+            )
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        try:
+            actual = candidate.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise SealedEnvironmentError(
+                f"native Python {field} identity is unavailable"
+            ) from exc
+        if actual != expected.resolve(strict=True):
+            raise SealedEnvironmentError(
+                f"native Python {field} identity mismatch: {value!r}"
+            )
     with tempfile.TemporaryDirectory(
         prefix=".sealed-python-role-state-",
         dir=root.parent,
@@ -2235,6 +2268,12 @@ def assemble_environment(
     _materialize_venv_links(Path(venv_source), spec)
     _normalize_venv(Path(venv_source), Path(runtime_source), spec)
     _copy_tree(Path(venv_source), output_root / "venv", spec)
+    _normalize_venv(
+        output_root / "venv",
+        output_root / "runtime",
+        spec,
+        home="runtime" if spec.windows else "runtime/bin",
+    )
     _copy_tree(sealed_source_root / "app", output_root / "app", spec)
     if application_source is not None:
         _copy_application_closure(

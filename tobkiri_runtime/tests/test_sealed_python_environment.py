@@ -9,6 +9,7 @@ import io
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -989,6 +990,91 @@ def test_assembly_materializes_links_and_freezes_the_complete_snapshot(
         and path.suffix not in {".pyc", ".pyo"}
         for path in output.rglob("*")
     )
+
+
+def test_final_venv_home_is_relative_to_the_sealed_launch_root(
+    tmp_path: Path,
+) -> None:
+    """The copied PBS interpreter must resolve its home from the final root."""
+    output = _fixture_sources(tmp_path, "x86_64-unknown-linux-gnu")[2]
+    config = (output / "venv/pyvenv.cfg").read_text(encoding="utf-8")
+    assert "home = runtime/bin\n" in config
+    assert "home = ../runtime/bin\n" not in config
+
+
+@pytest.mark.skipif(
+    not os.environ.get("TOBKIRI_SEALED_NATIVE_SMOKE_PYTHON"),
+    reason="set TOBKIRI_SEALED_NATIVE_SMOKE_PYTHON to run the standalone CPython relocation smoke",
+)
+def test_relocated_native_runtime_imports_encodings_and_installed_package(
+    tmp_path: Path,
+) -> None:
+    """A moved regular executable finds PBS stdlib, native modules, and venv packages."""
+    interpreter = Path(os.environ["TOBKIRI_SEALED_NATIVE_SMOKE_PYTHON"]).resolve(
+        strict=True
+    )
+    source_lib = interpreter.parent.parent / "lib"
+    stdlib_candidates = sorted(
+        path
+        for path in source_lib.iterdir()
+        if path.is_dir() and path.name.startswith("python")
+    )
+    if len(stdlib_candidates) != 1:
+        pytest.skip("standalone CPython stdlib layout is unavailable")
+    stdlib = stdlib_candidates[0]
+    minor = stdlib.name[len("python") :]
+    root = tmp_path / "moved-runtime"
+    runtime = root / "runtime"
+    (runtime / "bin").mkdir(parents=True)
+    shutil.copy2(interpreter, runtime / "bin/python3")
+    shutil.copytree(source_lib, runtime / "lib", symlinks=False)
+    venv = root / "venv"
+    (venv / "bin").mkdir(parents=True)
+    shutil.copy2(runtime / "bin/python3", venv / "bin/python3")
+    (venv / "bin/python3").chmod(0o755)
+    (venv / "pyvenv.cfg").write_text(
+        "home = runtime/bin\n"
+        "include-system-site-packages = false\n"
+        "relocatable = true\n",
+        encoding="utf-8",
+    )
+    site_packages = venv / f"lib/python{minor}/site-packages"
+    site_packages.mkdir(parents=True, exist_ok=True)
+    (site_packages / "installed_probe.py").write_text(
+        "VALUE = 'installed-in-moved-venv'\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            os.fspath(venv / "bin/python3"),
+            "-I",
+            "-B",
+            "-c",
+            (
+                "import _ssl, encodings, json, sys, installed_probe; "
+                "print(json.dumps({'executable': sys.executable, "
+                "'prefix': sys.prefix, 'base_prefix': sys.base_prefix, "
+                "'value': installed_probe.VALUE}, sort_keys=True))"
+            ),
+        ],
+        cwd=root,
+        env={**os.environ, BUILDER.PYTHON_BYTECODE_ENVIRONMENT: "1"},
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    for field, expected in (
+        ("executable", venv / "bin/python3"),
+        ("prefix", venv),
+        ("base_prefix", runtime),
+    ):
+        value = Path(report[field])
+        if not value.is_absolute():
+            value = root / value
+        assert value.resolve() == expected.resolve()
+    assert report["value"] == "installed-in-moved-venv"
 
 
 def test_validate_environment_rejects_later_child_python_bytecode(
