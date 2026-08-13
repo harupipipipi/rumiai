@@ -375,22 +375,30 @@ class RuntimeProfileChangeService:
         try:
             from .pack_control_v4 import resolve_profile_pack_set
 
-            bundle_binding = (
-                {} if self._bundle_root is None else {"bundle_root": self._bundle_root}
-            )
             if authoritative_selection:
-                resolved = resolve_profile_pack_set(
-                    pack_ids,
-                    profile_id=profile_id,
-                    expected_profile_definition_digest=definition_digest,
-                    expected_profile_catalog_digest=catalog_digest,
-                    expected_bundle_lock_digest=bundle_digest,
-                    **bundle_binding,
-                )
+                if self._bundle_root is None:
+                    resolved = resolve_profile_pack_set(
+                        pack_ids,
+                        profile_id=profile_id,
+                        expected_profile_definition_digest=definition_digest,
+                        expected_profile_catalog_digest=catalog_digest,
+                        expected_bundle_lock_digest=bundle_digest,
+                    )
+                else:
+                    resolved = resolve_profile_pack_set(
+                        pack_ids,
+                        profile_id=profile_id,
+                        expected_profile_definition_digest=definition_digest,
+                        expected_profile_catalog_digest=catalog_digest,
+                        expected_bundle_lock_digest=bundle_digest,
+                        bundle_root=self._bundle_root,
+                    )
+            elif self._bundle_root is None:
+                resolved = resolve_profile_pack_set(pack_ids)
             else:
                 resolved = resolve_profile_pack_set(
                     pack_ids,
-                    **bundle_binding,
+                    bundle_root=self._bundle_root,
                 )
         except Exception as error:
             raise _map_change_error(error) from error
