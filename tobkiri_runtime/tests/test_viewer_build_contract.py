@@ -215,7 +215,9 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
         assert "--source-clean" not in build_contents
         assert 'PYTHONDONTWRITEBYTECODE: "1"' in contents
         assert "aarch64-apple-darwin" in build_contents
-        assert "x86_64-apple-darwin" in build_contents
+        # Intel is deliberately outside the formal publication matrix; direct
+        # Intel publication must fail closed.
+        assert "x86_64-apple-darwin" not in build_contents
         for forbidden in (
             "windows-latest",
             "ubuntu-latest",
@@ -482,9 +484,9 @@ def test_release_platform_signing_is_fail_closed_and_ad_hoc_is_dev_only():
     assert "WINDOWS_CERTIFICATE_PASSWORD" not in workflow
     assert "Sign and verify Windows installer" not in workflow
     assert "Linux" not in workflow
-    assert {"aarch64-apple-darwin", "x86_64-apple-darwin"} <= set(
-        re.findall(r"(?:aarch64|x86_64)-apple-darwin", workflow)
-    )
+    assert set(re.findall(r"(?:aarch64|x86_64)-apple-darwin", workflow)) == {
+        "aarch64-apple-darwin"
+    }
 
 
 def test_pack_shell_profile_is_a_single_safe_path_component():
