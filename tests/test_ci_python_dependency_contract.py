@@ -9,6 +9,7 @@ LOCKED_EXPORTS = (
     "tobkiri_runtime/requirements.txt",
     "tobkiri_runtime/requirements-dev.txt",
 )
+FORMAL_PACKAGING_PRODUCER = "run_formal_defaults_packaging"
 
 
 def _job_blocks(workflow: str) -> dict[str, str]:
@@ -45,7 +46,8 @@ def test_locked_python_test_installer_uses_both_project_exports() -> None:
     build_script = (
         ROOT / "tobkiri_launcher" / "src-tauri" / "build.rs"
     ).read_text(encoding="utf-8")
-    assert PACKAGE_TEST in build_script
+    assert FORMAL_PACKAGING_PRODUCER in build_script
+    assert PACKAGE_TEST not in build_script
 
 
 def test_every_package_test_workflow_job_uses_locked_python_test_installer() -> None:
