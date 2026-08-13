@@ -85,6 +85,8 @@ SEALED_PYTHON_RESOURCE_DIR = "python-runtime"
 SEALED_PYTHON_MANIFEST = (
     f"{SEALED_PYTHON_RESOURCE_DIR}/sealed-environment.v1.json"
 )
+PACKAGING_PYTHON_SNAPSHOT_ENV = "TOBKIRI_PACKAGING_PYTHON_SNAPSHOT"
+PACKAGING_PYTHON_INVENTORY_SHA_ENV = "TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256"
 SEALED_PYTHON_BUILDER = (
     Path(".github") / "scripts" / "build_sealed_python_environment.py"
 )
@@ -338,10 +340,19 @@ def verify_sealed_role_closure(
             raise RuntimeError(f"Sealed role target hash mismatch: {relative}")
 
 
-def copy_generated_resource_dirs(source_root: Path, dest_root: Path) -> int:
+def copy_generated_resource_dirs(
+    source_root: Path,
+    dest_root: Path,
+    *,
+    sealed_python_source: Path | None = None,
+) -> int:
     copied = 0
     for rel_dir in GENERATED_RESOURCE_DIRS:
-        src_dir = source_root / rel_dir
+        src_dir = (
+            sealed_python_source
+            if rel_dir == SEALED_PYTHON_RESOURCE_DIR and sealed_python_source is not None
+            else source_root / rel_dir
+        )
         if not src_dir.exists():
             continue
         if src_dir.is_symlink():
@@ -351,18 +362,35 @@ def copy_generated_resource_dirs(source_root: Path, dest_root: Path) -> int:
                 if src.is_symlink():
                     raise RuntimeError(
                         "Refusing symlinked sealed Python resource: "
-                        f"{src.relative_to(source_root).as_posix()}"
+                        f"{Path(rel_dir) / src.relative_to(src_dir)}"
                     )
                 if src.is_dir():
                     continue
                 if not src.is_file():
                     raise RuntimeError(
                         "Refusing special sealed Python resource: "
-                        f"{src.relative_to(source_root).as_posix()}"
+                        f"{Path(rel_dir) / src.relative_to(src_dir)}"
                     )
-                rel_under_app = src.relative_to(source_root).as_posix()
+                rel_under_app = (
+                    Path(rel_dir) / src.relative_to(src_dir)
+                ).as_posix()
                 copy_file(src, dest_root / rel_under_app)
                 copied += 1
+            destination_dir = dest_root / rel_dir
+            destination_dir.mkdir(parents=True, exist_ok=True)
+            for src in sorted(
+                (src_dir, *src_dir.rglob("*")),
+                key=lambda item: len(item.relative_to(src_dir).parts),
+                reverse=True,
+            ):
+                if src.is_symlink():
+                    raise RuntimeError(
+                        "Refusing symlinked sealed Python resource: "
+                        f"{src.relative_to(src_dir).as_posix()}"
+                    )
+                if src.is_dir():
+                    destination = destination_dir / src.relative_to(src_dir)
+                    destination.chmod(stat.S_IMODE(src.stat().st_mode))
             continue
         for src in src_dir.rglob("*"):
             if src.is_symlink():
@@ -395,40 +423,46 @@ def _load_sealed_python_builder(repository_root: Path):
     return module
 
 
+def _formal_sealed_python_snapshot() -> tuple[Path, str]:
+    """Return the rootless sealed Python snapshot and its manifest binding."""
+    configured = os.environ.get(PACKAGING_PYTHON_SNAPSHOT_ENV)
+    expected_digest = os.environ.get(PACKAGING_PYTHON_INVENTORY_SHA_ENV)
+    if not configured or not expected_digest:
+        raise RuntimeError(
+            "formal sealed Python snapshot and manifest binding are required"
+        )
+    snapshot = Path(configured)
+    if not snapshot.is_absolute():
+        raise RuntimeError("formal sealed Python snapshot path must be absolute")
+    try:
+        resolved = snapshot.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError("formal sealed Python snapshot is unavailable") from exc
+    if snapshot.is_symlink() or resolved != snapshot or not snapshot.is_dir():
+        raise RuntimeError("formal sealed Python snapshot path is not canonical")
+    if len(expected_digest) != 64 or any(
+        character not in "0123456789abcdef" for character in expected_digest
+    ):
+        raise RuntimeError("formal sealed Python manifest binding is invalid")
+    return snapshot, expected_digest
+
+
 def build_sealed_python_resource(
     repository_root: Path,
     source_root: Path,
     target: str,
 ) -> Path:
-    """Build the fixed sealed Python tree before Tauri resource staging."""
+    """Validate the producer-owned sealed Python tree for Tauri staging."""
     builder = _load_sealed_python_builder(repository_root)
-    output_root = source_root / SEALED_PYTHON_RESOURCE_DIR
-    requirements = source_root / "requirements.txt"
-    uv_name = uv_binary_name(target)
-    uv_path = source_root / "bundled" / uv_name
-    if not uv_path.is_file() or uv_path.is_symlink():
-        raise RuntimeError(
-            "official pinned uv was not staged at the required bundled path: "
-            f"{uv_path}"
-        )
-    manifest = builder.build_environment(
-        repository_root,
-        target,
-        output_root=output_root,
-        requirements_path=requirements,
-        uv_path=uv_path,
-    )
+    snapshot, expected_digest = _formal_sealed_python_snapshot()
     digest = builder.validate_environment(
-        output_root,
+        snapshot,
         target,
+        expected_manifest_digest=expected_digest,
         run_native_smoke=True,
     )
-    print(
-        "Prepared sealed Python environment "
-        f"{manifest.relative_to(repository_root)} "
-        f"({digest})"
-    )
-    return manifest
+    print(f"Using formal sealed Python environment ({digest})")
+    return snapshot
 
 
 def validate_sealed_python_resource(
@@ -1315,8 +1349,13 @@ def main() -> int:
             return 2
         return 0
 
+    sealed_python_source = None
     if args.target:
-        build_sealed_python_resource(repo_root, source_root, args.target)
+        sealed_python_source = build_sealed_python_resource(
+            repo_root,
+            source_root,
+            args.target,
+        )
 
     remove_owned_path(
         dest_root,
@@ -1327,7 +1366,11 @@ def main() -> int:
 
     tracked_count = copy_tracked_runtime_files(repo_root, source_root, dest_root)
     stage_canonical_host_package(source_root, dest_root)
-    generated_count = copy_generated_resource_dirs(source_root, dest_root)
+    generated_count = copy_generated_resource_dirs(
+        source_root,
+        dest_root,
+        sealed_python_source=sealed_python_source,
+    )
 
     validate_bundle(
         dest_root,

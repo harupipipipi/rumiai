@@ -6,6 +6,7 @@ import io
 import json
 import os
 import shutil
+import stat
 import sys
 import tarfile
 import zipfile
@@ -216,6 +217,83 @@ def test_stage_uv_only_uses_private_external_root_without_checkout_mutation(
     assert module.main() == 0
     assert calls == [output_root]
     assert output_root.stat().st_mode & 0o077 == 0
+
+
+def test_formal_sealed_resource_uses_producer_snapshot_without_rebuilding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Formal Tauri staging consumes the rootless producer output exactly."""
+    module = _load_prepare_tauri_resources()
+    snapshot_path = tmp_path / "sealed-python"
+    snapshot_path.mkdir()
+    snapshot = snapshot_path.resolve()
+    calls: dict[str, object] = {}
+
+    class Builder:
+        def build_environment(self, *_args, **_kwargs):
+            pytest.fail("formal Tauri staging must not rebuild sealed Python")
+
+        def validate_environment(self, root, target, **kwargs):
+            calls.update(root=root, target=target, kwargs=kwargs)
+            return "a" * 64
+
+    monkeypatch.setenv(module.PACKAGING_PYTHON_SNAPSHOT_ENV, str(snapshot))
+    monkeypatch.setenv(module.PACKAGING_PYTHON_INVENTORY_SHA_ENV, "b" * 64)
+    monkeypatch.setattr(module, "_load_sealed_python_builder", lambda _root: Builder())
+
+    assert (
+        module.build_sealed_python_resource(
+            ROOT,
+            tmp_path / "checkout-runtime",
+            "aarch64-apple-darwin",
+        )
+        == snapshot
+    )
+    assert calls == {
+        "root": snapshot,
+        "target": "aarch64-apple-darwin",
+        "kwargs": {
+            "expected_manifest_digest": "b" * 64,
+            "run_native_smoke": True,
+        },
+    }
+
+
+def test_formal_snapshot_staging_preserves_sealed_directory_modes(tmp_path: Path) -> None:
+    """Copied formal snapshots remain non-writable before bundle validation."""
+    module = _load_prepare_tauri_resources()
+    source_root = tmp_path / "checkout-runtime"
+    source_root.mkdir()
+    (source_root / "python-runtime").mkdir()
+    (source_root / "python-runtime" / "decoy.txt").write_text("old\n", encoding="utf-8")
+
+    snapshot = tmp_path / "sealed-python"
+    nested = snapshot / "runtime" / "bin"
+    nested.mkdir(parents=True)
+    manifest = snapshot / "sealed-environment.v1.json"
+    manifest.write_text("{}\n", encoding="utf-8")
+    executable = nested / "python"
+    executable.write_bytes(b"python\n")
+    for path in (snapshot, snapshot / "runtime", nested):
+        path.chmod(0o500)
+    manifest.chmod(0o444)
+    executable.chmod(0o555)
+
+    destination = tmp_path / "staged"
+    destination.mkdir()
+    assert (
+        module.copy_generated_resource_dirs(
+            source_root,
+            destination,
+            sealed_python_source=snapshot,
+        )
+        == 2
+    )
+    staged_root = destination / "python-runtime"
+    assert stat.S_IMODE(staged_root.stat().st_mode) == 0o500
+    assert stat.S_IMODE((staged_root / "runtime").stat().st_mode) == 0o500
+    assert stat.S_IMODE((staged_root / "runtime/bin").stat().st_mode) == 0o500
+    assert not (staged_root / "decoy.txt").exists()
 
 
 def test_stage_uv_fails_on_checksum_mismatch_before_extract(tmp_path, monkeypatch):

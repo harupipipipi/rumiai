@@ -25,6 +25,12 @@ universal runtime export and
 The pinned `uv` archive is staged by the existing resource preparer. Python
 3.13.13 is installed and dependency wheels are synchronized at build time;
 the packaged application never downloads on first launch.
+Formal CI creates the sealed environment in a private rootless producer step,
+using the target-bound export above, and publishes its absolute snapshot plus
+raw manifest digest through `TOBKIRI_PACKAGING_PYTHON_SNAPSHOT` and
+`TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256`. Tauri resource preparation only
+validates and copies that producer-owned snapshot; it never accepts a caller
+requirements path or rebuilds a formal environment from the mutable checkout.
 Before generation, the pinned uv executable must report the structured official
 0.11.14 identity with a valid revision/date and the exact requested target
 triple; arbitrary prefixes, suffixes, versions, and architectures are rejected.

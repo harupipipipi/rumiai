@@ -437,6 +437,24 @@ def test_formal_packaging_lock_selection_is_target_bound() -> None:
     )
 
 
+def test_formal_builder_rejects_external_requirements_path(tmp_path: Path) -> None:
+    """Formal builds cannot be redirected to a caller-selected lock file."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    external_requirements = tmp_path / "requirements.txt"
+    external_requirements.write_text("# external\n", encoding="utf-8")
+
+    with pytest.raises(
+        BUILDER.SealedEnvironmentError,
+        match="formal build does not accept an external requirements path",
+    ):
+        BUILDER.build_environment(
+            repo_root,
+            "x86_64-unknown-linux-gnu",
+            requirements_path=external_requirements,
+        )
+
+
 def test_pinned_python_archive_download_keeps_sha256_binding(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
