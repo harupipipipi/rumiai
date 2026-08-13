@@ -934,6 +934,190 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    type FixtureSourceOwnerIdentity = (u64, u64);
+    #[cfg(not(unix))]
+    type FixtureSourceOwnerIdentity = (u64, Option<SystemTime>);
+
+    fn fixture_cleanup_error(path: &Path, reason: &str) -> std::io::Error {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("fixture cleanup refused {reason}: {}", path.display()),
+        )
+    }
+
+    fn fixture_source_owner_identity(path: &Path) -> std::io::Result<FixtureSourceOwnerIdentity> {
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(fixture_cleanup_error(path, "a symlink owner"));
+        }
+        if !metadata.is_dir() || path.canonicalize()? != path {
+            return Err(fixture_cleanup_error(path, "a non-canonical owner"));
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+
+            Ok((metadata.dev(), metadata.ino()))
+        }
+        #[cfg(not(unix))]
+        {
+            Ok((metadata.len(), metadata.modified().ok()))
+        }
+    }
+
+    fn set_fixture_permissions_for_cleanup(path: &Path, mode: u32) -> std::io::Result<()> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            fs::set_permissions(path, fs::Permissions::from_mode(mode))
+        }
+        #[cfg(not(unix))]
+        {
+            let mut permissions = fs::symlink_metadata(path)?.permissions();
+            permissions.set_readonly(false);
+            fs::set_permissions(path, permissions)
+        }
+    }
+
+    fn verify_fixture_cleanup_entry(
+        owner_root: &Path,
+        path: &Path,
+        metadata: &fs::Metadata,
+        owner_identity: &FixtureSourceOwnerIdentity,
+    ) -> std::io::Result<()> {
+        if metadata.file_type().is_symlink() {
+            return Err(fixture_cleanup_error(path, "a symlink"));
+        }
+        if !path.starts_with(owner_root) {
+            return Err(fixture_cleanup_error(path, "an owner escape"));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+
+            if metadata.dev() != owner_identity.0 {
+                return Err(fixture_cleanup_error(path, "a filesystem boundary"));
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = owner_identity;
+        Ok(())
+    }
+
+    fn restore_fixture_tree_permissions(
+        owner_root: &Path,
+        root: &Path,
+        owner_identity: &FixtureSourceOwnerIdentity,
+    ) -> std::io::Result<()> {
+        let metadata = fs::symlink_metadata(root)?;
+        verify_fixture_cleanup_entry(owner_root, root, &metadata, owner_identity)?;
+        if !metadata.is_dir() {
+            return Err(fixture_cleanup_error(root, "a non-directory"));
+        }
+        set_fixture_permissions_for_cleanup(root, 0o700)?;
+        for entry in fs::read_dir(root)? {
+            let entry = entry?;
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path)?;
+            verify_fixture_cleanup_entry(owner_root, &path, &metadata, owner_identity)?;
+            if metadata.is_dir() {
+                restore_fixture_tree_permissions(owner_root, &path, owner_identity)?;
+            } else if metadata.is_file() {
+                if has_multiple_links(&path, &metadata).map_err(|error| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
+                })? {
+                    return Err(fixture_cleanup_error(&path, "a hardlink"));
+                }
+                set_fixture_permissions_for_cleanup(&path, 0o600)?;
+            } else {
+                return Err(fixture_cleanup_error(&path, "a special entry"));
+            }
+        }
+        Ok(())
+    }
+
+    struct FixtureSourceOwner {
+        path: PathBuf,
+        identity: FixtureSourceOwnerIdentity,
+        cleaned: bool,
+    }
+
+    impl FixtureSourceOwner {
+        fn new(destination_parent: &Path, owner: PathBuf) -> std::io::Result<Self> {
+            let metadata = fs::symlink_metadata(&owner)?;
+            if metadata.file_type().is_symlink() {
+                return Err(fixture_cleanup_error(&owner, "a symlink owner"));
+            }
+            let parent = destination_parent.canonicalize()?;
+            let canonical_owner = owner.canonicalize()?;
+            if canonical_owner.file_name().and_then(|name| name.to_str())
+                != Some("sealed-source-owner")
+                || canonical_owner.parent() != Some(parent.as_path())
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "fixture source owner is not the expected direct child of {}: {}",
+                        parent.display(),
+                        canonical_owner.display()
+                    ),
+                ));
+            }
+            let identity = fixture_source_owner_identity(&canonical_owner)?;
+            Ok(Self {
+                path: canonical_owner,
+                identity,
+                cleaned: false,
+            })
+        }
+
+        fn cleanup(&mut self) -> std::io::Result<()> {
+            if self.cleaned {
+                return Ok(());
+            }
+            let current_identity = fixture_source_owner_identity(&self.path)?;
+            if current_identity != self.identity {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "fixture source owner identity changed before cleanup: {}",
+                        self.path.display()
+                    ),
+                ));
+            }
+            restore_fixture_tree_permissions(&self.path, &self.path, &self.identity)?;
+            let restored_identity = fixture_source_owner_identity(&self.path)?;
+            if restored_identity != self.identity {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "fixture source owner identity changed during cleanup: {}",
+                        self.path.display()
+                    ),
+                ));
+            }
+            fs::remove_dir_all(&self.path)?;
+            self.cleaned = true;
+            Ok(())
+        }
+    }
+
+    impl Drop for FixtureSourceOwner {
+        fn drop(&mut self) {
+            if !self.cleaned {
+                if let Err(error) = self.cleanup() {
+                    eprintln!(
+                        "fixture source owner teardown failed at {}: {error}",
+                        self.path.display()
+                    );
+                }
+            }
+        }
+    }
+
     fn seal_fixture_directories(root: &Path) {
         for entry in fs::read_dir(root).unwrap() {
             let entry = entry.unwrap();
@@ -973,10 +1157,12 @@ mod tests {
         source_checkout: &Path,
         destination_parent: &Path,
         source_revision: &str,
-    ) -> (PathBuf, PathBuf, PathBuf) {
+    ) -> (PathBuf, PathBuf, FixtureSourceOwner) {
         let owner = destination_parent.join("sealed-source-owner");
         fs::create_dir_all(&owner).unwrap();
         set_fixture_permissions(&owner, 0o700);
+        let owner_guard = FixtureSourceOwner::new(destination_parent, owner.clone())
+            .expect("fixture source owner should be safe to guard");
         let source_root = owner.join("source");
         fs::create_dir_all(&source_root).unwrap();
 
@@ -1042,7 +1228,7 @@ mod tests {
             "fixture provenance must be read-only"
         );
 
-        (canonical_root, canonical_provenance, owner)
+        (canonical_root, canonical_provenance, owner_guard)
     }
 
     fn collect_source_files(root: &Path, current: &Path, actual: &mut BTreeMap<String, Value>) {
@@ -1289,11 +1475,12 @@ mod tests {
         );
         fs::remove_file(&marker).unwrap();
 
-        let (source_root, provenance_path, source_owner) = materialize_fixture_source_provenance(
-            source_checkout,
-            &config.app_dir.join(".fixture-source-snapshot"),
-            source_revision,
-        );
+        let (source_root, provenance_path, mut source_owner) =
+            materialize_fixture_source_provenance(
+                source_checkout,
+                &config.app_dir.join(".fixture-source-snapshot"),
+                source_revision,
+            );
         let mut isolated = python.command().unwrap();
         isolated
             .env_clear()
@@ -1344,7 +1531,12 @@ mod tests {
         drop(unsafe_command);
         drop(isolated);
         drop(python);
-        fs::remove_dir_all(source_owner).unwrap();
+        if let Err(error) = source_owner.cleanup() {
+            panic!(
+                "fixture source owner teardown failed at {}: {error}",
+                source_owner.path.display()
+            );
+        }
         assert_clean_fixture_source(source_checkout);
         let bundle_root = config.app_dir.join("ecosystem/defaultspack/v4");
         let profile_raw = fs::read(bundle_root.join(PROFILE_PATH)).unwrap();
