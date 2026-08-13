@@ -280,6 +280,123 @@ def test_macos_python_archive_authority_is_exact_and_offline_after_download(
     assert (extracted / "bin/python3").read_bytes() == b"python"
 
 
+def _archive_member(
+    name: str,
+    *,
+    member_type: bytes = tarfile.REGTYPE,
+    payload: bytes = b"payload\n",
+    linkname: str = "",
+) -> tuple[tarfile.TarInfo, bytes]:
+    """Build one deterministic tar member for extraction safety cases."""
+    member = tarfile.TarInfo(name)
+    member.type = member_type
+    member.mode = 0o755 if member_type == tarfile.DIRTYPE else 0o644
+    member.linkname = linkname
+    if member_type == tarfile.REGTYPE:
+        member.size = len(payload)
+    return member, payload
+
+
+def _write_archive(
+    path: Path,
+    members: tuple[tuple[tarfile.TarInfo, bytes], ...],
+) -> None:
+    """Write synthetic members without filesystem traversal or link following."""
+    with tarfile.open(path, "w:gz") as bundle:
+        for member, payload in members:
+            bundle.addfile(
+                member,
+                io.BytesIO(payload) if member.isreg() else None,
+            )
+
+
+@pytest.mark.parametrize(
+    ("name", "member_type", "linkname"),
+    (
+        ("python/../outside", tarfile.REGTYPE, ""),
+        ("/outside", tarfile.REGTYPE, ""),
+        ("python/bin/link", tarfile.SYMTYPE, "../outside"),
+        ("python/bin/hardlink", tarfile.LNKTYPE, "python/bin/python3"),
+        ("python/bin/device", tarfile.CHRTYPE, ""),
+        ("python/bin/fifo", tarfile.FIFOTYPE, ""),
+        ("python/bin/special", b"?", ""),
+    ),
+)
+def test_pinned_python_archive_rejects_unsafe_member_types_and_paths(
+    tmp_path: Path,
+    name: str,
+    member_type: bytes,
+    linkname: str,
+) -> None:
+    """Archive extraction rejects traversal, links, devices, FIFOs, and specials."""
+    archive = tmp_path / "unsafe.tar.gz"
+    root, root_payload = _archive_member("python", member_type=tarfile.DIRTYPE)
+    unsafe, unsafe_payload = _archive_member(
+        name,
+        member_type=member_type,
+        linkname=linkname,
+    )
+    _write_archive(archive, ((root, root_payload), (unsafe, unsafe_payload)))
+
+    with pytest.raises(BUILDER.SealedEnvironmentError, match="unsafe pinned"):
+        BUILDER._extract_pinned_python_archive(archive, tmp_path / "output")
+    assert not (tmp_path / "outside").exists()
+
+
+@pytest.mark.parametrize(
+    "members",
+    (
+        (
+            _archive_member("python", member_type=tarfile.DIRTYPE),
+            _archive_member("python/bin/python3"),
+            _archive_member("python/bin/python3", payload=b"different\n"),
+        ),
+        (
+            _archive_member("python", member_type=tarfile.DIRTYPE),
+            _archive_member("python/bin", payload=b"file\n"),
+            _archive_member("python/bin/child", payload=b"child\n"),
+        ),
+        (
+            _archive_member("python", member_type=tarfile.DIRTYPE),
+            _archive_member("python/bin", payload=b"file\n"),
+            _archive_member("python/BIN/child", payload=b"case\n"),
+        ),
+    ),
+)
+def test_pinned_python_archive_rejects_duplicate_and_prefix_collisions(
+    tmp_path: Path,
+    members: tuple[tuple[tarfile.TarInfo, bytes], ...],
+) -> None:
+    """No duplicate or file/prefix collision may reach the extraction phase."""
+    archive = tmp_path / "collision.tar.gz"
+    _write_archive(archive, members)
+
+    with pytest.raises(
+        BUILDER.SealedEnvironmentError,
+        match="(duplicate|file/prefix collision)",
+    ):
+        BUILDER._extract_pinned_python_archive(archive, tmp_path / "output")
+
+
+def test_pinned_python_archive_rejects_destination_symlink(tmp_path: Path) -> None:
+    """A pre-existing destination symlink is never followed by extraction."""
+    archive = tmp_path / "valid.tar.gz"
+    root, root_payload = _archive_member("python", member_type=tarfile.DIRTYPE)
+    executable, executable_payload = _archive_member("python/bin/python3")
+    _write_archive(
+        archive,
+        ((root, root_payload), (executable, executable_payload)),
+    )
+    real_destination = tmp_path / "real-output"
+    real_destination.mkdir()
+    destination = tmp_path / "output"
+    destination.symlink_to(real_destination, target_is_directory=True)
+
+    with pytest.raises(BUILDER.SealedEnvironmentError):
+        BUILDER._extract_pinned_python_archive(archive, destination)
+    assert not (real_destination / "python").exists()
+
+
 def test_committed_source_inventory_copies_exact_bytes_and_rejects_tamper(
     tmp_path: Path,
 ) -> None:

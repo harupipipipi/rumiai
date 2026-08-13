@@ -1299,45 +1299,272 @@ def _download_pinned_python_archive(spec: TargetSpec, destination: Path) -> None
         raise SealedEnvironmentError("pinned CPython archive SHA-256 mismatch")
 
 
+def _unsafe_archive_member(member: tarfile.TarInfo) -> SealedEnvironmentError:
+    """Return the stable rejection used for every unsafe archive member."""
+    return SealedEnvironmentError(
+        f"unsafe pinned CPython archive member: {member.name}"
+    )
+
+
+def _archive_member_parts(member: tarfile.TarInfo) -> tuple[str, ...]:
+    """Return safe POSIX components for one regular archive member."""
+    name = member.name
+    if not isinstance(name, str):
+        raise _unsafe_archive_member(member)
+    if name.endswith("/"):
+        if not member.isdir():
+            raise _unsafe_archive_member(member)
+        name = name.rstrip("/")
+    if (
+        not name
+        or name.startswith("/")
+        or "\\" in name
+        or "\x00" in name
+    ):
+        raise _unsafe_archive_member(member)
+    parts = tuple(name.split("/"))
+    if (
+        not parts
+        or parts[0] != "python"
+        or any(part in {"", ".", ".."} for part in parts)
+        or any(":" in part for part in parts)
+    ):
+        raise _unsafe_archive_member(member)
+    return parts
+
+
+def _archive_dirfd_supported() -> bool:
+    """Whether this host supports descriptor-relative no-follow extraction."""
+    return bool(
+        hasattr(os, "O_NOFOLLOW")
+        and os.open in getattr(os, "supports_dir_fd", ())
+        and os.mkdir in getattr(os, "supports_dir_fd", ())
+    )
+
+
+def _open_archive_directory(path: str | Path, *, dir_fd: int | None = None) -> int:
+    """Open a real directory without following a symlink."""
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    if dir_fd is None:
+        fd = os.open(os.fspath(path), flags)
+    else:
+        fd = os.open(path, flags, dir_fd=dir_fd)
+    try:
+        if not stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError(f"archive extraction path is not a directory: {path}")
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _ensure_archive_directory_fd(root_fd: int, parts: Sequence[str]) -> int:
+    """Create/open a directory chain using descriptor-relative no-follow calls."""
+    current_fd = os.dup(root_fd)
+    try:
+        for part in parts:
+            try:
+                os.mkdir(part, mode=0o700, dir_fd=current_fd)
+            except FileExistsError:
+                pass
+            child_fd = _open_archive_directory(part, dir_fd=current_fd)
+            os.close(current_fd)
+            current_fd = child_fd
+        return current_fd
+    except BaseException:
+        os.close(current_fd)
+        raise
+
+
+def _ensure_archive_directory_path(root: Path, parts: Sequence[str]) -> Path:
+    """Create/open a directory chain with symlink checks for fallback hosts."""
+    current = root
+    for part in parts:
+        current /= part
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError:
+            try:
+                current.mkdir(mode=0o700)
+            except FileExistsError:
+                pass
+            metadata = current.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise SealedEnvironmentError(
+                f"archive extraction parent is not a real directory: {current}"
+            )
+    return current
+
+
+def _archive_file_mode(member: tarfile.TarInfo) -> int:
+    """Apply tarfile.data_filter's safe executable/read-only mode mask."""
+    return member.mode & 0o755
+
+
+def _write_archive_file(
+    bundle: tarfile.TarFile,
+    member: tarfile.TarInfo,
+    fd: int,
+    mode: int,
+) -> None:
+    """Copy one regular tar member to an already exclusively-created fd."""
+    source = bundle.extractfile(member)
+    if source is None:
+        raise SealedEnvironmentError(
+            f"regular pinned CPython archive member has no data: {member.name}"
+        )
+    written = 0
+    try:
+        with source:
+            while True:
+                chunk = source.read(1024 * 1024)
+                if not chunk:
+                    break
+                view = memoryview(chunk)
+                while view:
+                    count = os.write(fd, view)
+                    if count <= 0:
+                        raise OSError("archive extraction write made no progress")
+                    view = view[count:]
+                written += len(chunk)
+        if written != member.size:
+            raise SealedEnvironmentError(
+                f"pinned CPython archive member size changed: {member.name}"
+            )
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, mode)
+    finally:
+        os.close(fd)
+
+
+def _chmod_archive_path(path: Path, mode: int) -> None:
+    """Apply a safe mode without following a final symlink."""
+    try:
+        os.chmod(path, mode, follow_symlinks=False)
+    except TypeError:  # pragma: no cover - only old platform Python builds
+        os.chmod(path, mode)
+
+
 def _extract_pinned_python_archive(archive: Path, destination: Path) -> Path:
-    """Extract only a path-contained PBS install_only tree."""
-    destination.mkdir(mode=0o700)
-    with tarfile.open(archive, "r:gz") as bundle:
-        members = bundle.getmembers()
-        if not members:
-            raise SealedEnvironmentError("pinned CPython archive is empty")
-        for member in members:
-            parts = Path(member.name).parts
-            if (
-                not parts
-                or parts[0] != "python"
-                or member.name.startswith("/")
-                or any(part in {"", ".", ".."} for part in parts)
-                or member.islnk()
-                or not (member.isdir() or member.isfile() or member.issym())
-            ):
-                raise SealedEnvironmentError(
-                    f"unsafe pinned CPython archive member: {member.name}"
-                )
-            if member.issym():
-                target = Path(*parts[:-1], member.linkname)
-                normalized: list[str] = []
-                for part in target.parts:
-                    if part in {"", "."}:
-                        continue
-                    if part == "..":
-                        if not normalized:
-                            raise SealedEnvironmentError(
-                                f"CPython archive link escapes: {member.name}"
-                            )
-                        normalized.pop()
-                    else:
-                        normalized.append(part)
-                if not normalized or normalized[0] != "python":
+    """Extract only regular files and directories from a path-contained archive."""
+    use_dirfd = _archive_dirfd_supported()
+    directory_modes: list[tuple[tuple[str, ...], int]] = []
+    root_fd: int | None = None
+    try:
+        destination.mkdir(mode=0o700)
+        if destination.is_symlink() or not destination.is_dir():
+            raise SealedEnvironmentError(
+                f"archive extraction destination is not a real directory: {destination}"
+            )
+        with tarfile.open(archive, "r:gz") as bundle:
+            members = bundle.getmembers()
+            if not members:
+                raise SealedEnvironmentError("pinned CPython archive is empty")
+
+            entries: list[tuple[tarfile.TarInfo, tuple[str, ...]]] = []
+            names: dict[tuple[str, ...], tarfile.TarInfo] = {}
+            folded_names: dict[tuple[str, ...], tarfile.TarInfo] = {}
+            for member in members:
+                if not (member.isdir() or member.isreg()):
+                    raise _unsafe_archive_member(member)
+                if member.size < 0:
+                    raise _unsafe_archive_member(member)
+                parts = _archive_member_parts(member)
+                folded = tuple(part.casefold() for part in parts)
+                if parts in names or folded in folded_names:
                     raise SealedEnvironmentError(
-                        f"CPython archive link escapes: {member.name}"
+                        f"duplicate pinned CPython archive member: {member.name}"
                     )
-        bundle.extractall(destination, members=members, filter="data")
+                names[parts] = member
+                folded_names[folded] = member
+                entries.append((member, parts))
+
+            root_member = names.get(("python",))
+            if root_member is None or not root_member.isdir():
+                raise SealedEnvironmentError(
+                    "pinned CPython archive must contain a python directory"
+                )
+            for parts, member in names.items():
+                folded_parts = tuple(part.casefold() for part in parts)
+                for index in range(1, len(parts)):
+                    ancestor_member = folded_names.get(folded_parts[:index])
+                    if ancestor_member is not None and not ancestor_member.isdir():
+                        raise SealedEnvironmentError(
+                            "pinned CPython archive has a file/prefix collision: "
+                            f"{member.name}"
+                        )
+
+            if use_dirfd:
+                root_fd = _open_archive_directory(destination)
+                assert root_fd is not None
+            for member, parts in entries:
+                if member.isdir():
+                    if use_dirfd:
+                        directory_fd = _ensure_archive_directory_fd(root_fd, parts)
+                        os.close(directory_fd)
+                    else:
+                        _ensure_archive_directory_path(destination, parts)
+                    directory_modes.append((parts, _archive_file_mode(member)))
+                    continue
+
+                parent_parts = parts[:-1]
+                file_path: Path | None = None
+                if use_dirfd:
+                    parent_fd = _ensure_archive_directory_fd(root_fd, parent_parts)
+                    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                    flags |= getattr(os, "O_NOFOLLOW", 0)
+                    flags |= getattr(os, "O_CLOEXEC", 0)
+                    try:
+                        file_fd = os.open(
+                            parts[-1],
+                            flags,
+                            0o600,
+                            dir_fd=parent_fd,
+                        )
+                    finally:
+                        os.close(parent_fd)
+                else:
+                    parent = _ensure_archive_directory_path(destination, parent_parts)
+                    file_path = parent / parts[-1]
+                    try:
+                        file_path.lstat()
+                    except FileNotFoundError:
+                        pass
+                    else:
+                        raise SealedEnvironmentError(
+                            f"duplicate pinned CPython archive member: {member.name}"
+                        )
+                    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                    flags |= getattr(os, "O_NOFOLLOW", 0)
+                    file_fd = os.open(file_path, flags, 0o600)
+                mode = _archive_file_mode(member)
+                _write_archive_file(bundle, member, file_fd, mode)
+                if not hasattr(os, "fchmod"):
+                    _chmod_archive_path(
+                        destination.joinpath(*parts) if file_path is None else file_path,
+                        mode,
+                    )
+
+            for parts, mode in sorted(directory_modes, key=lambda item: len(item[0]), reverse=True):
+                if use_dirfd:
+                    directory_fd = _ensure_archive_directory_fd(root_fd, parts)
+                    try:
+                        os.fchmod(directory_fd, mode)
+                    finally:
+                        os.close(directory_fd)
+                else:
+                    _chmod_archive_path(destination.joinpath(*parts), mode)
+    except SealedEnvironmentError:
+        raise
+    except (OSError, tarfile.TarError) as error:
+        raise SealedEnvironmentError(
+            "pinned CPython archive extraction failed"
+        ) from error
+    finally:
+        if root_fd is not None:
+            os.close(root_fd)
     return destination / "python"
 
 
