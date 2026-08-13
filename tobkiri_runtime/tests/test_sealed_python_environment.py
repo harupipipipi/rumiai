@@ -416,6 +416,27 @@ def test_macos_python_archive_authority_is_exact_and_offline_after_download(
     assert (extracted / "bin/python3").read_bytes() == b"python"
 
 
+def test_formal_packaging_lock_selection_is_target_bound() -> None:
+    """ARM uses its reviewed wheel lock while Intel publication fails closed."""
+    arm = BUILDER.target_spec("aarch64-apple-darwin")
+    assert BUILDER.packaging_requirements_relative(arm) == Path(
+        "tobkiri_runtime/requirements-packaging-aarch64-apple-darwin.txt"
+    )
+
+    intel = BUILDER.target_spec("x86_64-apple-darwin")
+    with pytest.raises(
+        BUILDER.SealedEnvironmentError,
+        match="cryptography 50.0.0 has no CPython 3.13 macOS x86_64 wheel",
+    ):
+        BUILDER.packaging_requirements_relative(intel)
+
+    linux = BUILDER.target_spec("x86_64-unknown-linux-gnu")
+    assert (
+        BUILDER.packaging_requirements_relative(linux)
+        == BUILDER.DEFAULT_REQUIREMENTS_RELATIVE
+    )
+
+
 def test_pinned_python_archive_download_keeps_sha256_binding(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

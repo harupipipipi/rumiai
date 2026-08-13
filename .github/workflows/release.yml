@@ -28,13 +28,6 @@ jobs:
             presentation_variant: shell.tauri.default.macos-arm64
             presentation_platform: macos
             presentation_architecture: arm64
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-            shell_bundles: app
-            presentation_variant: shell.tauri.default.macos-x86_64
-            presentation_platform: macos
-            presentation_architecture: x86_64
-
     runs-on: ${{ matrix.os }}
 
     steps:

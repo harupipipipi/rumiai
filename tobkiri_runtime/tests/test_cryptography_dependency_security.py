@@ -3,23 +3,43 @@
 from __future__ import annotations
 
 import ast
-import importlib.metadata
+import importlib.util
 import re
+import sys
 import tomllib
 from pathlib import Path
 
 from packaging.requirements import Requirement
-from packaging.utils import canonicalize_name, parse_wheel_filename
+from packaging.utils import canonicalize_name
 from packaging.version import Version
+import pytest
 
 
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
-COMMON_MACOS_VERSION = Version("48.0.1")
+REPOSITORY_ROOT = RUNTIME_ROOT.parent
+SECURE_VERSION = Version("50.0.0")
+TARGET_LOCK = RUNTIME_ROOT / "requirements-packaging-aarch64-apple-darwin.txt"
+LOCK_GENERATOR_PATH = REPOSITORY_ROOT / ".github/scripts/generate_packaging_dependency_locks.py"
 _AFFECTED_PKCS7_DECRYPT_APIS = {
     "pkcs7_decrypt_der",
     "pkcs7_decrypt_pem",
     "pkcs7_decrypt_smime",
 }
+
+
+def _load_lock_generator():
+    """Load the checked-in target-lock generator without package-path fallback."""
+    spec = importlib.util.spec_from_file_location(
+        "tobkiri_packaging_dependency_lock_tests", LOCK_GENERATOR_PATH
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+LOCK_GENERATOR = _load_lock_generator()
 
 
 def _locked_cryptography_version() -> Version:
@@ -32,19 +52,18 @@ def _locked_cryptography_version() -> Version:
     return Version(match.group(1))
 
 
-def test_cryptography_is_direct_and_common_macos_pinned() -> None:
-    """Keep one exact wheel-backed version for both supported macOS targets."""
+def test_cryptography_is_direct_and_pinned_to_fully_fixed_release() -> None:
+    """Keep the direct dependency beyond all three audited advisories."""
     pyproject = (RUNTIME_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     declarations = re.findall(r'^\s*"(cryptography[^"]*)",?$', pyproject, re.MULTILINE)
-    assert declarations == ["cryptography==48.0.1"]
+    assert declarations == ["cryptography==50.0.0"]
 
     requirement = Requirement(declarations[0])
     assert requirement.marker is None
-    assert requirement.specifier == "==48.0.1"
+    assert requirement.specifier == "==50.0.0"
 
     locked_version = _locked_cryptography_version()
-    assert locked_version == COMMON_MACOS_VERSION
-    assert Version(importlib.metadata.version("cryptography")) == locked_version
+    assert locked_version == SECURE_VERSION
 
     expected_pin = f"cryptography=={locked_version} "
     for export_name in ("requirements.txt", "requirements-dev.txt"):
@@ -119,45 +138,78 @@ def _lock_hashes(package: dict[str, object]) -> set[str]:
     return hashes
 
 
-def _wheel_supports_python313(filename: str, architecture: str) -> bool:
-    """Check a wheel filename for CPython 3.13 on one supported macOS arch."""
-    _, _, _, tags = parse_wheel_filename(filename)
-    for tag in tags:
-        if tag.platform == "any" and tag.interpreter.startswith("py"):
-            return True
-        platform_matches = "universal2" in tag.platform or architecture in tag.platform
-        if not platform_matches:
-            continue
-        if tag.interpreter in {"cp313", "py3"}:
-            return True
-        if tag.interpreter.startswith("cp") and tag.abi == "abi3":
-            try:
-                if int(tag.interpreter.removeprefix("cp")) <= 313:
-                    return True
-            except ValueError:
-                continue
-    return False
-
-
-def test_locked_exports_have_hash_provenance_and_both_macos_wheels() -> None:
-    """Require every runtime/dev export to remain offline wheel-installable."""
+def test_locked_exports_have_uv_hash_provenance() -> None:
+    """Require every universal runtime/dev export hash to originate in uv.lock."""
     locked = _locked_packages()
     for export_name in ("requirements.txt", "requirements-dev.txt"):
         exported = _exported_requirements(RUNTIME_ROOT / export_name)
         assert exported, f"{export_name} did not contain pinned requirements"
-        assert {("cffi", "2.1.1"), ("cryptography", "48.0.1")} <= set(exported)
+        assert {("cffi", "2.1.1"), ("cryptography", "50.0.0")} <= set(exported)
         for key, hashes in exported.items():
             package = locked.get(key)
             assert package is not None, f"{export_name} entry is absent from uv.lock: {key}"
             assert hashes, f"{export_name} entry has no hashes: {key}"
             assert hashes <= _lock_hashes(package), f"{export_name} hash provenance drift: {key}"
-            filenames = [
-                str(wheel["url"]).rsplit("/", 1)[-1]
-                for wheel in package.get("wheels", [])
-                if isinstance(wheel, dict) and isinstance(wheel.get("url"), str)
-            ]
-            for architecture in ("x86_64", "arm64"):
-                assert any(
-                    _wheel_supports_python313(filename, architecture)
-                    for filename in filenames
-                ), f"{key} lacks a Python 3.13 macOS {architecture} wheel"
+
+
+def test_arm_packaging_lock_is_generated_from_only_compatible_wheels() -> None:
+    """Bind the formal ARM export to exact CPython 3.13 macOS wheel hashes."""
+    rendered = LOCK_GENERATOR.render_lock(
+        RUNTIME_ROOT / "requirements.txt",
+        RUNTIME_ROOT / "uv.lock",
+        "aarch64-apple-darwin",
+    )
+    assert TARGET_LOCK.read_text(encoding="utf-8") == rendered
+
+    exported = _exported_requirements(TARGET_LOCK)
+    assert exported[("cffi", "2.1.1")] == {
+        "19ee6127ee34de7d83ce3d371ebc5ed91addbdcc39f9ab15ce4eb35a4e534971"
+    }
+    assert exported[("cryptography", "50.0.0")] == {
+        "031e2d5dd4bb9caa3ca9c82e5a197fd8ae680232cee62603d1a813f3f07e3d03",
+        "ccdc4a71a4dabae05de219404f9f4abc38e3b58422177ff93d0da05967dafa07",
+    }
+    locked = _locked_packages()
+    for key, hashes in exported.items():
+        compatible = set(LOCK_GENERATOR.compatible_wheel_hashes(locked[key], "arm64"))
+        assert hashes == compatible, f"non-ARM or missing wheel hash for {key}"
+
+
+def test_intel_packaging_has_no_nonvulnerable_cryptography_wheel() -> None:
+    """Keep Intel publication fail-closed until a fixed x86_64 wheel exists."""
+    cryptography = _locked_packages()[("cryptography", "50.0.0")]
+    assert LOCK_GENERATOR.compatible_wheel_hashes(cryptography, "x86_64") == ()
+
+    with pytest.raises(
+        LOCK_GENERATOR.LockGenerationError,
+        match="unsupported formal packaging target",
+    ):
+        LOCK_GENERATOR.render_lock(
+            RUNTIME_ROOT / "requirements.txt",
+            RUNTIME_ROOT / "uv.lock",
+            "x86_64-apple-darwin",
+        )
+
+    for workflow_name in ("desktop-installers.yml", "release.yml"):
+        workflow = (
+            REPOSITORY_ROOT / ".github/workflows" / workflow_name
+        ).read_text(encoding="utf-8")
+        assert "target: aarch64-apple-darwin" in workflow
+        assert "target: x86_64-apple-darwin" not in workflow
+
+
+def test_target_lock_tamper_is_rejected(tmp_path: Path) -> None:
+    """A changed target export cannot pass the deterministic generation check."""
+    tampered = tmp_path / TARGET_LOCK.name
+    source = TARGET_LOCK.read_text(encoding="utf-8")
+    tampered.write_text(source.replace("031e2d5d", "f31e2d5d", 1), encoding="utf-8")
+    with pytest.raises(
+        LOCK_GENERATOR.LockGenerationError,
+        match="dependency lock is stale",
+    ):
+        LOCK_GENERATOR.verify_lock(
+            tampered,
+            RUNTIME_ROOT / "requirements.txt",
+            RUNTIME_ROOT / "uv.lock",
+            "aarch64-apple-darwin",
+        )

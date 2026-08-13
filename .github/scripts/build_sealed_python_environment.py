@@ -46,6 +46,9 @@ REPOSITORY_ROOT = SCRIPT_DIR.parents[1]
 APP_SOURCE_ROOT = "tobkiri_runtime"
 DEFAULT_OUTPUT_RELATIVE = Path("tobkiri_runtime/python-runtime")
 DEFAULT_REQUIREMENTS_RELATIVE = Path("tobkiri_runtime/requirements.txt")
+MACOS_ARM64_REQUIREMENTS_RELATIVE = Path(
+    "tobkiri_runtime/requirements-packaging-aarch64-apple-darwin.txt"
+)
 MANIFEST_FILENAME = "sealed-environment.v1.json"
 SOURCE_SNAPSHOT_MANIFEST = ".tobkiri-source-snapshot.v1.json"
 SOURCE_SNAPSHOT_SCHEMA = "io.tobkiri.rootless-source-snapshot.v1"
@@ -149,6 +152,19 @@ TARGETS = {
         "x86_64-pc-windows-msvc", "windows", "x86_64", True
     ),
 }
+
+
+def packaging_requirements_relative(spec: TargetSpec) -> Path:
+    """Select the sole reviewed wheel lock for a formal packaging target."""
+    if spec.triple == "aarch64-apple-darwin":
+        return MACOS_ARM64_REQUIREMENTS_RELATIVE
+    if spec.triple == "x86_64-apple-darwin":
+        raise SealedEnvironmentError(
+            "x86_64 macOS publication is disabled: cryptography 50.0.0 has no "
+            "CPython 3.13 macOS x86_64 wheel"
+        )
+    return DEFAULT_REQUIREMENTS_RELATIVE
+
 
 _UV_VERSION_PATTERN = re.compile(
     r"^uv "
@@ -2528,6 +2544,7 @@ def build_environment(
 ) -> Path:
     """Build a native release environment with pinned uv and hash locks."""
     spec = target_spec(target)
+    requirements_relative = packaging_requirements_relative(spec)
     repo_root = Path(repo_root).resolve(strict=True)
     output_root = Path(output_root or repo_root / DEFAULT_OUTPUT_RELATIVE)
     if requirements_path is not None:
@@ -2552,7 +2569,7 @@ def build_environment(
                 source_inventory_sha256 or "",
                 release_digest or "",
             )
-            requirements_path = verified_source / DEFAULT_REQUIREMENTS_RELATIVE
+            requirements_path = verified_source / requirements_relative
             cache = work / "cache"
             cache.mkdir(mode=0o700)
             archive = work / "python.tar.gz"

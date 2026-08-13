@@ -3,13 +3,23 @@
 Release builds create one native, relocatable Python environment per supported
 Tauri target before packaging:
 
-* `aarch64-apple-darwin` and `x86_64-apple-darwin` (macOS)
+* `aarch64-apple-darwin` (macOS)
+
+Intel macOS publication is currently fail-closed: the first cryptography
+release fixing all three 2026 advisories is 50.0.0, and that release has no
+CPython 3.13 macOS x86_64 wheel. Source builds and the vulnerable 48/49
+releases are not packaging fallbacks.
 The generator retains Linux/Windows fixture coverage, but current production
 installer and release workflows intentionally build and publish macOS only.
 Non-macOS production requests are rejected by the local release helper.
 
-The exact locked runtime export is
-`tobkiri_runtime/requirements.txt`; CI installs both that export and
+The universal locked runtime export is
+`tobkiri_runtime/requirements.txt`. Formal macOS ARM packaging instead uses
+`requirements-packaging-aarch64-apple-darwin.txt`, generated from `uv.lock`
+with only compatible CPython 3.13 wheel hashes. CI verifies that generated
+lock, performs wheel-only/hash-required dry runs for both ARM success and Intel
+rejection, and audits both production requirements exports. CI installs the
+universal runtime export and
 `requirements-dev.txt` through
 `.github/scripts/install_locked_python_test_dependencies.py`.
 The pinned `uv` archive is staged by the existing resource preparer. Python

@@ -170,17 +170,42 @@ jobs:
           uv lock --locked
           runtime_export="$(mktemp)"
           dev_export="$(mktemp)"
-          trap 'rm -f "$runtime_export" "$dev_export"' EXIT
+          arm_dry_run="$(mktemp -d)"
+          intel_dry_run="$(mktemp -d)"
+          trap 'rm -f "$runtime_export" "$dev_export"; rm -rf "$arm_dry_run" "$intel_dry_run"' EXIT
           uv export --locked --no-dev --no-emit-project > "$runtime_export"
           uv export --locked --extra dev --no-emit-project > "$dev_export"
           diff -u requirements.txt "$runtime_export"
           diff -u requirements-dev.txt "$dev_export"
+          python ../.github/scripts/generate_packaging_dependency_locks.py \
+            --target aarch64-apple-darwin \
+            --runtime-export requirements.txt \
+            --uv-lock uv.lock \
+            --output requirements-packaging-aarch64-apple-darwin.txt \
+            --check
+          uv pip install --dry-run --target "$arm_dry_run" \
+            --python-version 3.13 \
+            --python-platform aarch64-apple-darwin \
+            --require-hashes --only-binary :all: \
+            -r requirements-packaging-aarch64-apple-darwin.txt
+          if uv pip install --dry-run --target "$intel_dry_run" \
+            --python-version 3.13 \
+            --python-platform x86_64-apple-darwin \
+            --require-hashes --only-binary :all: \
+            -r requirements-packaging-aarch64-apple-darwin.txt; then
+            echo "ARM-only packaging lock unexpectedly resolved for macOS Intel" >&2
+            exit 1
+          fi
 
       - name: Audit Python dependencies
         working-directory: tobkiri_runtime
         run: |
           pip install pip-audit
-          pip-audit -r requirements.txt
+          for lock in \
+            requirements.txt \
+            requirements-packaging-aarch64-apple-darwin.txt; do
+            pip-audit --disable-pip -r "$lock"
+          done
 
       - name: Run security and hardening regression tests
         working-directory: tobkiri_runtime

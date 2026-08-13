@@ -74,17 +74,6 @@ jobs:
             presentation_architecture: arm64
             signing_args: ""
             artifact_suffix: macos-arm64
-          - label: macOS Intel
-            os: macos-15-intel
-            target: x86_64-apple-darwin
-            bundles: dmg
-            shell_bundles: app
-            presentation_variant: shell.tauri.default.macos-x86_64
-            presentation_platform: macos
-            presentation_architecture: x86_64
-            signing_args: ""
-            artifact_suffix: macos-x64
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
