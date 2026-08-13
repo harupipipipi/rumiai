@@ -148,31 +148,51 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
         assert "TOBKIRI_PACKAGING_GIT_SHA256" in build_contents
         assert 'cat-file blob "$identity_oid" > "$identity_launcher"' in build_contents
         assert 'hash-object "$identity_launcher"' in build_contents
+        assert "formal_identity() {" in build_contents
         assert 'exec 9< "$identity_launcher"' in build_contents
-        assert 'python3 -I -B "/dev/fd/9"' in build_contents
+        stdin_invocation = (
+            'PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I -B - "$@" <&9'
+        )
+        assert stdin_invocation in build_contents
+        assert 'IFS= read -r -n 1 <&9' in build_contents
         assert 'exec 9<&-' in build_contents
-        assert "formal_identity" not in build_contents
         assert "exec {identity_fd}" not in build_contents
-        assert "/dev/fd/$identity_fd" not in build_contents
-        assert build_contents.count('exec 9< "$identity_launcher"') == 4
-        assert build_contents.count('python3 -I -B "/dev/fd/9"') == 4
-        assert build_contents.count("exec 9<&-") == 4
+        assert "/dev/fd" not in build_contents
+        assert "eval " not in build_contents
+        assert not any(
+            line.strip().startswith(("source ", ". "))
+            for line in build_contents.splitlines()
+        )
+        assert build_contents.count('exec 9< "$identity_launcher"') == 1
+        assert build_contents.count(stdin_invocation) == 1
+        assert build_contents.count("exec 9<&-") == 1
+        assert build_contents.count("formal_identity ") == 4
+        for invocation in (
+            'formal_identity "$pre_git_env"',
+            'formal_identity "-"',
+            'formal_identity "$source_env"',
+            'formal_identity "$TOOLCHAIN_ENV"',
+        ):
+            assert build_contents.count(invocation) == 1
+        assert 'test "$identity_status" -eq 0' in build_contents
+        assert 'test -s "$required_output"' in build_contents
+        assert 'test -s "$identity_launcher"' in build_contents
         lines = build_contents.splitlines()
-        invocation_lines = [
+        open_line = next(
             index
             for index, line in enumerate(lines)
-            if 'python3 -I -B "/dev/fd/9"' in line
-        ]
-        assert len(invocation_lines) == 4
-        for invocation_line in invocation_lines:
-            assert (
-                lines[invocation_line - 1].strip()
-                == 'exec 9< "$identity_launcher"'
-            )
-            end_line = invocation_line
-            while lines[end_line].rstrip().endswith("\\"):
-                end_line += 1
-            assert lines[end_line + 1].strip() == "exec 9<&-"
+            if line.strip() == 'exec 9< "$identity_launcher"'
+        )
+        invocation_line = next(
+            index for index, line in enumerate(lines) if stdin_invocation in line
+        )
+        close_line = next(
+            index
+            for index, line in enumerate(lines[invocation_line:], invocation_line)
+            if line.strip() == "exec 9<&-"
+        )
+        assert invocation_line == open_line + 1
+        assert close_line > invocation_line
         assert "source_revision=" in build_contents
         assert "source_tree=" in build_contents
         assert "TOBKIRI_PACKAGING_SOURCE_PROVENANCE_FILE" not in build_contents

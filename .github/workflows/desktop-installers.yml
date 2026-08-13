@@ -127,29 +127,53 @@ jobs:
           "$formal_git" -C "$GITHUB_WORKSPACE" cat-file blob "$identity_oid" > "$identity_launcher"
           test "$("$formal_git" -C "$GITHUB_WORKSPACE" hash-object "$identity_launcher")" = "$identity_oid"
           /bin/chmod 0400 "$identity_launcher"
-          exec 9< "$identity_launcher"
-          PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I -B "/dev/fd/9" \
+          formal_identity() {
+            local required_output="$1"
+            local required_output_size=0
+            local identity_status=0
+            shift
+            if test "$required_output" = "-"; then
+              :
+            elif test -e "$required_output" || test -L "$required_output"; then
+              required_output_size="$(/usr/bin/stat -f '%z' "$required_output")"
+            fi
+            exec 9< "$identity_launcher"
+            if PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I -B - "$@" <&9; then
+              identity_status=0
+            else
+              identity_status=$?
+            fi
+            if test "$identity_status" -eq 0 && IFS= read -r -n 1 <&9; then
+              identity_status=1
+            fi
+            exec 9<&-
+            test "$identity_status" -eq 0
+            if test "$required_output" = "-"; then
+              test -s "$identity_launcher"
+            else
+              test -s "$required_output"
+              if test "$required_output_size" -gt 0; then
+                test "$(/usr/bin/stat -f '%z' "$required_output")" -gt "$required_output_size"
+              fi
+            fi
+          }
+          formal_identity "$pre_git_env" \
             --bind-git-env --env-output "$pre_git_env"
-          exec 9<&-
           while IFS='=' read -r key value; do
             case "$key" in
               TOBKIRI_PACKAGING_GIT|TOBKIRI_PACKAGING_GIT_SHA256) export "$key=$value" ;;
               *) exit 1 ;;
             esac
           done < "$pre_git_env"
-          exec 9< "$identity_launcher"
-          PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I -B "/dev/fd/9" \
+          formal_identity "-" \
             --repository-root "$GITHUB_WORKSPACE" \
             --provenance .github/toolchains/packaging-python-macos.v1.json \
             --source-commit "$GITHUB_SHA" --git "$TOBKIRI_PACKAGING_GIT" \
             --git-sha256 "$TOBKIRI_PACKAGING_GIT_SHA256" --smoke-git-authority
-          exec 9<&-
-          exec 9< "$identity_launcher"
-          PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I -B "/dev/fd/9" \
+          formal_identity "$source_env" \
             --repository-root "$GITHUB_WORKSPACE" --source-commit "$GITHUB_SHA" \
             --git "$TOBKIRI_PACKAGING_GIT" --git-sha256 "$TOBKIRI_PACKAGING_GIT_SHA256" \
             --snapshot-source --snapshot-root "$source_snapshot" --env-output "$source_env"
-          exec 9<&-
           while IFS='=' read -r key value; do
             case "$key" in
               TOBKIRI_PACKAGING_SOURCE_SNAPSHOT|TOBKIRI_PACKAGING_SOURCE_TREE|TOBKIRI_PACKAGING_SOURCE_INVENTORY_SHA256|TOBKIRI_PACKAGING_RELEASE_DIGEST) export "$key=$value" ;;
@@ -167,10 +191,8 @@ jobs:
             --source-tree "$TOBKIRI_PACKAGING_SOURCE_TREE" \
             --source-inventory-sha256 "$TOBKIRI_PACKAGING_SOURCE_INVENTORY_SHA256" \
             --env-output "$TOOLCHAIN_ENV"
-          exec 9< "$identity_launcher"
-          PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I -B "/dev/fd/9" \
+          formal_identity "$TOOLCHAIN_ENV" \
             --bind-git-env --env-output "$TOOLCHAIN_ENV"
-          exec 9<&-
           for marker in \
             TOBKIRI_PACKAGING_PYTHON \
             TOBKIRI_PACKAGING_PYTHON_SHA256 \

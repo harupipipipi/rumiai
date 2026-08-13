@@ -279,63 +279,97 @@ def test_workflow_uses_snapshot_builder_and_has_no_sudo(workflow_name: str) -> N
     assert "internal-root" not in source
     assert 'cat-file blob "$identity_oid" > "$identity_launcher"' in source
     assert 'hash-object "$identity_launcher"' in source
+    assert "formal_identity() {" in source
     assert 'exec 9< "$identity_launcher"' in source
-    assert 'python3 -I -B "/dev/fd/9"' in source
+    assert 'PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I -B - "$@" <&9' in source
+    assert 'IFS= read -r -n 1 <&9' in source
     assert 'exec 9<&-' in source
-    assert "formal_identity" not in source
     assert "exec {identity_fd}" not in source
-    assert "/dev/fd/$identity_fd" not in source
-    assert source.count('exec 9< "$identity_launcher"') == 4
-    assert source.count('python3 -I -B "/dev/fd/9"') == 4
-    assert source.count("exec 9<&-") == 4
-    lines = source.splitlines()
-    invocation_lines = [
-        index
-        for index, line in enumerate(lines)
-        if 'python3 -I -B "/dev/fd/9"' in line
-    ]
-    assert len(invocation_lines) == 4
-    for invocation_line in invocation_lines:
-        assert lines[invocation_line - 1].strip() == 'exec 9< "$identity_launcher"'
-        end_line = invocation_line
-        while lines[end_line].rstrip().endswith("\\"):
-            end_line += 1
-        assert lines[end_line + 1].strip() == "exec 9<&-"
+    assert "/dev/fd" not in source
+    assert "eval " not in source
+    assert not any(
+        line.strip().startswith(("source ", ". "))
+        for line in source.splitlines()
+    )
+    assert source.count('exec 9< "$identity_launcher"') == 1
+    assert source.count('PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I -B - "$@" <&9') == 1
+    assert source.count("exec 9<&-") == 1
+    assert source.count("formal_identity ") == 4
+    for invocation in (
+        'formal_identity "$pre_git_env"',
+        'formal_identity "-"',
+        'formal_identity "$source_env"',
+        'formal_identity "$TOOLCHAIN_ENV"',
+    ):
+        assert source.count(invocation) == 1
+    assert 'test "$identity_status" -eq 0' in source
+    assert 'test -s "$required_output"' in source
+    assert 'test -s "$identity_launcher"' in source
     assert "/usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py" not in source
 
 
 def test_fixed_identity_fd_reopens_for_each_bash_3_2_invocation(
     tmp_path: Path,
 ) -> None:
-    """Bash 3.2 reopens fixed FD 9 for each child and closes it afterward."""
+    """Bash 3.2 reopens FD 9 for stdin scripts and proves every postcondition."""
     launcher = tmp_path / "identity launcher.py"
+    fake_python = _executable(tmp_path / "non-consuming-python")
     first_output = tmp_path / "first env output"
     second_output = tmp_path / "second env output"
+    missing_output = tmp_path / "missing env output"
     launcher.write_text(
         "from pathlib import Path\n"
         "import sys\n"
-        "output = Path(sys.argv[sys.argv.index('--env-output') + 1])\n"
-        "output.write_text(f'output={output.name}\\n', encoding='utf-8')\n",
+        "arguments = sys.argv[1:]\n"
+        "if '--no-output' in arguments:\n"
+        "    raise SystemExit(0)\n"
+        "output = Path(arguments[arguments.index('--env-output') + 1])\n"
+        "marker = arguments[arguments.index('--argv-marker') + 1]\n"
+        "output.write_text(\n"
+        "    f'output={output.name};marker={marker}\\n', encoding='utf-8'\n"
+        ")\n",
         encoding="utf-8",
     )
     script = r"""
 set -euo pipefail
 identity_launcher="$1"
-python="$2"
+real_python="$2"
+python="$real_python"
 first_output="$3"
 second_output="$4"
-exec 9< "$identity_launcher"
-"$python" -I -B /dev/fd/9 --env-output "$first_output"
-exec 9<&-
-exec 9< "$identity_launcher"
-"$python" -I -B /dev/fd/9 --env-output "$second_output"
-exec 9<&-
-test -s "$first_output"
-test -s "$second_output"
+missing_output="$5"
+fake_python="$6"
+formal_identity() {
+  required_output="$1"
+  shift
+  identity_status=0
+  exec 9< "$identity_launcher"
+  if "$python" -I -B - "$@" <&9; then
+    identity_status=0
+  else
+    identity_status=$?
+  fi
+  if test "$identity_status" -eq 0 && IFS= read -r -n 1 <&9; then
+    identity_status=1
+  fi
+  exec 9<&-
+  test "$identity_status" -eq 0
+  test -s "$required_output"
+}
+formal_identity "$first_output" --env-output "$first_output" --argv-marker first
+formal_identity "$second_output" --env-output "$second_output" --argv-marker second
+grep -q 'marker=first' "$first_output"
+grep -q 'marker=second' "$second_output"
 test "$(cat "$first_output")" != "$(cat "$second_output")"
-if "$python" -I -B /dev/fd/9 --env-output "$first_output"; then
+if formal_identity "$missing_output" --no-output; then
   exit 1
 fi
+test ! -e "$missing_output"
+python="$fake_python"
+if formal_identity "$missing_output" --no-output; then
+  exit 1
+fi
+test ! -e "$missing_output"
 """
     result = subprocess.run(
         [
@@ -347,6 +381,8 @@ fi
             sys.executable,
             str(first_output),
             str(second_output),
+            str(missing_output),
+            str(fake_python),
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -357,7 +393,7 @@ fi
 
 
 def test_private_fd_launcher_ignores_checkout_path_swap(tmp_path: Path) -> None:
-    """A held exact launcher inode is independent of the mutable checkout name."""
+    """A private verified launcher stream is independent of the checkout name."""
     checkout = tmp_path / "identity.py"
     private = tmp_path / "private.py"
     marker = tmp_path / "marker"
@@ -365,22 +401,53 @@ def test_private_fd_launcher_ignores_checkout_path_swap(tmp_path: Path) -> None:
     checkout.write_bytes(trusted)
     private.write_bytes(checkout.read_bytes())
     private.chmod(0o400)
-    descriptor = os.open(private, os.O_RDONLY)
-    try:
-        checkout.write_text(f"from pathlib import Path\nPath({str(marker)!r}).touch()\n")
+    checkout.write_text(f"from pathlib import Path\nPath({str(marker)!r}).touch()\n")
+    with private.open("rb") as stream:
         result = subprocess.run(
-            [sys.executable, "-I", "-B", f"/dev/fd/{descriptor}"],
+            [sys.executable, "-I", "-B", "-", "checkout-argument"],
+            stdin=stream,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             check=False,
-            pass_fds=(descriptor,),
         )
-    finally:
-        os.close(descriptor)
     assert result.returncode == 0, result.stderr
     assert result.stdout == "trusted"
     assert not marker.exists()
+
+
+def test_tampered_private_launcher_blob_is_rejected(tmp_path: Path) -> None:
+    """A changed private launcher no longer matches its trusted Git blob ID."""
+    launcher = tmp_path / "identity launcher.py"
+    trusted_payload = b"import sys\nsys.stdout.write('trusted')\n"
+    launcher.write_bytes(trusted_payload)
+    trusted_digest = hashlib.sha1(
+        f"blob {len(trusted_payload)}\0".encode() + trusted_payload
+    ).hexdigest()
+    launcher.write_bytes(b"import sys\nsys.stdout.write('tampered')\n")
+    verifier = (
+        "import hashlib, pathlib, sys\n"
+        "payload = pathlib.Path(sys.argv[1]).read_bytes()\n"
+        "framed = f'blob {len(payload)}\\0'.encode() + payload\n"
+        "actual = hashlib.sha1(framed).hexdigest()\n"
+        "raise SystemExit(0 if actual == sys.argv[2] else 1)\n"
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            verifier,
+            str(launcher),
+            trusted_digest,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
 
 
 def test_cli_rejects_retired_privileged_action() -> None:
