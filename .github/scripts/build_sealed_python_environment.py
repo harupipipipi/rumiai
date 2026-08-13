@@ -168,6 +168,16 @@ class UvVersionIdentity:
     target: str
 
 
+@dataclass(frozen=True)
+class _VenvInterpreterCandidate:
+    """One safe venv interpreter candidate and its resolved regular target."""
+
+    path: Path
+    target: Path
+    path_identity: tuple[int, int, int, int, int, int]
+    target_identity: tuple[int, int, int, int, int, int]
+
+
 class SealedEnvironmentError(RuntimeError):
     """Raised when a sealed environment cannot be safely built or verified."""
 
@@ -568,6 +578,253 @@ def _venv_python(root: Path, spec: TargetSpec) -> Path:
     if not path.is_file() or path.is_symlink():
         raise SealedEnvironmentError(f"required venv executable is missing: {path}")
     return path
+
+
+def _path_identity(path: Path) -> tuple[int, int, int, int, int, int]:
+    """Return metadata that detects replacement of one candidate path."""
+    metadata = path.lstat()
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_mode,
+        metadata.st_nlink,
+    )
+
+
+def _venv_interpreter_candidate(
+    path: Path,
+    root: Path,
+    runtime_root: Path,
+) -> _VenvInterpreterCandidate:
+    """Resolve one allowlisted venv candidate without accepting external links."""
+    try:
+        path_identity = _path_identity(path)
+    except OSError as exc:
+        raise SealedEnvironmentError(
+            f"venv interpreter candidate disappeared: {path}"
+        ) from exc
+    if path.is_symlink():
+        try:
+            linkname = os.readlink(path)
+        except OSError as exc:
+            raise SealedEnvironmentError(
+                f"venv interpreter candidate link cannot be read: {path}"
+            ) from exc
+        if (
+            not isinstance(linkname, str)
+            or not linkname
+            or "\\" in linkname
+            or "\x00" in linkname
+        ):
+            raise SealedEnvironmentError(
+                f"venv interpreter candidate link is not safe: {path}"
+            )
+    try:
+        target = path.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise SealedEnvironmentError(
+            f"venv interpreter candidate target is unavailable: {path}"
+        ) from exc
+    try:
+        target.relative_to(root)
+    except ValueError:
+        try:
+            target.relative_to(runtime_root)
+        except ValueError as exc:
+            raise SealedEnvironmentError(
+                "venv interpreter candidate resolves outside the venv/runtime "
+                f"roots: {path}"
+            ) from exc
+    try:
+        target_metadata = target.lstat()
+    except OSError as exc:
+        raise SealedEnvironmentError(
+            f"venv interpreter candidate target disappeared: {path}"
+        ) from exc
+    if (
+        target.is_symlink()
+        or _is_reparse_point(target_metadata)
+        or not stat.S_ISREG(target_metadata.st_mode)
+        or target_metadata.st_nlink != 1
+        or not target_metadata.st_mode & 0o111
+    ):
+        raise SealedEnvironmentError(
+            f"venv interpreter candidate target is not a private executable: {path}"
+        )
+    return _VenvInterpreterCandidate(
+        path=path,
+        target=target,
+        path_identity=path_identity,
+        target_identity=_path_identity(target),
+    )
+
+
+def _venv_interpreter_candidate_names(spec: TargetSpec) -> tuple[str, ...]:
+    """Return the only interpreter aliases accepted from uv's Unix venv."""
+    if spec.windows:
+        return ("python.exe",)
+    major_minor = ".".join(PYTHON_VERSION.split(".")[:2])
+    return (f"python{major_minor}", "python3", "python")
+
+
+def _verify_venv_interpreter_identity(
+    candidate: _VenvInterpreterCandidate,
+    root: Path,
+    runtime_root: Path,
+) -> None:
+    """Run one candidate with isolated flags and bind its venv identity."""
+    code = (
+        "import json,sys; "
+        "print(json.dumps({'version': '.'.join(map(str, sys.version_info[:3])), "
+        "'executable': sys.executable, 'prefix': sys.prefix, "
+        "'base_prefix': sys.base_prefix}, sort_keys=True))"
+    )
+    environment = os.environ.copy()
+    environment.pop("PYTHONHOME", None)
+    environment.pop("PYTHONPATH", None)
+    environment.pop("VIRTUAL_ENV", None)
+    environment[PYTHON_BYTECODE_ENVIRONMENT] = "1"
+    try:
+        result = subprocess.run(
+            [os.fspath(candidate.path), "-I", "-B", "-c", code],
+            cwd=root,
+            env=environment,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise SealedEnvironmentError(
+            f"venv interpreter candidate failed isolated identity: {candidate.path}"
+        ) from exc
+    try:
+        report = json.loads(result.stdout)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise SealedEnvironmentError(
+            "venv interpreter candidate identity output is malformed: "
+            f"{candidate.path}"
+        ) from exc
+    if not isinstance(report, dict):
+        raise SealedEnvironmentError(
+            f"venv interpreter candidate identity is not an object: {candidate.path}"
+        )
+    if report.get("version") != PYTHON_VERSION:
+        raise SealedEnvironmentError(
+            "venv interpreter candidate has the wrong Python version: "
+            f"{candidate.path}"
+        )
+    expected_prefix = root.resolve(strict=True)
+    expected_base_prefix = runtime_root.resolve(strict=True)
+    for field, expected in (
+        ("prefix", expected_prefix),
+        ("base_prefix", expected_base_prefix),
+        ("executable", candidate.target),
+    ):
+        value = report.get(field)
+        if not isinstance(value, str):
+            raise SealedEnvironmentError(
+                f"venv interpreter candidate identity field is malformed: {field}"
+            )
+        try:
+            actual = Path(value).resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise SealedEnvironmentError(
+                f"venv interpreter candidate identity path is invalid: {field}"
+            ) from exc
+        if actual != expected:
+            raise SealedEnvironmentError(
+                "venv interpreter candidate identity mismatch for "
+                f"{field}: {candidate.path}"
+            )
+
+
+def _materialize_venv_interpreter(
+    candidate: _VenvInterpreterCandidate,
+    required: Path,
+) -> None:
+    """Copy a verified interpreter into the required link-free venv path."""
+    before = (
+        _path_identity(required)
+        if required.exists() or required.is_symlink()
+        else None
+    )
+    temporary = required.with_name(f".{required.name}.{os.getpid()}.materialized")
+    if temporary.exists() or temporary.is_symlink():
+        raise SealedEnvironmentError(
+            f"venv interpreter materialization path already exists: {temporary}"
+        )
+    try:
+        if _path_identity(candidate.path) != candidate.path_identity:
+            raise SealedEnvironmentError(
+                "venv interpreter candidate path changed during materialization: "
+                f"{candidate.path}"
+            )
+        _copy_regular_file(candidate.target, temporary, executable=True)
+        if _path_identity(candidate.target) != candidate.target_identity:
+            raise SealedEnvironmentError(
+                "venv interpreter candidate changed during materialization: "
+                f"{candidate.path}"
+            )
+        current = (
+            _path_identity(required)
+            if required.exists() or required.is_symlink()
+            else None
+        )
+        if current != before:
+            raise SealedEnvironmentError(
+                "required venv interpreter path changed during materialization: "
+                f"{required}"
+            )
+        os.replace(temporary, required)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _normalize_venv_python(
+    root: Path,
+    runtime_root: Path,
+    spec: TargetSpec,
+) -> Path:
+    """Create the formal venv/bin/python3 path from one verified uv alias."""
+    if spec.windows:
+        return _venv_python(root, spec)
+    root = _assert_root(root)
+    runtime_root = _assert_root(runtime_root)
+    bin_root = _assert_root(root / "bin")
+    required = bin_root / "python3"
+    candidates: list[_VenvInterpreterCandidate] = []
+    for name in _venv_interpreter_candidate_names(spec):
+        path = bin_root / name
+        if path.exists() or path.is_symlink():
+            candidates.append(_venv_interpreter_candidate(path, root, runtime_root))
+    if not candidates:
+        raise SealedEnvironmentError(
+            "required venv executable is missing and no supported interpreter "
+            f"candidate exists: {required}"
+        )
+    target_identities = {candidate.target_identity for candidate in candidates}
+    if len(target_identities) != 1:
+        names = ", ".join(candidate.path.name for candidate in candidates)
+        raise SealedEnvironmentError(
+            f"ambiguous venv interpreter candidates: {names}"
+        )
+    by_name = {candidate.path.name: candidate for candidate in candidates}
+    selected = by_name.get(required.name) or candidates[0]
+    _verify_venv_interpreter_identity(selected, root, runtime_root)
+    current = _venv_interpreter_candidate(selected.path, root, runtime_root)
+    if current != selected:
+        raise SealedEnvironmentError(
+            "venv interpreter candidate changed during identity validation: "
+            f"{selected.path}"
+        )
+    if selected.path != required or selected.path.is_symlink():
+        _materialize_venv_interpreter(selected, required)
+    final = _venv_interpreter_candidate(required, root, runtime_root)
+    _verify_venv_interpreter_identity(final, root, runtime_root)
+    return _venv_python(root, spec)
 
 
 def _write_text(path: Path, text: str, mode: int = 0o644) -> None:
@@ -2096,6 +2353,7 @@ def build_environment(
             verified_source,
             cache,
         )
+        _normalize_venv_python(venv_source, runtime_copy, spec)
         _run_uv(
             uv,
             [

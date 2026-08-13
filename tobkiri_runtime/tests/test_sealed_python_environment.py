@@ -1477,6 +1477,218 @@ def test_extracted_python_identity_forces_no_bytecode_environment(
     assert kwargs["env"][BUILDER.PYTHON_BYTECODE_ENVIRONMENT] == "1"
 
 
+@pytest.mark.parametrize("candidate_name", ("python3.13", "python"))
+def test_uv_venv_python_alias_is_materialized_to_required_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    candidate_name: str,
+) -> None:
+    """A supported uv alias becomes the regular formal venv/bin/python3."""
+    runtime = tmp_path / "runtime"
+    runtime_python = runtime / "bin/python3.13"
+    runtime_python.parent.mkdir(parents=True)
+    runtime_python.write_bytes(b"verified candidate interpreter")
+    runtime_python.chmod(0o755)
+    venv = tmp_path / "venv"
+    candidate = venv / "bin" / candidate_name
+    candidate.parent.mkdir(parents=True)
+    candidate.symlink_to(Path("../../runtime/bin/python3.13"))
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> types.SimpleNamespace:
+        calls.append((command, kwargs))
+        invoked = Path(command[0]).resolve()
+        return types.SimpleNamespace(
+            stdout=json.dumps(
+                {
+                    "version": BUILDER.PYTHON_VERSION,
+                    "executable": str(invoked),
+                    "prefix": str(venv),
+                    "base_prefix": str(runtime),
+                }
+            ),
+            stderr="",
+            returncode=0,
+        )
+
+    monkeypatch.setattr(BUILDER.subprocess, "run", fake_run)
+    result = BUILDER._normalize_venv_python(
+        venv,
+        runtime,
+        BUILDER.target_spec("aarch64-apple-darwin"),
+    )
+
+    assert result == venv / "bin/python3"
+    assert result.read_bytes() == runtime_python.read_bytes()
+    assert result.is_file() and not result.is_symlink()
+    assert result.stat().st_nlink == 1
+    assert all(command[1:3] == ["-I", "-B"] for command, _ in calls)
+    assert all(
+        kwargs["env"][BUILDER.PYTHON_BYTECODE_ENVIRONMENT] == "1"
+        for _, kwargs in calls
+    )
+
+
+def test_uv_venv_python_alias_rejects_ambiguous_regular_candidates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Different candidate files never win a path-based interpreter race."""
+    runtime = tmp_path / "runtime"
+    (runtime / "bin").mkdir(parents=True)
+    venv_bin = tmp_path / "venv/bin"
+    venv_bin.mkdir(parents=True)
+    for name, payload in (("python3.13", b"one"), ("python", b"two")):
+        path = venv_bin / name
+        path.write_bytes(payload)
+        path.chmod(0o755)
+    monkeypatch.setattr(
+        BUILDER.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail(
+            "ambiguous candidates must fail before execution"
+        ),
+    )
+
+    with pytest.raises(
+        BUILDER.SealedEnvironmentError,
+        match="ambiguous venv interpreter candidates",
+    ):
+        BUILDER._normalize_venv_python(
+            tmp_path / "venv",
+            runtime,
+            BUILDER.target_spec("aarch64-apple-darwin"),
+        )
+
+
+def test_uv_venv_python_alias_rejects_missing_candidates(tmp_path: Path) -> None:
+    """A missing formal path and every supported alias fail closed."""
+    runtime = tmp_path / "runtime"
+    (runtime / "bin").mkdir(parents=True)
+    (tmp_path / "venv/bin").mkdir(parents=True)
+
+    with pytest.raises(
+        BUILDER.SealedEnvironmentError,
+        match="no supported interpreter candidate",
+    ):
+        BUILDER._normalize_venv_python(
+            tmp_path / "venv",
+            runtime,
+            BUILDER.target_spec("aarch64-apple-darwin"),
+        )
+
+
+def test_uv_venv_python_alias_rejects_external_symlink(tmp_path: Path) -> None:
+    """A known alias pointing outside the private build roots is rejected."""
+    runtime = tmp_path / "runtime"
+    (runtime / "bin").mkdir(parents=True)
+    venv_bin = tmp_path / "venv/bin"
+    venv_bin.mkdir(parents=True)
+    outside = tmp_path / "outside-python"
+    outside.write_bytes(b"outside")
+    outside.chmod(0o755)
+    (venv_bin / "python3.13").symlink_to(outside)
+
+    with pytest.raises(
+        BUILDER.SealedEnvironmentError,
+        match="(outside the venv/runtime roots|candidate link is not safe)",
+    ):
+        BUILDER._normalize_venv_python(
+            tmp_path / "venv",
+            runtime,
+            BUILDER.target_spec("aarch64-apple-darwin"),
+        )
+
+
+def test_uv_venv_python_alias_rejects_path_swap_during_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A candidate replaced during identity validation cannot be materialized."""
+    runtime = tmp_path / "runtime"
+    runtime_python = runtime / "bin/python3.13"
+    runtime_python.parent.mkdir(parents=True)
+    runtime_python.write_bytes(b"verified candidate")
+    runtime_python.chmod(0o755)
+    venv = tmp_path / "venv"
+    candidate = venv / "bin/python3.13"
+    candidate.parent.mkdir(parents=True)
+    candidate.symlink_to(Path("../../runtime/bin/python3.13"))
+    outside = tmp_path / "outside-python"
+    outside.write_bytes(b"outside")
+    outside.chmod(0o755)
+
+    def fake_run(command: list[str], **_kwargs: object) -> types.SimpleNamespace:
+        del command
+        candidate.unlink()
+        candidate.symlink_to(outside)
+        return types.SimpleNamespace(
+            stdout=json.dumps(
+                {
+                    "version": BUILDER.PYTHON_VERSION,
+                    "executable": str(runtime_python),
+                    "prefix": str(venv),
+                    "base_prefix": str(runtime),
+                }
+            ),
+            stderr="",
+            returncode=0,
+        )
+
+    monkeypatch.setattr(BUILDER.subprocess, "run", fake_run)
+    with pytest.raises(
+        BUILDER.SealedEnvironmentError,
+        match="(outside the venv/runtime roots|candidate link is not safe)",
+    ):
+        BUILDER._normalize_venv_python(
+            venv,
+            runtime,
+            BUILDER.target_spec("aarch64-apple-darwin"),
+        )
+
+
+def test_uv_venv_python_alias_rejects_wrong_interpreter_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A runnable candidate with the wrong version is not accepted."""
+    runtime = tmp_path / "runtime"
+    runtime_python = runtime / "bin/python3.13"
+    runtime_python.parent.mkdir(parents=True)
+    runtime_python.write_bytes(b"wrong interpreter")
+    runtime_python.chmod(0o755)
+    venv = tmp_path / "venv"
+    candidate = venv / "bin/python3.13"
+    candidate.parent.mkdir(parents=True)
+    candidate.symlink_to(Path("../../runtime/bin/python3.13"))
+
+    monkeypatch.setattr(
+        BUILDER.subprocess,
+        "run",
+        lambda *_args, **_kwargs: types.SimpleNamespace(
+            stdout=json.dumps(
+                {
+                    "version": "3.12.0",
+                    "executable": str(runtime_python),
+                    "prefix": str(venv),
+                    "base_prefix": str(runtime),
+                }
+            ),
+            stderr="",
+            returncode=0,
+        ),
+    )
+    with pytest.raises(
+        BUILDER.SealedEnvironmentError,
+        match="wrong Python version",
+    ):
+        BUILDER._normalize_venv_python(
+            venv,
+            runtime,
+            BUILDER.target_spec("aarch64-apple-darwin"),
+        )
+
+
 def test_uv_runner_preserves_clear_environment_and_disables_bytecode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
