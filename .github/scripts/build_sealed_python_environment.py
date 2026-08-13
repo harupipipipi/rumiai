@@ -20,6 +20,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import posixpath
 import platform as host_platform
 import re
 import secrets
@@ -1333,12 +1334,79 @@ def _archive_member_parts(member: tarfile.TarInfo) -> tuple[str, ...]:
     return parts
 
 
+def _archive_link_target(
+    member: tarfile.TarInfo,
+    parts: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Resolve one archive linkname without permitting an escape."""
+    linkname = member.linkname
+    if (
+        not isinstance(linkname, str)
+        or not linkname
+        or linkname.startswith("/")
+        or "\\" in linkname
+        or "\x00" in linkname
+    ):
+        raise _unsafe_archive_member(member)
+    if member.islnk():
+        normalized = posixpath.normpath(linkname)
+    else:
+        normalized = posixpath.normpath(
+            posixpath.join("/".join(parts[:-1]), linkname)
+        )
+    if (
+        normalized in {"", ".", ".."}
+        or normalized.startswith("../")
+        or normalized.startswith("/")
+    ):
+        raise SealedEnvironmentError(
+            f"CPython archive link escapes: {member.name} -> {linkname}"
+        )
+    target_parts = tuple(normalized.split("/"))
+    if (
+        not target_parts
+        or target_parts[0] != "python"
+        or any(part in {"", ".", ".."} for part in target_parts)
+        or any(":" in part for part in target_parts)
+    ):
+        raise SealedEnvironmentError(
+            f"CPython archive link escapes: {member.name} -> {linkname}"
+        )
+    return target_parts
+
+
+def _resolve_archive_link(
+    parts: tuple[str, ...],
+    names: dict[tuple[str, ...], tarfile.TarInfo],
+    visiting: tuple[tuple[str, ...], ...] = (),
+) -> tuple[str, ...]:
+    """Resolve a validated link graph to a regular file or directory member."""
+    member = names[parts]
+    if member.isreg() or member.isdir():
+        return parts
+    if not (member.issym() or member.islnk()):
+        raise _unsafe_archive_member(member)
+    if parts in visiting:
+        raise SealedEnvironmentError(
+            f"CPython archive link cycle includes: {member.name}"
+        )
+    target = _archive_link_target(member, parts)
+    target_member = names.get(target)
+    if target_member is None:
+        raise SealedEnvironmentError(
+            f"CPython archive link target is missing: {member.name} -> "
+            f"{'/'.join(target)}"
+        )
+    return _resolve_archive_link(target, names, (*visiting, parts))
+
+
 def _archive_dirfd_supported() -> bool:
     """Whether this host supports descriptor-relative no-follow extraction."""
     return bool(
         hasattr(os, "O_NOFOLLOW")
         and os.open in getattr(os, "supports_dir_fd", ())
         and os.mkdir in getattr(os, "supports_dir_fd", ())
+        and os.symlink in getattr(os, "supports_dir_fd", ())
     )
 
 
@@ -1447,8 +1515,41 @@ def _chmod_archive_path(path: Path, mode: int) -> None:
         os.chmod(path, mode)
 
 
+def _create_archive_symlink(
+    root_fd: int | None,
+    destination: Path,
+    parts: tuple[str, ...],
+    linkname: str,
+) -> None:
+    """Create one validated directory link beneath an anchored parent."""
+    parent_parts = parts[:-1]
+    if root_fd is not None:
+        parent_fd = _ensure_archive_directory_fd(root_fd, parent_parts)
+        try:
+            os.symlink(linkname, parts[-1], dir_fd=parent_fd)
+        except FileExistsError as error:
+            raise SealedEnvironmentError(
+                f"duplicate pinned CPython archive member: {'/'.join(parts)}"
+            ) from error
+        finally:
+            os.close(parent_fd)
+        return
+    parent = _ensure_archive_directory_path(destination, parent_parts)
+    path = parent / parts[-1]
+    if os.path.lexists(path):
+        raise SealedEnvironmentError(
+            f"duplicate pinned CPython archive member: {'/'.join(parts)}"
+        )
+    try:
+        os.symlink(linkname, path)
+    except OSError as error:
+        raise SealedEnvironmentError(
+            f"failed to create pinned CPython archive link: {'/'.join(parts)}"
+        ) from error
+
+
 def _extract_pinned_python_archive(archive: Path, destination: Path) -> Path:
-    """Extract only regular files and directories from a path-contained archive."""
+    """Extract a validated PBS tree without using unsafe tar extraction APIs."""
     use_dirfd = _archive_dirfd_supported()
     directory_modes: list[tuple[tuple[str, ...], int]] = []
     root_fd: int | None = None
@@ -1467,7 +1568,12 @@ def _extract_pinned_python_archive(archive: Path, destination: Path) -> Path:
             names: dict[tuple[str, ...], tarfile.TarInfo] = {}
             folded_names: dict[tuple[str, ...], tarfile.TarInfo] = {}
             for member in members:
-                if not (member.isdir() or member.isreg()):
+                if not (
+                    member.isdir()
+                    or member.isreg()
+                    or member.issym()
+                    or member.islnk()
+                ):
                     raise _unsafe_archive_member(member)
                 if member.size < 0:
                     raise _unsafe_archive_member(member)
@@ -1496,10 +1602,24 @@ def _extract_pinned_python_archive(archive: Path, destination: Path) -> Path:
                             f"{member.name}"
                         )
 
+            link_terminals: dict[tuple[str, ...], tuple[str, ...]] = {}
+            for member, parts in entries:
+                if member.issym() or member.islnk():
+                    terminal = _resolve_archive_link(parts, names)
+                    terminal_member = names[terminal]
+                    if member.islnk() and not terminal_member.isreg():
+                        raise SealedEnvironmentError(
+                            f"pinned CPython hardlink target is not a regular file: "
+                            f"{member.name}"
+                        )
+                    link_terminals[parts] = terminal
+
             if use_dirfd:
                 root_fd = _open_archive_directory(destination)
                 assert root_fd is not None
             for member, parts in entries:
+                if member.issym() or member.islnk():
+                    continue
                 if member.isdir():
                     if use_dirfd:
                         directory_fd = _ensure_archive_directory_fd(root_fd, parts)
@@ -1547,7 +1667,60 @@ def _extract_pinned_python_archive(archive: Path, destination: Path) -> Path:
                         mode,
                     )
 
-            for parts, mode in sorted(directory_modes, key=lambda item: len(item[0]), reverse=True):
+            for member, parts in entries:
+                if not (member.issym() or member.islnk()):
+                    continue
+                terminal = link_terminals[parts]
+                terminal_member = names[terminal]
+                if terminal_member.isreg():
+                    parent_parts = parts[:-1]
+                    file_path: Path | None = None
+                    if use_dirfd:
+                        parent_fd = _ensure_archive_directory_fd(root_fd, parent_parts)
+                        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                        flags |= getattr(os, "O_NOFOLLOW", 0)
+                        flags |= getattr(os, "O_CLOEXEC", 0)
+                        try:
+                            file_fd = os.open(
+                                parts[-1],
+                                flags,
+                                0o600,
+                                dir_fd=parent_fd,
+                            )
+                        finally:
+                            os.close(parent_fd)
+                    else:
+                        parent = _ensure_archive_directory_path(
+                            destination, parent_parts
+                        )
+                        file_path = parent / parts[-1]
+                        if os.path.lexists(file_path):
+                            raise SealedEnvironmentError(
+                                f"duplicate pinned CPython archive member: {member.name}"
+                            )
+                        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                        flags |= getattr(os, "O_NOFOLLOW", 0)
+                        file_fd = os.open(file_path, flags, 0o600)
+                    mode = _archive_file_mode(terminal_member)
+                    _write_archive_file(bundle, terminal_member, file_fd, mode)
+                    if not hasattr(os, "fchmod"):
+                        _chmod_archive_path(
+                            destination.joinpath(*parts) if file_path is None else file_path,
+                            mode,
+                        )
+                else:
+                    _create_archive_symlink(
+                        root_fd,
+                        destination,
+                        parts,
+                        member.linkname,
+                    )
+
+            for parts, mode in sorted(
+                directory_modes,
+                key=lambda item: len(item[0]),
+                reverse=True,
+            ):
                 if use_dirfd:
                     directory_fd = _ensure_archive_directory_fd(root_fd, parts)
                     try:

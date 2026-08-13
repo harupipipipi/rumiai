@@ -280,6 +280,65 @@ def test_macos_python_archive_authority_is_exact_and_offline_after_download(
     assert (extracted / "bin/python3").read_bytes() == b"python"
 
 
+def test_pinned_python_archive_materializes_idle3_like_internal_links(
+    tmp_path: Path,
+) -> None:
+    """Internal PBS aliases are copied from validated regular archive targets."""
+    archive = tmp_path / "internal-links.tar.gz"
+    root, root_payload = _archive_member("python", member_type=tarfile.DIRTYPE)
+    bin_dir, bin_payload = _archive_member(
+        "python/bin",
+        member_type=tarfile.DIRTYPE,
+    )
+    lib_dir, lib_payload = _archive_member(
+        "python/lib",
+        member_type=tarfile.DIRTYPE,
+    )
+    idle_target, idle_payload = _archive_member(
+        "python/bin/idle3.13",
+        payload=b"#!/usr/bin/env python3\nprint('idle')\n",
+    )
+    idle_target.mode = 0o775
+    idle_link, idle_link_payload = _archive_member(
+        "python/bin/idle3",
+        member_type=tarfile.SYMTYPE,
+        linkname="idle3.13",
+    )
+    hard_link, hard_link_payload = _archive_member(
+        "python/bin/idle3-hardlink",
+        member_type=tarfile.LNKTYPE,
+        linkname="python/bin/idle3.13",
+    )
+    lib_link, lib_link_payload = _archive_member(
+        "python/lib-alias",
+        member_type=tarfile.SYMTYPE,
+        linkname="lib",
+    )
+    _write_archive(
+        archive,
+        (
+            (root, root_payload),
+            (bin_dir, bin_payload),
+            (lib_dir, lib_payload),
+            (idle_target, idle_payload),
+            (idle_link, idle_link_payload),
+            (hard_link, hard_link_payload),
+            (lib_link, lib_link_payload),
+        ),
+    )
+
+    extracted = BUILDER._extract_pinned_python_archive(archive, tmp_path / "output")
+    expected = (extracted / "bin/idle3.13").read_bytes()
+    for alias in ("idle3", "idle3-hardlink"):
+        path = extracted / "bin" / alias
+        assert path.read_bytes() == expected
+        assert not path.is_symlink()
+        assert path.stat().st_mode & 0o777 == 0o755
+    directory_alias = extracted / "lib-alias"
+    assert directory_alias.is_symlink()
+    assert directory_alias.resolve() == extracted / "lib"
+
+
 def _archive_member(
     name: str,
     *,
@@ -315,8 +374,8 @@ def _write_archive(
     (
         ("python/../outside", tarfile.REGTYPE, ""),
         ("/outside", tarfile.REGTYPE, ""),
-        ("python/bin/link", tarfile.SYMTYPE, "../outside"),
-        ("python/bin/hardlink", tarfile.LNKTYPE, "python/bin/python3"),
+        ("python/bin/link", tarfile.SYMTYPE, "/outside"),
+        ("python/bin/hardlink", tarfile.LNKTYPE, "../../outside"),
         ("python/bin/device", tarfile.CHRTYPE, ""),
         ("python/bin/fifo", tarfile.FIFOTYPE, ""),
         ("python/bin/special", b"?", ""),
@@ -338,9 +397,88 @@ def test_pinned_python_archive_rejects_unsafe_member_types_and_paths(
     )
     _write_archive(archive, ((root, root_payload), (unsafe, unsafe_payload)))
 
-    with pytest.raises(BUILDER.SealedEnvironmentError, match="unsafe pinned"):
+    with pytest.raises(
+        BUILDER.SealedEnvironmentError,
+        match="(unsafe pinned|escapes)",
+    ):
         BUILDER._extract_pinned_python_archive(archive, tmp_path / "output")
     assert not (tmp_path / "outside").exists()
+
+
+@pytest.mark.parametrize(
+    "members",
+    (
+        (
+            _archive_member("python", member_type=tarfile.DIRTYPE),
+            _archive_member("python/bin", member_type=tarfile.DIRTYPE),
+            _archive_member(
+                "python/bin/link",
+                member_type=tarfile.SYMTYPE,
+                linkname="../../outside",
+            ),
+        ),
+        (
+            _archive_member("python", member_type=tarfile.DIRTYPE),
+            _archive_member("python/bin", member_type=tarfile.DIRTYPE),
+            _archive_member(
+                "python/bin/link",
+                member_type=tarfile.SYMTYPE,
+                linkname="missing",
+            ),
+        ),
+        (
+            _archive_member("python", member_type=tarfile.DIRTYPE),
+            _archive_member("python/bin", member_type=tarfile.DIRTYPE),
+            _archive_member(
+                "python/bin/first",
+                member_type=tarfile.SYMTYPE,
+                linkname="second",
+            ),
+            _archive_member(
+                "python/bin/second",
+                member_type=tarfile.SYMTYPE,
+                linkname="first",
+            ),
+        ),
+        (
+            _archive_member("python", member_type=tarfile.DIRTYPE),
+            _archive_member("python/bin", member_type=tarfile.DIRTYPE),
+            _archive_member("python/bin/special", member_type=tarfile.CHRTYPE),
+            _archive_member(
+                "python/bin/link",
+                member_type=tarfile.SYMTYPE,
+                linkname="special",
+            ),
+        ),
+        (
+            _archive_member("python", member_type=tarfile.DIRTYPE),
+            _archive_member("python/bin", member_type=tarfile.DIRTYPE),
+            _archive_member(
+                "python/bin/first",
+                member_type=tarfile.LNKTYPE,
+                linkname="python/bin/second",
+            ),
+            _archive_member(
+                "python/bin/second",
+                member_type=tarfile.LNKTYPE,
+                linkname="python/bin/first",
+            ),
+        ),
+    ),
+)
+def test_pinned_python_archive_rejects_link_graph_attacks(
+    tmp_path: Path,
+    members: tuple[tuple[tarfile.TarInfo, bytes], ...],
+) -> None:
+    """Link targets must be internal, present, non-special, and acyclic."""
+    archive = tmp_path / "link-attack.tar.gz"
+    _write_archive(archive, members)
+
+    with pytest.raises(
+        BUILDER.SealedEnvironmentError,
+        match="(unsafe pinned|escapes|missing|cycle)",
+    ):
+        BUILDER._extract_pinned_python_archive(archive, tmp_path / "output")
 
 
 @pytest.mark.parametrize(
