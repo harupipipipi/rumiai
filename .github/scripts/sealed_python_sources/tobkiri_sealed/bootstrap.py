@@ -67,7 +67,7 @@ SENTINEL_FILENAMES = {
     "native_sha256": "native.sha256",
 }
 PACKAGE_KIND_BY_PLATFORM = {
-    "macos": "apple-code-signature-v1",
+    "macos": "pinned-python-build-standalone-v1",
     "linux": "linux-immutable-package-v1",
     "windows": "windows-authenticode-v1",
 }

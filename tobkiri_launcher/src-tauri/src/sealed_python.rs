@@ -1,7 +1,7 @@
 //! Verified packaged Python execution environment contract.
 //!
-//! Integrity (the manifest and every byte named by it) is deliberately
-//! separate from package provenance (the outer platform package signature).
+//! Integrity (the manifest and every byte named by it), environment source
+//! provenance, and the outer platform package signature are separate checks.
 //!
 //! Threat model: packaged macOS launch protects against a corrupt or
 //! non-cooperating updater, cross-UID writes, and path/symlink substitution by
@@ -1542,6 +1542,7 @@ fn validate_manifest_contract(manifest: &SealedEnvironmentManifest) -> Result<()
         || manifest.platform != std::env::consts::OS
         || normalize_architecture(&manifest.architecture)
             != normalize_architecture(std::env::consts::ARCH)
+        || manifest.package_provenance.kind != required_package_provenance_kind()
         || manifest.package_provenance.package_id != "dev.tobkiri.launcher"
     {
         bail!("[PYTHON_SEALED_INVALID] sealed Python platform/package contract mismatch");
@@ -1603,6 +1604,16 @@ fn validate_manifest_contract(manifest: &SealedEnvironmentManifest) -> Result<()
         bail!("[PYTHON_SEALED_INVALID] environment digest does not match file inventory");
     }
     Ok(())
+}
+
+fn required_package_provenance_kind() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "pinned-python-build-standalone-v1"
+    } else if cfg!(windows) {
+        "windows-authenticode-v1"
+    } else {
+        "linux-immutable-package-v1"
+    }
 }
 
 fn verify_environment_tree(root: &Path, manifest: &SealedEnvironmentManifest) -> Result<()> {
@@ -2062,8 +2073,8 @@ fn normalize_architecture(value: &str) -> &str {
 
 #[cfg(target_os = "macos")]
 fn verify_package_provenance(config: &AppConfig, provenance: &PackageProvenance) -> Result<()> {
-    if provenance.kind != "apple-code-signature-v1" {
-        bail!("[PYTHON_SEALED_PROVENANCE_INVALID] macOS requires Apple code-signature provenance");
+    if provenance.kind != required_package_provenance_kind() {
+        bail!("[PYTHON_SEALED_PROVENANCE_INVALID] packaged Python provenance kind mismatch");
     }
     let bundle = config
         .app_dir
@@ -2077,11 +2088,7 @@ fn verify_package_provenance(config: &AppConfig, provenance: &PackageProvenance)
 
 #[cfg(not(target_os = "macos"))]
 fn verify_package_provenance(_config: &AppConfig, provenance: &PackageProvenance) -> Result<()> {
-    let required = if cfg!(windows) {
-        "windows-authenticode-v1"
-    } else {
-        "linux-immutable-package-v1"
-    };
+    let required = required_package_provenance_kind();
     if provenance.kind != required {
         bail!("[PYTHON_SEALED_PROVENANCE_INVALID] packaged Python provenance kind mismatch");
     }
@@ -2177,7 +2184,7 @@ mod tests {
             architecture: std::env::consts::ARCH.into(),
             python_version: "3.13.13".into(),
             package_provenance: PackageProvenance {
-                kind: "apple-code-signature-v1".into(),
+                kind: required_package_provenance_kind().into(),
                 package_id: "dev.tobkiri.launcher".into(),
                 release_digest: digest('b'),
             },
@@ -2289,6 +2296,38 @@ mod tests {
         manifest.environment_digest = sha256_bytes(&serde_json::to_vec(&manifest.files).unwrap());
         manifest.sentinels.stdlib_sha256 = format!("sha256:{}", digest('c'));
         assert!(validate_manifest_contract(&manifest).is_err());
+    }
+
+    #[test]
+    fn package_provenance_identity_is_exact_and_manifest_bound() {
+        let mut manifest = minimal_manifest();
+        manifest
+            .files
+            .sort_by(|left, right| left.path.cmp(&right.path));
+        manifest.environment_digest = sha256_bytes(&serde_json::to_vec(&manifest.files).unwrap());
+        validate_manifest_contract(&manifest).unwrap();
+
+        let expected_manifest_digest = sha256_bytes(&serde_json::to_vec(&manifest).unwrap());
+
+        let mut wrong_kind = manifest.clone();
+        wrong_kind.package_provenance.kind = "apple-code-signature-v1".into();
+        assert!(validate_manifest_contract(&wrong_kind).is_err());
+
+        let mut wrong_package = manifest.clone();
+        wrong_package.package_provenance.package_id = "dev.tobkiri.other".into();
+        assert!(validate_manifest_contract(&wrong_package).is_err());
+
+        let mut malformed_release = manifest.clone();
+        malformed_release.package_provenance.release_digest = format!("sha256:{}", digest('b'));
+        assert!(validate_manifest_contract(&malformed_release).is_err());
+
+        let mut substituted_release = manifest;
+        substituted_release.package_provenance.release_digest = digest('f');
+        validate_manifest_contract(&substituted_release).unwrap();
+        assert_ne!(
+            sha256_bytes(&serde_json::to_vec(&substituted_release).unwrap()),
+            expected_manifest_digest
+        );
     }
 
     #[test]

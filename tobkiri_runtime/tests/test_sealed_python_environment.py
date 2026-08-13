@@ -942,6 +942,68 @@ def test_manifest_is_strict_complete_and_reproducible(tmp_path: Path, target: st
     assert BUILDER.validate_environment(first, target, run_native_smoke=False)
 
 
+def test_macos_builder_bootstrap_and_schema_share_exact_package_provenance(
+    tmp_path: Path,
+) -> None:
+    """The generated macOS identity is accepted unchanged by every consumer."""
+    output = _fixture_sources(tmp_path, "x86_64-unknown-linux-gnu")[2]
+    document = json.loads((output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    document["platform"] = "macos"
+    document["architecture"] = "x86_64"
+    document["package_provenance"]["kind"] = "pinned-python-build-standalone-v1"
+
+    source_root = ROOT / ".github" / "scripts" / "sealed_python_sources"
+    old_path = sys.path[:]
+    old_package = sys.modules.pop("tobkiri_sealed", None)
+    old_bootstrap = sys.modules.pop("tobkiri_sealed.bootstrap", None)
+    try:
+        sys.path.insert(0, str(source_root))
+        import tobkiri_sealed.bootstrap as bootstrap
+
+        assert BUILDER._validate_manifest_shape(document) == document
+        assert bootstrap._validate_manifest_shape(document) == document
+
+        for field, invalid in (
+            ("kind", "apple-code-signature-v1"),
+            ("package_id", "dev.tobkiri.other"),
+            ("release_digest", "sha256:" + "a" * 64),
+        ):
+            tampered = json.loads(json.dumps(document))
+            tampered["package_provenance"][field] = invalid
+            with pytest.raises(BUILDER.SealedEnvironmentError):
+                BUILDER._validate_manifest_shape(tampered)
+            with pytest.raises(bootstrap.SealedBootstrapError):
+                bootstrap._validate_manifest_shape(tampered)
+
+        extra_field = json.loads(json.dumps(document))
+        extra_field["package_provenance"]["source_path"] = "/private/source"
+        with pytest.raises(BUILDER.SealedEnvironmentError, match="shape"):
+            BUILDER._validate_manifest_shape(extra_field)
+        with pytest.raises(bootstrap.SealedBootstrapError, match="shape"):
+            bootstrap._validate_manifest_shape(extra_field)
+
+        environment_schema = json.loads(
+            (ROOT / ".github" / "schemas" / "sealed-python-environment.v1.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert environment_schema["properties"]["package_provenance"]["properties"]["kind"][
+            "enum"
+        ] == [
+            "pinned-python-build-standalone-v1",
+            "windows-authenticode-v1",
+            "linux-immutable-package-v1",
+        ]
+    finally:
+        sys.path = old_path
+        sys.modules.pop("tobkiri_sealed.bootstrap", None)
+        sys.modules.pop("tobkiri_sealed", None)
+        if old_package is not None:
+            sys.modules["tobkiri_sealed"] = old_package
+        if old_bootstrap is not None:
+            sys.modules["tobkiri_sealed.bootstrap"] = old_bootstrap
+
+
 def test_manifest_contains_fixed_entrypoints_and_bootstrap_paths(tmp_path: Path) -> None:
     """The Unix layout inventories every fixed role and installed bootstrap."""
     output = _fixture_sources(tmp_path, "x86_64-unknown-linux-gnu")[2]

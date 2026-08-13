@@ -37,7 +37,7 @@
       "properties": {
         "kind": {
           "enum": [
-            "apple-code-signature-v1",
+            "pinned-python-build-standalone-v1",
             "windows-authenticode-v1",
             "linux-immutable-package-v1"
           ]
