@@ -116,6 +116,7 @@ APPLICATION_EXCLUDED_DIR_NAMES = {
     "venv",
 }
 APPLICATION_EXCLUDED_SUFFIXES = {".bak", ".pyc", ".pyo", ".zip"}
+PYTHON_BYTECODE_ENVIRONMENT = "PYTHONDONTWRITEBYTECODE"
 APPLICATION_LEGACY_AUTHORITY_FILENAMES = {
     "ecosystem.json",
     "rumi.pack.v3.json",
@@ -849,6 +850,8 @@ def _run_role_smoke(
 ) -> None:
     """Start one real role through the parent-compatible bootstrap wire."""
     python = _venv_python(root / "venv", spec)
+    environment = dict(environment)
+    environment[PYTHON_BYTECODE_ENVIRONMENT] = "1"
     nonce = secrets.token_hex(32)
     with tempfile.TemporaryDirectory(
         prefix=".sealed-python-attestation-",
@@ -981,7 +984,7 @@ def _verify_python_smoke(root: Path, spec: TargetSpec) -> None:
             "PYTHONHOME",
         } or key.startswith(("DYLD_", "LD_")):
             environment.pop(key, None)
-    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment[PYTHON_BYTECODE_ENVIRONMENT] = "1"
     native_result = subprocess.run(
         [os.fspath(python), "-I", "-B", "-c", native_code],
         cwd=root,
@@ -1240,6 +1243,7 @@ def _run_uv(
         "HOME": os.fspath(cache),
         "LC_ALL": "C",
         "PATH": "/usr/bin:/bin",
+        PYTHON_BYTECODE_ENVIRONMENT: "1",
         "TMPDIR": os.fspath(cache),
         "UV_CACHE_DIR": os.fspath(cache / "uv-cache"),
         "UV_NO_CONFIG": "1",
@@ -1332,6 +1336,13 @@ def _archive_member_parts(member: tarfile.TarInfo) -> tuple[str, ...]:
     ):
         raise _unsafe_archive_member(member)
     return parts
+
+
+def _archive_member_is_excluded_bytecode(parts: tuple[str, ...]) -> bool:
+    """Identify safe archive bytecode that is validated but not materialized."""
+    return any(part == "__pycache__" for part in parts) or parts[-1].lower().endswith(
+        (".pyc", ".pyo")
+    )
 
 
 def _archive_link_target(
@@ -1567,6 +1578,7 @@ def _extract_pinned_python_archive(archive: Path, destination: Path) -> Path:
             entries: list[tuple[tarfile.TarInfo, tuple[str, ...]]] = []
             names: dict[tuple[str, ...], tarfile.TarInfo] = {}
             folded_names: dict[tuple[str, ...], tarfile.TarInfo] = {}
+            excluded_bytecode: set[tuple[str, ...]] = set()
             for member in members:
                 if not (
                     member.isdir()
@@ -1578,6 +1590,13 @@ def _extract_pinned_python_archive(archive: Path, destination: Path) -> Path:
                 if member.size < 0:
                     raise _unsafe_archive_member(member)
                 parts = _archive_member_parts(member)
+                if _archive_member_is_excluded_bytecode(parts):
+                    if not member.isreg():
+                        raise SealedEnvironmentError(
+                            "excluded pinned CPython bytecode member must be a "
+                            f"regular file: {member.name}"
+                        )
+                    excluded_bytecode.add(parts)
                 folded = tuple(part.casefold() for part in parts)
                 if parts in names or folded in folded_names:
                     raise SealedEnvironmentError(
@@ -1616,12 +1635,23 @@ def _extract_pinned_python_archive(archive: Path, destination: Path) -> Path:
                             f"pinned CPython hardlink target is not a regular file: "
                             f"{member.name}"
                         )
+                    if terminal in excluded_bytecode:
+                        raise SealedEnvironmentError(
+                            "pinned CPython archive link targets excluded "
+                            f"bytecode: {member.name}"
+                        )
                     link_terminals[parts] = terminal
 
             if use_dirfd:
                 root_fd = _open_archive_directory(destination)
                 assert root_fd is not None
+                python_fd = _ensure_archive_directory_fd(root_fd, ("python",))
+                os.close(python_fd)
+            else:
+                _ensure_archive_directory_path(destination, ("python",))
             for member, parts in entries:
+                if parts in excluded_bytecode:
+                    continue
                 if member.issym() or member.islnk():
                     continue
                 if member.isdir():
@@ -1672,6 +1702,8 @@ def _extract_pinned_python_archive(archive: Path, destination: Path) -> Path:
                     )
 
             for member, parts in entries:
+                if parts in excluded_bytecode:
+                    continue
                 if not (member.issym() or member.islnk()):
                     continue
                 terminal = link_terminals[parts]
@@ -1754,9 +1786,12 @@ def _find_runtime(runtime: Path, spec: TargetSpec) -> Path:
         "print(json.dumps({'version': '.'.join(map(str, sys.version_info[:3])), "
         "'machine': platform.machine().lower()}, sort_keys=True))"
     )
+    environment = os.environ.copy()
+    environment[PYTHON_BYTECODE_ENVIRONMENT] = "1"
     result = subprocess.run(
         [os.fspath(python), "-I", "-B", "-c", code],
         check=True,
+        env=environment,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

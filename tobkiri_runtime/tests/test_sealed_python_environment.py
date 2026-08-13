@@ -280,6 +280,49 @@ def test_macos_python_archive_authority_is_exact_and_offline_after_download(
     assert (extracted / "bin/python3").read_bytes() == b"python"
 
 
+def test_pinned_python_archive_download_keeps_sha256_binding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pinned archive download still verifies its exact SHA-256 digest."""
+    spec = BUILDER.target_spec("x86_64-apple-darwin")
+    payload = b"pinned archive bytes\n"
+
+    class Response:
+        def __init__(self) -> None:
+            self._read = False
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def read(self, _size: int) -> bytes:
+            if self._read:
+                return b""
+            self._read = True
+            return payload
+
+    monkeypatch.setattr(
+        BUILDER.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: Response(),
+    )
+    monkeypatch.setitem(
+        BUILDER.PYTHON_ARCHIVE_SHA256_BY_TARGET,
+        spec.triple,
+        hashlib.sha256(payload).hexdigest(),
+    )
+    verified = tmp_path / "verified.tar.gz"
+    BUILDER._download_pinned_python_archive(spec, verified)
+    assert verified.read_bytes() == payload
+
+    monkeypatch.setitem(BUILDER.PYTHON_ARCHIVE_SHA256_BY_TARGET, spec.triple, "0" * 64)
+    with pytest.raises(BUILDER.SealedEnvironmentError, match="SHA-256 mismatch"):
+        BUILDER._download_pinned_python_archive(spec, tmp_path / "mismatch.tar.gz")
+
+
 def test_pinned_python_archive_materializes_idle3_like_internal_links(
     tmp_path: Path,
 ) -> None:
@@ -360,6 +403,53 @@ def test_pinned_python_archive_creates_implicit_parent_directories(
     assert (extracted / "bin/idle3.13").read_bytes() == b"idle\n"
     assert (extracted / "bin/idle3").read_bytes() == b"idle\n"
     assert not (extracted / "bin/idle3").is_symlink()
+
+
+def test_pinned_python_archive_omits_safe_archive_bytecode(
+    tmp_path: Path,
+) -> None:
+    """Safe pinned bytecode is validated but never copied into the runtime."""
+    archive = tmp_path / "archive-bytecode.tar.gz"
+    root, root_payload = _archive_member("python", member_type=tarfile.DIRTYPE)
+    executable, executable_payload = _archive_member(
+        "python/bin/python3",
+        payload=b"exact executable bytes\n",
+    )
+    module, module_payload = _archive_member(
+        "python/lib/python3.13/encodings.py",
+        payload=b"exact module bytes\n",
+    )
+    pyc, pyc_payload = _archive_member(
+        "python/lib/python3.13/encodings.pyc",
+        payload=b"archive bytecode\n",
+    )
+    cached_pyc, cached_pyc_payload = _archive_member(
+        "python/lib/python3.13/__pycache__/encodings.cpython-313.pyc",
+        payload=b"cached archive bytecode\n",
+    )
+    _write_archive(
+        archive,
+        (
+            (root, root_payload),
+            (executable, executable_payload),
+            (module, module_payload),
+            (pyc, pyc_payload),
+            (cached_pyc, cached_pyc_payload),
+        ),
+    )
+
+    extracted = BUILDER._extract_pinned_python_archive(archive, tmp_path / "output")
+    assert (extracted / "bin/python3").read_bytes() == b"exact executable bytes\n"
+    assert (extracted / "lib/python3.13/encodings.py").read_bytes() == (
+        b"exact module bytes\n"
+    )
+    assert not (extracted / "lib/python3.13/encodings.pyc").exists()
+    assert not (extracted / "lib/python3.13/__pycache__").exists()
+    assert not any(
+        path.suffix.lower() in {".pyc", ".pyo"}
+        or "__pycache__" in path.relative_to(extracted).parts
+        for path in extracted.rglob("*")
+    )
 
 
 def _archive_member(
@@ -487,6 +577,26 @@ def test_pinned_python_archive_rejects_unsafe_member_types_and_paths(
                 linkname="python/bin/first",
             ),
         ),
+        (
+            _archive_member("python", member_type=tarfile.DIRTYPE),
+            _archive_member("python/bin", member_type=tarfile.DIRTYPE),
+            _archive_member("python/bin/hidden.pyc"),
+            _archive_member(
+                "python/bin/symlink-to-bytecode",
+                member_type=tarfile.SYMTYPE,
+                linkname="hidden.pyc",
+            ),
+        ),
+        (
+            _archive_member("python", member_type=tarfile.DIRTYPE),
+            _archive_member("python/bin", member_type=tarfile.DIRTYPE),
+            _archive_member("python/bin/hidden.pyo"),
+            _archive_member(
+                "python/bin/hardlink-to-bytecode",
+                member_type=tarfile.LNKTYPE,
+                linkname="python/bin/hidden.pyo",
+            ),
+        ),
     ),
 )
 def test_pinned_python_archive_rejects_link_graph_attacks(
@@ -499,7 +609,7 @@ def test_pinned_python_archive_rejects_link_graph_attacks(
 
     with pytest.raises(
         BUILDER.SealedEnvironmentError,
-        match="(unsafe pinned|escapes|missing|cycle)",
+        match="(unsafe pinned|escapes|missing|cycle|excluded)",
     ):
         BUILDER._extract_pinned_python_archive(archive, tmp_path / "output")
 
@@ -758,6 +868,31 @@ def test_assembly_materializes_links_and_freezes_the_complete_snapshot(
         and path.suffix not in {".pyc", ".pyo"}
         for path in output.rglob("*")
     )
+
+
+def test_validate_environment_rejects_later_child_python_bytecode(
+    tmp_path: Path,
+) -> None:
+    """The final tree scanner rejects bytecode created after assembly."""
+    output = _fixture_sources(tmp_path, "x86_64-unknown-linux-gnu")[2]
+    runtime = output / "runtime/lib/python3.13"
+    _make_test_mutable(runtime)
+    encodings = runtime / "encodings"
+    encodings.mkdir(exist_ok=True)
+    _make_test_mutable(encodings)
+    child_bytecode = encodings / "__pycache__/child.cpython-313.pyc"
+    child_bytecode.parent.mkdir(parents=True)
+    child_bytecode.write_bytes(b"child-created bytecode")
+
+    with pytest.raises(
+        BUILDER.SealedEnvironmentError,
+        match="generated Python bytecode",
+    ):
+        BUILDER.validate_environment(
+            output,
+            "x86_64-unknown-linux-gnu",
+            run_native_smoke=False,
+        )
 
 
 @pytest.mark.parametrize("case", ("outside", "cycle"))
@@ -1310,6 +1445,140 @@ def test_uv_version_runner_uses_structured_identity(
     assert identity.target == "aarch64-apple-darwin"
     with pytest.raises(BUILDER.SealedEnvironmentError):
         BUILDER._uv_version(Path("wrong-architecture-uv"), "x86_64-apple-darwin")
+
+
+def test_extracted_python_identity_forces_no_bytecode_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The extracted runtime receives -B and cannot inherit bytecode writes."""
+    spec = BUILDER.target_spec("x86_64-unknown-linux-gnu")
+    runtime = tmp_path / "runtime"
+    python = runtime / "bin/python3"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"synthetic python")
+    python.chmod(0o755)
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> types.SimpleNamespace:
+        calls.append((command, kwargs))
+        return types.SimpleNamespace(
+            stdout=json.dumps(
+                {"version": BUILDER.PYTHON_VERSION, "machine": "x86_64"}
+            )
+        )
+
+    monkeypatch.setenv(BUILDER.PYTHON_BYTECODE_ENVIRONMENT, "0")
+    monkeypatch.setattr(BUILDER.subprocess, "run", fake_run)
+
+    assert BUILDER._find_runtime(runtime, spec) == runtime
+    command, kwargs = calls[0]
+    assert command[:3] == [str(python), "-I", "-B"]
+    assert kwargs["env"][BUILDER.PYTHON_BYTECODE_ENVIRONMENT] == "1"
+
+
+def test_uv_runner_preserves_clear_environment_and_disables_bytecode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """uv's clear environment also protects Python used during venv setup."""
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> None:
+        calls.append((command, kwargs))
+
+    monkeypatch.setattr(BUILDER.subprocess, "run", fake_run)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    BUILDER._run_uv(
+        tmp_path / "uv",
+        ["venv", tmp_path / "venv"],
+        tmp_path,
+        cache,
+    )
+
+    command, kwargs = calls[0]
+    assert command[0] == str(tmp_path / "uv")
+    environment = kwargs["env"]
+    assert environment[BUILDER.PYTHON_BYTECODE_ENVIRONMENT] == "1"
+    assert "PYTHONPATH" not in environment
+    assert environment["UV_NO_CONFIG"] == "1"
+
+
+def test_role_smoke_forces_no_bytecode_environment_and_B(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A role child cannot re-enable bytecode through its inherited env."""
+    spec = BUILDER.target_spec("x86_64-unknown-linux-gnu")
+    root = tmp_path / "sealed"
+    python = root / "venv/bin/python3"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"synthetic python")
+    python.chmod(0o755)
+    captured: dict[str, object] = {}
+
+    def fake_run(command: list[str], **kwargs: object) -> types.SimpleNamespace:
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        nonce = command[command.index("--nonce") + 1]
+        attestation = Path(command[command.index("--attestation") + 1])
+        attestation.write_text(
+            json.dumps(
+                {
+                    "schema": BUILDER.ATTESTATION_SCHEMA,
+                    "nonce": nonce,
+                    "role": "host_helper",
+                    "environment_digest": "a" * 64,
+                    "executable": str(python),
+                    "prefix": str(root / "venv"),
+                    "base_prefix": str(root / "runtime"),
+                    "sys_path": [],
+                    "stdlib_sha256": "b" * 64,
+                    "site_packages_sha256": "c" * 64,
+                    "native_sha256": "d" * 64,
+                    "lifetime_lease": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    environment = {BUILDER.PYTHON_BYTECODE_ENVIRONMENT: "0"}
+    monkeypatch.setattr(BUILDER.subprocess, "run", fake_run)
+    BUILDER._run_role_smoke(root, spec, "host_helper", (), environment)
+
+    command = captured["command"]
+    kwargs = captured["kwargs"]
+    assert command[:3] == [str(python), "-I", "-B"]
+    assert kwargs["env"][BUILDER.PYTHON_BYTECODE_ENVIRONMENT] == "1"
+    assert environment[BUILDER.PYTHON_BYTECODE_ENVIRONMENT] == "0"
+
+
+def test_no_bytecode_flag_wins_over_child_environment_override(tmp_path: Path) -> None:
+    """A child changing its env after startup still cannot write bytecode."""
+    module = tmp_path / "runtime_module.py"
+    module.write_text("VALUE = 1\n", encoding="utf-8")
+    code = (
+        "import os, sys; "
+        "sys.path.insert(0, sys.argv[1]); "
+        "os.environ['PYTHONDONTWRITEBYTECODE'] = '0'; "
+        "import runtime_module; "
+        "print(sys.dont_write_bytecode)"
+    )
+    environment = _clean_sealed_test_environment()
+    environment[BUILDER.PYTHON_BYTECODE_ENVIRONMENT] = "0"
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code, str(tmp_path)],
+        env=environment,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "True"
+    assert not list(tmp_path.rglob("__pycache__"))
 
 
 def _write_fake_uv(path: Path, output: str, *, mode: int = 0o555) -> None:
