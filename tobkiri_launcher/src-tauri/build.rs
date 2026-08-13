@@ -424,7 +424,8 @@ fn stage_runtime_bundle() -> io::Result<()> {
     let runtime_root = repo_root.join(APP_SOURCE_DIR);
     let staged_root = project_dir.join("gen").join("app");
 
-    reset_dir(&staged_root).map_err(|error| stage_error("reset staged runtime", error))?;
+    reset_staged_runtime(&staged_root)
+        .map_err(|error| stage_error("reset staged runtime", error))?;
     if !copy_tracked_runtime_tree(repo_root, &staged_root)
         .map_err(|error| stage_error("copy tracked runtime", error))?
     {
@@ -1941,6 +1942,7 @@ impl CoreTransactionGuard {
                 "Core transaction ownership is incomplete; residue retained fail-closed",
             )
         })?;
+        verify_core_transaction_name(&self.parent, &self.name, self.identity)?;
         core_transaction_remove(&self.root, "", inventory)?;
         verify_core_transaction_name(&self.parent, &self.name, self.identity)?;
         unlinkat_core(&self.parent, &self.name, libc::AT_REMOVEDIR)?;
@@ -1955,6 +1957,410 @@ impl Drop for CoreTransactionGuard {
         // Explicit cleanup composes diagnostics. Drop never performs a path-based retry.
         if self.armed {}
     }
+}
+
+#[cfg(target_os = "macos")]
+struct StagedRuntimeResetGuard {
+    parent: File,
+    root: File,
+    name: std::ffi::OsString,
+    identity: (u64, u64),
+    inventory: std::collections::BTreeMap<String, (u64, u64, bool)>,
+    armed: bool,
+}
+
+#[cfg(target_os = "macos")]
+impl StagedRuntimeResetGuard {
+    fn open(path: &Path) -> io::Result<Self> {
+        use std::os::unix::fs::MetadataExt;
+
+        reject_staged_path_components(path)?;
+        let parent_path = path
+            .parent()
+            .ok_or_else(|| invalid_release("staged runtime root has no parent"))?;
+        let parent = open_staged_directory(parent_path, "staged runtime parent")?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| invalid_release("staged runtime root has no name"))?
+            .to_owned();
+        let root = core_openat(&parent, &name, true)?;
+        let metadata = root.metadata()?;
+        if metadata.uid() != unsafe { libc::geteuid() } {
+            return Err(invalid_release(
+                "staged runtime root is not owned by the build host; residue retained",
+            ));
+        }
+        let identity = (metadata.dev(), metadata.ino());
+        let inventory = core_transaction_inventory(&root)?;
+        validate_staged_runtime_manifest(&root, &inventory)?;
+        Ok(Self {
+            parent,
+            root,
+            name,
+            identity,
+            inventory,
+            armed: true,
+        })
+    }
+
+    fn cleanup(mut self) -> io::Result<()> {
+        verify_core_transaction_name(&self.parent, &self.name, self.identity)?;
+        core_transaction_remove(&self.root, "", &self.inventory)?;
+        verify_core_transaction_name(&self.parent, &self.name, self.identity)?;
+        unlinkat_core(&self.parent, &self.name, libc::AT_REMOVEDIR)?;
+        self.armed = false;
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for StagedRuntimeResetGuard {
+    fn drop(&mut self) {
+        // Explicit cleanup is the only removal path.  Drop never retries by path.
+        if self.armed {}
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn reject_staged_path_components(path: &Path) -> io::Result<()> {
+    if !path.is_absolute() {
+        return Err(invalid_release(
+            "staged runtime path must be absolute; residue retained",
+        ));
+    }
+    for ancestor in path.ancestors() {
+        match fs::symlink_metadata(ancestor) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(invalid_release(
+                    "staged runtime path contains a symlink; residue retained",
+                ));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(invalid_release(
+                    "staged runtime path contains a non-directory; residue retained",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn require_staged_owner(metadata: &fs::Metadata, label: &str) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    if metadata.uid() != unsafe { libc::geteuid() } {
+        return Err(invalid_release(format!(
+            "{label} is not owned by the build host; residue retained",
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn open_staged_directory(path: &Path, label: &str) -> io::Result<File> {
+    use std::ffi::CString;
+    use std::os::fd::FromRawFd;
+    use std::os::unix::ffi::OsStrExt;
+
+    reject_staged_path_components(path)?;
+    let encoded = CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| invalid_release(format!("{label} contains NUL")))?;
+    let fd = unsafe {
+        libc::open(
+            encoded.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if fd == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    let directory = unsafe { File::from_raw_fd(fd) };
+    require_staged_owner(&directory.metadata()?, label)?;
+    Ok(directory)
+}
+
+#[cfg(target_os = "macos")]
+fn ensure_staged_parent(parent: &Path) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+
+    reject_staged_path_components(parent)?;
+    match fs::symlink_metadata(parent) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(invalid_release(
+                    "staged runtime parent has an unsafe type; residue retained",
+                ));
+            }
+            require_staged_owner(&metadata, "staged runtime parent")?;
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let grandparent = parent
+                .parent()
+                .ok_or_else(|| invalid_release("staged runtime parent has no parent"))?;
+            let grandparent_metadata = fs::symlink_metadata(grandparent)?;
+            if grandparent_metadata.file_type().is_symlink()
+                || !grandparent_metadata.is_dir()
+                || grandparent_metadata.uid() != unsafe { libc::geteuid() }
+            {
+                return Err(invalid_release(
+                    "staged runtime parent anchor is not owned by the build host; residue retained",
+                ));
+            }
+            fs::create_dir(parent)?;
+            let metadata = fs::symlink_metadata(parent)?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(invalid_release(
+                    "staged runtime parent was replaced during creation; residue retained",
+                ));
+            }
+            require_staged_owner(&metadata, "staged runtime parent")?;
+        }
+        Err(error) => return Err(error),
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn create_staged_runtime_root(path: &Path) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::MetadataExt;
+
+    let parent_path = path
+        .parent()
+        .ok_or_else(|| invalid_release("staged runtime root has no parent"))?;
+    let parent = open_staged_directory(parent_path, "staged runtime parent")?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| invalid_release("staged runtime root has no name"))?;
+    let encoded = CString::new(name.as_bytes())
+        .map_err(|_| invalid_release("staged runtime root name contains NUL"))?;
+    if unsafe { libc::mkdirat(parent.as_raw_fd(), encoded.as_ptr(), 0o755) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    let root = core_openat(&parent, name, true)?;
+    let metadata = root.metadata()?;
+    if !metadata.is_dir() || metadata.uid() != unsafe { libc::geteuid() } {
+        return Err(invalid_release(
+            "new staged runtime root has unsafe ownership; residue retained",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn reset_staged_runtime_macos(path: &Path) -> io::Result<()> {
+    reject_staged_path_components(path)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| invalid_release("staged runtime root has no parent"))?;
+    ensure_staged_parent(parent)?;
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(invalid_release(
+                    "staged runtime root has an unsafe type; residue retained",
+                ));
+            }
+            require_staged_owner(&metadata, "staged runtime root")?;
+            StagedRuntimeResetGuard::open(path)?.cleanup()?;
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    create_staged_runtime_root(path)
+}
+
+#[cfg(target_os = "macos")]
+fn core_open_relative(root: &File, relative: &str, directory_only: bool) -> io::Result<File> {
+    let relative_path = safe_release_relative_path(relative, "staged runtime entry")?;
+    let components = relative_path
+        .components()
+        .map(|component| match component {
+            Component::Normal(name) => Ok(name.to_owned()),
+            _ => Err(invalid_release(
+                "staged runtime entry contains a non-normal component",
+            )),
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    if components.is_empty() {
+        return Err(invalid_release("staged runtime entry is empty"));
+    }
+    let mut directory = root.try_clone()?;
+    for (index, name) in components.iter().enumerate() {
+        let is_last = index + 1 == components.len();
+        directory = core_openat(&directory, name, is_last && directory_only || !is_last)?;
+    }
+    Ok(directory)
+}
+
+#[cfg(target_os = "macos")]
+fn validate_staged_runtime_manifest(
+    root: &File,
+    inventory: &std::collections::BTreeMap<String, (u64, u64, bool)>,
+) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+
+    let manifest = core_openat(root, std::ffi::OsStr::new(RUNTIME_RESOURCE_MANIFEST), false)?;
+    let manifest_metadata = manifest.metadata()?;
+    if !manifest_metadata.is_file()
+        || manifest_metadata.nlink() != 1
+        || manifest_metadata.uid() != unsafe { libc::geteuid() }
+    {
+        return Err(invalid_release(
+            "staged runtime seal manifest has unsafe identity; residue retained",
+        ));
+    }
+    let mut manifest_bytes = Vec::new();
+    manifest
+        .take(64 * 1024 * 1024)
+        .read_to_end(&mut manifest_bytes)?;
+    let document: serde_json::Value = serde_json::from_slice(&manifest_bytes).map_err(|error| {
+        invalid_release(format!("staged runtime seal manifest is invalid: {error}"))
+    })?;
+    let object = exact_object(
+        Some(&document),
+        &["schema", "entries"],
+        "staged runtime seal manifest",
+    )?;
+    if object.get("schema").and_then(serde_json::Value::as_str) != Some(RUNTIME_RESOURCE_SCHEMA) {
+        return Err(invalid_release(
+            "staged runtime seal manifest schema is invalid; residue retained",
+        ));
+    }
+    let entries = object
+        .get("entries")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| invalid_release("staged runtime seal entries are invalid"))?;
+    if entries.is_empty() {
+        return Err(invalid_release(
+            "staged runtime seal has no entries; residue retained",
+        ));
+    }
+
+    let mut expected = std::collections::BTreeMap::new();
+    expected.insert(String::new(), true);
+    expected.insert(RUNTIME_RESOURCE_MANIFEST.to_owned(), false);
+    let mut verified_entries = Vec::with_capacity(entries.len());
+    let mut previous_path = None;
+    for value in entries {
+        let entry = exact_object(
+            Some(value),
+            &["path", "size", "sha256"],
+            "staged runtime seal entry",
+        )?;
+        let path_text = entry
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| invalid_release("staged runtime seal path is invalid"))?;
+        let relative = safe_release_relative_path(path_text, "staged runtime seal path")?;
+        if relative
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+            || portable_relative_path(&relative) != path_text
+            || path_text == RUNTIME_RESOURCE_MANIFEST
+        {
+            return Err(invalid_release(
+                "staged runtime seal path is not canonical; residue retained",
+            ));
+        }
+        if previous_path
+            .as_deref()
+            .is_some_and(|previous| previous >= path_text)
+        {
+            return Err(invalid_release(
+                "staged runtime seal entries are not canonical; residue retained",
+            ));
+        }
+        previous_path = Some(path_text.to_owned());
+        let size = entry
+            .get("size")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| invalid_release("staged runtime seal size is invalid"))?;
+        let digest = entry
+            .get("sha256")
+            .and_then(serde_json::Value::as_str)
+            .filter(|digest| valid_raw_sha256(digest))
+            .ok_or_else(|| invalid_release("staged runtime seal digest is invalid"))?
+            .to_owned();
+        let normalized = portable_relative_path(&relative);
+        if expected.insert(normalized.clone(), false).is_some() {
+            return Err(invalid_release(
+                "staged runtime seal contains a duplicate path; residue retained",
+            ));
+        }
+        let mut directory = PathBuf::new();
+        let components = relative.components().collect::<Vec<_>>();
+        for component in components.iter().take(components.len() - 1) {
+            let Component::Normal(name) = component else {
+                return Err(invalid_release(
+                    "staged runtime seal directory is not canonical; residue retained",
+                ));
+            };
+            directory.push(name);
+            let directory_text = portable_relative_path(&directory);
+            if expected.get(&directory_text) == Some(&false) {
+                return Err(invalid_release(
+                    "staged runtime seal has a file/directory collision; residue retained",
+                ));
+            }
+            expected.insert(directory_text, true);
+        }
+        verified_entries.push((normalized, size, digest));
+    }
+
+    if inventory.len() != expected.len()
+        || expected.iter().any(|(path, expected_directory)| {
+            inventory
+                .get(path)
+                .map(|(_, _, actual_directory)| actual_directory != expected_directory)
+                != Some(false)
+        })
+    {
+        return Err(invalid_release(
+            "staged runtime seal does not cover the exact owned tree; residue retained",
+        ));
+    }
+
+    for (path, (_, _, directory)) in inventory {
+        let handle = if path.is_empty() {
+            root.try_clone()?
+        } else {
+            core_open_relative(root, path, *directory)?
+        };
+        let metadata = handle.metadata()?;
+        if metadata.uid() != unsafe { libc::geteuid() }
+            || (*directory && !metadata.is_dir())
+            || (!*directory && (!metadata.is_file() || metadata.nlink() != 1))
+        {
+            return Err(invalid_release(
+                "staged runtime tree ownership or type is invalid; residue retained",
+            ));
+        }
+    }
+
+    for (path, expected_size, expected_digest) in verified_entries {
+        let mut file = core_open_relative(root, &path, false)?;
+        let before = file.metadata()?;
+        let mut payload = Vec::new();
+        file.read_to_end(&mut payload)?;
+        let after = file.metadata()?;
+        if before.dev() != after.dev()
+            || before.ino() != after.ino()
+            || before.len() != expected_size
+            || payload.len() as u64 != expected_size
+            || raw_byte_digest(&payload) != expected_digest
+        {
+            return Err(invalid_release(
+                "staged runtime seal entry changed or has the wrong digest; residue retained",
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -1979,7 +2385,7 @@ fn core_openat(directory: &File, name: &std::ffi::OsStr, directory_only: bool) -
 #[cfg(target_os = "macos")]
 fn core_directory_entries(directory: &File) -> io::Result<Vec<std::ffi::OsString>> {
     use std::ffi::CStr;
-    use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd};
+    use std::os::fd::IntoRawFd;
     use std::os::unix::ffi::OsStringExt;
     let independent = core_openat(directory, std::ffi::OsStr::new("."), true)?;
     let stream = unsafe { libc::fdopendir(independent.into_raw_fd()) };
@@ -4149,6 +4555,7 @@ fn pack_shell_binary_name(target: &str) -> &'static str {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn reset_dir(path: &Path) -> io::Result<()> {
     if path.exists() {
         clear_dir(path)?;
@@ -4158,6 +4565,18 @@ fn reset_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+fn reset_staged_runtime(path: &Path) -> io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        return reset_staged_runtime_macos(path);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        reset_dir(path)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
 fn clear_dir(path: &Path) -> io::Result<()> {
     for entry in fs::read_dir(path)? {
         let entry = entry?;
@@ -5141,6 +5560,8 @@ mod tests {
                     .find("stage_presentation_release(&staged_root)")
                     .unwrap()
         );
+        assert!(stage.contains("reset_staged_runtime(&staged_root)"));
+        assert!(!stage.contains("reset_dir(&staged_root)"));
         let dispatcher = &source[source.find("fn stage_presentation_release(").unwrap()
             ..source.find("fn write_canonical_json(").unwrap()];
         assert!(dispatcher.contains("produce_and_stage_core_presentation_release"));
@@ -6170,6 +6591,101 @@ mod tests {
             .expect_err("unknown ownership must retain residue");
         assert!(error.to_string().contains("incomplete"));
         assert!(path.is_dir());
+    }
+
+    #[cfg(target_os = "macos")]
+    fn write_read_only_staged_runtime_fixture(root: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let nested = root.join("bundle");
+        fs::create_dir_all(&nested).expect("staged fixture should be creatable");
+        fs::write(nested.join("entry.txt"), b"host-sealed bytes")
+            .expect("staged fixture file should be writable");
+        write_runtime_resource_manifest(root).expect("staged fixture should seal");
+        fs::set_permissions(&nested, fs::Permissions::from_mode(0o555))
+            .expect("nested fixture should be sealed");
+        fs::set_permissions(root, fs::Permissions::from_mode(0o555))
+            .expect("staged fixture root should be sealed");
+        nested
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn staged_runtime_reset_unseals_only_the_host_sealed_tree() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tree = TestTree::new("staged-runtime-reset");
+        let staged = tree.path().join("gen/app");
+        fs::create_dir_all(&staged).expect("staged root should be creatable");
+        let nested = write_read_only_staged_runtime_fixture(&staged);
+
+        reset_staged_runtime(&staged).expect("host-sealed staging should reset");
+        assert!(staged.is_dir());
+        assert!(!nested.exists());
+        assert!(!staged.join(RUNTIME_RESOURCE_MANIFEST).exists());
+        assert_eq!(
+            fs::metadata(&staged)
+                .expect("new staged root should exist")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn staged_runtime_reset_rejects_extra_and_replaced_entries() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tree = TestTree::new("staged-runtime-negative");
+        let staged = tree.path().join("gen/app");
+        fs::create_dir_all(&staged).expect("staged root should be creatable");
+        let nested = write_read_only_staged_runtime_fixture(&staged);
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))
+            .expect("staged fixture should be writable for the negative case");
+        fs::write(staged.join("unowned-extra"), b"must remain")
+            .expect("extra fixture should be writable before sealing");
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o555))
+            .expect("staged fixture root should be resealed");
+        let error = reset_staged_runtime(&staged).expect_err("extra entry must fail closed");
+        assert!(error.to_string().contains("exact owned tree"));
+        assert!(staged.join("unowned-extra").is_file());
+        fs::set_permissions(&nested, fs::Permissions::from_mode(0o755))
+            .expect("nested fixture should be restored for cleanup");
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))
+            .expect("staged fixture should be restored for cleanup");
+
+        fs::remove_dir_all(&staged).expect("extra fixture should be removable");
+        fs::create_dir_all(&staged).expect("hardlink fixture root should be creatable");
+        let nested = write_read_only_staged_runtime_fixture(&staged);
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))
+            .expect("hardlink fixture root should be writable before mutation");
+        let outside = tree.path().join("outside-hardlink");
+        fs::write(&outside, b"outside bytes").expect("hardlink source should be writable");
+        fs::hard_link(&outside, staged.join("linked-extra"))
+            .expect("hardlink fixture should be creatable");
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o555))
+            .expect("hardlink fixture root should be resealed");
+        let error = reset_staged_runtime(&staged).expect_err("hardlink must fail closed");
+        assert!(error.to_string().contains("special or linked"));
+        assert!(outside.is_file());
+        fs::set_permissions(&nested, fs::Permissions::from_mode(0o755))
+            .expect("nested hardlink fixture should be restored for cleanup");
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))
+            .expect("hardlink fixture should be restored for cleanup");
+
+        let replacement = tree.path().join("replacement");
+        fs::create_dir_all(&replacement).expect("replacement should be creatable");
+        fs::write(replacement.join("victim"), b"victim")
+            .expect("replacement victim should be writable");
+        fs::remove_dir_all(&staged).expect("original fixture should be removable");
+        std::os::unix::fs::symlink(&replacement, &staged)
+            .expect("replacement symlink should be creatable");
+        let error = reset_staged_runtime(&staged).expect_err("root symlink must fail closed");
+        assert!(error.to_string().contains("symlink"));
+        assert!(replacement.join("victim").is_file());
+        fs::remove_file(&staged).expect("replacement symlink should be removable");
     }
 
     #[cfg(any(unix, windows))]
