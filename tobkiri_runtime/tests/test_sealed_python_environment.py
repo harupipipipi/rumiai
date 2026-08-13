@@ -121,6 +121,7 @@ def _fixture_sources(base: Path, target: str) -> tuple[Path, Path, Path]:
     else:
         venv_python.symlink_to(runtime_python)
     site_packages.mkdir(parents=True)
+    (site_packages / "empty-installed-package").mkdir()
     (site_packages / "fixture_dependency.py").write_text(
         "VALUE = 'sealed'\n",
         encoding="utf-8",
@@ -135,6 +136,7 @@ def _fixture_sources(base: Path, target: str) -> tuple[Path, Path, Path]:
     application = base / "application-source"
     (application / "ecosystem/defaultspack/defaultspack").mkdir(parents=True)
     (application / "core_runtime/host_broker").mkdir(parents=True)
+    (application / "empty-application-package").mkdir()
     (application / "app.py").write_text(
         "import json, os\n"
         "def main(argv=None):\n"
@@ -1031,6 +1033,88 @@ def test_manifest_contains_fixed_entrypoints_and_bootstrap_paths(tmp_path: Path)
     } <= paths
 
 
+def test_directory_inventory_is_exact_file_parent_closure(tmp_path: Path) -> None:
+    """Producer prunes empty inputs and both verifiers reject every extra dir."""
+    output = _fixture_sources(tmp_path / "canonical", "x86_64-unknown-linux-gnu")[2]
+    document = json.loads(
+        (output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8")
+    )
+    assert not (output / "app/empty-application-package").exists()
+    assert not (
+        output
+        / "venv/lib/python3.13/site-packages/empty-installed-package"
+    ).exists()
+    expected = BUILDER._expected_directories(document["files"])
+    assert BUILDER._actual_directories(output) == expected
+
+    source_root = ROOT / ".github" / "scripts" / "sealed_python_sources"
+    old_path = sys.path[:]
+    old_package = sys.modules.pop("tobkiri_sealed", None)
+    old_bootstrap = sys.modules.pop("tobkiri_sealed.bootstrap", None)
+    try:
+        sys.path.insert(0, str(source_root))
+        import tobkiri_sealed.bootstrap as bootstrap
+
+        assert bootstrap._expected_directories(document["files"]) == expected
+        for relative, builder_error in (
+            ("empty-extra", "directory inventory"),
+            ("__pycache__", "generated Python bytecode"),
+            (
+                "venv/lib/python3.13/site-packages-lookalike",
+                "directory inventory",
+            ),
+        ):
+            rejected = tmp_path / ("rejected-" + relative.replace("/", "-"))
+            shutil.copytree(output, rejected)
+            _make_test_mutable(rejected)
+            extra = rejected / relative
+            _make_test_mutable(extra.parent)
+            extra.mkdir(parents=True)
+            extra.chmod(0o555)
+            extra.parent.chmod(0o555)
+            rejected.chmod(0o555)
+            with pytest.raises(
+                BUILDER.SealedEnvironmentError,
+                match=builder_error,
+            ):
+                BUILDER.validate_environment(
+                    rejected,
+                    "x86_64-unknown-linux-gnu",
+                    run_native_smoke=False,
+                )
+            with pytest.raises(bootstrap.SealedBootstrapError):
+                bootstrap._verify_tree(rejected, document)
+
+        linked = tmp_path / "rejected-linked-directory"
+        shutil.copytree(output, linked)
+        _make_test_mutable(linked)
+        (linked / "linked-extra").symlink_to(linked / "app", target_is_directory=True)
+        linked.chmod(0o555)
+        with pytest.raises(BUILDER.SealedEnvironmentError, match="link"):
+            BUILDER.validate_environment(
+                linked,
+                "x86_64-unknown-linux-gnu",
+                run_native_smoke=False,
+            )
+        with pytest.raises(bootstrap.SealedBootstrapError, match="link"):
+            bootstrap._verify_tree(linked, document)
+
+        omitted = json.loads(json.dumps(document))
+        omitted["files"] = [
+            entry
+            for entry in omitted["files"]
+            if entry["path"] != "app/kernel_entry.py"
+        ]
+        with pytest.raises(bootstrap.SealedBootstrapError, match="missing or extra files"):
+            bootstrap._verify_tree(output, omitted)
+    finally:
+        sys.path = old_path
+        sys.modules.pop("tobkiri_sealed.bootstrap", None)
+        sys.modules.pop("tobkiri_sealed", None)
+        if old_package is not None:
+            sys.modules["tobkiri_sealed"] = old_package
+        if old_bootstrap is not None:
+            sys.modules["tobkiri_sealed.bootstrap"] = old_bootstrap
 def test_assembly_materializes_links_and_freezes_the_complete_snapshot(
     tmp_path: Path,
 ) -> None:

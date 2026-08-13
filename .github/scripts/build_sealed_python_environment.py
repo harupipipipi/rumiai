@@ -901,6 +901,47 @@ def _records(root: Path, spec: TargetSpec) -> list[dict[str, object]]:
     return records
 
 
+def _expected_directories(files: Sequence[dict[str, object]]) -> list[str]:
+    """Return the one canonical directory domain implied by file inventory."""
+    expected: set[str] = set()
+    for entry in files:
+        parent = Path(str(entry["path"])).parent
+        while str(parent) not in {"", "."}:
+            expected.add(parent.as_posix())
+            parent = parent.parent
+    return sorted(expected)
+
+
+def _actual_directories(root: Path) -> list[str]:
+    """Return every validated directory below a sealed root."""
+    return sorted(
+        relative
+        for relative, _path, kind, _metadata in _walk_tree(root)
+        if kind == "directory"
+    )
+
+
+def _remove_empty_directories(root: Path) -> None:
+    """Remove validated empty directories before the file-derived manifest."""
+    directories = [
+        (relative, path)
+        for relative, path, kind, _metadata in _walk_tree(root)
+        if kind == "directory"
+    ]
+    for relative, path in sorted(
+        directories,
+        key=lambda item: (len(Path(item[0]).parts), item[0]),
+        reverse=True,
+    ):
+        try:
+            path.rmdir()
+        except OSError as exc:
+            if exc.errno not in {errno.ENOTEMPTY, errno.EEXIST}:
+                raise SealedEnvironmentError(
+                    f"failed to normalize sealed directory closure: {relative}"
+                ) from exc
+
+
 def _files_digest(records: list[dict[str, object]]) -> str:
     """Digest the exact compact JSON bytes serialized by the core verifier."""
     payload = json.dumps(
@@ -963,6 +1004,7 @@ def _expected_manifest(
     python_version: str,
     release_digest: str,
 ) -> dict[str, object]:
+    _remove_empty_directories(root)
     records = _records(root, spec)
     sentinels = _sentinel_groups(records, python_version)
     for name, digest in sentinels.items():
@@ -1360,6 +1402,10 @@ def validate_environment(
     if records != actual_records:
         raise SealedEnvironmentError(
             "sealed file inventory does not match its manifest"
+        )
+    if _actual_directories(root) != _expected_directories(records):
+        raise SealedEnvironmentError(
+            "sealed directory inventory does not match file parent closure"
         )
     if document["environment_digest"] != _files_digest(records):
         raise SealedEnvironmentError("sealed environment digest does not match files")

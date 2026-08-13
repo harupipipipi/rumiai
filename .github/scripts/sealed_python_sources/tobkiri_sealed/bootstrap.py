@@ -326,6 +326,7 @@ def _validate_manifest_shape(document: object) -> dict[str, Any]:
 
 
 def _expected_directories(files: Sequence[dict[str, Any]]) -> list[str]:
+    """Return the one canonical directory domain implied by file inventory."""
     expected: set[str] = set()
     for entry in files:
         parent = Path(str(entry["path"])).parent
