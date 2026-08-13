@@ -916,6 +916,132 @@ mod tests {
         false
     }
 
+    fn set_fixture_permissions(path: &Path, mode: u32) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+        }
+        #[cfg(not(unix))]
+        {
+            let mut permissions = fs::metadata(path).unwrap().permissions();
+            permissions.set_readonly(mode & 0o200 == 0);
+            fs::set_permissions(path, permissions).unwrap();
+        }
+    }
+
+    fn seal_fixture_directories(root: &Path) {
+        for entry in fs::read_dir(root).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                seal_fixture_directories(&entry.path());
+            }
+        }
+        set_fixture_permissions(root, 0o555);
+    }
+
+    fn fixture_source_tree(source_checkout: &Path) -> String {
+        let output = Command::new(verified_git())
+            .args(["rev-parse", "--verify", "HEAD^{tree}"])
+            .current_dir(source_checkout)
+            .output()
+            .expect("authoritative fixture source tree should be readable");
+        assert!(
+            output.status.success(),
+            "authoritative fixture source tree lookup failed"
+        );
+        let tree = String::from_utf8(output.stdout)
+            .expect("authoritative fixture source tree should be UTF-8")
+            .trim()
+            .to_owned();
+        assert!(
+            tree.len() == 40
+                && tree
+                    .bytes()
+                    .all(|character| character.is_ascii_hexdigit()
+                        && !character.is_ascii_uppercase()),
+            "authoritative fixture source tree must be a full lowercase SHA"
+        );
+        tree
+    }
+
+    fn materialize_fixture_source_provenance(
+        source_checkout: &Path,
+        destination_parent: &Path,
+        source_revision: &str,
+    ) -> (PathBuf, PathBuf, PathBuf) {
+        let owner = destination_parent.join("sealed-source-owner");
+        fs::create_dir_all(&owner).unwrap();
+        set_fixture_permissions(&owner, 0o700);
+        let source_root = owner.join("source");
+        fs::create_dir_all(&source_root).unwrap();
+
+        let source_runtime = source_checkout.join("tobkiri_runtime");
+        let entries = source_manifest_entries(source_checkout);
+        for (relative, entry) in entries {
+            let source = source_runtime.join(&relative);
+            let metadata = fs::symlink_metadata(&source).unwrap();
+            assert!(
+                metadata.is_file()
+                    && !metadata.file_type().is_symlink()
+                    && !has_multiple_links(&source, &metadata).unwrap(),
+                "fixture source entry is not a regular non-hardlinked file: {}",
+                source.display()
+            );
+            let destination = source_root.join(&relative);
+            fs::create_dir_all(destination.parent().unwrap()).unwrap();
+            fs::copy(&source, &destination).unwrap();
+            let executable = entry
+                .get("executable")
+                .and_then(Value::as_bool)
+                .expect("source manifest executable flag should be boolean");
+            set_fixture_permissions(&destination, if executable { 0o555 } else { 0o444 });
+        }
+
+        let manifest = source_runtime.join("packaged_defaultspack_source_manifest.v1.json");
+        let manifest_bytes = fs::read(&manifest).unwrap();
+        let destination_manifest =
+            source_root.join("packaged_defaultspack_source_manifest.v1.json");
+        fs::write(&destination_manifest, &manifest_bytes).unwrap();
+        set_fixture_permissions(&destination_manifest, 0o444);
+
+        let provenance_path = source_root.join("packaging-source-provenance.v1.json");
+        let provenance = serde_json::json!({
+            "schema": "io.tobkiri.packaging-source-provenance.v1",
+            "source_commit": source_revision,
+            "source_tree": fixture_source_tree(source_checkout),
+            "source_clean": true,
+            "source_manifest_sha256": sha256(&manifest_bytes),
+        });
+        fs::write(&provenance_path, serde_json::to_vec(&provenance).unwrap()).unwrap();
+        set_fixture_permissions(&provenance_path, 0o400);
+        seal_fixture_directories(&source_root);
+        set_fixture_permissions(&owner, 0o700);
+
+        let canonical_root = source_root.canonicalize().unwrap();
+        let canonical_provenance = provenance_path.canonicalize().unwrap();
+        assert_eq!(
+            canonical_provenance,
+            canonical_root.join("packaging-source-provenance.v1.json"),
+            "fixture provenance must bind the sealed snapshot root"
+        );
+        let provenance_metadata = fs::symlink_metadata(&canonical_provenance).unwrap();
+        assert!(
+            !provenance_metadata.file_type().is_symlink()
+                && !has_multiple_links(&canonical_provenance, &provenance_metadata).unwrap(),
+            "fixture provenance must be a regular non-hardlinked file"
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            provenance_metadata.permissions().mode() & 0o222,
+            0,
+            "fixture provenance must be read-only"
+        );
+
+        (canonical_root, canonical_provenance, owner)
+    }
+
     fn collect_source_files(root: &Path, current: &Path, actual: &mut BTreeMap<String, Value>) {
         let entries = fs::read_dir(current).expect("source closure directory should be readable");
         for entry in entries {
@@ -1160,10 +1286,11 @@ mod tests {
         );
         fs::remove_file(&marker).unwrap();
 
-        let source_root = source_checkout
-            .join("tobkiri_runtime")
-            .canonicalize()
-            .unwrap();
+        let (source_root, provenance_path, source_owner) = materialize_fixture_source_provenance(
+            source_checkout,
+            &config.app_dir.join(".fixture-source-snapshot"),
+            source_revision,
+        );
         let mut isolated = python.command().unwrap();
         isolated
             .env_clear()
@@ -1190,8 +1317,8 @@ mod tests {
             .arg("arm64")
             .arg("--bundle-identity")
             .arg("io.tobkiri.shell.tauri")
-            .arg("--source-commit")
-            .arg(source_revision)
+            .arg("--source-provenance-file")
+            .arg(&provenance_path)
             .env(
                 "GIT_CONFIG_GLOBAL",
                 if cfg!(windows) { "NUL" } else { "/dev/null" },
@@ -1214,6 +1341,7 @@ mod tests {
         drop(unsafe_command);
         drop(isolated);
         drop(python);
+        fs::remove_dir_all(source_owner).unwrap();
         assert_clean_fixture_source(source_checkout);
         let bundle_root = config.app_dir.join("ecosystem/defaultspack/v4");
         let profile_raw = fs::read(bundle_root.join(PROFILE_PATH)).unwrap();
