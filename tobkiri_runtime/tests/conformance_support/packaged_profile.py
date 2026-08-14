@@ -46,7 +46,7 @@ def create_test_source_provenance(
 ) -> Path:
     """Create a private fixture snapshot and its core-shaped provenance file."""
     owner = destination / "sealed-source-owner"
-    owner.mkdir(mode=0o700)
+    owner.mkdir(mode=0o700, parents=True, exist_ok=False)
     owner.chmod(0o700)
     snapshot = owner / "source"
     materialize_source_snapshot(source_root, snapshot)
