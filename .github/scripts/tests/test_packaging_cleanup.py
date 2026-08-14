@@ -1162,6 +1162,191 @@ def test_recursive_cleanup_does_not_call_shutil_rmtree(
     assert not target.exists()
 
 
+@pytest.mark.skipif(cleanup._IS_WINDOWS, reason="POSIX sealed-tree contract")
+def test_manifest_bound_read_only_tree_is_unsealed_and_removed(tmp_path: Path) -> None:
+    """Only a complete host-owned manifest tree may be unsealed for reset."""
+
+    owner = tmp_path / "owned"
+    target = owner / "tree"
+    bundle = target / "bundle"
+    bundle.mkdir(parents=True)
+    (bundle / "global_contract_types.py").write_text("sealed\n", encoding="utf-8")
+    (target / "runtime-resource-manifest.v1.json").write_text(
+        "manifest\n", encoding="utf-8"
+    )
+    (bundle / "global_contract_types.py").chmod(0o444)
+    bundle.chmod(0o555)
+    target.chmod(0o555)
+    expected = {
+        "runtime-resource-manifest.v1.json": False,
+        "bundle/global_contract_types.py": False,
+    }
+
+    cleanup.remove_owned_path(
+        target,
+        owner_root=owner,
+        operation="test sealed tree reset",
+        expected_tree=expected,
+        unseal_read_only=True,
+    )
+
+    assert not target.exists()
+
+
+@pytest.mark.skipif(cleanup._IS_WINDOWS, reason="POSIX sealed-tree contract")
+@pytest.mark.parametrize("case", ("missing", "extra", "symlink", "hardlink"))
+def test_manifest_bound_read_only_tree_rejects_drift(
+    tmp_path: Path, case: str
+) -> None:
+    """Manifest, link, and exact-tree drift fail before unseal or quarantine."""
+
+    owner = tmp_path / "owned"
+    target = owner / "tree"
+    bundle = target / "bundle"
+    bundle.mkdir(parents=True)
+    payload = bundle / "global_contract_types.py"
+    payload.write_text("sealed\n", encoding="utf-8")
+    manifest = target / "runtime-resource-manifest.v1.json"
+    manifest.write_text("manifest\n", encoding="utf-8")
+    expected = {
+        "runtime-resource-manifest.v1.json": False,
+        "bundle/global_contract_types.py": False,
+    }
+    external = tmp_path / "external-victim"
+    external.write_text("must remain\n", encoding="utf-8")
+
+    if case == "missing":
+        payload.unlink()
+    elif case == "extra":
+        (target / "unlisted-extra").write_text("extra\n", encoding="utf-8")
+    else:
+        bundle.chmod(0o755)
+        payload.unlink()
+        if case == "symlink":
+            payload.symlink_to(external)
+        else:
+            os.link(external, payload)
+    if not bundle.is_symlink():
+        bundle.chmod(0o555)
+    if case == "extra":
+        (target / "unlisted-extra").chmod(0o444)
+    target.chmod(0o555)
+
+    with pytest.raises(cleanup.PackagingCleanupError, match="sealed"):
+        cleanup.remove_owned_path(
+            target,
+            owner_root=owner,
+            operation="test sealed tree drift",
+            expected_tree=expected,
+            unseal_read_only=True,
+        )
+
+    assert target.exists()
+    assert external.read_text(encoding="utf-8") == "must remain\n"
+    assert not list(owner.glob(".tobkiri-cleanup-*"))
+    for item in sorted(
+        tmp_path.rglob("*"), key=lambda value: len(value.parts), reverse=True
+    ):
+        if item.is_symlink():
+            continue
+        try:
+            item.chmod(0o755 if item.is_dir() else 0o644)
+        except OSError:
+            pass
+
+
+@pytest.mark.skipif(cleanup._IS_WINDOWS, reason="POSIX sealed-tree contract")
+def test_manifest_bound_read_only_tree_rejects_foreign_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tree owned by another UID is never made writable for cleanup."""
+
+    owner = tmp_path / "owned"
+    target = owner / "tree"
+    (target / "bundle").mkdir(parents=True)
+    (target / "bundle/global_contract_types.py").write_text(
+        "sealed\n", encoding="utf-8"
+    )
+    (target / "runtime-resource-manifest.v1.json").write_text(
+        "manifest\n", encoding="utf-8"
+    )
+    (target / "bundle").chmod(0o555)
+    target.chmod(0o555)
+    monkeypatch.setattr(cleanup, "_posix_owner", lambda _result: os.geteuid() + 1)
+
+    with pytest.raises(cleanup.PackagingCleanupError, match="host-owned"):
+        cleanup.remove_owned_path(
+            target,
+            owner_root=owner,
+            operation="test foreign sealed tree",
+            expected_tree={
+                "runtime-resource-manifest.v1.json": False,
+                "bundle/global_contract_types.py": False,
+            },
+            unseal_read_only=True,
+        )
+
+    assert target.exists()
+    target.chmod(0o755)
+    (target / "bundle").chmod(0o755)
+
+
+@pytest.mark.skipif(cleanup._IS_WINDOWS, reason="POSIX sealed-tree contract")
+def test_manifest_bound_read_only_tree_rejects_path_swap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A target identity swap at quarantine is rejected after unseal."""
+
+    owner = tmp_path / "owned"
+    target = owner / "tree"
+    bundle = target / "bundle"
+    bundle.mkdir(parents=True)
+    (bundle / "global_contract_types.py").write_text("sealed\n", encoding="utf-8")
+    (target / "runtime-resource-manifest.v1.json").write_text(
+        "manifest\n", encoding="utf-8"
+    )
+    bundle.chmod(0o555)
+    target.chmod(0o555)
+    original = owner / "tree-original"
+    replacement = tmp_path / "replacement"
+    replacement.mkdir()
+    (replacement / "victim").write_text("must remain\n", encoding="utf-8")
+    swapped = False
+
+    def replace_target(path: Path) -> None:
+        nonlocal swapped
+        if path == target and not swapped:
+            swapped = True
+            target.rename(original)
+            replacement.rename(target)
+
+    monkeypatch.setattr(cleanup, "_BEFORE_POSIX_MUTATION", replace_target)
+    with pytest.raises(cleanup.PackagingCleanupError, match="identity"):
+        cleanup.remove_owned_path(
+            target,
+            owner_root=owner,
+            operation="test sealed target swap",
+            expected_tree={
+                "runtime-resource-manifest.v1.json": False,
+                "bundle/global_contract_types.py": False,
+            },
+            unseal_read_only=True,
+        )
+
+    assert swapped
+    assert (target / "victim").read_text(encoding="utf-8") == "must remain\n"
+    assert (original / "bundle/global_contract_types.py").exists()
+    for item in sorted(
+        tmp_path.rglob("*"), key=lambda value: len(value.parts), reverse=True
+    ):
+        if item.is_symlink():
+            continue
+        try:
+            item.chmod(0o755 if item.is_dir() else 0o644)
+        except OSError:
+            pass
+
+
 @pytest.mark.skipif(cleanup._IS_WINDOWS, reason="POSIX descriptor contract")
 def test_recursive_cleanup_rejects_hardlink_and_preserves_external_victim(
     tmp_path: Path,

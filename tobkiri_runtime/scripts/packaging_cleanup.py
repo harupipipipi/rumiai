@@ -20,7 +20,7 @@ import time
 import uuid
 from ctypes import wintypes
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable, Mapping, Optional, Sequence, Union
 
 
@@ -994,6 +994,12 @@ def _identity_signature(
         stat.S_IFMT(result.st_mode),
         getattr(result, "st_file_attributes", None),
     )
+
+
+def _posix_owner(result: os.stat_result) -> Optional[int]:
+    """Return the numeric owner of a POSIX object when the platform exposes it."""
+
+    return getattr(result, "st_uid", None)
 
 
 def _parse_linux_mount_id(lines: Sequence[str]) -> int:
@@ -2194,6 +2200,85 @@ def _assert_posix_object(
         )
 
 
+def _assert_posix_host_owner(
+    result: os.stat_result,
+    *,
+    path: Path,
+    operation: str,
+    attempts: int,
+) -> None:
+    """Require a sealed-tree object to belong to the current build host."""
+
+    effective_uid = getattr(os, "geteuid", None)
+    owner = _posix_owner(result)
+    if effective_uid is None or owner is None or owner != effective_uid():
+        raise _security_error(
+            operation=operation,
+            path=path,
+            reason="descriptor-bound POSIX tree entry is not host-owned",
+            attempts=attempts,
+        )
+
+
+def _normalize_expected_tree(
+    expected_tree: Mapping[str, bool],
+    *,
+    operation: str,
+    path: Path,
+    attempts: int,
+) -> dict[str, bool]:
+    """Normalize a manifest file inventory and derive its parent directories."""
+
+    normalized: dict[str, bool] = {"": True}
+
+    def insert(relative: str, is_directory: bool) -> None:
+        previous = normalized.get(relative)
+        if relative in normalized and previous != is_directory:
+            raise _security_error(
+                operation=operation,
+                path=path,
+                reason="sealed manifest has a file/directory collision",
+                attempts=attempts,
+            )
+        normalized[relative] = is_directory
+
+    for relative, is_directory in expected_tree.items():
+        if not isinstance(relative, str) or not isinstance(is_directory, bool):
+            raise _security_error(
+                operation=operation,
+                path=path,
+                reason="sealed manifest inventory has an invalid entry",
+                attempts=attempts,
+            )
+        if relative == "":
+            if not is_directory:
+                raise _security_error(
+                    operation=operation,
+                    path=path,
+                    reason="sealed manifest root must be a directory",
+                    attempts=attempts,
+                )
+            continue
+        portable = PurePosixPath(relative)
+        if (
+            portable.is_absolute()
+            or "\\" in relative
+            or portable.as_posix() != relative
+            or any(part in {"", ".", ".."} for part in portable.parts)
+        ):
+            raise _security_error(
+                operation=operation,
+                path=path,
+                reason="sealed manifest path is not canonical",
+                attempts=attempts,
+            )
+        insert(relative, is_directory)
+        parts = relative.split("/")
+        for index in range(1, len(parts)):
+            insert("/".join(parts[:index]), True)
+    return normalized
+
+
 def _lstat_at(parent_fd: int, name: str) -> os.stat_result:
     """Inspect one child relative to a held parent without following links."""
 
@@ -2285,6 +2370,273 @@ def _open_posix_at(parent_fd: int, name: str, *, directory: bool) -> int:
     return os.open(name, flags, dir_fd=parent_fd)
 
 
+def _prepare_posix_sealed_tree(
+    parent_fd: int,
+    name: str,
+    path: Path,
+    *,
+    binding: _PathBinding,
+    expected_tree: Mapping[str, bool],
+    operation: str,
+    attempts: int,
+) -> dict[str, bool]:
+    """Validate and unseal one host-owned manifest-bound POSIX tree.
+
+    The complete descriptor-relative inventory is checked before any mode is
+    changed.  Directory descriptors remain held while they are changed to
+    owner-only writable mode, so the later quarantine/delete step never needs
+    to resolve an untrusted pathname to make a sealed tree removable.
+    """
+
+    if _IS_WINDOWS or binding.posix_mount_identity is None:
+        raise _security_error(
+            operation=operation,
+            path=path,
+            reason="sealed POSIX reset requires descriptor and mount identity",
+            attempts=attempts,
+        )
+    normalized = _normalize_expected_tree(
+        expected_tree,
+        operation=operation,
+        path=path,
+        attempts=attempts,
+    )
+    for index, descriptor in enumerate(binding.directory_fds):
+        current = os.fstat(descriptor)
+        identity = binding.identities[index].signature
+        if _posix_identity(current) != (
+            identity[0],
+            identity[1],
+            identity[2],
+        ):
+            raise _security_error(
+                operation=operation,
+                path=path,
+                reason="bound owner directory identity changed before sealed reset",
+                attempts=attempts,
+            )
+        _assert_posix_host_owner(
+            current,
+            path=binding.identities[index].path,
+            operation=operation,
+            attempts=attempts,
+        )
+
+    try:
+        root_result = _lstat_at(parent_fd, name)
+    except FileNotFoundError:
+        return normalized
+    root_device = binding.identities[0].signature[0]
+    _assert_posix_object(
+        root_result,
+        root_result,
+        path=path,
+        operation=operation,
+        attempts=attempts,
+        root_device=root_device,
+    )
+    if not stat.S_ISDIR(root_result.st_mode) or normalized.get("") is not True:
+        raise _security_error(
+            operation=operation,
+            path=path,
+            reason="sealed manifest root is not the expected directory",
+            attempts=attempts,
+        )
+
+    directory_records: list[tuple[int, str, Path, os.stat_result]] = []
+    seen: set[str] = set()
+    root_fd = _open_posix_at(parent_fd, name, directory=True)
+    try:
+        directory_records.append((root_fd, "", path, root_result))
+        _assert_posix_mount_identity(
+            root_fd,
+            binding.posix_mount_identity,
+            path=path,
+            operation=operation,
+            attempts=attempts,
+        )
+        opened_root = os.fstat(root_fd)
+        _assert_posix_object(
+            opened_root,
+            root_result,
+            path=path,
+            operation=operation,
+            attempts=attempts,
+            root_device=root_device,
+        )
+        _assert_posix_host_owner(
+            opened_root,
+            path=path,
+            operation=operation,
+            attempts=attempts,
+        )
+
+        def visit(directory_fd: int, relative: str, directory_path: Path) -> None:
+            if normalized.get(relative) is not True:
+                raise _security_error(
+                    operation=operation,
+                    path=directory_path,
+                    reason="sealed manifest does not identify an owned directory",
+                    attempts=attempts,
+                )
+            seen.add(relative)
+            for child_name in os.listdir(directory_fd):
+                if not isinstance(child_name, str) or child_name in (
+                    "",
+                    ".",
+                    "..",
+                ):
+                    raise _security_error(
+                        operation=operation,
+                        path=directory_path,
+                        reason="sealed directory enumeration returned an unsafe name",
+                        attempts=attempts,
+                    )
+                child_path = directory_path / child_name
+                child_relative = (
+                    child_name if not relative else f"{relative}/{child_name}"
+                )
+                child_result = _lstat_at(directory_fd, child_name)
+                _assert_posix_object(
+                    child_result,
+                    child_result,
+                    path=child_path,
+                    operation=operation,
+                    attempts=attempts,
+                    root_device=root_device,
+                )
+                if child_relative not in normalized:
+                    raise _security_error(
+                        operation=operation,
+                        path=child_path,
+                        reason="sealed tree contains an unowned extra entry",
+                        attempts=attempts,
+                    )
+                expected_directory = normalized[child_relative]
+                actual_directory = stat.S_ISDIR(child_result.st_mode)
+                if actual_directory != expected_directory:
+                    raise _security_error(
+                        operation=operation,
+                        path=child_path,
+                        reason="sealed tree entry type differs from its manifest",
+                        attempts=attempts,
+                    )
+                if actual_directory:
+                    child_fd = _open_posix_at(
+                        directory_fd,
+                        child_name,
+                        directory=True,
+                    )
+                    directory_records.append(
+                        (child_fd, child_relative, child_path, child_result)
+                    )
+                    _assert_posix_mount_identity(
+                        child_fd,
+                        binding.posix_mount_identity,
+                        path=child_path,
+                        operation=operation,
+                        attempts=attempts,
+                    )
+                    opened_child = os.fstat(child_fd)
+                    _assert_posix_object(
+                        opened_child,
+                        child_result,
+                        path=child_path,
+                        operation=operation,
+                        attempts=attempts,
+                        root_device=root_device,
+                    )
+                    _assert_posix_host_owner(
+                        opened_child,
+                        path=child_path,
+                        operation=operation,
+                        attempts=attempts,
+                    )
+                    visit(child_fd, child_relative, child_path)
+                else:
+                    file_fd = _open_posix_at(
+                        directory_fd,
+                        child_name,
+                        directory=False,
+                    )
+                    try:
+                        _assert_posix_mount_identity(
+                            file_fd,
+                            binding.posix_mount_identity,
+                            path=child_path,
+                            operation=operation,
+                            attempts=attempts,
+                        )
+                        opened_child = os.fstat(file_fd)
+                        _assert_posix_object(
+                            opened_child,
+                            child_result,
+                            path=child_path,
+                            operation=operation,
+                            attempts=attempts,
+                            root_device=root_device,
+                        )
+                        _assert_posix_host_owner(
+                            opened_child,
+                            path=child_path,
+                            operation=operation,
+                            attempts=attempts,
+                        )
+                    finally:
+                        os.close(file_fd)
+                    seen.add(child_relative)
+
+        visit(root_fd, "", path)
+        if seen != set(normalized):
+            raise _security_error(
+                operation=operation,
+                path=path,
+                reason="sealed tree does not match the exact host-owned manifest",
+                attempts=attempts,
+            )
+        binding.assert_current(operation=operation, attempts=attempts)
+        for descriptor, _, directory_path, expected in directory_records:
+            current = os.fstat(descriptor)
+            _assert_posix_object(
+                current,
+                expected,
+                path=directory_path,
+                operation=operation,
+                attempts=attempts,
+                root_device=root_device,
+            )
+            _assert_posix_host_owner(
+                current,
+                path=directory_path,
+                operation=operation,
+                attempts=attempts,
+            )
+            _assert_posix_mount_identity(
+                descriptor,
+                binding.posix_mount_identity,
+                path=directory_path,
+                operation=operation,
+                attempts=attempts,
+            )
+            os.fchmod(descriptor, stat.S_IRWXU)
+        binding.assert_current(operation=operation, attempts=attempts)
+    except PackagingCleanupError:
+        raise
+    except OSError as error:
+        diagnostic = _diagnostic(
+            operation=operation,
+            path=path,
+            attempts=attempts,
+            error=error,
+            reason="could not validate or unseal the host-owned sealed tree",
+        )
+        raise PackagingCleanupError(diagnostic) from error
+    finally:
+        for descriptor, _, _, _ in reversed(directory_records):
+            os.close(descriptor)
+    return normalized
+
+
 def _remove_posix_file_at(
     parent_fd: int,
     name: str,
@@ -2352,8 +2704,24 @@ def _remove_posix_tree_at(
     attempts: int,
     root_device: Optional[int],
     root_mount_identity: _PosixMountIdentity,
+    expected_tree: Optional[Mapping[str, bool]] = None,
+    relative: str = "",
+    seen: Optional[set[str]] = None,
 ) -> None:
     """Recursively remove a directory using only no-follow held descriptors."""
+
+    expected_root = expected_tree is not None and seen is None
+    if expected_tree is not None:
+        if seen is None:
+            seen = set()
+        if expected_tree.get(relative) is not True:
+            raise _security_error(
+                operation=operation,
+                path=path,
+                reason="sealed tree directory is not present in its manifest",
+                attempts=attempts,
+            )
+        seen.add(relative)
 
     _assert_posix_object(
         expected,
@@ -2399,6 +2767,22 @@ def _remove_posix_tree_at(
                 attempts=attempts,
                 root_device=root_device,
             )
+            child_relative = child_name if not relative else f"{relative}/{child_name}"
+            if expected_tree is not None:
+                if child_relative not in expected_tree:
+                    raise _security_error(
+                        operation=operation,
+                        path=child_path,
+                        reason="sealed tree contains an unowned extra entry",
+                        attempts=attempts,
+                    )
+                if stat.S_ISDIR(child_result.st_mode) != expected_tree[child_relative]:
+                    raise _security_error(
+                        operation=operation,
+                        path=child_path,
+                        reason="sealed tree entry type differs from its manifest",
+                        attempts=attempts,
+                    )
             if stat.S_ISDIR(child_result.st_mode):
                 _remove_posix_tree_at(
                     directory_fd,
@@ -2410,6 +2794,9 @@ def _remove_posix_tree_at(
                     attempts=attempts,
                     root_device=root_device,
                     root_mount_identity=root_mount_identity,
+                    expected_tree=expected_tree,
+                    relative=child_relative,
+                    seen=seen,
                 )
             else:
                 _remove_posix_file_at(
@@ -2423,7 +2810,16 @@ def _remove_posix_tree_at(
                     root_device=root_device,
                     root_mount_identity=root_mount_identity,
                 )
+                if seen is not None:
+                    seen.add(child_relative)
 
+        if expected_root and seen != set(expected_tree or {}):
+            raise _security_error(
+                operation=operation,
+                path=path,
+                reason="sealed tree is missing an entry from its manifest",
+                attempts=attempts,
+            )
         _run_posix_mutation_hook(path)
         binding.assert_current(operation=operation, attempts=attempts)
         current = _lstat_at(parent_fd, name)
@@ -2447,6 +2843,7 @@ def _remove_once(
     operation: str = "remove owned packaging path",
     binding: Optional[_PathBinding] = None,
     attempts: int = 0,
+    expected_tree: Optional[Mapping[str, bool]] = None,
 ) -> None:
     """Remove one already-bound path without following its final link."""
 
@@ -2512,6 +2909,7 @@ def _remove_once(
                 attempts=attempts,
                 root_device=root_device,
                 root_mount_identity=binding.posix_mount_identity,
+                expected_tree=expected_tree,
             )
             return
         if not stat.S_ISREG(quarantine_result.st_mode):
@@ -2672,6 +3070,8 @@ def remove_owned_path(
     max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
     backoff_seconds: tuple[float, ...] = _DEFAULT_BACKOFF_SECONDS,
     sleep: Callable[[float], None] = time.sleep,
+    expected_tree: Optional[Mapping[str, bool]] = None,
+    unseal_read_only: bool = False,
 ) -> None:
     """Remove an owned path with bounded Windows lock-race retries.
 
@@ -2679,10 +3079,19 @@ def remove_owned_path(
     removed.  Only Windows sharing/access-denied errors are retried, and an
     exhausted retry or any other error raises ``PackagingCleanupError`` while
     leaving the path in place.
+
+    ``expected_tree`` and ``unseal_read_only`` are reserved for a producer's
+    host-owned sealed tree.  On POSIX, the exact manifest inventory is checked
+    through held descriptors before any directory mode is changed.  Ordinary
+    cleanup callers retain the existing quarantine-only behavior.
     """
 
     if max_attempts < 1:
         raise ValueError("max_attempts must be positive")
+    if unseal_read_only and expected_tree is None:
+        raise ValueError("unseal_read_only requires an expected sealed-tree manifest")
+    if unseal_read_only and _IS_WINDOWS:
+        raise ValueError("read-only sealed-tree reset requires POSIX descriptors")
     binding: Optional[_PathBinding] = None
     bind_attempt = 0
     while binding is None:
@@ -2741,6 +3150,36 @@ def remove_owned_path(
             )
             raise
 
+    normalized_expected_tree: Optional[dict[str, bool]] = None
+    try:
+        if expected_tree is not None:
+            normalized_expected_tree = _normalize_expected_tree(
+                expected_tree,
+                operation=operation,
+                path=target,
+                attempts=0,
+            )
+        if unseal_read_only:
+            assert normalized_expected_tree is not None
+            normalized_expected_tree = _prepare_posix_sealed_tree(
+                binding.parent_fd,
+                target.name,
+                target,
+                binding=binding,
+                expected_tree=normalized_expected_tree,
+                operation=operation,
+                attempts=0,
+            )
+    except BaseException as error:
+        _finish_binding_close(
+            binding,
+            operation=operation,
+            path=target,
+            attempts=0,
+            primary=error,
+        )
+        raise
+
     primary_error: Optional[BaseException] = None
     last_attempt = 0
     try:
@@ -2754,6 +3193,7 @@ def remove_owned_path(
                     operation=operation,
                     binding=binding,
                     attempts=attempt,
+                    expected_tree=normalized_expected_tree,
                 )
                 return
             except PackagingCleanupError:

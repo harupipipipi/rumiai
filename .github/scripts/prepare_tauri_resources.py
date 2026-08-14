@@ -539,7 +539,7 @@ def write_runtime_resource_manifest(dest_root: Path) -> Path:
     return manifest_path
 
 
-def verify_runtime_resource_manifest(dest_root: Path) -> None:
+def verify_runtime_resource_manifest(dest_root: Path) -> dict[str, object]:
     """Fail closed when staged bytes differ from the resource manifest."""
     manifest_path = dest_root / RUNTIME_RESOURCE_MANIFEST
     if manifest_path.is_symlink() or not manifest_path.is_file():
@@ -552,6 +552,29 @@ def verify_runtime_resource_manifest(dest_root: Path) -> None:
         raise RuntimeError(f"Runtime resource manifest is malformed: {exc}") from exc
     if actual != build_runtime_resource_manifest(dest_root):
         raise RuntimeError("Runtime resource manifest does not match staged bytes")
+    return actual
+
+
+def runtime_resource_expected_tree(
+    manifest: Mapping[str, object],
+) -> dict[str, bool]:
+    """Convert a verified runtime manifest into an exact cleanup inventory."""
+    entries = manifest.get("entries")
+    if not isinstance(entries, list):
+        raise RuntimeError("Runtime resource manifest entries are invalid")
+    expected = {RUNTIME_RESOURCE_MANIFEST: False}
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            raise RuntimeError("Runtime resource manifest entry is invalid")
+        relative = entry.get("path")
+        if not isinstance(relative, str) or not relative:
+            raise RuntimeError("Runtime resource manifest path is invalid")
+        if relative in expected:
+            raise RuntimeError(
+                "Runtime resource manifest contains a duplicate path"
+            )
+        expected[relative] = False
+    return expected
 
 
 def verify_staged_bootstrap_import(dest_root: Path) -> None:
@@ -1357,10 +1380,25 @@ def main() -> int:
             args.target,
         )
 
+    expected_tree = None
+    if dest_root.is_symlink():
+        # Let the descriptor-bound cleanup report the unsafe final component.
+        pass
+    elif dest_root.exists():
+        if not dest_root.is_dir():
+            raise RuntimeError(
+                f"Staged Tauri resource root is not a directory: {dest_root}"
+            )
+        manifest = verify_runtime_resource_manifest(dest_root)
+        expected_tree = runtime_resource_expected_tree(manifest)
+
+    sealed_reset = expected_tree is not None and os.name != "nt"
     remove_owned_path(
         dest_root,
         owner_root=repo_root / "tobkiri_launcher/src-tauri/gen",
         operation="reset staged Tauri resources",
+        expected_tree=expected_tree if sealed_reset else None,
+        unseal_read_only=sealed_reset,
     )
     dest_root.mkdir(parents=True, exist_ok=True)
 
