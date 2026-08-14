@@ -59,6 +59,24 @@ def _catalog_with_second_profile(catalog: BundledCatalog) -> BundledCatalog:
     )
 
 
+_MISSING = object()
+
+
+def _catalog_with_profile_packs(
+    catalog: BundledCatalog,
+    packs: object = _MISSING,
+) -> BundledCatalog:
+    definition = dict(catalog.profiles["defaults"])
+    if packs is _MISSING:
+        definition.pop("packs", None)
+    else:
+        definition["packs"] = packs
+    return replace(
+        catalog,
+        profiles={**catalog.profiles, "defaults": definition},
+    )
+
+
 def _resolved_with_added_pack(active_runtime, catalog: BundledCatalog, pack_id: str):
     manifest = catalog.packs[pack_id]
     artifact_digest = manifest["pack"]["artifact_digest"]
@@ -154,6 +172,82 @@ def test_active_catalog_projects_exact_profile_lock_closure_and_current_records(
     assert resolved.lock["lock_api_version"] == "io.tobkiri.profile-lock.v5"
     assert resolved.plan["plan_api_version"] == "io.tobkiri.resolved-plan.v2"
     assert active.activation["activation_api_version"] == ("io.tobkiri.activation-record.v2")
+
+
+@pytest.mark.parametrize(
+    ("packs", "diagnostic_code", "diagnostic_subject"),
+    [
+        pytest.param(_MISSING, "PROFILE_PACKS_INVALID", "packs", id="missing"),
+        pytest.param(None, "PROFILE_PACKS_INVALID", "packs", id="null"),
+        pytest.param("not-an-array", "PROFILE_PACKS_INVALID", "packs", id="wrong-type"),
+        pytest.param(
+            ["not-a-pack-binding"],
+            "PROFILE_PACK_ENTRY_INVALID",
+            "packs[0]",
+            id="wrong-entry-type",
+        ),
+        pytest.param(
+            [{"pack_id": "runtime.tauri.application.default"}],
+            "PROFILE_PACK_ENTRY_INVALID",
+            "packs[0]",
+            id="missing-entry-field",
+        ),
+        pytest.param(
+            [{"pack_id": 42, "artifact_digest": None, "role": "application"}],
+            "PROFILE_PACK_ENTRY_INVALID",
+            "packs[0]",
+            id="wrong-entry-field-type",
+        ),
+        pytest.param(
+            [
+                {
+                    "pack_id": "runtime.tauri.application.default",
+                    "artifact_digest": None,
+                    "role": "unknown",
+                }
+            ],
+            "PROFILE_PACK_ENTRY_INVALID",
+            "packs[0]",
+            id="invalid-entry-role",
+        ),
+    ],
+)
+def test_malformed_profile_packs_are_diagnosed_without_erasing_authoritative_closure(
+    active_runtime,
+    packs: object,
+    diagnostic_code: str,
+    diagnostic_subject: str,
+) -> None:
+    catalog = _catalog_with_profile_packs(BundledCatalog.load(_bundle_root()), packs)
+    service = RuntimeSurfaceService(
+        snapshot_loader=lambda: active_runtime,
+        catalog_loader=lambda: catalog,
+    )
+
+    entry = service.read_profile_catalog()["data"]["profiles"][0]
+
+    assert entry["available"] is False
+    assert any(
+        diagnostic["code"] == diagnostic_code and diagnostic["subject"] == diagnostic_subject
+        for diagnostic in entry["diagnostics"]
+    )
+    assert {item["pack_id"] for item in entry["pack_closure"]} == {
+        item["identity"] for item in active_runtime.resolved.lock["effective_set"]
+    }
+
+
+def test_null_pack_artifact_digest_remains_valid_for_unresolved_source_profile(
+    active_runtime,
+) -> None:
+    catalog = BundledCatalog.load(_bundle_root())
+    source = catalog.profiles["defaults"]
+    unresolved_packs = [{**item, "artifact_digest": None} for item in source["packs"]]
+    catalog = _catalog_with_profile_packs(catalog, unresolved_packs)
+
+    entry = project_profile_catalog(catalog, active_runtime)["profiles"][0]
+
+    assert entry["available"] is True
+    assert entry["diagnostics"] == []
 
 
 def test_catalog_restores_session_candidate_and_pack_closure_after_restart(

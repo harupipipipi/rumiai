@@ -5,13 +5,19 @@ from __future__ import annotations
 import hashlib
 import hmac
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 from ecosystem.defaultspack.domain.runtime_v4 import ActiveDefaultProfile, BundledCatalog
 from tobkiri_protocol.canonical import canonical_digest
+from tobkiri_protocol.errors import ProtocolError
+from tobkiri_protocol.ids import validate_artifact_digest, validate_canonical_id
+
+
+_PROFILE_PACK_FIELDS = frozenset({"pack_id", "artifact_digest", "role"})
+_PROFILE_PACK_ROLES = frozenset({"backend", "contribution", "provider", "application"})
 
 
 def profile_catalog_digest(catalog: BundledCatalog) -> str:
@@ -162,7 +168,7 @@ def _project_definition(
         if len(matching_variants) != 1:
             diagnostics.append({"code": "SHELL_VARIANT_INCOMPATIBLE", "subject": shell_id})
 
-    requested = [dict(item) for item in definition["packs"]]
+    requested = _normalize_profile_packs(definition, diagnostics)
     requested_ids = [str(item["pack_id"]) for item in requested]
     if len(requested_ids) != len(set(requested_ids)):
         diagnostics.append({"code": "PACK_DUPLICATE", "subject": profile_id})
@@ -198,6 +204,7 @@ def _project_definition(
             candidate_profile,
             candidate_lock.get("effective_set"),
             diagnostics,
+            requested=requested,
         )
     elif is_active and active_profile is not None:
         closure = _resolved_pack_closure(
@@ -205,6 +212,7 @@ def _project_definition(
             active_profile,
             active_effective_set,
             diagnostics,
+            requested=requested,
         )
     else:
         closure = _static_pack_closure(catalog, base_id, shell, requested, diagnostics)
@@ -267,14 +275,17 @@ def _resolved_pack_closure(
     profile: Mapping[str, Any],
     effective_set: object,
     diagnostics: list[dict[str, str]],
+    *,
+    requested: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, object]]:
     """Project the exact resolved ProfileLock closure without re-resolving it."""
 
     if not isinstance(effective_set, list):
         diagnostics.append({"code": "PROFILE_LOCK_CLOSURE_INVALID", "subject": "effective_set"})
         return []
-    definition = catalog.profiles.get(str(profile.get("profile_id") or ""))
-    requested = definition.get("packs") if isinstance(definition, Mapping) else ()
+    if requested is None:
+        definition = catalog.profiles.get(str(profile.get("profile_id") or ""))
+        requested = _normalize_profile_packs(definition, diagnostics)
     roles = {
         str(profile["base"]["pack_id"]): "base",
         str(profile["shell"]["pack_id"]): "shell",
@@ -287,17 +298,13 @@ def _resolved_pack_closure(
         }
     )
     selected_ids = {
-        str(item.get("identity") or "")
-        for item in effective_set
-        if isinstance(item, Mapping)
+        str(item.get("identity") or "") for item in effective_set if isinstance(item, Mapping)
     }
     dependency_ids = {
         str(dependency_id)
         for pack_id in selected_ids
         if pack_id in catalog.packs
-        for dependency_id in catalog.packs[pack_id]["requirements"][
-            "pack_dependencies"
-        ]
+        for dependency_id in catalog.packs[pack_id]["requirements"]["pack_dependencies"]
         if dependency_id in selected_ids
     }
     result: list[dict[str, object]] = []
@@ -332,6 +339,83 @@ def _resolved_pack_closure(
             }
         )
     return sorted(result, key=lambda row: str(row["pack_id"]))
+
+
+def _normalize_profile_packs(
+    definition: Mapping[str, Any] | None,
+    diagnostics: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    """Return only schema-valid Profile Pack bindings for role projection.
+
+    Protocol v4/v5 Profile documents require ``packs`` to be an array of
+    objects. This boundary may receive an in-memory catalog assembled by a
+    caller, so it cannot rely on the loader's schema validation alone. Invalid
+    source entries are diagnosed and excluded from role lookup; the resolved
+    closure remains authoritative and is never replaced by this normalization.
+    """
+
+    if definition is None:
+        diagnostics.append({"code": "PROFILE_DEFINITION_UNAVAILABLE", "subject": "packs"})
+        return []
+
+    raw_packs = definition.get("packs")
+    if not isinstance(raw_packs, list):
+        diagnostics.append({"code": "PROFILE_PACKS_INVALID", "subject": "packs"})
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for index, raw_item in enumerate(raw_packs):
+        if not isinstance(raw_item, Mapping):
+            diagnostics.append(
+                {
+                    "code": "PROFILE_PACK_ENTRY_INVALID",
+                    "subject": f"packs[{index}]",
+                }
+            )
+            continue
+        item = cast(Mapping[str, Any], raw_item)
+        if not _is_valid_profile_pack_entry(item):
+            diagnostics.append(
+                {
+                    "code": "PROFILE_PACK_ENTRY_INVALID",
+                    "subject": f"packs[{index}]",
+                }
+            )
+            continue
+        normalized.append(dict(item))
+    return normalized
+
+
+def _is_valid_profile_pack_entry(item: Mapping[str, Any]) -> bool:
+    """Check the Profile Pack binding shape used by the v4/v5 schemas."""
+
+    if any(not isinstance(key, str) or key not in _PROFILE_PACK_FIELDS for key in item):
+        return False
+    if "pack_id" not in item or "artifact_digest" not in item:
+        return False
+
+    pack_id = item["pack_id"]
+    if not isinstance(pack_id, str):
+        return False
+    try:
+        validate_canonical_id(pack_id, field="pack_id")
+    except ProtocolError:
+        return False
+
+    artifact_digest = item["artifact_digest"]
+    if artifact_digest is not None:
+        if not isinstance(artifact_digest, str):
+            return False
+        try:
+            validate_artifact_digest(artifact_digest, field="artifact_digest")
+        except ProtocolError:
+            return False
+
+    if "role" in item:
+        role = item["role"]
+        if not isinstance(role, str) or role not in _PROFILE_PACK_ROLES:
+            return False
+    return True
 
 
 def _static_pack_closure(
