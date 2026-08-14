@@ -151,6 +151,37 @@ def _minimal_v4_stage(tmp_path: Path) -> Path:
     return stage
 
 
+def _stub_formal_sealed_python_tree(stage: Path, module) -> Path:
+    """Add the exact formal boundary with the two venv directory domains."""
+    sealed_root = stage / module.SEALED_PYTHON_RESOURCE_DIR
+    for relative in module.SEALED_ROLE_TARGETS:
+        source = ROOT / "tobkiri_runtime" / relative
+        destination = sealed_root / "app" / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+    (sealed_root / "venv").mkdir(parents=True, exist_ok=True)
+    (sealed_root / "runtime/lib/python3.13/venv").mkdir(parents=True, exist_ok=True)
+    manifest = sealed_root / Path(module.SEALED_PYTHON_MANIFEST).name
+    manifest.write_text("{}\n", encoding="utf-8")
+    return sealed_root
+
+
+def _stub_formal_builder(monkeypatch, module, sealed_root: Path) -> None:
+    """Provide producer validation evidence without constructing CPython."""
+    manifest_digest = _sha256(
+        (sealed_root / Path(module.SEALED_PYTHON_MANIFEST).name).read_bytes()
+    )
+
+    class Builder:
+        def validate_environment(self, root, target, **kwargs):
+            assert root == sealed_root
+            assert target == "aarch64-apple-darwin"
+            assert kwargs == {"run_native_smoke": False}
+            return manifest_digest
+
+    monkeypatch.setattr(module, "_load_sealed_python_builder", lambda _root: Builder())
+
+
 def test_stage_uv_extracts_only_after_pinned_checksum_verification(tmp_path, monkeypatch):
     module = _load_prepare_tauri_resources()
     target = "x86_64-pc-windows-msvc"
@@ -657,6 +688,106 @@ def test_validate_bundle_accepts_canonical_v4_stage_without_legacy_authority(tmp
 
     assert not list(stage.rglob("ecosystem.json"))
     assert not list(stage.rglob("rumi.pack.v3.json"))
+
+
+def test_validate_bundle_accepts_only_formally_validated_python_venv_domains(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The two producer-owned venv directories are accepted after validation."""
+    module = _load_prepare_tauri_resources()
+    stage = _minimal_v4_stage(tmp_path)
+    sealed_root = _stub_formal_sealed_python_tree(stage, module)
+    _stub_formal_builder(monkeypatch, module, sealed_root)
+
+    module.validate_bundle(
+        stage,
+        False,
+        "aarch64-apple-darwin",
+        repository_root=ROOT,
+    )
+
+
+@pytest.mark.parametrize(
+    "relative",
+    (
+        "foreign/.venv",
+        "foreign/venv",
+        "foreign/virtualenv",
+        "nested/python-runtime/venv",
+        "python-runtime-evil/venv",
+    ),
+)
+def test_validate_bundle_rejects_venv_names_outside_formal_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relative: str,
+) -> None:
+    """Path/name lookalikes never inherit the formal Python boundary."""
+    module = _load_prepare_tauri_resources()
+    stage = _minimal_v4_stage(tmp_path)
+    sealed_root = _stub_formal_sealed_python_tree(stage, module)
+    _stub_formal_builder(monkeypatch, module, sealed_root)
+    (stage / relative).mkdir(parents=True)
+
+    with pytest.raises(RuntimeError, match="Forbidden generated bundle directories"):
+        module.validate_bundle(
+            stage,
+            False,
+            "aarch64-apple-darwin",
+            repository_root=ROOT,
+        )
+
+
+def test_validate_bundle_does_not_allow_an_unsealed_python_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed formal validator cannot be bypassed by the directory policy."""
+    module = _load_prepare_tauri_resources()
+    stage = _minimal_v4_stage(tmp_path)
+    _stub_formal_sealed_python_tree(stage, module)
+
+    class Builder:
+        def validate_environment(self, *_args, **_kwargs):
+            raise RuntimeError("sealed manifest inventory is invalid")
+
+    monkeypatch.setattr(module, "_load_sealed_python_builder", lambda _root: Builder())
+
+    with pytest.raises(RuntimeError, match="sealed manifest inventory"):
+        module.validate_bundle(
+            stage,
+            False,
+            "aarch64-apple-darwin",
+            repository_root=ROOT,
+        )
+
+
+def test_formal_python_boundary_rejects_root_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Replacing the validated root invalidates its producer evidence."""
+    module = _load_prepare_tauri_resources()
+    stage = tmp_path / "app"
+    sealed_root = stage / module.SEALED_PYTHON_RESOURCE_DIR
+    sealed_root.mkdir(parents=True)
+    (sealed_root / Path(module.SEALED_PYTHON_MANIFEST).name).write_text(
+        "{}\n", encoding="utf-8"
+    )
+    _stub_formal_builder(monkeypatch, module, sealed_root)
+
+    boundary = module.validate_sealed_python_resource(
+        stage,
+        "aarch64-apple-darwin",
+        ROOT,
+    )
+    replacement = tmp_path / "replaced-python-runtime"
+    sealed_root.rename(replacement)
+    sealed_root.mkdir()
+    (sealed_root / Path(module.SEALED_PYTHON_MANIFEST).name).write_text(
+        "{}\n", encoding="utf-8"
+    )
+
+    with pytest.raises(RuntimeError, match="bundle boundary changed"):
+        boundary.assert_unchanged()
 
 
 @pytest.mark.parametrize("case", ("missing", "tampered", "symlink"))

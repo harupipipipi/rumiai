@@ -76,6 +76,19 @@ Tauri maps `tobkiri_launcher/src-tauri/gen/app` to the stable packaged
 └── venv/*/site-packages/tobkiri_sealed/bootstrap.py
 ```
 
+`python-runtime` is a producer-owned validation domain, not a generic
+directory-name exemption. The resource preparer first validates this exact
+subtree with the sealed-environment schema, raw manifest binding, complete
+file and directory inventory, provenance, digest, and link-free identity
+checks. Only that validation evidence permits the generic generated-directory
+scan to traverse the subtree, including the required top-level `venv/` and
+the CPython stdlib's `runtime/lib/python3.13/venv/` directory. A lookalike
+such as `python-runtime-evil`, a nested `python-runtime`, or any `.venv`,
+`venv`, or `virtualenv` outside this exact boundary remains forbidden. The
+sealed validator separately rejects missing, extra, tampered, symlinked, or
+hardlinked entries; the Rust build script then rechecks the same manifest and
+exact inventory before binding the resource.
+
 The manifest has only the fixed top-level fields and fixed nested field sets
 defined in `.github/schemas/sealed-python-environment.v1.schema.json`.
 Its provenance `kind` is `apple-code-signature-v1` on macOS,

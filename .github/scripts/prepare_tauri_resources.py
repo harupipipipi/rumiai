@@ -51,6 +51,7 @@ EXCLUDED_DIR_NAMES = {
     "user_data",
     "userdata",
     "venv",
+    "virtualenv",
 }
 EXCLUDED_SUFFIXES = {
     ".bak",
@@ -121,6 +122,77 @@ UV_BINARY_SHA256_BY_TARGET = {
     "x86_64-pc-windows-msvc": "442b73298cf8648217e5bc232588bb1067f98ea5b40beea18e43c9c7929c020c",
     "x86_64-unknown-linux-gnu": "b5cbc3a3f35debad0b4770811efd190bcf460b654114d6a3f71e0ce298468e5d",
 }
+
+
+class _ValidatedSealedPythonBoundary:
+    """Evidence binding the generic bundle scan to one formal Python tree."""
+
+    __slots__ = (
+        "bundle_root",
+        "root",
+        "root_identity",
+        "manifest_identity",
+        "manifest_digest",
+    )
+
+    def __init__(
+        self,
+        *,
+        bundle_root: Path,
+        root: Path,
+        root_identity: tuple[int, int],
+        manifest_identity: tuple[int, int],
+        manifest_digest: str,
+    ) -> None:
+        self.bundle_root = bundle_root
+        self.root = root
+        self.root_identity = root_identity
+        self.manifest_identity = manifest_identity
+        self.manifest_digest = manifest_digest
+
+    def contains_descendant(self, path: Path) -> bool:
+        """Return whether ``path`` is below this exact validated subtree."""
+        if path == self.root:
+            return False
+        try:
+            path.relative_to(self.root)
+        except ValueError:
+            return False
+        return True
+
+    def assert_unchanged(self) -> None:
+        """Reject replacement or manifest mutation after formal validation."""
+        expected_root = self.bundle_root / SEALED_PYTHON_RESOURCE_DIR
+        if self.root != expected_root:
+            raise RuntimeError("formal sealed Python bundle boundary is invalid")
+        try:
+            root_metadata = self.root.lstat()
+        except OSError as exc:
+            raise RuntimeError("formal sealed Python bundle boundary is unavailable") from exc
+        if (
+            self.root.is_symlink()
+            or getattr(root_metadata, "st_file_attributes", 0) & 0x0400
+            or not stat.S_ISDIR(root_metadata.st_mode)
+            or (root_metadata.st_dev, root_metadata.st_ino) != self.root_identity
+        ):
+            raise RuntimeError("formal sealed Python bundle boundary changed")
+
+        manifest = self.root / Path(SEALED_PYTHON_MANIFEST).name
+        try:
+            manifest_metadata = manifest.lstat()
+            manifest_digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+        except OSError as exc:
+            raise RuntimeError("formal sealed Python manifest is unavailable") from exc
+        if (
+            manifest.is_symlink()
+            or getattr(manifest_metadata, "st_file_attributes", 0) & 0x0400
+            or not stat.S_ISREG(manifest_metadata.st_mode)
+            or manifest_metadata.st_nlink != 1
+            or (manifest_metadata.st_dev, manifest_metadata.st_ino)
+            != self.manifest_identity
+            or manifest_digest != self.manifest_digest
+        ):
+            raise RuntimeError("formal sealed Python manifest changed")
 
 
 def parse_args() -> argparse.Namespace:
@@ -469,14 +541,87 @@ def validate_sealed_python_resource(
     dest_root: Path,
     target: str,
     repository_root: Path,
-) -> None:
-    """Validate the sealed Python subtree after it is copied into ``gen/app``."""
+) -> _ValidatedSealedPythonBoundary:
+    """Validate and bind the formal sealed Python subtree in ``gen/app``."""
     builder = _load_sealed_python_builder(repository_root)
-    builder.validate_environment(
-        dest_root / SEALED_PYTHON_RESOURCE_DIR,
+    sealed_root = dest_root / SEALED_PYTHON_RESOURCE_DIR
+    manifest = sealed_root / Path(SEALED_PYTHON_MANIFEST).name
+    manifest_digest = builder.validate_environment(
+        sealed_root,
         target,
         run_native_smoke=False,
     )
+    if (
+        not isinstance(manifest_digest, str)
+        or len(manifest_digest) != 64
+        or any(character not in "0123456789abcdef" for character in manifest_digest)
+    ):
+        raise RuntimeError("formal sealed Python validator returned an invalid identity")
+
+    try:
+        root_metadata = sealed_root.lstat()
+        manifest_metadata = manifest.lstat()
+    except OSError as exc:
+        raise RuntimeError("formal sealed Python bundle boundary is unavailable") from exc
+    if (
+        sealed_root.is_symlink()
+        or getattr(root_metadata, "st_file_attributes", 0) & 0x0400
+        or not stat.S_ISDIR(root_metadata.st_mode)
+        or manifest.is_symlink()
+        or getattr(manifest_metadata, "st_file_attributes", 0) & 0x0400
+        or not stat.S_ISREG(manifest_metadata.st_mode)
+        or manifest_metadata.st_nlink != 1
+    ):
+        raise RuntimeError("formal sealed Python bundle boundary is unsafe")
+    boundary = _ValidatedSealedPythonBoundary(
+        bundle_root=dest_root,
+        root=sealed_root,
+        root_identity=(root_metadata.st_dev, root_metadata.st_ino),
+        manifest_identity=(manifest_metadata.st_dev, manifest_metadata.st_ino),
+        manifest_digest=manifest_digest,
+    )
+    boundary.assert_unchanged()
+    return boundary
+
+
+def _validate_generated_bundle_directories(
+    dest_root: Path,
+    *,
+    validated_sealed_python: _ValidatedSealedPythonBoundary | None,
+) -> None:
+    """Reject generated directories outside formally validated resource domains.
+
+    The generic name policy has no allowlist for Python environments.  It may
+    traverse the exact sealed Python subtree only after the producer-owned
+    manifest, inventory, digest, provenance, and link-free tree have been
+    validated by ``build_sealed_python_environment.py``.  The boundary is
+    checked before and after traversal so a replacement cannot turn that
+    evidence into a path/name exemption.
+    """
+    if validated_sealed_python is not None:
+        validated_sealed_python.assert_unchanged()
+
+    forbidden: list[str] = []
+    for path in dest_root.rglob("*"):
+        if (
+            validated_sealed_python is not None
+            and validated_sealed_python.contains_descendant(path)
+        ):
+            continue
+        try:
+            metadata = path.lstat()
+        except OSError as exc:
+            raise RuntimeError(
+                "generated bundle changed during directory validation"
+            ) from exc
+        if stat.S_ISDIR(metadata.st_mode) and path.name in EXCLUDED_DIR_NAMES:
+            forbidden.append(str(path.relative_to(dest_root)))
+    if validated_sealed_python is not None:
+        validated_sealed_python.assert_unchanged()
+    if forbidden:
+        raise RuntimeError(
+            "Forbidden generated bundle directories: " + ", ".join(forbidden[:20])
+        )
 
 
 def _resource_files(dest_root: Path) -> list[Path]:
@@ -1264,19 +1409,21 @@ def validate_bundle(
             + ", ".join(legacy[:20])
         )
 
-    forbidden = []
-    for path in dest_root.rglob("*"):
-        if path.is_dir() and path.name in EXCLUDED_DIR_NAMES:
-            forbidden.append(str(path.relative_to(dest_root)))
-    if forbidden:
-        raise RuntimeError("Forbidden generated bundle directories: " + ", ".join(forbidden[:20]))
-
     _validate_defaultspack_v4(dest_root, repository_root)
     verify_canonical_host_package(dest_root, repository_root)
     verify_sealed_role_closure(dest_root, repository_root)
     verify_staged_bootstrap_import(dest_root)
+    validated_sealed_python = None
     if target:
-        validate_sealed_python_resource(dest_root, target, repository_root)
+        validated_sealed_python = validate_sealed_python_resource(
+            dest_root,
+            target,
+            repository_root,
+        )
+    _validate_generated_bundle_directories(
+        dest_root,
+        validated_sealed_python=validated_sealed_python,
+    )
     verify_no_python_bytecode(dest_root)
 
 
