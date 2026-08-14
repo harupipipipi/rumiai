@@ -343,12 +343,33 @@ def test_macos_installer_uses_finder_free_verified_dmg_packager():
         ROOT / ".github" / "workflows" / "desktop-installers.yml"
     ).read_text(encoding="utf-8")
     desktop_macos = desktop_workflow[
-        desktop_workflow.index("Build local macOS application (ad-hoc)") :
+        desktop_workflow.index(
+            "Build non-publishable macOS CI/E2E application"
+        ) :
     ]
     assert "--bundles app" in desktop_macos
     assert "scripts/package_macos_dmg.sh" in desktop_macos
     assert "2>&1 | tee" in desktop_macos
     assert "--target '${{ matrix.target }}'" in desktop_macos
+    assert "--ci-e2e-cert-sha256" in desktop_macos
+    assert "TOBKIRI_MACOS_ARTIFACT_POLICY=ci-e2e-v1" in desktop_workflow
+    for forbidden in (
+        "--allow-ad-hoc-local",
+        "add-trusted-cert",
+        "create-keychain",
+        "set-key-partition-list",
+        "security ",
+        "APPLE_CERTIFICATE",
+        "APPLE_SIGNING_IDENTITY",
+        "APPLE_TEAM_ID",
+        "Developer ID",
+        "notarytool",
+        "stapler",
+        "spctl",
+        "softprops/action-gh-release",
+        "Upload one reviewable draft release",
+    ):
+        assert forbidden not in desktop_workflow
 
     release_workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
         encoding="utf-8"
@@ -520,8 +541,24 @@ def test_release_platform_signing_is_fail_closed_and_ad_hoc_is_dev_only():
         ROOT / ".github" / "workflows" / "desktop-installers.yml"
     ).read_text(encoding="utf-8")
     assert "--config src-tauri/tauri.macos.dev.conf.json" in desktop_workflow
-    assert "--allow-ad-hoc-local" in desktop_workflow
+    assert "--ci-e2e-cert-sha256" in desktop_workflow
+    for forbidden in (
+        "--allow-ad-hoc-local",
+        "add-trusted-cert",
+        "create-keychain",
+        "set-key-partition-list",
+        "security ",
+        "APPLE_CERTIFICATE",
+        "APPLE_SIGNING_IDENTITY",
+        "APPLE_TEAM_ID",
+        "Developer ID",
+        "softprops/action-gh-release",
+        "Upload one reviewable draft release",
+    ):
+        assert forbidden not in desktop_workflow
     assert "--allow-ad-hoc-local" not in workflow
+    assert "TOBKIRI_MACOS_ARTIFACT_POLICY" not in workflow
+    assert "ci-e2e" not in workflow
 
     verify_at = workflow.index("Verify Developer ID signed macOS application")
     dmg_at = workflow.index("Build macOS DMG installer")
