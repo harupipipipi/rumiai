@@ -30,6 +30,9 @@ MACOS_DMG_PACKAGER = ROOT / "tobkiri_launcher" / "scripts" / "package_macos_dmg.
 MACOS_DMG_CLEANUP = (
     ROOT / "tobkiri_launcher" / "scripts" / "cleanup_macos_dmg_workspace.py"
 )
+MACOS_DMG_VERIFIER = (
+    ROOT / "tobkiri_launcher" / "scripts" / "verify_packaged_python_dmg.py"
+)
 RELEASE_GATE = ROOT / "scripts" / "release_gate.py"
 TEST_WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
 PACKAGED_GENERATOR = (
@@ -313,6 +316,25 @@ def test_macos_installer_uses_finder_free_verified_dmg_packager():
     ):
         assert required in packager
     assert MACOS_DMG_CLEANUP.is_file()
+    assert MACOS_DMG_VERIFIER.is_file()
+    mounted_verifier = MACOS_DMG_VERIFIER.read_text(encoding="utf-8")
+    for required in (
+        "O_DIRECTORY",
+        "O_NOFOLLOW",
+        "O_CLOEXEC",
+        "device_metadata.st_rdev != metadata.st_dev",
+        'self.hdiutil, ["detach", os.fspath(self.device)]',
+        "verify_packaged_python.py",
+        'codesign = _resolve_executable("codesign")',
+        'python = _bind_executable(Path(sys.executable), "verification Python")',
+    ):
+        assert required in mounted_verifier
+    mounted_shell = (
+        ROOT / "tobkiri_launcher" / "scripts" / "verify_packaged_python_dmg.sh"
+    ).read_text(encoding="utf-8")
+    assert "verify_packaged_python_dmg.py" in mounted_shell
+    assert "mktemp" not in mounted_shell
+    assert "hdiutil detach" not in mounted_shell
     assert "-ov" not in packager
     assert "osascript" not in packager
     assert "bundle_dmg.sh" not in packager
@@ -359,12 +381,8 @@ def test_packaged_python_smoke_is_post_sign_read_only_in_both_workflows():
             or "scripts/verify_macos_release.sh" in tail
         )
 
-    mounted = (
-        ROOT / "tobkiri_launcher/scripts/verify_packaged_python_dmg.sh"
-    ).read_text(encoding="utf-8")
-    assert mounted.index("--native-smoke") < mounted.index(
-        "codesign --verify --deep --strict"
-    )
+    mounted = MACOS_DMG_VERIFIER.read_text(encoding="utf-8")
+    assert mounted.index('"--native-smoke"') < mounted.index('"--verify"')
 
 
 def test_debug_pack_shell_is_built_and_sealed_before_launcher_rust_checks():
