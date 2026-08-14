@@ -13,6 +13,8 @@ import pytest
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "verify_packaged_python_dmg.py"
+ROOT = SCRIPT.parents[2]
+BUILDER_SCRIPT = ROOT / ".github/scripts/build_sealed_python_environment.py"
 
 
 def _load_module():
@@ -26,6 +28,21 @@ def _load_module():
 
 
 MODULE = _load_module()
+
+
+def _load_builder():
+    spec = importlib.util.spec_from_file_location(
+        "verify_dmg_sealed_python_builder", BUILDER_SCRIPT
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"unable to load {BUILDER_SCRIPT}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+BUILDER = _load_builder()
 
 
 def _write_executable(path: Path, contents: str) -> None:
@@ -239,8 +256,11 @@ def test_actual_read_only_dmg_mount_is_identity_bound_and_cleanup_is_idempotent(
 ) -> None:
     source = tmp_path / "source"
     app = source / "Fixture.app"
-    app.mkdir(parents=True)
-    (app / "payload").write_text("fixture", encoding="utf-8")
+    sealed_root = app / "Contents/Resources/app/python-runtime"
+    sealed_root.mkdir(parents=True)
+    (sealed_root / BUILDER.MANIFEST_FILENAME).write_text(
+        "fixture", encoding="utf-8"
+    )
     dmg = tmp_path / "fixture.dmg"
     subprocess.run(
         [
@@ -261,8 +281,28 @@ def test_actual_read_only_dmg_mount_is_identity_bound_and_cleanup_is_idempotent(
     mount_path = mount.path
     try:
         mount.attach()
-        assert mount.application_bundle().name == "Fixture.app"
+        mounted_app = mount.application_bundle()
+        assert mounted_app.name == "Fixture.app"
         mount.verify_mounted()
+        mounted_sealed_root = mounted_app / "Contents/Resources/app/python-runtime"
+        before = tuple(
+            (path.relative_to(mounted_app).as_posix(), path.lstat().st_mode)
+            for path in (mounted_app, *sorted(mounted_app.rglob("*")))
+        )
+        with BUILDER._native_smoke_workspace(mounted_sealed_root) as workspace:
+            environment = BUILDER._native_smoke_environment(
+                mounted_sealed_root,
+                BUILDER.target_spec("aarch64-apple-darwin"),
+                workspace,
+            )
+            for key in ("HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP"):
+                assert Path(environment[key]).is_relative_to(workspace.path)
+            assert not workspace.path.is_relative_to(mounted_app)
+        after = tuple(
+            (path.relative_to(mounted_app).as_posix(), path.lstat().st_mode)
+            for path in (mounted_app, *sorted(mounted_app.rglob("*")))
+        )
+        assert after == before
         mount.cleanup()
         mount.cleanup()
         assert not mount_path.exists()

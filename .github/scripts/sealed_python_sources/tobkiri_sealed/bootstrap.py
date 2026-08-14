@@ -563,12 +563,14 @@ def _attestation_destination(path_value: str, root: Path, nonce: str) -> Path:
         canonical = path.resolve(strict=False)
     except (OSError, RuntimeError) as exc:
         raise SealedBootstrapError("attestation path is unavailable") from exc
-    try:
-        canonical.relative_to(root)
-    except ValueError:
-        pass
-    else:
-        raise SealedBootstrapError("attestation path may not be inside sealed environment")
+    for forbidden_root in (root, root.parent):
+        try:
+            canonical.relative_to(forbidden_root)
+        except ValueError:
+            continue
+        raise SealedBootstrapError(
+            "attestation path may not be inside sealed application resources"
+        )
     if path.parent != parent:
         raise SealedBootstrapError("attestation path contains a linked parent")
     if path.exists() or path.is_symlink():

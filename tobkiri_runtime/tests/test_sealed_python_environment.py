@@ -2265,7 +2265,7 @@ def test_role_smoke_forces_no_bytecode_environment_and_B(
 ) -> None:
     """A role child cannot re-enable bytecode through its inherited env."""
     spec = BUILDER.target_spec("x86_64-unknown-linux-gnu")
-    root = tmp_path / "sealed"
+    root = tmp_path / "application" / "sealed"
     python = root / "venv/bin/python3"
     python.parent.mkdir(parents=True)
     python.write_bytes(b"synthetic python")
@@ -2296,17 +2296,251 @@ def test_role_smoke_forces_no_bytecode_environment_and_B(
             ),
             encoding="utf-8",
         )
+        attestation.chmod(0o600)
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
     environment = {BUILDER.PYTHON_BYTECODE_ENVIRONMENT: "0"}
     monkeypatch.setattr(BUILDER.subprocess, "run", fake_run)
-    BUILDER._run_role_smoke(root, spec, "host_helper", (), environment)
+    temp_parent = tmp_path / "host-temp"
+    temp_parent.mkdir(mode=0o700)
+    monkeypatch.setenv("TMPDIR", str(temp_parent))
+    before = tuple(
+        (path.relative_to(root).as_posix(), path.lstat().st_mode, path.read_bytes())
+        for path in root.rglob("*")
+        if path.is_file()
+    )
+    with BUILDER._native_smoke_workspace(root) as workspace:
+        workspace_path = workspace.path
+        BUILDER._run_role_smoke(
+            root,
+            spec,
+            "host_helper",
+            (),
+            environment,
+            workspace,
+            "a" * 64,
+        )
+        assert workspace.path.is_relative_to(temp_parent)
+        assert not workspace.path.is_relative_to(root.parent)
+    after = tuple(
+        (path.relative_to(root).as_posix(), path.lstat().st_mode, path.read_bytes())
+        for path in root.rglob("*")
+        if path.is_file()
+    )
 
     command = captured["command"]
     kwargs = captured["kwargs"]
     assert command[:3] == [str(python), "-I", "-B"]
     assert kwargs["env"][BUILDER.PYTHON_BYTECODE_ENVIRONMENT] == "1"
     assert environment[BUILDER.PYTHON_BYTECODE_ENVIRONMENT] == "0"
+    assert after == before
+    assert not workspace_path.exists()
+    assert all(
+        BUILDER.SMOKE_WORKSPACE_PREFIX not in value
+        for key, value in kwargs["env"].items()
+        if key != "TMPDIR"
+    )
+    with BUILDER._native_smoke_workspace(root) as workspace:
+        with pytest.raises(BUILDER.SealedEnvironmentError, match="identity is invalid"):
+            BUILDER._run_role_smoke(
+                root,
+                spec,
+                "host_helper",
+                (),
+                environment,
+                workspace,
+                "f" * 64,
+            )
+
+
+def test_native_smoke_workspace_rejects_symlinked_temp_parent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An attacker-controlled TMPDIR alias cannot redirect Host smoke state."""
+    real = tmp_path / "real-temp"
+    real.mkdir()
+    alias = tmp_path / "alias-temp"
+    alias.symlink_to(real, target_is_directory=True)
+    monkeypatch.setenv("TMPDIR", str(alias))
+
+    with pytest.raises(BUILDER.SealedEnvironmentError, match="contains a symlink"):
+        BUILDER._NativeSmokeWorkspace(tmp_path / "app" / "python-runtime")
+
+
+def test_native_smoke_environment_excludes_host_secrets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Smoke children receive fixed state paths, never ambient CI credentials."""
+    temp_parent = tmp_path / "host-temp"
+    temp_parent.mkdir(mode=0o700)
+    monkeypatch.setenv("TMPDIR", str(temp_parent))
+    for key in (
+        "GITHUB_TOKEN",
+        "TOBKIRI_PACKAGING_TRANSACTION_TOKEN",
+        "AWS_SECRET_ACCESS_KEY",
+        "PYTHONPATH",
+    ):
+        monkeypatch.setenv(key, f"secret-{key}")
+    sealed_root = tmp_path / "app" / "python-runtime"
+    sealed_root.mkdir(parents=True)
+    (sealed_root / BUILDER.MANIFEST_FILENAME).write_text("manifest", encoding="utf-8")
+    with BUILDER._native_smoke_workspace(sealed_root) as workspace:
+        environment = BUILDER._native_smoke_environment(
+            sealed_root,
+            BUILDER.target_spec("aarch64-apple-darwin"),
+            workspace,
+        )
+        assert all(key not in environment for key in (
+            "GITHUB_TOKEN",
+            "TOBKIRI_PACKAGING_TRANSACTION_TOKEN",
+            "AWS_SECRET_ACCESS_KEY",
+            "PYTHONPATH",
+        ))
+        for key in ("HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP"):
+            assert Path(environment[key]).is_relative_to(workspace.path)
+
+
+def test_native_smoke_workspace_rejects_root_swap_and_preserves_external_victim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Workspace replacement cannot redirect verification or cleanup."""
+    temp_parent = tmp_path / "host-temp"
+    temp_parent.mkdir(mode=0o700)
+    monkeypatch.setenv("TMPDIR", str(temp_parent))
+    victim = tmp_path / "external-victim"
+    victim.mkdir()
+    (victim / "keep.txt").write_text("keep", encoding="utf-8")
+    sealed_root = tmp_path / "app" / "python-runtime"
+    sealed_root.mkdir(parents=True)
+    workspace = BUILDER._NativeSmokeWorkspace(sealed_root)
+    original = workspace.path.with_name(f"{workspace.path.name}.original")
+    workspace.path.rename(original)
+    workspace.path.symlink_to(victim, target_is_directory=True)
+    try:
+        with pytest.raises(BUILDER.SealedEnvironmentError, match="identity changed"):
+            workspace.verify()
+        assert (victim / "keep.txt").read_text(encoding="utf-8") == "keep"
+    finally:
+        workspace.path.unlink()
+        original.rename(workspace.path)
+        workspace.cleanup()
+
+
+def test_native_smoke_workspace_rejects_precreated_child_and_hardlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Precreated work paths and multiply-linked attestations fail closed."""
+    temp_parent = tmp_path / "host-temp"
+    temp_parent.mkdir(mode=0o700)
+    monkeypatch.setenv("TMPDIR", str(temp_parent))
+    external = tmp_path / "external-victim"
+    external.write_text("victim", encoding="utf-8")
+    external.chmod(0o600)
+    sealed_root = tmp_path / "app" / "python-runtime"
+    sealed_root.mkdir(parents=True)
+    workspace = BUILDER._NativeSmokeWorkspace(sealed_root)
+    try:
+        attestation_parent = workspace.create_directory("attestation-typed")
+        with pytest.raises(BUILDER.SealedEnvironmentError, match="already exists"):
+            workspace.create_directory("attestation-typed")
+        attestation = attestation_parent / f"startup-{'a' * 64}.json"
+        os.link(external, attestation)
+        with pytest.raises(BUILDER.SealedEnvironmentError, match="identity is invalid"):
+            workspace.read_attestation(attestation)
+        with pytest.raises(RuntimeError, match="hard-linked file"):
+            workspace.cleanup()
+        assert not workspace.path.exists()
+        workspace.cleanup()
+    finally:
+        if not workspace.removed:
+            workspace.cleanup()
+    assert external.read_text(encoding="utf-8") == "victim"
+
+
+def test_native_smoke_workspace_rejects_wrong_device_and_cleanup_is_idempotent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A created root stays on its parent device and may be cleaned twice."""
+    temp_parent = tmp_path / "host-temp"
+    temp_parent.mkdir(mode=0o700)
+    monkeypatch.setenv("TMPDIR", str(temp_parent))
+    metadata = temp_parent.lstat()
+    wrong_parent = BUILDER._SmokePathIdentity(
+        metadata.st_dev + 1,
+        metadata.st_ino,
+        metadata.st_uid,
+    )
+    with pytest.raises(BUILDER.SealedEnvironmentError, match="device boundary"):
+        BUILDER._validate_smoke_workspace_metadata(metadata, wrong_parent)
+
+    sealed_root = tmp_path / "app" / "python-runtime"
+    sealed_root.mkdir(parents=True)
+    workspace = BUILDER._NativeSmokeWorkspace(sealed_root)
+    path = workspace.path
+    workspace.cleanup()
+    workspace.cleanup()
+    assert not path.exists()
+
+
+def test_native_smoke_child_error_precedes_cleanup_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Cleanup diagnostics never replace the native child failure status."""
+    temp_parent = tmp_path / "host-temp"
+    temp_parent.mkdir(mode=0o700)
+    monkeypatch.setenv("TMPDIR", str(temp_parent))
+
+    def fail_cleanup(_workspace: object) -> None:
+        raise RuntimeError("synthetic cleanup failure")
+
+    monkeypatch.setattr(BUILDER._NativeSmokeWorkspace, "cleanup", fail_cleanup)
+    sealed_root = tmp_path / "app" / "python-runtime"
+    sealed_root.mkdir(parents=True)
+    with pytest.raises(BUILDER.SealedEnvironmentError, match="child failed"):
+        with BUILDER._native_smoke_workspace(sealed_root):
+            raise BUILDER.SealedEnvironmentError("child failed")
+    assert "cleanup also failed" in capsys.readouterr().err
+
+
+def test_bootstrap_rejects_attestation_inside_application_resources(
+    tmp_path: Path,
+) -> None:
+    """The child refuses attestation output beside its sealed environment."""
+    source_root = ROOT / ".github" / "scripts" / "sealed_python_sources"
+    old_path = sys.path[:]
+    old_bootstrap = sys.modules.pop("tobkiri_sealed.bootstrap", None)
+    old_package = sys.modules.pop("tobkiri_sealed", None)
+    try:
+        sys.path.insert(0, str(source_root))
+        import tobkiri_sealed.bootstrap as bootstrap
+
+        application_root = tmp_path / "Contents" / "Resources" / "app"
+        sealed_root = application_root / "python-runtime"
+        attestation_parent = application_root / "attestation"
+        sealed_root.mkdir(parents=True)
+        attestation_parent.mkdir()
+        nonce = "a" * 64
+        with pytest.raises(bootstrap.SealedBootstrapError, match="application resources"):
+            bootstrap._attestation_destination(
+                str(attestation_parent / f"startup-{nonce}.json"),
+                sealed_root,
+                nonce,
+            )
+    finally:
+        sys.path = old_path
+        sys.modules.pop("tobkiri_sealed.bootstrap", None)
+        sys.modules.pop("tobkiri_sealed", None)
+        if old_package is not None:
+            sys.modules["tobkiri_sealed"] = old_package
+        if old_bootstrap is not None:
+            sys.modules["tobkiri_sealed.bootstrap"] = old_bootstrap
 
 
 def test_no_bytecode_flag_wins_over_child_environment_override(tmp_path: Path) -> None:

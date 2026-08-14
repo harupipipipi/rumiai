@@ -16,6 +16,7 @@ the native Python prefix when the requested target is the current host.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import errno
 import hashlib
 import importlib.util
@@ -56,6 +57,7 @@ SOURCE_SNAPSHOT_MANIFEST = ".tobkiri-source-snapshot.v1.json"
 SOURCE_SNAPSHOT_SCHEMA = "io.tobkiri.rootless-source-snapshot.v1"
 MANIFEST_SCHEMA = "io.tobkiri.sealed-python-environment.v1"
 ATTESTATION_SCHEMA = "io.tobkiri.sealed-python-attestation.v1"
+SMOKE_WORKSPACE_PREFIX = ".tobkiri-sealed-python-smoke."
 MANIFEST_SHA_ENV = "TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256"
 LEASE_FILENAME = "lease.v1"
 LEASE_CONTENT = "io.tobkiri.sealed-python-lease.v1\n"
@@ -1223,23 +1225,402 @@ def _free_loopback_port() -> int:
         return int(listener.getsockname()[1])
 
 
+@dataclass(frozen=True)
+class _SmokePathIdentity:
+    """Creation-time identity for a Host-owned native-smoke directory."""
+
+    device: int
+    inode: int
+    owner: int | None
+
+
+def _smoke_identity(metadata: os.stat_result) -> _SmokePathIdentity:
+    owner = metadata.st_uid if hasattr(metadata, "st_uid") else None
+    return _SmokePathIdentity(metadata.st_dev, metadata.st_ino, owner)
+
+
+def _validate_smoke_workspace_metadata(
+    metadata: os.stat_result,
+    parent_identity: _SmokePathIdentity,
+) -> _SmokePathIdentity:
+    """Validate a newly created private workspace against its Host parent."""
+    identity = _smoke_identity(metadata)
+    if stat.S_ISLNK(metadata.st_mode) or _is_reparse_point(metadata):
+        raise SealedEnvironmentError("native smoke workspace is linked")
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise SealedEnvironmentError("native smoke workspace is not a directory")
+    if identity.device != parent_identity.device:
+        raise SealedEnvironmentError("native smoke workspace crossed a device boundary")
+    if hasattr(os, "geteuid") and identity.owner != os.geteuid():
+        raise SealedEnvironmentError("native smoke workspace has the wrong owner")
+    if os.name != "nt" and stat.S_IMODE(metadata.st_mode) != 0o700:
+        raise SealedEnvironmentError("native smoke workspace is not private")
+    return identity
+
+
+def _smoke_directory_flags() -> int:
+    required = ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")
+    if not all(hasattr(os, name) for name in required):
+        raise SealedEnvironmentError(
+            "native smoke requires secure Host directory descriptors"
+        )
+    return os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def _canonical_smoke_parent() -> Path:
+    """Return a canonical Host temp parent with no attacker-controlled links."""
+    raw = (
+        os.environ.get("TMPDIR")
+        or os.environ.get("TEMP")
+        or os.environ.get("TMP")
+        or tempfile.gettempdir()
+    )
+    parent = Path(raw)
+    if (
+        not parent.is_absolute()
+        or parent != Path(os.path.normpath(parent))
+        or any(character in os.fspath(parent) for character in ("\n", "\r", "\t"))
+    ):
+        raise SealedEnvironmentError("native smoke temp parent is not an absolute clean path")
+    current = Path(parent.anchor)
+    for part in parent.parts[1:]:
+        current /= part
+        try:
+            metadata = current.lstat()
+        except OSError as exc:
+            raise SealedEnvironmentError(
+                "native smoke temp parent is unavailable"
+            ) from exc
+        if _is_reparse_point(metadata):
+            raise SealedEnvironmentError("native smoke temp parent contains a reparse point")
+        if not current.is_symlink():
+            continue
+        allowed_alias = None
+        if sys.platform == "darwin":
+            allowed_alias = {
+                Path("/var"): Path("/private/var"),
+                Path("/tmp"): Path("/private/tmp"),
+            }.get(current)
+        if allowed_alias is None or current.resolve(strict=True) != allowed_alias:
+            raise SealedEnvironmentError("native smoke temp parent contains a symlink")
+    try:
+        canonical = parent.resolve(strict=True)
+        metadata = canonical.lstat()
+    except (OSError, RuntimeError) as exc:
+        raise SealedEnvironmentError("native smoke temp parent is unavailable") from exc
+    if (
+        canonical.is_symlink()
+        or _is_reparse_point(metadata)
+        or not stat.S_ISDIR(metadata.st_mode)
+    ):
+        raise SealedEnvironmentError("native smoke temp parent is not a real directory")
+    return canonical
+
+
+class _NativeSmokeWorkspace:
+    """Hold and remove one canonical, private, identity-bound Host workspace."""
+
+    def __init__(self, sealed_root: Path) -> None:
+        self.parent = _canonical_smoke_parent()
+        self.parent_fd = (
+            None if os.name == "nt" else os.open(self.parent, _smoke_directory_flags())
+        )
+        parent_metadata = (
+            self.parent.lstat()
+            if self.parent_fd is None
+            else os.fstat(self.parent_fd)
+        )
+        self.parent_identity = _smoke_identity(parent_metadata)
+        if self.parent_fd is None:
+            self.path = Path(
+                tempfile.mkdtemp(prefix=SMOKE_WORKSPACE_PREFIX, dir=self.parent)
+            )
+        else:
+            for _attempt in range(128):
+                name = f"{SMOKE_WORKSPACE_PREFIX}{secrets.token_hex(16)}"
+                try:
+                    os.mkdir(name, mode=0o700, dir_fd=self.parent_fd)
+                except FileExistsError:
+                    continue
+                self.path = self.parent / name
+                break
+            else:
+                os.close(self.parent_fd)
+                raise SealedEnvironmentError(
+                    "native smoke workspace name allocation was exhausted"
+                )
+        workspace_metadata = (
+            self.path.lstat()
+            if self.parent_fd is None
+            else os.stat(
+                self.path.name,
+                dir_fd=self.parent_fd,
+                follow_symlinks=False,
+            )
+        )
+        self.identity = _validate_smoke_workspace_metadata(
+            workspace_metadata,
+            self.parent_identity,
+        )
+        self.workspace_fd = (
+            None
+            if self.parent_fd is None
+            else os.open(
+                self.path.name,
+                _smoke_directory_flags(),
+                dir_fd=self.parent_fd,
+            )
+        )
+        self.descriptors_closed = False
+        self.removed = False
+        self.children: dict[str, _SmokePathIdentity] = {}
+        try:
+            self._verify_directory(
+                workspace_metadata,
+                self.identity,
+                "native smoke workspace",
+            )
+            sealed_scope = sealed_root.parent.resolve(strict=True)
+            if self.path == sealed_scope or self.path.is_relative_to(sealed_scope):
+                raise SealedEnvironmentError(
+                    "native smoke workspace is inside packaged application resources"
+                )
+            self.verify()
+        except BaseException:
+            if self.workspace_fd is not None:
+                os.close(self.workspace_fd)
+            if self.parent_fd is not None:
+                try:
+                    os.rmdir(self.path.name, dir_fd=self.parent_fd)
+                finally:
+                    os.close(self.parent_fd)
+            raise
+
+    @staticmethod
+    def _verify_directory(
+        metadata: os.stat_result,
+        identity: _SmokePathIdentity,
+        label: str,
+    ) -> None:
+        if (
+            stat.S_ISLNK(metadata.st_mode)
+            or _is_reparse_point(metadata)
+            or not stat.S_ISDIR(metadata.st_mode)
+            or _smoke_identity(metadata) != identity
+        ):
+            raise SealedEnvironmentError(f"{label} identity changed")
+
+    def verify(self) -> None:
+        """Reject parent or workspace replacement while held descriptors are live."""
+        if self.descriptors_closed:
+            raise SealedEnvironmentError("native smoke workspace is already closed")
+        parent_metadata = self.parent.lstat()
+        self._verify_directory(
+            parent_metadata,
+            self.parent_identity,
+            "native smoke temp parent",
+        )
+        if (
+            self.parent_fd is not None
+            and _smoke_identity(os.fstat(self.parent_fd)) != self.parent_identity
+        ):
+            raise SealedEnvironmentError("held native smoke temp parent changed")
+        workspace_metadata = (
+            self.path.lstat()
+            if self.parent_fd is None
+            else os.stat(
+                self.path.name,
+                dir_fd=self.parent_fd,
+                follow_symlinks=False,
+            )
+        )
+        self._verify_directory(
+            workspace_metadata,
+            self.identity,
+            "native smoke workspace",
+        )
+        if (
+            self.workspace_fd is not None
+            and _smoke_identity(os.fstat(self.workspace_fd)) != self.identity
+        ):
+            raise SealedEnvironmentError("held native smoke workspace changed")
+        if self.path.resolve(strict=True) != self.path:
+            raise SealedEnvironmentError("native smoke workspace is not canonical")
+        for name, identity in self.children.items():
+            metadata = (
+                (self.path / name).lstat()
+                if self.workspace_fd is None
+                else os.stat(name, dir_fd=self.workspace_fd, follow_symlinks=False)
+            )
+            self._verify_directory(
+                metadata,
+                identity,
+                "native smoke child",
+            )
+
+    def create_directory(self, name: str) -> Path:
+        """Create one fixed private child through the held workspace descriptor."""
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", name):
+            raise SealedEnvironmentError("native smoke child name is invalid")
+        self.verify()
+        try:
+            if self.workspace_fd is None:
+                (self.path / name).mkdir(mode=0o700)
+            else:
+                os.mkdir(name, mode=0o700, dir_fd=self.workspace_fd)
+        except FileExistsError as exc:
+            raise SealedEnvironmentError(
+                "native smoke child destination already exists"
+            ) from exc
+        metadata = (
+            (self.path / name).lstat()
+            if self.workspace_fd is None
+            else os.stat(name, dir_fd=self.workspace_fd, follow_symlinks=False)
+        )
+        identity = _smoke_identity(metadata)
+        self._verify_directory(
+            metadata,
+            identity,
+            "native smoke child",
+        )
+        if identity.device != self.identity.device or identity.owner != self.identity.owner:
+            raise SealedEnvironmentError("native smoke child identity is invalid")
+        if os.name != "nt" and stat.S_IMODE(metadata.st_mode) != 0o700:
+            raise SealedEnvironmentError("native smoke child is not private")
+        self.children[name] = identity
+        self.verify()
+        return self.path / name
+
+    def read_attestation(self, path: Path) -> dict[str, object]:
+        """Read one exact ordinary attestation without following or accepting links."""
+        self.verify()
+        if path.parent.parent != self.path or not path.name.startswith("startup-"):
+            raise SealedEnvironmentError("native smoke attestation path escaped workspace")
+        parent_metadata = path.parent.lstat()
+        if (
+            path.parent.is_symlink()
+            or _is_reparse_point(parent_metadata)
+            or not stat.S_ISDIR(parent_metadata.st_mode)
+        ):
+            raise SealedEnvironmentError("native smoke attestation parent changed")
+        metadata = path.lstat()
+        if (
+            path.is_symlink()
+            or _is_reparse_point(metadata)
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or metadata.st_dev != self.identity.device
+            or (
+                hasattr(metadata, "st_uid")
+                and metadata.st_uid != self.identity.owner
+            )
+            or (os.name != "nt" and stat.S_IMODE(metadata.st_mode) != 0o600)
+        ):
+            raise SealedEnvironmentError("native smoke attestation identity is invalid")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        descriptor = os.open(path, flags)
+        try:
+            opened = os.fstat(descriptor)
+            if _path_identity(path) != _path_identity_from_stat(opened):
+                raise SealedEnvironmentError("native smoke attestation changed while opened")
+            with os.fdopen(descriptor, "rb", closefd=True) as handle:
+                descriptor = -1
+                raw = handle.read(1024 * 1024 + 1)
+                if _path_identity_from_stat(os.fstat(handle.fileno())) != _path_identity_from_stat(
+                    opened
+                ):
+                    raise SealedEnvironmentError(
+                        "native smoke attestation changed while read"
+                    )
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+        if len(raw) > 1024 * 1024:
+            raise SealedEnvironmentError("native smoke attestation is too large")
+        try:
+            document = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise SealedEnvironmentError("native smoke attestation is malformed") from exc
+        if not isinstance(document, dict):
+            raise SealedEnvironmentError("native smoke attestation is malformed")
+        self.verify()
+        return document
+
+    def cleanup(self) -> None:
+        """Remove only this creation-bound workspace through the shared safe helper."""
+        if self.removed:
+            return
+        if not self.descriptors_closed:
+            self.verify()
+            if self.workspace_fd is not None:
+                os.close(self.workspace_fd)
+            if self.parent_fd is not None:
+                os.close(self.parent_fd)
+            self.descriptors_closed = True
+        remove_owned_path = _load_cleanup_remove()
+        remove_owned_path(
+            self.path,
+            owner_root=self.parent,
+            operation="remove native sealed Python smoke workspace",
+            expected_identity=(self.identity.device, self.identity.inode),
+        )
+        self.removed = True
+
+
+def _path_identity_from_stat(metadata: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_mode,
+        metadata.st_nlink,
+    )
+
+
+@contextlib.contextmanager
+def _native_smoke_workspace(root: Path):
+    workspace = _NativeSmokeWorkspace(root)
+    primary_error: BaseException | None = None
+    try:
+        yield workspace
+    except BaseException as error:
+        primary_error = error
+        raise
+    finally:
+        try:
+            workspace.cleanup()
+        except BaseException as cleanup_error:
+            if primary_error is None:
+                raise SealedEnvironmentError(
+                    "native smoke workspace cleanup failed"
+                ) from cleanup_error
+            print(
+                "native smoke workspace cleanup also failed",
+                file=sys.stderr,
+            )
+
+
 def _run_role_smoke(
     root: Path,
     spec: TargetSpec,
     role: str,
     role_arguments: Sequence[str],
     environment: dict[str, str],
+    workspace: _NativeSmokeWorkspace,
+    expected_environment_digest: str,
 ) -> None:
     """Start one real role through the parent-compatible bootstrap wire."""
     python = _venv_python(root / "venv", spec)
     environment = dict(environment)
     environment[PYTHON_BYTECODE_ENVIRONMENT] = "1"
     nonce = secrets.token_hex(32)
-    with tempfile.TemporaryDirectory(
-        prefix=".sealed-python-attestation-",
-        dir=root.parent,
-    ) as raw_directory:
-        attestation = Path(raw_directory) / f"startup-{nonce}.json"
+    attestation_directory = workspace.create_directory(
+        f"attestation-{role.replace('_', '-')}"
+    )
+    attestation = attestation_directory / f"startup-{nonce}.json"
+    primary_error: BaseException | None = None
+    try:
         command = [
             os.fspath(python),
             "-I",
@@ -1311,12 +1692,7 @@ def _run_role_smoke(
                 raise SealedEnvironmentError(
                     f"{role} role smoke failed with {result.returncode}: {detail}"
                 )
-        try:
-            evidence = json.loads(attestation.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise SealedEnvironmentError(
-                f"{role} role attestation is malformed"
-            ) from exc
+        evidence = workspace.read_attestation(attestation)
         if (
             tuple(evidence)
             != (
@@ -1336,20 +1712,80 @@ def _run_role_smoke(
             or evidence.get("schema") != ATTESTATION_SCHEMA
             or evidence.get("nonce") != nonce
             or evidence.get("role") != role
+            or evidence.get("environment_digest") != expected_environment_digest
             or evidence.get("lifetime_lease") is not True
         ):
             raise SealedEnvironmentError(f"{role} role attestation identity is invalid")
+    except BaseException as error:
+        primary_error = error
+        raise
+    finally:
+        try:
+            workspace.verify()
+        except BaseException:
+            if primary_error is None:
+                raise
+            print(
+                f"{role} role workspace verification also failed",
+                file=sys.stderr,
+            )
 
 
-def _verify_python_smoke(root: Path, spec: TargetSpec) -> None:
-    """Run relocated native imports and all three fixed roles."""
-    host = _native_host_spec()
-    if (
-        host is None
-        or host.platform != spec.platform
-        or host.architecture != spec.architecture
-    ):
-        return
+def _native_smoke_environment(
+    root: Path,
+    spec: TargetSpec,
+    workspace: _NativeSmokeWorkspace,
+) -> dict[str, str]:
+    """Build the fixed non-secret environment for native smoke children."""
+    environment = {
+        key: os.environ[key]
+        for key in (
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE",
+            "SystemRoot",
+            "WINDIR",
+            "COMSPEC",
+            "PATHEXT",
+        )
+        if key in os.environ
+    }
+    home = workspace.create_directory("home")
+    process_temp = workspace.create_directory("process-temp")
+    user_data = workspace.create_directory("user-data")
+    logs = workspace.create_directory("logs")
+    binary_directories = (
+        (root / "venv/Scripts", root / "runtime")
+        if spec.windows
+        else (root / "venv/bin", root / "runtime/bin")
+    )
+    environment.update(
+        {
+            "PATH": os.pathsep.join(os.fspath(path) for path in binary_directories),
+            "HOME": os.fspath(home),
+            "USERPROFILE": os.fspath(home),
+            "TMPDIR": os.fspath(process_temp),
+            "TEMP": os.fspath(process_temp),
+            "TMP": os.fspath(process_temp),
+            PYTHON_BYTECODE_ENVIRONMENT: "1",
+            MANIFEST_SHA_ENV: _sha256_file(root / MANIFEST_FILENAME),
+            "RUMI_DEFAULTSPACK_OPEN_BROWSER": "0",
+            "RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND": "1",
+            "RUMI_DEFAULTSPACK_PORT": str(_free_loopback_port()),
+            "RUMI_APP_DIR": os.fspath(root / "app"),
+            "RUMI_USER_DATA": os.fspath(user_data),
+            "RUMI_LOG_DIR": os.fspath(logs),
+        }
+    )
+    return environment
+
+
+def _run_native_import_smoke(
+    root: Path,
+    spec: TargetSpec,
+    environment: dict[str, str],
+) -> None:
+    """Run relocated native imports without consulting mutable Host state."""
     python = _venv_python(root / "venv", spec)
     native_code = (
         "import _hashlib, _ssl, json, sys; "
@@ -1358,16 +1794,6 @@ def _verify_python_smoke(root: Path, spec: TargetSpec) -> None:
         "'executable': sys.executable, 'prefix': sys.prefix, "
         "'base_prefix': sys.base_prefix}, sort_keys=True))"
     )
-    environment = os.environ.copy()
-    for key in list(environment):
-        if key in {
-            "REPO",
-            "RUMI_CORE_DIR",
-            "PYTHONPATH",
-            "PYTHONHOME",
-        } or key.startswith(("DYLD_", "LD_")):
-            environment.pop(key, None)
-    environment[PYTHON_BYTECODE_ENVIRONMENT] = "1"
     native_result = subprocess.run(
         [os.fspath(python), "-I", "-B", "-c", native_code],
         cwd=root,
@@ -1413,35 +1839,48 @@ def _verify_python_smoke(root: Path, spec: TargetSpec) -> None:
             raise SealedEnvironmentError(
                 f"native Python {field} identity mismatch: {value!r}"
             )
-    # Defaultspack derives its launch-log directory from user data. Keeping
-    # smoke state here, outside Resources/app, preserves the signed bundle.
-    with tempfile.TemporaryDirectory(
-        prefix="tobkiri-sealed-python-role-state-",
-    ) as state_directory:
-        state_root = Path(state_directory).resolve(strict=True)
+
+
+def _verify_python_smoke(root: Path, spec: TargetSpec) -> None:
+    """Run relocated native imports and all three fixed roles."""
+    host = _native_host_spec()
+    if (
+        host is None
+        or host.platform != spec.platform
+        or host.architecture != spec.architecture
+    ):
+        return
+    document = _validate_manifest_shape(
+        json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    )
+    # Native imports, Defaultspack, and bootstrap write only below this
+    # Host-owned workspace. Mounted/source application resources stay read-only.
+    with _native_smoke_workspace(root) as workspace:
+        environment = _native_smoke_environment(root, spec, workspace)
         packaged_app_root = root.parent.resolve(strict=True)
-        if state_root == packaged_app_root or state_root.is_relative_to(
-            packaged_app_root
-        ):
-            raise SealedEnvironmentError(
-                "native role smoke state must be outside packaged application resources"
-            )
-        environment.update(
-            {
-                "RUMI_DEFAULTSPACK_OPEN_BROWSER": "0",
-                "RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND": "1",
-                "RUMI_DEFAULTSPACK_PORT": str(_free_loopback_port()),
-                "RUMI_APP_DIR": str(root / "app"),
-                "RUMI_USER_DATA": str(state_root / "user_data"),
-                "RUMI_LOG_DIR": str(state_root / "logs"),
-            }
-        )
+        for key in ("HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP"):
+            state_path = Path(environment[key]).resolve(strict=True)
+            if state_path == packaged_app_root or state_path.is_relative_to(
+                packaged_app_root
+            ):
+                raise SealedEnvironmentError(
+                    "native role smoke state must be outside application resources"
+                )
+        _run_native_import_smoke(root, spec, environment)
         for role, role_arguments in (
             ("typed", ()),
             ("defaultspack", ()),
             ("host_helper", ()),
         ):
-            _run_role_smoke(root, spec, role, role_arguments, environment)
+            _run_role_smoke(
+                root,
+                spec,
+                role,
+                role_arguments,
+                environment,
+                workspace,
+                str(document["environment_digest"]),
+            )
 
 
 def validate_environment(
