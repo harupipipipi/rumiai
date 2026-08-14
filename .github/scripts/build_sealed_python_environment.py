@@ -50,6 +50,8 @@ MACOS_ARM64_REQUIREMENTS_RELATIVE = Path(
     "tobkiri_runtime/requirements-packaging-aarch64-apple-darwin.txt"
 )
 MANIFEST_FILENAME = "sealed-environment.v1.json"
+DIRECTORY_MODES_FILENAME = "sealed-directory-modes.v1.json"
+DIRECTORY_MODES_SCHEMA = "io.tobkiri.sealed-python-directory-modes.v1"
 SOURCE_SNAPSHOT_MANIFEST = ".tobkiri-source-snapshot.v1.json"
 SOURCE_SNAPSHOT_SCHEMA = "io.tobkiri.rootless-source-snapshot.v1"
 MANIFEST_SCHEMA = "io.tobkiri.sealed-python-environment.v1"
@@ -928,6 +930,53 @@ def _expected_directories(files: Sequence[dict[str, object]]) -> list[str]:
     return sorted(expected)
 
 
+def _directory_mode_document(files: Sequence[dict[str, object]]) -> dict[str, object]:
+    """Return manifest-bound exact POSIX modes for the complete directory closure.
+
+    The sealed-environment v1 wire shape remains stable.  This evidence is a
+    required ordinary file in its existing file inventory, so its exact bytes
+    are covered by both ``environment_digest`` and the raw manifest binding.
+    """
+    return {
+        "schema": DIRECTORY_MODES_SCHEMA,
+        "directories": [
+            {"path": ".", "mode": format(IMMUTABLE_DIRECTORY_MODE, "04o")},
+            *(
+                {"path": path, "mode": format(IMMUTABLE_DIRECTORY_MODE, "04o")}
+                for path in _expected_directories(files)
+            ),
+        ],
+    }
+
+
+def _validate_directory_mode_evidence(
+    root: Path,
+    records: Sequence[dict[str, object]],
+) -> None:
+    """Validate the exact directory inventory/modes bound into manifest v1."""
+    evidence_path = root / DIRECTORY_MODES_FILENAME
+    try:
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SealedEnvironmentError("sealed directory mode evidence is malformed") from exc
+    expected = _directory_mode_document(records)
+    if evidence != expected:
+        raise SealedEnvironmentError("sealed directory mode evidence is invalid")
+    for entry in evidence["directories"]:
+        relative = str(entry["path"])
+        path = root if relative == "." else root / relative
+        metadata = path.lstat()
+        if (
+            path.is_symlink()
+            or _is_reparse_point(metadata)
+            or not stat.S_ISDIR(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != IMMUTABLE_DIRECTORY_MODE
+        ):
+            raise SealedEnvironmentError(
+                f"sealed directory mode drift: {relative}"
+            )
+
+
 def _actual_directories(root: Path) -> list[str]:
     """Return every validated directory below a sealed root."""
     return sorted(
@@ -1026,6 +1075,16 @@ def _expected_manifest(
     for name, digest in sentinels.items():
         _write_text(root / "sentinels" / SENTINEL_FILENAMES[name], digest + "\n")
     records = _records(root, spec)
+    _write_text(
+        root / DIRECTORY_MODES_FILENAME,
+        json.dumps(
+            _directory_mode_document(records),
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n",
+    )
+    records = _records(root, spec)
     return {
         "schema": MANIFEST_SCHEMA,
         "environment_digest": _files_digest(records),
@@ -1121,6 +1180,7 @@ def _required_paths(spec: TargetSpec) -> tuple[str, ...]:
         else "venv/lib/python3.13/site-packages/tobkiri_sealed/bootstrap.py"
     )
     return (
+        DIRECTORY_MODES_FILENAME,
         LEASE_FILENAME,
         venv_python,
         bootstrap,
@@ -1423,6 +1483,8 @@ def validate_environment(
         raise SealedEnvironmentError(
             "sealed directory inventory does not match file parent closure"
         )
+    if require_sealed:
+        _validate_directory_mode_evidence(root, records)
     if document["environment_digest"] != _files_digest(records):
         raise SealedEnvironmentError("sealed environment digest does not match files")
     paths = {str(entry["path"]) for entry in records}
@@ -1444,9 +1506,16 @@ def validate_environment(
             raise SealedEnvironmentError(f"sealed sentinel payload mismatch: {path}")
     if require_sealed:
         for _relative, path, _kind, entry_metadata in _walk_tree(root):
-            if entry_metadata.st_mode & 0o222:
+            expected_mode = (
+                IMMUTABLE_DIRECTORY_MODE
+                if stat.S_ISDIR(entry_metadata.st_mode)
+                else IMMUTABLE_EXECUTABLE_MODE
+                if _executable_flag(path, entry_metadata, spec)
+                else IMMUTABLE_FILE_MODE
+            )
+            if stat.S_IMODE(entry_metadata.st_mode) != expected_mode:
                 raise SealedEnvironmentError(
-                    f"sealed snapshot entry is writable: {path.relative_to(root)}"
+                    f"sealed snapshot entry mode drift: {path.relative_to(root)}"
                 )
     if run_native_smoke:
         _verify_python_smoke(root, spec)

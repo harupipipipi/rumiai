@@ -418,6 +418,17 @@ jobs:
           TOBKIRI_PANEL_BUILD_DIR: ${{ runner.temp }}/tobkiri-panel-build
         run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.macos.dev.conf.json --bundles app --ci ${{ matrix.signing_args }}
 
+      - name: Host-seal and launch-test packaged Python application resources
+        if: runner.os == 'macOS'
+        run: |
+          /usr/bin/python3 -B tobkiri_launcher/scripts/verify_packaged_python.py \
+            --repo-root "$GITHUB_WORKSPACE" \
+            --app-bundle "$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app" \
+            --target '${{ matrix.target }}' \
+            --expected-manifest-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256" \
+            --seal-tauri-directories \
+            --native-smoke
+
       - name: Build macOS DMG installer
         if: runner.os == 'macOS'
         working-directory: tobkiri_launcher
@@ -430,6 +441,17 @@ jobs:
             --allow-ad-hoc-local \
             --output-dir "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" \
             2>&1 | tee "$RUNNER_TEMP/tobkiri-macos-dmg-${{ matrix.target }}.log"
+
+      - name: Verify mounted macOS installer packaged Python
+        if: runner.os == 'macOS'
+        working-directory: tobkiri_launcher
+        run: |
+          dmg="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -n "$dmg"
+          bash scripts/verify_packaged_python_dmg.sh \
+            --dmg "$dmg" \
+            --target '${{ matrix.target }}' \
+            --expected-manifest-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256"
 
       - name: Upload desktop installer
         uses: actions/upload-artifact@v4

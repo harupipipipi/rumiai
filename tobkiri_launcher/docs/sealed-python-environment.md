@@ -59,6 +59,7 @@ Tauri maps `tobkiri_launcher/src-tauri/gen/app` to the stable packaged
 ```text
 {resource_dir}/app/python-runtime/
 ├── sealed-environment.v1.json
+├── sealed-directory-modes.v1.json
 ├── lease.v1
 ├── runtime/                 # native CPython runtime
 ├── venv/                    # copied, relocatable environment
@@ -91,7 +92,7 @@ exact inventory before binding the resource.
 
 The manifest has only the fixed top-level fields and fixed nested field sets
 defined in `.github/schemas/sealed-python-environment.v1.schema.json`.
-Its provenance `kind` is `apple-code-signature-v1` on macOS,
+Its provenance `kind` is `pinned-python-build-standalone-v1` on macOS,
 `windows-authenticode-v1` on Windows, and `linux-immutable-package-v1` on
 Linux; `package_id` is always `dev.tobkiri.launcher`.
 `files` is a sorted, link-free inventory of regular files and excludes only
@@ -101,6 +102,29 @@ lowercase 64-hex raw SHA-256 values; the `sha256:` prefix is not part of this
 domain. `environment_digest` is SHA-256 over the compact serde-compatible JSON
 bytes of that exact array. `lease.v1` is included in the inventory and is
 opened under a shared OS lock by bootstrap for the lifetime of the process.
+
+The manifest-v1 wire shape is intentionally unchanged for compatibility.
+Exact directory identity is added as the required inventoried regular file
+`sealed-directory-modes.v1.json`, whose schema is
+`io.tobkiri.sealed-python-directory-modes.v1`. Its first entry binds the root
+as `.` and its remaining sorted entries bind the exact transitive directory
+closure; every mode is `0555`. Because this evidence file is in `files`, its
+bytes are covered by `environment_digest` and by the raw manifest digest that
+the launcher embeds. Existing v1 readers can deserialize the manifest, while
+the producer, bootstrap, Rust build verifier, and launcher now require and
+enforce the evidence. On POSIX, regular files must be exactly `0444` and
+executable files exactly `0555`; merely non-writable but different modes are
+rejected.
+
+Python preparation and Rust staging preserve these modes. Tauri recreates
+resource directories as `0755`, so the macOS packaging lane performs one
+build-time Host seal on the actual `.app`: only the exact `0755` to `0555`
+directory delta is accepted, with file bytes/modes, link counts, directory
+closure, and manifest identity already verified. It then runs native imports
+and all fixed roles from that packaged resource. No launch-time chmod or
+permission exception exists. The signed app is checked afterward, and the
+read-only DMG is mounted and subjected to the same exact-mode/native smoke
+before upload, catching copy, bundle, image, or extraction drift.
 
 The launcher invokes the fixed boundary:
 

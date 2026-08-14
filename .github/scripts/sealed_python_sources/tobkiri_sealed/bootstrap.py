@@ -42,6 +42,8 @@ ROLE_TARGETS = {
     ),
 }
 MANIFEST_NAME = "sealed-environment.v1.json"
+DIRECTORY_MODES_NAME = "sealed-directory-modes.v1.json"
+DIRECTORY_MODES_SCHEMA = "io.tobkiri.sealed-python-directory-modes.v1"
 MANIFEST_SHA_ENV = "TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256"
 LEASE_NAME = "lease.v1"
 REPARSE_POINT = 0x0400
@@ -379,6 +381,8 @@ def _verify_tree(root: Path, document: dict[str, Any]) -> list[dict[str, Any]]:
         raise SealedBootstrapError("sealed environment has missing or extra files")
     if actual_directories != _expected_directories(document["files"]):
         raise SealedBootstrapError("sealed environment has missing or extra directories")
+    if DIRECTORY_MODES_NAME not in expected_files:
+        raise SealedBootstrapError("sealed directory mode evidence is missing")
     records: list[dict[str, Any]] = []
     platform_name = str(document["platform"])
     for entry in document["files"]:
@@ -392,7 +396,36 @@ def _verify_tree(root: Path, document: dict[str, Any]) -> list[dict[str, Any]]:
         }
         if actual != entry:
             raise SealedBootstrapError(f"sealed file changed: {entry['path']}")
+        if platform_name != "windows":
+            expected_mode = 0o555 if bool(entry["executable"]) else 0o444
+            if stat.S_IMODE(path.lstat().st_mode) != expected_mode:
+                raise SealedBootstrapError(
+                    f"sealed file mode changed: {entry['path']}"
+                )
         records.append(actual)
+    try:
+        directory_modes = json.loads(
+            (root / DIRECTORY_MODES_NAME).read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SealedBootstrapError("sealed directory mode evidence is malformed") from exc
+    expected_mode_entries = [
+        {"path": ".", "mode": "0555"},
+        *({"path": path, "mode": "0555"} for path in actual_directories),
+    ]
+    if directory_modes != {
+        "schema": DIRECTORY_MODES_SCHEMA,
+        "directories": expected_mode_entries,
+    }:
+        raise SealedBootstrapError("sealed directory mode evidence is invalid")
+    if platform_name != "windows":
+        for entry in expected_mode_entries:
+            relative = str(entry["path"])
+            path = root if relative == "." else root / relative
+            if stat.S_IMODE(path.lstat().st_mode) != 0o555:
+                raise SealedBootstrapError(
+                    f"sealed directory mode changed: {relative}"
+                )
     compact = json.dumps(records, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if _sha256_bytes(compact) != document["environment_digest"]:
         raise SealedBootstrapError("sealed environment digest changed")

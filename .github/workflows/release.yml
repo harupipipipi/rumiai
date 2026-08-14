@@ -458,6 +458,17 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: cargo tauri build --target ${{ matrix.target }} --bundles app --ci
 
+      - name: Host-seal and launch-test packaged Python application resources
+        if: runner.os == 'macOS'
+        run: |
+          /usr/bin/python3 -B tobkiri_launcher/scripts/verify_packaged_python.py \
+            --repo-root "$GITHUB_WORKSPACE" \
+            --app-bundle "$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app" \
+            --target '${{ matrix.target }}' \
+            --expected-manifest-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256" \
+            --seal-tauri-directories \
+            --native-smoke
+
       - name: Verify Developer ID signed macOS application
         if: runner.os == 'macOS'
         working-directory: tobkiri_launcher
@@ -482,6 +493,17 @@ jobs:
             --signing-identity "$APPLE_SIGNING_IDENTITY" \
             --output-dir "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" \
             2>&1 | tee "$RUNNER_TEMP/tobkiri-macos-dmg-${{ matrix.target }}.log"
+
+      - name: Verify mounted macOS installer packaged Python
+        if: runner.os == 'macOS'
+        working-directory: tobkiri_launcher
+        run: |
+          dmg="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -n "$dmg"
+          bash scripts/verify_packaged_python_dmg.sh \
+            --dmg "$dmg" \
+            --target '${{ matrix.target }}' \
+            --expected-manifest-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256"
 
       - name: Notarize and staple macOS release DMG
         if: runner.os == 'macOS'

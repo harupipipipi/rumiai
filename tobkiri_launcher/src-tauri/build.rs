@@ -31,9 +31,11 @@ const RUNTIME_RESOURCE_MANIFEST: &str = "runtime-resource-manifest.v1.json";
 const RUNTIME_RESOURCE_SCHEMA: &str = "io.tobkiri.runtime-resource-manifest.v1";
 const SEALED_PYTHON_ROOT: &str = "python-runtime";
 const SEALED_PYTHON_MANIFEST: &str = "sealed-environment.v1.json";
+const SEALED_PYTHON_DIRECTORY_MODES: &str = "sealed-directory-modes.v1.json";
 const PACKAGING_PYTHON_SNAPSHOT_ENV: &str = "TOBKIRI_PACKAGING_PYTHON_SNAPSHOT";
 const PACKAGING_PYTHON_INVENTORY_SHA_ENV: &str = "TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256";
 const SEALED_PYTHON_SCHEMA: &str = "io.tobkiri.sealed-python-environment.v1";
+const SEALED_PYTHON_DIRECTORY_MODES_SCHEMA: &str = "io.tobkiri.sealed-python-directory-modes.v1";
 const CARGO_TARGET_DIR_ENV: &str = "CARGO_TARGET_DIR";
 const PANEL_BUILD_DIR_ENV: &str = "TOBKIRI_PANEL_BUILD_DIR";
 const PANEL_RESOURCE_DIR: &str = "core_runtime/core_pack/core_control_panel/web";
@@ -514,6 +516,40 @@ fn collect_runtime_resource_files(root: &Path, current: &Path) -> io::Result<Vec
     Ok(files)
 }
 
+fn collect_runtime_resource_directories(root: &Path, current: &Path) -> io::Result<Vec<String>> {
+    let mut directories = Vec::new();
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "staged runtime resource may not be a symlink: {}",
+                    path.display()
+                ),
+            ));
+        }
+        if metadata.is_dir() {
+            directories.push(portable_relative_path(
+                path.strip_prefix(root).unwrap_or(&path),
+            ));
+            directories.extend(collect_runtime_resource_directories(root, &path)?);
+        } else if !metadata.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "staged runtime resource may not be special: {}",
+                    path.display()
+                ),
+            ));
+        }
+    }
+    directories.sort();
+    Ok(directories)
+}
+
 fn bind_sealed_python_root(root: &Path) -> io::Result<()> {
     reject_unsupported_sealed_python_release_target()?;
     let manifest_path = root.join(SEALED_PYTHON_MANIFEST);
@@ -699,8 +735,9 @@ fn bind_sealed_python_root(root: &Path) -> io::Result<()> {
             use std::os::unix::fs::PermissionsExt;
             let metadata = fs::metadata(&path)?;
             let executable = metadata.permissions().mode() & 0o111 != 0;
+            let expected_mode = if executable { 0o555 } else { 0o444 };
             if entry.get("executable").and_then(serde_json::Value::as_bool) != Some(executable)
-                || metadata.permissions().mode() & 0o022 != 0
+                || metadata.permissions().mode() & 0o777 != expected_mode
             {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -805,10 +842,96 @@ fn bind_sealed_python_root(root: &Path) -> io::Result<()> {
             "sealed Python environment contains missing or extra files",
         ));
     }
+    if expected_paths
+        .binary_search_by(|path| path.as_str().cmp(SEALED_PYTHON_DIRECTORY_MODES))
+        .is_err()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "sealed Python directory mode evidence is missing",
+        ));
+    }
+    verify_sealed_python_directory_modes(root, &expected_paths)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if fs::symlink_metadata(&manifest_path)?.permissions().mode() & 0o777 != 0o444 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "sealed Python manifest permissions drift",
+            ));
+        }
+    }
     println!(
         "cargo:rustc-env=TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256={}",
         raw_byte_digest(&bytes)
     );
+    Ok(())
+}
+
+fn verify_sealed_python_directory_modes(root: &Path, files: &[String]) -> io::Result<()> {
+    let mut expected_directories = std::collections::BTreeSet::new();
+    for relative in files {
+        let mut parent = Path::new(relative).parent();
+        while let Some(directory) = parent.filter(|path| !path.as_os_str().is_empty()) {
+            expected_directories.insert(portable_relative_path(directory));
+            parent = directory.parent();
+        }
+    }
+    let actual_directories = collect_runtime_resource_directories(root, root)?;
+    if actual_directories != expected_directories.iter().cloned().collect::<Vec<_>>() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "sealed Python directory inventory drift",
+        ));
+    }
+    let expected_entries = std::iter::once(serde_json::json!({
+        "path": ".",
+        "mode": "0555",
+    }))
+    .chain(
+        expected_directories
+            .iter()
+            .map(|path| serde_json::json!({"path": path, "mode": "0555"})),
+    )
+    .collect::<Vec<_>>();
+    let evidence_path = root.join(SEALED_PYTHON_DIRECTORY_MODES);
+    require_regular_file(&evidence_path, "sealed Python directory mode evidence")?;
+    let evidence: serde_json::Value = serde_json::from_slice(&fs::read(&evidence_path)?)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    if evidence
+        != serde_json::json!({
+            "schema": SEALED_PYTHON_DIRECTORY_MODES_SCHEMA,
+            "directories": expected_entries,
+        })
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "sealed Python directory mode evidence is invalid",
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for relative in std::iter::once(".").chain(expected_directories.iter().map(String::as_str))
+        {
+            let path = if relative == "." {
+                root.to_path_buf()
+            } else {
+                root.join(relative)
+            };
+            let metadata = fs::symlink_metadata(&path)?;
+            if !metadata.is_dir()
+                || metadata.file_type().is_symlink()
+                || metadata.permissions().mode() & 0o777 != 0o555
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("sealed Python directory permissions drift: {relative}"),
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -5209,17 +5332,35 @@ mod tests {
             "app/host_helper_entry.py",
             "app/kernel_entry.py",
             "lease.v1",
+            SEALED_PYTHON_DIRECTORY_MODES,
             "sentinels/native.sha256",
             "sentinels/site-packages.sha256",
             "sentinels/stdlib.sha256",
             "venv/bin/python3",
             "venv/lib/python3.13/site-packages/tobkiri_sealed/bootstrap.py",
         ];
+        let mut directory_paths = std::collections::BTreeSet::new();
+        for relative in required {
+            let mut parent = Path::new(relative).parent();
+            while let Some(directory) = parent.filter(|path| !path.as_os_str().is_empty()) {
+                directory_paths.insert(portable_relative_path(directory));
+                parent = directory.parent();
+            }
+        }
+        let directory_modes = serde_json::to_string_pretty(&serde_json::json!({
+            "schema": SEALED_PYTHON_DIRECTORY_MODES_SCHEMA,
+            "directories": std::iter::once(serde_json::json!({"path": ".", "mode": "0555"}))
+                .chain(directory_paths.iter().map(|path| serde_json::json!({"path": path, "mode": "0555"})))
+                .collect::<Vec<_>>()
+        }))
+        .unwrap();
         let mut files = Vec::new();
         for relative in required {
             let path = root.join(relative);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
-            let payload = if relative.ends_with("tobkiri_sealed/bootstrap.py") {
+            let payload = if relative == SEALED_PYTHON_DIRECTORY_MODES {
+                directory_modes.clone()
+            } else if relative.ends_with("tobkiri_sealed/bootstrap.py") {
                 sealed_python_protocol::REQUIRED_TEMPLATE_FRAGMENTS.join("\n")
                     + "\nparse_known_args role_args chmod\n"
             } else {
@@ -5232,7 +5373,7 @@ mod tests {
                 use std::os::unix::fs::PermissionsExt;
                 fs::set_permissions(
                     &path,
-                    fs::Permissions::from_mode(if executable { 0o555 } else { 0o644 }),
+                    fs::Permissions::from_mode(if executable { 0o555 } else { 0o444 }),
                 )
                 .unwrap();
             }
@@ -5264,6 +5405,20 @@ mod tests {
         });
         let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
         fs::write(root.join(SEALED_PYTHON_MANIFEST), &manifest_bytes).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(
+                root.join(SEALED_PYTHON_MANIFEST),
+                fs::Permissions::from_mode(0o444),
+            )
+            .unwrap();
+            for relative in &directory_paths {
+                fs::set_permissions(root.join(relative), fs::Permissions::from_mode(0o555))
+                    .unwrap();
+            }
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
+        }
         let inventory_digest = raw_byte_digest(&manifest_bytes);
         let _inventory =
             EnvironmentGuard::set_value(PACKAGING_PYTHON_INVENTORY_SHA_ENV, &inventory_digest);
@@ -5280,16 +5435,43 @@ mod tests {
 
         let mut swapped = manifest.clone();
         swapped["environment_digest"] = swapped["package_provenance"]["release_digest"].clone();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(
+                root.join(SEALED_PYTHON_MANIFEST),
+                fs::Permissions::from_mode(0o644),
+            )
+            .unwrap();
+        }
         fs::write(
             root.join(SEALED_PYTHON_MANIFEST),
             serde_json::to_vec(&swapped).unwrap(),
         )
         .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(
+                root.join(SEALED_PYTHON_MANIFEST),
+                fs::Permissions::from_mode(0o444),
+            )
+            .unwrap();
+        }
         assert!(bind_sealed_python_root(&root).is_err());
 
         let mut prefixed = manifest;
         prefixed["sentinels"]["stdlib_sha256"] =
             serde_json::Value::String(format!("sha256:{}", raw_byte_digest(b"stdlib")));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(
+                root.join(SEALED_PYTHON_MANIFEST),
+                fs::Permissions::from_mode(0o644),
+            )
+            .unwrap();
+        }
         fs::write(
             root.join(SEALED_PYTHON_MANIFEST),
             serde_json::to_vec(&prefixed).unwrap(),

@@ -101,5 +101,5 @@
       "pattern": "^[0-9a-f]{64}$"
     }
   },
-  "$comment": "files is sorted by path; environment_digest is SHA-256 over compact serde JSON bytes of that exact array. The complete directory inventory is exactly the transitive parent closure of files; empty or other extra directories are forbidden. lease.v1 and the fixed runtime/app/entrypoint closure are required inventory entries."
+  "$comment": "files is sorted by path; environment_digest is SHA-256 over compact serde JSON bytes of that exact array. The complete directory inventory is exactly the transitive parent closure of files; empty or other extra directories are forbidden. sealed-directory-modes.v1.json, lease.v1, and the fixed runtime/app/entrypoint closure are required inventory entries. The directory-mode document is an inventoried file, preserving this v1 wire shape while binding exact 0555 directory modes into the raw manifest identity."
 }

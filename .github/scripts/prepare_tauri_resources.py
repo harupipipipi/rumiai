@@ -133,6 +133,7 @@ class _ValidatedSealedPythonBoundary:
         "root_identity",
         "manifest_identity",
         "manifest_digest",
+        "tree_identity",
     )
 
     def __init__(
@@ -143,12 +144,14 @@ class _ValidatedSealedPythonBoundary:
         root_identity: tuple[int, int],
         manifest_identity: tuple[int, int],
         manifest_digest: str,
+        tree_identity: tuple[tuple[str, int, int, int, int, int], ...],
     ) -> None:
         self.bundle_root = bundle_root
         self.root = root
         self.root_identity = root_identity
         self.manifest_identity = manifest_identity
         self.manifest_digest = manifest_digest
+        self.tree_identity = tree_identity
 
     def contains_descendant(self, path: Path) -> bool:
         """Return whether ``path`` is below this exact validated subtree."""
@@ -193,6 +196,31 @@ class _ValidatedSealedPythonBoundary:
             or manifest_digest != self.manifest_digest
         ):
             raise RuntimeError("formal sealed Python manifest changed")
+        if _sealed_tree_identity(self.root) != self.tree_identity:
+            raise RuntimeError("formal sealed Python tree identity changed")
+
+
+def _sealed_tree_identity(
+    root: Path,
+) -> tuple[tuple[str, int, int, int, int, int], ...]:
+    """Bind every sealed entry identity and exact mode without following links."""
+    entries = []
+    for path in (root, *sorted(root.rglob("*"))):
+        metadata = path.lstat()
+        if path.is_symlink() or getattr(metadata, "st_file_attributes", 0) & 0x0400:
+            raise RuntimeError("formal sealed Python tree contains a link")
+        relative = "." if path == root else path.relative_to(root).as_posix()
+        entries.append(
+            (
+                relative,
+                metadata.st_dev,
+                metadata.st_ino,
+                stat.S_IMODE(metadata.st_mode),
+                metadata.st_nlink,
+                metadata.st_size,
+            )
+        )
+    return tuple(entries)
 
 
 def parse_args() -> argparse.Namespace:
@@ -579,6 +607,7 @@ def validate_sealed_python_resource(
         root_identity=(root_metadata.st_dev, root_metadata.st_ino),
         manifest_identity=(manifest_metadata.st_dev, manifest_metadata.st_ino),
         manifest_digest=manifest_digest,
+        tree_identity=_sealed_tree_identity(sealed_root),
     )
     boundary.assert_unchanged()
     return boundary

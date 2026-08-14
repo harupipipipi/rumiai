@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -1067,6 +1068,7 @@ def test_manifest_contains_fixed_entrypoints_and_bootstrap_paths(tmp_path: Path)
         ]
     }
     assert {
+        "sealed-directory-modes.v1.json",
         "lease.v1",
         "venv/bin/python3",
         "venv/lib/python3.13/site-packages/tobkiri_sealed/bootstrap.py",
@@ -1181,12 +1183,34 @@ def test_assembly_materializes_links_and_freezes_the_complete_snapshot(
 
     for path in (output, *output.rglob("*")):
         assert not path.is_symlink(), path
-        assert not path.stat().st_mode & 0o222, path
+        expected_mode = 0o555 if path.is_dir() or path.stat().st_mode & 0o111 else 0o444
+        assert stat.S_IMODE(path.stat().st_mode) == expected_mode, path
     assert all(
         not any(part == "__pycache__" for part in path.relative_to(output).parts)
         and path.suffix not in {".pyc", ".pyo"}
         for path in output.rglob("*")
     )
+
+    evidence = json.loads(
+        (output / BUILDER.DIRECTORY_MODES_FILENAME).read_text(encoding="utf-8")
+    )
+    manifest = json.loads(
+        (output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8")
+    )
+    assert evidence == BUILDER._directory_mode_document(manifest["files"])
+
+
+@pytest.mark.parametrize("drift_mode", (0o755, 0o500))
+def test_validator_rejects_exact_directory_mode_drift(
+    tmp_path: Path,
+    drift_mode: int,
+) -> None:
+    """Writable and merely non-writable-but-noncanonical directory modes fail."""
+    output = _fixture_sources(tmp_path, "x86_64-unknown-linux-gnu")[2]
+    directory = output / "runtime/lib"
+    directory.chmod(drift_mode)
+    with pytest.raises(BUILDER.SealedEnvironmentError, match="directory mode drift"):
+        BUILDER.validate_environment(output, "x86_64-unknown-linux-gnu", run_native_smoke=False)
 
 
 def test_final_venv_home_is_relative_to_the_sealed_launch_root(

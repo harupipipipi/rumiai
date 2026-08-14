@@ -36,6 +36,8 @@ pub const MANIFEST_SCHEMA: &str = "io.tobkiri.sealed-python-environment.v1";
 pub const ATTESTATION_SCHEMA: &str = protocol::ATTESTATION_SCHEMA;
 pub const RESOURCE_DIRECTORY: &str = "python-runtime";
 pub const MANIFEST_FILENAME: &str = "sealed-environment.v1.json";
+const DIRECTORY_MODES_FILENAME: &str = "sealed-directory-modes.v1.json";
+const DIRECTORY_MODES_SCHEMA: &str = "io.tobkiri.sealed-python-directory-modes.v1";
 const LIFETIME_LEASE: &str = "lease.v1";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 const TERMINATION_CONFIRM_TIMEOUT: Duration = Duration::from_millis(250);
@@ -282,6 +284,20 @@ pub struct SealedFile {
     pub size: u64,
     pub sha256: String,
     pub executable: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct SealedDirectoryModes {
+    schema: String,
+    directories: Vec<SealedDirectoryMode>,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct SealedDirectoryMode {
+    path: String,
+    mode: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1218,7 +1234,7 @@ fn copy_anchored_file(
             destination_dir,
             name.as_ptr(),
             libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            if executable { 0o500 } else { 0o400 },
+            if executable { 0o555 } else { 0o444 },
         )
     };
     if destination_fd < 0 {
@@ -1306,11 +1322,11 @@ fn seal_snapshot_directories(
     }
     for relative in directories.iter().rev() {
         let directory = openat_relative_directory(root, relative)?;
-        if unsafe { libc::fchmod(directory.as_raw_fd(), 0o500) } != 0 {
+        if unsafe { libc::fchmod(directory.as_raw_fd(), 0o555) } != 0 {
             return Err(std::io::Error::last_os_error()).context("seal snapshot directory");
         }
     }
-    if unsafe { libc::fchmod(root, 0o500) } != 0 {
+    if unsafe { libc::fchmod(root, 0o555) } != 0 {
         return Err(std::io::Error::last_os_error()).context("seal snapshot root");
     }
     Ok(())
@@ -1406,7 +1422,7 @@ fn verify_snapshot_anchored(
         if !metadata.is_file()
             || metadata.nlink() != 1
             || metadata.len() != entry.size
-            || metadata.permissions().mode() & 0o022 != 0
+            || metadata.permissions().mode() & 0o777 != if entry.executable { 0o555 } else { 0o444 }
             || (metadata.permissions().mode() & 0o111 != 0) != entry.executable
         {
             bail!(
@@ -1432,7 +1448,7 @@ fn verify_snapshot_anchored(
     for directory in &directories {
         let handle = openat_relative_directory(root, directory)?;
         let metadata = handle.metadata()?;
-        if !metadata.is_dir() || metadata.permissions().mode() & 0o022 != 0 {
+        if !metadata.is_dir() || metadata.permissions().mode() & 0o777 != 0o555 {
             bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] anchored directory changed");
         }
     }
@@ -1443,8 +1459,8 @@ fn verify_snapshot_anchored(
         }
         value.assume_init()
     };
-    if root_metadata.st_mode & 0o022 != 0 {
-        bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] anchored root became writable");
+    if root_metadata.st_mode & 0o777 != 0o555 {
+        bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] anchored root mode changed");
     }
     let mut actual_files = Vec::new();
     let mut actual_directories = Vec::new();
@@ -1582,6 +1598,9 @@ fn validate_manifest_contract(manifest: &SealedEnvironmentManifest) -> Result<()
             bail!("[PYTHON_SEALED_INVALID] missing fixed sealed path {required}");
         }
     }
+    if !unique.contains(DIRECTORY_MODES_FILENAME) {
+        bail!("[PYTHON_SEALED_INVALID] missing sealed directory mode evidence");
+    }
     let interpreter = if cfg!(windows) {
         "venv/Scripts/python.exe"
     } else {
@@ -1621,6 +1640,13 @@ fn verify_environment_tree(root: &Path, manifest: &SealedEnvironmentManifest) ->
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
         bail!("[PYTHON_SEALED_INVALID] environment root is linked or missing");
     }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o777 != 0o555 {
+            bail!("[PYTHON_SEALED_INVALID] environment root mode changed");
+        }
+    }
     let mut actual = Vec::new();
     let mut actual_directories = Vec::new();
     collect_files(root, root, &mut actual, &mut actual_directories)?;
@@ -1647,6 +1673,7 @@ fn verify_environment_tree(root: &Path, manifest: &SealedEnvironmentManifest) ->
     if actual_directories != expected_directories {
         bail!("[PYTHON_SEALED_INVALID] environment has missing or extra directories");
     }
+    verify_directory_mode_evidence(root, &actual_directories)?;
     for entry in &manifest.files {
         let path = root.join(&entry.path);
         let metadata = fs::symlink_metadata(&path)?;
@@ -1674,12 +1701,57 @@ fn verify_environment_tree(root: &Path, manifest: &SealedEnvironmentManifest) ->
         {
             use std::os::unix::fs::PermissionsExt;
             let executable = metadata.permissions().mode() & 0o111 != 0;
-            if executable != entry.executable || metadata.permissions().mode() & 0o022 != 0 {
+            let expected_mode = if entry.executable { 0o555 } else { 0o444 };
+            if executable != entry.executable
+                || metadata.permissions().mode() & 0o777 != expected_mode
+            {
                 bail!(
                     "[PYTHON_SEALED_INVALID] sealed file permissions changed: {}",
                     entry.path
                 );
             }
+        }
+    }
+    Ok(())
+}
+
+fn verify_directory_mode_evidence(root: &Path, directories: &[String]) -> Result<()> {
+    let evidence_path = root.join(DIRECTORY_MODES_FILENAME);
+    let evidence: SealedDirectoryModes =
+        serde_json::from_slice(&read_bounded_regular(&evidence_path, 4 * 1024 * 1024)?)
+            .context("[PYTHON_SEALED_INVALID] malformed sealed directory mode evidence")?;
+    let expected = SealedDirectoryModes {
+        schema: DIRECTORY_MODES_SCHEMA.to_string(),
+        directories: std::iter::once(SealedDirectoryMode {
+            path: ".".to_string(),
+            mode: "0555".to_string(),
+        })
+        .chain(directories.iter().map(|path| SealedDirectoryMode {
+            path: path.clone(),
+            mode: "0555".to_string(),
+        }))
+        .collect(),
+    };
+    if evidence != expected {
+        bail!("[PYTHON_SEALED_INVALID] sealed directory mode evidence changed");
+    }
+    #[cfg(unix)]
+    for entry in &evidence.directories {
+        use std::os::unix::fs::PermissionsExt;
+        let path = if entry.path == "." {
+            root.to_path_buf()
+        } else {
+            root.join(&entry.path)
+        };
+        let metadata = fs::symlink_metadata(&path)?;
+        if !metadata.is_dir()
+            || metadata.file_type().is_symlink()
+            || metadata.permissions().mode() & 0o777 != 0o555
+        {
+            bail!(
+                "[PYTHON_SEALED_INVALID] sealed directory mode changed: {}",
+                entry.path
+            );
         }
     }
     Ok(())
@@ -2085,6 +2157,7 @@ fn fixed_bootstrap_path(python_version: &str) -> Result<String> {
 fn required_layout_paths() -> &'static [&'static str] {
     if cfg!(windows) {
         &[
+            DIRECTORY_MODES_FILENAME,
             "venv/Scripts/python.exe",
             "app/kernel_entry.py",
             "app/defaultspack_entry.py",
@@ -2096,6 +2169,7 @@ fn required_layout_paths() -> &'static [&'static str] {
         ]
     } else {
         &[
+            DIRECTORY_MODES_FILENAME,
             "venv/bin/python3",
             "app/kernel_entry.py",
             "app/defaultspack_entry.py",
@@ -2277,17 +2351,92 @@ mod tests {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let mode = if entry.executable { 0o555 } else { 0o644 };
+                let mode = if entry.executable { 0o555 } else { 0o444 };
                 fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
             }
             entry.size = 1;
             entry.sha256 = sha256_bytes(b"x");
+        }
+        let mut directories = Vec::new();
+        collect_files(&root, &root, &mut Vec::new(), &mut directories).unwrap();
+        directories.sort();
+        let evidence = SealedDirectoryModes {
+            schema: DIRECTORY_MODES_SCHEMA.to_string(),
+            directories: std::iter::once(SealedDirectoryMode {
+                path: ".".to_string(),
+                mode: "0555".to_string(),
+            })
+            .chain(directories.iter().map(|path| SealedDirectoryMode {
+                path: path.clone(),
+                mode: "0555".to_string(),
+            }))
+            .collect(),
+        };
+        let evidence_bytes = serde_json::to_vec(&evidence).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(
+                root.join(DIRECTORY_MODES_FILENAME),
+                fs::Permissions::from_mode(0o644),
+            )
+            .unwrap();
+        }
+        fs::write(root.join(DIRECTORY_MODES_FILENAME), &evidence_bytes).unwrap();
+        let evidence_entry = manifest
+            .files
+            .iter_mut()
+            .find(|entry| entry.path == DIRECTORY_MODES_FILENAME)
+            .unwrap();
+        evidence_entry.size = evidence_bytes.len() as u64;
+        evidence_entry.sha256 = sha256_bytes(&evidence_bytes);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(
+                root.join(DIRECTORY_MODES_FILENAME),
+                fs::Permissions::from_mode(0o444),
+            )
+            .unwrap();
+            for directory in &directories {
+                fs::set_permissions(root.join(directory), fs::Permissions::from_mode(0o555))
+                    .unwrap();
+            }
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
         }
         manifest
             .files
             .sort_by(|left, right| left.path.cmp(&right.path));
         manifest.environment_digest = sha256_bytes(&serde_json::to_vec(&manifest.files).unwrap());
         (root, manifest)
+    }
+
+    #[cfg(unix)]
+    fn make_test_tree_writable(root: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let mut entries = fs::read_dir(root)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        while let Some(path) = entries.pop() {
+            let metadata = fs::symlink_metadata(&path).unwrap();
+            if metadata.is_dir() {
+                fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+                entries.extend(
+                    fs::read_dir(&path)
+                        .unwrap()
+                        .map(|entry| entry.unwrap().path()),
+                );
+            } else if metadata.is_file() {
+                let mode = if metadata.permissions().mode() & 0o111 != 0 {
+                    0o755
+                } else {
+                    0o644
+                };
+                fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+            }
+        }
+        fs::set_permissions(root, fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     #[cfg(target_os = "macos")]
@@ -2298,12 +2447,32 @@ mod tests {
             std::process::id(),
             random_nonce()
         ));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&source, fs::Permissions::from_mode(0o755)).unwrap();
+        }
         fs::rename(source, &root).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+        }
         fs::write(
             root.join(MANIFEST_FILENAME),
             serde_json::to_vec(&manifest).unwrap(),
         )
         .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(
+                root.join(MANIFEST_FILENAME),
+                fs::Permissions::from_mode(0o444),
+            )
+            .unwrap();
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
+        }
         let environment = VerifiedEnvironment {
             manifest_path: root.join(MANIFEST_FILENAME),
             _root_lease: open_directory(&root).unwrap(),
@@ -2523,6 +2692,7 @@ mod tests {
         fs::write(external.join("preserve"), b"external").unwrap();
 
         let (symlink_path, symlink_environment) = test_snapshot_environment("symlink");
+        make_test_tree_writable(&symlink_path);
         fs::remove_dir_all(symlink_path.join("app")).unwrap();
         symlink(&external, symlink_path.join("app")).unwrap();
         drop(symlink_environment);
@@ -2531,6 +2701,8 @@ mod tests {
 
         let (path, environment) = test_snapshot_environment("path-swap");
         let original = path.with_extension("original");
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
         fs::rename(&path, &original).unwrap();
         fs::create_dir(&path).unwrap();
         fs::write(path.join("preserve"), b"replacement").unwrap();
@@ -2538,6 +2710,7 @@ mod tests {
         assert!(path.join("preserve").exists());
         assert!(original.exists());
         fs::remove_dir_all(path).unwrap();
+        make_test_tree_writable(&original);
         fs::remove_dir_all(original).unwrap();
         fs::remove_dir_all(external).unwrap();
     }
@@ -2643,6 +2816,7 @@ mod tests {
             assert!(path.exists());
             thread::sleep(Duration::from_millis(1200));
             assert!(path.exists());
+            make_test_tree_writable(&path);
             fs::remove_dir_all(path).unwrap();
         }
     }
@@ -2663,6 +2837,7 @@ mod tests {
         assert!(fs::create_dir(&path).is_err());
         thread::sleep(Duration::from_millis(1200));
         assert!(path.exists(), "failed handoff must leave a safe residue");
+        make_test_tree_writable(&path);
         fs::remove_dir_all(path).unwrap();
     }
 
@@ -2696,6 +2871,9 @@ mod tests {
         let (root, manifest) = materialized_environment();
         verify_environment_tree(&root, &manifest).unwrap();
 
+        #[cfg(unix)]
+        make_test_tree_writable(&root);
+
         let victim = root.join("app/kernel_entry.py");
         fs::write(&victim, b"tampered").unwrap();
         assert!(verify_environment_tree(&root, &manifest).is_err());
@@ -2725,16 +2903,33 @@ mod tests {
     #[cfg(target_os = "macos")]
     fn anchored_copy_ignores_path_replacement_and_rejects_hardlinks() {
         use std::os::fd::AsRawFd;
-        use std::os::unix::fs::DirBuilderExt;
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 
         let (source_path, manifest) = materialized_environment();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&source_path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
         fs::write(
             source_path.join(MANIFEST_FILENAME),
             serde_json::to_vec(&manifest).unwrap(),
         )
         .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(
+                source_path.join(MANIFEST_FILENAME),
+                fs::Permissions::from_mode(0o444),
+            )
+            .unwrap();
+            fs::set_permissions(&source_path, fs::Permissions::from_mode(0o555)).unwrap();
+        }
         let source = open_directory(&source_path).unwrap();
         let moved = source_path.with_extension("held");
+        #[cfg(unix)]
+        fs::set_permissions(&source_path, fs::Permissions::from_mode(0o755)).unwrap();
         fs::rename(&source_path, &moved).unwrap();
         fs::create_dir(&source_path).unwrap();
         fs::create_dir_all(source_path.join("app")).unwrap();
@@ -2781,6 +2976,8 @@ mod tests {
         )
         .unwrap();
 
+        #[cfg(unix)]
+        fs::set_permissions(moved.join("app"), fs::Permissions::from_mode(0o755)).unwrap();
         fs::hard_link(
             moved.join("app/kernel_entry.py"),
             moved.join("app/kernel_entry-copy.py"),
@@ -2838,6 +3035,8 @@ mod tests {
     #[test]
     fn attestation_binds_role_prefixes_paths_sentinels_and_digest() {
         let (root, mut manifest) = materialized_environment();
+        #[cfg(unix)]
+        make_test_tree_writable(&root);
         let import_files = [
             "runtime/lib/python3.13/os.py",
             "runtime/lib/python3.13/lib-dynload/_ssl.so",
