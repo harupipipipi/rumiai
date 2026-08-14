@@ -3442,10 +3442,16 @@ mod tests {
             random_nonce()
         ));
         fs::create_dir(&path).unwrap();
-        let error = verify_macos_static_code(&path).unwrap_err();
+        let error =
+            verify_macos_static_code_for_policy(&path, "production-v1", "ABC1234567").unwrap_err();
         assert!(error
             .to_string()
             .contains("PYTHON_SEALED_PROVENANCE_INVALID"));
+        let unavailable =
+            verify_macos_static_code_for_policy(&path, "production-v1", "").unwrap_err();
+        assert!(unavailable
+            .to_string()
+            .contains("PYTHON_SEALED_PROVENANCE_UNAVAILABLE"));
         fs::remove_dir(path).ok();
     }
 
