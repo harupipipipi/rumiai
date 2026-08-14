@@ -24,6 +24,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1104,6 +1106,12 @@ fn cleanup_macos_snapshot(path: &Path, root_handle: &File) {
 }
 
 #[cfg(target_os = "macos")]
+fn canonical_private_temp_root() -> Result<PathBuf> {
+    fs::canonicalize(std::env::temp_dir())
+        .context("[PYTHON_SEALED_SNAPSHOT_INVALID] canonicalize private temp root")
+}
+
+#[cfg(target_os = "macos")]
 fn create_macos_snapshot(
     config: &AppConfig,
     source_root: &Path,
@@ -1113,7 +1121,8 @@ fn create_macos_snapshot(
     use std::os::fd::AsRawFd;
     use std::os::unix::fs::DirBuilderExt;
 
-    let snapshot_path = std::env::temp_dir().join(format!(
+    let temp_root = canonical_private_temp_root()?;
+    let snapshot_path = temp_root.join(format!(
         ".tobkiri-sealed-python-{}-{}",
         std::process::id(),
         random_nonce()
@@ -1477,14 +1486,43 @@ fn verify_snapshot_anchored(
         .iter()
         .map(|entry| entry.path.clone())
         .collect::<Vec<_>>();
-    let expected_directories = directories
+    let expected_directories = portable_directory_inventory(directories);
+    if actual_files != expected_files || actual_directories != expected_directories {
+        let missing_file = expected_files
+            .iter()
+            .find(|path| actual_files.binary_search(path).is_err());
+        let extra_file = actual_files
+            .iter()
+            .find(|path| expected_files.binary_search(path).is_err());
+        let missing_directory = expected_directories
+            .iter()
+            .find(|path| actual_directories.binary_search(path).is_err());
+        let extra_directory = actual_directories
+            .iter()
+            .find(|path| expected_directories.binary_search(path).is_err());
+        bail!(
+            "[PYTHON_SEALED_SNAPSHOT_INVALID] anchored inventory has missing or extra entries \
+             (files actual={} expected={}, first missing={missing_file:?}, first extra={extra_file:?}; \
+             directories actual={} expected={}, first missing={missing_directory:?}, first extra={extra_directory:?})",
+            actual_files.len(),
+            expected_files.len(),
+            actual_directories.len(),
+            expected_directories.len(),
+        );
+    }
+    Ok(())
+}
+
+fn portable_directory_inventory(directories: impl IntoIterator<Item = PathBuf>) -> Vec<String> {
+    let mut portable = directories
         .into_iter()
         .map(|path| path.to_string_lossy().replace('\\', "/"))
         .collect::<Vec<_>>();
-    if actual_files != expected_files || actual_directories != expected_directories {
-        bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] anchored inventory has missing or extra entries");
-    }
-    Ok(())
+    // PathBuf orders by components, whereas the anchored inventory contains
+    // flattened portable strings.  Canonicalize in the representation that is
+    // compared so equal inventories cannot fail solely due to ordering.
+    portable.sort();
+    portable
 }
 
 #[cfg(target_os = "macos")]
@@ -1497,8 +1535,24 @@ fn collect_anchored_inventory(
     use std::ffi::{CStr, OsString};
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
-    let stream = unsafe { libc::fdopendir(duplicate_fd(directory)?) };
+    // `dup` would share the directory offset with the retained root lease.
+    // Open `.` relative to the anchored descriptor so every inventory pass has
+    // an independent file description and repeated revalidation starts at the
+    // beginning of the directory.
+    let dot = c".";
+    let enumeration = unsafe {
+        libc::openat(
+            directory,
+            dot.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if enumeration < 0 {
+        return Err(std::io::Error::last_os_error()).context("open anchored inventory directory");
+    }
+    let stream = unsafe { libc::fdopendir(enumeration) };
     if stream.is_null() {
+        unsafe { libc::close(enumeration) };
         return Err(std::io::Error::last_os_error()).context("enumerate anchored snapshot");
     }
     let result = (|| {
@@ -2039,14 +2093,18 @@ fn collect_files(
                     .replace('\\', "/"),
             );
             collect_files(root, &path, output, directories)?;
-        } else if metadata.is_file()
-            && path.file_name().and_then(|name| name.to_str()) != Some(MANIFEST_FILENAME)
-        {
-            output.push(
-                path.strip_prefix(root)?
-                    .to_string_lossy()
-                    .replace('\\', "/"),
-            );
+        } else if metadata.is_file() {
+            // The manifest authenticates the rest of the tree and is therefore
+            // intentionally absent from its own file inventory.  It remains a
+            // required regular file; only omit it from `output`, not from the
+            // accepted file-type branch.
+            if path.file_name().and_then(|name| name.to_str()) != Some(MANIFEST_FILENAME) {
+                output.push(
+                    path.strip_prefix(root)?
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
+            }
         } else {
             bail!("[PYTHON_SEALED_INVALID] sealed tree contains a special file");
         }
@@ -2237,11 +2295,238 @@ fn verify_package_provenance(_config: &AppConfig, provenance: &PackageProvenance
 
 #[cfg(target_os = "macos")]
 fn verify_macos_static_code(bundle: &Path) -> Result<()> {
+    verify_macos_static_code_for_policy(
+        bundle,
+        option_env!("TOBKIRI_MACOS_ARTIFACT_POLICY").unwrap_or("production-v1"),
+        option_env!("TOBKIRI_MACOS_ARTIFACT_IDENTITY").unwrap_or_default(),
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn macos_code_requirement(policy: &str, identity: &str) -> Result<(&'static str, String)> {
+    match policy {
+        "production-v1" => {
+            if identity.len() != 10
+                || !identity
+                    .bytes()
+                    .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
+            {
+                bail!("[PYTHON_SEALED_PROVENANCE_UNAVAILABLE] production signing identity is not build-bound");
+            }
+            Ok((
+                "dev.tobkiri.launcher",
+                format!(
+                    "identifier \"dev.tobkiri.launcher\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"{identity}\""
+                ),
+            ))
+        }
+        "ci-e2e-v1" => {
+            require_sha256(identity).context(
+                "[PYTHON_SEALED_PROVENANCE_UNAVAILABLE] CI signing identity is not build-bound",
+            )?;
+            Ok((
+                "dev.tobkiri.launcher.ci-e2e",
+                "identifier \"dev.tobkiri.launcher.ci-e2e\"".to_owned(),
+            ))
+        }
+        _ => bail!("[PYTHON_SEALED_PROVENANCE_UNAVAILABLE] unknown build-bound artifact policy"),
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MacosCiAttestation {
+    schema: String,
+    policy: String,
+    bundle_identifier: String,
+    certificate_sha256: String,
+    files: Vec<MacosCiAttestedFile>,
+    signature: String,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct MacosCiAttestedFile {
+    path: String,
+    sha256: String,
+}
+
+#[cfg(target_os = "macos")]
+fn verify_macos_ci_attestation(bundle: &Path, certificate_sha256: &str) -> Result<()> {
+    const CERTIFICATE_NAME: &str = "ci-e2e-signing-certificate.der";
+    const ATTESTATION_NAME: &str = "ci-e2e-startup-attestation.v1.json";
+    const SIGNED_PATHS: &[&str] = &[
+        "Contents/MacOS/tobkiri-launcher",
+        "Contents/Resources/app/python-runtime/sealed-environment.v1.json",
+        "Contents/Resources/app/runtime-resource-manifest.v1.json",
+        "Contents/Resources/ci-e2e-artifact-policy.v1.json",
+        "Contents/Resources/ci-e2e-signing-certificate.der",
+    ];
+
+    require_sha256(certificate_sha256)?;
+    let resources = bundle.join("Contents/Resources");
+    let certificate = read_bounded_regular(&resources.join(CERTIFICATE_NAME), 16 * 1024)
+        .context("[PYTHON_SEALED_PROVENANCE_INVALID] CI certificate is unsafe")?;
+    if sha256_bytes(&certificate) != certificate_sha256 {
+        bail!("[PYTHON_SEALED_PROVENANCE_INVALID] CI certificate differs from the build-bound identity");
+    }
+    let attestation_bytes = read_bounded_regular(&resources.join(ATTESTATION_NAME), 64 * 1024)
+        .context("[PYTHON_SEALED_PROVENANCE_INVALID] CI attestation is unsafe")?;
+    let attestation: MacosCiAttestation = serde_json::from_slice(&attestation_bytes)
+        .context("[PYTHON_SEALED_PROVENANCE_INVALID] CI attestation is malformed")?;
+    if attestation.schema != "io.tobkiri.macos-ci-e2e-attestation.v1"
+        || attestation.policy != "ci-e2e-v1"
+        || attestation.bundle_identifier != "dev.tobkiri.launcher.ci-e2e"
+        || attestation.certificate_sha256 != certificate_sha256
+    {
+        bail!("[PYTHON_SEALED_PROVENANCE_INVALID] CI attestation domain is invalid");
+    }
+    let expected_files = SIGNED_PATHS
+        .iter()
+        .map(|relative| {
+            let bytes = read_bounded_regular(&bundle.join(relative), 32 * 1024 * 1024)
+                .with_context(|| {
+                    format!(
+                        "[PYTHON_SEALED_PROVENANCE_INVALID] CI attested path is unsafe: {relative}"
+                    )
+                })?;
+            Ok(MacosCiAttestedFile {
+                path: (*relative).to_owned(),
+                sha256: if *relative == SIGNED_PATHS[0] {
+                    macho_code_sha256(&bytes)?
+                } else {
+                    sha256_bytes(&bytes)
+                },
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if attestation.files != expected_files {
+        bail!("[PYTHON_SEALED_PROVENANCE_INVALID] CI attested file identity changed");
+    }
+    let mut message = format!(
+        "TOBKIRI-CI-E2E-ATTESTATION-V1\nbundle_identifier=dev.tobkiri.launcher.ci-e2e\ncertificate_sha256={certificate_sha256}\n"
+    );
+    for file in &expected_files {
+        message.push_str(&file.path);
+        message.push('\0');
+        message.push_str(&file.sha256);
+        message.push('\n');
+    }
+    let public_key = option_env!("TOBKIRI_MACOS_CI_PUBLIC_KEY").unwrap_or_default();
+    let public_key_bytes: [u8; 32] = BASE64
+        .decode(public_key)
+        .context("[PYTHON_SEALED_PROVENANCE_UNAVAILABLE] CI public key is invalid")?
+        .try_into()
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "[PYTHON_SEALED_PROVENANCE_UNAVAILABLE] CI public key length is invalid"
+            )
+        })?;
+    let signature_bytes: [u8; 64] = BASE64
+        .decode(attestation.signature)
+        .context("[PYTHON_SEALED_PROVENANCE_INVALID] CI signature is malformed")?
+        .try_into()
+        .map_err(|_| {
+            anyhow::anyhow!("[PYTHON_SEALED_PROVENANCE_INVALID] CI signature length is invalid")
+        })?;
+    VerifyingKey::from_bytes(&public_key_bytes)
+        .context("[PYTHON_SEALED_PROVENANCE_UNAVAILABLE] CI public key is invalid")?
+        .verify(message.as_bytes(), &Signature::from_bytes(&signature_bytes))
+        .context("[PYTHON_SEALED_PROVENANCE_INVALID] CI startup attestation signature rejected")
+}
+
+#[cfg(target_os = "macos")]
+fn macho_code_sha256(bytes: &[u8]) -> Result<String> {
+    fn word(bytes: &[u8], offset: usize) -> Result<u32> {
+        Ok(u32::from_le_bytes(
+            bytes
+                .get(offset..offset + 4)
+                .ok_or_else(|| anyhow::anyhow!("Mach-O field is truncated"))?
+                .try_into()?,
+        ))
+    }
+    if bytes.len() < 32 || bytes[..4] != [0xcf, 0xfa, 0xed, 0xfe] {
+        bail!("[PYTHON_SEALED_PROVENANCE_INVALID] CI executable is not a thin 64-bit Mach-O");
+    }
+    let command_count = word(bytes, 16)? as usize;
+    let command_end = 32usize
+        .checked_add(word(bytes, 20)? as usize)
+        .filter(|end| *end <= bytes.len())
+        .ok_or_else(|| anyhow::anyhow!("Mach-O load commands exceed the executable"))?;
+    let mut offset = 32usize;
+    let mut signature = None;
+    let mut linkedit_command = None;
+    for _ in 0..command_count {
+        let command = word(bytes, offset)?;
+        let command_size = word(bytes, offset + 4)? as usize;
+        if command_size < 8
+            || offset
+                .checked_add(command_size)
+                .is_none_or(|end| end > command_end)
+        {
+            bail!("[PYTHON_SEALED_PROVENANCE_INVALID] Mach-O load command size is invalid");
+        }
+        if command == 0x1d {
+            if command_size != 16 || signature.is_some() {
+                bail!(
+                    "[PYTHON_SEALED_PROVENANCE_INVALID] Mach-O code-signature command is invalid"
+                );
+            }
+            signature = Some((
+                offset,
+                word(bytes, offset + 8)? as usize,
+                word(bytes, offset + 12)? as usize,
+            ));
+        } else if command == 0x19
+            && bytes.get(offset + 8..offset + 24).is_some_and(|name| {
+                name.iter()
+                    .copied()
+                    .take_while(|byte| *byte != 0)
+                    .eq(b"__LINKEDIT".iter().copied())
+            })
+        {
+            if command_size < 72 || linkedit_command.is_some() {
+                bail!("[PYTHON_SEALED_PROVENANCE_INVALID] Mach-O __LINKEDIT command is invalid");
+            }
+            linkedit_command = Some(offset);
+        }
+        offset += command_size;
+    }
+    let (command_offset, data_offset, data_size) = signature.ok_or_else(|| {
+        anyhow::anyhow!(
+            "[PYTHON_SEALED_PROVENANCE_INVALID] Mach-O code-signature command is missing"
+        )
+    })?;
+    if offset != command_end
+        || data_offset < command_end
+        || data_offset.checked_add(data_size) != Some(bytes.len())
+    {
+        bail!("[PYTHON_SEALED_PROVENANCE_INVALID] Mach-O code-signature region is invalid");
+    }
+    let linkedit_command = linkedit_command.ok_or_else(|| {
+        anyhow::anyhow!("[PYTHON_SEALED_PROVENANCE_INVALID] Mach-O __LINKEDIT command is missing")
+    })?;
+    let mut canonical = bytes[..data_offset].to_vec();
+    canonical[command_offset + 8..command_offset + 16].fill(0);
+    canonical[linkedit_command + 32..linkedit_command + 40].fill(0);
+    canonical[linkedit_command + 48..linkedit_command + 56].fill(0);
+    Ok(format!("{:x}", Sha256::digest(canonical)))
+}
+
+#[cfg(target_os = "macos")]
+fn verify_macos_static_code_for_policy(bundle: &Path, policy: &str, identity: &str) -> Result<()> {
     use std::os::unix::ffi::OsStrExt;
     use std::ptr;
 
     type CFTypeRef = *const std::ffi::c_void;
+    type CFAllocatorRef = *const std::ffi::c_void;
+    type CFArrayRef = *const std::ffi::c_void;
+    type CFDictionaryRef = *const std::ffi::c_void;
+    type CFStringRef = *const std::ffi::c_void;
     type CFURLRef = *const std::ffi::c_void;
+    type SecRequirementRef = *const std::ffi::c_void;
     type SecStaticCodeRef = *const std::ffi::c_void;
     #[link(name = "CoreFoundation", kind = "framework")]
     unsafe extern "C" {
@@ -2251,10 +2536,20 @@ fn verify_macos_static_code(bundle: &Path) -> Result<()> {
             length: isize,
             is_directory: u8,
         ) -> CFURLRef;
+        fn CFStringCreateWithBytes(
+            allocator: CFAllocatorRef,
+            bytes: *const u8,
+            length: isize,
+            encoding: u32,
+            is_external_representation: u8,
+        ) -> CFStringRef;
+        fn CFDictionaryGetValue(dictionary: CFDictionaryRef, key: CFTypeRef) -> CFTypeRef;
+        fn CFArrayGetCount(array: CFArrayRef) -> isize;
         fn CFRelease(value: CFTypeRef);
     }
     #[link(name = "Security", kind = "framework")]
     unsafe extern "C" {
+        static kSecCodeInfoCertificates: CFStringRef;
         fn SecStaticCodeCreateWithPath(
             path: CFURLRef,
             flags: u32,
@@ -2265,7 +2560,44 @@ fn verify_macos_static_code(bundle: &Path) -> Result<()> {
             flags: u32,
             requirement: CFTypeRef,
         ) -> i32;
+        fn SecRequirementCreateWithString(
+            text: CFStringRef,
+            flags: u32,
+            requirement: *mut SecRequirementRef,
+        ) -> i32;
+        fn SecCodeCopySigningInformation(
+            code: SecStaticCodeRef,
+            flags: u32,
+            information: *mut CFDictionaryRef,
+        ) -> i32;
     }
+    const UTF8: u32 = 0x0800_0100;
+    const VALIDATION_FLAGS: u32 =
+        (1 << 29) | (1 << 9) | (1 << 8) | (1 << 7) | (1 << 4) | (1 << 3) | 1;
+
+    let (bundle_identifier, requirement_text) = macos_code_requirement(policy, identity)?;
+    let resources = bundle.join("Contents/Resources");
+    let policy_path = resources.join("ci-e2e-artifact-policy.v1.json");
+    if policy == "ci-e2e-v1" {
+        let expected = include_bytes!("../ci-e2e/ci-e2e-artifact-policy.v1.json");
+        let actual = read_bounded_regular(&policy_path, 16 * 1024)
+            .context("[PYTHON_SEALED_PROVENANCE_INVALID] CI artifact policy is unsafe")?;
+        if actual.as_slice() != expected {
+            bail!("[PYTHON_SEALED_PROVENANCE_INVALID] CI artifact policy differs from the build-bound domain");
+        }
+    } else {
+        for marker in [
+            "NON_PUBLISHABLE_CI_E2E_ARTIFACT.txt",
+            "ci-e2e-artifact-policy.v1.json",
+            "ci-e2e-signing-certificate.der",
+            "ci-e2e-startup-attestation.v1.json",
+        ] {
+            if fs::symlink_metadata(resources.join(marker)).is_ok() {
+                bail!("[PYTHON_SEALED_PROVENANCE_INVALID] production artifact carries a CI trust-domain marker");
+            }
+        }
+    }
+
     let bytes = bundle.as_os_str().as_bytes();
     let url = unsafe {
         CFURLCreateFromFileSystemRepresentation(
@@ -2284,12 +2616,62 @@ fn verify_macos_static_code(bundle: &Path) -> Result<()> {
     if create != 0 || code.is_null() {
         bail!("[PYTHON_SEALED_PROVENANCE_INVALID] SecStaticCodeCreateWithPath={create}");
     }
-    const FLAGS: u32 = (1 << 29) | (1 << 3) | (1 << 1) | 1;
-    let validity = unsafe { SecStaticCodeCheckValidity(code, FLAGS, ptr::null()) };
-    unsafe { CFRelease(code) };
+
+    let requirement_string = unsafe {
+        CFStringCreateWithBytes(
+            ptr::null(),
+            requirement_text.as_ptr(),
+            requirement_text.len() as isize,
+            UTF8,
+            0,
+        )
+    };
+    if requirement_string.is_null() {
+        unsafe { CFRelease(code) };
+        bail!("[PYTHON_SEALED_PROVENANCE_UNAVAILABLE] failed to create code requirement");
+    }
+    let mut requirement = ptr::null();
+    let requirement_status =
+        unsafe { SecRequirementCreateWithString(requirement_string, 0, &mut requirement) };
+    unsafe { CFRelease(requirement_string) };
+    if requirement_status != 0 || requirement.is_null() {
+        unsafe { CFRelease(code) };
+        bail!("[PYTHON_SEALED_PROVENANCE_UNAVAILABLE] invalid build-bound code requirement ({requirement_status})");
+    }
+    let validity = unsafe { SecStaticCodeCheckValidity(code, VALIDATION_FLAGS, requirement) };
+    unsafe { CFRelease(requirement) };
     if validity != 0 {
+        unsafe { CFRelease(code) };
         bail!("[PYTHON_SEALED_PROVENANCE_INVALID] outer app signature rejected ({validity})");
     }
+
+    if policy == "ci-e2e-v1" {
+        let mut signing_information = ptr::null();
+        let info_status =
+            unsafe { SecCodeCopySigningInformation(code, 1 << 1, &mut signing_information) };
+        if info_status != 0 || signing_information.is_null() {
+            unsafe { CFRelease(code) };
+            bail!("[PYTHON_SEALED_PROVENANCE_INVALID] signing certificate information unavailable ({info_status})");
+        }
+        let certificates = unsafe {
+            CFDictionaryGetValue(signing_information, kSecCodeInfoCertificates) as CFArrayRef
+        };
+        if !certificates.is_null() && unsafe { CFArrayGetCount(certificates) } != 0 {
+            unsafe {
+                CFRelease(signing_information);
+                CFRelease(code);
+            }
+            bail!("[PYTHON_SEALED_PROVENANCE_INVALID] CI outer signature must remain explicitly ad-hoc");
+        }
+        unsafe { CFRelease(signing_information) };
+        let attestation = verify_macos_ci_attestation(bundle, identity);
+        unsafe { CFRelease(code) };
+        attestation?;
+        debug_assert!(requirement_text.contains(bundle_identifier));
+        return Ok(());
+    }
+    unsafe { CFRelease(code) };
+    debug_assert!(requirement_text.contains(bundle_identifier));
     Ok(())
 }
 
@@ -2520,6 +2902,50 @@ mod tests {
             executable: false,
         });
         assert!(validate_manifest_contract(&manifest).is_err());
+    }
+
+    #[test]
+    fn sealed_inventory_accepts_regular_manifest_but_does_not_inventory_it() {
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-sealed-manifest-inventory-{}-{}",
+            std::process::id(),
+            random_nonce()
+        ));
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join(MANIFEST_FILENAME), b"{}").unwrap();
+        fs::write(root.join("python"), b"binary").unwrap();
+
+        let mut files = Vec::new();
+        let mut directories = Vec::new();
+        collect_files(&root, &root, &mut files, &mut directories).unwrap();
+
+        assert_eq!(files, vec!["python"]);
+        assert!(directories.is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn portable_directory_inventory_sorts_flattened_paths() {
+        let directories = [
+            PathBuf::from("runtime/lib/python"),
+            PathBuf::from("runtime-lib/python"),
+            PathBuf::from("runtime/lib"),
+        ]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(
+            portable_directory_inventory(directories),
+            vec!["runtime-lib/python", "runtime/lib", "runtime/lib/python"]
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn sealed_snapshot_parent_is_canonical() {
+        let parent = canonical_private_temp_root().unwrap();
+
+        assert_eq!(fs::canonicalize(&parent).unwrap(), parent);
     }
 
     #[test]
@@ -2975,6 +3401,12 @@ mod tests {
             &sha256_bytes(&serde_json::to_vec(&manifest).unwrap()),
         )
         .unwrap();
+        verify_snapshot_anchored(
+            destination.as_raw_fd(),
+            &manifest,
+            &sha256_bytes(&serde_json::to_vec(&manifest).unwrap()),
+        )
+        .expect("anchored inventory must be repeatable on the retained root lease");
 
         #[cfg(unix)]
         fs::set_permissions(moved.join("app"), fs::Permissions::from_mode(0o755)).unwrap();
@@ -3015,6 +3447,68 @@ mod tests {
             .to_string()
             .contains("PYTHON_SEALED_PROVENANCE_INVALID"));
         fs::remove_dir(path).ok();
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn macos_artifact_policy_rejects_identity_and_domain_swaps() {
+        let production = macos_code_requirement("production-v1", "ABC1234567").unwrap();
+        assert_eq!(production.0, "dev.tobkiri.launcher");
+        assert!(production.1.contains("anchor apple generic"));
+        assert!(production.1.contains("ABC1234567"));
+
+        let ci = macos_code_requirement("ci-e2e-v1", &digest('a')).unwrap();
+        assert_eq!(ci.0, "dev.tobkiri.launcher.ci-e2e");
+        assert!(!ci.1.contains("dev.tobkiri.launcher\" and anchor"));
+        for (policy, identity) in [
+            ("production-v1", &digest('b')[..]),
+            ("ci-e2e-v1", "ABC1234567"),
+            ("ad-hoc", &digest('c')[..]),
+        ] {
+            assert!(macos_code_requirement(policy, identity).is_err());
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn ad_hoc_macos_ci_bundle_is_rejected_without_build_bound_certificate() {
+        let path = std::env::temp_dir().join(format!(
+            "Tobkiri-CI-AdHoc-{}-{}.app",
+            std::process::id(),
+            random_nonce()
+        ));
+        let executable_dir = path.join("Contents/MacOS");
+        fs::create_dir_all(&executable_dir).unwrap();
+        let resources_dir = path.join("Contents/Resources");
+        fs::create_dir(&resources_dir).unwrap();
+        fs::copy("/usr/bin/true", executable_dir.join("fixture")).unwrap();
+        fs::write(
+            resources_dir.join("ci-e2e-artifact-policy.v1.json"),
+            include_bytes!("../ci-e2e/ci-e2e-artifact-policy.v1.json"),
+        )
+        .unwrap();
+        fs::write(
+            path.join("Contents/Info.plist"),
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>dev.tobkiri.launcher.ci-e2e</string>
+<key>CFBundleExecutable</key><string>fixture</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+</dict></plist>"#,
+        )
+        .unwrap();
+        let status = Command::new("/usr/bin/codesign")
+            .args(["--force", "--sign", "-"])
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let error =
+            verify_macos_static_code_for_policy(&path, "ci-e2e-v1", &digest('d')).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("PYTHON_SEALED_PROVENANCE_INVALID"));
+        fs::remove_dir_all(path).ok();
     }
 
     #[test]

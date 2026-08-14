@@ -34,6 +34,10 @@ const SEALED_PYTHON_MANIFEST: &str = "sealed-environment.v1.json";
 const SEALED_PYTHON_DIRECTORY_MODES: &str = "sealed-directory-modes.v1.json";
 const PACKAGING_PYTHON_SNAPSHOT_ENV: &str = "TOBKIRI_PACKAGING_PYTHON_SNAPSHOT";
 const PACKAGING_PYTHON_INVENTORY_SHA_ENV: &str = "TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256";
+const MACOS_ARTIFACT_POLICY_ENV: &str = "TOBKIRI_MACOS_ARTIFACT_POLICY";
+const MACOS_CI_CERT_SHA256_ENV: &str = "TOBKIRI_MACOS_CI_CERT_SHA256";
+const MACOS_CI_PUBLIC_KEY_ENV: &str = "TOBKIRI_MACOS_CI_PUBLIC_KEY";
+const APPLE_TEAM_ID_ENV: &str = "APPLE_TEAM_ID";
 const SEALED_PYTHON_SCHEMA: &str = "io.tobkiri.sealed-python-environment.v1";
 const SEALED_PYTHON_DIRECTORY_MODES_SCHEMA: &str = "io.tobkiri.sealed-python-directory-modes.v1";
 const CARGO_TARGET_DIR_ENV: &str = "CARGO_TARGET_DIR";
@@ -188,6 +192,10 @@ fn main() {
     println!("cargo:rerun-if-env-changed={PANEL_BUILD_DIR_ENV}");
     println!("cargo:rerun-if-env-changed={PACKAGING_PYTHON_SNAPSHOT_ENV}");
     println!("cargo:rerun-if-env-changed={PACKAGING_PYTHON_INVENTORY_SHA_ENV}");
+    println!("cargo:rerun-if-env-changed={MACOS_ARTIFACT_POLICY_ENV}");
+    println!("cargo:rerun-if-env-changed={MACOS_CI_CERT_SHA256_ENV}");
+    println!("cargo:rerun-if-env-changed={MACOS_CI_PUBLIC_KEY_ENV}");
+    println!("cargo:rerun-if-env-changed={APPLE_TEAM_ID_ENV}");
     println!("cargo:rerun-if-changed=capabilities");
 
     if let Some(panel_dir) = configured_panel_build_dir(&PathBuf::from(env!("CARGO_MANIFEST_DIR")))
@@ -195,6 +203,7 @@ fn main() {
         println!("cargo:rerun-if-changed={}", panel_dir.display());
     }
 
+    bind_macos_artifact_policy().expect("failed to bind macOS artifact policy");
     warn_legacy_defaultspack_app_bundle();
     stage_runtime_bundle().expect("failed to stage runtime bundle");
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
@@ -209,6 +218,96 @@ fn main() {
         ]),
     ))
     .expect("failed to build Tauri application manifest")
+}
+
+fn bind_macos_artifact_policy() -> io::Result<()> {
+    let target = required_cargo_target()?;
+    let profile = required_cargo_profile()?;
+    let policy =
+        std::env::var(MACOS_ARTIFACT_POLICY_ENV).unwrap_or_else(|_| "production-v1".to_owned());
+    let is_macos = target.ends_with("-apple-darwin");
+
+    if !is_macos {
+        if policy != "production-v1"
+            || std::env::var_os(MACOS_CI_CERT_SHA256_ENV).is_some()
+            || std::env::var_os(MACOS_CI_PUBLIC_KEY_ENV).is_some()
+        {
+            return Err(invalid_release(
+                "macOS artifact policy may only be selected for an Apple Darwin target",
+            ));
+        }
+        println!("cargo:rustc-env=TOBKIRI_MACOS_ARTIFACT_POLICY=production-v1");
+        println!("cargo:rustc-env=TOBKIRI_MACOS_ARTIFACT_IDENTITY=");
+        println!("cargo:rustc-env=TOBKIRI_MACOS_CI_PUBLIC_KEY=");
+        return Ok(());
+    }
+
+    let identity = match policy.as_str() {
+        "production-v1" => {
+            if std::env::var_os(MACOS_CI_CERT_SHA256_ENV).is_some() {
+                return Err(invalid_release(
+                    "production macOS builds may not carry a CI signing certificate",
+                ));
+            }
+            if std::env::var_os(MACOS_CI_PUBLIC_KEY_ENV).is_some() {
+                return Err(invalid_release(
+                    "production macOS builds may not carry a CI verification key",
+                ));
+            }
+            let team = std::env::var(APPLE_TEAM_ID_ENV).unwrap_or_default();
+            if profile == "release"
+                && (team.len() != 10
+                    || !team
+                        .bytes()
+                        .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit()))
+            {
+                return Err(invalid_release(
+                    "release macOS production builds require an exact 10-character APPLE_TEAM_ID",
+                ));
+            }
+            team
+        }
+        "ci-e2e-v1" => {
+            if profile != "release" {
+                return Err(invalid_release(
+                    "the non-publishable CI/E2E policy is restricted to release-profile artifacts",
+                ));
+            }
+            let digest = std::env::var(MACOS_CI_CERT_SHA256_ENV).map_err(|_| {
+                invalid_release("CI/E2E macOS builds require TOBKIRI_MACOS_CI_CERT_SHA256")
+            })?;
+            if !valid_raw_sha256(&digest) {
+                return Err(invalid_release(
+                    "CI/E2E macOS signing certificate identity must be a lowercase SHA-256",
+                ));
+            }
+            if std::env::var_os(APPLE_TEAM_ID_ENV).is_some() {
+                return Err(invalid_release(
+                    "CI/E2E macOS builds may not claim a production Apple Team ID",
+                ));
+            }
+            let public_key = std::env::var(MACOS_CI_PUBLIC_KEY_ENV).map_err(|_| {
+                invalid_release("CI/E2E macOS builds require TOBKIRI_MACOS_CI_PUBLIC_KEY")
+            })?;
+            let decoded = BASE64
+                .decode(&public_key)
+                .map_err(|_| invalid_release("CI/E2E macOS public key must be canonical base64"))?;
+            if decoded.len() != 32 || BASE64.encode(decoded) != public_key {
+                return Err(invalid_release(
+                    "CI/E2E macOS public key must encode exactly 32 bytes",
+                ));
+            }
+            digest
+        }
+        _ => return Err(invalid_release("unknown macOS artifact policy")),
+    };
+    println!("cargo:rustc-env=TOBKIRI_MACOS_ARTIFACT_POLICY={policy}");
+    println!("cargo:rustc-env=TOBKIRI_MACOS_ARTIFACT_IDENTITY={identity}");
+    println!(
+        "cargo:rustc-env=TOBKIRI_MACOS_CI_PUBLIC_KEY={}",
+        std::env::var(MACOS_CI_PUBLIC_KEY_ENV).unwrap_or_default()
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -5595,6 +5694,59 @@ mod tests {
             } else {
                 std::env::remove_var(self.key);
             }
+        }
+    }
+
+    #[test]
+    fn macos_artifact_policy_separates_production_and_ci_identity_domains() {
+        let _environment = environment_lock();
+        let _target = EnvironmentGuard::set_value("TARGET", "aarch64-apple-darwin");
+        let _profile = EnvironmentGuard::set_value("PROFILE", "release");
+
+        {
+            let _policy = EnvironmentGuard::set_value(MACOS_ARTIFACT_POLICY_ENV, "ci-e2e-v1");
+            let _certificate =
+                EnvironmentGuard::set_value(MACOS_CI_CERT_SHA256_ENV, &"a".repeat(64));
+            let _public_key =
+                EnvironmentGuard::set_value(MACOS_CI_PUBLIC_KEY_ENV, &BASE64.encode([7_u8; 32]));
+            let _team = EnvironmentGuard::clear(APPLE_TEAM_ID_ENV);
+            bind_macos_artifact_policy().unwrap();
+        }
+        {
+            let _policy = EnvironmentGuard::set_value(MACOS_ARTIFACT_POLICY_ENV, "production-v1");
+            let _certificate = EnvironmentGuard::clear(MACOS_CI_CERT_SHA256_ENV);
+            let _public_key = EnvironmentGuard::clear(MACOS_CI_PUBLIC_KEY_ENV);
+            let _team = EnvironmentGuard::set_value(APPLE_TEAM_ID_ENV, "ABC1234567");
+            bind_macos_artifact_policy().unwrap();
+        }
+    }
+
+    #[test]
+    fn macos_artifact_policy_rejects_ad_hoc_and_cross_domain_inputs() {
+        let _environment = environment_lock();
+        let _target = EnvironmentGuard::set_value("TARGET", "aarch64-apple-darwin");
+        let _profile = EnvironmentGuard::set_value("PROFILE", "release");
+
+        for policy in ["ad-hoc", "local", "ci"] {
+            let _policy = EnvironmentGuard::set_value(MACOS_ARTIFACT_POLICY_ENV, policy);
+            assert!(bind_macos_artifact_policy().is_err());
+        }
+        {
+            let _policy = EnvironmentGuard::set_value(MACOS_ARTIFACT_POLICY_ENV, "production-v1");
+            let _certificate =
+                EnvironmentGuard::set_value(MACOS_CI_CERT_SHA256_ENV, &"b".repeat(64));
+            let _public_key = EnvironmentGuard::clear(MACOS_CI_PUBLIC_KEY_ENV);
+            let _team = EnvironmentGuard::set_value(APPLE_TEAM_ID_ENV, "ABC1234567");
+            assert!(bind_macos_artifact_policy().is_err());
+        }
+        {
+            let _policy = EnvironmentGuard::set_value(MACOS_ARTIFACT_POLICY_ENV, "ci-e2e-v1");
+            let _certificate =
+                EnvironmentGuard::set_value(MACOS_CI_CERT_SHA256_ENV, &"c".repeat(64));
+            let _public_key =
+                EnvironmentGuard::set_value(MACOS_CI_PUBLIC_KEY_ENV, &BASE64.encode([8_u8; 32]));
+            let _team = EnvironmentGuard::set_value(APPLE_TEAM_ID_ENV, "ABC1234567");
+            assert!(bind_macos_artifact_policy().is_err());
         }
     }
 

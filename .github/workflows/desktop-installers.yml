@@ -397,6 +397,30 @@ jobs:
           --target ${{ matrix.target }}
           --profile release
 
+      - name: Create ephemeral non-publishable macOS CI signing identity
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          material="$RUNNER_TEMP/tobkiri-ci-e2e-${TOBKIRI_PACKAGING_TRANSACTION_TOKEN}"
+          identity_json=$(python .github/scripts/macos_ci_artifact.py \
+            create-identity --output-dir "$material")
+          IDENTITY_JSON="$identity_json" MATERIAL="$material" python - <<'PY'
+          import json
+          import os
+
+          identity = json.loads(os.environ["IDENTITY_JSON"])
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write("TOBKIRI_MACOS_ARTIFACT_POLICY=ci-e2e-v1\n")
+              output.write(
+                  f"TOBKIRI_MACOS_CI_CERT_SHA256={identity['certificate_sha256']}\n"
+              )
+              output.write(f"TOBKIRI_MACOS_CI_PUBLIC_KEY={identity['public_key']}\n")
+              output.write(f"TOBKIRI_CI_PRIVATE_KEY={identity['private_key']}\n")
+              output.write(f"TOBKIRI_CI_CERTIFICATE={identity['certificate']}\n")
+              output.write(f"TOBKIRI_CI_SIGNING_MATERIAL={os.environ['MATERIAL']}\n")
+          PY
+
       - name: Build verified Tauri Shell artifact
         working-directory: tobkiri_launcher
         run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.shell.conf.json --bundles ${{ matrix.shell_bundles }} --ci
@@ -411,26 +435,46 @@ jobs:
           /usr/bin/codesign --force --sign - "$artifact"
           /usr/bin/codesign --verify --deep --strict --verbose=2 "$artifact"
 
-      - name: Build local macOS application (ad-hoc)
+      - name: Build non-publishable macOS CI/E2E application
         if: runner.os == 'macOS'
         working-directory: tobkiri_launcher
         env:
           TOBKIRI_PANEL_BUILD_DIR: ${{ runner.temp }}/tobkiri-panel-build
         run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.macos.dev.conf.json --bundles app --ci ${{ matrix.signing_args }}
 
+      - name: Attest and ad-hoc sign macOS CI/E2E application
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app"
+          test -d "$app"
+          python .github/scripts/macos_ci_artifact.py attest \
+            --app-bundle "$app" \
+            --private-key "$TOBKIRI_CI_PRIVATE_KEY" \
+            --certificate "$TOBKIRI_CI_CERTIFICATE"
+          /usr/bin/codesign --force --deep --options runtime --timestamp=none \
+            --sign - "$app"
+          /usr/bin/codesign --verify --deep --strict --verbose=2 "$app"
+          python .github/scripts/macos_ci_artifact.py verify \
+            --app-bundle "$app" \
+            --expected-certificate-sha256 "$TOBKIRI_MACOS_CI_CERT_SHA256"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+            "$app/Contents/Info.plist")" = 'dev.tobkiri.launcher.ci-e2e'
+
       - name: Host-seal and launch-test packaged Python application resources
         if: runner.os == 'macOS'
         run: |
           /usr/bin/python3 -B tobkiri_launcher/scripts/verify_packaged_python.py \
             --repo-root "$GITHUB_WORKSPACE" \
-            --app-bundle "$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app" \
+            --app-bundle "$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app" \
             --target '${{ matrix.target }}' \
             --expected-manifest-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256" \
             --seal-tauri-directories \
             --native-smoke
-          test ! -e "$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app/Contents/Resources/app/logs"
+          test ! -e "$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app/Contents/Resources/app/logs"
           /usr/bin/codesign --verify --deep --strict --verbose=2 \
-            "$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app"
+            "$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app"
 
       - name: Build macOS DMG installer
         if: runner.os == 'macOS'
@@ -439,9 +483,9 @@ jobs:
         run: |
           set -o pipefail
           bash scripts/package_macos_dmg.sh \
-            --app-bundle "src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app" \
+            --app-bundle "src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app" \
             --target '${{ matrix.target }}' \
-            --allow-ad-hoc-local \
+            --ci-e2e-cert-sha256 "$TOBKIRI_MACOS_CI_CERT_SHA256" \
             --output-dir "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" \
             2>&1 | tee "$RUNNER_TEMP/tobkiri-macos-dmg-${{ matrix.target }}.log"
 
@@ -459,10 +503,20 @@ jobs:
       - name: Upload desktop installer
         uses: actions/upload-artifact@v4
         with:
-          name: tobkiri-${{ matrix.artifact_suffix }}-installer-${{ steps.checked_out_source.outputs.source_revision }}
+          name: tobkiri-non-publishable-ci-e2e-${{ matrix.artifact_suffix }}-${{ steps.checked_out_source.outputs.source_revision }}
           path: |
             tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
           if-no-files-found: error
+
+      - name: Destroy ephemeral macOS CI signing identity
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${TOBKIRI_CI_SIGNING_MATERIAL:-}" \
+             && "$TOBKIRI_CI_SIGNING_MATERIAL" == "$RUNNER_TEMP"/tobkiri-ci-e2e-* ]]; then
+            /usr/bin/find "$TOBKIRI_CI_SIGNING_MATERIAL" -depth -delete
+          fi
 
       - name: Capture macOS installer diagnostics
         if: failure() && runner.os == 'macOS'

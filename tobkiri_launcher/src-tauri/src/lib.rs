@@ -1750,7 +1750,7 @@ fn run_delayed_update_check() {
 fn startup_failure_message(stage: &str, error: &anyhow::Error, config: &AppConfig) -> String {
     let log_path = config.log_dir.join("kernel.log");
     format!(
-        "Error: {stage} failed — {error}. See {}",
+        "Error: {stage} failed — {error:#}. See {}",
         log_path.display()
     )
 }

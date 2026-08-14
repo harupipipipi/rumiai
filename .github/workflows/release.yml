@@ -422,6 +422,7 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.shell.conf.json --bundles ${{ matrix.shell_bundles }} --ci
 
       - name: Notarize and staple macOS Shell artifact

@@ -49,6 +49,20 @@ fn kernel_working_dir(config: &AppConfig) -> &Path {
     }
 }
 
+fn require_development_venv(config: &AppConfig) -> Result<()> {
+    if !config.is_dev_workspace() {
+        return Ok(());
+    }
+    let venv_python = config.venv_python();
+    if !venv_python.exists() {
+        bail!(
+            "venv Python not found at {} -- run environment setup first",
+            venv_python.display()
+        );
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PortListener {
     pub(crate) pid: u32,
@@ -120,14 +134,7 @@ impl KernelManager {
             warn!("{message}");
         }
 
-        let venv_python = self.config.venv_python();
-
-        if !venv_python.exists() {
-            bail!(
-                "venv Python not found at {} -- run environment setup first",
-                venv_python.display()
-            );
-        }
+        require_development_venv(&self.config)?;
         if !self.config.rumi_home.exists() {
             bail!(
                 "Kernel directory not found: {}",
@@ -149,8 +156,12 @@ impl KernelManager {
         let working_dir = kernel_working_dir(&self.config);
         fs::create_dir_all(working_dir)?;
         info!(
-            "Starting Kernel from sealed runtime: {} (cwd={})",
-            venv_python.display(),
+            "Starting Kernel from {} (cwd={})",
+            if self.config.is_dev_workspace() {
+                self.config.venv_python().display().to_string()
+            } else {
+                "build-bound sealed Python snapshot".to_string()
+            },
             working_dir.display()
         );
 
@@ -751,6 +762,15 @@ mod tests {
         let config = test_config();
 
         assert_eq!(kernel_working_dir(&config), Path::new("/tmp/test_appdata"));
+    }
+
+    #[test]
+    fn bundled_kernel_does_not_require_legacy_writable_venv() {
+        let config = test_config();
+
+        assert!(!config.is_dev_workspace());
+        assert!(!config.venv_python().exists());
+        require_development_venv(&config).unwrap();
     }
 
     #[test]

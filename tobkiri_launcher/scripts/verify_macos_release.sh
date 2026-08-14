@@ -45,6 +45,25 @@ fi
   exit 1
 }
 
+bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+  "$app_bundle/Contents/Info.plist")"
+if [[ "$bundle_identifier" != 'dev.tobkiri.launcher' ]]; then
+  printf 'release macOS app has a non-production bundle identifier: %s\n' \
+    "$bundle_identifier" >&2
+  exit 1
+fi
+if [[ -e "$app_bundle/Contents/Resources/NON_PUBLISHABLE_CI_E2E_ARTIFACT.txt" \
+   || -L "$app_bundle/Contents/Resources/NON_PUBLISHABLE_CI_E2E_ARTIFACT.txt" \
+   || -e "$app_bundle/Contents/Resources/ci-e2e-artifact-policy.v1.json" \
+   || -L "$app_bundle/Contents/Resources/ci-e2e-artifact-policy.v1.json" \
+   || -e "$app_bundle/Contents/Resources/ci-e2e-signing-certificate.der" \
+   || -L "$app_bundle/Contents/Resources/ci-e2e-signing-certificate.der" \
+   || -e "$app_bundle/Contents/Resources/ci-e2e-startup-attestation.v1.json" \
+   || -L "$app_bundle/Contents/Resources/ci-e2e-startup-attestation.v1.json" ]]; then
+  printf 'non-publishable CI/E2E artifacts are forbidden in production releases\n' >&2
+  exit 1
+fi
+
 command -v codesign >/dev/null 2>&1 || {
   printf 'codesign is required to verify the macOS release\n' >&2
   exit 1

@@ -12,7 +12,8 @@ set -Eeuo pipefail
 usage() {
   cat >&2 <<'EOF'
 Usage: package_macos_dmg.sh --app-bundle PATH --target TARGET --output-dir PATH \
-  [--signing-identity "Developer ID Application: ..." | --allow-ad-hoc-local]
+  [--signing-identity "Developer ID Application: ..." | --allow-ad-hoc-local | \
+   --ci-e2e-cert-sha256 SHA256]
 EOF
 }
 
@@ -21,6 +22,7 @@ target=''
 output_dir=''
 signing_identity=''
 allow_ad_hoc_local=0
+ci_e2e_cert_sha256=''
 
 while (($# > 0)); do
   case "$1" in
@@ -46,9 +48,15 @@ while (($# > 0)); do
       shift 2
       ;;
     --allow-ad-hoc-local)
-      [[ -z "$signing_identity" ]] || { usage; exit 2; }
+      [[ -z "$signing_identity" && -z "$ci_e2e_cert_sha256" ]] || { usage; exit 2; }
       allow_ad_hoc_local=1
       shift
+      ;;
+    --ci-e2e-cert-sha256)
+      (($# >= 2)) || { usage; exit 2; }
+      [[ -z "$signing_identity" && "$allow_ad_hoc_local" -eq 0 ]] || { usage; exit 2; }
+      ci_e2e_cert_sha256=$2
+      shift 2
       ;;
     -h|--help)
       usage >&1
@@ -96,8 +104,14 @@ if [[ -n "$signing_identity" && "$signing_identity" != "Developer ID Application
   printf 'release macOS signing identity must be Developer ID Application, not ad-hoc\n' >&2
   exit 1
 fi
-if [[ -z "$signing_identity" && "$allow_ad_hoc_local" -ne 1 ]]; then
-  printf 'a Developer ID signing identity is required; use --allow-ad-hoc-local only for local/dev builds\n' >&2
+if [[ -z "$signing_identity" && "$allow_ad_hoc_local" -ne 1 \
+   && -z "$ci_e2e_cert_sha256" ]]; then
+  printf 'a Developer ID identity or explicit non-publishable CI/E2E identity is required\n' >&2
+  exit 1
+fi
+if [[ -n "$ci_e2e_cert_sha256" \
+   && ! "$ci_e2e_cert_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+  printf 'CI/E2E signing certificate identity must be a lowercase SHA-256\n' >&2
   exit 1
 fi
 command -v ditto >/dev/null 2>&1 || {
@@ -311,6 +325,29 @@ if [[ -n "$signing_identity" ]]; then
     printf 'macOS app is not signed by the requested Developer ID identity\n' >&2
     exit 1
   fi
+elif [[ -n "$ci_e2e_cert_sha256" ]]; then
+  bundle_identifier=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+    "$app_bundle/Contents/Info.plist")
+  [[ "$bundle_identifier" == 'dev.tobkiri.launcher.ci-e2e' ]] || {
+    printf 'CI/E2E artifact has the wrong bundle identifier: %s\n' \
+      "$bundle_identifier" >&2
+    exit 1
+  }
+  marker="$app_bundle/Contents/Resources/NON_PUBLISHABLE_CI_E2E_ARTIFACT.txt"
+  [[ -f "$marker" && ! -L "$marker" ]] || {
+    printf 'CI/E2E artifact is missing its signed non-publishable marker\n' >&2
+    exit 1
+  }
+  artifact_policy="$app_bundle/Contents/Resources/ci-e2e-artifact-policy.v1.json"
+  expected_policy="$script_dir/../src-tauri/ci-e2e/ci-e2e-artifact-policy.v1.json"
+  [[ -f "$artifact_policy" && ! -L "$artifact_policy" ]] \
+    && cmp -s "$expected_policy" "$artifact_policy" || {
+    printf 'CI/E2E artifact policy is missing or differs from its build domain\n' >&2
+    exit 1
+  }
+  python3 -B "$script_dir/../../.github/scripts/macos_ci_artifact.py" verify \
+    --app-bundle "$app_bundle" \
+    --expected-certificate-sha256 "$ci_e2e_cert_sha256"
 fi
 
 printf 'Staging signed app bundle for DMG: %s\n' "$app_name"
