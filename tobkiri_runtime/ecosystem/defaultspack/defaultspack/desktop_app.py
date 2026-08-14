@@ -294,17 +294,36 @@ def _restore_active_profile_contracts():
 def _diagnostic_log_path() -> Path:
     explicit = os.environ.get("RUMI_DEFAULTSPACK_LAUNCH_LOG")
     if explicit:
-        return Path(explicit).expanduser()
+        return _validate_mutable_diagnostic_path(Path(explicit).expanduser())
 
     log_dir = os.environ.get("RUMI_LOG_DIR")
     if log_dir:
-        return Path(log_dir).expanduser() / "defaultspack-launch.jsonl"
+        return _validate_mutable_diagnostic_path(
+            Path(log_dir).expanduser() / "defaultspack-launch.jsonl"
+        )
 
     user_data = os.environ.get("RUMI_USER_DATA")
     if user_data:
-        return Path(user_data).expanduser().parent / "logs" / "defaultspack-launch.jsonl"
+        return _validate_mutable_diagnostic_path(
+            Path(user_data).expanduser().parent / "logs" / "defaultspack-launch.jsonl"
+        )
 
     return Path(tempfile.gettempdir()) / "rumi-defaultspack-launch.jsonl"
+
+
+def _validate_mutable_diagnostic_path(path: Path) -> Path:
+    """Reject launch diagnostics that would mutate sealed app resources."""
+    if not path.is_absolute():
+        raise ValueError("Defaultspack launch log path must be absolute")
+    candidate = path.resolve(strict=False)
+    sealed_app_root = _sealed_app_root()
+    if sealed_app_root is not None:
+        protected = sealed_app_root.resolve(strict=True)
+        if candidate == protected or candidate.is_relative_to(protected):
+            raise ValueError(
+                "Defaultspack launch log path must be outside sealed app resources"
+            )
+    return candidate
 
 
 def _safe_cwd() -> str:

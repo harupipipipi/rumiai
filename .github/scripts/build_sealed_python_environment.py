@@ -1413,17 +1413,27 @@ def _verify_python_smoke(root: Path, spec: TargetSpec) -> None:
             raise SealedEnvironmentError(
                 f"native Python {field} identity mismatch: {value!r}"
             )
+    # Defaultspack derives its launch-log directory from user data. Keeping
+    # smoke state here, outside Resources/app, preserves the signed bundle.
     with tempfile.TemporaryDirectory(
-        prefix=".sealed-python-role-state-",
-        dir=root.parent,
+        prefix="tobkiri-sealed-python-role-state-",
     ) as state_directory:
+        state_root = Path(state_directory).resolve(strict=True)
+        packaged_app_root = root.parent.resolve(strict=True)
+        if state_root == packaged_app_root or state_root.is_relative_to(
+            packaged_app_root
+        ):
+            raise SealedEnvironmentError(
+                "native role smoke state must be outside packaged application resources"
+            )
         environment.update(
             {
                 "RUMI_DEFAULTSPACK_OPEN_BROWSER": "0",
                 "RUMI_DEFAULTSPACK_REQUIRE_OWN_BIND": "1",
                 "RUMI_DEFAULTSPACK_PORT": str(_free_loopback_port()),
                 "RUMI_APP_DIR": str(root / "app"),
-                "RUMI_USER_DATA": state_directory,
+                "RUMI_USER_DATA": str(state_root / "user_data"),
+                "RUMI_LOG_DIR": str(state_root / "logs"),
             }
         )
         for role, role_arguments in (

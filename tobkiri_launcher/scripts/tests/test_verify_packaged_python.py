@@ -86,3 +86,28 @@ def test_directory_mode_evidence_is_manifest_inventoried(tmp_path: Path) -> None
     )
     assert entry["sha256"] == BUILDER._sha256_file(evidence)
     assert entry["executable"] is False
+
+
+def test_post_sign_verifier_preserves_bundle_tree_identity(tmp_path: Path) -> None:
+    resource, _digest = _tauri_copied_resource(tmp_path)
+    app = resource.parents[3]
+
+    before = VERIFY._bundle_tree_identity(app)
+    result = VERIFY._without_bundle_mutation(app, lambda: "verified")
+
+    assert result == "verified"
+    assert VERIFY._bundle_tree_identity(app) == before
+    assert not (resource.parent / "logs").exists()
+
+
+def test_post_sign_verifier_rejects_added_resource_log(tmp_path: Path) -> None:
+    resource, _digest = _tauri_copied_resource(tmp_path)
+    app = resource.parents[3]
+
+    def mutate_signed_resources() -> None:
+        log = resource.parent / "logs" / "defaultspack-launch.jsonl"
+        log.parent.mkdir()
+        log.write_text("mutation\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="mutated the signed application bundle"):
+        VERIFY._without_bundle_mutation(app, mutate_signed_resources)

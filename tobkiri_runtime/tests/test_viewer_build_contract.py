@@ -337,6 +337,30 @@ def test_macos_installer_uses_finder_free_verified_dmg_packager():
         assert "hdiutil info || true" in workflow
 
 
+def test_packaged_python_smoke_is_post_sign_read_only_in_both_workflows():
+    """Native role smoke cannot leave mutable resources or break signing."""
+    for workflow_path in VIEWER_BUILD_WORKFLOWS:
+        workflow = workflow_path.read_text(encoding="utf-8")
+        smoke_at = workflow.index(
+            "Host-seal and launch-test packaged Python application resources"
+        )
+        tail = workflow[smoke_at:]
+        smoke_section = tail[: tail.index("Build macOS DMG installer")]
+        assert "--native-smoke" in smoke_section
+        assert "Contents/Resources/app/logs" in smoke_section
+        assert (
+            "codesign --verify --deep --strict" in tail
+            or "scripts/verify_macos_release.sh" in tail
+        )
+
+    mounted = (
+        ROOT / "tobkiri_launcher/scripts/verify_packaged_python_dmg.sh"
+    ).read_text(encoding="utf-8")
+    assert mounted.index("--native-smoke") < mounted.index(
+        "codesign --verify --deep --strict"
+    )
+
+
 def test_debug_pack_shell_is_built_and_sealed_before_launcher_rust_checks():
     assert PACK_SHELL_SEALER.is_file()
     expectations = (

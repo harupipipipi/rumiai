@@ -10,11 +10,15 @@ import json
 import os
 import stat
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import TypeVar
 
 
 RESOURCE_RELATIVE = Path("Contents/Resources/app/python-runtime")
+MUTABLE_LOG_RELATIVE = Path("Contents/Resources/app/logs")
 BUILDER_RELATIVE = Path(".github/scripts/build_sealed_python_environment.py")
+_T = TypeVar("_T")
 
 
 def _load_builder(repository_root: Path):
@@ -40,6 +44,40 @@ def _canonical_directory(path: Path, label: str) -> Path:
 
 def _raw_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _bundle_tree_identity(root: Path) -> tuple[tuple[object, ...], ...]:
+    """Return a byte, mode, type, and link identity for an application tree."""
+    entries: list[tuple[object, ...]] = []
+    for path in (root, *sorted(root.rglob("*"))):
+        relative = "." if path == root else path.relative_to(root).as_posix()
+        metadata = path.lstat()
+        mode = stat.S_IMODE(metadata.st_mode)
+        if stat.S_ISDIR(metadata.st_mode):
+            entries.append((relative, "directory", mode))
+        elif stat.S_ISREG(metadata.st_mode):
+            entries.append(
+                (relative, "file", mode, metadata.st_size, _raw_sha256(path))
+            )
+        elif stat.S_ISLNK(metadata.st_mode):
+            entries.append((relative, "symlink", mode, os.readlink(path)))
+        else:
+            entries.append((relative, "other", mode, metadata.st_rdev))
+    return tuple(entries)
+
+
+def _without_bundle_mutation(app_bundle: Path, operation: Callable[[], _T]) -> _T:
+    """Run packaged verification and reject every application-tree mutation."""
+    before = _bundle_tree_identity(app_bundle)
+    try:
+        result = operation()
+    finally:
+        after = _bundle_tree_identity(app_bundle)
+        if after != before:
+            raise RuntimeError(
+                "packaged verification mutated the signed application bundle"
+            )
+    return result
 
 
 def _preseal_tauri_directories(root: Path, target: str, expected: str, builder) -> None:
@@ -132,6 +170,8 @@ def main() -> int:
         app_bundle / RESOURCE_RELATIVE,
         "packaged sealed Python resource",
     )
+    if (app_bundle / MUTABLE_LOG_RELATIVE).exists():
+        raise RuntimeError("packaged application contains mutable launch logs")
     builder = _load_builder(repository_root)
     if args.seal_tauri_directories:
         _preseal_tauri_directories(
@@ -140,13 +180,18 @@ def main() -> int:
             args.expected_manifest_sha256,
             builder,
         )
-    digest = builder.validate_environment(
-        resource,
-        args.target,
-        expected_manifest_digest=args.expected_manifest_sha256,
-        run_native_smoke=args.native_smoke,
-        require_sealed=True,
+    digest = _without_bundle_mutation(
+        app_bundle,
+        lambda: builder.validate_environment(
+            resource,
+            args.target,
+            expected_manifest_digest=args.expected_manifest_sha256,
+            run_native_smoke=args.native_smoke,
+            require_sealed=True,
+        ),
     )
+    if (app_bundle / MUTABLE_LOG_RELATIVE).exists():
+        raise RuntimeError("packaged verification created mutable launch logs")
     print(f"Verified packaged sealed Python environment ({digest}) at {resource}")
     return 0
 

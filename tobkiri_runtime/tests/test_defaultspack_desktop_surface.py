@@ -19,6 +19,46 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 class TestDefaultspackDesktopSurface(unittest.TestCase):
     _PANEL_BOOTSTRAP_SECRET = "desktop-surface-host-secret"
 
+    def test_launch_log_uses_external_app_data_and_rejects_sealed_resources(self):
+        from defaultspack import desktop_app
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sealed_app = root / "sealed-app"
+            sealed_app.mkdir()
+            external_logs = root / "app-data" / "logs"
+            with patch.object(
+                desktop_app,
+                "_sealed_app_root",
+                return_value=sealed_app,
+            ):
+                with patch.dict(
+                    os.environ,
+                    {"RUMI_LOG_DIR": str(external_logs)},
+                    clear=True,
+                ):
+                    self.assertEqual(
+                        desktop_app._diagnostic_log_path(),
+                        (external_logs / "defaultspack-launch.jsonl").resolve(),
+                    )
+                with patch.dict(
+                    os.environ,
+                    {"RUMI_LOG_DIR": str(sealed_app / "logs")},
+                    clear=True,
+                ):
+                    with self.assertRaisesRegex(ValueError, "outside sealed app"):
+                        desktop_app._diagnostic_log_path()
+
+                redirect = root / "redirect"
+                redirect.symlink_to(sealed_app, target_is_directory=True)
+                with patch.dict(
+                    os.environ,
+                    {"RUMI_LOG_DIR": str(redirect / "logs")},
+                    clear=True,
+                ):
+                    with self.assertRaisesRegex(ValueError, "outside sealed app"):
+                        desktop_app._diagnostic_log_path()
+
     @staticmethod
     def _activate_defaults(user_data: Path) -> None:
         from core_runtime.bootstrap.profile_capture import (

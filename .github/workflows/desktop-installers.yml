@@ -428,6 +428,9 @@ jobs:
             --expected-manifest-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256" \
             --seal-tauri-directories \
             --native-smoke
+          test ! -e "$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app/Contents/Resources/app/logs"
+          /usr/bin/codesign --verify --deep --strict --verbose=2 \
+            "$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app"
 
       - name: Build macOS DMG installer
         if: runner.os == 'macOS'

@@ -468,6 +468,7 @@ jobs:
             --expected-manifest-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256" \
             --seal-tauri-directories \
             --native-smoke
+          test ! -e "$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app/Contents/Resources/app/logs"
 
       - name: Verify Developer ID signed macOS application
         if: runner.os == 'macOS'
