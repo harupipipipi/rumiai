@@ -299,8 +299,8 @@
     {
       "path": "scripts/generate_packaged_defaultspack_v4_bundle.py",
       "type": "regular-file",
-      "size": 32387,
-      "sha256": "c69d0d3d9e4f16bad6a060b65823754f9683d669b32744749d4cffc309a26bad",
+      "size": 39814,
+      "sha256": "8da0eee0deb4c88599eae85dbdb609649a347640b6cdd06f5fcbd4152b3d15bd",
       "executable": false
     },
     {

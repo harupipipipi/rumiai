@@ -2199,6 +2199,89 @@ fn core_open_relative(root: &File, relative: &str, directory_only: bool) -> io::
 }
 
 #[cfg(target_os = "macos")]
+fn core_create_directory(
+    parent: &File,
+    name: &std::ffi::OsStr,
+    root_device: u64,
+    label: &str,
+) -> io::Result<File> {
+    use std::ffi::CString;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::MetadataExt;
+
+    let encoded = CString::new(name.as_bytes())
+        .map_err(|_| invalid_release(format!("{label} contains NUL")))?;
+    if unsafe { libc::mkdirat(parent.as_raw_fd(), encoded.as_ptr(), 0o700) } == -1 {
+        let error = io::Error::last_os_error();
+        if error.kind() == io::ErrorKind::AlreadyExists {
+            return Err(invalid_release(format!(
+                "{label} already exists inside the Core transaction; residue retained"
+            )));
+        }
+        return Err(error);
+    }
+    let directory = core_openat(parent, name, true)?;
+    let metadata = directory.metadata()?;
+    if !metadata.is_dir()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.dev() != root_device
+        || metadata.mode() & 0o777 != 0o700
+    {
+        return Err(invalid_release(format!(
+            "{label} has unsafe Core transaction ownership; residue retained"
+        )));
+    }
+    Ok(directory)
+}
+
+#[cfg(target_os = "macos")]
+fn stage_core_defaults_bundle(
+    transaction: &CoreTransactionGuard,
+    repository_root: &Path,
+) -> io::Result<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+
+    let source = repository_root
+        .join(APP_SOURCE_DIR)
+        .join("ecosystem/defaultspack/v4");
+    require_directory(&source, "canonical Defaults v4 source bundle")?;
+    let release = core_create_directory(
+        &transaction.root,
+        std::ffi::OsStr::new("release"),
+        transaction.identity.0,
+        "Core release root",
+    )?;
+    let ecosystem = core_create_directory(
+        &release,
+        std::ffi::OsStr::new("ecosystem"),
+        transaction.identity.0,
+        "Core release ecosystem root",
+    )?;
+    let defaultspack = core_create_directory(
+        &ecosystem,
+        std::ffi::OsStr::new("defaultspack"),
+        transaction.identity.0,
+        "Core release Defaultspack root",
+    )?;
+    let bundle_root = transaction.path.join("release/ecosystem/defaultspack/v4");
+    copy_release_tree(&source, &bundle_root)?;
+    mirror_directory_permissions(&source, &bundle_root)?;
+    drop(defaultspack);
+    let bound = core_open_relative(&transaction.root, "release/ecosystem/defaultspack/v4", true)?;
+    let metadata = bound.metadata()?;
+    if !metadata.is_dir()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.dev() != transaction.identity.0
+    {
+        return Err(invalid_release(
+            "Core Defaults bundle root identity changed; residue retained",
+        ));
+    }
+    Ok(bundle_root)
+}
+
+#[cfg(target_os = "macos")]
 fn validate_staged_runtime_manifest(
     root: &File,
     inventory: &std::collections::BTreeMap<String, (u64, u64, bool)>,
@@ -3093,7 +3176,7 @@ fn produce_and_stage_core_presentation_release(staged_root: &Path) -> io::Result
         let transaction_path = transaction.path().to_owned();
         let result = (|| -> io::Result<Option<PathBuf>> {
             let release_root = transaction_path.join("release");
-            let bundle_root = release_root.join("ecosystem/defaultspack/v4");
+            let bundle_root = stage_core_defaults_bundle(&transaction, &repository_root)?;
             let artifact_root = release_root.join("bundled/presentation-artifacts");
             let installed_container = artifact_root.join(&shell.artifact_id);
             fs::create_dir_all(&installed_container)?;
@@ -5576,6 +5659,29 @@ mod tests {
             .unwrap()
             ..source.find("fn stage_core_verified_release(").unwrap()];
         assert!(verifier.contains("current_source_revision(&repository_root)"));
+    }
+
+    #[test]
+    fn core_producer_creates_owned_bundle_root_before_formal_generator() {
+        let source = include_str!("build.rs");
+        let producer = &source[source
+            .find("fn produce_and_stage_core_presentation_release")
+            .unwrap()
+            ..source.find("fn stage_presentation_release_at(").unwrap()];
+        let bundle_staging = producer
+            .find("stage_core_defaults_bundle(&transaction, &repository_root)")
+            .expect("Core producer must materialize its exact Defaults root first");
+        let generator = producer
+            .find("run_formal_defaults_packaging(")
+            .expect("Core producer must use the formal generator");
+        assert!(bundle_staging < generator);
+        assert!(source.contains("fn stage_core_defaults_bundle("));
+        assert!(source.contains("core_create_directory("));
+        assert!(source.contains("copy_release_tree(&source, &bundle_root)"));
+        assert!(source.contains(
+            "let bound = core_open_relative(&transaction.root, \"release/ecosystem/defaultspack/v4\""
+        ));
+        assert!(producer.contains("Core transaction did not reach verified ownership"));
     }
 
     fn write_pack_shell_fixture(root: &Path, target: &str, profile: &str) -> PathBuf {

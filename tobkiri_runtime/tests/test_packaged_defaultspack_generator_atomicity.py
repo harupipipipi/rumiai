@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -237,6 +238,78 @@ def test_generator_existing_output_rollback_on_publish_fault(
         _stage(source, bundle, artifacts)
     assert _bytes(bundle) == before_bundle
     assert _bytes(artifacts) == before_artifacts
+
+
+def test_generator_requires_the_core_producer_to_create_bundle_root(
+    tmp_path: Path,
+) -> None:
+    """A missing bundle root is a caller-contract violation, not mkdir input."""
+    parent = tmp_path / "defaultspack"
+    parent.mkdir()
+    bundle = parent / "v4"
+    artifacts = parent / "platform-artifacts"
+    with pytest.raises(ValueError, match="bundle root must be a real directory"):
+        generator._new_transaction(bundle, artifacts)
+    assert not bundle.exists()
+    assert not list(parent.glob(".tobkiri-defaultspack-transaction-*"))
+
+
+def test_generator_rejects_existing_bundle_file_and_symlink(
+    tmp_path: Path,
+) -> None:
+    """The producer contract never follows or replaces a foreign bundle root."""
+    parent = tmp_path / "defaultspack"
+    parent.mkdir()
+    artifacts = parent / "platform-artifacts"
+    bundle_file = parent / "v4-file"
+    bundle_file.write_text("foreign", encoding="utf-8")
+    with pytest.raises(ValueError, match="bundle root"):
+        generator._new_transaction(bundle_file, artifacts)
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    bundle_link = parent / "v4-link"
+    bundle_link.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlink"):
+        generator._new_transaction(bundle_link, artifacts)
+    assert not list(parent.glob(".tobkiri-defaultspack-transaction-*"))
+
+
+def test_generator_rejects_foreign_or_world_writable_bundle_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Output parents must remain host-owned and not group/world writable."""
+    bundle, artifacts = _bundle_roots(tmp_path)
+    parent = bundle.parent
+    original_mode = parent.stat().st_mode
+    try:
+        parent.chmod(0o777)
+        with pytest.raises(ValueError, match="writable permissions"):
+            generator._new_transaction(bundle, artifacts)
+        parent.chmod(0o755)
+
+        monkeypatch.setattr(generator.os, "geteuid", lambda: os.getuid() + 1)
+        with pytest.raises(ValueError, match="not owned"):
+            generator._new_transaction(bundle, artifacts)
+    finally:
+        parent.chmod(original_mode)
+
+
+def test_generator_rejects_hardlinked_bundle_input_without_touching_victim(
+    tmp_path: Path,
+) -> None:
+    """A hard-linked source entry is residue, never an accepted bundle input."""
+    bundle, artifacts = _bundle_roots(tmp_path)
+    victim = tmp_path / "external-victim.json"
+    victim.write_bytes(b"must remain")
+    linked = bundle / "defaults-basepack.base.v1.json"
+    linked.unlink()
+    os.link(victim, linked)
+    source = _linux_source(tmp_path / "source")
+    with pytest.raises(ValueError, match="hard-linked"):
+        _stage(source, bundle, artifacts)
+    assert victim.read_bytes() == b"must remain"
+    assert not list(tmp_path.glob(".tobkiri-defaultspack-transaction-*"))
 
 
 @pytest.mark.parametrize(

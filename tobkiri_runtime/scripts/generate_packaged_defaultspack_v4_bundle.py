@@ -10,6 +10,7 @@ import os
 import shutil
 import stat
 import tempfile
+import uuid
 from pathlib import Path, PureWindowsPath
 from typing import Any, Mapping, TypedDict
 
@@ -30,7 +31,11 @@ from .generate_defaultspack_v4_bundle import (  # noqa: E402
     _normalize_pack,
     _pretty,
 )
-from .packaging_cleanup import remove_owned_path  # noqa: E402
+from .packaging_cleanup import (  # noqa: E402
+    _is_reparse_point,
+    _posix_mount_identity,
+    remove_owned_path,
+)
 from tobkiri_protocol.canonical import canonical_digest  # noqa: E402
 from tobkiri_protocol.platform_artifact import (  # noqa: E402
     artifact_digest,
@@ -69,8 +74,164 @@ def _reject_symlink_components(path: Path) -> None:
     current = Path(absolute.anchor)
     for part in absolute.parts[1:]:
         current /= part
-        if current.is_symlink() and current not in {Path("/var"), Path("/tmp")}:
+        try:
+            metadata = os.lstat(current)
+        except FileNotFoundError:
+            continue
+        if current in {Path("/var"), Path("/tmp")}:
+            continue
+        if stat.S_ISLNK(metadata.st_mode) or _is_reparse_point(current, metadata):
             raise ValueError(f"release path contains a symlink: {current}")
+        if current != absolute and not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError(f"release path contains a non-directory: {current}")
+
+
+def _directory_identity(value: os.stat_result) -> tuple[int, int, int]:
+    """Return the no-follow identity fields for one directory object."""
+    return (value.st_dev, value.st_ino, stat.S_IFMT(value.st_mode))
+
+
+def _require_owned_output_directory(
+    path: Path,
+    metadata: os.stat_result,
+    field: str,
+    *,
+    reject_writable_group: bool = True,
+) -> None:
+    """Require one real, host-owned, non-world-writable output directory."""
+    if stat.S_ISLNK(metadata.st_mode) or _is_reparse_point(path, metadata):
+        raise ValueError(f"packaged {field} may not be a symlink or junction")
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise ValueError(f"packaged {field} must be a directory")
+    if os.name != "nt":
+        owner = getattr(metadata, "st_uid", None)
+        if owner is None or owner != os.geteuid():
+            raise ValueError(f"packaged {field} is not owned by the build host")
+        if reject_writable_group and stat.S_IMODE(metadata.st_mode) & 0o022:
+            raise ValueError(f"packaged {field} has unsafe writable permissions")
+
+
+def _open_owned_output_parent(path: Path, field: str) -> tuple[int | None, object | None]:
+    """Open and bind an output parent without a pathname fallback on POSIX."""
+    try:
+        metadata = os.lstat(path)
+    except FileNotFoundError as error:
+        raise ValueError(f"packaged {field} parent is missing") from error
+    _require_owned_output_directory(path, metadata, f"{field} parent")
+    if os.name == "nt":
+        return None, None
+    required = ("O_DIRECTORY", "O_NOFOLLOW")
+    if not all(hasattr(os, flag) for flag in required):
+        raise ValueError("packaged output requires no-follow directory descriptors")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    try:
+        descriptor = os.open(os.fspath(path), flags)
+    except OSError as error:
+        raise ValueError(f"packaged {field} parent could not be bound") from error
+    try:
+        opened = os.fstat(descriptor)
+        if _directory_identity(opened) != _directory_identity(metadata):
+            raise ValueError(f"packaged {field} parent changed while being bound")
+        mount_identity = _posix_mount_identity(descriptor)
+    except (OSError, ValueError) as error:
+        os.close(descriptor)
+        if isinstance(error, ValueError):
+            raise
+        raise ValueError(f"packaged {field} parent mount identity is unavailable") from error
+    return descriptor, mount_identity
+
+
+def _validate_existing_output_root(
+    path: Path,
+    parent_descriptor: int | None,
+    parent_mount_identity: object | None,
+    field: str,
+) -> bool:
+    """Validate an existing output root through its bound parent descriptor."""
+    try:
+        metadata = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    _require_owned_output_directory(path, metadata, field)
+    if parent_descriptor is None:
+        return True
+    name = path.name
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    try:
+        descriptor = os.open(name, flags, dir_fd=parent_descriptor)
+    except OSError as error:
+        raise ValueError(f"packaged {field} could not be opened without following links") from error
+    try:
+        opened = os.fstat(descriptor)
+        if _directory_identity(opened) != _directory_identity(metadata):
+            raise ValueError(f"packaged {field} changed while being bound")
+        if (
+            parent_mount_identity is not None
+            and _posix_mount_identity(descriptor) != parent_mount_identity
+        ):
+            raise ValueError(f"packaged {field} crossed a mount boundary")
+        _require_owned_output_directory(path, opened, field)
+    except (OSError, ValueError) as error:
+        if isinstance(error, ValueError):
+            raise
+        raise ValueError(f"packaged {field} identity could not be verified") from error
+    finally:
+        os.close(descriptor)
+    return True
+
+
+def _create_owned_transaction(
+    parent: Path,
+    parent_descriptor: int | None,
+    parent_mount_identity: object | None,
+) -> Path:
+    """Create an unpredictable owner-only transaction leaf atomically."""
+    if os.name == "nt":
+        transaction = Path(
+            tempfile.mkdtemp(
+                prefix=".tobkiri-defaultspack-transaction-",
+                dir=parent,
+            )
+        )
+        metadata = os.lstat(transaction)
+        _require_owned_output_directory(transaction, metadata, "transaction")
+        return transaction
+    if parent_descriptor is None:
+        raise ValueError("packaged transaction requires an anchored parent descriptor")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    for _ in range(8):
+        name = f".tobkiri-defaultspack-transaction-{uuid.uuid4().hex}"
+        try:
+            os.mkdir(name, 0o700, dir_fd=parent_descriptor)
+        except FileExistsError:
+            continue
+        transaction = parent / name
+        try:
+            descriptor = os.open(name, flags, dir_fd=parent_descriptor)
+            try:
+                metadata = os.fstat(descriptor)
+                if _directory_identity(metadata) != (
+                    metadata.st_dev,
+                    metadata.st_ino,
+                    stat.S_IFDIR,
+                ):
+                    raise ValueError("packaged transaction is not a real directory")
+                _require_owned_output_directory(transaction, metadata, "transaction")
+                if stat.S_IMODE(metadata.st_mode) != 0o700:
+                    raise ValueError("packaged transaction has unsafe permissions")
+                if (
+                    parent_mount_identity is not None
+                    and _posix_mount_identity(descriptor) != parent_mount_identity
+                ):
+                    raise ValueError("packaged transaction crossed a mount boundary")
+            finally:
+                os.close(descriptor)
+        except (OSError, ValueError) as error:
+            if isinstance(error, ValueError):
+                raise
+            raise ValueError("packaged transaction could not be bound") from error
+        return transaction
+    raise ValueError("could not allocate an unpredictable packaged transaction")
 
 
 def _reject_symlinks(path: Path) -> None:
@@ -108,6 +269,8 @@ def _snapshot_file(source: Path, destination: Path) -> None:
             before = os.fstat(handle.fileno())
             if not stat.S_ISREG(before.st_mode):
                 raise ValueError(f"release file is not regular: {source}")
+            if before.st_nlink != 1:
+                raise ValueError(f"release file is hard-linked: {source}")
             destination.parent.mkdir(parents=True, exist_ok=True)
             with destination.open("wb") as output:
                 size = 0
@@ -288,27 +451,49 @@ def _validate_binary_architecture(entrypoint: Path, architecture: str) -> None:
 
 
 def _new_transaction(bundle_root: Path, artifact_root: Path) -> Path:
-    """Create same-filesystem owner-only staging for both output roots."""
+    """Bind caller-owned roots and create one private transaction leaf."""
     if bundle_root == artifact_root:
         raise ValueError("bundle and artifact roots must be distinct")
     if bundle_root.is_relative_to(artifact_root) or artifact_root.is_relative_to(bundle_root):
         raise ValueError("bundle and artifact roots must not overlap")
     _reject_symlink_components(bundle_root)
     _reject_symlink_components(artifact_root)
-    artifact_root.parent.mkdir(parents=True, exist_ok=True)
-    if bundle_root.is_symlink() or not bundle_root.is_dir():
-        raise ValueError("packaged bundle root must be a real directory")
-    if artifact_root.is_symlink() or (
-        artifact_root.exists() and not artifact_root.is_dir()
-    ):
-        raise ValueError("packaged artifact root must be a directory")
-    if bundle_root.stat().st_dev != artifact_root.parent.stat().st_dev:
-        raise ValueError("bundle and artifact outputs must share one filesystem")
-    transaction = Path(
-        tempfile.mkdtemp(prefix=".tobkiri-defaultspack-transaction-", dir=bundle_root.parent)
+    bundle_parent_descriptor, bundle_parent_mount = _open_owned_output_parent(
+        bundle_root.parent, "bundle"
     )
-    transaction.chmod(0o700)
-    return transaction
+    artifact_parent_descriptor, artifact_parent_mount = _open_owned_output_parent(
+        artifact_root.parent, "artifact"
+    )
+    try:
+        if (
+            bundle_parent_mount is not None
+            and artifact_parent_mount is not None
+            and bundle_parent_mount != artifact_parent_mount
+        ):
+            raise ValueError("bundle and artifact outputs must share one filesystem")
+        if not _validate_existing_output_root(
+            bundle_root,
+            bundle_parent_descriptor,
+            bundle_parent_mount,
+            "bundle root",
+        ):
+            raise ValueError("packaged bundle root must be a real directory")
+        _validate_existing_output_root(
+            artifact_root,
+            artifact_parent_descriptor,
+            artifact_parent_mount,
+            "artifact root",
+        )
+        return _create_owned_transaction(
+            bundle_root.parent,
+            bundle_parent_descriptor,
+            bundle_parent_mount,
+        )
+    finally:
+        if bundle_parent_descriptor is not None:
+            os.close(bundle_parent_descriptor)
+        if artifact_parent_descriptor is not None:
+            os.close(artifact_parent_descriptor)
 
 
 def _remove_owned(path: Path) -> None:
