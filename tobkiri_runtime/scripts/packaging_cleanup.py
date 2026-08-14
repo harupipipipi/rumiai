@@ -2376,7 +2376,7 @@ def _prepare_posix_sealed_tree(
     path: Path,
     *,
     binding: _PathBinding,
-    expected_tree: Mapping[str, bool],
+    expected_tree: Optional[Mapping[str, bool]],
     operation: str,
     attempts: int,
 ) -> dict[str, bool]:
@@ -2395,11 +2395,16 @@ def _prepare_posix_sealed_tree(
             reason="sealed POSIX reset requires descriptor and mount identity",
             attempts=attempts,
         )
-    normalized = _normalize_expected_tree(
-        expected_tree,
-        operation=operation,
-        path=path,
-        attempts=attempts,
+    dynamic_inventory = expected_tree is None
+    normalized = (
+        {"": True}
+        if dynamic_inventory
+        else _normalize_expected_tree(
+            expected_tree,
+            operation=operation,
+            path=path,
+            attempts=attempts,
+        )
     )
     for index, descriptor in enumerate(binding.directory_fds):
         current = os.fstat(descriptor)
@@ -2505,7 +2510,10 @@ def _prepare_posix_sealed_tree(
                     attempts=attempts,
                     root_device=root_device,
                 )
-                if child_relative not in normalized:
+                actual_directory = stat.S_ISDIR(child_result.st_mode)
+                if dynamic_inventory:
+                    normalized[child_relative] = actual_directory
+                elif child_relative not in normalized:
                     raise _security_error(
                         operation=operation,
                         path=child_path,
@@ -2513,7 +2521,6 @@ def _prepare_posix_sealed_tree(
                         attempts=attempts,
                     )
                 expected_directory = normalized[child_relative]
-                actual_directory = stat.S_ISDIR(child_result.st_mode)
                 if actual_directory != expected_directory:
                     raise _security_error(
                         operation=operation,
@@ -3072,6 +3079,7 @@ def remove_owned_path(
     sleep: Callable[[float], None] = time.sleep,
     expected_tree: Optional[Mapping[str, bool]] = None,
     unseal_read_only: bool = False,
+    expected_identity: Optional[tuple[int, int]] = None,
 ) -> None:
     """Remove an owned path with bounded Windows lock-race retries.
 
@@ -3081,15 +3089,24 @@ def remove_owned_path(
     leaving the path in place.
 
     ``expected_tree`` and ``unseal_read_only`` are reserved for a producer's
-    host-owned sealed tree.  On POSIX, the exact manifest inventory is checked
-    through held descriptors before any directory mode is changed.  Ordinary
-    cleanup callers retain the existing quarantine-only behavior.
+    host-owned sealed tree.  When no manifest is available, a creation-time
+    ``expected_identity`` permits a descriptor-bound inventory to be captured
+    before any directory mode is changed.  Ordinary cleanup callers retain the
+    existing quarantine-only behavior.
     """
 
     if max_attempts < 1:
         raise ValueError("max_attempts must be positive")
-    if unseal_read_only and expected_tree is None:
-        raise ValueError("unseal_read_only requires an expected sealed-tree manifest")
+    if expected_identity is not None and (
+        not isinstance(expected_identity, tuple)
+        or len(expected_identity) != 2
+        or any(not isinstance(value, int) or value <= 0 for value in expected_identity)
+    ):
+        raise ValueError("expected_identity must contain positive device and inode values")
+    if unseal_read_only and expected_tree is None and expected_identity is None:
+        raise ValueError(
+            "dynamic read-only reset requires a creation-time path identity"
+        )
     if unseal_read_only and _IS_WINDOWS:
         raise ValueError("read-only sealed-tree reset requires POSIX descriptors")
     binding: Optional[_PathBinding] = None
@@ -3137,6 +3154,23 @@ def remove_owned_path(
                 sleep(backoff_seconds[delay_index])
     assert binding is not None
     target = binding.target
+    target_identity = binding.identities[-1]
+    if expected_identity is not None and target_identity.exists:
+        actual_identity = target_identity.signature[:2]
+        if actual_identity != expected_identity:
+            error = _security_error(
+                operation=operation,
+                path=target,
+                reason="owned path differs from its creation-time identity",
+            )
+            _finish_binding_close(
+                binding,
+                operation=operation,
+                path=target,
+                attempts=0,
+                primary=error,
+            )
+            raise error
     if child is not None:
         try:
             _ensure_child_exited(child, operation=operation, path=target)
@@ -3160,7 +3194,6 @@ def remove_owned_path(
                 attempts=0,
             )
         if unseal_read_only:
-            assert normalized_expected_tree is not None
             normalized_expected_tree = _prepare_posix_sealed_tree(
                 binding.parent_fd,
                 target.name,

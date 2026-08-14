@@ -140,25 +140,52 @@ if [[ -e "$dmg_path" || -L "$dmg_path" ]]; then
   exit 1
 fi
 
-work_dir=$(mktemp -d "$output_dir/.tobkiri-dmg.XXXXXX")
+script_dir=$(cd "$(dirname "$0")" && pwd -P)
+workspace_identity=$(/usr/bin/python3 -I -B \
+  "$script_dir/cleanup_macos_dmg_workspace.py" create --parent "$output_dir")
+IFS=$'\t' read -r work_dir work_device work_inode <<<"$workspace_identity"
+[[ -n "$work_dir" && "$work_device" =~ ^[0-9]+$ && "$work_inode" =~ ^[0-9]+$ ]] || {
+  printf 'DMG workspace helper returned an invalid ownership identity\n' >&2
+  exit 1
+}
 staging_dir="$work_dir/staging"
 image_dir="$work_dir/images"
 mkdir "$staging_dir" "$image_dir"
 owned_image_paths=()
 cleanup() {
   local exit_status
-  exit_status=$?
+  exit_status=$1
 
   trap - EXIT HUP INT QUIT TERM
 
-  if [[ -n "${work_dir:-}" && -d "$work_dir" ]]; then
-    if ! detach_owned_images; then
+  if [[ -n "${work_dir:-}" && ( -e "$work_dir" || -L "$work_dir" ) ]]; then
+    local workspace_verified=0
+    if /usr/bin/python3 -I -B \
+      "$script_dir/cleanup_macos_dmg_workspace.py" verify \
+      --parent "$output_dir" \
+      --workspace "$work_dir" \
+      --device "$work_device" \
+      --inode "$work_inode"; then
+      workspace_verified=1
+    else
+      printf 'Temporary DMG workspace identity changed; cleanup refused: %s\n' \
+        "$work_dir" >&2
+      if ((exit_status == 0)); then
+        exit_status=1
+      fi
+    fi
+    if ((workspace_verified == 1)) && ! detach_owned_images; then
       printf 'Could not detach every invocation-owned disk image during cleanup\n' >&2
       if ((exit_status == 0)); then
         exit_status=1
       fi
     fi
-    if ! rm -rf -- "$work_dir"; then
+    if ((workspace_verified == 1)) && ! /usr/bin/python3 -I -B \
+      "$script_dir/cleanup_macos_dmg_workspace.py" cleanup \
+      --parent "$output_dir" \
+      --workspace "$work_dir" \
+      --device "$work_device" \
+      --inode "$work_inode"; then
       printf 'Could not remove temporary DMG workspace: %s\n' "$work_dir" >&2
       if ((exit_status == 0)); then
         exit_status=1
@@ -167,7 +194,7 @@ cleanup() {
   fi
   return "$exit_status"
 }
-trap cleanup EXIT
+trap 'cleanup $?' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 131' QUIT
@@ -175,13 +202,9 @@ trap 'exit 143' TERM
 
 find_owned_device() {
   local target=$1
-  local info_file="$work_dir/hdiutil-info.txt"
-  local info_stderr="$work_dir/hdiutil-info.stderr"
+  local info=''
 
-  if ! hdiutil info >"$info_file" 2>"$info_stderr"; then
-    if [[ -s "$info_stderr" ]]; then
-      cat "$info_stderr" >&2
-    fi
+  if ! info=$(hdiutil info); then
     return 1
   fi
 
@@ -203,7 +226,7 @@ find_owned_device() {
       print $1
       exit
     }
-  ' "$info_file"
+  ' <<<"$info"
 }
 
 detach_owned_image() {

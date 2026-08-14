@@ -27,6 +27,9 @@ MACOS_CONFIG = TAURI_ROOT / "tauri.macos.conf.json"
 MACOS_DEV_CONFIG = TAURI_ROOT / "tauri.macos.dev.conf.json"
 MACOS_RELEASE_VERIFIER = ROOT / "tobkiri_launcher" / "scripts" / "verify_macos_release.sh"
 MACOS_DMG_PACKAGER = ROOT / "tobkiri_launcher" / "scripts" / "package_macos_dmg.sh"
+MACOS_DMG_CLEANUP = (
+    ROOT / "tobkiri_launcher" / "scripts" / "cleanup_macos_dmg_workspace.py"
+)
 RELEASE_GATE = ROOT / "scripts" / "release_gate.py"
 TEST_WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
 PACKAGED_GENERATOR = (
@@ -296,10 +299,12 @@ def test_macos_installer_uses_finder_free_verified_dmg_packager():
         "hdiutil detach",
         "-fs APFS",
         "-format UDZO",
-        'mktemp -d "$output_dir/.tobkiri-dmg.XXXXXX"',
+        "cleanup_macos_dmg_workspace.py",
+        "workspace_identity",
+        '--device "$work_device"',
         "owned_image_paths",
         "Resource busy",
-        "trap cleanup EXIT",
+        "trap 'cleanup $?' EXIT",
         "trap 'exit 130' INT",
         "trap 'exit 143' TERM",
         'ln "$source_path" "$dmg_path"',
@@ -307,6 +312,7 @@ def test_macos_installer_uses_finder_free_verified_dmg_packager():
         "unsafe version for a DMG filename",
     ):
         assert required in packager
+    assert MACOS_DMG_CLEANUP.is_file()
     assert "-ov" not in packager
     assert "osascript" not in packager
     assert "bundle_dmg.sh" not in packager

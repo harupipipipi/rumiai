@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -52,6 +53,11 @@ exit 0
         """#!/bin/sh
 set -eu
 cp -R "$1" "$2"
+sealed="$2/Contents/Resources/app/python-runtime"
+if [ -d "$sealed" ]; then
+  find "$sealed" -type f -exec chmod 0444 {} +
+  find "$sealed" -type d -exec chmod 0555 {} +
+fi
 """,
     )
     _write_executable(
@@ -90,6 +96,15 @@ if command == "create":
     state["commands"].append(sys.argv[1:])
     attempt = state["create_count"]
     mode = state["mode"]
+    if mode == "primary_and_cleanup_failure":
+        workspace = output.parents[1]
+        (workspace / "staging" / "external-victim").symlink_to(
+            Path(os.environ["FAKE_EXTERNAL_VICTIM"]),
+            target_is_directory=True,
+        )
+        save()
+        print("hdiutil: create failed - permission denied", file=sys.stderr)
+        raise SystemExit(7)
     if mode == "busy_then_success" and attempt == 1:
         state["attached"].append(str(output))
         save()
@@ -105,6 +120,12 @@ if command == "create":
         print("hdiutil: create failed - permission denied", file=sys.stderr)
         raise SystemExit(7)
     output.write_bytes(("DMG-%d" % attempt).encode("ascii"))
+    if mode == "success_cleanup_failure":
+        workspace = output.parents[1]
+        (workspace / "staging" / "external-victim").symlink_to(
+            Path(os.environ["FAKE_EXTERNAL_VICTIM"]),
+            target_is_directory=True,
+        )
     save()
     print("created: %s" % output)
     raise SystemExit(0)
@@ -149,8 +170,11 @@ def _fixture_app(root: Path) -> Path:
     app = root / "Tobkiri Launcher.app"
     contents = app / "Contents"
     (contents / "MacOS").mkdir(parents=True)
+    sealed = contents / "Resources" / "app" / "python-runtime" / "nested"
+    sealed.mkdir(parents=True)
     (contents / "Info.plist").write_text("fixture", encoding="utf-8")
     (contents / "MacOS" / "launcher").write_text("fixture", encoding="utf-8")
+    (sealed / "sealed.py").write_text("fixture", encoding="utf-8")
     return app
 
 
@@ -165,6 +189,10 @@ def _run_packager(
     environment["PATH"] = f"{bin_dir}{os.pathsep}{environment['PATH']}"
     environment["FAKE_HDIUTIL_STATE"] = str(state_path)
     environment["FAKE_SLEEP_LOG"] = str(sleep_log)
+    victim = root / "external-victim"
+    victim.mkdir()
+    (victim / "keep.txt").write_text("keep", encoding="utf-8")
+    environment["FAKE_EXTERNAL_VICTIM"] = str(victim)
     result = subprocess.run(
         [
             "bash",
@@ -213,7 +241,7 @@ def test_permanent_hdiutil_error_is_not_retried_and_stderr_is_preserved(
 ) -> None:
     result, output_dir, state_path = _run_packager(tmp_path, "permanent")
 
-    assert result.returncode == 7
+    assert result.returncode == 7, result.stderr
     assert _state(state_path)["create_count"] == 1
     assert "permission denied" in result.stderr
     assert "Retrying hdiutil create" not in result.stderr
@@ -287,3 +315,56 @@ def test_output_publication_never_clobbers_existing_trusted_file(
     assert final_path.read_bytes() == b"trusted-existing-output"
     assert "Refusing to overwrite" in result.stderr
     assert _temporary_workspaces(output_dir) == []
+
+
+def test_primary_package_error_wins_when_cleanup_rejects_external_link(
+    tmp_path: Path,
+) -> None:
+    result, output_dir, _state_path = _run_packager(
+        tmp_path, "primary_and_cleanup_failure"
+    )
+
+    assert result.returncode == 7, result.stderr
+    assert "permission denied" in result.stderr
+    assert "descriptor-bound POSIX tree contains a symlink" in result.stderr
+    assert "Could not remove temporary DMG workspace" in result.stderr
+    assert (tmp_path / "external-victim" / "keep.txt").read_text(
+        encoding="utf-8"
+    ) == "keep"
+
+    workspace = _temporary_workspaces(output_dir)[0]
+    (workspace / "staging" / "external-victim").unlink()
+    for path in sorted(workspace.rglob("*"), reverse=True):
+        if path.is_dir():
+            path.chmod(0o700)
+    workspace.chmod(0o700)
+    shutil.rmtree(workspace)
+
+
+def test_cleanup_failure_after_success_fails_without_deleting_published_dmg(
+    tmp_path: Path,
+) -> None:
+    source_file = (
+        tmp_path
+        / "Tobkiri Launcher.app/Contents/Resources/app/python-runtime/nested/sealed.py"
+    )
+    result, output_dir, _state_path = _run_packager(
+        tmp_path, "success_cleanup_failure"
+    )
+
+    assert result.returncode == 1
+    assert "Could not remove temporary DMG workspace" in result.stderr
+    assert (output_dir / FINAL_NAME).read_bytes() == b"DMG-1"
+    assert source_file.read_text(encoding="utf-8") == "fixture"
+    assert source_file.stat().st_mode & 0o777 == 0o644
+    assert (tmp_path / "external-victim" / "keep.txt").read_text(
+        encoding="utf-8"
+    ) == "keep"
+
+    workspace = _temporary_workspaces(output_dir)[0]
+    (workspace / "staging" / "external-victim").unlink()
+    for path in sorted(workspace.rglob("*"), reverse=True):
+        if path.is_dir():
+            path.chmod(0o700)
+    workspace.chmod(0o700)
+    shutil.rmtree(workspace)
