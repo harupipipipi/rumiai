@@ -124,6 +124,7 @@ APPLICATION_EXCLUDED_DIR_NAMES = {
     "venv",
 }
 APPLICATION_EXCLUDED_SUFFIXES = {".bak", ".pyc", ".pyo", ".zip"}
+APPLICATION_CLOSURE_MAX_DEPTH = 128
 PYTHON_BYTECODE_ENVIRONMENT = "PYTHONDONTWRITEBYTECODE"
 APPLICATION_LEGACY_AUTHORITY_FILENAMES = {
     "ecosystem.json",
@@ -415,6 +416,185 @@ def _copy_tree(source: Path, destination: Path, spec: TargetSpec) -> None:
             destination_path,
             _executable_flag(source_path, metadata, spec),
         )
+
+
+@dataclass(frozen=True)
+class _ApplicationClosureEntry:
+    """One identity-bound member of a fixed application traversal snapshot."""
+
+    relative: str
+    kind: str
+    identity: tuple[int, int, int, int, int, int]
+    executable: bool = False
+
+
+def _application_entry_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_mode,
+        metadata.st_nlink,
+    )
+
+
+def _application_closure_inventory(source: Path) -> tuple[_ApplicationClosureEntry, ...]:
+    """Freeze the complete selected traversal before any application copy."""
+    source = _assert_root(source)
+    pending = [Path(".")]
+    entries: list[_ApplicationClosureEntry] = []
+    while pending:
+        relative_current = pending.pop()
+        current = source if relative_current == Path(".") else source / relative_current
+        try:
+            children = sorted(os.scandir(current), key=lambda entry: entry.name)
+        except OSError as exc:
+            raise SealedEnvironmentError(
+                f"cannot inventory application closure directory: {current}"
+            ) from exc
+        selected_directories: list[Path] = []
+        for child in children:
+            path = current / child.name
+            relative = path.relative_to(source)
+            if len(relative.parts) > APPLICATION_CLOSURE_MAX_DEPTH:
+                raise SealedEnvironmentError(
+                    "application closure exceeds the maximum safe depth: "
+                    f"{relative.as_posix()}"
+                )
+            try:
+                metadata = path.lstat()
+            except OSError as exc:
+                raise SealedEnvironmentError(
+                    f"application closure entry disappeared: {path}"
+                ) from exc
+            if path.is_symlink() or _is_reparse_point(metadata):
+                raise SealedEnvironmentError(
+                    f"sealed application closure contains a link: {path}"
+                )
+            if stat.S_ISDIR(metadata.st_mode):
+                if child.name in APPLICATION_EXCLUDED_DIR_NAMES:
+                    continue
+                entry = _ApplicationClosureEntry(
+                    relative.as_posix(),
+                    "directory",
+                    _application_entry_identity(metadata),
+                )
+                entries.append(entry)
+                selected_directories.append(relative)
+                continue
+            if (
+                child.name == ".DS_Store"
+                or child.name in APPLICATION_LEGACY_AUTHORITY_FILENAMES
+                or Path(child.name).suffix in APPLICATION_EXCLUDED_SUFFIXES
+            ):
+                continue
+            if not stat.S_ISREG(metadata.st_mode):
+                raise SealedEnvironmentError(
+                    f"sealed application closure contains a special file: {path}"
+                )
+            if metadata.st_nlink != 1:
+                raise SealedEnvironmentError(
+                    f"sealed application closure contains a hardlink: {path}"
+                )
+            entries.append(
+                _ApplicationClosureEntry(
+                    relative.as_posix(),
+                    "file",
+                    _application_entry_identity(metadata),
+                    bool(metadata.st_mode & 0o111),
+                )
+            )
+        pending.extend(reversed(selected_directories))
+    return tuple(sorted(entries, key=lambda entry: entry.relative))
+
+
+def _copy_snapshot_file(
+    source: Path,
+    destination: Path,
+    entry: _ApplicationClosureEntry,
+    spec: TargetSpec,
+) -> None:
+    """Copy one pre-inventoried file through no-follow descriptors."""
+    current = source.lstat()
+    if _application_entry_identity(current) != entry.identity:
+        raise SealedEnvironmentError(f"application closure changed before copy: {source}")
+    source_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    source_fd = os.open(source, source_flags)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination_flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    destination_fd = -1
+    try:
+        opened = os.fstat(source_fd)
+        if (
+            _application_entry_identity(opened) != entry.identity
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+        ):
+            raise SealedEnvironmentError(
+                f"application closure changed while opening: {source}"
+            )
+        destination_fd = os.open(destination, destination_flags, 0o600)
+        while chunk := os.read(source_fd, 1024 * 1024):
+            view = memoryview(chunk)
+            while view:
+                written = os.write(destination_fd, view)
+                view = view[written:]
+        if _application_entry_identity(os.fstat(source_fd)) != entry.identity:
+            raise SealedEnvironmentError(
+                f"application closure changed while copying: {source}"
+            )
+        mode = (
+            0o755
+            if entry.executable or (spec.windows and _windows_executable(source))
+            else 0o644
+        )
+        if os.name != "nt":
+            os.fchmod(destination_fd, mode)
+    finally:
+        if destination_fd >= 0:
+            os.close(destination_fd)
+        os.close(source_fd)
+    if os.name == "nt":
+        destination.chmod(mode)
+    if _application_entry_identity(source.lstat()) != entry.identity:
+        raise SealedEnvironmentError(f"application closure changed after copy: {source}")
+
+
+def _copy_application_snapshot(
+    source: Path,
+    destination: Path,
+    spec: TargetSpec,
+) -> tuple[_ApplicationClosureEntry, ...]:
+    """Copy only a fixed inventory and reject concurrent source mutation."""
+    source = _assert_root(source)
+    if destination.exists() or destination.is_symlink():
+        raise SealedEnvironmentError(
+            f"application snapshot destination already exists: {destination}"
+        )
+    inventory = _application_closure_inventory(source)
+    destination.mkdir(mode=0o700, parents=False)
+    for entry in inventory:
+        source_path = source / entry.relative
+        destination_path = destination / entry.relative
+        if entry.kind == "directory":
+            if _application_entry_identity(source_path.lstat()) != entry.identity:
+                raise SealedEnvironmentError(
+                    f"application closure directory changed: {source_path}"
+                )
+            destination_path.mkdir(parents=True, exist_ok=False)
+            destination_path.chmod(0o755)
+        else:
+            _copy_snapshot_file(source_path, destination_path, entry, spec)
+    if _application_closure_inventory(source) != inventory:
+        raise SealedEnvironmentError("application closure changed during snapshot copy")
+    return inventory
 
 
 def _copy_application_closure(
@@ -3074,7 +3254,143 @@ def assemble_environment(
     return manifest_path
 
 
-def rebuild_environment_application_closure(
+def _absolute_unaliased_directory(path: Path) -> Path:
+    """Bind an existing directory while rejecting linked ancestor aliases."""
+    lexical = Path(os.path.abspath(os.fspath(path)))
+    current = Path(lexical.anchor)
+    for part in lexical.parts[1:]:
+        current /= part
+        try:
+            metadata = current.lstat()
+        except OSError as exc:
+            raise SealedEnvironmentError(
+                f"application re-seal ancestor is unavailable: {current}"
+            ) from exc
+        if current.is_symlink() or _is_reparse_point(metadata):
+            raise SealedEnvironmentError(
+                f"application re-seal ancestor is an alias: {current}"
+            )
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise SealedEnvironmentError(
+                f"application re-seal ancestor is not a directory: {current}"
+            )
+    resolved = lexical.resolve(strict=True)
+    if resolved != lexical:
+        raise SealedEnvironmentError(
+            f"application re-seal directory has an ancestor alias: {path}"
+        )
+    return resolved
+
+
+def _paths_overlap(left: Path, right: Path) -> bool:
+    """Return whether either resolved root contains the other."""
+    return left == right or left.is_relative_to(right) or right.is_relative_to(left)
+
+
+def _assert_disjoint_reseal_roots(**roots: Path) -> None:
+    """Reject equal, ancestor, descendant, and resolved-alias transaction roots."""
+    resolved = {
+        name: _absolute_unaliased_directory(path) for name, path in roots.items()
+    }
+    items = list(resolved.items())
+    for index, (left_name, left) in enumerate(items):
+        for right_name, right in items[index + 1 :]:
+            if _paths_overlap(left, right):
+                raise SealedEnvironmentError(
+                    "application re-seal roots overlap: "
+                    f"{left_name}={left}, {right_name}={right}"
+                )
+
+
+@dataclass
+class _ApplicationResealWorkspace:
+    """Creation-bound same-volume workspace for snapshot, stage, and rollback."""
+
+    path: Path
+    parent: Path
+    identity: tuple[int, int]
+    removed: bool = False
+
+    def verify(self) -> None:
+        if self.removed:
+            raise SealedEnvironmentError("application re-seal workspace was removed")
+        if _directory_identity(self.path) != self.identity:
+            raise SealedEnvironmentError("application re-seal workspace identity changed")
+        if _absolute_unaliased_directory(self.path) != self.path:
+            raise SealedEnvironmentError("application re-seal workspace path changed")
+
+    def cleanup(self) -> None:
+        if self.removed:
+            return
+        self.verify()
+        remove_owned_path = _load_cleanup_remove()
+        remove_owned_path(
+            self.path,
+            owner_root=self.parent,
+            operation="remove application re-seal transaction workspace",
+            expected_identity=self.identity,
+            unseal_read_only=True,
+        )
+        self.removed = True
+
+
+@contextlib.contextmanager
+def _application_reseal_workspace(
+    destination_parent: Path,
+    application_source: Path,
+    sealed_root: Path,
+):
+    """Create a private stage outside source, sealed root, and destination."""
+    destination_parent = _absolute_unaliased_directory(destination_parent)
+    application_source = _absolute_unaliased_directory(application_source)
+    sealed_root = _absolute_unaliased_directory(sealed_root)
+    stage_parent = destination_parent
+    while (
+        stage_parent == application_source
+        or stage_parent.is_relative_to(application_source)
+        or stage_parent == sealed_root
+        or stage_parent.is_relative_to(sealed_root)
+    ):
+        if stage_parent.parent == stage_parent:
+            raise SealedEnvironmentError(
+                "no non-overlapping same-volume application re-seal parent exists"
+            )
+        stage_parent = _absolute_unaliased_directory(stage_parent.parent)
+    if stage_parent.lstat().st_dev != destination_parent.lstat().st_dev:
+        raise SealedEnvironmentError(
+            "application re-seal workspace is not on the destination volume"
+        )
+    parent_identity = _directory_identity(stage_parent)
+    raw = tempfile.mkdtemp(
+        prefix=f".{sealed_root.name}.application-reseal.",
+        dir=stage_parent,
+    )
+    workspace_path = Path(raw)
+    workspace_path.chmod(0o700)
+    workspace = _ApplicationResealWorkspace(
+        workspace_path,
+        stage_parent,
+        _directory_identity(workspace_path),
+    )
+    try:
+        if _directory_identity(stage_parent) != parent_identity:
+            raise SealedEnvironmentError(
+                "application re-seal workspace parent identity changed"
+            )
+        _assert_disjoint_reseal_roots(
+            source=application_source,
+            workspace=workspace_path,
+        )
+        _assert_disjoint_reseal_roots(
+            sealed=sealed_root,
+            workspace=workspace_path,
+        )
+        yield workspace
+    finally:
+        workspace.cleanup()
+
+
+def _rebuild_environment_application_closure_from_snapshot(
     base_root: Path,
     application_source: Path,
     output_root: Path,
@@ -3082,15 +3398,15 @@ def rebuild_environment_application_closure(
     *,
     expected_base_manifest_digest: str,
 ) -> Path:
-    """Re-seal an environment around the final generated application closure.
+    """Re-seal an environment from a fixed, non-overlapping source snapshot.
 
     The interpreter, installed packages, bootstrap, and provenance remain those
     of the formally built environment. Only ``app`` is reconstructed, after
     the final Pack/Profile/Shell/presentation generator has completed.
     """
     spec = target_spec(target)
-    base_root = Path(base_root).resolve(strict=True)
-    application_source = Path(application_source).resolve(strict=True)
+    base_root = _absolute_unaliased_directory(base_root)
+    application_source = _absolute_unaliased_directory(application_source)
     output_root = Path(output_root)
     validate_environment(
         base_root,
@@ -3113,6 +3429,11 @@ def rebuild_environment_application_closure(
     output_root.parent.mkdir(parents=True, exist_ok=True)
     output_root.mkdir()
     output_root.chmod(0o755)
+    _assert_disjoint_reseal_roots(
+        base=base_root,
+        source=application_source,
+        destination=output_root,
+    )
     _copy_tree(base_root / "runtime", output_root / "runtime", spec)
     _copy_tree(base_root / "venv", output_root / "venv", spec)
     _copy_tree(SEALED_SOURCE_ROOT / "app", output_root / "app", spec)
@@ -3133,6 +3454,61 @@ def rebuild_environment_application_closure(
     return manifest_path
 
 
+def rebuild_environment_application_closure(
+    base_root: Path,
+    application_source: Path,
+    output_root: Path,
+    target: str,
+    *,
+    expected_base_manifest_digest: str,
+) -> Path:
+    """Re-seal into a new destination through an isolated fixed snapshot."""
+    base_root = _absolute_unaliased_directory(base_root)
+    application_source = _absolute_unaliased_directory(application_source)
+    output_root = Path(os.path.abspath(os.fspath(output_root)))
+    output_parent = _absolute_unaliased_directory(output_root.parent)
+    _assert_publish_destination_absent(output_root)
+    spec = target_spec(target)
+    with _application_reseal_workspace(
+        output_parent, application_source, base_root
+    ) as workspace:
+        snapshot = workspace.path / "application-snapshot"
+        stage = workspace.path / "environment-stage"
+        _copy_application_snapshot(application_source, snapshot, spec)
+        manifest = _rebuild_environment_application_closure_from_snapshot(
+            base_root,
+            snapshot,
+            stage,
+            target,
+            expected_base_manifest_digest=expected_base_manifest_digest,
+        )
+        stage.chmod(0o755)
+        stage_identity = _directory_identity(stage)
+        published = False
+        try:
+            os.replace(stage, output_root)
+            published = True
+            if _directory_identity(output_root) != stage_identity:
+                raise SealedEnvironmentError(
+                    "published re-seal destination identity differs from its stage"
+                )
+            output_root.chmod(IMMUTABLE_DIRECTORY_MODE)
+            validate_environment(output_root, target, run_native_smoke=False)
+            verify_packaged_application_closure(application_source, output_root)
+            return output_root / manifest.name
+        except BaseException:
+            if published:
+                remove_owned_path = _load_cleanup_remove()
+                remove_owned_path(
+                    output_root,
+                    owner_root=output_parent,
+                    operation="remove failed application re-seal destination",
+                    expected_identity=stage_identity,
+                    unseal_read_only=True,
+                )
+            raise
+
+
 def replace_environment_application_closure(
     sealed_root: Path,
     application_source: Path,
@@ -3140,46 +3516,89 @@ def replace_environment_application_closure(
     *,
     expected_base_manifest_digest: str,
 ) -> Path:
-    """Atomically replace one validated stale application closure."""
-    sealed_root = Path(sealed_root).resolve(strict=True)
-    parent = sealed_root.parent.resolve(strict=True)
-    nonce = secrets.token_hex(12)
-    staged = parent / f".{sealed_root.name}.application-reseal.{nonce}"
-    previous = parent / f".{sealed_root.name}.application-previous.{nonce}"
-    published = False
-    try:
-        manifest = rebuild_environment_application_closure(
+    """Atomically replace one environment from an isolated fixed snapshot."""
+    sealed_root = _absolute_unaliased_directory(sealed_root)
+    application_source = _absolute_unaliased_directory(application_source)
+    parent = _absolute_unaliased_directory(sealed_root.parent)
+    spec = target_spec(target)
+    validate_environment(
+        sealed_root,
+        target,
+        expected_manifest_digest=expected_base_manifest_digest,
+        run_native_smoke=False,
+    )
+    validate_packaged_application_closure(application_source)
+    old_identity = _directory_identity(sealed_root)
+    parent_identity = _directory_identity(parent)
+
+    with _application_reseal_workspace(
+        parent, application_source, sealed_root
+    ) as workspace:
+        snapshot = workspace.path / "application-snapshot"
+        staged = workspace.path / "environment-stage"
+        previous = workspace.path / "previous-environment"
+        _copy_application_snapshot(application_source, snapshot, spec)
+        manifest = _rebuild_environment_application_closure_from_snapshot(
             sealed_root,
-            application_source,
+            snapshot,
             staged,
             target,
             expected_base_manifest_digest=expected_base_manifest_digest,
         )
-        # macOS denies renaming a sealed directory whose own mode is 0555,
-        # even when its parent is writable. Validation above binds the entire
-        # old tree before this narrowly scoped publish transition.
+        staged_identity = _directory_identity(staged)
+        workspace.verify()
+        if (
+            _directory_identity(parent) != parent_identity
+            or _directory_identity(sealed_root) != old_identity
+        ):
+            raise SealedEnvironmentError(
+                "sealed application destination identity changed before publish"
+            )
+
+        # macOS requires a writable directory inode for rename. Only the two
+        # already validated roots enter this narrowly scoped transition.
         sealed_root.chmod(0o755)
         staged.chmod(0o755)
-        os.replace(sealed_root, previous)
+        previous_moved = False
+        published = False
         try:
+            workspace.verify()
+            os.replace(sealed_root, previous)
+            previous_moved = True
+            if _directory_identity(previous) != old_identity:
+                raise SealedEnvironmentError(
+                    "previous sealed environment identity changed during publish"
+                )
             os.replace(staged, sealed_root)
-            sealed_root.chmod(IMMUTABLE_DIRECTORY_MODE)
             published = True
-        except Exception:
-            os.replace(previous, sealed_root)
+            if _directory_identity(sealed_root) != staged_identity:
+                raise SealedEnvironmentError(
+                    "published sealed environment identity differs from its stage"
+                )
             sealed_root.chmod(IMMUTABLE_DIRECTORY_MODE)
+            validate_environment(sealed_root, target, run_native_smoke=False)
+            verify_packaged_application_closure(application_source, sealed_root)
+            return sealed_root / manifest.name
+        except BaseException:
+            if published:
+                remove_owned_path = _load_cleanup_remove()
+                remove_owned_path(
+                    sealed_root,
+                    owner_root=parent,
+                    operation="rollback application re-seal publish",
+                    expected_identity=staged_identity,
+                    unseal_read_only=True,
+                )
+            if previous_moved:
+                if _directory_identity(previous) != old_identity:
+                    raise SealedEnvironmentError(
+                        "previous sealed environment changed before rollback"
+                    )
+                os.replace(previous, sealed_root)
+                sealed_root.chmod(IMMUTABLE_DIRECTORY_MODE)
+            elif sealed_root.exists() and _directory_identity(sealed_root) == old_identity:
+                sealed_root.chmod(IMMUTABLE_DIRECTORY_MODE)
             raise
-        validate_environment(sealed_root, target, run_native_smoke=False)
-        verify_packaged_application_closure(application_source, sealed_root)
-        _cleanup_published_output(previous)
-        return sealed_root / manifest.name
-    except Exception:
-        if staged.exists():
-            _cleanup_published_output(staged)
-        if published and previous.exists():
-            _cleanup_published_output(sealed_root)
-            os.replace(previous, sealed_root)
-        raise
 
 
 def _copy_verified_source_snapshot(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -76,6 +77,9 @@ def _packaged_application_closure(base: Path) -> Path:
     platform = app / "ecosystem/defaultspack/platform-artifacts" / artifact_ref
     platform.parent.mkdir(parents=True, exist_ok=True)
     platform.write_bytes(b"runtime shell\n")
+    for index in range(28):
+        extra = platform.parent / f"closure-{index:02d}.json"
+        extra.write_text(f'{{"index":{index}}}\n', encoding="utf-8")
     for relative in (
         "app.py",
         "ecosystem/defaultspack/defaultspack/desktop_app.py",
@@ -113,12 +117,25 @@ def _run_reseal(sealed: Path, application: Path, target: str) -> subprocess.Comp
     )
 
 
+def _embedded_sealed_application(
+    tmp_path: Path,
+    target: str,
+) -> tuple[Path, Path]:
+    application = _packaged_application_closure(tmp_path / "outer")
+    initial = FIXTURES._fixture_sources(tmp_path / "sealed", target)[2]
+    initial.chmod(0o755)
+    sealed = application / "python-runtime"
+    os.replace(initial, sealed)
+    sealed.chmod(BUILDER.IMMUTABLE_DIRECTORY_MODE)
+    return application, sealed
+
+
 def test_application_reseal_cli_replaces_stale_pre_generation_copy(tmp_path: Path) -> None:
     target = "x86_64-unknown-linux-gnu"
-    sealed = FIXTURES._fixture_sources(tmp_path / "sealed", target)[2]
-    sealed.parent.chmod(0o755)
-    application = _packaged_application_closure(tmp_path / "outer")
+    application, sealed = _embedded_sealed_application(tmp_path, target)
     old_manifest = BUILDER._sha256_file(sealed / BUILDER.MANIFEST_FILENAME)
+
+    assert len(BUILDER.validate_packaged_application_closure(application)) == 41
 
     result = _run_reseal(sealed, application, target)
 
@@ -128,6 +145,143 @@ def test_application_reseal_cli_replaces_stale_pre_generation_copy(tmp_path: Pat
     assert f"TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256={new_manifest}" in result.stdout
     BUILDER.validate_environment(sealed, target, run_native_smoke=False)
     BUILDER.verify_packaged_application_closure(application, sealed)
+
+
+def test_application_reseal_stage_is_outside_source_and_sealed_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = "x86_64-unknown-linux-gnu"
+    application, sealed = _embedded_sealed_application(tmp_path, target)
+    digest = BUILDER._sha256_file(sealed / BUILDER.MANIFEST_FILENAME)
+    original = BUILDER._copy_application_snapshot
+    observed: list[Path] = []
+
+    def record_snapshot(source: Path, destination: Path, spec):
+        observed.append(destination)
+        assert not BUILDER._paths_overlap(source.resolve(), destination.parent.resolve())
+        assert not BUILDER._paths_overlap(sealed.resolve(), destination.parent.resolve())
+        return original(source, destination, spec)
+
+    monkeypatch.setattr(BUILDER, "_copy_application_snapshot", record_snapshot)
+    BUILDER.replace_environment_application_closure(
+        sealed,
+        application,
+        target,
+        expected_base_manifest_digest=digest,
+    )
+
+    assert observed
+    assert not list(application.parent.glob(".python-runtime.application-reseal.*"))
+
+
+def test_application_reseal_failure_preserves_original_and_cleans_temp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = "x86_64-unknown-linux-gnu"
+    application, sealed = _embedded_sealed_application(tmp_path, target)
+    digest = BUILDER._sha256_file(sealed / BUILDER.MANIFEST_FILENAME)
+
+    def fail_after_snapshot(*_args, **_kwargs):
+        raise BUILDER.SealedEnvironmentError("injected re-seal failure")
+
+    monkeypatch.setattr(
+        BUILDER,
+        "_rebuild_environment_application_closure_from_snapshot",
+        fail_after_snapshot,
+    )
+    with pytest.raises(BUILDER.SealedEnvironmentError, match="injected"):
+        BUILDER.replace_environment_application_closure(
+            sealed,
+            application,
+            target,
+            expected_base_manifest_digest=digest,
+        )
+
+    assert BUILDER._sha256_file(sealed / BUILDER.MANIFEST_FILENAME) == digest
+    BUILDER.validate_environment(sealed, target, run_native_smoke=False)
+    assert not list(application.parent.glob(".python-runtime.application-reseal.*"))
+
+
+@pytest.mark.parametrize(
+    ("layout", "names"),
+    (
+        ("temp_inside_source", ("source", "temp")),
+        ("source_inside_temp", ("temp", "source")),
+        ("destination_inside_source", ("source", "destination")),
+    ),
+)
+def test_application_reseal_rejects_overlapping_roots(
+    tmp_path: Path,
+    layout: str,
+    names: tuple[str, str],
+) -> None:
+    outer = tmp_path / layout
+    outer.mkdir()
+    inner = outer / "nested"
+    inner.mkdir()
+
+    with pytest.raises(BUILDER.SealedEnvironmentError, match="roots overlap"):
+        BUILDER._assert_disjoint_reseal_roots(
+            **{names[0]: outer, names[1]: inner}
+        )
+
+
+def test_application_reseal_rejects_symlinked_ancestor_alias(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    alias = tmp_path / "source-alias"
+    try:
+        alias.symlink_to(source, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlinks are unavailable: {exc}")
+
+    with pytest.raises(BUILDER.SealedEnvironmentError, match="alias"):
+        BUILDER._absolute_unaliased_directory(alias)
+
+
+def test_application_snapshot_rejects_deep_recursion_before_copy(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    current = source
+    for _index in range(BUILDER.APPLICATION_CLOSURE_MAX_DEPTH + 1):
+        current /= "d"
+        current.mkdir()
+
+    with pytest.raises(BUILDER.SealedEnvironmentError, match="maximum safe depth"):
+        BUILDER._copy_application_snapshot(
+            source,
+            tmp_path / "snapshot",
+            BUILDER.target_spec("x86_64-unknown-linux-gnu"),
+        )
+
+
+def test_application_snapshot_rejects_concurrent_source_addition(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "first.py").write_text("FIRST = 1\n", encoding="utf-8")
+    original = BUILDER._copy_snapshot_file
+    mutated = False
+
+    def copy_and_mutate(*args, **kwargs):
+        nonlocal mutated
+        original(*args, **kwargs)
+        if not mutated:
+            (source / "appeared.py").write_text("APPEARED = 1\n", encoding="utf-8")
+            mutated = True
+
+    monkeypatch.setattr(BUILDER, "_copy_snapshot_file", copy_and_mutate)
+    with pytest.raises(BUILDER.SealedEnvironmentError, match="changed during"):
+        BUILDER._copy_application_snapshot(
+            source,
+            tmp_path / "snapshot",
+            BUILDER.target_spec("x86_64-unknown-linux-gnu"),
+        )
+    assert not (tmp_path / "snapshot/appeared.py").exists()
 
 
 @pytest.mark.parametrize(
