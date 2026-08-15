@@ -21,6 +21,10 @@ const DEFAULT_BASE_ID: &str = "defaults-basepack";
 const DEFAULT_SHELL_ID: &str = "shell.tauri.default";
 const DEFAULT_RUNTIME_ID: &str = "runtime.tauri.application.default";
 const DEFAULT_PROFILE_API_VERSION: &str = "io.tobkiri.profile.v5";
+const EXECUTABLE_CATALOG_API_VERSION: &str = "io.tobkiri.executable-catalog.v4";
+const MAX_CANONICAL_JSON_BYTES: usize = 4 * 1024 * 1024;
+const MAX_CANONICAL_JSON_DEPTH: usize = 64;
+const MAX_SAFE_JSON_INTEGER: u64 = (1_u64 << 53) - 1;
 const DEFAULT_PROFILE_SOURCE: &str =
     "tobkiri_runtime/ecosystem/defaultspack/v4/defaults.profile.v4.json";
 const DEFAULT_PROVIDER_PACK_IDS: [&str; 13] = [
@@ -76,8 +80,67 @@ struct BundleLock {
 #[serde(deny_unknown_fields)]
 struct BundleEntry {
     path: String,
-    kind: String,
+    kind: BundleEntryKind,
     digest: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum BundleEntryKind {
+    Pack,
+    Base,
+    Shell,
+    Profile,
+    ExecutableCatalog,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct VerifiedBundleLock {
+    authority_digests: BTreeMap<String, String>,
+    sidecar_digests: BTreeMap<String, String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecutableCatalog {
+    catalog_api_version: String,
+    pack_id: String,
+    source_identity: String,
+    variants: Vec<ExecutableVariant>,
+    catalog_digest: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecutableVariant {
+    variant_id: String,
+    function_id: String,
+    implementation_path: String,
+    implementation_digest: String,
+    execution_kind: String,
+    platform: String,
+    architecture: String,
+    runtime_abi: String,
+    backend: String,
+    materialization_mode: String,
+    execution_domain_profile: String,
+    operations: Vec<ExecutableOperation>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecutableOperation {
+    contract_id: String,
+    contract_version: String,
+    revision_digest: String,
+    operation_id: String,
+    input_schema: BTreeMap<String, Value>,
+    output_schema: BTreeMap<String, Value>,
+    error_schema: BTreeMap<String, Value>,
+    effect_class: String,
+    timeout_default_ms: u64,
+    timeout_hard_max_ms: u64,
+    idempotency: String,
 }
 
 /// Resolve guardian launch metadata solely from packaged v4 authorities.
@@ -115,7 +178,8 @@ pub(crate) fn resolve(config: &AppConfig) -> Result<GuardianAuthority> {
     )?;
     verify_symlink_free_tree(&pack_root, &pack_root)?;
     let bundle_root = canonical_child_directory(&pack_root, Path::new("v4"), "Pack v4 root")?;
-    let entries = verify_bundle_lock(&bundle_root)?;
+    let bundle_lock = verify_bundle_lock(&bundle_root)?;
+    let entries = &bundle_lock.authority_digests;
 
     require_catalog_digest(
         &entries,
@@ -522,38 +586,280 @@ fn collect_bundle_files(root: &Path, current: &Path, files: &mut BTreeSet<String
     Ok(())
 }
 
-fn verify_bundle_lock(root: &Path) -> Result<BTreeMap<String, String>> {
+fn valid_digest(value: &str) -> bool {
+    value.len() == 71
+        && value.starts_with("sha256:")
+        && value[7..]
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn valid_identifier(value: &str) -> bool {
+    if value.len() > 128 {
+        return false;
+    }
+    let mut parts = value.split(['.', '_', '-']);
+    let Some(first) = parts.next() else {
+        return false;
+    };
+    !first.is_empty()
+        && first.as_bytes()[0].is_ascii_lowercase()
+        && first
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        && parts.all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        })
+}
+
+fn valid_contract_id(value: &str) -> bool {
+    if value.len() > 128 {
+        return false;
+    }
+    let Some((prefix, version)) = value.rsplit_once(".v") else {
+        return false;
+    };
+    valid_identifier(prefix)
+        && !version.is_empty()
+        && version.as_bytes()[0] != b'0'
+        && version.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn validate_canonical_json(value: &Value, depth: usize) -> Result<()> {
+    if depth > MAX_CANONICAL_JSON_DEPTH {
+        bail!("executable catalog JSON exceeds the canonical depth limit");
+    }
+    match value {
+        Value::Null | Value::Bool(_) | Value::String(_) => Ok(()),
+        Value::Number(number) => {
+            let safe = number
+                .as_u64()
+                .map(|item| item <= MAX_SAFE_JSON_INTEGER)
+                .or_else(|| {
+                    number
+                        .as_i64()
+                        .map(|item| item.unsigned_abs() <= MAX_SAFE_JSON_INTEGER)
+                })
+                .unwrap_or(false);
+            if !safe {
+                bail!("executable catalog JSON contains a non-canonical number");
+            }
+            Ok(())
+        }
+        Value::Array(items) => {
+            for item in items {
+                validate_canonical_json(item, depth + 1)?;
+            }
+            Ok(())
+        }
+        Value::Object(items) => {
+            for item in items.values() {
+                validate_canonical_json(item, depth + 1)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_executable_catalog(raw: &[u8], path: &str) -> Result<ExecutableCatalog> {
+    if raw.len() > MAX_CANONICAL_JSON_BYTES {
+        bail!("executable catalog exceeds the canonical size limit");
+    }
+    let mut document: Value = serde_json::from_slice(raw)
+        .with_context(|| format!("executable catalog is malformed: {path}"))?;
+    validate_canonical_json(&document, 0)?;
+    let catalog: ExecutableCatalog = serde_json::from_slice(raw)
+        .with_context(|| format!("executable catalog violates its strict schema: {path}"))?;
+    if catalog.catalog_api_version != EXECUTABLE_CATALOG_API_VERSION
+        || !valid_identifier(&catalog.pack_id)
+        || !valid_digest(&catalog.source_identity)
+        || !valid_digest(&catalog.catalog_digest)
+    {
+        bail!("executable catalog identity is invalid: {path}");
+    }
+    let expected_path = format!("packs/{}.executables.v4.json", catalog.pack_id);
+    if path != expected_path {
+        bail!("executable catalog path does not match its Pack identity: {path}");
+    }
+    let mut variant_ids = BTreeSet::new();
+    let mut function_ids = BTreeSet::new();
+    for variant in &catalog.variants {
+        if !valid_identifier(&variant.variant_id)
+            || !variant_ids.insert(variant.variant_id.as_str())
+            || !valid_identifier(&variant.function_id)
+            || !function_ids.insert(variant.function_id.as_str())
+            || safe_relative(&variant.implementation_path).is_err()
+            || !valid_digest(&variant.implementation_digest)
+            || !matches!(
+                variant.execution_kind.as_str(),
+                "wasm" | "pack_vm" | "host_extension" | "remote"
+            )
+            || variant.platform.is_empty()
+            || variant.architecture.is_empty()
+            || variant.runtime_abi.is_empty()
+            || !valid_identifier(&variant.backend)
+            || !matches!(
+                variant.materialization_mode.as_str(),
+                "eager" | "continuous" | "on_demand" | "event_wake"
+            )
+            || !valid_identifier(&variant.execution_domain_profile)
+            || variant.operations.is_empty()
+        {
+            bail!("executable catalog variant is invalid: {path}");
+        }
+        let mut operations = BTreeSet::new();
+        for operation in &variant.operations {
+            if !valid_contract_id(&operation.contract_id)
+                || operation.contract_version.is_empty()
+                || !valid_digest(&operation.revision_digest)
+                || !valid_identifier(&operation.operation_id)
+                || !operations.insert((
+                    operation.contract_id.as_str(),
+                    operation.operation_id.as_str(),
+                ))
+                || !matches!(
+                    operation.effect_class.as_str(),
+                    "pure" | "read" | "write" | "external_effect" | "privileged"
+                )
+                || operation.timeout_default_ms == 0
+                || operation.timeout_hard_max_ms == 0
+                || !matches!(
+                    operation.idempotency.as_str(),
+                    "none" | "keyed" | "replayable"
+                )
+            {
+                bail!("executable catalog operation is invalid: {path}");
+            }
+            for schema in [
+                &operation.input_schema,
+                &operation.output_schema,
+                &operation.error_schema,
+            ] {
+                validate_canonical_json(&Value::Object(schema.clone().into_iter().collect()), 0)?;
+            }
+        }
+    }
+    let object = document
+        .as_object_mut()
+        .context("executable catalog must be a JSON object")?;
+    object.remove("catalog_digest");
+    let actual_catalog_digest = sha256(&serde_json::to_vec(&document)?);
+    if actual_catalog_digest != catalog.catalog_digest {
+        bail!("executable catalog self-digest mismatch: {path}");
+    }
+    Ok(catalog)
+}
+
+fn authority_pack_identity(raw: &[u8], path: &str) -> Result<(String, String)> {
+    let document: Value = serde_json::from_slice(raw)
+        .with_context(|| format!("Pack authority is malformed: {path}"))?;
+    let pack_id =
+        value_str(&document, "/pack/id").context("Pack authority is missing its Pack identity")?;
+    let source_identity = value_str(&document, "/integrity/source_identity")
+        .context("Pack authority is missing its source identity")?;
+    if value_str(&document, "/pack_api_version") != Some("io.tobkiri.pack.v4")
+        || !valid_identifier(pack_id)
+        || !valid_digest(source_identity)
+    {
+        bail!("bundle entry does not contain a valid Pack authority: {path}");
+    }
+    Ok((pack_id.to_owned(), source_identity.to_owned()))
+}
+
+fn validate_authority_role(kind: BundleEntryKind, raw: &[u8], path: &str) -> Result<()> {
+    let document: Value = serde_json::from_slice(raw)
+        .with_context(|| format!("Pack v4 authority is malformed: {path}"))?;
+    let valid = match kind {
+        BundleEntryKind::Pack => {
+            value_str(&document, "/pack_api_version") == Some("io.tobkiri.pack.v4")
+        }
+        BundleEntryKind::Base => {
+            value_str(&document, "/base_api_version") == Some("io.tobkiri.base.v4")
+        }
+        BundleEntryKind::Shell => {
+            value_str(&document, "/shell_api_version") == Some("io.tobkiri.shell.v5")
+        }
+        BundleEntryKind::Profile => {
+            value_str(&document, "/profile_api_version") == Some(DEFAULT_PROFILE_API_VERSION)
+        }
+        BundleEntryKind::ExecutableCatalog => false,
+    };
+    if !valid {
+        bail!("bundle entry does not match its declared authority role: {path}");
+    }
+    Ok(())
+}
+
+fn verify_bundle_lock(root: &Path) -> Result<VerifiedBundleLock> {
     let raw = read_regular_file(&root.join("bundle.lock.json"), "Pack v4 bundle lock")?;
     let lock: BundleLock =
         serde_json::from_slice(&raw).context("Pack v4 bundle lock is malformed")?;
     if lock.schema != BUNDLE_SCHEMA || lock.entries.is_empty() {
         bail!("Pack v4 bundle lock schema or entries are invalid");
     }
-    let mut verified = BTreeMap::new();
+    let mut authority_digests = BTreeMap::new();
+    let mut sidecar_digests = BTreeMap::new();
+    let mut pack_identities = BTreeMap::new();
+    let mut executable_catalogs = Vec::new();
     for entry in lock.entries {
-        if !matches!(entry.kind.as_str(), "pack" | "base" | "shell" | "profile") {
-            bail!("Pack v4 bundle lock contains an invalid authority kind");
-        }
         let relative = safe_relative(&entry.path)?;
         let candidate = root.join(&relative);
-        let bytes = read_regular_file(&candidate, "Pack v4 locked authority")?;
-        if sha256(&bytes) != entry.digest {
-            bail!("Pack v4 locked authority digest mismatch: {}", entry.path);
+        let bytes = read_regular_file(&candidate, "Pack v4 locked entry")?;
+        if !valid_digest(&entry.digest) || sha256(&bytes) != entry.digest {
+            bail!("Pack v4 locked entry digest mismatch: {}", entry.path);
         }
         let canonical = candidate.canonicalize()?;
         if !canonical.starts_with(root) {
-            bail!("Pack v4 locked authority escapes its root: {}", entry.path);
+            bail!("Pack v4 locked entry escapes its root: {}", entry.path);
         }
-        if verified.insert(entry.path.clone(), entry.digest).is_some() {
+        if authority_digests.contains_key(&entry.path) || sidecar_digests.contains_key(&entry.path)
+        {
             bail!("Pack v4 bundle lock contains a duplicate path");
+        }
+        if entry.kind == BundleEntryKind::ExecutableCatalog {
+            let catalog = validate_executable_catalog(&bytes, &entry.path)?;
+            sidecar_digests.insert(entry.path.clone(), entry.digest);
+            executable_catalogs.push((entry.path, catalog));
+        } else {
+            validate_authority_role(entry.kind, &bytes, &entry.path)?;
+            if entry.kind == BundleEntryKind::Pack {
+                let (pack_id, source_identity) = authority_pack_identity(&bytes, &entry.path)?;
+                if pack_identities.insert(pack_id, source_identity).is_some() {
+                    bail!("Pack v4 bundle contains a duplicate Pack identity");
+                }
+            }
+            authority_digests.insert(entry.path, entry.digest);
+        }
+    }
+    let mut sidecar_pack_ids = BTreeSet::new();
+    for (path, catalog) in executable_catalogs {
+        if !sidecar_pack_ids.insert(catalog.pack_id.clone()) {
+            bail!("Pack v4 bundle contains duplicate executable catalogs");
+        }
+        let source_identity = pack_identities
+            .get(&catalog.pack_id)
+            .with_context(|| format!("executable catalog has no Pack authority: {path}"))?;
+        if source_identity != &catalog.source_identity {
+            bail!("executable catalog source identity disagrees with its Pack: {path}");
         }
     }
     let mut actual = BTreeSet::new();
     collect_bundle_files(root, root, &mut actual)?;
-    if actual != verified.keys().cloned().collect() {
+    let locked = authority_digests
+        .keys()
+        .chain(sidecar_digests.keys())
+        .cloned()
+        .collect();
+    if actual != locked {
         bail!("Pack v4 bundle inventory differs from its lock");
     }
-    Ok(verified)
+    Ok(VerifiedBundleLock {
+        authority_digests,
+        sidecar_digests,
+    })
 }
 
 fn require_catalog_digest(
@@ -808,6 +1114,115 @@ mod tests {
 
     fn rewrite_runtime_pack(config: &AppConfig, mutate: impl FnOnce(&mut Value)) {
         rewrite_locked_document(config, RUNTIME_PACK_PATH, mutate);
+    }
+
+    fn minimal_executable_catalog(source_identity: &str) -> Value {
+        let mut document = serde_json::json!({
+            "catalog_api_version": EXECUTABLE_CATALOG_API_VERSION,
+            "pack_id": "test_pack",
+            "source_identity": source_identity,
+            "variants": [{
+                "variant_id": "test_pack.provider.python",
+                "function_id": "test_pack.provider",
+                "implementation_path": "runtime/provider.py",
+                "implementation_digest": format!("sha256:{}", "2".repeat(64)),
+                "execution_kind": "pack_vm",
+                "platform": "any",
+                "architecture": "any",
+                "runtime_abi": "python3.13",
+                "backend": "tobkiri.python-pack-v4",
+                "materialization_mode": "on_demand",
+                "execution_domain_profile": "sandbox.default.v1",
+                "operations": [{
+                    "contract_id": "test.contract.v1",
+                    "contract_version": "1.0.0",
+                    "revision_digest": format!("sha256:{}", "3".repeat(64)),
+                    "operation_id": "invoke",
+                    "input_schema": {"type": "object"},
+                    "output_schema": {"type": "object"},
+                    "error_schema": {"type": "object"},
+                    "effect_class": "pure",
+                    "timeout_default_ms": 1000,
+                    "timeout_hard_max_ms": 2000,
+                    "idempotency": "none"
+                }]
+            }]
+        });
+        let digest = sha256(&serde_json::to_vec(&document).unwrap());
+        document["catalog_digest"] = Value::String(digest);
+        document
+    }
+
+    fn minimal_sidecar_bundle(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-executable-sidecar-{name}-{}-{unique}",
+            std::process::id()
+        ));
+        let packs = root.join("packs");
+        fs::create_dir_all(&packs).unwrap();
+        let source_identity = format!("sha256:{}", "1".repeat(64));
+        let pack_path = "packs/test_pack.pack.v4.json";
+        let sidecar_path = "packs/test_pack.executables.v4.json";
+        let pack_raw = serde_json::to_vec(&serde_json::json!({
+            "pack_api_version": "io.tobkiri.pack.v4",
+            "pack": {"id": "test_pack"},
+            "integrity": {"source_identity": source_identity.clone()}
+        }))
+        .unwrap();
+        let sidecar_raw =
+            serde_json::to_vec(&minimal_executable_catalog(&source_identity)).unwrap();
+        fs::write(root.join(pack_path), &pack_raw).unwrap();
+        fs::write(root.join(sidecar_path), &sidecar_raw).unwrap();
+        fs::write(
+            root.join("bundle.lock.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schema": BUNDLE_SCHEMA,
+                "entries": [
+                    {
+                        "path": pack_path,
+                        "kind": "pack",
+                        "digest": sha256(&pack_raw)
+                    },
+                    {
+                        "path": sidecar_path,
+                        "kind": "executable_catalog",
+                        "digest": sha256(&sidecar_raw)
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        root.canonicalize().unwrap()
+    }
+
+    fn rewrite_minimal_lock(root: &Path, mutate: impl FnOnce(&mut Value)) {
+        let path = root.join("bundle.lock.json");
+        let mut lock: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        mutate(&mut lock);
+        fs::write(path, serde_json::to_vec(&lock).unwrap()).unwrap();
+    }
+
+    fn rewrite_minimal_sidecar(root: &Path, mutate: impl FnOnce(&mut Value)) {
+        let relative = "packs/test_pack.executables.v4.json";
+        let path = root.join(relative);
+        let mut document: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        mutate(&mut document);
+        let raw = serde_json::to_vec(&document).unwrap();
+        fs::write(path, &raw).unwrap();
+        rewrite_minimal_lock(root, |lock| {
+            let entry = lock["entries"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|entry| entry["path"] == relative)
+                .unwrap();
+            entry["digest"] = Value::String(sha256(&raw));
+        });
     }
 
     fn source_manifest_entries(source_checkout: &Path) -> BTreeMap<String, Value> {
@@ -1637,6 +2052,126 @@ mod tests {
 
     fn fixture(name: &str) -> (PathBuf, AppConfig) {
         fixture_at_layout(name, RELOCATION_LAYOUTS[0].1)
+    }
+
+    #[test]
+    fn executable_catalog_is_verified_as_non_authority_sidecar() {
+        let root = minimal_sidecar_bundle("valid");
+        let verified = verify_bundle_lock(&root).unwrap();
+        assert_eq!(
+            verified
+                .authority_digests
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>(),
+            ["packs/test_pack.pack.v4.json"]
+        );
+        assert_eq!(
+            verified.sidecar_digests.keys().cloned().collect::<Vec<_>>(),
+            ["packs/test_pack.executables.v4.json"]
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn canonical_bundle_executable_catalogs_pass_rust_verifier() {
+        let bundle = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tobkiri_runtime/ecosystem/defaultspack/v4")
+            .canonicalize()
+            .unwrap();
+        let verified = verify_bundle_lock(&bundle).unwrap();
+        assert_eq!(verified.sidecar_digests.len(), 63);
+        assert_eq!(verified.authority_digests.len(), 72);
+        assert!(verified
+            .sidecar_digests
+            .contains_key("packs/defaultspack.executables.v4.json"));
+        assert!(!verified
+            .authority_digests
+            .contains_key("packs/defaultspack.executables.v4.json"));
+    }
+
+    #[test]
+    fn executable_catalog_tamper_fails_locked_raw_digest() {
+        let root = minimal_sidecar_bundle("tamper");
+        fs::write(
+            root.join("packs/test_pack.executables.v4.json"),
+            b"{\"tampered\":true}",
+        )
+        .unwrap();
+        let error = verify_bundle_lock(&root).unwrap_err().to_string();
+        assert!(error.contains("locked entry digest mismatch"), "{error}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn executable_catalog_missing_file_fails_closed() {
+        let root = minimal_sidecar_bundle("missing");
+        fs::remove_file(root.join("packs/test_pack.executables.v4.json")).unwrap();
+        assert!(verify_bundle_lock(&root).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn executable_catalog_role_mismatch_cannot_enter_authority_graph() {
+        let root = minimal_sidecar_bundle("role-mismatch");
+        rewrite_minimal_lock(&root, |lock| {
+            lock["entries"][1]["kind"] = Value::String("profile".to_owned());
+        });
+        let error = verify_bundle_lock(&root).unwrap_err().to_string();
+        assert!(error.contains("declared authority role"), "{error}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn executable_catalog_self_digest_mismatch_fails_closed() {
+        let root = minimal_sidecar_bundle("self-digest");
+        rewrite_minimal_sidecar(&root, |catalog| {
+            catalog["catalog_digest"] = Value::String(format!("sha256:{}", "0".repeat(64)));
+        });
+        let error = verify_bundle_lock(&root).unwrap_err().to_string();
+        assert!(error.contains("self-digest mismatch"), "{error}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn executable_catalog_authority_masquerade_fails_closed() {
+        let root = minimal_sidecar_bundle("authority-masquerade");
+        rewrite_minimal_lock(&root, |lock| {
+            lock["entries"][1]["kind"] = Value::String("pack".to_owned());
+        });
+        let error = verify_bundle_lock(&root).unwrap_err().to_string();
+        assert!(error.contains("declared authority role"), "{error}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn executable_catalog_source_identity_mismatch_fails_closed() {
+        let root = minimal_sidecar_bundle("source-identity");
+        rewrite_minimal_sidecar(&root, |catalog| {
+            catalog["source_identity"] = Value::String(format!("sha256:{}", "9".repeat(64)));
+            let object = catalog.as_object_mut().unwrap();
+            object.remove("catalog_digest");
+            let digest = sha256(&serde_json::to_vec(&catalog).unwrap());
+            catalog["catalog_digest"] = Value::String(digest);
+        });
+        let error = verify_bundle_lock(&root).unwrap_err().to_string();
+        assert!(error.contains("source identity disagrees"), "{error}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn executable_catalog_unknown_schema_field_fails_closed() {
+        let root = minimal_sidecar_bundle("unknown-field");
+        rewrite_minimal_sidecar(&root, |catalog| {
+            catalog["unknown_authority_hint"] = Value::Bool(true);
+            let object = catalog.as_object_mut().unwrap();
+            object.remove("catalog_digest");
+            let digest = sha256(&serde_json::to_vec(&catalog).unwrap());
+            catalog["catalog_digest"] = Value::String(digest);
+        });
+        let error = verify_bundle_lock(&root).unwrap_err().to_string();
+        assert!(error.contains("strict schema"), "{error}");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
