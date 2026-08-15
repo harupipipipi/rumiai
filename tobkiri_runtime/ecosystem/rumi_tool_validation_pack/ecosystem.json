@@ -13,7 +13,7 @@
     "authoritative_owner": true,
     "canonical_v4": {
       "artifact": "pack.v4.json",
-      "artifact_digest": "sha256:105be336f4625ecb03c605bc22b70b72351118c71f8bdf16c4ae0ccf01f1a8a2",
+      "artifact_digest": "sha256:ec680478d367e6768a6ccaf367b6c74e25b48eee4fd6e016cee7c9df35449524",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
       "source_identity": "sha256:b7b5c9c3444c88af9d39541a32d8b463ccbd79448e334ef4838771037a454e60"
     },

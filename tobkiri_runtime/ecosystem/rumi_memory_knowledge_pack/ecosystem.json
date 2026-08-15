@@ -51,7 +51,7 @@
     "author": "Rumi AI Team",
     "canonical_v4": {
       "artifact": "pack.v4.json",
-      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "artifact_digest": "sha256:20bf8969fba8106ff65e3276f32fb01c20e8030cb6ab2efc20a5f37d7190023d",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
       "source_identity": "sha256:369c8c953fe5519ac26858e0c910b9d3b4f6cb5c90d7d2f6fc4b176778dc4967"
     },
@@ -84,7 +84,7 @@
   "pack_identity": "rumi:ecosystem/rumi_memory_knowledge_pack",
   "provenance": {
     "build_identity": "rumi_memory_knowledge_pack:1.0.0",
-    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "content_hash": "sha256:20bf8969fba8106ff65e3276f32fb01c20e8030cb6ab2efc20a5f37d7190023d",
     "signature": null,
     "trust_class": "local"
   },

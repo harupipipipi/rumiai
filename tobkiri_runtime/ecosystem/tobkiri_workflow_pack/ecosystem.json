@@ -6,7 +6,7 @@
   "metadata": {
     "canonical_v4": {
       "artifact": "pack.v4.json",
-      "artifact_digest": "sha256:e68f6fe17c0ca47a94a159d4e918cc353516cf263b133b6eca20a816428679c6",
+      "artifact_digest": "sha256:d061bf7e09d2fdbf3df0f912efe68fe2c6482d580b18f849af0c55f4a07948b7",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
       "source_identity": "sha256:818e4a82c2e7a3732b691920051617b1328ba3182cbda11add788f0b05837f39"
     },
@@ -26,7 +26,7 @@
   "pack_identity": "tobkiri:ecosystem/tobkiri_workflow_pack",
   "provenance": {
     "build_identity": "tobkiri_workflow_pack:4.0.0",
-    "content_hash": "sha256:e68f6fe17c0ca47a94a159d4e918cc353516cf263b133b6eca20a816428679c6",
+    "content_hash": "sha256:d061bf7e09d2fdbf3df0f912efe68fe2c6482d580b18f849af0c55f4a07948b7",
     "signature": null,
     "trust_class": "local"
   },

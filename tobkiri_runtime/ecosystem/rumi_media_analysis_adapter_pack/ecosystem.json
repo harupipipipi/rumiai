@@ -19,7 +19,7 @@
   "metadata": {
     "canonical_v4": {
       "artifact": "pack.v4.json",
-      "artifact_digest": "sha256:f3bdc7fcd149de4e5ea4f9f5d5f672bb1c566eaf04d36f7192c68843bcca65fa",
+      "artifact_digest": "sha256:8745410a540d71f4afc8a189e7daf802673d3a3efa1fb67ca2d7a532e3751616",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
       "source_identity": "sha256:2383a868e187b31697d5d6e3cc282dd8a76669d7351b53f2fadafaa99f227317"
     },

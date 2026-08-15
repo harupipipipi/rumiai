@@ -88,7 +88,7 @@
           "authority": "patch",
           "canonical_v4": {
             "artifact": "pack.v4.json",
-            "artifact_digest": "sha256:b64150979768bb0e76bb1cb3390bdc9217bde28d74db7a7260d50be44d0c75fc",
+            "artifact_digest": "sha256:e2e0c140e32ea27e1d1fdd792dbd46ac332b512664c9bda402af42d4047aa820",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
             "source_identity": "sha256:68afe1096a6680584dd9de5024a0ffed6bd522ff900dc78694c42a4b26943c2f"
           },

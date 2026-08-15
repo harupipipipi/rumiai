@@ -21,7 +21,7 @@
     "authority": "write",
     "canonical_v4": {
       "artifact": "pack.v4.json",
-      "artifact_digest": "sha256:1e66c204ffd46b5927aaee57860a82d308ec690cdcb9f4a35758a32730c78507",
+      "artifact_digest": "sha256:22e399067b25de637152bcf463b577075ea900368a1da470f615c1b398222082",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
       "source_identity": "sha256:ced19cf1404dcd5fa84dd96ccf5c735593ff5c57b9a9ba61af5323dce68bc614"
     },

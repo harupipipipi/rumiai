@@ -7,7 +7,7 @@
     "authoritative_owner": true,
     "canonical_v4": {
       "artifact": "pack.v4.json",
-      "artifact_digest": "sha256:801e1f763a046fc003e5665f201b337a272b56febcffb65be4ed9011a8d3bdd3",
+      "artifact_digest": "sha256:fffbf39da451dd066338191b891e85667f25acfb2099eb6257baf75deb032777",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
       "source_identity": "sha256:2d568d178c7f9f6b790fc6224e3311f21e88c94cb3d44b7a06cb5b132f1a76fa"
     },
@@ -35,7 +35,7 @@
   "pack_identity": "tobkiri:ecosystem/tobkiri_host_pack_control",
   "provenance": {
     "build_identity": "tobkiri_host_pack_control:1.0.0",
-    "content_hash": "sha256:801e1f763a046fc003e5665f201b337a272b56febcffb65be4ed9011a8d3bdd3",
+    "content_hash": "sha256:fffbf39da451dd066338191b891e85667f25acfb2099eb6257baf75deb032777",
     "signature": null,
     "trust_class": "local"
   },

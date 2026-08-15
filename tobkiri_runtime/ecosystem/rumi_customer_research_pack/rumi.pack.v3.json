@@ -86,7 +86,7 @@
           },
           "canonical_v4": {
             "artifact": "pack.v4.json",
-            "artifact_digest": "sha256:7de11ca67c52f4b84bb69da1716c18ccd19048dd1b61eb11ee4e05e48f6a4e24",
+            "artifact_digest": "sha256:9b87e30e1f08f998f37143b65c602c8ac76a95e99efd709b7270527d8f5afefb",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
             "source_identity": "sha256:cb16c518786a1b901e3a5650fa07d47e0cbe27965afd7bae1b1cdc4f882f7f6d"
           },

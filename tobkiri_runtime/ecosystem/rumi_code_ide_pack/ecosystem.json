@@ -8,7 +8,7 @@
     "author": "Rumi AI Team",
     "canonical_v4": {
       "artifact": "pack.v4.json",
-      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "artifact_digest": "sha256:7a3d8ca54b5ffc40215892fe58b1dc3a8c9374de6453363856b70b63c45a1fed",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
       "source_identity": "sha256:90dcc1063765278230742732fd89c10a7013345f8a14a0fed9136e0eddd4cb4d"
     },
@@ -90,7 +90,7 @@
   "pack_identity": "rumi:ecosystem/rumi_code_ide_pack",
   "provenance": {
     "build_identity": "rumi_code_ide_pack:1.0.0",
-    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "content_hash": "sha256:7a3d8ca54b5ffc40215892fe58b1dc3a8c9374de6453363856b70b63c45a1fed",
     "signature": null,
     "trust_class": "local"
   },

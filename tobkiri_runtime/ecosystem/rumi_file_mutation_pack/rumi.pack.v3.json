@@ -89,7 +89,7 @@
           "authority": "mutate",
           "canonical_v4": {
             "artifact": "pack.v4.json",
-            "artifact_digest": "sha256:c494b36bfb4ecd4647c1d887cab880ce2ce368f0549851486e6e83653d469333",
+            "artifact_digest": "sha256:3631adb05772eebedc69cd7bf697a20da88c6d4a5d739b3553e6a8cd1015c4dc",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
             "source_identity": "sha256:b93e5b05bcbf92ec7c3c1bbac385b1d8a0f150579a3616898d9847c681b625df"
           },

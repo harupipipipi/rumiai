@@ -46,6 +46,18 @@ def test_v4_catalog_is_byte_identical_and_uninstalled_variants_fail_closed(
     bundle = MODULE.load_v4_bundle(ROOT)
     assert "shell.tauri.default" in bundle.selected_pack_ids
     assert "shell.cli.default" not in bundle.selected_pack_ids
+    assert bundle.executable_catalogs
+    for pack_id, executable in bundle.executable_catalogs.items():
+        pack = bundle.packs[pack_id].value
+        sidecars = [
+            item
+            for item in pack["artifacts"]
+            if item["path"] == "executables.v4.json"
+        ]
+        assert len(sidecars) == 1
+        assert sidecars[0]["kind"] == "sidecar"
+        assert sidecars[0]["digest"] == executable.digest
+        assert executable.value["source_identity"] == pack["integrity"]["source_identity"]
     assert "shell.tauri.default" in catalog["source_manifest_digests"]
     assert "shell.cli.default" not in catalog["source_manifest_digests"]
     shell = catalog["shell_providers"][0]

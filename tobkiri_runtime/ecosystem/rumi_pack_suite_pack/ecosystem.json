@@ -6,7 +6,7 @@
   "metadata": {
     "canonical_v4": {
       "artifact": "pack.v4.json",
-      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "artifact_digest": "sha256:6ed2a6d5ef85b1a55790d49f223d73140cb88b6a3aa1bd21fd049e889eae46ca",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
       "source_identity": "sha256:927df96460996849550b2f6a9507358a5559cd618a9b42920051e317419da074"
     },
@@ -61,7 +61,7 @@
   "pack_identity": "rumi:ecosystem/rumi_pack_suite_pack",
   "provenance": {
     "build_identity": "rumi_pack_suite_pack:0.1.0",
-    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "content_hash": "sha256:6ed2a6d5ef85b1a55790d49f223d73140cb88b6a3aa1bd21fd049e889eae46ca",
     "signature": null,
     "trust_class": "local"
   },

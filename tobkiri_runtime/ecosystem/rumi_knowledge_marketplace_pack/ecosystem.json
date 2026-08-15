@@ -78,7 +78,7 @@
     },
     "canonical_v4": {
       "artifact": "pack.v4.json",
-      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "artifact_digest": "sha256:ae11e5127c0bb4a1dab5f1a763c5f9b87378b27454f74ef80a9a27613e6ab6b1",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
       "source_identity": "sha256:0add39edb25bd8c1f640624a08a0500399eb258534f798aad22e33ed399dd4d5"
     },
@@ -148,7 +148,7 @@
   "pack_identity": "rumi:ecosystem/rumi_knowledge_marketplace_pack",
   "provenance": {
     "build_identity": "rumi_knowledge_marketplace_pack:0.2.0",
-    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "content_hash": "sha256:ae11e5127c0bb4a1dab5f1a763c5f9b87378b27454f74ef80a9a27613e6ab6b1",
     "signature": null,
     "trust_class": "local"
   },

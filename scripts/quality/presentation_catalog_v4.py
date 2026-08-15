@@ -58,6 +58,7 @@ class V4Bundle:
     bases: Mapping[str, V4Document]
     shells: Mapping[str, V4Document]
     profiles: Mapping[str, V4Document]
+    executable_catalogs: Mapping[str, V4Document]
     selected_pack_ids: tuple[str, ...] = ()
 
 
@@ -129,6 +130,9 @@ def _identity(kind: str, document: Mapping[str, Any]) -> str:
     elif kind == "profile":
         source = document
         field = "profile_id"
+    elif kind == "executable_catalog":
+        source = document
+        field = "pack_id"
     else:
         raise PresentationCatalogError(f"unsupported v4 bundle kind: {kind}")
     if not isinstance(source, Mapping) or not isinstance(source.get(field), str):
@@ -150,6 +154,11 @@ def _validate_v4_documents(bundle: V4Bundle) -> tuple[str, ...]:
     try:
         from domain.runtime_v4 import BundledCatalog, resolve_default_profile
 
+        # BundledCatalog.load is the canonical schema, source-identity, catalog
+        # digest, Pack-sidecar role, and bundle-lock digest validator.  The
+        # presentation projection intentionally consumes none of these
+        # executable sidecars, but it must still verify them as part of the
+        # finite v4 source set before excluding them from the UI catalog.
         catalog = BundledCatalog.load(bundle.root)
         profile = catalog.profiles.get("defaults")
         if profile is None:
@@ -247,6 +256,7 @@ def load_v4_bundle(repository_root: Path) -> V4Bundle:
         "base": {},
         "shell": {},
         "profile": {},
+        "executable_catalog": {},
     }
     seen_paths: set[str] = set()
     for index, entry in enumerate(entries):
@@ -294,6 +304,7 @@ def load_v4_bundle(repository_root: Path) -> V4Bundle:
         bases=documents["base"],
         shells=documents["shell"],
         profiles=documents["profile"],
+        executable_catalogs=documents["executable_catalog"],
     )
     selected_pack_ids = _validate_v4_documents(bundle)
     return V4Bundle(
@@ -302,6 +313,7 @@ def load_v4_bundle(repository_root: Path) -> V4Bundle:
         bases=bundle.bases,
         shells=bundle.shells,
         profiles=bundle.profiles,
+        executable_catalogs=bundle.executable_catalogs,
         selected_pack_ids=selected_pack_ids,
     )
 

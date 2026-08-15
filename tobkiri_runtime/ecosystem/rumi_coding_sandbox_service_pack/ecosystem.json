@@ -23,7 +23,7 @@
     ],
     "canonical_v4": {
       "artifact": "pack.v4.json",
-      "artifact_digest": "sha256:eeaeb9ed727aa1d52757eb210136ffa63f804cbdcc2952b3a7cd39b88479e1a8",
+      "artifact_digest": "sha256:69b5e64e9d88a843fe57c8dea829fcba8498aa43f554fffa3795b77b0e9a18bb",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
       "source_identity": "sha256:6d4a480cc879d085ca5b7ee5d05cd5ff87490e95884c9897f62612aab2752545"
     },

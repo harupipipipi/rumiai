@@ -45,7 +45,7 @@
     "author": "Rumi AI Team",
     "canonical_v4": {
       "artifact": "pack.v4.json",
-      "artifact_digest": "sha256:1e39c2fcf97b3d36efc832b622e67f1a204fb16305fc8693c8b6e77487338193",
+      "artifact_digest": "sha256:91d06a5215a4c108246bf7723728c0801f5ccc0835a9ee3d8daaa1b149e1ccd3",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
       "source_identity": "sha256:e2d83995d747960bba97f667015dac30d433110afe19a3b2cda0818220f38e53"
     },

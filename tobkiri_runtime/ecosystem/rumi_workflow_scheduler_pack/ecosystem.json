@@ -41,7 +41,7 @@
     "author": "Rumi AI Team",
     "canonical_v4": {
       "artifact": "pack.v4.json",
-      "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "artifact_digest": "sha256:68f6f16e72c86f6276a39282e662ad5e81912af4483caaa7cbe91054edf5e8c6",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
       "source_identity": "sha256:e5167067247c9347be2b828efa85065e5d9b1667b6b5ae1cfb727474f5eafc36"
     },
@@ -78,7 +78,7 @@
   "pack_identity": "rumi:ecosystem/rumi_workflow_scheduler_pack",
   "provenance": {
     "build_identity": "rumi_workflow_scheduler_pack:1.0.0",
-    "content_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "content_hash": "sha256:68f6f16e72c86f6276a39282e662ad5e81912af4483caaa7cbe91054edf5e8c6",
     "signature": null,
     "trust_class": "local"
   },
