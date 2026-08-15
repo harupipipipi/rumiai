@@ -739,6 +739,7 @@ def capture_production_dispatch(
     }
     if control_bindings:
         control_session = capture_pack_control_session(
+            active=active,
             packvm_readiness_reader=packvm_readiness_reader,
             active_profile_loader=activation_store.load_active_snapshot,
             bundle_root=bundle_root,

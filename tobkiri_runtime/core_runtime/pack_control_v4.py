@@ -21,6 +21,7 @@ from tobkiri_protocol.secure_persistence import (
     SecureDirectory,
     SecurePersistenceError,
 )
+from ecosystem.defaultspack.domain.runtime_v4 import ActiveDefaultProfile
 
 from .external_pack_catalog_v4 import (
     control_catalog_revision,
@@ -173,11 +174,12 @@ class CapturedPackControlSession:
     def capture(
         cls,
         *,
+        active: ActiveDefaultProfile | None = None,
         packvm_readiness_reader: Callable[[], Mapping[str, Any]] | None = None,
     ) -> "CapturedPackControlSession":
         """Capture the active Profile and canonical catalog revisions."""
         return cls(
-            _capture_binding(),
+            _capture_binding(active),
             packvm_readiness_reader=packvm_readiness_reader,
         )
 
@@ -241,8 +243,11 @@ class CapturedPackControlSession:
     ) -> Mapping[str, Any]:
         """Invoke one qualified operation after exact session/profile checks."""
         del version_range
+        from .bootstrap.profile_capture import profile_capture_scope
+
         if contract_id == CONTROL_PRESENTATION_CONTRACT:
-            return self._invoke_control_presentation(operation_id, payload)
+            with profile_capture_scope():
+                return self._invoke_control_presentation(operation_id, payload)
         if contract_id != PACK_CONTROL_CONTRACT:
             raise PackControlUnapproved("contract is absent from the captured Host session")
         if operation_id not in PACK_CONTROL_OPERATIONS:
@@ -252,7 +257,7 @@ class CapturedPackControlSession:
         self._reject_identity_override(arguments)
         if "approved" in arguments:
             raise PackControlUnapproved("client approval assertions are not trusted")
-        with self._lock:
+        with profile_capture_scope(), self._lock:
             if operation_id == "profile.reload":
                 self._recapture()
                 return self._status(arguments)
@@ -392,6 +397,9 @@ class CapturedPackControlSession:
             raise PackControlStaleRevision("captured Profile session is stale")
 
     def _recapture(self) -> None:
+        from .bootstrap.profile_capture import invalidate_profile_capture_scope
+
+        invalidate_profile_capture_scope()
         self._binding = _capture_binding()
         self._candidates.clear()
 
@@ -584,13 +592,14 @@ class CapturedPackControlSession:
 
 def capture_pack_control_session(
     *,
+    active: ActiveDefaultProfile | None = None,
     packvm_readiness_reader: Callable[[], Mapping[str, Any]] | None = None,
     active_profile_loader: Callable[[], Any] | None = None,
     bundle_root: Path | None = None,
 ) -> CapturedPackControlSession:
     """Capture the Pack control session used by the production HTTP surface."""
     return CapturedPackControlSession(
-        _capture_binding(),
+        _capture_binding(active),
         packvm_readiness_reader=packvm_readiness_reader,
         active_profile_loader=active_profile_loader,
         bundle_root=bundle_root,
@@ -873,8 +882,8 @@ def _declared_operations(record: Mapping[str, Any]) -> list[dict[str, Any]]:
     )
 
 
-def _capture_binding() -> _Binding:
-    state, profile = _active_profile()
+def _capture_binding(active: ActiveDefaultProfile | None = None) -> _Binding:
+    state, profile = _active_profile(active)
     resolved_profile = state["resolved_profile"]
     catalog_revision = control_catalog_revision()
     profile_revision = "sha256:" + _digest(resolved_profile)
@@ -895,11 +904,14 @@ def _capture_binding() -> _Binding:
     )
 
 
-def _active_profile() -> tuple[dict[str, Any], dict[str, Any]]:
+def _active_profile(
+    active: ActiveDefaultProfile | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     try:
-        from .bootstrap.profile_capture import capture_default_profile
+        if active is None:
+            from .bootstrap.profile_capture import capture_default_profile
 
-        active = capture_default_profile()
+            active = capture_default_profile()
     except Exception as error:
         raise PackControlDigestMismatch(
             "active v4 Profile session is missing or invalid"

@@ -22,6 +22,7 @@ from core_runtime.pack_control_v4 import (
 from core_runtime.authority.v4 import AuditUnavailable, AuthorityStore
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
+import core_runtime.bootstrap.profile_capture as profile_capture
 from core_runtime.bootstrap.profile_capture import (
     capture_default_profile,
     prepare_default_profile_confirmation,
@@ -109,6 +110,33 @@ def test_catalog_install_approve_enable_and_restart_read_back(captured_session) 
 
     with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
         assert authority.active_activation_reservation(str(first_activation)) is None
+
+
+def test_control_operation_reuses_only_its_scoped_capture(
+    captured_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated binding checks share one capture, while each operation is fresh."""
+
+    session, _state_path, _user_data = captured_session
+    original_load = profile_capture.ActivationStore.load_active_snapshot
+    loads = 0
+
+    def counted_load(store):
+        nonlocal loads
+        loads += 1
+        return original_load(store)
+
+    monkeypatch.setattr(
+        profile_capture.ActivationStore,
+        "load_active_snapshot",
+        counted_load,
+    )
+
+    assert _invoke(session, "catalog.read")["profile_id"] == "defaults"
+    assert loads == 1
+    assert _invoke(session, "catalog.read")["profile_id"] == "defaults"
+    assert loads == 2
 
 
 def test_enable_does_not_require_unrelated_pack_install_or_approval(

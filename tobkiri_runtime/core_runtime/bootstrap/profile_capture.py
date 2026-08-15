@@ -5,9 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
 
 from ecosystem.defaultspack.domain.runtime_v4 import (
     ActivationStore,
@@ -22,6 +24,58 @@ from tobkiri_protocol.canonical import canonical_digest
 from ..authority.v4 import AuthorityStore
 from ..authority.v4_models import authority_digest
 from ..env_compat import read_migrated_env
+
+
+_ProfilePointerSignature = tuple[int, int, int, int]
+_ProfileCaptureCacheEntry = tuple[ActiveDefaultProfile, _ProfilePointerSignature]
+_PROFILE_CAPTURE_SCOPE: ContextVar[
+    dict[Path, _ProfileCaptureCacheEntry] | None
+] = ContextVar("tobkiri_profile_capture_scope", default=None)
+
+
+@contextmanager
+def profile_capture_scope() -> Iterator[None]:
+    """Bound repeated capture reads to one explicit operation scope.
+
+    The scope is intentionally opt-in and context-local.  It never becomes a
+    process-wide cache: callers open a new scope for each operation, and
+    mutation code invalidates it before recapturing state.
+    """
+
+    existing = _PROFILE_CAPTURE_SCOPE.get()
+    if existing is not None:
+        yield
+        return
+    token = _PROFILE_CAPTURE_SCOPE.set({})
+    try:
+        yield
+    finally:
+        _PROFILE_CAPTURE_SCOPE.reset(token)
+
+
+def invalidate_profile_capture_scope() -> None:
+    """Discard the current operation's cached activation snapshot."""
+
+    cache = _PROFILE_CAPTURE_SCOPE.get()
+    if cache is not None:
+        cache.clear()
+
+
+def _activation_pointer_signature(path: Path) -> _ProfilePointerSignature | None:
+    """Return a cheap identity/version marker for the canonical active pointer."""
+
+    try:
+        stat_result = path.lstat()
+    except OSError:
+        return None
+    if not path.is_file() or path.is_symlink():
+        return None
+    return (
+        int(stat_result.st_dev),
+        int(stat_result.st_ino),
+        int(stat_result.st_size),
+        int(stat_result.st_mtime_ns),
+    )
 
 
 def runtime_user_data_root(base_dir: Path | None = None) -> Path:
@@ -306,6 +360,14 @@ def capture_default_profile(
     active_pointer = state_root / "active.json"
     if state_root.is_symlink() or active_pointer.is_symlink():
         raise ProfileResolutionDenied("Defaults activation state must not be symlinked")
+    cache = _PROFILE_CAPTURE_SCOPE.get()
+    if confirmation is None and cache is not None:
+        signature = _activation_pointer_signature(active_pointer)
+        cached = cache.get(user_data)
+        if cached is not None:
+            if signature == cached[1]:
+                return cached[0]
+            cache.pop(user_data, None)
     if active_pointer.is_file():
         workspace = user_data / "workspaces" / "defaults"
         catalog = BundledCatalog.load(_bundle_root(base_dir))
@@ -341,7 +403,12 @@ def capture_default_profile(
                     activation_id=activation_id,
                     created_at=created_at,
                 )
-            return store.load_active_snapshot()
+            active = store.load_active_snapshot()
+            if confirmation is None and cache is not None:
+                signature = _activation_pointer_signature(active_pointer)
+                if signature is not None:
+                    cache[user_data] = (active, signature)
+            return active
     if active_pointer.exists():
         raise ProfileResolutionDenied("active activation pointer is not a regular file")
     if confirmation is None:
@@ -375,13 +442,20 @@ def capture_default_profile(
             activation_id=activation_id,
             created_at=created_at,
         )
-        return store.load_active_snapshot()
+        active = store.load_active_snapshot()
+        if cache is not None:
+            signature = _activation_pointer_signature(active_pointer)
+            if signature is not None:
+                cache[user_data] = (active, signature)
+        return active
 
 
 __all__ = [
     "activation_audit_receipt",
     "active_default_profile_exists",
     "capture_default_profile",
+    "invalidate_profile_capture_scope",
     "prepare_default_profile_confirmation",
+    "profile_capture_scope",
     "runtime_user_data_root",
 ]
