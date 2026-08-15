@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -117,6 +118,23 @@ FALLBACK_NAMES = frozenset(
 )
 OLD_COMPOSITION_MODULE = "domain.pack_architecture"
 VALID_MANIFEST_AUTHORITIES = frozenset({"v4-authoritative"})
+
+_CHILD_DIAGNOSTIC_ENV_KEYS = (
+    "TOBKIRI_USER_DATA",
+    "RUMI_USER_DATA",
+    "RUMI_SANDBOX_LIMA_STATE",
+    "PYTHONDONTWRITEBYTECODE",
+    "PYTHONPYCACHEPREFIX",
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "TEMP",
+    "TMP",
+    "RUMI_API_BIND_ADDRESS",
+    "RUMI_ALLOW_LEGACY_REMOTE_BEARER",
+)
 
 PACK_API_SOURCE = RUNTIME / "core_runtime" / "pack_api_server.py"
 PACK_API_AUTH_SOURCE = RUNTIME / "core_runtime" / "api" / "auth_gate.py"
@@ -1666,7 +1684,74 @@ def test_pack_api_has_no_hardcoded_legacy_handler_reachability() -> None:
     )
 
 
-def test_fresh_home_legacy_api_probes_are_retired_without_manager_imports() -> None:
+def _child_output_for_diagnostic(value: object) -> str | None:
+    """Convert subprocess output to stable text, including timeout output."""
+
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _child_failure_diagnostic(
+    command: list[str],
+    *,
+    cwd: Path,
+    environment: Mapping[str, str],
+    returncode: int | None,
+    stdout: object,
+    stderr: object,
+) -> str:
+    """Format exact child process context without exposing unrelated secrets."""
+
+    payload = {
+        "command": command,
+        "cwd": str(cwd),
+        "environment": {
+            key: environment.get(key) for key in _CHILD_DIAGNOSTIC_ENV_KEYS
+        },
+        "returncode": returncode,
+        "stdout": _child_output_for_diagnostic(stdout),
+        "stderr": _child_output_for_diagnostic(stderr),
+    }
+    return "fresh-home child process failed: " + json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def test_child_failure_diagnostic_preserves_exact_process_context(tmp_path: Path) -> None:
+    """The child failure path must retain command, environment, and both streams."""
+
+    command = ["python.exe", "-c", "raise SystemExit(7)"]
+    environment = {
+        "TOBKIRI_USER_DATA": str(tmp_path / "fresh-home"),
+        "RUMI_USER_DATA": str(tmp_path / "fresh-home"),
+        "PATH": r"C:\hostedtoolcache\windows\Python\3.11.9\x64",
+    }
+
+    diagnostic = _child_failure_diagnostic(
+        command,
+        cwd=tmp_path,
+        environment=environment,
+        returncode=7,
+        stdout="child stdout",
+        stderr="Traceback: child stderr",
+    )
+
+    assert "python.exe" in diagnostic
+    assert str(tmp_path) in diagnostic
+    assert "child stdout" in diagnostic
+    assert "Traceback: child stderr" in diagnostic
+    assert '"returncode": 7' in diagnostic
+    assert "TOBKIRI_USER_DATA" in diagnostic
+
+
+def test_fresh_home_legacy_api_probes_are_retired_without_manager_imports(
+    tmp_path: Path,
+) -> None:
     """A clean local server yields only typed retirement for legacy probes."""
 
     script = r"""
@@ -1674,67 +1759,95 @@ import http.client
 import json
 import os
 import sys
+import traceback
 
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
 
-os.environ["RUMI_API_BIND_ADDRESS"] = "0.0.0.0"
-os.environ["RUMI_ALLOW_LEGACY_REMOTE_BEARER"] = "1"
-server = PackAPIServer(
-    port=0,
-    panel_auth_manager=PanelAuthManager(bootstrap_secret="verified-local"),
-)
 observed = []
-for cycle in (1, 2):
-    server.start()
-    try:
-        for method, path in (
-            ("GET", "/api/packs"),
-            ("GET", "/api/authority/events"),
-            ("GET", "/api/runtime/available"),
-            ("POST", "/api/packs/scan"),
-            ("POST", "/api/routes/reload"),
-            ("POST", "/api/v4/dispatch"),
-            ("GET", "/api/flows"),
-            ("POST", "/api/flows/legacy/run"),
-            ("POST", "/api/executors/python-file-call"),
-            ("POST", "/api/blocks/python-file-call"),
-            ("POST", "/api/functions/direct-invoke"),
-            ("GET", "/api/setup/complete"),
-            ("POST", "/api/setup/complete"),
-            ("PUT", "/api/setup/complete"),
-            ("PATCH", "/api/setup/complete"),
-            ("DELETE", "/api/setup/complete"),
-            ("OPTIONS", "/api/setup/complete"),
-            ("HEAD", "/api/setup/complete"),
-            ("GET", "/api/setup/complete?probe=fresh-home"),
-        ):
-            connection = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
-            connection.request(
-                method,
-                path,
-                body="{}" if method in {"POST", "PUT", "PATCH", "DELETE", "OPTIONS"} else None,
-                headers={
-                    "Authorization": "Bearer fresh-valid-internal-token",
-                    "Content-Type": "application/json",
-                },
-            )
-            response = connection.getresponse()
-            raw = response.read()
-            payload = json.loads(raw.decode("utf-8")) if raw else {}
-            observed.append(
-                (
-                    cycle,
+server = None
+current_probe = {"phase": "construct"}
+try:
+    os.environ["RUMI_API_BIND_ADDRESS"] = "0.0.0.0"
+    os.environ["RUMI_ALLOW_LEGACY_REMOTE_BEARER"] = "1"
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified-local"),
+    )
+    for cycle in (1, 2):
+        current_probe = {"cycle": cycle, "phase": "server.start"}
+        server.start()
+        try:
+            for method, path in (
+                ("GET", "/api/packs"),
+                ("GET", "/api/authority/events"),
+                ("GET", "/api/runtime/available"),
+                ("POST", "/api/packs/scan"),
+                ("POST", "/api/routes/reload"),
+                ("POST", "/api/v4/dispatch"),
+                ("GET", "/api/flows"),
+                ("POST", "/api/flows/legacy/run"),
+                ("POST", "/api/executors/python-file-call"),
+                ("POST", "/api/blocks/python-file-call"),
+                ("POST", "/api/functions/direct-invoke"),
+                ("GET", "/api/setup/complete"),
+                ("POST", "/api/setup/complete"),
+                ("PUT", "/api/setup/complete"),
+                ("PATCH", "/api/setup/complete"),
+                ("DELETE", "/api/setup/complete"),
+                ("OPTIONS", "/api/setup/complete"),
+                ("HEAD", "/api/setup/complete"),
+                ("GET", "/api/setup/complete?probe=fresh-home"),
+            ):
+                current_probe = {
+                    "cycle": cycle,
+                    "method": method,
+                    "path": path,
+                }
+                connection = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
+                connection.request(
                     method,
                     path,
-                    response.status,
-                    payload.get("data", {}).get("state"),
-                    payload.get("data", {}).get("write_set"),
+                    body="{}" if method in {"POST", "PUT", "PATCH", "DELETE", "OPTIONS"} else None,
+                    headers={
+                        "Authorization": "Bearer fresh-valid-internal-token",
+                        "Content-Type": "application/json",
+                    },
                 )
-            )
-            connection.close()
-    finally:
-        server.stop()
+                response = connection.getresponse()
+                raw = response.read()
+                payload = json.loads(raw.decode("utf-8")) if raw else {}
+                observed.append(
+                    (
+                        cycle,
+                        method,
+                        path,
+                        response.status,
+                        payload.get("data", {}).get("state"),
+                        payload.get("data", {}).get("write_set"),
+                    )
+                )
+                connection.close()
+        finally:
+            current_probe = {"cycle": cycle, "phase": "server.stop"}
+            server.stop()
+except BaseException as error:
+    print(
+        json.dumps(
+            {
+                "child_error": {
+                    "type": type(error).__name__,
+                    "message": str(error),
+                },
+                "current_probe": current_probe,
+                "observed_count": len(observed),
+            },
+            sort_keys=True,
+        ),
+        file=sys.stderr,
+    )
+    traceback.print_exc()
+    raise
 blocked_modules = sorted(
     name
     for name in sys.modules
@@ -1766,13 +1879,48 @@ print(
     )
 )
 """
-    completed = subprocess.run(
-        [sys.executable, "-c", script],
+    command = [sys.executable, "-c", script]
+    fresh_user_data = tmp_path / "fresh-home"
+    child_environment = os.environ.copy()
+    child_environment.update(
+        {
+            "TOBKIRI_USER_DATA": str(fresh_user_data),
+            "RUMI_USER_DATA": str(fresh_user_data),
+            "RUMI_SANDBOX_LIMA_STATE": str(
+                fresh_user_data / "sandbox" / "lima-runtime.json"
+            ),
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONPYCACHEPREFIX": str(tmp_path / "python-cache"),
+        }
+    )
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=RUNTIME,
+            env=child_environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise AssertionError(
+            _child_failure_diagnostic(
+                command,
+                cwd=RUNTIME,
+                environment=child_environment,
+                returncode=None,
+                stdout=error.stdout,
+                stderr=error.stderr,
+            )
+        ) from error
+    assert completed.returncode == 0, _child_failure_diagnostic(
+        command,
         cwd=RUNTIME,
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=30,
+        environment=child_environment,
+        returncode=completed.returncode,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
     )
     evidence = json.loads(completed.stdout)
     assert evidence["blocked_modules"] == []

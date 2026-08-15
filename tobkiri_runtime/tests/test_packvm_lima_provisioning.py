@@ -42,6 +42,7 @@ from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
     _FileLockUnavailable,
     _acquire_exclusive_file_lock,
     _darwin_stat_flags,
+    lima_state_path,
     _load_file_lock_module,
     _process_is_alive,
     _release_exclusive_file_lock,
@@ -857,6 +858,21 @@ def test_default_runtime_root_is_persistent_short_and_restart_stable(
 
     different_state = _default_packvm_lima_home(tmp_path / "other-state", PACKVM_LIMA_INSTANCE)
     assert different_state != first
+
+
+def test_lima_state_path_prefers_canonical_user_data_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PackVM state follows the same canonical root as the v4 runtime."""
+
+    canonical = tmp_path / "canonical-user-data"
+    legacy = tmp_path / "legacy-user-data"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(canonical))
+    monkeypatch.setenv("RUMI_USER_DATA", str(legacy))
+    monkeypatch.delenv("RUMI_SANDBOX_LIMA_STATE", raising=False)
+
+    assert lima_state_path() == canonical / "sandbox" / "lima-runtime.json"
 
 
 def test_lifecycle_rejects_environment_injection_payload(provisioner) -> None:

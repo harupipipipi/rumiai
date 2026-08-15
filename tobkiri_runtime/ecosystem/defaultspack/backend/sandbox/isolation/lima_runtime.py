@@ -27,6 +27,7 @@ from core_runtime.bounded_process_runner import (
     HostBoundedProcessRunner,
     ProcessExecutionPolicy,
 )
+from core_runtime.env_compat import read_migrated_env
 from core_runtime.hmac_key_manager import generate_or_load_signing_key
 from ecosystem.defaultspack.backend.sandbox.isolation.packvm_image_cache import (
     PackVMImageAuthority,
@@ -336,7 +337,9 @@ def lima_state_path() -> Path:
     configured = str(os.environ.get(LIMA_STATE_ENV) or "").strip()
     if configured:
         return Path(configured).expanduser()
-    user_data = str(os.environ.get("RUMI_USER_DATA") or "").strip()
+    user_data = str(
+        read_migrated_env("TOBKIRI_USER_DATA", "RUMI_USER_DATA") or ""
+    ).strip()
     if user_data:
         root = Path(user_data).expanduser()
     else:
