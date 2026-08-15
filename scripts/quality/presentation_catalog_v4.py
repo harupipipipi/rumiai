@@ -658,7 +658,7 @@ def _shell_descriptor(
     if not variants:
         raise PresentationCatalogError(f"verified Shell {shell.identity} has no variant")
     artifact_variants: list[dict[str, Any]] = []
-    seen_targets: set[tuple[str, str]] = set()
+    seen_artifact_targets: set[tuple[str, str]] = set()
     seen_ids: set[str] = set()
     for variant in variants:
         if not isinstance(variant, Mapping):
@@ -666,9 +666,9 @@ def _shell_descriptor(
         platform = str(variant.get("platform") or "")
         architecture = str(variant.get("architecture") or "")
         target = (platform, architecture)
-        if target in seen_targets:
+        if target in seen_artifact_targets:
             raise PresentationCatalogError(f"Shell {shell.identity} duplicates platform variant: {target}")
-        seen_targets.add(target)
+        seen_artifact_targets.add(target)
         artifact_id = f"{shell.identity}.{platform}-{architecture}"
         if artifact_id in seen_ids:
             raise PresentationCatalogError(f"Shell {shell.identity} duplicates artifact identity")
@@ -711,7 +711,7 @@ def _shell_descriptor(
         profile_shell.get("platform"),
         profile_shell.get("architecture"),
     )
-    if requested_target not in seen_targets:
+    if requested_target not in seen_artifact_targets:
         raise PresentationCatalogError(
             f"defaults profile Shell target is not declared: {requested_target}"
         )

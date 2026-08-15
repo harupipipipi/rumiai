@@ -5,6 +5,7 @@ import json
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -85,12 +86,12 @@ def test_source_catalog_drops_stale_installed_metadata_and_release_binding(
     target = tmp_path / "catalog.json"
     MODULE.write_presentation_catalog(ROOT, target)
     catalog = json.loads(target.read_text(encoding="utf-8"))
-    variant = {
+    variant: dict[str, Any] = {
         "artifact_id": "shell.tauri.default.macos-arm64",
         "platform": "macos",
         "architecture": "arm64",
     }
-    installed = {
+    installed: dict[str, Any] = {
         "path": "bundled/presentation-artifacts/shell.tauri.default.macos-arm64/Tobkiri.app",
         "sha256": "sha256:" + "1" * 64,
         "size": 17,
