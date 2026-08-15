@@ -54,6 +54,7 @@ from ..authority.v4 import (
     FunctionPrincipal,
     GrantLifetime,
     GrantRecord,
+    HostExtensionTrustRecord,
     ProviderAuthorityRecord,
     authority_digest,
 )
@@ -386,6 +387,95 @@ def _register_exact_domain(
         raise AuthorityDenied("authenticated session identity changed")
 
 
+def _binding_principal(binding: ResolvedOperationBinding) -> FunctionPrincipal:
+    """Reconstruct the exact authority principal from verified binding data."""
+
+    return FunctionPrincipal(
+        parent_artifact_digest=binding.artifact.digest,
+        function_implementation_digest=binding.function.implementation_digest,
+        function_id=binding.function.function_id,
+        contract_revision_digest=binding.operation.revision_digest,
+        operation_id=binding.operation.operation_id,
+    )
+
+
+def _validate_host_provider_bindings(
+    function_id: str,
+    provider_bindings: tuple[ResolvedOperationBinding, ...],
+) -> str:
+    """Validate a complete Host Extension inventory before importing its hook."""
+
+    if not provider_bindings:
+        raise AuthorityDenied("Host Provider hook has no verified bindings")
+    artifact = provider_bindings[0].artifact
+    if artifact.package_kind is not PackageKind.HOST_EXTENSION:
+        raise AuthorityDenied("Host Provider hook requires a Host Extension package")
+    backend_ids = {variant.backend for variant in artifact.variants}
+    if len(backend_ids) != 1 or any(
+        variant.execution_kind is not ExecutionKind.HOST_EXTENSION
+        for variant in artifact.variants
+    ):
+        raise AuthorityDenied("Host Provider hook artifact boundary is invalid")
+    for binding in provider_bindings:
+        if (
+            binding.artifact != artifact
+            or binding.artifact.package_kind is not PackageKind.HOST_EXTENSION
+            or binding.function.function_id != function_id
+            or binding.function not in artifact.functions
+            or binding.variant not in artifact.variants
+            or binding.function.variant_id != binding.variant.variant_id
+            or binding.operation not in binding.function.operations
+            or binding.variant.execution_kind is not ExecutionKind.HOST_EXTENSION
+            or binding.variant.backend not in backend_ids
+            or binding.principal_ref.value != _binding_principal(binding).principal_id
+        ):
+            raise AuthorityDenied("Host Provider hook verified identity is invalid")
+    return next(iter(backend_ids))
+
+
+def _load_verified_host_provider_factory(
+    pack_root: Path,
+    function_id: str,
+    provider_bindings: tuple[ResolvedOperationBinding, ...],
+) -> tuple[Any, str]:
+    """Import a hook only after its complete Host Extension identity is valid."""
+
+    backend_id = _validate_host_provider_bindings(function_id, provider_bindings)
+    return load_host_provider_factory(pack_root, provider_bindings[0]), backend_id
+
+
+def _host_extension_trust_record(
+    *,
+    active: ActiveDefaultProfile,
+    binding: ResolvedOperationBinding,
+    valid_from: float,
+) -> HostExtensionTrustRecord:
+    """Create exact, activation-bound trust for one verified Host Extension Provider."""
+
+    principal = _binding_principal(binding)
+    _validate_host_provider_bindings(binding.function.function_id, (binding,))
+    activation = active.activation
+    identity_suffix = str(activation["activation_id"]).replace(":", ".")
+    principal_suffix = principal.principal_id.removeprefix("sha256:")[:24]
+    return HostExtensionTrustRecord(
+        trust_id=f"host-extension.{principal_suffix}.{identity_suffix}",
+        parent_artifact_digest=binding.artifact.digest,
+        publisher_lineage=binding.artifact.publisher_lineage,
+        provider_principal_ids=(principal.principal_id,),
+        trust_provenance_digest=canonical_digest(
+            {
+                "source": "verified-host-extension-artifact",
+                "plan_digest": activation["plan_digest"],
+                "artifact_digest": binding.artifact.digest,
+                "publisher_lineage": binding.artifact.publisher_lineage,
+                "provider_principal_id": principal.principal_id,
+            }
+        ),
+        security_epoch=int(activation["security_epoch"]),
+        valid_from=valid_from,
+    )
+
+
 def _commit_pack_control_authority(
     store: AuthorityStore,
     control: Any,
@@ -397,6 +487,7 @@ def _commit_pack_control_authority(
     scope: AuthorityScope,
     authority_label: str = "pack-control",
     pack_approval_revision: str | None = None,
+    host_extension_binding: ResolvedOperationBinding | None = None,
 ) -> None:
     activation = active.activation
     profile = active.resolved.profile
@@ -449,6 +540,15 @@ def _commit_pack_control_authority(
         effect_bundle_digest=scope.digest,
         security_epoch=int(activation["security_epoch"]),
     )
+    host_extension_trust = (
+        _host_extension_trust_record(
+            active=active,
+            binding=host_extension_binding,
+            valid_from=decided_at,
+        )
+        if host_extension_binding is not None
+        else None
+    )
     provider = ProviderAuthorityRecord(
         record_id=(f"provider.defaults.{authority_label}.{operation_suffix}.{record_identity}"),
         provider=target,
@@ -464,8 +564,16 @@ def _commit_pack_control_authority(
                 "target": target.to_dict(),
             }
         ),
-        publisher_lineage="tobkiri.repository",
-        host_extension_id="runtime-tcb",
+        publisher_lineage=(
+            host_extension_trust.publisher_lineage
+            if host_extension_trust is not None
+            else "tobkiri.repository"
+        ),
+        host_extension_id=(
+            host_extension_trust.trust_id
+            if host_extension_trust is not None
+            else "runtime-tcb"
+        ),
         valid_from=decided_at,
         host_broker_binding="tobkiri.request-broker.v4",
     )
@@ -477,7 +585,7 @@ def _commit_pack_control_authority(
         activation_id=str(activation["activation_id"]),
         profile_authority_digest=str(activation["profile_authority_snapshot_digest"]),
         caller_publisher_lineage="tobkiri.repository",
-        target_publisher_lineage="tobkiri.repository",
+        target_publisher_lineage=provider.publisher_lineage,
         scope=scope,
         lifetime=GrantLifetime.PERSISTENT_PROFILE,
         security_epoch=int(activation["security_epoch"]),
@@ -485,14 +593,20 @@ def _commit_pack_control_authority(
         issued_at=decided_at,
     )
     existing = (
+        (
+            store.get_host_extension_trust(host_extension_trust.trust_id)
+            if host_extension_trust is not None
+            else None
+        ),
         store.get_approval(approval.approval_id),
         store.get_provider_authority(provider.record_id),
         store.get_grant(grant.grant_id),
     )
-    expected = (approval, provider, grant)
-    if existing == (None, None, None):
+    expected = (host_extension_trust, approval, provider, grant)
+    if existing == (None, None, None, None):
         control.commit_approval_bundle(
             approval,
+            host_extension_trust=host_extension_trust,
             provider_authorities=(provider,),
             grants=(grant,),
         )
@@ -628,6 +742,17 @@ def capture_production_dispatch(
         verified_effective_artifacts=effective,
         authority_ceilings=ceilings,
     )
+    catalog_bindings = tuple(
+        runtime.composition.catalog.resolve_pinned(
+            str(binding["contract_id"]),
+            str(binding["operation_id"]),
+        )
+        for binding in plan["bindings"]
+    )
+    resolved_binding_by_key = {
+        (binding.operation.contract_id, binding.operation.operation_id): binding
+        for binding in catalog_bindings
+    }
     authority_control = runtime.composition.authority_adapter(authority_store)
     control_targets: dict[tuple[str, str], tuple[str, str, str]] = {}
     control_backend: PackControlBackendV4 | None = None
@@ -744,6 +869,16 @@ def capture_production_dispatch(
             # The immutable plan may still contain a previously selected Pack,
             # but missing/corrupt/stale approval must never recreate authority.
             continue
+        resolved_dynamic_binding = resolved_binding_by_key[key]
+        is_host_extension = (
+            resolved_dynamic_binding.artifact.package_kind
+            is PackageKind.HOST_EXTENSION
+        )
+        if is_host_extension:
+            _validate_host_provider_bindings(
+                resolved_dynamic_binding.function.function_id,
+                (resolved_dynamic_binding,),
+            )
         target = FunctionPrincipal.from_dict(dynamic_binding["function_principal"])
         target_suffix = target.principal_id.removeprefix("sha256:")[:24]
         target_domain = _execution_domain(
@@ -771,8 +906,12 @@ def capture_production_dispatch(
             scope=scope_by_operation[key],
             authority_label="dynamic-pack",
             pack_approval_revision=pack_approval_revision,
+            host_extension_binding=(
+                resolved_dynamic_binding if is_host_extension else None
+            ),
         )
-        approved_host_binding_keys.add(key)
+        if is_host_extension:
+            approved_host_binding_keys.add(key)
         dynamic_domain_ids[(contract_id, operation_id, target.principal_id)] = (
             target_domain.domain_id
         )
@@ -787,6 +926,11 @@ def capture_production_dispatch(
             or str(host_binding["pack_id"]) not in built_in_host_pack_ids
         ):
             continue
+        resolved_host_binding = resolved_binding_by_key[key]
+        _validate_host_provider_bindings(
+            resolved_host_binding.function.function_id,
+            (resolved_host_binding,),
+        )
         target = FunctionPrincipal.from_dict(host_binding["function_principal"])
         target_suffix = target.principal_id.removeprefix("sha256:")[:24]
         target_domain = _execution_domain(
@@ -812,6 +956,7 @@ def capture_production_dispatch(
             target_domain=target_domain,
             scope=scope_by_operation[key],
             authority_label=f"built-in-{host_binding['pack_id']}",
+            host_extension_binding=resolved_host_binding,
         )
         approved_host_binding_keys.add(key)
         dynamic_domain_ids[(key[0], key[1], target.principal_id)] = target_domain.domain_id
@@ -835,13 +980,6 @@ def capture_production_dispatch(
         registered_backends += (_UnavailablePythonPackBackend(),)
     if control_backend is not None:
         registered_backends += (control_backend,)
-    catalog_bindings = tuple(
-        runtime.composition.catalog.resolve_pinned(
-            str(binding["contract_id"]),
-            str(binding["operation_id"]),
-        )
-        for binding in plan["bindings"]
-    )
     binding_by_function: dict[str, list[ResolvedOperationBinding]] = {}
     for resolved_binding in catalog_bindings:
         key = (
@@ -968,20 +1106,16 @@ def capture_production_dispatch(
         return _HostInvocation(envelope)
 
     for function_id, provider_bindings in sorted(binding_by_function.items()):
-        factory = load_host_provider_factory(
+        captured_bindings = tuple(provider_bindings)
+        factory, backend_id = _load_verified_host_provider_factory(
             pack_roots[provider_bindings[0].artifact.pack_id],
-            provider_bindings[0],
+            function_id,
+            captured_bindings,
         )
         if factory is None:
             continue
         if factory.function_id != function_id:
             raise AuthorityDenied("Host Provider hook Function identity changed")
-        backend_ids = {binding.variant.backend for binding in provider_bindings}
-        if len(backend_ids) != 1 or any(
-            binding.variant.execution_kind is not ExecutionKind.HOST_EXTENSION
-            for binding in provider_bindings
-        ):
-            raise AuthorityDenied("Host Provider hook executable boundary is invalid")
         captured_provider = factory.capture(
             HostProviderCaptureContextV4(
                 profile_id=str(profile["profile_id"]),
@@ -989,7 +1123,7 @@ def capture_production_dispatch(
                 security_epoch=int(active.activation["security_epoch"]),
                 activation=active.activation,
                 state_root=authority_user_data / "host_provider_state",
-                provider_bindings=tuple(provider_bindings),
+                provider_bindings=captured_bindings,
                 catalog_bindings=catalog_bindings,
                 domain_ids=dynamic_domain_ids,
                 user_data_root=authority_user_data,
@@ -1006,7 +1140,6 @@ def capture_production_dispatch(
         if {item.key for item in captured_provider.contributions} != expected_keys:
             captured_provider.close()
             raise AuthorityDenied("Host Provider hook contribution set is incomplete")
-        backend_id = next(iter(backend_ids))
         host_contributions_by_backend.setdefault(backend_id, []).extend(
             captured_provider.contributions
         )

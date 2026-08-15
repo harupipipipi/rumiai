@@ -8,7 +8,7 @@ from dataclasses import replace
 
 import pytest
 
-from core_runtime.authority.v4 import AuthorityStore
+from core_runtime.authority.v4 import AuthorityStore, DomainBoundary
 from core_runtime.bootstrap.production_v4 import capture_production_dispatch
 from core_runtime.host_provider_backend_v4 import ExactHostProviderBackendV4
 from core_runtime.host_provider_hooks_v4 import load_host_provider_factory
@@ -156,6 +156,21 @@ def test_optional_workflow_pack_enters_closure_only_after_full_ceremony(
             "tobkiri.workflow.v4",
             "operation.palette",
         )
+        provider_authority = next(
+            item
+            for item in authority.list_provider_authorities()
+            if item.provider.principal_id == binding.principal_ref.value
+        )
+        extension_trust = authority.get_host_extension_trust(
+            provider_authority.host_extension_id
+        )
+        assert extension_trust is not None
+        assert extension_trust.package_kind == "host_extension"
+        assert extension_trust.parent_artifact_digest == binding.artifact.digest
+        assert extension_trust.provider_principal_ids == (binding.principal_ref.value,)
+        provider_domain = authority.get_domain(provider_authority.execution_domain_id)
+        assert provider_domain is not None
+        assert provider_domain.boundary is DomainBoundary.DEDICATED_PROCESS
         assert binding.operation.contract_version == "4.0.0"
         assert restarted.provider_metadata("tobkiri.workflow.v4")
         restarted.assert_operation_ready(
