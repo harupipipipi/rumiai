@@ -22,6 +22,7 @@ from . import SCHEMA
 
 PROTOCOL_SCHEMA = "io.tobkiri.sealed-python-launch.v2"
 ATTESTATION_SCHEMA = "io.tobkiri.sealed-python-attestation.v2"
+ATTESTATION_FILE_SCHEMA = "io.tobkiri.sealed-python-attestation-file.v1"
 ROLE_ENTRYPOINTS = {
     "typed": "kernel_entry.py",
     "defaultspack": "defaultspack_entry.py",
@@ -653,40 +654,231 @@ def _publish_attestation(path: Path, evidence: dict[str, Any]) -> None:
         "utf-8"
     )
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    if temporary.exists() or temporary.is_symlink():
-        raise SealedBootstrapError("attestation temporary destination already exists")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    parent_metadata = path.parent.lstat()
+    parent_identity = _attestation_parent_identity(parent_metadata)
+    published_descriptor = -1
+    directory_descriptor = -1
+    temporary_identity: tuple[int, int, int, int, int] | None = None
     try:
-        descriptor = os.open(temporary, flags, 0o600)
+        if os.name != "nt":
+            directory_descriptor = os.open(
+                path.parent,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+            )
+            if (
+                _attestation_parent_identity(os.fstat(directory_descriptor))
+                != parent_identity
+            ):
+                raise SealedBootstrapError(
+                    "attestation parent identity changed before publication"
+                )
+        try:
+            descriptor = (
+                os.open(temporary.name, flags, 0o600, dir_fd=directory_descriptor)
+                if directory_descriptor >= 0
+                else os.open(temporary, flags, 0o600)
+            )
+        except FileExistsError as exc:
+            raise SealedBootstrapError(
+                "attestation temporary destination already exists"
+            ) from exc
         with os.fdopen(descriptor, "wb", closefd=True) as handle:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        if path.exists() or path.is_symlink():
+            temporary_identity = _attestation_file_identity(os.fstat(handle.fileno()))
+        _validate_published_attestation_metadata(
+            _publication_lstat(temporary, directory_descriptor),
+            path.parent,
+            expected_links=1,
+        )
+        if _publication_exists(path, directory_descriptor):
             raise SealedBootstrapError("attestation destination appeared during publish")
         try:
-            os.link(temporary, path, follow_symlinks=False)
+            if directory_descriptor >= 0:
+                os.link(
+                    temporary.name,
+                    path.name,
+                    src_dir_fd=directory_descriptor,
+                    dst_dir_fd=directory_descriptor,
+                    follow_symlinks=False,
+                )
+            else:
+                os.link(temporary, path, follow_symlinks=False)
         except FileExistsError as exc:
             raise SealedBootstrapError("attestation destination appeared during publish") from exc
-        # os.replace would permit an attacker to overwrite an existing target;
-        # the link-and-unlink publication above is the no-replace equivalent.
-        temporary.unlink()
-        path.chmod(0o600)
-        if os.name != "nt":
-            directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
+        published_descriptor = os.open(
+            path.name if directory_descriptor >= 0 else path,
+            os.O_RDONLY
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0),
+            **(
+                {"dir_fd": directory_descriptor}
+                if directory_descriptor >= 0
+                else {}
+            ),
+        )
+        linked_metadata = os.fstat(published_descriptor)
+        _validate_published_attestation_metadata(
+            linked_metadata,
+            path.parent,
+            expected_links=2,
+        )
+        if (
+            _attestation_file_identity(linked_metadata) != temporary_identity
+            or _attestation_file_identity(
+                _publication_lstat(path, directory_descriptor)
+            )
+            != temporary_identity
+            or _attestation_file_identity(
+                _publication_lstat(temporary, directory_descriptor)
+            )
+            != temporary_identity
+        ):
+            raise SealedBootstrapError(
+                "published attestation identity changed during publication"
+            )
+        # os.replace would permit replacement of a target that appeared during
+        # publication. The atomic link is no-replace; unlinking the temporary
+        # name is the completion boundary observed by Host readers.
+        _publication_unlink_owned(
+            temporary,
+            directory_descriptor,
+            temporary_identity,
+        )
+        if directory_descriptor >= 0:
+            os.fsync(directory_descriptor)
+        final_metadata = os.fstat(published_descriptor)
+        _validate_published_attestation_metadata(
+            final_metadata,
+            path.parent,
+            expected_links=1,
+        )
+        if (
+            _attestation_file_identity(final_metadata) != temporary_identity
+            or _attestation_file_identity(
+                _publication_lstat(path, directory_descriptor)
+            )
+            != temporary_identity
+            or _attestation_parent_identity(path.parent.lstat()) != parent_identity
+            or (
+                directory_descriptor >= 0
+                and _attestation_parent_identity(os.fstat(directory_descriptor))
+                != parent_identity
+            )
+        ):
+            raise SealedBootstrapError(
+                "published attestation identity changed after publication"
+            )
     finally:
-        temporary.unlink(missing_ok=True)
-    _assert_regular_file(
-        path,
-        "published attestation",
-        require_immutable=False,
+        try:
+            if published_descriptor >= 0:
+                os.close(published_descriptor)
+            if temporary_identity is not None:
+                _publication_unlink_owned(
+                    temporary,
+                    directory_descriptor,
+                    temporary_identity,
+                    missing_ok=True,
+                )
+        finally:
+            if directory_descriptor >= 0:
+                os.close(directory_descriptor)
+
+
+def _attestation_file_identity(
+    metadata: os.stat_result,
+) -> tuple[int, int, int, int, int]:
+    """Return the stable fields binding one attestation path to its inode."""
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_mode,
     )
-    if path.stat().st_mode & 0o777 != 0o600:
-        raise SealedBootstrapError("published attestation permissions are not private")
+
+
+def _publication_lstat(path: Path, directory_descriptor: int) -> os.stat_result:
+    """Stat one publication name through the held parent when supported."""
+    if directory_descriptor >= 0:
+        return os.stat(
+            path.name,
+            dir_fd=directory_descriptor,
+            follow_symlinks=False,
+        )
+    return path.lstat()
+
+
+def _publication_exists(path: Path, directory_descriptor: int) -> bool:
+    """Check one no-follow publication name without trusting a resolved path."""
+    try:
+        _publication_lstat(path, directory_descriptor)
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def _publication_unlink_owned(
+    path: Path,
+    directory_descriptor: int,
+    expected_identity: tuple[int, int, int, int, int],
+    *,
+    missing_ok: bool = False,
+) -> None:
+    """Unlink only the exact temporary inode created by this publisher."""
+    try:
+        metadata = _publication_lstat(path, directory_descriptor)
+    except FileNotFoundError:
+        if missing_ok:
+            return
+        raise
+    if _attestation_file_identity(metadata) != expected_identity:
+        raise SealedBootstrapError(
+            "attestation temporary identity changed before cleanup"
+        )
+    if directory_descriptor >= 0:
+        os.unlink(path.name, dir_fd=directory_descriptor)
+    else:
+        path.unlink()
+
+
+def _attestation_parent_identity(
+    metadata: os.stat_result,
+) -> tuple[int, int, int, int | None]:
+    """Bind the parent without treating expected directory mtime changes as swaps."""
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_uid if hasattr(metadata, "st_uid") else None,
+    )
+
+
+def _validate_published_attestation_metadata(
+    metadata: os.stat_result,
+    parent: Path,
+    *,
+    expected_links: int,
+) -> None:
+    """Validate one handle- or no-follow-stat view of the publication inode."""
+    parent_metadata = parent.lstat()
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != expected_links
+        or metadata.st_dev != parent_metadata.st_dev
+        or (
+            hasattr(os, "geteuid")
+            and hasattr(metadata, "st_uid")
+            and metadata.st_uid != os.geteuid()
+        )
+        or (os.name != "nt" and stat.S_IMODE(metadata.st_mode) != 0o600)
+    ):
+        raise SealedBootstrapError("published attestation identity is invalid")
 
 
 def _sys_path_contract(

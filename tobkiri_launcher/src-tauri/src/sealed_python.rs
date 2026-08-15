@@ -2085,13 +2085,37 @@ fn wait_for_attestation(
 ) -> Result<()> {
     let deadline = Instant::now() + STARTUP_TIMEOUT;
     loop {
-        if fs::symlink_metadata(path).is_ok() {
-            validate_attestation_file(path)?;
-            let bytes = read_bounded_regular(path, MAX_ATTESTATION_BYTES)?;
-            let attestation: StartupAttestation = serde_json::from_slice(&bytes)
-                .context("[PYTHON_SEALED_ATTESTATION_INVALID] malformed startup attestation")?;
-            validate_attestation(&attestation, nonce, role, verified)?;
-            return Ok(());
+        match fs::symlink_metadata(path) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() || !metadata.is_file() {
+                    bail!(
+                        "[PYTHON_SEALED_ATTESTATION_INVALID] attestation is not a private regular file"
+                    );
+                }
+                // Bootstrap's no-replace publication has two names until the
+                // temporary name is unlinked.  Only nlink=1 is the completed,
+                // versioned attestation-file lifecycle.
+                if has_multiple_links(path, &metadata)? {
+                    if let Some(status) = child.try_wait()? {
+                        bail!("[PYTHON_SEALED_ATTESTATION_MISSING] sealed Python exited during attestation publication: {status}");
+                    }
+                    if Instant::now() >= deadline {
+                        bail!("[PYTHON_SEALED_ATTESTATION_INVALID] attestation publication did not complete");
+                    }
+                    thread::sleep(Duration::from_millis(20));
+                    continue;
+                }
+                let bytes = read_attestation_file(path)?;
+                let attestation: StartupAttestation = serde_json::from_slice(&bytes)
+                    .context("[PYTHON_SEALED_ATTESTATION_INVALID] malformed startup attestation")?;
+                validate_attestation(&attestation, nonce, role, verified)?;
+                return Ok(());
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error)
+                    .context("[PYTHON_SEALED_ATTESTATION_INVALID] inspect startup attestation")
+            }
         }
         if let Some(status) = child.try_wait()? {
             bail!("[PYTHON_SEALED_ATTESTATION_MISSING] sealed Python exited before attestation: {status}");
@@ -2105,11 +2129,10 @@ fn wait_for_attestation(
     }
 }
 
-fn validate_attestation_file(path: &Path) -> Result<()> {
-    let metadata = fs::symlink_metadata(path)?;
+fn validate_attestation_file(path: &Path, metadata: &fs::Metadata) -> Result<()> {
     if !metadata.is_file()
         || metadata.file_type().is_symlink()
-        || has_multiple_links(path, &metadata)?
+        || has_multiple_links(path, metadata)?
     {
         bail!("[PYTHON_SEALED_ATTESTATION_INVALID] attestation is not a private regular file");
     }
@@ -2123,6 +2146,61 @@ fn validate_attestation_file(path: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn read_attestation_file(path: &Path) -> Result<Vec<u8>> {
+    let before = fs::symlink_metadata(path)?;
+    validate_attestation_file(path, &before)?;
+    let mut file = open_regular(path)?;
+    let opened = file.metadata()?;
+    if !same_attestation_identity(&before, &opened) {
+        bail!("[PYTHON_SEALED_ATTESTATION_INVALID] attestation changed while opened");
+    }
+    let mut bytes = Vec::with_capacity(opened.len() as usize);
+    (&mut file)
+        .take(MAX_ATTESTATION_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 != opened.len() || bytes.len() as u64 > MAX_ATTESTATION_BYTES {
+        bail!("[PYTHON_SEALED_ATTESTATION_INVALID] attestation changed while read");
+    }
+    let after_handle = file.metadata()?;
+    let after_path = fs::symlink_metadata(path)?;
+    validate_attestation_file(path, &after_path)?;
+    if !same_attestation_identity(&opened, &after_handle)
+        || !same_attestation_identity(&opened, &after_path)
+    {
+        bail!("[PYTHON_SEALED_ATTESTATION_INVALID] attestation changed after read");
+    }
+    Ok(bytes)
+}
+
+#[cfg(unix)]
+fn same_attestation_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    left.dev() == right.dev()
+        && left.ino() == right.ino()
+        && left.len() == right.len()
+        && left.mtime() == right.mtime()
+        && left.mtime_nsec() == right.mtime_nsec()
+        && left.permissions().mode() == right.permissions().mode()
+        && left.nlink() == right.nlink()
+        && left.uid() == right.uid()
+}
+
+#[cfg(windows)]
+fn same_attestation_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    left.volume_serial_number() == right.volume_serial_number()
+        && left.file_index() == right.file_index()
+        && left.number_of_links() == right.number_of_links()
+        && left.file_size() == right.file_size()
+        && left.last_write_time() == right.last_write_time()
+        && left.file_attributes() == right.file_attributes()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn same_attestation_identity(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
+    false
 }
 
 fn validate_attestation(

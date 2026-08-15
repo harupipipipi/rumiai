@@ -58,7 +58,8 @@ DIRECTORY_MODES_SCHEMA = "io.tobkiri.sealed-python-directory-modes.v1"
 SOURCE_SNAPSHOT_MANIFEST = ".tobkiri-source-snapshot.v1.json"
 SOURCE_SNAPSHOT_SCHEMA = "io.tobkiri.rootless-source-snapshot.v1"
 MANIFEST_SCHEMA = "io.tobkiri.sealed-python-environment.v1"
-ATTESTATION_SCHEMA = "io.tobkiri.sealed-python-attestation.v1"
+ATTESTATION_SCHEMA = "io.tobkiri.sealed-python-attestation.v2"
+ATTESTATION_FILE_SCHEMA = "io.tobkiri.sealed-python-attestation-file.v1"
 SMOKE_WORKSPACE_PREFIX = ".tobkiri-sealed-python-smoke."
 MANIFEST_SHA_ENV = "TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256"
 LEASE_FILENAME = "lease.v1"
@@ -1857,6 +1858,8 @@ class _NativeSmokeWorkspace:
 
     def read_attestation(self, path: Path) -> dict[str, object]:
         """Read one exact ordinary attestation without following or accepting links."""
+        if not self.attestation_ready(path):
+            raise SealedEnvironmentError("native smoke attestation identity is invalid")
         self.verify()
         if path.parent.parent != self.path or not path.name.startswith("startup-"):
             raise SealedEnvironmentError("native smoke attestation path escaped workspace")
@@ -1867,20 +1870,6 @@ class _NativeSmokeWorkspace:
             or not stat.S_ISDIR(parent_metadata.st_mode)
         ):
             raise SealedEnvironmentError("native smoke attestation parent changed")
-        metadata = path.lstat()
-        if (
-            path.is_symlink()
-            or _is_reparse_point(metadata)
-            or not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_nlink != 1
-            or metadata.st_dev != self.identity.device
-            or (
-                hasattr(metadata, "st_uid")
-                and metadata.st_uid != self.identity.owner
-            )
-            or (os.name != "nt" and stat.S_IMODE(metadata.st_mode) != 0o600)
-        ):
-            raise SealedEnvironmentError("native smoke attestation identity is invalid")
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
         descriptor = os.open(path, flags)
         try:
@@ -1899,6 +1888,10 @@ class _NativeSmokeWorkspace:
         finally:
             if descriptor >= 0:
                 os.close(descriptor)
+        if _path_identity(path) != _path_identity_from_stat(opened):
+            raise SealedEnvironmentError(
+                "native smoke attestation changed after read"
+            )
         if len(raw) > 1024 * 1024:
             raise SealedEnvironmentError("native smoke attestation is too large")
         try:
@@ -1907,8 +1900,55 @@ class _NativeSmokeWorkspace:
             raise SealedEnvironmentError("native smoke attestation is malformed") from exc
         if not isinstance(document, dict):
             raise SealedEnvironmentError("native smoke attestation is malformed")
+        if _path_identity(path) != _path_identity_from_stat(opened):
+            raise SealedEnvironmentError(
+                "native smoke attestation changed after validation"
+            )
         self.verify()
         return document
+
+    def attestation_ready(self, path: Path) -> bool:
+        """Return true only for a fully published, identity-stable attestation."""
+        self.verify()
+        if path.parent.parent != self.path or not path.name.startswith("startup-"):
+            raise SealedEnvironmentError("native smoke attestation path escaped workspace")
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            return False
+        if (
+            path.is_symlink()
+            or _is_reparse_point(metadata)
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_dev != self.identity.device
+            or (
+                hasattr(metadata, "st_uid")
+                and metadata.st_uid != self.identity.owner
+            )
+            or (os.name != "nt" and stat.S_IMODE(metadata.st_mode) != 0o600)
+        ):
+            raise SealedEnvironmentError("native smoke attestation identity is invalid")
+        # Bootstrap's no-replace publication briefly gives the inode two names.
+        # A single link is the completion boundary; never bind an expected
+        # identity to the absent destination or to the temporary name.
+        if metadata.st_nlink != 1:
+            return False
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        descriptor = os.open(path, flags)
+        try:
+            opened = os.fstat(descriptor)
+            if _path_identity_from_stat(opened) != _path_identity_from_stat(metadata):
+                raise SealedEnvironmentError(
+                    "native smoke attestation changed while opened"
+                )
+        finally:
+            os.close(descriptor)
+        if _path_identity(path) != _path_identity_from_stat(opened):
+            raise SealedEnvironmentError(
+                "native smoke attestation changed after readiness check"
+            )
+        self.verify()
+        return True
 
     def cleanup(self) -> None:
         """Remove only this creation-bound workspace through the shared safe helper."""
@@ -2021,7 +2061,9 @@ def _run_role_smoke(
                 text=True,
             )
             deadline = time.monotonic() + 20
-            while not attestation.exists() and process.poll() is None:
+            while process.poll() is None:
+                if workspace.attestation_ready(attestation):
+                    break
                 if time.monotonic() >= deadline:
                     process.terminate()
                     process.communicate(timeout=5)
@@ -2029,7 +2071,7 @@ def _run_role_smoke(
                         f"{role} role did not publish attestation before timeout"
                     )
                 time.sleep(0.02)
-            if not attestation.is_file() or process.poll() is not None:
+            if not workspace.attestation_ready(attestation) or process.poll() is not None:
                 stdout, stderr = process.communicate(timeout=5)
                 detail = (stderr or stdout).strip()
                 raise SealedEnvironmentError(

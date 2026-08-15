@@ -7,6 +7,7 @@ use std::ffi::{OsStr, OsString};
 
 pub const PROTOCOL_SCHEMA: &str = "io.tobkiri.sealed-python-launch.v2";
 pub const ATTESTATION_SCHEMA: &str = "io.tobkiri.sealed-python-attestation.v2";
+pub const ATTESTATION_FILE_SCHEMA: &str = "io.tobkiri.sealed-python-attestation-file.v1";
 pub const BOOTSTRAP_MODULE: &str = "tobkiri_sealed.bootstrap";
 pub const ROLE_TYPED: &str = "typed";
 pub const ROLE_DEFAULTSPACK: &str = "defaultspack";
@@ -23,6 +24,7 @@ pub const ARG_SEPARATOR: &str = "--";
 pub const REQUIRED_TEMPLATE_FRAGMENTS: &[&str] = &[
     PROTOCOL_SCHEMA,
     ATTESTATION_SCHEMA,
+    ATTESTATION_FILE_SCHEMA,
     ROLE_TYPED,
     ROLE_DEFAULTSPACK,
     ROLE_HOST_HELPER,
@@ -32,12 +34,13 @@ pub const REQUIRED_TEMPLATE_FRAGMENTS: &[&str] = &[
     ARG_ENVIRONMENT_ROOT,
     ARG_RUNTIME_OVERLAY_SHA256,
     ARG_OUTER_RUNTIME_MANIFEST_SHA256,
-    "os.replace",
+    "O_EXCL",
+    "os.link",
+    "st_nlink",
     "fsync",
-    "chmod",
 ];
 
-/// The sole accepted argument ordering for the bootstrap v1 boundary.
+/// The sole accepted argument ordering for the bootstrap v2 boundary.
 pub fn launch_arguments(
     role: &str,
     nonce: &str,

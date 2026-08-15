@@ -1498,6 +1498,9 @@ def test_bootstrap_wire_dispatches_all_roles_and_publishes_attestation(
             assert evidence["nonce"] == nonce
             assert evidence["lifetime_lease"] is True
             assert attestation.stat().st_mode & 0o777 == 0o600
+            assert attestation.stat().st_nlink == 1
+            if hasattr(os, "geteuid"):
+                assert attestation.stat().st_uid == os.geteuid()
             assert all(Path(item).resolve().is_relative_to(output) for item in evidence["sys_path"])
             assert all(Path(item).resolve().is_relative_to(output) for item in sys.path)
             assert list(sys.path) == evidence["sys_path"]
@@ -1540,6 +1543,173 @@ def test_bootstrap_wire_dispatches_all_roles_and_publishes_attestation(
         sys.stdout = old_stdout
         os.environ.clear()
         os.environ.update(old_env)
+
+
+def test_bootstrap_atomic_publish_is_readable_by_real_builder_subprocess(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real bootstrap publisher crosses the builder's completed-inode gate."""
+    sealed_root = tmp_path / "application" / "python-runtime"
+    sealed_root.mkdir(parents=True)
+    temp_parent = tmp_path / "host-temp"
+    temp_parent.mkdir(mode=0o700)
+    monkeypatch.setenv("TMPDIR", str(temp_parent))
+    evidence = {
+        "schema": BUILDER.ATTESTATION_SCHEMA,
+        "nonce": "a" * 64,
+        "role": "typed",
+    }
+    source_root = ROOT / ".github" / "scripts" / "sealed_python_sources"
+    code = (
+        "import json,pathlib,sys;"
+        "sys.path.insert(0,sys.argv[1]);"
+        "from tobkiri_sealed import bootstrap;"
+        "bootstrap._publish_attestation(pathlib.Path(sys.argv[2]),json.loads(sys.argv[3]))"
+    )
+    with BUILDER._native_smoke_workspace(sealed_root) as workspace:
+        directory = workspace.create_directory("attestation-typed")
+        attestation = directory / f"startup-{'a' * 64}.json"
+        assert not workspace.attestation_ready(attestation)
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-B",
+                "-c",
+                code,
+                str(source_root),
+                str(attestation),
+                json.dumps(evidence),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=_clean_sealed_test_environment(),
+        )
+        assert result.returncode == 0, result.stderr
+        assert workspace.attestation_ready(attestation)
+        assert workspace.read_attestation(attestation) == evidence
+        assert attestation.stat().st_nlink == 1
+        assert not list(directory.glob(".*.tmp"))
+
+
+@pytest.mark.parametrize("case", ("precreate", "symlink", "hardlink"))
+def test_bootstrap_atomic_publish_rejects_existing_destination(
+    tmp_path: Path,
+    case: str,
+) -> None:
+    """O_EXCL publication never replaces any pre-existing destination kind."""
+    source_root = ROOT / ".github" / "scripts" / "sealed_python_sources"
+    directory = tmp_path / "attestation"
+    directory.mkdir(mode=0o700)
+    attestation = directory / f"startup-{'d' * 64}.json"
+    external = tmp_path / "external"
+    external.write_text("external", encoding="utf-8")
+    if case == "precreate":
+        attestation.write_text("existing", encoding="utf-8")
+    elif case == "symlink":
+        attestation.symlink_to(external)
+    else:
+        os.link(external, attestation)
+    code = (
+        "import pathlib,sys;"
+        "sys.path.insert(0,sys.argv[1]);"
+        "from tobkiri_sealed import bootstrap;"
+        "bootstrap._publish_attestation(pathlib.Path(sys.argv[2]),{'schema':'x'})"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code, str(source_root), str(attestation)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_clean_sealed_test_environment(),
+    )
+    assert result.returncode != 0
+    assert "destination" in result.stderr
+    assert attestation.read_text(encoding="utf-8") in {"existing", "external"}
+    attestation.unlink()
+
+
+@pytest.mark.parametrize("case", ("replace", "tamper"))
+def test_builder_rejects_attestation_replacement_after_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    """A same-shape pathname replacement cannot survive post-parse revalidation."""
+    sealed_root = tmp_path / "application" / "python-runtime"
+    sealed_root.mkdir(parents=True)
+    temp_parent = tmp_path / "host-temp"
+    temp_parent.mkdir(mode=0o700)
+    monkeypatch.setenv("TMPDIR", str(temp_parent))
+    original_loads = BUILDER.json.loads
+    with BUILDER._native_smoke_workspace(sealed_root) as workspace:
+        directory = workspace.create_directory("attestation-typed")
+        attestation = directory / f"startup-{'b' * 64}.json"
+        attestation.write_text('{"schema":"original"}', encoding="utf-8")
+        attestation.chmod(0o600)
+
+        def replace_after_parse(payload: object) -> object:
+            document = original_loads(payload)
+            if case == "replace":
+                displaced = directory / "displaced.json"
+                attestation.rename(displaced)
+                attestation.write_text(
+                    '{"schema":"replacement"}', encoding="utf-8"
+                )
+                attestation.chmod(0o600)
+            else:
+                attestation.write_text('{"schema":"tampered"}', encoding="utf-8")
+            return document
+
+        monkeypatch.setattr(BUILDER.json, "loads", replace_after_parse)
+        with pytest.raises(
+            BUILDER.SealedEnvironmentError,
+            match="changed after validation",
+        ):
+            workspace.read_attestation(attestation)
+
+
+@pytest.mark.parametrize("case", ("symlink", "hardlink", "mode"))
+def test_builder_rejects_unpublished_attestation_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    """Linked or non-private output never becomes a completed publication."""
+    sealed_root = tmp_path / "application" / "python-runtime"
+    sealed_root.mkdir(parents=True)
+    temp_parent = tmp_path / "host-temp"
+    temp_parent.mkdir(mode=0o700)
+    monkeypatch.setenv("TMPDIR", str(temp_parent))
+    external = tmp_path / "external-attestation"
+    external.write_text('{"schema":"external"}', encoding="utf-8")
+    external.chmod(0o600)
+    with BUILDER._native_smoke_workspace(sealed_root) as workspace:
+        directory = workspace.create_directory("attestation-typed")
+        attestation = directory / f"startup-{'c' * 64}.json"
+        if case == "symlink":
+            attestation.symlink_to(external)
+        elif case == "hardlink":
+            os.link(external, attestation)
+        else:
+            attestation.write_text('{"schema":"mode"}', encoding="utf-8")
+            attestation.chmod(0o644)
+        if case == "hardlink":
+            assert not workspace.attestation_ready(attestation)
+        else:
+            with pytest.raises(
+                BUILDER.SealedEnvironmentError,
+                match="identity is invalid",
+            ):
+                workspace.attestation_ready(attestation)
+        with pytest.raises(
+            BUILDER.SealedEnvironmentError,
+            match="identity is invalid",
+        ):
+            workspace.read_attestation(attestation)
+        attestation.unlink()
 
 
 @pytest.mark.parametrize(
@@ -3235,8 +3405,18 @@ def test_bootstrap_and_resource_wiring_match_the_fixed_contract() -> None:
     assert "LOCK_SH" in bootstrap and "LK_RLCK" in bootstrap
     assert 'values.index("--")' in bootstrap
     assert "io.tobkiri.sealed-python-launch.v2" in bootstrap
+    assert BUILDER.ATTESTATION_SCHEMA == "io.tobkiri.sealed-python-attestation.v2"
+    assert BUILDER.ATTESTATION_SCHEMA in bootstrap
+    assert BUILDER.ATTESTATION_SCHEMA in rust_contract
+    assert (
+        BUILDER.ATTESTATION_FILE_SCHEMA
+        == "io.tobkiri.sealed-python-attestation-file.v1"
+    )
+    assert BUILDER.ATTESTATION_FILE_SCHEMA in bootstrap
+    assert BUILDER.ATTESTATION_FILE_SCHEMA in rust_contract
     assert "os.replace" in bootstrap
-    assert "fsync" in bootstrap and "chmod" in bootstrap
+    assert "fsync" in bootstrap and "O_EXCL" in bootstrap
+    assert "os.link" in bootstrap and "st_nlink" in bootstrap
     assert all(f'"{role}"' in bootstrap for role in ("typed", "defaultspack", "host_helper"))
     bootstrap_strings = {
         node.value
