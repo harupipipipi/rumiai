@@ -694,6 +694,7 @@ fn rebase_staged_sealed_python(staged_root: &Path) -> io::Result<()> {
         ));
     }
     let sealed_root = staged_root.join(SEALED_PYTHON_ROOT);
+    let work_budget = sealed_python_reseal_work_budget(&sealed_root, &expected)?;
     let python = packaging_toolchain::verified_tool("python")?;
     let mut command = python.command()?;
     command.args([
@@ -710,7 +711,7 @@ fn rebase_staged_sealed_python(staged_root: &Path) -> io::Result<()> {
         std::ffi::OsString::from("--rebase-application-source"),
         staged_root.as_os_str().to_owned(),
     ]);
-    let output = command.output()?;
+    let output = command.output_with_budget(work_budget)?;
     if !output.status.success() {
         return Err(invalid_release(format!(
             "sealed Python application re-seal failed: {}",
@@ -734,6 +735,58 @@ fn rebase_staged_sealed_python(staged_root: &Path) -> io::Result<()> {
         ));
     }
     Ok(())
+}
+
+fn sealed_python_reseal_work_budget(
+    sealed_root: &Path,
+    expected_manifest_sha256: &str,
+) -> io::Result<packaging_toolchain::VerifiedOutputBudget> {
+    let manifest_path = sealed_root.join(SEALED_PYTHON_MANIFEST);
+    require_regular_file(&manifest_path, "re-seal work inventory")?;
+    let manifest = fs::read(&manifest_path)?;
+    if !valid_raw_sha256(expected_manifest_sha256)
+        || raw_byte_digest(&manifest) != expected_manifest_sha256
+    {
+        return Err(invalid_release(
+            "re-seal work inventory differs from the formal binding",
+        ));
+    }
+    let document: serde_json::Value = serde_json::from_slice(&manifest).map_err(|error| {
+        invalid_release(format!("re-seal work inventory is malformed: {error}"))
+    })?;
+    let files = document
+        .get("files")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| invalid_release("re-seal work inventory files are missing"))?;
+    let mut inventory_bytes = 0_u64;
+    for entry in files {
+        let relative = entry
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| invalid_release("re-seal work inventory path is missing"))?;
+        let size = entry
+            .get("size")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| invalid_release("re-seal work inventory size is missing"))?;
+        let path = sealed_root.join(safe_release_relative_path(
+            relative,
+            "re-seal work inventory file",
+        )?);
+        require_regular_file(&path, "re-seal work inventory file")?;
+        let metadata = fs::metadata(&path)?;
+        reject_release_hardlink(&metadata, &path)?;
+        if metadata.len() != size {
+            return Err(invalid_release(format!(
+                "re-seal work inventory size drift: {relative}"
+            )));
+        }
+        inventory_bytes = inventory_bytes
+            .checked_add(size)
+            .ok_or_else(|| invalid_release("re-seal work inventory byte count overflow"))?;
+    }
+    let file_count = u64::try_from(files.len())
+        .map_err(|_| invalid_release("re-seal work inventory file count overflow"))?;
+    packaging_toolchain::VerifiedOutputBudget::sealed_python_reseal(inventory_bytes, file_count)
 }
 
 fn bind_sealed_python_root(root: &Path, require_formal_binding: bool) -> io::Result<()> {
@@ -5618,6 +5671,8 @@ mod tests {
         )
         .unwrap();
         bind_sealed_python_root(&staged.join(SEALED_PYTHON_ROOT), true).unwrap();
+        sealed_python_reseal_work_budget(&staged.join(SEALED_PYTHON_ROOT), &inventory_digest)
+            .expect("digest-bound staged inventory should authorize a re-seal work budget");
 
         let mut swapped = manifest.clone();
         swapped["environment_digest"] = swapped["package_provenance"]["release_digest"].clone();
@@ -5645,6 +5700,7 @@ mod tests {
             .unwrap();
         }
         assert!(bind_sealed_python_root(&root, true).is_err());
+        assert!(sealed_python_reseal_work_budget(&root, &inventory_digest).is_err());
 
         let mut prefixed = manifest;
         prefixed["sentinels"]["stdlib_sha256"] =
@@ -6097,6 +6153,11 @@ mod tests {
             .find("write_runtime_resource_manifest(&staged_root)")
             .expect("outer runtime manifest must be final");
         assert!(generate < reseal && reseal < manifest);
+        let rebase = &source[source.find("fn rebase_staged_sealed_python").unwrap()
+            ..source.find("fn bind_sealed_python_root").unwrap()];
+        assert!(rebase.contains("sealed_python_reseal_work_budget(&sealed_root, &expected)"));
+        assert!(rebase.contains("command.output_with_budget(work_budget)"));
+        assert!(!rebase.contains("command.output()?"));
     }
 
     #[test]

@@ -13,6 +13,17 @@ use std::process::{Child, Command, ExitStatus, Output, Stdio};
 #[cfg(target_os = "macos")]
 use std::sync::Arc;
 
+#[cfg(target_os = "macos")]
+const DARWIN_MAX_CAPTURE_BYTES: usize = 64 * 1024 * 1024;
+#[cfg(target_os = "macos")]
+const DARWIN_OUTPUT_DIAGNOSTIC_BYTES: usize = 4 * 1024;
+const SEALED_RESEAL_MAX_INVENTORY_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const SEALED_RESEAL_MAX_FILE_COUNT: u64 = 100_000;
+const SEALED_RESEAL_MIN_SECONDS: u64 = 30;
+const SEALED_RESEAL_MAX_SECONDS: u64 = 240;
+const SEALED_RESEAL_BYTES_PER_SECOND: u64 = 4 * 1024 * 1024;
+const SEALED_RESEAL_FILES_PER_SECOND: u64 = 500;
+
 use sha2::{Digest, Sha256};
 
 #[cfg(target_os = "macos")]
@@ -37,6 +48,44 @@ pub const GIT_SHA256_ENV: &str = "TOBKIRI_PACKAGING_GIT_SHA256";
 pub const PYTHON_SNAPSHOT_ENV: &str = "TOBKIRI_PACKAGING_PYTHON_SNAPSHOT";
 #[cfg(target_os = "macos")]
 pub const PYTHON_INVENTORY_SHA256_ENV: &str = "TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256";
+
+/// A fail-closed execution budget derived from a verified packaging contract.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VerifiedOutputBudget {
+    duration: std::time::Duration,
+}
+
+impl VerifiedOutputBudget {
+    /// Derive the sealed-application re-seal budget from its digest-bound
+    /// inventory. Callers must obtain both values from that verified manifest.
+    pub fn sealed_python_reseal(inventory_bytes: u64, file_count: u64) -> io::Result<Self> {
+        if inventory_bytes == 0
+            || inventory_bytes > SEALED_RESEAL_MAX_INVENTORY_BYTES
+            || file_count == 0
+            || file_count > SEALED_RESEAL_MAX_FILE_COUNT
+        {
+            return Err(invalid(
+                "sealed Python re-seal inventory work exceeds the formal contract",
+            ));
+        }
+        let byte_seconds = inventory_bytes
+            .checked_add(SEALED_RESEAL_BYTES_PER_SECOND - 1)
+            .ok_or_else(|| invalid("sealed Python re-seal byte budget overflow"))?
+            / SEALED_RESEAL_BYTES_PER_SECOND;
+        let file_seconds = file_count
+            .checked_add(SEALED_RESEAL_FILES_PER_SECOND - 1)
+            .ok_or_else(|| invalid("sealed Python re-seal file budget overflow"))?
+            / SEALED_RESEAL_FILES_PER_SECOND;
+        let seconds = SEALED_RESEAL_MIN_SECONDS
+            .checked_add(byte_seconds)
+            .and_then(|value| value.checked_add(file_seconds))
+            .ok_or_else(|| invalid("sealed Python re-seal execution budget overflow"))?
+            .min(SEALED_RESEAL_MAX_SECONDS);
+        Ok(Self {
+            duration: std::time::Duration::from_secs(seconds),
+        })
+    }
+}
 
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message.into())
@@ -769,31 +818,21 @@ impl<'a> VerifiedCommand<'a> {
             Err(error) => return VerifiedSpawnOutcome::NoChild(error),
         };
         child._python_installation = self.tool.python_installation.clone();
-        let capture_fds = [
-            child.stdout.as_ref().map(std::os::fd::AsRawFd::as_raw_fd),
-            child.stderr.as_ref().map(std::os::fd::AsRawFd::as_raw_fd),
-        ];
-        for fd in capture_fds.into_iter().flatten() {
-            let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-            if flags == -1
-                || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1
-            {
-                let primary = io::Error::last_os_error();
-                let containment = child.kill().and_then(|()| {
-                    child
-                        .wait_nonblocking_until(
-                            std::time::Instant::now() + std::time::Duration::from_secs(2),
-                        )?
-                        .ok_or_else(|| invalid("timed out reaping Darwin child after pipe failure"))
-                        .map(|_| ())
-                });
-                return match containment {
-                    Ok(()) => VerifiedSpawnOutcome::ReapedFailure(primary),
-                    Err(containment) => VerifiedSpawnOutcome::Uncontained(invalid(format!(
-                        "{primary}; Darwin child containment also failed: {containment}"
-                    ))),
-                };
-            }
+        if let Err(primary) = child.start_output_readers() {
+            let containment = child.kill().and_then(|()| {
+                child
+                    .wait_nonblocking_until(
+                        std::time::Instant::now() + std::time::Duration::from_secs(2),
+                    )?
+                    .ok_or_else(|| invalid("timed out reaping Darwin child after reader failure"))
+                    .map(|_| ())
+            });
+            return match containment {
+                Ok(()) => VerifiedSpawnOutcome::ReapedFailure(primary),
+                Err(containment) => VerifiedSpawnOutcome::Uncontained(invalid(format!(
+                    "{primary}; Darwin child containment also failed: {containment}"
+                ))),
+            };
         }
         let pid = child.pid;
         let result = (|| {
@@ -856,12 +895,28 @@ impl<'a> VerifiedCommand<'a> {
     }
 
     pub fn output(&mut self) -> io::Result<Output> {
+        self.output_with_optional_budget(None)
+    }
+
+    /// Collect output under a typed packaging-operation work budget.
+    pub fn output_with_budget(&mut self, budget: VerifiedOutputBudget) -> io::Result<Output> {
+        self.output_with_optional_budget(Some(budget))
+    }
+
+    fn output_with_optional_budget(
+        &mut self,
+        budget: Option<VerifiedOutputBudget>,
+    ) -> io::Result<Output> {
         #[cfg(target_os = "macos")]
         {
             return match self.spawn_darwin(true) {
-                VerifiedSpawnOutcome::Running(VerifiedChild::Darwin(child)) => {
-                    child.wait_with_output()
-                }
+                VerifiedSpawnOutcome::Running(VerifiedChild::Darwin(child)) => match budget {
+                    Some(budget) => child.wait_with_output_until(
+                        std::time::Instant::now() + budget.duration,
+                        std::time::Duration::from_secs(2),
+                    ),
+                    None => child.wait_with_output(),
+                },
                 VerifiedSpawnOutcome::NoChild(error)
                 | VerifiedSpawnOutcome::ReapedFailure(error)
                 | VerifiedSpawnOutcome::Uncontained(error) => Err(error),
@@ -870,6 +925,7 @@ impl<'a> VerifiedCommand<'a> {
         }
         #[cfg(not(target_os = "macos"))]
         {
+            let _ = budget;
             let mut command = self.command_with_stdio(true)?;
             command.stdin(Stdio::null());
             command.spawn()?.wait_with_output()
@@ -900,6 +956,7 @@ fn spawn_suspended_darwin(
         ) -> i32;
         fn posix_spawnattr_init(attributes: *mut *mut std::ffi::c_void) -> i32;
         fn posix_spawnattr_setflags(attributes: *mut *mut std::ffi::c_void, flags: i16) -> i32;
+        fn posix_spawnattr_setpgroup(attributes: *mut *mut std::ffi::c_void, pgroup: i32) -> i32;
         fn posix_spawnattr_destroy(attributes: *mut *mut std::ffi::c_void) -> i32;
         fn posix_spawn_file_actions_init(actions: *mut *mut std::ffi::c_void) -> i32;
         fn posix_spawn_file_actions_addfchdir_np(
@@ -980,8 +1037,16 @@ fn spawn_suspended_darwin(
     let result = unsafe {
         let mut code = posix_spawnattr_init(&mut attributes);
         if code == 0 {
-            code =
-                posix_spawnattr_setflags(&mut attributes, libc::POSIX_SPAWN_START_SUSPENDED as i16);
+            code = posix_spawnattr_setflags(
+                &mut attributes,
+                (libc::POSIX_SPAWN_START_SUSPENDED | libc::POSIX_SPAWN_SETPGROUP) as i16,
+            );
+        }
+        if code == 0 {
+            // A zero pgroup makes the child the leader of a fresh process
+            // group. This is established by the kernel before any child code
+            // runs, so timeout containment never relies on a racy setpgid.
+            code = posix_spawnattr_setpgroup(&mut attributes, 0);
         }
         if code == 0 {
             code = posix_spawn_file_actions_init(&mut actions);
@@ -1062,10 +1127,39 @@ fn spawn_suspended_darwin(
     if result != 0 {
         return Err(io::Error::from_raw_os_error(result));
     }
+    if unsafe { libc::getpgid(pid) } != pid {
+        let primary = invalid("Darwin child did not enter its dedicated process group");
+        let killed = unsafe { libc::kill(pid, libc::SIGKILL) };
+        if killed == -1 {
+            return Err(invalid(format!(
+                "{primary}; failed to signal child with invalid process-group identity"
+            )));
+        }
+        let mut status = 0;
+        let reaped = loop {
+            let result = unsafe { libc::waitpid(pid, &mut status, 0) };
+            if result == pid {
+                break true;
+            }
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::EINTR) {
+                break false;
+            }
+        };
+        if !reaped {
+            return Err(invalid(format!(
+                "{primary}; failed to contain child with invalid process-group identity"
+            )));
+        }
+        return Err(primary);
+    }
     let child = DarwinChild {
         pid,
+        process_group: pid,
         stdout: stdout_read,
         stderr: stderr_read,
+        stdout_reader: None,
+        stderr_reader: None,
         status: None,
         state: DarwinChildState::Running,
         _python_installation: None,
@@ -1173,8 +1267,11 @@ fn macos_guest_code_identity(pid: i32) -> io::Result<Vec<u8>> {
 #[cfg(target_os = "macos")]
 pub struct DarwinChild {
     pid: i32,
+    process_group: i32,
     stdout: Option<File>,
     stderr: Option<File>,
+    stdout_reader: Option<DarwinOutputReader>,
+    stderr_reader: Option<DarwinOutputReader>,
     status: Option<ExitStatus>,
     state: DarwinChildState,
     _python_installation: Option<Arc<MacOSPythonInstallationLease>>,
@@ -1191,7 +1288,52 @@ enum DarwinChildState {
 }
 
 #[cfg(target_os = "macos")]
+#[derive(Default)]
+struct DarwinCapturedStream {
+    bytes: Vec<u8>,
+    error: Option<String>,
+}
+
+#[cfg(target_os = "macos")]
+struct DarwinOutputReader {
+    receiver: std::sync::mpsc::Receiver<DarwinCapturedStream>,
+    thread: Option<std::thread::JoinHandle<()>>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(target_os = "macos")]
+enum DarwinReaderPoll {
+    Finished(DarwinCapturedStream),
+    Pending,
+    Failed(String),
+}
+
+#[cfg(target_os = "macos")]
 impl DarwinChild {
+    fn start_output_readers(&mut self) -> io::Result<()> {
+        use std::sync::atomic::{AtomicBool, AtomicUsize};
+
+        if self.stdout_reader.is_some() || self.stderr_reader.is_some() {
+            return Err(invalid("Darwin output readers were already started"));
+        }
+        let budget = Arc::new(AtomicUsize::new(DARWIN_MAX_CAPTURE_BYTES));
+        let stop = Arc::new(AtomicBool::new(false));
+        if let Some(file) = self.stdout.take() {
+            set_nonblocking(&file)?;
+            self.stdout_reader = Some(spawn_darwin_output_reader(
+                file,
+                Arc::clone(&budget),
+                Arc::clone(&stop),
+                "stdout",
+            )?);
+        }
+        if let Some(file) = self.stderr.take() {
+            set_nonblocking(&file)?;
+            self.stderr_reader = Some(spawn_darwin_output_reader(file, budget, stop, "stderr")?);
+        }
+        Ok(())
+    }
+
     fn wait_nonblocking_until(
         &mut self,
         deadline: std::time::Instant,
@@ -1261,6 +1403,32 @@ impl DarwinChild {
         Ok(status)
     }
 
+    fn kill_process_group(&mut self) -> io::Result<()> {
+        if self.state == DarwinChildState::Lost {
+            return Err(invalid(
+                "refusing to signal a lost Darwin child process group",
+            ));
+        }
+        if self.state == DarwinChildState::ExternalReaped {
+            return Err(invalid(
+                "refusing to signal an externally reaped Darwin child process group",
+            ));
+        }
+        if self.process_group <= 0 || self.process_group != self.pid {
+            return Err(invalid("Darwin child process group identity is invalid"));
+        }
+        if unsafe { libc::kill(-self.process_group, libc::SIGKILL) } == -1 {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::ESRCH) {
+                return Err(error);
+            }
+        }
+        if self.status.is_none() {
+            self.state = DarwinChildState::KillSent;
+        }
+        Ok(())
+    }
+
     fn kill(&mut self) -> io::Result<()> {
         if self.status.is_some() {
             self.state = DarwinChildState::Reaped;
@@ -1272,58 +1440,33 @@ impl DarwinChild {
         if self.state == DarwinChildState::ExternalReaped {
             return Err(invalid("Darwin child was already reaped externally"));
         }
-        if unsafe { libc::kill(self.pid, libc::SIGKILL) } == -1 {
-            let error = io::Error::last_os_error();
-            if matches!(error.raw_os_error(), Some(libc::ESRCH) | Some(libc::ECHILD)) {
-                if error.raw_os_error() == Some(libc::ECHILD) {
-                    self.state = DarwinChildState::ExternalReaped;
-                    return Err(invalid("Darwin child was already reaped externally"));
-                }
-                match self.wait_nonblocking_until(
-                    std::time::Instant::now() + std::time::Duration::from_secs(2),
-                )? {
-                    Some(_) => Ok(()),
-                    None => {
-                        self.state = DarwinChildState::Lost;
-                        Err(invalid("Darwin child was lost before reap"))
-                    }
-                }
-            } else {
-                self.state = DarwinChildState::Lost;
-                Err(error)
-            }
-        } else {
-            self.state = DarwinChildState::KillSent;
-            Ok(())
-        }
+        self.kill_process_group()
     }
 
-    fn wait_with_output(mut self) -> io::Result<Output> {
-        use std::sync::{atomic::AtomicUsize, Arc};
-        const MAX_CAPTURE_BYTES: usize = 64 * 1024 * 1024;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        let budget = Arc::new(AtomicUsize::new(MAX_CAPTURE_BYTES));
-        let stdout_budget = Arc::clone(&budget);
-        let stdout = self.stdout.take().map(|mut file| {
-            std::thread::spawn(move || {
-                let mut bytes = Vec::new();
-                read_nonblocking_to_end(&mut file, &mut bytes, deadline, &stdout_budget)
-                    .map(|()| bytes)
-            })
-        });
-        let stderr_budget = Arc::clone(&budget);
-        let stderr = self.stderr.take().map(|mut file| {
-            std::thread::spawn(move || {
-                let mut bytes = Vec::new();
-                read_nonblocking_to_end(&mut file, &mut bytes, deadline, &stderr_budget)
-                    .map(|()| bytes)
-            })
-        });
-        let status_result = match self.wait_nonblocking_until(deadline) {
+    fn wait_with_output(self) -> io::Result<Output> {
+        self.wait_with_output_until(
+            std::time::Instant::now() + std::time::Duration::from_secs(30),
+            std::time::Duration::from_secs(2),
+        )
+    }
+
+    fn wait_with_output_until(
+        mut self,
+        execution_deadline: std::time::Instant,
+        drain_grace: std::time::Duration,
+    ) -> io::Result<Output> {
+        if (self.stdout.is_some() || self.stderr.is_some())
+            && self.stdout_reader.is_none()
+            && self.stderr_reader.is_none()
+        {
+            self.start_output_readers()?;
+        }
+        let mut errors = Vec::new();
+        let status_result = match self.wait_nonblocking_until(execution_deadline) {
             Ok(Some(status)) => Ok(status),
             Ok(None) => {
                 let primary = invalid("timed out waiting for Darwin child");
-                match self.kill().and_then(|()| {
+                match self.kill_process_group().and_then(|()| {
                     self.wait_nonblocking_until(
                         std::time::Instant::now() + std::time::Duration::from_secs(2),
                     )?
@@ -1340,45 +1483,121 @@ impl DarwinChild {
                 "{primary}; Darwin child identity is lost, so PID containment was stopped to avoid signaling a reused PID"
             ))),
         };
-        let stdout_result = join_reader(stdout, "stdout");
-        let stderr_result = join_reader(stderr, "stderr");
-        let (status, stdout, stderr) = match (status_result, stdout_result, stderr_result) {
-            (Ok(status), Ok(stdout), Ok(stderr)) => (status, stdout, stderr),
-            (status, stdout, stderr) => {
-                let errors = [status.err(), stdout.err(), stderr.err()]
-                    .into_iter()
-                    .flatten()
-                    .map(|error| error.to_string())
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                return Err(invalid(format!(
-                    "Darwin child output collection failed: {errors}"
-                )));
+        if let Err(error) = &status_result {
+            errors.push(error.to_string());
+        }
+
+        let first_drain_deadline = std::time::Instant::now() + drain_grace;
+        let mut stdout =
+            poll_darwin_reader(&mut self.stdout_reader, first_drain_deadline, "stdout");
+        let mut stderr =
+            poll_darwin_reader(&mut self.stderr_reader, first_drain_deadline, "stderr");
+        if matches!(stdout, DarwinReaderPoll::Pending)
+            || matches!(stderr, DarwinReaderPoll::Pending)
+        {
+            errors.push(
+                "Darwin child descendants kept output pipes open after child completion".into(),
+            );
+            if let Err(error) = self.kill_process_group() {
+                errors.push(format!(
+                    "Darwin child process-group containment failed: {error}"
+                ));
             }
-        };
+            let containment_deadline = std::time::Instant::now() + drain_grace;
+            if matches!(stdout, DarwinReaderPoll::Pending) {
+                stdout =
+                    poll_darwin_reader(&mut self.stdout_reader, containment_deadline, "stdout");
+            }
+            if matches!(stderr, DarwinReaderPoll::Pending) {
+                stderr =
+                    poll_darwin_reader(&mut self.stderr_reader, containment_deadline, "stderr");
+            }
+        }
+        if matches!(stdout, DarwinReaderPoll::Pending)
+            || matches!(stderr, DarwinReaderPoll::Pending)
+        {
+            stop_darwin_reader(&self.stdout_reader);
+            stop_darwin_reader(&self.stderr_reader);
+            let stop_deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+            if matches!(stdout, DarwinReaderPoll::Pending) {
+                stdout = poll_darwin_reader(&mut self.stdout_reader, stop_deadline, "stdout");
+            }
+            if matches!(stderr, DarwinReaderPoll::Pending) {
+                stderr = poll_darwin_reader(&mut self.stderr_reader, stop_deadline, "stderr");
+            }
+        }
+
+        let stdout = finish_darwin_capture(stdout, "stdout", &mut errors);
+        let stderr = finish_darwin_capture(stderr, "stderr", &mut errors);
+        if !errors.is_empty() {
+            let diagnostics = format_darwin_diagnostics(&stdout.bytes, &stderr.bytes);
+            return Err(invalid(format!(
+                "Darwin child output collection failed: {}{diagnostics}",
+                errors.join("; ")
+            )));
+        }
+        let status = status_result.expect("status error is included above");
         Ok(Output {
             status,
-            stdout,
-            stderr,
+            stdout: stdout.bytes,
+            stderr: stderr.bytes,
         })
     }
 }
 
 #[cfg(target_os = "macos")]
+fn set_nonblocking(file: &File) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) };
+    if flags == -1
+        || unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn spawn_darwin_output_reader(
+    mut file: File,
+    budget: Arc<std::sync::atomic::AtomicUsize>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    stream: &str,
+) -> io::Result<DarwinOutputReader> {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let reader_stop = Arc::clone(&stop);
+    let thread = std::thread::Builder::new()
+        .name(format!("tobkiri-darwin-{stream}-reader"))
+        .spawn(move || {
+            let capture = read_nonblocking_to_end(&mut file, &budget, &reader_stop);
+            let _ = sender.send(capture);
+        })?;
+    Ok(DarwinOutputReader {
+        receiver,
+        thread: Some(thread),
+        stop,
+    })
+}
+
+#[cfg(target_os = "macos")]
 fn read_nonblocking_to_end(
     file: &mut File,
-    bytes: &mut Vec<u8>,
-    deadline: std::time::Instant,
     budget: &std::sync::atomic::AtomicUsize,
-) -> io::Result<()> {
+    stop: &std::sync::atomic::AtomicBool,
+) -> DarwinCapturedStream {
     use std::sync::atomic::Ordering;
+    let mut bytes = Vec::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
-        if std::time::Instant::now() >= deadline {
-            return Err(invalid("timed out draining Darwin child output"));
+        if stop.load(Ordering::Acquire) {
+            return DarwinCapturedStream {
+                bytes,
+                error: Some("collector stopped before output pipe reached EOF".into()),
+            };
         }
         match file.read(&mut buffer) {
-            Ok(0) => return Ok(()),
+            Ok(0) => return DarwinCapturedStream { bytes, error: None },
             Ok(count) => {
                 if budget
                     .fetch_update(Ordering::AcqRel, Ordering::Acquire, |remaining| {
@@ -1386,51 +1605,135 @@ fn read_nonblocking_to_end(
                     })
                     .is_err()
                 {
-                    return Err(invalid("Darwin child output exceeded capture limit"));
+                    stop.store(true, Ordering::Release);
+                    return DarwinCapturedStream {
+                        bytes,
+                        error: Some("Darwin child output exceeded capture limit".into()),
+                    };
                 }
                 bytes.extend_from_slice(&buffer[..count]);
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                if std::time::Instant::now() >= deadline {
-                    return Err(invalid("timed out draining Darwin child output"));
-                }
                 std::thread::sleep(std::time::Duration::from_millis(2));
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                return DarwinCapturedStream {
+                    bytes,
+                    error: Some(error.to_string()),
+                };
+            }
         }
     }
 }
 
 #[cfg(target_os = "macos")]
-fn join_reader(
-    reader: Option<std::thread::JoinHandle<io::Result<Vec<u8>>>>,
+fn poll_darwin_reader(
+    reader: &mut Option<DarwinOutputReader>,
+    deadline: std::time::Instant,
     stream: &str,
-) -> io::Result<Vec<u8>> {
-    reader
-        .map(|thread| {
-            thread
+) -> DarwinReaderPoll {
+    let Some(active) = reader.as_mut() else {
+        return DarwinReaderPoll::Finished(DarwinCapturedStream::default());
+    };
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    match active.receiver.recv_timeout(remaining) {
+        Ok(capture) => {
+            let mut finished = reader.take().expect("active reader must remain present");
+            match finished
+                .thread
+                .take()
+                .expect("reader thread must exist")
                 .join()
-                .map_err(|_| invalid(format!("{stream} reader panicked")))?
-        })
-        .transpose()
-        .map(|value| value.unwrap_or_default())
+            {
+                Ok(()) => DarwinReaderPoll::Finished(capture),
+                Err(_) => DarwinReaderPoll::Failed(format!("{stream} reader panicked")),
+            }
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => DarwinReaderPoll::Pending,
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            let mut finished = reader.take().expect("active reader must remain present");
+            let _ = finished
+                .thread
+                .take()
+                .expect("reader thread must exist")
+                .join();
+            DarwinReaderPoll::Failed(format!("{stream} reader disconnected"))
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn stop_darwin_reader(reader: &Option<DarwinOutputReader>) {
+    use std::sync::atomic::Ordering;
+    if let Some(reader) = reader {
+        reader.stop.store(true, Ordering::Release);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn finish_darwin_capture(
+    result: DarwinReaderPoll,
+    stream: &str,
+    errors: &mut Vec<String>,
+) -> DarwinCapturedStream {
+    match result {
+        DarwinReaderPoll::Finished(capture) => {
+            if let Some(error) = &capture.error {
+                errors.push(format!("{stream} reader failed: {error}"));
+            }
+            capture
+        }
+        DarwinReaderPoll::Pending => {
+            errors.push(format!("timed out joining {stream} reader"));
+            DarwinCapturedStream::default()
+        }
+        DarwinReaderPoll::Failed(error) => {
+            errors.push(error);
+            DarwinCapturedStream::default()
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn format_darwin_diagnostics(stdout: &[u8], stderr: &[u8]) -> String {
+    fn tail(bytes: &[u8]) -> String {
+        let start = bytes.len().saturating_sub(DARWIN_OUTPUT_DIAGNOSTIC_BYTES);
+        String::from_utf8_lossy(&bytes[start..])
+            .chars()
+            .flat_map(char::escape_default)
+            .collect()
+    }
+
+    let mut diagnostics = String::new();
+    if !stdout.is_empty() {
+        diagnostics.push_str(&format!("; bounded stdout tail: {}", tail(stdout)));
+    }
+    if !stderr.is_empty() {
+        diagnostics.push_str(&format!("; bounded stderr tail: {}", tail(stderr)));
+    }
+    diagnostics
 }
 
 #[cfg(target_os = "macos")]
 impl Drop for DarwinChild {
     fn drop(&mut self) {
-        if self.status.is_none()
-            && !matches!(
-                self.state,
-                DarwinChildState::ExternalReaped | DarwinChildState::Lost
-            )
-        {
-            let _ = self.kill();
+        if !matches!(
+            self.state,
+            DarwinChildState::ExternalReaped | DarwinChildState::Lost
+        ) {
+            if self.status.is_none() {
+                let _ = self.kill_process_group();
+            }
             let _ = self.wait_nonblocking_until(
                 std::time::Instant::now() + std::time::Duration::from_secs(2),
             );
         }
+        stop_darwin_reader(&self.stdout_reader);
+        stop_darwin_reader(&self.stderr_reader);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let _ = poll_darwin_reader(&mut self.stdout_reader, deadline, "stdout");
+        let _ = poll_darwin_reader(&mut self.stderr_reader, deadline, "stderr");
     }
 }
 
@@ -2303,6 +2606,129 @@ mod tests {
         assert!(mode_writable_by_caller(0, 0, 0o775, 501, &[0, 20]));
         assert!(mode_writable_by_caller(501, 0, 0o755, 501, &[20]));
         assert!(mode_writable_by_caller(0, 0, 0o757, 501, &[20]));
+    }
+
+    #[cfg(target_os = "macos")]
+    fn spawn_darwin_test_shell(script: &str) -> DarwinChild {
+        let mut child = spawn_suspended_darwin(
+            Path::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from(script),
+            ],
+            &std::collections::BTreeMap::new(),
+            None,
+            true,
+        )
+        .expect("test shell should spawn suspended");
+        assert_eq!(unsafe { libc::getpgid(child.pid) }, child.pid);
+        child
+            .start_output_readers()
+            .expect("test output readers should start before resume");
+        assert_eq!(unsafe { libc::kill(child.pid, libc::SIGCONT) }, 0);
+        child
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn darwin_output_collector_captures_success_from_real_spawn_path() {
+        let child = spawn_darwin_test_shell("printf success; printf diagnostic >&2");
+        let output = child
+            .wait_with_output_until(
+                std::time::Instant::now() + std::time::Duration::from_secs(5),
+                std::time::Duration::from_secs(1),
+            )
+            .expect("short command should complete");
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"success");
+        assert_eq!(output.stderr, b"diagnostic");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn darwin_output_collector_drains_large_stdout_and_stderr_without_backpressure() {
+        let child = spawn_darwin_test_shell(
+            "(/bin/dd if=/dev/zero bs=1048576 count=4 2>/dev/null) & \
+             (/bin/dd if=/dev/zero bs=1048576 count=4 1>&2 2>/dev/null) & wait",
+        );
+        let output = child
+            .wait_with_output_until(
+                std::time::Instant::now() + std::time::Duration::from_secs(10),
+                std::time::Duration::from_secs(1),
+            )
+            .expect("large concurrent output should not deadlock");
+        assert!(output.status.success());
+        assert_eq!(output.stdout.len(), 4 * 1024 * 1024);
+        assert_eq!(output.stderr.len(), 4 * 1024 * 1024);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn darwin_output_collector_contains_descendant_that_holds_pipe_open() {
+        let child = spawn_darwin_test_shell("sleep 60 & printf parent-complete");
+        let process_group = child.process_group;
+        let started = std::time::Instant::now();
+        let error = child
+            .wait_with_output_until(
+                std::time::Instant::now() + std::time::Duration::from_secs(5),
+                std::time::Duration::from_millis(200),
+            )
+            .expect_err("inherited descendant pipe must fail closed");
+        assert!(started.elapsed() < std::time::Duration::from_secs(3));
+        assert!(error.to_string().contains("kept output pipes open"));
+        assert!(error.to_string().contains("parent-complete"));
+        assert_eq!(unsafe { libc::kill(-process_group, 0) }, -1);
+        assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn darwin_output_collector_kills_and_reaps_hung_process_group() {
+        let child = spawn_darwin_test_shell("while :; do sleep 1; done");
+        let process_group = child.process_group;
+        let started = std::time::Instant::now();
+        let error = child
+            .wait_with_output_until(
+                std::time::Instant::now() + std::time::Duration::from_millis(200),
+                std::time::Duration::from_millis(200),
+            )
+            .expect_err("hung process group must time out");
+        assert!(started.elapsed() < std::time::Duration::from_secs(3));
+        assert!(error
+            .to_string()
+            .contains("timed out waiting for Darwin child"));
+        assert_eq!(unsafe { libc::kill(-process_group, 0) }, -1);
+        assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
+    }
+
+    #[test]
+    fn sealed_reseal_budget_is_work_bound_capped_and_overflow_safe() {
+        let budget = VerifiedOutputBudget::sealed_python_reseal(442 * 1024 * 1024, 12_000)
+            .expect("verified 442 MiB inventory should receive a reseal budget");
+        assert!(budget.duration > std::time::Duration::from_secs(30));
+        assert!(budget.duration <= std::time::Duration::from_secs(SEALED_RESEAL_MAX_SECONDS));
+        assert!(VerifiedOutputBudget::sealed_python_reseal(0, 1).is_err());
+        assert!(VerifiedOutputBudget::sealed_python_reseal(1, 0).is_err());
+        assert!(VerifiedOutputBudget::sealed_python_reseal(u64::MAX, 1).is_err());
+        assert!(VerifiedOutputBudget::sealed_python_reseal(1, u64::MAX).is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn darwin_442_mib_work_budget_allows_bounded_slow_progress() {
+        let budget = VerifiedOutputBudget::sealed_python_reseal(442 * 1024 * 1024, 12_000)
+            .expect("verified 442 MiB inventory should receive a reseal budget");
+        let child = spawn_darwin_test_shell(
+            "i=0; while test $i -lt 12; do printf x; /bin/sleep 0.05; i=$((i + 1)); done",
+        );
+        let output = child
+            .wait_with_output_until(
+                std::time::Instant::now() + budget.duration,
+                std::time::Duration::from_millis(200),
+            )
+            .expect("bounded slow progress should finish inside its work budget");
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"xxxxxxxxxxxx");
     }
     use std::time::{SystemTime, UNIX_EPOCH};
 
