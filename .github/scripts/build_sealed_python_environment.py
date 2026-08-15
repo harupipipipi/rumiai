@@ -2304,42 +2304,90 @@ def _verify_python_smoke(root: Path, spec: TargetSpec) -> None:
     document = _validate_manifest_shape(
         json.loads((root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
     )
-    # Native imports, Defaultspack, and bootstrap write only below this
-    # Host-owned workspace. Mounted/source application resources stay read-only.
-    with _native_smoke_workspace(root) as workspace:
-        runtime_snapshot, overlay_sha256, outer_manifest_sha256 = (
-            _create_native_smoke_runtime_snapshot(root, spec, workspace, document)
+    # Keep the copied runtime and writable Host state in separate private roots.
+    # Bootstrap deliberately rejects attestations below the sealed root *or its
+    # parent*, so sharing one workspace would make the builder exercise a launch
+    # layout that the real Host protocol forbids.
+    with _native_smoke_workspace(root) as runtime_workspace:
+        with _native_smoke_workspace(root) as host_workspace:
+            _verify_python_smoke_in_workspaces(
+                root,
+                spec,
+                document,
+                runtime_workspace,
+                host_workspace,
+            )
+
+
+def _verify_python_smoke_in_workspaces(
+    root: Path,
+    spec: TargetSpec,
+    document: dict[str, object],
+    runtime_workspace: _NativeSmokeWorkspace,
+    host_workspace: _NativeSmokeWorkspace,
+) -> None:
+    """Run native smoke with disjoint sealed-snapshot and Host-state roots."""
+    runtime_workspace.verify()
+    host_workspace.verify()
+    runtime_root = runtime_workspace.path.resolve(strict=True)
+    host_root = host_workspace.path.resolve(strict=True)
+    if (
+        runtime_root == host_root
+        or runtime_root.is_relative_to(host_root)
+        or host_root.is_relative_to(runtime_root)
+    ):
+        raise SealedEnvironmentError(
+            "native smoke runtime and Host workspaces overlap"
         )
-        try:
-            environment = _native_smoke_environment(runtime_snapshot, spec, workspace)
-            packaged_app_root = root.parent.resolve(strict=True)
-            for key in ("HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP"):
-                state_path = Path(environment[key]).resolve(strict=True)
-                if state_path == packaged_app_root or state_path.is_relative_to(
-                    packaged_app_root
-                ):
-                    raise SealedEnvironmentError(
-                        "native role smoke state must be outside application resources"
-                    )
-            _run_native_import_smoke(runtime_snapshot, spec, environment)
-            for role, role_arguments in (
-                ("typed", ()),
-                ("defaultspack", ()),
-                ("host_helper", ()),
+    runtime_snapshot, overlay_sha256, outer_manifest_sha256 = (
+        _create_native_smoke_runtime_snapshot(
+            root,
+            spec,
+            runtime_workspace,
+            document,
+        )
+    )
+    try:
+        environment = _native_smoke_environment(
+            runtime_snapshot,
+            spec,
+            host_workspace,
+        )
+        packaged_app_root = root.parent.resolve(strict=True)
+        forbidden_state_roots = (
+            packaged_app_root,
+            runtime_snapshot.resolve(strict=True),
+            runtime_snapshot.parent.resolve(strict=True),
+        )
+        for key in ("HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP"):
+            state_path = Path(environment[key]).resolve(strict=True)
+            if any(
+                state_path == forbidden or state_path.is_relative_to(forbidden)
+                for forbidden in forbidden_state_roots
             ):
-                _run_role_smoke(
-                    runtime_snapshot,
-                    spec,
-                    role,
-                    role_arguments,
-                    environment,
-                    workspace,
-                    str(document["environment_digest"]),
-                    overlay_sha256,
-                    outer_manifest_sha256,
+                raise SealedEnvironmentError(
+                    "native role smoke state must be outside application resources "
+                    "and the sealed runtime snapshot"
                 )
-        finally:
-            _thaw_native_smoke_runtime_snapshot(runtime_snapshot, workspace)
+        _run_native_import_smoke(runtime_snapshot, spec, environment)
+        for role, role_arguments in (
+            ("typed", ()),
+            ("defaultspack", ()),
+            ("host_helper", ()),
+        ):
+            _run_role_smoke(
+                runtime_snapshot,
+                spec,
+                role,
+                role_arguments,
+                environment,
+                host_workspace,
+                str(document["environment_digest"]),
+                overlay_sha256,
+                outer_manifest_sha256,
+            )
+    finally:
+        _thaw_native_smoke_runtime_snapshot(runtime_snapshot, runtime_workspace)
 
 
 def validate_environment(

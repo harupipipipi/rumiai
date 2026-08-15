@@ -2571,6 +2571,78 @@ def test_native_smoke_uses_separate_single_file_runtime_overlay(tmp_path: Path) 
     BUILDER.validate_environment(output, target, run_native_smoke=False)
 
 
+def test_native_smoke_separates_runtime_snapshot_from_host_attestation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The packaging smoke uses the same disjoint Host launch layout as runtime."""
+    target = "x86_64-unknown-linux-gnu"
+    spec = BUILDER.target_spec(target)
+    output = _fixture_sources(tmp_path / "sealed", target)[2]
+    temp_parent = tmp_path / "host-temp"
+    temp_parent.mkdir(mode=0o700)
+    monkeypatch.setenv("TMPDIR", str(temp_parent))
+    monkeypatch.setattr(BUILDER, "_native_host_spec", lambda: spec)
+    monkeypatch.setattr(BUILDER, "_run_native_import_smoke", lambda *_args: None)
+    observed_workspaces: list[tuple[Path, Path]] = []
+
+    def fake_role_smoke(
+        runtime_root: Path,
+        _spec: object,
+        _role: str,
+        _role_arguments: object,
+        environment: dict[str, str],
+        workspace: object,
+        _environment_digest: str,
+        _overlay_digest: str,
+        _outer_digest: str,
+    ) -> None:
+        host_root = workspace.path.resolve(strict=True)
+        snapshot_root = runtime_root.resolve(strict=True)
+        assert not host_root.is_relative_to(snapshot_root)
+        assert not host_root.is_relative_to(snapshot_root.parent)
+        for key in ("HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP"):
+            assert Path(environment[key]).resolve(strict=True).is_relative_to(host_root)
+        observed_workspaces.append((snapshot_root.parent, host_root))
+
+    monkeypatch.setattr(BUILDER, "_run_role_smoke", fake_role_smoke)
+    BUILDER._verify_python_smoke(output, spec)
+
+    assert len(observed_workspaces) == 3
+    runtime_workspace, host_workspace = observed_workspaces[0]
+    assert runtime_workspace != host_workspace
+    assert all(pair == observed_workspaces[0] for pair in observed_workspaces)
+    assert not runtime_workspace.exists()
+    assert not host_workspace.exists()
+
+
+def test_native_smoke_rejects_overlapping_runtime_and_host_workspaces(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller cannot collapse the typed runtime and Host-state domains."""
+    target = "x86_64-unknown-linux-gnu"
+    output = _fixture_sources(tmp_path / "sealed", target)[2]
+    document = json.loads(
+        (output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8")
+    )
+    temp_parent = tmp_path / "host-temp"
+    temp_parent.mkdir(mode=0o700)
+    monkeypatch.setenv("TMPDIR", str(temp_parent))
+    with BUILDER._native_smoke_workspace(output) as workspace:
+        with pytest.raises(
+            BUILDER.SealedEnvironmentError,
+            match="runtime and Host workspaces overlap",
+        ):
+            BUILDER._verify_python_smoke_in_workspaces(
+                output,
+                BUILDER.target_spec(target),
+                document,
+                workspace,
+                workspace,
+            )
+
+
 def test_native_smoke_workspace_rejects_root_swap_and_preserves_external_victim(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
