@@ -1195,8 +1195,8 @@
     {
       "path": "scripts/quality/scan_defaultspack_integrity.py",
       "type": "regular-file",
-      "size": 24123,
-      "sha256": "30aae7f9dac93ad7506f1df6977db9ad40dd13076944f7c70d5e364ab7d743df",
+      "size": 24134,
+      "sha256": "963c973ef12aa37c58d93f5fda7c6fb6baabd1b1bc0a4f31f40e92a05733169b",
       "executable": false
     },
     {
