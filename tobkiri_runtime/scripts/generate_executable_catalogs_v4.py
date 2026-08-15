@@ -79,11 +79,14 @@ def _execution_metadata(manifest: dict[str, Any], function: dict[str, Any]) -> d
     }
 
 
-def _render(pack_id: str) -> dict[str, Any]:
-    root = ECOSYSTEM / pack_id
-    manifest = json.loads((root / "pack.v4.json").read_text(encoding="utf-8"))
-    contracts = json.loads((root / "contracts.v4.json").read_text(encoding="utf-8"))
-    index = json.loads((root / "artifact-index.v4.json").read_text(encoding="utf-8"))
+def _render_document(
+    pack_id: str,
+    root: Path,
+    manifest: dict[str, Any],
+    contracts: dict[str, Any],
+    index: dict[str, Any],
+) -> dict[str, Any]:
+    """Render one catalog from already-rendered canonical v4 documents."""
     runtime_paths: dict[str, list[str]] = {}
     for artifact in index["artifacts"]:
         if artifact["role"] == "runtime":
@@ -157,6 +160,14 @@ def _render(pack_id: str) -> dict[str, Any]:
     }
     document = {**unsigned, "catalog_digest": canonical_digest(unsigned)}
     return validate_document(document, "executable_catalog")
+
+
+def _render(pack_id: str) -> dict[str, Any]:
+    root = ECOSYSTEM / pack_id
+    manifest = json.loads((root / "pack.v4.json").read_text(encoding="utf-8"))
+    contracts = json.loads((root / "contracts.v4.json").read_text(encoding="utf-8"))
+    index = json.loads((root / "artifact-index.v4.json").read_text(encoding="utf-8"))
+    return _render_document(pack_id, root, manifest, contracts, index)
 
 
 def main() -> int:

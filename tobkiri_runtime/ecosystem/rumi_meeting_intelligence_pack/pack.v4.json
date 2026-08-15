@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:07eda81a7eaf43ac1338c513ebe6112ac137a3513e967c4ea1db6a13e00d81ea",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:343eab2a3b11b681bbb1bbfde3f9a51f23eb1994e907f4b0a608b01fdbca7fe4",
     "contract_catalog_digest": "sha256:88f1106cca329187311e4dc3d6c86e0f0121f6265dd32406f7b7b6b3bb9d4ede",
     "source_identity": "sha256:f911340a02d617776953a06282fa38a7e2643ef9c6ae82af362ffafbf82d3764"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:343eab2a3b11b681bbb1bbfde3f9a51f23eb1994e907f4b0a608b01fdbca7fe4",
     "display_name": "Rumi Meeting Intelligence Pack",
     "id": "rumi_meeting_intelligence_pack",
     "kind": "application",

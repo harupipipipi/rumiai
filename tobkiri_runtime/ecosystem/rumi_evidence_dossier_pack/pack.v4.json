@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:400737366014223b98ff564ff5411b15d4033603095840aac9a1fed0e15e6ffb",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:25d546f0bbf10dd1b8491148c6bf96cf1465c07d0ea2feb1ff97f2dd9b03c313",
     "contract_catalog_digest": "sha256:fd6dadc189f19bbcafbaaa0ca44da0619dc459bfa75cdd590c5731cf2434f5a5",
     "source_identity": "sha256:242c3710f27380bd7456260abc6e5ea2b3a800a706dcecf8a2244284d180bd12"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:25d546f0bbf10dd1b8491148c6bf96cf1465c07d0ea2feb1ff97f2dd9b03c313",
     "display_name": "Rumi Evidence Dossier Pack",
     "id": "rumi_evidence_dossier_pack",
     "kind": "application",

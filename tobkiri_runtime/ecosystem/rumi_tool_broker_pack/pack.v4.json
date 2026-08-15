@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:5dccdfa9b2207761fe1f1c4aec315fcea8fc15629d1b27f49fb078b25bc857c4",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:65ae6ff8c4236863bbffe614a46bedfcf7107a65b79e512d45d50bc1be56594b",
       "kind": "executable",
       "path": "runtime/broker.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:fa9356b0f55c2c29573e7aea9f6dc36e9ed96466c1d7045e0e36901729cecf6b",
+    "artifact_set_digest": "sha256:e279d05e24a146e4be8481660818511daf5dd1080c12d650e37b50eb55de49b7",
     "contract_catalog_digest": "sha256:dfda82bf1a8a19ba9727a54d872abd6c5ff3ee8eeb7c780a138f43302240dd97",
     "source_identity": "sha256:05738489604a92a85991b5c758f35f34ca74bb8ced10ead934b50bb74a137a1f"
   },
@@ -56,7 +61,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:fa9356b0f55c2c29573e7aea9f6dc36e9ed96466c1d7045e0e36901729cecf6b",
+    "artifact_digest": "sha256:e279d05e24a146e4be8481660818511daf5dd1080c12d650e37b50eb55de49b7",
     "display_name": "Rumi Tool Broker",
     "id": "rumi_tool_broker_pack",
     "kind": "host_extension",

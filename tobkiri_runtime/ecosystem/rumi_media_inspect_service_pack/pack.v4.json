@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:f91b42fee840324efe6a8742274910812ae5adc00071e57b4510e808690110cd",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:73d0c3316b34ace2b00abf868dbbc6ac47c67be1a694b472485637f63b22553e",
       "kind": "executable",
       "path": "runtime/inspect.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:e70863e30020dd7b0c716be72a3790fcba5d8353340cc7cdd2c22249726f2344",
+    "artifact_set_digest": "sha256:945779951b78e8a0efacc486a28383a46d40afb575b915f7298014bb31587450",
     "contract_catalog_digest": "sha256:f458ddd09a7e9d0fec327e867932808dd24b0b5837779428549b0a42642d633d",
     "source_identity": "sha256:d62965b30ed62a68329fb611d1a2889700f81dd36852d31b7342dd64833e8d91"
   },
@@ -55,7 +60,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:e70863e30020dd7b0c716be72a3790fcba5d8353340cc7cdd2c22249726f2344",
+    "artifact_digest": "sha256:945779951b78e8a0efacc486a28383a46d40afb575b915f7298014bb31587450",
     "display_name": "Rumi Media Inspect Service",
     "id": "rumi_media_inspect_service_pack",
     "kind": "normal_sandbox",

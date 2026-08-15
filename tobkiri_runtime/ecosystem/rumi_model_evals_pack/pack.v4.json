@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:b22c922f04ca44287f1aeae97373bedfba763a881ea9cc6912a14c8e24c004bf",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:65ad7a99adbb923c9f64b399614b06f3ea322c45820a15d68adfcb694475cf1f",
       "kind": "executable",
       "path": "runtime/__init__.py"
@@ -67,7 +72,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:72b92977a2d49cf4f95300051ca08c0e2f78a723c086569d0af3086cc8d54e13",
+    "artifact_set_digest": "sha256:3c95192605c14a05852b406713d03220a6ee7d26d465b83169d940a511ac8c07",
     "contract_catalog_digest": "sha256:c1c9932e3369f86f54ca77db8e121b5e221457b3243792f3962d409ed619e7c1",
     "source_identity": "sha256:48a947d62f69a656709a55e268e7aa13c967b6cbca3e4e7fc50b7cafadecd3b4"
   },
@@ -119,7 +124,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:72b92977a2d49cf4f95300051ca08c0e2f78a723c086569d0af3086cc8d54e13",
+    "artifact_digest": "sha256:3c95192605c14a05852b406713d03220a6ee7d26d465b83169d940a511ac8c07",
     "display_name": "Rumi Model Evals",
     "id": "rumi_model_evals_pack",
     "kind": "host_extension",

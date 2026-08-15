@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:1ed21dba013db9ce5e80a4a8b324d728cbc57bde83a6b8faf2753e4173f35921",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:2728dce0e3ecf3b2685926742b0c499d8b478ef71d1cfbb70b44d65e2d9fb9f4",
       "kind": "executable",
       "path": "runtime/gateway.py"
@@ -62,7 +67,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:08a25534c7b551d7419bea34ed3d6c8bcf906491b1060314aa9e7f602ccd5b4f",
+    "artifact_set_digest": "sha256:3f5c9e8b96061c598d2a1e6d499ec475c8f77d0a740027ade29fae98245adbe2",
     "contract_catalog_digest": "sha256:8ff90126ce1e14666c43f568c5f01d66a328e1ce0472edefd3867c05a86fcb36",
     "source_identity": "sha256:229a8df2690cce73fe52c8cd0c06e01be10066c5eca9606864d04f073653452c"
   },
@@ -111,7 +116,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:08a25534c7b551d7419bea34ed3d6c8bcf906491b1060314aa9e7f602ccd5b4f",
+    "artifact_digest": "sha256:3f5c9e8b96061c598d2a1e6d499ec475c8f77d0a740027ade29fae98245adbe2",
     "display_name": "Rumi Connector Transport Gateway",
     "id": "rumi_connector_transport_gateway_pack",
     "kind": "normal_sandbox",

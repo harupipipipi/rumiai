@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:0f3fa7bffcf67ffc4b0b123faf466aed72336fc255cc5bf1eb05f6097b325089",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:0fd8053263f22aefba603ba378966177239a6fe72a817b6ce6addc42e6176fe0",
       "kind": "executable",
       "path": "runtime/adapter.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:08828f6e19468433b0f1194f823db1d83d8c6dd9931962f8a4f6e90fc2ea37bf",
+    "artifact_set_digest": "sha256:53af2e7a34dfc424760db6162473a96474f15621a8893321b6a5c3c57269aeb5",
     "contract_catalog_digest": "sha256:5e9578ae4afdb39919c8cbb3e72346b812427623dcb3bd66e0b0e1ab693ca9b8",
     "source_identity": "sha256:ed73de2aa508b07be27fc52daf51dce5ff739ed303a3425bccb888ee1192311f"
   },
@@ -57,7 +62,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:08828f6e19468433b0f1194f823db1d83d8c6dd9931962f8a4f6e90fc2ea37bf",
+    "artifact_digest": "sha256:53af2e7a34dfc424760db6162473a96474f15621a8893321b6a5c3c57269aeb5",
     "display_name": "Rumi Discord Connector",
     "id": "rumi_discord_connector_pack",
     "kind": "host_extension",

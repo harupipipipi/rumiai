@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:caff927fb10334748f2dfb762f221617f6d438643d42b7e08c5b9752d5c94fc6",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:24b44aee8e740aa379a36e662794e24be47631229131d083e0fbad1cbe14e5e0",
       "kind": "executable",
       "path": "runtime/runner.py"
@@ -50,7 +55,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:40d3bfe0776fd3dfd9f628f1fd00a8bbe8480059ddfa6ba88c9ad0d01b85f7cf",
+    "artifact_set_digest": "sha256:76377cc3a85b98f5d138681cdf00013845379a47b3c88293e280a106dfe51fd8",
     "contract_catalog_digest": "sha256:b547115fae30453941c89869d0a9360fdf8ebea97481c904dc4fd3fb2526a94e",
     "source_identity": "sha256:e69dd60c28d655f5467d78090107abdb7ff20986bf78d800eeefa90166c8d720"
   },
@@ -90,7 +95,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:40d3bfe0776fd3dfd9f628f1fd00a8bbe8480059ddfa6ba88c9ad0d01b85f7cf",
+    "artifact_digest": "sha256:76377cc3a85b98f5d138681cdf00013845379a47b3c88293e280a106dfe51fd8",
     "display_name": "Rumi Clipboard Host Service",
     "id": "rumi_clipboard_host_service_pack",
     "kind": "host_extension",

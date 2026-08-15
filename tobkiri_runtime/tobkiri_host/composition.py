@@ -256,6 +256,30 @@ class HostV4Composition:
             raise ResolutionError("ResolvedPlan digest is stale")
         if lock_digest != lock["lock_digest"]:
             raise ResolutionError("ProfileLock digest is stale")
+        pin_fields = (
+            "pack_id",
+            "artifact_digest",
+            "executable_catalog_digest",
+            "variant_id",
+            "platform",
+            "architecture",
+            "runtime_abi",
+            "backend",
+            "execution_kind",
+            "domain_kind",
+        )
+        plan_pins = [
+            {
+                field: binding[field]
+                for field in pin_fields
+            }
+            for binding in plan["bindings"]
+        ]
+        plan_pin_keys = {tuple(pin[field] for field in pin_fields) for pin in plan_pins}
+        lock_pins = lock.get("variant_pins", [])
+        lock_pin_keys = {tuple(pin[field] for field in pin_fields) for pin in lock_pins}
+        if lock_pin_keys != plan_pin_keys or len(lock_pin_keys) != len(lock_pins):
+            raise ResolutionError("ProfileLock executable variant pins do not match ResolvedPlan")
         expected = (
             profile["profile_id"],
             plan["plan_digest"],

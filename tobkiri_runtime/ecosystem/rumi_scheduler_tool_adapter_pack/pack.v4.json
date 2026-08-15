@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:f2159859bb5a947097ea7b9c791802a4cf68a2ac25754a2cad7a8ed516dc1c7c",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:38909d724cb9210d7c44cee848b4a4885b7b0b3ed9e484a2a716485066ec8eae",
       "kind": "executable",
       "path": "runtime/adapter.py"
@@ -45,7 +50,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:10833ae5e044683acadc789394da31d5d932f50353ebb55f68f05f1ffa5c6017",
+    "artifact_set_digest": "sha256:7348e503b2d0523dfa72fc2c39c49ae9ab00a6e9d7044172963d7c7e34353bbf",
     "contract_catalog_digest": "sha256:d5f360bdf35c3cf2da6544e416dd8deeb8ca99efe5f0f9fbb91faa8d26da84f8",
     "source_identity": "sha256:16e8360d35abe720fbe6e8e34eb46888d8644947d8fece90a18ae382cc6adb08"
   },
@@ -83,7 +88,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:10833ae5e044683acadc789394da31d5d932f50353ebb55f68f05f1ffa5c6017",
+    "artifact_digest": "sha256:7348e503b2d0523dfa72fc2c39c49ae9ab00a6e9d7044172963d7c7e34353bbf",
     "display_name": "Rumi Scheduler Tool Adapter",
     "id": "rumi_scheduler_tool_adapter_pack",
     "kind": "normal_sandbox",

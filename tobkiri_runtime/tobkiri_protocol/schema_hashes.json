@@ -16,7 +16,7 @@
     "pack_contract_catalog_v4.schema.json": "sha256:132c18aeb94952853a914a3bb962150898dd2f8f9d24ec245b7252012603eebf",
     "pack_manifest_v4.schema.json": "sha256:38ea3d19e207003bf4a8e07b08610c9ab3fd4e547113f74b1c9afcc282538900",
     "profile_lock_v4.schema.json": "sha256:879f2e8b975b9877a59f057e686b785ab4dd81357df688e6efa07927ec89e45e",
-    "profile_lock_v5.schema.json": "sha256:ca9bf711182486d9e8aea29a84e980f9f28b1e960893da3568427fd493ee6f50",
+    "profile_lock_v5.schema.json": "sha256:571fe5f18b269159c3336b0b8eb5daa9e16d8b2440bbbe495551a5b9c4cc47b9",
     "profile_v4.schema.json": "sha256:b8e026f38d7477903f6ccbd04a0e855123491652c86c5bed6ae62c54cf146e85",
     "profile_v5.schema.json": "sha256:8b31667b1e6e5ba80a62b625ad560a1423b8fa31712791cfbed2520deb4299e8",
     "provenance_v1.schema.json": "sha256:34e1d1104613a7764e627bba147086381fb70f8b4d184bdb1d8f47ba024899da",
@@ -24,7 +24,7 @@
     "request_envelope_v1.schema.json": "sha256:b1e73e73b803b183dced2ae6565518ce95e1cdf11efed996149f0eb5eab9760b",
     "request_frame_v1.schema.json": "sha256:c8f54f0453faeb682103611a4b11e5996dd6f81d526588b7a2e7aebf8c7cba90",
     "resolved_plan_v1.schema.json": "sha256:c02a20f1c851ffd0957ee88bf0e1da914f45fef033cdc1f472a93ffbe41fde16",
-    "resolved_plan_v2.schema.json": "sha256:8bbfff98ad91a8b119a5bcc07043c4eb4e28e3d4edb48e27a93fbca60c022fd5",
+    "resolved_plan_v2.schema.json": "sha256:335d22467c2a13de341eb65f6fc47fc487d4f655cc064f0873989d3eef73c8b5",
     "shell_definition_v4.schema.json": "sha256:c1e4b4005b4c3267f33a72b9348b9777a3386279283390c4a12e9d9da55f2e81",
     "shell_definition_v5.schema.json": "sha256:24ab2058a7dbe24018481a9ce06fc951211ebe9a84525da3a23aeed1df12daf6"
   },

@@ -335,6 +335,21 @@ def _duplicate_identity_diagnostics(document: Mapping[str, Any]) -> list[str]:
                 else:
                     seen_edges[identity] = index
             continue
+        if path == "$.variant_pins":
+            seen_variants: dict[tuple[str, str], int] = {}
+            for index, item in enumerate(value):
+                if not isinstance(item, Mapping):
+                    continue
+                identity = (str(item.get("pack_id") or ""), str(item.get("variant_id") or ""))
+                previous = seen_variants.get(identity)
+                if previous is not None:
+                    diagnostics.append(
+                        f"{path}[{index}]: duplicate executable variant pin; "
+                        f"first at index {previous}"
+                    )
+                else:
+                    seen_variants[identity] = index
+            continue
         if path == "$.operation_catalog" or path.endswith(".operations"):
             seen_operations: dict[str, int] = {}
             for index, item in enumerate(value):

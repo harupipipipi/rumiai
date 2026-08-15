@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:245a0ace5ed7f86c629524c335b4e89371aa76a4e3d32133b141295e53359373",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:1dbcc2f6137687e4c7422d9a6393fec7a14110c8c87f62021297ab7301e02ce8",
       "kind": "executable",
       "path": "runtime/store.py"
@@ -45,7 +50,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:7f26f41ebd6091b56f646c2d8f28292f083c5348418aad78adf8953bcbb55e68",
+    "artifact_set_digest": "sha256:936014f87b2f6414c1f199625f46c58b6e04a194ca440127e96fec8b78b894e0",
     "contract_catalog_digest": "sha256:4b318d9578ef30063b8c2106e7e083fc6b43a74adb0057957f54fb7733f4470c",
     "source_identity": "sha256:05e7ea0ceb4af650c08735e8d8103eedac3d5d46e2cf3c40915ffe466f9c4182"
   },
@@ -83,7 +88,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:7f26f41ebd6091b56f646c2d8f28292f083c5348418aad78adf8953bcbb55e68",
+    "artifact_digest": "sha256:936014f87b2f6414c1f199625f46c58b6e04a194ca440127e96fec8b78b894e0",
     "display_name": "Rumi Agent State Store",
     "id": "rumi_agent_state_store_pack",
     "kind": "normal_sandbox",

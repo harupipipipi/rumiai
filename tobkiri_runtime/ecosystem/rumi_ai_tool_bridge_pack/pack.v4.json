@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:825bfec40dcfcbbb9369b4ae0d6a3b3865ba93fb81f00116d84ccc4eb2646c29",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:32ba6d76166504fb7d991ff60fb8d2756b7288a92d65938c3f971fb148479073",
       "kind": "executable",
       "path": "runtime/__init__.py"
@@ -37,7 +42,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:304064d9650148822bef675a8baf1c4381f364e31b617798835b9fdbffd4a566",
+    "artifact_set_digest": "sha256:d6bad877e9e4251e1ec8a11e87109f2f2f0a641a5a4fdc85592bb29fef685f4a",
     "contract_catalog_digest": "sha256:0c0a1f57c7e0e661f6349db41fbe9c6541a7fbcba86e000dfb411fdf548b8e4b",
     "source_identity": "sha256:52a26ba779bec14c04995c8d75224355e5e34a602a911af573b995b751bf3bc3"
   },
@@ -87,7 +92,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:304064d9650148822bef675a8baf1c4381f364e31b617798835b9fdbffd4a566",
+    "artifact_digest": "sha256:d6bad877e9e4251e1ec8a11e87109f2f2f0a641a5a4fdc85592bb29fef685f4a",
     "display_name": "Rumi AI Tool Bridge",
     "id": "rumi_ai_tool_bridge_pack",
     "kind": "host_extension",

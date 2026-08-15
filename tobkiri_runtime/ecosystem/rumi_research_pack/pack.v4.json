@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:305f2cc4e9258100335df7ff112e79c7f261c891dc5f23f648d107d6271cb063",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:e8f6c5315bd2285240a9d293cddbdbb060e3da1ed41d8cc462eb586c470fe9c0",
       "kind": "sidecar",
       "path": "frontend/contributions/research.json"
@@ -9,7 +14,7 @@
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:1e39c2fcf97b3d36efc832b622e67f1a204fb16305fc8693c8b6e77487338193",
+    "artifact_set_digest": "sha256:91d06a5215a4c108246bf7723728c0801f5ccc0835a9ee3d8daaa1b149e1ccd3",
     "contract_catalog_digest": "sha256:8160567092e975de9de188fe41a61c1f716ef729216ae9df24486d3cd8f11ac7",
     "source_identity": "sha256:e2d83995d747960bba97f667015dac30d433110afe19a3b2cda0818220f38e53"
   },
@@ -24,7 +29,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:1e39c2fcf97b3d36efc832b622e67f1a204fb16305fc8693c8b6e77487338193",
+    "artifact_digest": "sha256:91d06a5215a4c108246bf7723728c0801f5ccc0835a9ee3d8daaa1b149e1ccd3",
     "display_name": "Rumi Research Content",
     "id": "rumi_research_pack",
     "kind": "application",

@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:dfffc4e4acf4173c7d5bda665384f758061738771463fb81a54445b8263fea5b",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:a0bfff7e5e1a5a375a2f883505a76e916bd18b49deea5769608619637afe7899",
     "contract_catalog_digest": "sha256:359201050dfeafdcfef20b366b2b29313d62d24b7cde584431d0d8b1f2c8c692",
     "source_identity": "sha256:4a280a06aacec0701103507bdc9451bd5109a914007f5682b632241d5b4e6b84"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:a0bfff7e5e1a5a375a2f883505a76e916bd18b49deea5769608619637afe7899",
     "display_name": "Rumi Browser Automation Pack",
     "id": "rumi_browser_automation_pack",
     "kind": "application",

@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:3e081525d4ede22ac3d4dbbf487d9982078be8b9ece514c477032f4f30cf417e",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:b789436190c19ec3f436dee86dc740293bdface12fdc0d531a1452c303eef888",
       "kind": "executable",
       "path": "runtime/audit.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:801e217c7a46360158cda0d39c55d388516f557fef2e42ac719cdae3b50e184d",
+    "artifact_set_digest": "sha256:321b2856e1618dbfaadb12e24d67a7603ff469ee46c8631ccabf88d574bb76c7",
     "contract_catalog_digest": "sha256:b6a3c9f62ac4361d4c5769fffb0e241530cf87dcd2fec1e79c01efcff2cd4489",
     "source_identity": "sha256:399bacdcaaa830fbbcd8b1ed97f3c34a19715a150f64b946499a839c19ea88c3"
   },
@@ -56,7 +61,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:801e217c7a46360158cda0d39c55d388516f557fef2e42ac719cdae3b50e184d",
+    "artifact_digest": "sha256:321b2856e1618dbfaadb12e24d67a7603ff469ee46c8631ccabf88d574bb76c7",
     "display_name": "Rumi Tool Audit",
     "id": "rumi_tool_audit_pack",
     "kind": "host_extension",

@@ -55,12 +55,15 @@ def _digest(label: str) -> str:
 
 MINIMAL_PROFILE_AUTHORITY_DIGEST = _digest("profile-authority-snapshot")
 MINIMAL_CATALOG_REVISION = _digest("catalog")
+MINIMAL_EXECUTABLE_CATALOG_DIGEST = (
+    "sha256:14cad34416da183ae98671ec04c6d1cd87bf827367eee917f6b3a02c1e5af8a2"
+)
 MINIMAL_BUNDLE_DIGEST = _digest("bundle")
 MINIMAL_PROFILE_DEFINITION_DIGEST = _digest("profile-definition")
 MINIMAL_CONSTRAINTS_DIGEST = _digest("constraints")
 MINIMAL_BASE_DIGEST = _digest("base-artifact")
 MINIMAL_SHELL_DIGEST = _digest("shell-artifact")
-MINIMAL_PACK_DIGEST = _digest("echo-artifact")
+MINIMAL_PACK_DIGEST = "sha256:7ea147ccb4770b0d912aaafb961b1b29f41f6a9449b966aeceaa204dc86462cc"
 MINIMAL_CALLER_IMPLEMENTATION_DIGEST = _digest("profile-caller")
 MINIMAL_FUNCTION_IMPLEMENTATION_DIGEST = (
     "sha256:db83893c95d81c118325596551b3c2a60263dcbffa80da4ea7610d95ac518073"
@@ -343,6 +346,13 @@ def minimal_profile() -> MinimalProfile:
         "contract_id": MINIMAL_CONTRACT_ID,
         "operation_id": MINIMAL_OPERATION_ID,
         "domain_kind": "wasm_component",
+        "executable_catalog_digest": MINIMAL_EXECUTABLE_CATALOG_DIGEST,
+        "variant_id": MINIMAL_VARIANT_ID,
+        "platform": "conformance",
+        "architecture": "portable",
+        "runtime_abi": "component-v1",
+        "backend": MINIMAL_BACKEND_ID,
+        "execution_kind": "wasm",
         "authority_reference": authority_reference,
         "requested_scope_digest": canonical_digest(
             profile["requested_edges"][0]["requested_scope_template"]
@@ -409,6 +419,20 @@ def minimal_profile() -> MinimalProfile:
         },
         "application": None,
         "effective_set": effective_set,
+        "variant_pins": [
+            {
+                "pack_id": pack.pack_id,
+                "artifact_digest": pack.digest,
+                "executable_catalog_digest": MINIMAL_EXECUTABLE_CATALOG_DIGEST,
+                "variant_id": MINIMAL_VARIANT_ID,
+                "platform": "conformance",
+                "architecture": "portable",
+                "runtime_abi": "component-v1",
+                "backend": MINIMAL_BACKEND_ID,
+                "execution_kind": "wasm",
+                "domain_kind": "wasm_component",
+            }
+        ],
         "requested_edges_digest": requested_edges_digest,
         "constraints_digest": MINIMAL_CONSTRAINTS_DIGEST,
         "closure_digest": closure_digest,

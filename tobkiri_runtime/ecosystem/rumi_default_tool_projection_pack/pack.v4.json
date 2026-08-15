@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:37cff9e9beccec0ab5f0424430227225bec1b72cad3aacbdfa1126f81dc48f20",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:e42979a24229b736aa5cc59f124bc2b0878f599d35134899de6c2670f0b9e9e9",
       "kind": "executable",
       "path": "runtime/projection.py"
@@ -45,7 +50,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:c78335a062934340949acf11900fa5fdd6bd8ea9ea4e4945da82eadce35ac35d",
+    "artifact_set_digest": "sha256:a1aad87241c11903383dd09232a682bcc6d58fb573ebfb5c4aff70331cd43b57",
     "contract_catalog_digest": "sha256:7dacdd899fa978a5241e4b248f4bb3c3f1302e1d3bfce561e7222444ec122ba6",
     "source_identity": "sha256:39748e508c7b15b53ec189953fddaf4389c9ff8ad9fbf87c14ef3f202e90812f"
   },
@@ -85,7 +90,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:c78335a062934340949acf11900fa5fdd6bd8ea9ea4e4945da82eadce35ac35d",
+    "artifact_digest": "sha256:a1aad87241c11903383dd09232a682bcc6d58fb573ebfb5c4aff70331cd43b57",
     "display_name": "Rumi Default Tool Projection",
     "id": "rumi_default_tool_projection_pack",
     "kind": "host_extension",

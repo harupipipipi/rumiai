@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:798c140f41b581b952069b322d0bd23629ab4b8e80d604d2e7507613fac0a43f",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:d19bcba1e195378e41b21ee7543192a2922223afcbc73bce9999f52db86c4955",
       "kind": "executable",
       "path": "runtime/bridge.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:6cd76560192a26c3d0ba24fc0a653ed5f49c7400bd80fa137bd922966a1040bc",
+    "artifact_set_digest": "sha256:40153fa9d0c9ee52b8b2618c4d183aa156899f15a2f2ef06d1d5a95940a2ac90",
     "contract_catalog_digest": "sha256:4ebd48e90d8ccebc42a4c74b69a89d3f803a18f11abc5fc694253bd1621bcec5",
     "source_identity": "sha256:9f041603183f52eac0b4f4e63abeb9c9a3ac40b8be18c067b95723d52793f168"
   },
@@ -56,7 +61,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:6cd76560192a26c3d0ba24fc0a653ed5f49c7400bd80fa137bd922966a1040bc",
+    "artifact_digest": "sha256:40153fa9d0c9ee52b8b2618c4d183aa156899f15a2f2ef06d1d5a95940a2ac90",
     "display_name": "Rumi Host Authority Bridge",
     "id": "rumi_host_authority_bridge_pack",
     "kind": "host_extension",

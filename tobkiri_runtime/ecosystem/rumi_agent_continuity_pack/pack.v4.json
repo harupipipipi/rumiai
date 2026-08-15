@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:e651b734237b6bd79f217c4c8d6eb4622bc2b3afd6b4f4a00d9306e4c4338f05",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:7bed61d6291481cec605fd474ed925cebe7bb43bead54caf9570e4624d994714",
     "contract_catalog_digest": "sha256:78e4fadc9b49d424aba03603736c273f15ad0ba14cc834933ee903e2d85dabe4",
     "source_identity": "sha256:b6d3f441a8520d6c1dc43219f8d538b5adb87ba076e63921ef15c87f87c18df1"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:7bed61d6291481cec605fd474ed925cebe7bb43bead54caf9570e4624d994714",
     "display_name": "Rumi Agent Continuity Pack",
     "id": "rumi_agent_continuity_pack",
     "kind": "application",

@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:6f93f20597f37c1fa1ebe318c257c2fe24d44130741b19075fac2152a5e29975",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:cce6588ac75beb3ae037706fdc8ea0cea7d793315642a44c0fda1105d863307e",
     "contract_catalog_digest": "sha256:60a5aed7162fd2a69415b427adbe1aea3dd99a4ef121ba5b97d8479fecd779a7",
     "source_identity": "sha256:bbd6a8ef99654c3e8b0801d7fc41b6afe02ca3a07d3dc5276c62899f5c358ef5"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:cce6588ac75beb3ae037706fdc8ea0cea7d793315642a44c0fda1105d863307e",
     "display_name": "Rumi Localization Pack",
     "id": "rumi_localization_pack",
     "kind": "application",

@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:d2a99510c82a0f45af8f759e48b9d55bbc8ed67cd761147ce569f0c296c17b27",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:ee1dfc4d2c78d4bc65ebfe1b96bf1ee41d30bb63021f25d7a61e2f31de93f1a9",
       "kind": "executable",
       "path": "runtime/sessions.py"
@@ -45,7 +50,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:2036ac3558278f354277eb88293f0e46adfefd1e3b43176e19c36e4fcb5b21c4",
+    "artifact_set_digest": "sha256:4e2274744bb75921e7587282c92ad7ec110a1840d8eb6c019fcefe8dd70659d4",
     "contract_catalog_digest": "sha256:b4672b96f41fd35f9a0e29de13fce75ff59b499c1bb9583dd04e626c0bd5c38d",
     "source_identity": "sha256:d875a4928afdb08bb60ba631e451641c87849b11d799050fca4980d1d8d9635c"
   },
@@ -83,7 +88,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:2036ac3558278f354277eb88293f0e46adfefd1e3b43176e19c36e4fcb5b21c4",
+    "artifact_digest": "sha256:4e2274744bb75921e7587282c92ad7ec110a1840d8eb6c019fcefe8dd70659d4",
     "display_name": "Rumi IDE Bridge Service",
     "id": "rumi_ide_bridge_service_pack",
     "kind": "normal_sandbox",

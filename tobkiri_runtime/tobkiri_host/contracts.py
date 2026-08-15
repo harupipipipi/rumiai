@@ -36,9 +36,18 @@ class OperationRoute:
     materialization_mode: str
     target_principal_ref: OpaqueAuthorityRef
     adapter_ids: tuple[str, ...] = ()
+    catalog_digest: str | None = None
+    platform: str | None = None
+    architecture: str | None = None
+    runtime_abi: str | None = None
+    backend: str | None = None
+    execution_kind: str | None = None
+    domain_kind: str | None = None
 
     def __post_init__(self) -> None:
         require_digest(self.artifact_digest, "route artifact")
+        if self.catalog_digest is not None:
+            require_digest(self.catalog_digest, "route executable catalog")
         if self.materialization_mode not in {
             "eager",
             "continuous",
@@ -90,6 +99,28 @@ class OperationCatalog:
         ]
         if len(variants) != 1 or function.variant_id != route.variant_id:
             raise ResolutionError("route variant does not match Function inventory")
+        variant = variants[0]
+        if artifact.catalog_digest is not None:
+            expected = {
+                "catalog_digest": artifact.catalog_digest,
+                "platform": variant.os,
+                "architecture": variant.architecture,
+                "runtime_abi": variant.runtime_abi,
+                "backend": variant.backend,
+                "execution_kind": variant.execution_kind.value,
+                "domain_kind": variant.domain_kind,
+            }
+            actual = {
+                "catalog_digest": route.catalog_digest,
+                "platform": route.platform,
+                "architecture": route.architecture,
+                "runtime_abi": route.runtime_abi,
+                "backend": route.backend,
+                "execution_kind": route.execution_kind,
+                "domain_kind": route.domain_kind,
+            }
+            if None in actual.values() or actual != expected:
+                raise ResolutionError("route executable variant pin does not match artifact")
         operations = [
             operation
             for operation in function.operations
@@ -102,7 +133,7 @@ class OperationCatalog:
         return ResolvedOperationBinding(
             artifact=artifact,
             function=function,
-            variant=variants[0],
+            variant=variant,
             operation=operation,
             route=route,
             principal_ref=route.target_principal_ref,

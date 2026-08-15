@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:4ebc7d465f27314b5f07d1607e23e3605ab072628b258522e7b7238eff29477d",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:b9e67d4e981adc16de2e398fe6f0c9fe3e6ce2568a9a57fffb3c4384afdc41c6",
       "kind": "executable",
       "path": "runtime/adapter.py"
@@ -45,7 +50,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:85a4e117988a8815a5d5e978a1ba505c47af617d959bf84513d34e1f979cada4",
+    "artifact_set_digest": "sha256:5945ccc4d51e973b0b2faa84af978049bc828131cbc7c8890d5bb81b44a93285",
     "contract_catalog_digest": "sha256:ae0bcc416071447bac1043f55c49b04074188c5284f187d034178caafbcb2176",
     "source_identity": "sha256:5467291ffda6ee3dda6a92bf16fc25bfdd72c4bd0759e1f6fa1b46b582bebcd3"
   },
@@ -86,7 +91,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:85a4e117988a8815a5d5e978a1ba505c47af617d959bf84513d34e1f979cada4",
+    "artifact_digest": "sha256:5945ccc4d51e973b0b2faa84af978049bc828131cbc7c8890d5bb81b44a93285",
     "display_name": "Rumi Slack Connector",
     "id": "rumi_slack_connector_pack",
     "kind": "host_extension",

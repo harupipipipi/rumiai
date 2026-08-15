@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:d2f9c9fea9163d4a5385cb96c41cde99b6df5ca9e9f0d55afff62408e98ff552",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:23d32224137fbea17938bc33e80e34f40723f26275edee9cb6610d755e8e2688",
     "contract_catalog_digest": "sha256:0b8863160f1c12a5df7997f8147c40148273ac50dc54d52370ce918b93dccdf0",
     "source_identity": "sha256:5528318966b9842e6f3c7ebc797efd698d84132a60bcfe94bb59b439f5eea1bb"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:23d32224137fbea17938bc33e80e34f40723f26275edee9cb6610d755e8e2688",
     "display_name": "Rumi Agentic QA Pack",
     "id": "rumi_agentic_qa_pack",
     "kind": "application",

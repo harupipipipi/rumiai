@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:feced6fc3c41d28999880bb491dd24d2eedef77fbed1b5845fad0ff580d37cb0",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:3ee4062949616812e352eee832ff37c92d85c187e0eeafdffcf755f75c649db2",
     "contract_catalog_digest": "sha256:a28c3e819cbb6fd8af6d228ae3c50410fe919d90ea12081207154159d864fdc3",
     "source_identity": "sha256:11223d955bb21fb4f4673c4d3d28fe7aac1b99cbf34c401b9b362ada9e987c9e"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:3ee4062949616812e352eee832ff37c92d85c187e0eeafdffcf755f75c649db2",
     "display_name": "rumi_operations_company_pack",
     "id": "rumi_operations_company_pack",
     "kind": "application",

@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:edf8f25c66580cee18d718a42638fb26c3856ab43a7089e15d2d36e88e41a903",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:e0d97b9e55724486c67d2a9cb37ab64e78e5ad4c9f34563143355765b77490da",
       "kind": "executable",
       "path": "runtime/runtime.py"
@@ -62,7 +67,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:a7e3304a1b77d047bb5457dab99c5640357d7d7226540bdac1079b186c6e1958",
+    "artifact_set_digest": "sha256:260f14978dd057b5862e3c830e8152677958b575ad1dde73b2cf289fdc753ffa",
     "contract_catalog_digest": "sha256:7e65819bc06caa9cadc4b88be82b0c0d074852fca85da85e3e96af92a35d89a9",
     "source_identity": "sha256:4e8f2344aa2ef8c99d0b12fcde1c9e02dd3d0da87ce83c7cfbfb69ba9cf095bc"
   },
@@ -111,7 +116,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:a7e3304a1b77d047bb5457dab99c5640357d7d7226540bdac1079b186c6e1958",
+    "artifact_digest": "sha256:260f14978dd057b5862e3c830e8152677958b575ad1dde73b2cf289fdc753ffa",
     "display_name": "Rumi Agent Runtime Service",
     "id": "rumi_agent_runtime_service_pack",
     "kind": "normal_sandbox",

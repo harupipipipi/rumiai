@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:3ef1cfad7aa4798d6273b373ed6727ff7b085498bdcb94432766dcf5d7f1a18b",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:2350f27970a4283e492bacd40cc95b5a4e21048758e0594f0db74e59c2ed6e01",
       "kind": "executable",
       "path": "runtime/service.py"
@@ -45,7 +50,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:dc830abfd06cd3759d8ce365166ff53e338e0ae7172e979d693ec58fb4f70d9b",
+    "artifact_set_digest": "sha256:39fa29b151ee0a15d1cfa796503c5126821da1b448c462734da71c5d53f9ebb3",
     "contract_catalog_digest": "sha256:580fc9df04cd452dac979d9cdeadbfc3d24c40324113cb1581d76b11c2a001d7",
     "source_identity": "sha256:4331551bed04acdcffdb1a5a5469acc55bbcbc04fb8105567e4d3006c11d0571"
   },
@@ -83,7 +88,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:dc830abfd06cd3759d8ce365166ff53e338e0ae7172e979d693ec58fb4f70d9b",
+    "artifact_digest": "sha256:39fa29b151ee0a15d1cfa796503c5126821da1b448c462734da71c5d53f9ebb3",
     "display_name": "Rumi Media Capture Host Service",
     "id": "rumi_media_capture_host_service_pack",
     "kind": "normal_sandbox",

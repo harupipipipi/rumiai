@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:0de86359c4293c08115734fdb3f7effb7fca312dfdba0a1dbb7e04b58c8461ba",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:748a376741d5e9b4556e17ee9f6b5b49cc7b168c901262799b79312d12ae2153",
       "kind": "executable",
       "path": "runtime/store.py"
@@ -62,7 +67,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:17c61d17c971d03f8bc4b5f318153c3c1844a9988d8369498a76ccb426a0337c",
+    "artifact_set_digest": "sha256:e6c41be1578ca92be19f9dbe4658903bcb9e0ba737c11f31f836e0ee3bc1d6f1",
     "contract_catalog_digest": "sha256:29bf4037d508d03ea08c7cab8ed7aad04f6ba5bdea882b3c241c27575e4aa3cb",
     "source_identity": "sha256:1a7ce4500bb58e6177e738b3635d9f2306e32ea4ee6bd83b1d7d76e21a90bfc5"
   },
@@ -114,7 +119,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:17c61d17c971d03f8bc4b5f318153c3c1844a9988d8369498a76ccb426a0337c",
+    "artifact_digest": "sha256:e6c41be1578ca92be19f9dbe4658903bcb9e0ba737c11f31f836e0ee3bc1d6f1",
     "display_name": "Rumi Memory Store",
     "id": "rumi_memory_store_pack",
     "kind": "host_extension",

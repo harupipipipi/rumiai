@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:463c77ab16896afd45ea2eaf9220356ac844d387499b498b786b686e35ea76a9",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:08de45459e7857a492a480fdf6a028dac404c58c53a81978c2a5a40002497fcb",
       "kind": "executable",
       "path": "runtime/adapter.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:05ea2e905be01008966960de6dfe69994fc888d698673bc10febafb894364ec6",
+    "artifact_set_digest": "sha256:ac8d258e3ed2603dd077627ea682a7789b2d6997804ab44a2c57cea46fbaae4b",
     "contract_catalog_digest": "sha256:edfc3bb8ae8b1de956f2bf0c4370763ca9100062cb3cd7437e13c913f24343ef",
     "source_identity": "sha256:25a8069c5de442d25b55432884f35d1e9ade2f8b0c3e064ff116f332f84fef0b"
   },
@@ -57,7 +62,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:05ea2e905be01008966960de6dfe69994fc888d698673bc10febafb894364ec6",
+    "artifact_digest": "sha256:ac8d258e3ed2603dd077627ea682a7789b2d6997804ab44a2c57cea46fbaae4b",
     "display_name": "Rumi P2P Connector",
     "id": "rumi_p2p_connector_pack",
     "kind": "host_extension",

@@ -73,6 +73,7 @@ class ArtifactVariant:
     runtime_abi: str
     backend: str
     prebuilt: bool = True
+    domain_kind: str | None = None
 
     def __post_init__(self) -> None:
         require_identifier(self.variant_id, "variant_id")
@@ -147,6 +148,7 @@ class PackArtifact:
     package_kind: PackageKind
     functions: tuple[FunctionArtifact, ...]
     variants: tuple[ArtifactVariant, ...]
+    catalog_digest: str | None = None
 
     def __post_init__(self) -> None:
         require_identifier(self.pack_id, "pack_id")
@@ -166,6 +168,8 @@ class PackArtifact:
             raise InvalidArtifactError(
                 f"Function inventory references unknown variants: {sorted(missing)}"
             )
+        if self.catalog_digest is not None:
+            require_digest(self.catalog_digest, "executable catalog")
 
     def function(self, function_id: str) -> FunctionArtifact:
         """Return an exact inventoried Function or fail closed."""

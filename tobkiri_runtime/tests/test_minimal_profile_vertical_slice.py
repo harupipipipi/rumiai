@@ -30,6 +30,7 @@ from tobkiri_host.ports import (
     StaticAuthorityQuery,
 )
 from tobkiri_host.runtime import ProductionRuntimeV4
+from tobkiri_protocol.canonical import canonical_digest
 
 
 class NoAdapters:
@@ -273,6 +274,32 @@ def test_minimal_profile_rejects_stale_activation_record() -> None:
             lock=profile.lock,
             plan=profile.plan,
             activation=stale_activation,
+            artifacts=profile.artifacts,
+            routes=(profile.route,),
+            authority_ceilings=profile.authority_ceilings,
+            effective_artifacts=profile.artifact_inventory,
+        )
+
+
+def test_minimal_profile_rejects_lock_variant_pin_mismatch() -> None:
+    """A re-sealed Lock cannot replace the Plan's exact executable variant."""
+
+    profile = minimal_profile()
+    lock = {
+        **profile.lock,
+        "variant_pins": [
+            {**profile.lock["variant_pins"][0], "backend": "tobkiri.remote-pack-v4"}
+        ],
+    }
+    lock["lock_digest"] = canonical_digest(
+        {key: value for key, value in lock.items() if key != "lock_digest"}
+    )
+    with pytest.raises(ResolutionError, match="variant pins"):
+        HostV4Composition.capture(
+            profile=profile.profile,
+            lock=lock,
+            plan=profile.plan,
+            activation=profile.activation,
             artifacts=profile.artifacts,
             routes=(profile.route,),
             authority_ceilings=profile.authority_ceilings,

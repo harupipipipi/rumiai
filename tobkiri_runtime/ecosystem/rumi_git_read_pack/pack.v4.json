@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:863462154b0c9a081e372455964836782bf818909c3f4ecc2a176eba32c9d4df",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:9f79fddc4bb747277a0623bb2ba6cab74944d20e4fdf35005f4d355c06d6f932",
       "kind": "executable",
       "path": "runtime/read.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:38a66e2749c75439fe6f225f6092daa99765d273014dfffca4c8c66d9277f1f5",
+    "artifact_set_digest": "sha256:3eb22659cc6df47ce109abe7a6a0b0500b81d5216f22e18ec4f4d8fdbba05f6b",
     "contract_catalog_digest": "sha256:84f78c9033e5e4c6b2ffba9976d22d97955ee513ad1138d070801b97bea3d836",
     "source_identity": "sha256:5c8ae1efd0bfe6a847b2b3db070225fca4b0901ee80544c48d544663acb79882"
   },
@@ -56,7 +61,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:38a66e2749c75439fe6f225f6092daa99765d273014dfffca4c8c66d9277f1f5",
+    "artifact_digest": "sha256:3eb22659cc6df47ce109abe7a6a0b0500b81d5216f22e18ec4f4d8fdbba05f6b",
     "display_name": "Rumi Git Read",
     "id": "rumi_git_read_pack",
     "kind": "host_extension",

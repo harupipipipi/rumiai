@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:84db4bbcb0b7d170a537ea0cfd967e1ac8a1e533c91db5ce02276115f5cd25d0",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:a292e8f063e2743c727943a418e14621829e6f73a9465bd0b1b17a7287072b7a",
     "contract_catalog_digest": "sha256:215d5df40eb0fb5b6193bdde05006d93102063c3f4c15b8ced1a270519b5c7b2",
     "source_identity": "sha256:0ed995ccc091d65fcaed1184eef362ec7e000a82c8dfe7a441c1f7a82809ff8e"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:a292e8f063e2743c727943a418e14621829e6f73a9465bd0b1b17a7287072b7a",
     "display_name": "rumi_devops_release_pack",
     "id": "rumi_devops_release_pack",
     "kind": "application",

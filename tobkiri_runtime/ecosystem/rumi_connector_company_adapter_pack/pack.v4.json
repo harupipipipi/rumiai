@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:d68d8c7bdb045f12256477b5b456669e53c20f644ec46e735abad03dd530d4e2",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:585a6c6e0f2ed28c4d478eb4eaf39df73cbe3e4df9d2f7eb5196058bfc816a6d",
       "kind": "executable",
       "path": "runtime/adapter.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:dc3cb58aef49ef3a189f77cc2187cb54571db143b6a5180fc90121c5e3132ccc",
+    "artifact_set_digest": "sha256:d6c25840c0af5391b052d3c334675222d3ae41b52f868873404a88ab3988b200",
     "contract_catalog_digest": "sha256:2ad6c9d2bd401021c31a94421cc5ca70d499b9b6fb44551ecb773c0afb7b69b8",
     "source_identity": "sha256:64d95a6b924fe40904bf6e97a328f646edd7a4e2314aae8d1d3850dbe1cff208"
   },
@@ -55,7 +60,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:dc3cb58aef49ef3a189f77cc2187cb54571db143b6a5180fc90121c5e3132ccc",
+    "artifact_digest": "sha256:d6c25840c0af5391b052d3c334675222d3ae41b52f868873404a88ab3988b200",
     "display_name": "Rumi Connector Company Adapter",
     "id": "rumi_connector_company_adapter_pack",
     "kind": "normal_sandbox",

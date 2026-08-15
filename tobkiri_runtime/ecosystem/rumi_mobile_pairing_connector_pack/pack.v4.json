@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:ce73cda65f4a2d2b1819d4a912aa2f96ac502fa098f9c53dcdd1ef99315fe93a",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:a36fb70dcb0688c414dd734e1398b64a8799f74d2ddbb707595ebb47a42dae87",
       "kind": "executable",
       "path": "runtime/adapter.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:46a70d0905db576cb416ae4aa1e76538b443caedec4db00638a7bb53f4b9e3d2",
+    "artifact_set_digest": "sha256:2ec5f84cb655635c4dbf601f79d383d420613ce41655f753ac7d0cd1ede59627",
     "contract_catalog_digest": "sha256:b0984997a7ab1e498812f982901679f3b82e85050f418e10d303599d1d694291",
     "source_identity": "sha256:6d88e518267df71cb8dcf9bb5dd704a334bdb83556fe08ac5af6ca889129037b"
   },
@@ -56,7 +61,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:46a70d0905db576cb416ae4aa1e76538b443caedec4db00638a7bb53f4b9e3d2",
+    "artifact_digest": "sha256:2ec5f84cb655635c4dbf601f79d383d420613ce41655f753ac7d0cd1ede59627",
     "display_name": "Rumi Mobile Pairing Connector",
     "id": "rumi_mobile_pairing_connector_pack",
     "kind": "normal_sandbox",

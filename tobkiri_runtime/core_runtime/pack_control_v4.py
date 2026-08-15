@@ -1025,6 +1025,7 @@ def resolve_profile_pack_set(
         shells=catalog.shells,
         profiles=catalog.profiles,
         artifact_root=catalog.artifact_root,
+        executable_catalogs=catalog.executable_catalogs,
     )
     source = catalog.profiles.get(profile_id)
     if source is None:

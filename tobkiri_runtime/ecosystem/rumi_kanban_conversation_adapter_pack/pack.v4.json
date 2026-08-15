@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:f3f38ba2b98d173dfafc16a701646edc9a211c343586b3f6017055cc4afd3085",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:3a1c4b115c1f07a423aaf32cb281452ef21e0d79a559ac6b6a24f5c99711296f",
       "kind": "executable",
       "path": "runtime/adapter.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:b120f600aa64027bb3f8cd50afce66fac6b8f7383238c1c5ecfa76b0f63af910",
+    "artifact_set_digest": "sha256:a7d9809777a75d9b99ac09638b0bb90eb735e8964b03126a5d1c60954af57bd1",
     "contract_catalog_digest": "sha256:02eaf08e64d0dd1343340b0f63c97a0fea46ae974fdd6e647f4f7e2e79435a30",
     "source_identity": "sha256:436cd3064556cb4d77fd7328e24bce4e4e6f6d4a8057b0c23d0603a0a7dd1d32"
   },
@@ -55,7 +60,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:b120f600aa64027bb3f8cd50afce66fac6b8f7383238c1c5ecfa76b0f63af910",
+    "artifact_digest": "sha256:a7d9809777a75d9b99ac09638b0bb90eb735e8964b03126a5d1c60954af57bd1",
     "display_name": "Rumi Kanban Conversation Adapter",
     "id": "rumi_kanban_conversation_adapter_pack",
     "kind": "normal_sandbox",

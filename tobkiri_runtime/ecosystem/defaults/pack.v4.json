@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:faa59f3429a34a081e8861b50c8fed690ae5dc55c3f655acffcd524e3574e76c",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:db00d284db117d28cd0519bf8ff04b69c081c55eb19dc46e7ca88922faf6ba95",
     "contract_catalog_digest": "sha256:190a3e155a7202ca2f1372e3a122acb1e258d6f1c3bd3fa880497ad50ae8fe6f",
     "source_identity": "sha256:50bdb12f51119585e84d943d3a374cbb33cafff901ac300ce516ff46cb8b696d"
   },
@@ -15,7 +21,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:db00d284db117d28cd0519bf8ff04b69c081c55eb19dc46e7ca88922faf6ba95",
     "display_name": "Tobkiri Defaults Base",
     "id": "defaults",
     "kind": "base",

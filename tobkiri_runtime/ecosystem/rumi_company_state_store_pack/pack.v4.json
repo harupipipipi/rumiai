@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:a843de0d965a10c22ac54951bfafc124ee233fb5fd666b70214db4ee2f384675",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:a3fd51a3c28c083f0819932964fbab77b55d3cd0b7ab0958dd287d23139bdd9f",
       "kind": "executable",
       "path": "runtime/store.py"
@@ -45,7 +50,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:9779ec6138c0e62237988eba65395fba8d00d88d191cc3c809018f2a59f2108e",
+    "artifact_set_digest": "sha256:74aa760a824fd0c5631a109cdfdc430a15708b02094f3b5aaf3bb2cc0d242a7b",
     "contract_catalog_digest": "sha256:c8a087ac8198b612f2ca08308503f6f8b5736fa874eebe4b2df24061081fe486",
     "source_identity": "sha256:d0748d5cb0391d2dc4bf9ea0bf4b6d464383f68ac38d82d3617a40a15d08d884"
   },
@@ -83,7 +88,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:9779ec6138c0e62237988eba65395fba8d00d88d191cc3c809018f2a59f2108e",
+    "artifact_digest": "sha256:74aa760a824fd0c5631a109cdfdc430a15708b02094f3b5aaf3bb2cc0d242a7b",
     "display_name": "Rumi Company State Store",
     "id": "rumi_company_state_store_pack",
     "kind": "normal_sandbox",

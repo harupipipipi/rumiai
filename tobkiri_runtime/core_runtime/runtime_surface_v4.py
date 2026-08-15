@@ -2075,6 +2075,7 @@ def _catalog_for_effective_sets(
         shells=catalog.shells,
         profiles=catalog.profiles,
         artifact_root=catalog.artifact_root,
+        executable_catalogs=catalog.executable_catalogs,
     )
 
 

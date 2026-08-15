@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:4a16f8ea673195b506f578521087fbde9027a5e424c2007c60f6a4fbc0b847e8",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:bd659fafb83b1510377471701cc37e615677a840ce6af89e11c51cd6bc61108e",
       "kind": "executable",
       "path": "runtime/write.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:1e66c204ffd46b5927aaee57860a82d308ec690cdcb9f4a35758a32730c78507",
+    "artifact_set_digest": "sha256:22e399067b25de637152bcf463b577075ea900368a1da470f615c1b398222082",
     "contract_catalog_digest": "sha256:06b21018a9ceb2cc6895ed34a5015428006fa306fe709708cba91c697d826b0e",
     "source_identity": "sha256:ced19cf1404dcd5fa84dd96ccf5c735593ff5c57b9a9ba61af5323dce68bc614"
   },
@@ -56,7 +61,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:1e66c204ffd46b5927aaee57860a82d308ec690cdcb9f4a35758a32730c78507",
+    "artifact_digest": "sha256:22e399067b25de637152bcf463b577075ea900368a1da470f615c1b398222082",
     "display_name": "Rumi Git Write",
     "id": "rumi_git_write_pack",
     "kind": "host_extension",

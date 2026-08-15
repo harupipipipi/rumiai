@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:49c41f5c7c805a7a30c006443855c99be07d962ab8c92ad71bcd697a68f7b47c",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:ae11e5127c0bb4a1dab5f1a763c5f9b87378b27454f74ef80a9a27613e6ab6b1",
     "contract_catalog_digest": "sha256:c17838052887fd9db373559a71b8c88dda2e4183cb74d4ba243d426091fcfa7c",
     "source_identity": "sha256:0add39edb25bd8c1f640624a08a0500399eb258534f798aad22e33ed399dd4d5"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:ae11e5127c0bb4a1dab5f1a763c5f9b87378b27454f74ef80a9a27613e6ab6b1",
     "display_name": "Rumi Knowledge Marketplace Pack",
     "id": "rumi_knowledge_marketplace_pack",
     "kind": "application",

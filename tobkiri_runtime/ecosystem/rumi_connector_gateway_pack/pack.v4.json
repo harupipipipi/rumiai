@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:5ce1e586a9b4d37be088de2fec1a4d7dc270e4e5a9219caecece36316d875495",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:7c08f69a6702c02d91ad608d5caaa4aaffd43e7a20389ecf0b490f480fb7ced0",
     "contract_catalog_digest": "sha256:d77b9ab090ca588fe2ad26d9fd99aeab30ef3c1c4c74213d75c543db29dbc3d1",
     "source_identity": "sha256:21c5542259b43c2aeb18d47a9cadcbfb565ad11b84bd2a0d1423d7be01412092"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:7c08f69a6702c02d91ad608d5caaa4aaffd43e7a20389ecf0b490f480fb7ced0",
     "display_name": "Rumi Connector Gateway Pack",
     "id": "rumi_connector_gateway_pack",
     "kind": "application",

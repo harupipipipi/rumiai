@@ -314,6 +314,7 @@ def compose_runtime_profile(
         "shell": shell_lock,
         "application": application,
         "effective_set": effective_set,
+        "variant_pins": [],
         "requested_edges_digest": requested_edges_digest,
         "constraints_digest": constraints_digest,
         "closure_digest": closure_digest,

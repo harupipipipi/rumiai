@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:296c1c8db812631f8e44d8981d01e29ea381828a8a2509dd2a45d2e1ebf46c3f",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:9d31421989dd635b488c4353bf7f50e24c878ded45daa8368c80af9e1361dd4f",
       "kind": "executable",
       "path": "runtime/broker.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:7745e2e27dc9637ac134f0c78c8f9c27a5442d9c16ba3411b1cfaae2e34d554a",
+    "artifact_set_digest": "sha256:634c46d225f0c7239abc8de40a1211650e735e0d3eda9c5d0a260a2e68984d92",
     "contract_catalog_digest": "sha256:2c544cfb40ff54de791173131b12311082503792ab64be1eba46a441a43fe978",
     "source_identity": "sha256:8576606a39b3e9c691c4f0d5da80bbbfb59085f6fa1bcfd165c2f31af7dca04f"
   },
@@ -55,7 +60,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:7745e2e27dc9637ac134f0c78c8f9c27a5442d9c16ba3411b1cfaae2e34d554a",
+    "artifact_digest": "sha256:634c46d225f0c7239abc8de40a1211650e735e0d3eda9c5d0a260a2e68984d92",
     "display_name": "Rumi Connector Inbound Broker",
     "id": "rumi_connector_inbound_broker_pack",
     "kind": "normal_sandbox",

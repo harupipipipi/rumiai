@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:03d425e16a4730297659756f7a8d27868d3031dfce21cfedf3528825f0538488",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:b70b6eed75958e98dd1c3a0f58529440e8f2b5c2d30b1911ef0a9620367c65ef",
     "contract_catalog_digest": "sha256:fc33ba308628f4f46d9fc9b9abdeb6122171a1535553e909feb5f5312778892f",
     "source_identity": "sha256:b496fa5123722eb84ddc6f28097f94fe6841b6750e699843fd0fc5eabaff4126"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:b70b6eed75958e98dd1c3a0f58529440e8f2b5c2d30b1911ef0a9620367c65ef",
     "display_name": "Rumi Frontend Design Pack",
     "id": "rumi_frontend_design_pack",
     "kind": "application",

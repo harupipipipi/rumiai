@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:944270216a0b75fe968d6c12c4ffed09bcd355fb19bf13f50b009d1f3249179c",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:0eefb8b32c083309abf0d20688d7769b8533f726f516891de0fead09bfa792ed",
       "kind": "executable",
       "path": "runtime/turns.py"
@@ -62,7 +67,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:1e9c62b183322d75641a7ee15d0fee7b6b072c950275193fbe26885549d5d32a",
+    "artifact_set_digest": "sha256:527b3948b0453aa8311b0295ab22b67ffb04b623509dd958f6dcb1fe12dc94e6",
     "contract_catalog_digest": "sha256:2aa6002d35e82549aef11425b6ca5101dbfb94eb84b1376fe25c5ca5aef48930",
     "source_identity": "sha256:efc055d0765a37ceade0bcdd78f6b960a262d8a47e19cee9cad32d15b56d3d44"
   },
@@ -114,7 +119,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:1e9c62b183322d75641a7ee15d0fee7b6b072c950275193fbe26885549d5d32a",
+    "artifact_digest": "sha256:527b3948b0453aa8311b0295ab22b67ffb04b623509dd958f6dcb1fe12dc94e6",
     "display_name": "Rumi Turn Runtime",
     "id": "rumi_turn_runtime_pack",
     "kind": "host_extension",

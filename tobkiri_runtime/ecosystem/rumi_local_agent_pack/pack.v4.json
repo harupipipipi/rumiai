@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:9cd555648944a00f39d97f93be943f55139b21353b5204bb73f713cbe2157738",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:3c42743d0091c9904ce553ee98a4a47f940e2989e73f392f25c6327c8e23225e",
     "contract_catalog_digest": "sha256:7f70cebbcd801b9274d864c6c6e59d7850e771fc233072f637f121ad8844b3f5",
     "source_identity": "sha256:fc8c78cc5d9866e4f44dc90b435f416bcb671d004c3e8e09d93aeab1f3aa452d"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:3c42743d0091c9904ce553ee98a4a47f940e2989e73f392f25c6327c8e23225e",
     "display_name": "rumi_local_agent_pack",
     "id": "rumi_local_agent_pack",
     "kind": "application",

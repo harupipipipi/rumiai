@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:7e1e902d1c5bd5a1823910c0bc617aff33b2ef5a9b2075e955b3237da5f73b9d",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:3bde466cc00a8432cfcb99871074eb174d6fdac8b6147a33984df395857db4ae",
       "kind": "sidecar",
       "path": "extensions/activities/repository_context/manifest.json"
@@ -114,7 +119,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:18b5b6f244a385f18ba20ba591c6557dad5c82f659f237a469fd29bb22890726",
+    "artifact_set_digest": "sha256:8dd8edc2e73f29487a82d6d85b6486ab1968ca588eba6fbc41deb5c3bd100856",
     "contract_catalog_digest": "sha256:37625d56d2c58df1b3ff7d3fdb4ae7b6523be7cda42518caed7d4bf14ee74309",
     "source_identity": "sha256:d4cc541317bffa0e267c0961f74594916e0dab927c2f561a8e66c888549b3f3e"
   },
@@ -178,7 +183,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:18b5b6f244a385f18ba20ba591c6557dad5c82f659f237a469fd29bb22890726",
+    "artifact_digest": "sha256:8dd8edc2e73f29487a82d6d85b6486ab1968ca588eba6fbc41deb5c3bd100856",
     "display_name": "Tobkiri Repository Context",
     "id": "rumi_repository_context_pack",
     "kind": "host_extension",

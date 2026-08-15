@@ -6,6 +6,11 @@
       "path": "catalog/prompt_studio_prompt_library.yaml"
     },
     {
+      "digest": "sha256:2b2a89f5c80be4fe21af5d64908c25bb48663a252a29f83b4178968b375bbaba",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:7a21d786ce90d54f615b7e85a7317ff7556d82a49a79070407ac65a50b3c6484",
       "kind": "executable",
       "path": "frontend/contributions/prompt-studio.json"
@@ -136,7 +141,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:28ea33fb63021a277ae78134d331e1162ef4a4425ae2a23e89d4dc0aafa600a0",
+    "artifact_set_digest": "sha256:652e11404e1505379de22b7a511139a11780ca975d95183abffb1538f013183b",
     "contract_catalog_digest": "sha256:c593d7337906b5fbdba45815ea31a2f28230e24886f0d219078db29d9b7f3ade",
     "source_identity": "sha256:7c17033a14efca12cec8b020366201a8c31126847d04ee2883be7667937fe2f6"
   },
@@ -212,7 +217,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:28ea33fb63021a277ae78134d331e1162ef4a4425ae2a23e89d4dc0aafa600a0",
+    "artifact_digest": "sha256:652e11404e1505379de22b7a511139a11780ca975d95183abffb1538f013183b",
     "display_name": "Rumi Prompt Studio",
     "id": "rumi_prompt_studio_pack",
     "kind": "host_extension",

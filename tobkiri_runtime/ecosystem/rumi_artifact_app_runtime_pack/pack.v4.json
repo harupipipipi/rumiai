@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:79762f6274256598a6dc22128c50de858dd4a2d5b2f9907f12057f80423b2e9d",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:095f3b32b86ba30a7c3be6b9fad208ef31721027440250d6d536335916c29355",
       "kind": "sidecar",
       "path": "frontend/contributions/artifact-app-runtime.json"
@@ -9,7 +14,7 @@
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:7438ba4f6ec32564fe2e75d940154098127d47c4e51d305da1f3afceaa187ad4",
+    "artifact_set_digest": "sha256:e8ac7c313c1fd92ea14abd709107d7e33c22f10f8f8f6e9f5a00ef7e65dc2450",
     "contract_catalog_digest": "sha256:594241b673316d5f111a493273c31cd8c8da247d2c362c8a3c8235ef4199d479",
     "source_identity": "sha256:26b8f081f5ba81132a181b449b9a01982c5eb87059fc430c7b9df03353638edc"
   },
@@ -24,7 +29,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:7438ba4f6ec32564fe2e75d940154098127d47c4e51d305da1f3afceaa187ad4",
+    "artifact_digest": "sha256:e8ac7c313c1fd92ea14abd709107d7e33c22f10f8f8f6e9f5a00ef7e65dc2450",
     "display_name": "Rumi Artifact App Runtime Content",
     "id": "rumi_artifact_app_runtime_pack",
     "kind": "application",

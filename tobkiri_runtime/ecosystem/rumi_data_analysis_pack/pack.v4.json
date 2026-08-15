@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:25d4f63b947dc76dbcb7c695d9e39bb2d91a112f3da897c1694f978c137c09b2",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:c52cf09712ad37b0e44656898afa03fb9fd08f238eb9e102b5667386031678cd",
       "kind": "sidecar",
       "path": "frontend/contributions/data-analysis.json"
@@ -9,7 +14,7 @@
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:2a314400051ac12857ed61415998a4c2d628a70853e966d27f1f43b97f96c210",
+    "artifact_set_digest": "sha256:49b6de8241c6eec1808be5084cb3457389fad037fc2d506e665d834b14aa28c1",
     "contract_catalog_digest": "sha256:0b830c3b766b2e1da1da756c4208f53da8eb0738f3323045aed80b080a39dc8c",
     "source_identity": "sha256:bebe538206c785696ab1e6ed07db91765e5f5bd4b27c93bfc4d6e540994a6c27"
   },
@@ -24,7 +29,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:2a314400051ac12857ed61415998a4c2d628a70853e966d27f1f43b97f96c210",
+    "artifact_digest": "sha256:49b6de8241c6eec1808be5084cb3457389fad037fc2d506e665d834b14aa28c1",
     "display_name": "Rumi Data Analysis Content",
     "id": "rumi_data_analysis_pack",
     "kind": "application",

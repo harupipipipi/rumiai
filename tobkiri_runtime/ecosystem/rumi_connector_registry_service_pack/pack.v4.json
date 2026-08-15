@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:68b51a8bbfdd1d3d869b4ee5585075eb45f1acffbb05e7196704a14c60218018",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:86e41154adfd84c3ffc0b583d0cc2835a327033716eb16c42efda4afda07909c",
       "kind": "executable",
       "path": "runtime/registry.py"
@@ -45,7 +50,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:cd97ee803bf99f6dba493876e8b81ecb2b4ff45bfa91e1910a02dd0e13cb592a",
+    "artifact_set_digest": "sha256:f612b76a1363d40e46e6912eb011c33f46709892ebacc54431a377a59b09d192",
     "contract_catalog_digest": "sha256:7b2fde9eb5a91ddaa6f4dbea2f6f6905f57bde74bee70f9f91195cf0318e7cf7",
     "source_identity": "sha256:7a958c2a915402a0cc419303b3815e58cd71e94512a0e57fba8bc76a465bb077"
   },
@@ -83,7 +88,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:cd97ee803bf99f6dba493876e8b81ecb2b4ff45bfa91e1910a02dd0e13cb592a",
+    "artifact_digest": "sha256:f612b76a1363d40e46e6912eb011c33f46709892ebacc54431a377a59b09d192",
     "display_name": "Rumi Connector Registry Service",
     "id": "rumi_connector_registry_service_pack",
     "kind": "normal_sandbox",

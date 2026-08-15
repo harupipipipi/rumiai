@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:ea8c4a1d397aed297601098dbbe8f1b691056ca9357e2496e8c27f6c9ebfe859",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:3a1ca8334510d8fdbbf41437f444ea32c6345fccdc1ca8ad298d470dbf8a4bd7",
       "kind": "executable",
       "path": "runtime/__init__.py"
@@ -33,7 +38,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:fe2dd574cc33a781474b78bc791fba24d6dd150c8e47cf244eed932488821bfd",
+    "artifact_set_digest": "sha256:455fbb01c6367013cd4b8fb18e99ddbbcf7521679ec1964b73cee33dac5de23a",
     "contract_catalog_digest": "sha256:ef89045810ca0e2d66bf2533f86b404da0be83848b88fa6fa97c03c049553ef1",
     "source_identity": "sha256:4e9d5f841be5dbac042b2e1f93be49b1477c17eb1001882181cd7c788e86fa65"
   },
@@ -61,7 +66,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:fe2dd574cc33a781474b78bc791fba24d6dd150c8e47cf244eed932488821bfd",
+    "artifact_digest": "sha256:455fbb01c6367013cd4b8fb18e99ddbbcf7521679ec1964b73cee33dac5de23a",
     "display_name": "Rumi AI Stream",
     "id": "rumi_ai_stream_pack",
     "kind": "host_extension",

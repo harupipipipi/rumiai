@@ -48,6 +48,10 @@ def _file_digest(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _file_digest_text(value: str) -> str:
+    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 def _json_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
@@ -728,12 +732,22 @@ def _manifest_document(
     source_identity: str,
     contracts: list[Mapping[str, Any]],
     contract_catalog_digest: str,
+    executable_catalog_artifact_digest: str | None = None,
 ) -> dict[str, Any]:
     contract_by_id = {item["contract_id"]: item for item in contracts}
     artifact_set = [
         {key: value for key, value in item.items() if key != "index_role"}
         for item in record["runtime_artifacts"]
     ]
+    if executable_catalog_artifact_digest is not None:
+        artifact_set.append(
+            {
+                "path": "executables.v4.json",
+                "digest": executable_catalog_artifact_digest,
+                "kind": "sidecar",
+            }
+        )
+    artifact_set.sort(key=lambda item: item["path"])
     artifact_set_digest = _artifact_set_digest(artifact_set)
     functions = []
     operation_catalog = []
@@ -841,6 +855,8 @@ def _manifest_document(
 
 
 def _render_record(record: Mapping[str, Any]) -> dict[str, str]:
+    from scripts.generate_executable_catalogs_v4 import _render_document
+
     source_identity = _digest(record)
     contracts = [
         _contract_document(record, source_identity, source)
@@ -853,13 +869,13 @@ def _render_record(record: Mapping[str, Any]) -> dict[str, str]:
         "contracts": contracts,
     }
     contract_text = _json_text(contract_catalog)
-    manifest = _manifest_document(
+    provisional_manifest = _manifest_document(
         record,
         source_identity,
         contracts,
         "sha256:" + hashlib.sha256(contract_text.encode("utf-8")).hexdigest(),
     )
-    manifest_text = _json_text(manifest)
+    provisional_manifest_text = _json_text(provisional_manifest)
     unsigned_index = {
         "index_api_version": "io.tobkiri.pack-artifact-index.v4",
         "pack_id": record["pack_id"],
@@ -867,7 +883,8 @@ def _render_record(record: Mapping[str, Any]) -> dict[str, str]:
         "artifacts": [
             {
                 "path": "pack.v4.json",
-                "digest": "sha256:" + hashlib.sha256(manifest_text.encode("utf-8")).hexdigest(),
+                "digest": "sha256:"
+                + hashlib.sha256(provisional_manifest_text.encode("utf-8")).hexdigest(),
                 "role": "canonical_manifest",
             },
             {
@@ -884,8 +901,54 @@ def _render_record(record: Mapping[str, Any]) -> dict[str, str]:
                 for item in record["runtime_artifacts"]
             ],
         ],
-        "artifact_set_digest": manifest["integrity"]["artifact_set_digest"],
+        "artifact_set_digest": provisional_manifest["integrity"]["artifact_set_digest"],
     }
+    provisional_index = {
+        **unsigned_index,
+        "integrity_seal": {
+            "algorithm": "sha256-canonical-v1",
+            "signed_digest": _digest(unsigned_index),
+        },
+    }
+    executable = _render_document(
+        str(record["pack_id"]),
+        ECOSYSTEM / str(record["pack_id"]),
+        provisional_manifest,
+        contract_catalog,
+        provisional_index,
+    )
+    executable_text = _json_text(executable)
+    executable_artifact_digest = (
+        "sha256:" + hashlib.sha256(executable_text.encode("utf-8")).hexdigest()
+    )
+    manifest = _manifest_document(
+        record,
+        source_identity,
+        contracts,
+        "sha256:" + hashlib.sha256(contract_text.encode("utf-8")).hexdigest(),
+        executable_artifact_digest,
+    )
+    manifest_text = _json_text(manifest)
+    unsigned_index["artifacts"] = [
+        {
+            **item,
+            "digest": (
+                _file_digest_text(manifest_text)
+                if item["path"] == "pack.v4.json"
+                else item["digest"]
+            ),
+        }
+        for item in unsigned_index["artifacts"]
+    ]
+    unsigned_index["artifacts"].append(
+        {
+            "path": "executables.v4.json",
+            "digest": executable_artifact_digest,
+            "role": "sidecar",
+        }
+    )
+    unsigned_index["artifacts"].sort(key=lambda item: item["path"])
+    unsigned_index["artifact_set_digest"] = manifest["integrity"]["artifact_set_digest"]
     index = {
         **unsigned_index,
         "integrity_seal": {
@@ -900,6 +963,7 @@ def _render_record(record: Mapping[str, Any]) -> dict[str, str]:
         "pack.v4.json": manifest_text,
         "contracts.v4.json": contract_text,
         "artifact-index.v4.json": _json_text(index),
+        "executables.v4.json": executable_text,
     }
 
 
@@ -909,14 +973,21 @@ def verify_rendered_artifacts(files: Mapping[str, str]) -> None:
         manifest = validate_document(files["pack.v4.json"], "pack")
         contracts = validate_document(files["contracts.v4.json"], "pack_contract_catalog")
         index = validate_document(files["artifact-index.v4.json"], "pack_artifact_index")
+        executable = validate_document(files["executables.v4.json"], "executable_catalog")
     except KeyError as exc:
         raise PackV4MigrationError(f"missing generated artifact: {exc.args[0]}") from exc
-    if not (manifest["pack"]["id"] == contracts["pack_id"] == index["pack_id"]):
+    if not (
+        manifest["pack"]["id"]
+        == contracts["pack_id"]
+        == index["pack_id"]
+        == executable["pack_id"]
+    ):
         raise PackV4MigrationError("generated Pack identities disagree")
     if not (
         manifest["integrity"]["source_identity"]
         == contracts["source_identity"]
         == index["source_identity"]
+        == executable["source_identity"]
     ):
         raise PackV4MigrationError("generated source identities disagree")
     _verify_function_operation_principals(manifest)
@@ -927,6 +998,27 @@ def verify_rendered_artifacts(files: Mapping[str, str]) -> None:
             raise PackV4MigrationError(f"artifact index digest mismatch: {name}")
     if manifest["integrity"]["contract_catalog_digest"] != entries["contracts.v4.json"]["digest"]:
         raise PackV4MigrationError("manifest contract catalog digest is stale")
+    expected_artifact_digest = _artifact_set_digest(manifest["artifacts"])
+    if (
+        manifest["pack"]["artifact_digest"] != expected_artifact_digest
+        or manifest["integrity"]["artifact_set_digest"] != expected_artifact_digest
+        or index["artifact_set_digest"] != expected_artifact_digest
+    ):
+        raise PackV4MigrationError("generated Pack artifact set digest is stale")
+    manifest_entries = {item["path"]: item["digest"] for item in manifest["artifacts"]}
+    for path, digest in manifest_entries.items():
+        if entries.get(path, {}).get("digest") != digest:
+            raise PackV4MigrationError(f"artifact index digest mismatch: {path}")
+    executable_raw_digest = _file_digest_text(files["executables.v4.json"])
+    if entries.get("executables.v4.json", {}).get("role") != "sidecar":
+        raise PackV4MigrationError("artifact index does not pin executable catalog")
+    if entries["executables.v4.json"]["digest"] != executable_raw_digest:
+        raise PackV4MigrationError("executable catalog artifact digest is stale")
+    unsigned_executable = {
+        key: value for key, value in executable.items() if key != "catalog_digest"
+    }
+    if executable["catalog_digest"] != _digest(unsigned_executable):
+        raise PackV4MigrationError("executable catalog digest is stale")
     unsigned = {key: value for key, value in index.items() if key != "integrity_seal"}
     if index["integrity_seal"]["signed_digest"] != _digest(unsigned):
         raise PackV4MigrationError("artifact index integrity seal is invalid")

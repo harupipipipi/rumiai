@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:74258d32bcc71b0a1fe58ed2079bc1797fbfc4271ed1389f8f865028ad5b0433",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:91ed3ca4170dd6112d0b6e52c8e1db234e7c5e45ffd4249918d535ff4c6c9f1b",
     "contract_catalog_digest": "sha256:4edf708bf2e2bf9d00ae1fa2907775d658bd4b76e30a97d315a39b0ec97d9243",
     "source_identity": "sha256:a0c347c0a7dfa63d270ae0e4b6aec50788ee48f215ebcc3269b1ae2574b9f645"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:91ed3ca4170dd6112d0b6e52c8e1db234e7c5e45ffd4249918d535ff4c6c9f1b",
     "display_name": "Rumi Experiment Design Pack",
     "id": "rumi_experiment_design_pack",
     "kind": "application",

@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:252eef3bbd62d092b080bb621a4e15812df7aef293bb0e1455942df92fde64ce",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:e7dcfbbcdba7f3e290e68a436bdde19c2b0ef1b3042c31efb64057d56b9c180d",
     "contract_catalog_digest": "sha256:e167028fc874f86d99a1fd5a4e88f14e3f654bfe60de07033076ed5f2c306212",
     "source_identity": "sha256:7c34fbc9188cb6dbbd92749b68b14167193762989a1b8ebf72acb24f5f2f15b7"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:e7dcfbbcdba7f3e290e68a436bdde19c2b0ef1b3042c31efb64057d56b9c180d",
     "display_name": "Rumi Business Ops Pack",
     "id": "rumi_business_ops_pack",
     "kind": "application",

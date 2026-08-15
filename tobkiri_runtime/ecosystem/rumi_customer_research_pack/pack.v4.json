@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:ac6cdfef349fa29e5c6808067c393bec946927d4c12f498676d0d29e2ab9d86b",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:083b6a99b7b5cd6c59dbc1fa2af992d6cef024b34a641f592ea2d269910ee224",
       "kind": "sidecar",
       "path": "frontend/contributions/customer-research.json"
@@ -9,7 +14,7 @@
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:7de11ca67c52f4b84bb69da1716c18ccd19048dd1b61eb11ee4e05e48f6a4e24",
+    "artifact_set_digest": "sha256:9b87e30e1f08f998f37143b65c602c8ac76a95e99efd709b7270527d8f5afefb",
     "contract_catalog_digest": "sha256:9bec61de3194decd97886b453c0eb5b9dfc87d1eb373b2d13446dcf162c7dcf1",
     "source_identity": "sha256:cb16c518786a1b901e3a5650fa07d47e0cbe27965afd7bae1b1cdc4f882f7f6d"
   },
@@ -24,7 +29,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:7de11ca67c52f4b84bb69da1716c18ccd19048dd1b61eb11ee4e05e48f6a4e24",
+    "artifact_digest": "sha256:9b87e30e1f08f998f37143b65c602c8ac76a95e99efd709b7270527d8f5afefb",
     "display_name": "Rumi Customer Research Content",
     "id": "rumi_customer_research_pack",
     "kind": "application",

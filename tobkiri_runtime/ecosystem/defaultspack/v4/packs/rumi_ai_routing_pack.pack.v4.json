@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:ac5904e91fcbb4897046f080c67fb97e3340e0b89ce886fe8791615f0341d943",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:e2540c5e7ab8f04f3cc89bdc65b092e8e6c6336180107a1dc93770b0e102005e",
       "kind": "executable",
       "path": "runtime/__init__.py"
@@ -37,7 +42,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:2f2594474c717110c03e023bd8ac38fd36d5f7046e971e93acfe6f02ec65bbaa",
+    "artifact_set_digest": "sha256:abdc664893cac7df62fc455cbe08b975768f7392b50a110fe463bab91c56a59d",
     "contract_catalog_digest": "sha256:9ea74ae27d91b6c516c8edc1897cbe8121123f277fab41ea34ad82189786c999",
     "source_identity": "sha256:e84a4d5e56d3a4e451bd118cb7c12a253e8d4522ce201fb9566b0b12a11b6710"
   },
@@ -87,7 +92,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:2f2594474c717110c03e023bd8ac38fd36d5f7046e971e93acfe6f02ec65bbaa",
+    "artifact_digest": "sha256:abdc664893cac7df62fc455cbe08b975768f7392b50a110fe463bab91c56a59d",
     "display_name": "Rumi AI Routing",
     "id": "rumi_ai_routing_pack",
     "kind": "host_extension",

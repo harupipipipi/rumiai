@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:ca9238b6a6e012bd1fe761ada81b65f0ae866c6599fc3d2da5c258af109f0104",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:9a7d6328fff037b6366a47998ceadf38649fe080b8c5b3e32e7480f431a311c6",
       "kind": "executable",
       "path": "runtime/adapter.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:df26d816e9f75e13a13cf00a27a04a4c09aa9eb0e1652832e9530c4b86a4deeb",
+    "artifact_set_digest": "sha256:f1cb6df246cc67570b1842ee32359aed3b597517b34a0631982bbd756e6a134c",
     "contract_catalog_digest": "sha256:538f8238fbb452b963be18cdf2250a46239a7e5d060f8fa02e459b61e4a22bcf",
     "source_identity": "sha256:255099f5d40bc9dcb1feeb0867da610fbfb026b6634cce552d67412a20ec84a3"
   },
@@ -57,7 +62,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:df26d816e9f75e13a13cf00a27a04a4c09aa9eb0e1652832e9530c4b86a4deeb",
+    "artifact_digest": "sha256:f1cb6df246cc67570b1842ee32359aed3b597517b34a0631982bbd756e6a134c",
     "display_name": "Rumi HTTP API Connector",
     "id": "rumi_http_api_connector_pack",
     "kind": "host_extension",

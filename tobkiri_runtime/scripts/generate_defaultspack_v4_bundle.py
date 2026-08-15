@@ -483,6 +483,14 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
             if canonical is not None or role_spec is not None
             else _normalize_pack(document)
         )
+        source_catalog = (canonical or path).parent / "executables.v4.json"
+        if (
+            role_spec is None
+            and document["pack"]["kind"] not in {"base", "shell"}
+            and source_catalog.is_file()
+        ):
+            catalog_path = path.with_name(f"{document['pack']['id']}.executables.v4.json")
+            rendered[catalog_path] = source_catalog.read_bytes()
 
     base_path = BUNDLE / "defaults-basepack.base.v1.json"
     shell_paths = sorted(BUNDLE.glob("*.shell.v1.json"))
@@ -587,7 +595,11 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
     for path in paths:
         raw = rendered[path] if path in rendered else path.read_bytes()
         relative = path.relative_to(BUNDLE).as_posix()
-        kind = next(value for marker, value in kinds.items() if marker in relative)
+        kind = (
+            "executable_catalog"
+            if relative.endswith(".executables.v4.json")
+            else next(value for marker, value in kinds.items() if marker in relative)
+        )
         entries.append(
             {
                 "path": relative,

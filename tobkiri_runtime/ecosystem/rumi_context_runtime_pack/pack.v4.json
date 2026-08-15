@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:4032f1a928602afdcb8f297c7e8bd2e8921902f19a4130225a38c244dbbb9846",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:0f5cf7acdb2419c0f921b100506eee87acd21681a4f7ae88814a999a97deea33",
       "kind": "executable",
       "path": "runtime/materializer.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:2abb7694d7047206ca317c76bc518433cb99aded2439d99b63d1a2d73e132d93",
+    "artifact_set_digest": "sha256:1d0a4329cd25c818085e0522880ab3859cd7a2b0045c585b9459e1fb98ed0b8a",
     "contract_catalog_digest": "sha256:ee50f2e033525e3dac200ea158d359b1d08bc2b6a17bb513fbecee7316abb11a",
     "source_identity": "sha256:470ee2c8685b1368030f3f798490596758e931181d65d1dfc3ca9f4b74d04b45"
   },
@@ -56,7 +61,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:2abb7694d7047206ca317c76bc518433cb99aded2439d99b63d1a2d73e132d93",
+    "artifact_digest": "sha256:1d0a4329cd25c818085e0522880ab3859cd7a2b0045c585b9459e1fb98ed0b8a",
     "display_name": "Rumi Context Runtime",
     "id": "rumi_context_runtime_pack",
     "kind": "host_extension",

@@ -1,15 +1,15 @@
 {
-  "artifact_set_digest": "sha256:18b5b6f244a385f18ba20ba591c6557dad5c82f659f237a469fd29bb22890726",
+  "artifact_set_digest": "sha256:8dd8edc2e73f29487a82d6d85b6486ab1968ca588eba6fbc41deb5c3bd100856",
   "artifacts": [
-    {
-      "digest": "sha256:a1ac3213925d25c8677b63c616d90bd13c6b8e113d01248ad264bb22802235ba",
-      "path": "pack.v4.json",
-      "role": "canonical_manifest"
-    },
     {
       "digest": "sha256:37625d56d2c58df1b3ff7d3fdb4ae7b6523be7cda42518caed7d4bf14ee74309",
       "path": "contracts.v4.json",
       "role": "contract_catalog"
+    },
+    {
+      "digest": "sha256:7e1e902d1c5bd5a1823910c0bc617aff33b2ef5a9b2075e955b3237da5f73b9d",
+      "path": "executables.v4.json",
+      "role": "sidecar"
     },
     {
       "digest": "sha256:3bde466cc00a8432cfcb99871074eb174d6fdac8b6147a33984df395857db4ae",
@@ -30,6 +30,11 @@
       "digest": "sha256:2a49d171a139a7adc656d39f4e785cc62a0016130021a89bf37ef782bc1ab13e",
       "path": "extensions/tools/repository_context_prepare/manifest.json",
       "role": "runtime"
+    },
+    {
+      "digest": "sha256:3808104f6cde2d476cc43da77d1df3b7a55bfe1b618d6641cece2504716595c5",
+      "path": "pack.v4.json",
+      "role": "canonical_manifest"
     },
     {
       "digest": "sha256:bf31649318cd2291d4d92ef7e828d14b8365d1f46ef98cc29aff391a4f44ad45",
@@ -55,7 +60,7 @@
   "index_api_version": "io.tobkiri.pack-artifact-index.v4",
   "integrity_seal": {
     "algorithm": "sha256-canonical-v1",
-    "signed_digest": "sha256:108a9865f9fa4db5608456232bc0b13627acba0cb7e74593d373bc359d3c3da8"
+    "signed_digest": "sha256:1c5a32b1d8a25e1c59f18d9ddeaf17c5723d5f5b722cdcf4b3cc4f36971d59be"
   },
   "pack_id": "rumi_repository_context_pack",
   "source_identity": "sha256:d4cc541317bffa0e267c0961f74594916e0dab927c2f561a8e66c888549b3f3e"

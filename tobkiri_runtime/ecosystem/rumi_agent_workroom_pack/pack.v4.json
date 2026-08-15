@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:c4abe8ce3f79885a59f126f3848cd79a3770de687a992218ee766aba1c3c4617",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:f2091a7e35b605399f75e990ebcca7f24af04176657fd75db127e56880aa0ec9",
     "contract_catalog_digest": "sha256:bc6645f20b80282b3a9c9f9f617bee726194d4a721995725ed2ad1333ed9ace8",
     "source_identity": "sha256:1b55209cd437d487844e6461c5a3059719c620601131e05e327ce7d72fa3f1fb"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:f2091a7e35b605399f75e990ebcca7f24af04176657fd75db127e56880aa0ec9",
     "display_name": "Rumi Agent Workroom Pack",
     "id": "rumi_agent_workroom_pack",
     "kind": "application",

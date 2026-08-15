@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:50fc8858c65ee4d2404b5cbc3cf407014479062c80ab189b3f9bc485613c4498",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:7a3d8ca54b5ffc40215892fe58b1dc3a8c9374de6453363856b70b63c45a1fed",
     "contract_catalog_digest": "sha256:eb8e9d513bbe0db5182bc07b32ce3bf8c960786bf58f41a9cf05580778faac33",
     "source_identity": "sha256:90dcc1063765278230742732fd89c10a7013345f8a14a0fed9136e0eddd4cb4d"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:7a3d8ca54b5ffc40215892fe58b1dc3a8c9374de6453363856b70b63c45a1fed",
     "display_name": "rumi_code_ide_pack",
     "id": "rumi_code_ide_pack",
     "kind": "application",

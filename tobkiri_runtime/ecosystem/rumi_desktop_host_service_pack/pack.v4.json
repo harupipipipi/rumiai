@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:d2295d0a4d91dd7cffa6aefc3dba880e863b711dd32d688cc06bad0d95fe7ee9",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:978f30aeae69ba9c5616e837c712e0977447e82268cdb82ad3a11366e3f819de",
       "kind": "executable",
       "path": "runtime/service.py"
@@ -45,7 +50,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:14a3095a6c98a93bc31715c0330b0dd44e826f120f7e2f16fbac17d6261a5cd8",
+    "artifact_set_digest": "sha256:b186aa7b575b3ae2107d83aa065b2c1e8dc3fe775cfb1fad01e7ff3d17a5a882",
     "contract_catalog_digest": "sha256:96c04cbe6e07dcbd15339e342c4bffcf166933d01b586192268a0787dffa7e1a",
     "source_identity": "sha256:ca73b3e6f40b82deeb3c77a28d1d70fba39feac0cbd166b4d8a0b68c87495d40"
   },
@@ -83,7 +88,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:14a3095a6c98a93bc31715c0330b0dd44e826f120f7e2f16fbac17d6261a5cd8",
+    "artifact_digest": "sha256:b186aa7b575b3ae2107d83aa065b2c1e8dc3fe775cfb1fad01e7ff3d17a5a882",
     "display_name": "Rumi Desktop Host Service",
     "id": "rumi_desktop_host_service_pack",
     "kind": "normal_sandbox",

@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:24deea8455c90cb8007c3acdcacd3614cee5f117c73e69d9762506c6fef629c5",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:0c501ba874d90285ae699aa8bd3b2d2ae390309d944997bd21efcdb610d0fef7",
       "kind": "sidecar",
       "path": "frontend/contributions/companies.json"
@@ -24,7 +29,7 @@
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:814c46789811897b7bd506acb67ded94ca38f433fdadac4e342f8c57a0e2a7f2",
+    "artifact_set_digest": "sha256:e4c7fb37db73e45fbb895aca518c07726613fce725e8995580ed7d2f59a66f75",
     "contract_catalog_digest": "sha256:9aae2d411515f2c225152a1c17fba44029df1bc35f5f14cdb892c9d302893b5e",
     "source_identity": "sha256:6a358ebb0dd6ac49eb037642ed4af915df729a2e3df877e4b4d214bdabcdf023"
   },
@@ -39,7 +44,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:814c46789811897b7bd506acb67ded94ca38f433fdadac4e342f8c57a0e2a7f2",
+    "artifact_digest": "sha256:e4c7fb37db73e45fbb895aca518c07726613fce725e8995580ed7d2f59a66f75",
     "display_name": "Rumi Company Surface",
     "id": "rumi_company_surface_pack",
     "kind": "application",

@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:96cde588b92f8bc228ba852ed76c097e3919595a4f92e4ce9f457b6fcead3849",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:875de058af53bf84ee896b096de72efe668dd40a1204b49efe583f65578667a9",
     "contract_catalog_digest": "sha256:2dfc3bf4958f19dbb6c506640686b8868a723bc3a1f5d3f39648368818ed751a",
     "source_identity": "sha256:cb2cc66db0959f038d3bd06c28a6693511ed75876fe6061deab83b3e3651b105"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:875de058af53bf84ee896b096de72efe668dd40a1204b49efe583f65578667a9",
     "display_name": "rumi_security_review_pack",
     "id": "rumi_security_review_pack",
     "kind": "application",

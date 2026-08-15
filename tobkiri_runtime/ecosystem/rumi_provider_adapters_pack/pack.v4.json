@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:3524642449ad337c00e0b027e23600d294b58f9d3167d7f553d7889bae3dcf0a",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:99779c627cd7a1ee6667657a0b88d7abfdae2eb07007c017cbf30ad6306ca724",
       "kind": "executable",
       "path": "runtime/__init__.py"
@@ -84,7 +89,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:9765ef3a332df70f7109b1915e7fc23101972111d395b1fa8254b71aae5a1c63",
+    "artifact_set_digest": "sha256:f1bd846662e32899413ef6e971a96fca2ff5da322d7c9c1d79bfb510de23c029",
     "contract_catalog_digest": "sha256:dda4fbf5d0d520b5e5a3fe8902453e73cb6d3d4b349d3bf2bb1f9da81590c02b",
     "source_identity": "sha256:923b6baa2c4a19aad2e33895787bb62671fc08d9c37e0e4acf8c4a4d7bda3722"
   },
@@ -148,7 +153,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:9765ef3a332df70f7109b1915e7fc23101972111d395b1fa8254b71aae5a1c63",
+    "artifact_digest": "sha256:f1bd846662e32899413ef6e971a96fca2ff5da322d7c9c1d79bfb510de23c029",
     "display_name": "Rumi Provider Adapters",
     "id": "rumi_provider_adapters_pack",
     "kind": "host_extension",

@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:1cc7bef84fec1be4caec840095b3dcccb5cde75a9970755190b6c76ccc9b2d45",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:67d41e1fa1d887e5bd250e4285c400fb6eef0518e856c01c0398fda41d2c54b9",
       "kind": "executable",
       "path": "runtime/validator.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:105be336f4625ecb03c605bc22b70b72351118c71f8bdf16c4ae0ccf01f1a8a2",
+    "artifact_set_digest": "sha256:ec680478d367e6768a6ccaf367b6c74e25b48eee4fd6e016cee7c9df35449524",
     "contract_catalog_digest": "sha256:ba84c2657a6db0932a2fa368583d3a992bb375fd2ae41a0571f45d91a64cc3d4",
     "source_identity": "sha256:b7b5c9c3444c88af9d39541a32d8b463ccbd79448e334ef4838771037a454e60"
   },
@@ -56,7 +61,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:105be336f4625ecb03c605bc22b70b72351118c71f8bdf16c4ae0ccf01f1a8a2",
+    "artifact_digest": "sha256:ec680478d367e6768a6ccaf367b6c74e25b48eee4fd6e016cee7c9df35449524",
     "display_name": "Rumi Tool Validation",
     "id": "rumi_tool_validation_pack",
     "kind": "host_extension",

@@ -1,10 +1,10 @@
 {
-  "artifact_set_digest": "sha256:28ea33fb63021a277ae78134d331e1162ef4a4425ae2a23e89d4dc0aafa600a0",
+  "artifact_set_digest": "sha256:652e11404e1505379de22b7a511139a11780ca975d95183abffb1538f013183b",
   "artifacts": [
     {
-      "digest": "sha256:74f5e089e800414b3ccb527d32696a8782a188f6018e1ad34a57905343fa063f",
-      "path": "pack.v4.json",
-      "role": "canonical_manifest"
+      "digest": "sha256:75420fa0dc4632836135df7fe98686b5579beb822bcea5c3e447b6aa6a48627e",
+      "path": "catalog/prompt_studio_prompt_library.yaml",
+      "role": "runtime"
     },
     {
       "digest": "sha256:c593d7337906b5fbdba45815ea31a2f28230e24886f0d219078db29d9b7f3ade",
@@ -12,14 +12,19 @@
       "role": "contract_catalog"
     },
     {
-      "digest": "sha256:75420fa0dc4632836135df7fe98686b5579beb822bcea5c3e447b6aa6a48627e",
-      "path": "catalog/prompt_studio_prompt_library.yaml",
-      "role": "runtime"
+      "digest": "sha256:2b2a89f5c80be4fe21af5d64908c25bb48663a252a29f83b4178968b375bbaba",
+      "path": "executables.v4.json",
+      "role": "sidecar"
     },
     {
       "digest": "sha256:7a21d786ce90d54f615b7e85a7317ff7556d82a49a79070407ac65a50b3c6484",
       "path": "frontend/contributions/prompt-studio.json",
       "role": "runtime"
+    },
+    {
+      "digest": "sha256:67f9ecac845fa1ebc4540c410bc0a6fd671fa1b99726342507a45efc5638b022",
+      "path": "pack.v4.json",
+      "role": "canonical_manifest"
     },
     {
       "digest": "sha256:d90f2cd9fcdb2137fe94c6063de0c9cfbee5addce8ab9f5df74ef4b9f9188c81",
@@ -60,7 +65,7 @@
   "index_api_version": "io.tobkiri.pack-artifact-index.v4",
   "integrity_seal": {
     "algorithm": "sha256-canonical-v1",
-    "signed_digest": "sha256:913e342a74f5393e4b51037151bf59749e78ba02a8ba5c0ea6245b49142a1d86"
+    "signed_digest": "sha256:abbe55418d409794f9725f3f4617abf20df2d1b5364ff788b565674f997adf54"
   },
   "pack_id": "rumi_prompt_studio_pack",
   "source_identity": "sha256:7c17033a14efca12cec8b020366201a8c31126847d04ee2883be7667937fe2f6"

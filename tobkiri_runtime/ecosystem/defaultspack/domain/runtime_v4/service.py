@@ -15,7 +15,7 @@ import os
 import re
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Protocol
 
@@ -134,6 +134,7 @@ class BundledCatalog:
     shells: Mapping[str, Mapping[str, Any]]
     profiles: Mapping[str, Mapping[str, Any]]
     artifact_root: Path | None = None
+    executable_catalogs: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, root: Path, *, artifact_root: Path | None = None) -> "BundledCatalog":
@@ -162,14 +163,17 @@ class BundledCatalog:
             "base": {},
             "shell": {},
             "profile": {},
+            "executable_catalog": {},
         }
         identity_fields = {
             "pack": ("pack", "id"),
             "base": (None, "pack_id"),
             "shell": (None, "provider_id"),
             "profile": (None, "profile_id"),
+            "executable_catalog": (None, "pack_id"),
         }
         seen_paths: set[str] = set()
+        executable_lock_entries: dict[str, tuple[str, str]] = {}
         for index, entry in enumerate(entries):
             if not isinstance(entry, dict) or set(entry) != {"path", "kind", "digest"}:
                 raise BundleIntegrityError(f"bundle entry {index} has invalid fields")
@@ -221,7 +225,49 @@ class BundledCatalog:
             if not isinstance(identity, str) or identity in collections[kind]:
                 raise BundleIntegrityError(f"duplicate or missing {kind} identity: {identity!r}")
             collections[kind][identity] = document
+            if kind == "executable_catalog":
+                executable_lock_entries[identity] = (relative, expected_digest)
             seen_paths.add(relative)
+        for pack_id, executable in collections["executable_catalog"].items():
+            manifest = collections["pack"].get(pack_id)
+            if manifest is None:
+                raise BundleIntegrityError(
+                    f"executable catalog has no bundled Pack manifest: {pack_id}"
+                )
+            if executable["source_identity"] != manifest["integrity"]["source_identity"]:
+                raise BundleIntegrityError(
+                    f"executable catalog source identity is stale: {pack_id}"
+                )
+            expected_catalog_digest = canonical_digest(
+                {
+                    key: value
+                    for key, value in executable.items()
+                    if key != "catalog_digest"
+                }
+            )
+            if executable["catalog_digest"] != expected_catalog_digest:
+                raise BundleIntegrityError(
+                    f"executable catalog digest is stale: {pack_id}"
+                )
+            catalog_entries = [
+                item
+                for item in manifest["artifacts"]
+                if item["path"] == "executables.v4.json"
+            ]
+            if len(catalog_entries) != 1:
+                raise BundleIntegrityError(
+                    f"Pack manifest does not pin executable catalog: {pack_id}"
+                )
+            catalog_path, catalog_lock_digest = executable_lock_entries[pack_id]
+            catalog_raw = (root / catalog_path).read_bytes()
+            catalog_raw_digest = _sha256_bytes(catalog_raw)
+            if (
+                catalog_entries[0]["digest"] != catalog_raw_digest
+                or catalog_lock_digest != catalog_raw_digest
+            ):
+                raise BundleIntegrityError(
+                    f"Pack executable catalog artifact pin is stale: {pack_id}"
+                )
         return cls(
             root=root,
             packs=collections["pack"],
@@ -235,6 +281,7 @@ class BundledCatalog:
                 if (root.parent / "platform-artifacts").is_dir()
                 else None
             ),
+            executable_catalogs=collections["executable_catalog"],
         )
 
 
@@ -440,6 +487,65 @@ def dynamic_profile_edges(
                     }
                 )
     return tuple(result)
+
+
+def _exact_executable_variant(
+    catalog: BundledCatalog,
+    manifest: Mapping[str, Any],
+    function: Mapping[str, Any],
+    contract_id: str,
+    operation_id: str,
+) -> Mapping[str, Any]:
+    """Resolve one Function through its bundled executable catalog only."""
+    pack_id = str(manifest["pack"]["id"])
+    executable = catalog.executable_catalogs.get(pack_id)
+    if executable is None:
+        raise ProfileResolutionDenied(
+            f"executable catalog is not bundled for Pack: {pack_id}"
+        )
+    if (
+        executable["pack_id"] != pack_id
+        or executable["source_identity"] != manifest["integrity"]["source_identity"]
+    ):
+        raise ProfileResolutionDenied("executable catalog identity is stale")
+    expected_catalog_digest = canonical_digest(
+        {key: value for key, value in executable.items() if key != "catalog_digest"}
+    )
+    if executable["catalog_digest"] != expected_catalog_digest:
+        raise ProfileResolutionDenied("executable catalog digest is stale")
+    variants = [
+        item
+        for item in executable["variants"]
+        if item["function_id"] == function["id"]
+    ]
+    if len(variants) != 1:
+        raise ProfileResolutionDenied(
+            f"executable variant is not unique: {pack_id}/{function['id']}"
+        )
+    variant = variants[0]
+    if variant["implementation_digest"] != function["implementation_digest"]:
+        raise ProfileResolutionDenied("executable variant implementation is stale")
+    operations = [
+        item
+        for item in variant["operations"]
+        if item["contract_id"] == contract_id
+        and item["operation_id"] == operation_id
+        and item["revision_digest"] == function["contract_revision_digest"]
+    ]
+    if len(operations) != 1:
+        raise ProfileResolutionDenied("executable variant Operation is not exact")
+    expected_execution_kind = (
+        "host_extension"
+        if manifest["pack"]["kind"] == "host_extension"
+        else "wasm"
+        if function.get("isolation") == "wasm_component"
+        else "remote"
+        if function.get("isolation") == "remote"
+        else "pack_vm"
+    )
+    if variant["execution_kind"] != expected_execution_kind:
+        raise ProfileResolutionDenied("executable variant execution kind is stale")
+    return variant
 
 
 def resolve_default_profile(
@@ -744,6 +850,7 @@ def resolve_default_profile(
             )
 
     bindings: list[dict[str, Any]] = []
+    variant_pins: dict[tuple[str, str], dict[str, Any]] = {}
     resolved_edges: list[dict[str, Any]] = []
     references: list[str] = []
     for source_edge in all_source_edges:
@@ -783,6 +890,32 @@ def resolve_default_profile(
             "contract_revision_digest": contract["revision_digest"],
             "operation_id": edge["operation_id"],
         }
+        variant = _exact_executable_variant(
+            catalog,
+            manifest,
+            function,
+            str(edge["contract_id"]),
+            str(edge["operation_id"]),
+        )
+        domain_kind = function.get("isolation", "pack_vm")
+        pin = {
+            "pack_id": manifest["pack"]["id"],
+            "artifact_digest": manifest["pack"]["artifact_digest"],
+            "executable_catalog_digest": catalog.executable_catalogs[
+                manifest["pack"]["id"]
+            ]["catalog_digest"],
+            "variant_id": variant["variant_id"],
+            "platform": variant["platform"],
+            "architecture": variant["architecture"],
+            "runtime_abi": variant["runtime_abi"],
+            "backend": variant["backend"],
+            "execution_kind": variant["execution_kind"],
+            "domain_kind": domain_kind,
+        }
+        pin_key = (str(pin["pack_id"]), str(pin["variant_id"]))
+        previous_pin = variant_pins.setdefault(pin_key, pin)
+        if previous_pin != pin:
+            raise ProfileResolutionDenied("one executable variant has conflicting pins")
         bindings.append(
             {
                 "caller_function_id": edge["caller_function_id"],
@@ -791,7 +924,14 @@ def resolve_default_profile(
                 "function_principal": principal,
                 "contract_id": edge["contract_id"],
                 "operation_id": edge["operation_id"],
-                "domain_kind": function.get("isolation", "pack_vm"),
+                "domain_kind": domain_kind,
+                "executable_catalog_digest": pin["executable_catalog_digest"],
+                "variant_id": pin["variant_id"],
+                "platform": pin["platform"],
+                "architecture": pin["architecture"],
+                "runtime_abi": pin["runtime_abi"],
+                "backend": pin["backend"],
+                "execution_kind": pin["execution_kind"],
                 "authority_reference": reference,
                 "requested_scope_digest": canonical_digest(edge["requested_scope_template"]),
                 "adapter_digests": [],
@@ -936,6 +1076,9 @@ def resolve_default_profile(
         "shell": dict(profile["shell"]),
         "application": application,
         "effective_set": effective_set,
+        "variant_pins": sorted(
+            variant_pins.values(), key=lambda item: (item["pack_id"], item["variant_id"])
+        ),
         "requested_edges_digest": requested_edges_digest,
         "constraints_digest": constraints_digest,
         "closure_digest": closure_digest,

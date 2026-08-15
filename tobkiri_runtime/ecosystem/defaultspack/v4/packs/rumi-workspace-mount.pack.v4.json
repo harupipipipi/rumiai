@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:f2e794d0d72b0245b2d7f5e90d4794882bf5b6d046f93b5424b52dc176902164",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:7c339e5cd1716f30f264e3b0239344ed4f7a13415a544ff88f627d7202bb545b",
       "kind": "executable",
       "path": "runtime/mounts.py"
@@ -45,7 +50,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:4a5d684826139e2ad47e7538af995cd398ba71330614fa90a8fcb8a50f4d49ed",
+    "artifact_set_digest": "sha256:0eae94b5571c875c77b04de7135642efda677b8ccdf042601d2d20f43ca2811a",
     "contract_catalog_digest": "sha256:1ce5e04db94108755808afb18e605ac99b97a9a581b1746cc33583e8799df6c7",
     "source_identity": "sha256:d54937b9d0981de53d29e74376d53a4272e8c75937349cdb510a94c7bf8f4f28"
   },
@@ -85,7 +90,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:4a5d684826139e2ad47e7538af995cd398ba71330614fa90a8fcb8a50f4d49ed",
+    "artifact_digest": "sha256:0eae94b5571c875c77b04de7135642efda677b8ccdf042601d2d20f43ca2811a",
     "display_name": "Rumi Workspace Mount",
     "id": "rumi_workspace_mount_pack",
     "kind": "host_extension",

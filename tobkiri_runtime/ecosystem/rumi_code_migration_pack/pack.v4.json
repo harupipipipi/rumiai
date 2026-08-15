@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:0ccc56ac5467a4383bf5ed450df475bae8618f88501f6bbc68804c01df5758d5",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:c7e6b46d394682812bdf87e4e566409a5e36ae2a3815e4f8af89f81ef9a300cf",
     "contract_catalog_digest": "sha256:101eeac462b1d4cf19d6709290def69337c3adb2f881d2392131952f3bf097fb",
     "source_identity": "sha256:3a9632de69987985c07fee72b8a89206ae5fd9adad519fdabb45c32db8bbbb55"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:c7e6b46d394682812bdf87e4e566409a5e36ae2a3815e4f8af89f81ef9a300cf",
     "display_name": "Rumi Code Migration Pack",
     "id": "rumi_code_migration_pack",
     "kind": "application",

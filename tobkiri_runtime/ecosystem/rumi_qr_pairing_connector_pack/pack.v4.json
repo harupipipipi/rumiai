@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:549dc2ac4efa8ac7866e2420695a8463a63a8d2d9c880744c82f5ced1056d93b",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:d0df2f80a4ecc591507ba40b2864cfdcb1133d85ed76c1cc612ed89823b970d0",
       "kind": "executable",
       "path": "runtime/adapter.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:9acd3eb07a00691fc362a847a8276ad98fdf9fad6f625e659f1559cc08b221d4",
+    "artifact_set_digest": "sha256:6e8244aad424a13d512394f589bf6663eed15f6c7c81c8d3414e0014bb3f61f9",
     "contract_catalog_digest": "sha256:7b72f69c3fb55e88fb4863aab784ba7d071e03aaf645a3f71a6db8a798715536",
     "source_identity": "sha256:ad05a27dc86febc0c820750b855c359281a69e2cd2e8e37bdbc2f6104429328f"
   },
@@ -56,7 +61,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:9acd3eb07a00691fc362a847a8276ad98fdf9fad6f625e659f1559cc08b221d4",
+    "artifact_digest": "sha256:6e8244aad424a13d512394f589bf6663eed15f6c7c81c8d3414e0014bb3f61f9",
     "display_name": "Rumi QR Pairing Connector",
     "id": "rumi_qr_pairing_connector_pack",
     "kind": "normal_sandbox",

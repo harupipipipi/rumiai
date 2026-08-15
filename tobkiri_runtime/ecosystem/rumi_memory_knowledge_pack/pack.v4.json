@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:42cd776e88ba7aef1d3731876289508d193ee21878b405978f38ea16217a7a3e",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:20bf8969fba8106ff65e3276f32fb01c20e8030cb6ab2efc20a5f37d7190023d",
     "contract_catalog_digest": "sha256:79c1db2ad75909117f26e3f39248386c93a2fa841149e70ea57c788b5c19cee7",
     "source_identity": "sha256:369c8c953fe5519ac26858e0c910b9d3b4f6cb5c90d7d2f6fc4b176778dc4967"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:20bf8969fba8106ff65e3276f32fb01c20e8030cb6ab2efc20a5f37d7190023d",
     "display_name": "rumi_memory_knowledge_pack",
     "id": "rumi_memory_knowledge_pack",
     "kind": "application",

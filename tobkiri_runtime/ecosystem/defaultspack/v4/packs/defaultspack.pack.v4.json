@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:fa7c5475ff33672c47a29de999ad86662856cfc95a039d0debfcbf3c41b50f61",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:c53100d459dbf91774dddfe3a266fa33543a1a4f8bc122414343e9bf76a99820",
       "kind": "executable",
       "path": "runtime/conversation.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:b8b37f87645fc793bd812d5f1ecd758b14405a9936577ca18c36dd40630e4b3f",
+    "artifact_set_digest": "sha256:8c8f580ea23efe6ca15b94f7db77a076116663502f7e21105a9fef9b36b41693",
     "contract_catalog_digest": "sha256:daa27722ca8cfebe70429bae20ab068b85c6132305b80a4e12eaa2e3a30b4da5",
     "source_identity": "sha256:a4901e84a5bdcfe4c639649bde065ddc4a1aaf9e514dca94f5e309f56832a40a"
   },
@@ -49,7 +54,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:b8b37f87645fc793bd812d5f1ecd758b14405a9936577ca18c36dd40630e4b3f",
+    "artifact_digest": "sha256:8c8f580ea23efe6ca15b94f7db77a076116663502f7e21105a9fef9b36b41693",
     "display_name": "Tobkiri Defaults Providers",
     "id": "defaultspack",
     "kind": "normal_sandbox",

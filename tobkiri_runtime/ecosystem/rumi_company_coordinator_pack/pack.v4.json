@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:901f1e9b739cef042ffbc26f4c8fa694f04c907be6949432efbe7e8d9af65e6f",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:fc3a98c75d5d974220d0b113dba59915cc57f20bd1025c6e3d5ed45bd95f6c36",
       "kind": "executable",
       "path": "runtime/coordinator.py"
@@ -62,7 +67,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:c4dc99b41e4bf6713306f73c384b0e5b55926e93818af3fc5dce4c23928482c1",
+    "artifact_set_digest": "sha256:390bc0fc7f34296533ae1b7fcf47febda08667d86455e7e439e84f1e1dd75264",
     "contract_catalog_digest": "sha256:f2d62d7ab3abf539f4436b30efb30cae5d9e00254441f034416087afd8c4c658",
     "source_identity": "sha256:517548b669d73830c1425181e987ed41384ef3281b1a45591cd79ce7428ac438"
   },
@@ -111,7 +116,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:c4dc99b41e4bf6713306f73c384b0e5b55926e93818af3fc5dce4c23928482c1",
+    "artifact_digest": "sha256:390bc0fc7f34296533ae1b7fcf47febda08667d86455e7e439e84f1e1dd75264",
     "display_name": "Rumi Company Coordinator",
     "id": "rumi_company_coordinator_pack",
     "kind": "normal_sandbox",

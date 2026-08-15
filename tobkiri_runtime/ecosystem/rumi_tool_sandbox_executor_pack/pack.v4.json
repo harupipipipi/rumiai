@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:066891649ef1e6b8879d41fe0a692f807805c89d17f2694310cd2438558a2149",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:5f36220d03bdd6a8ef2381cc21e450309315e912f6e57fddf6f592bea3ae0350",
       "kind": "executable",
       "path": "runtime/executor.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:eece212123ea442c89a598b31ea2d589dad67b3876eba1a177c45c7b3aa23e4f",
+    "artifact_set_digest": "sha256:401dbc8f2cd19d20e3ced38e468139430755a3ae8e935d17237f7957e3c9784d",
     "contract_catalog_digest": "sha256:5c764223c618e35bf72627ec8545c8142cd4e016d2c6032a87c18fc1b8cdff6c",
     "source_identity": "sha256:7f02e4619f61e4a8bc052cc94f6c494662c9203b5d93f713f82cf57035cdfc71"
   },
@@ -56,7 +61,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:eece212123ea442c89a598b31ea2d589dad67b3876eba1a177c45c7b3aa23e4f",
+    "artifact_digest": "sha256:401dbc8f2cd19d20e3ced38e468139430755a3ae8e935d17237f7957e3c9784d",
     "display_name": "Rumi Tool Sandbox Executor",
     "id": "rumi_tool_sandbox_executor_pack",
     "kind": "host_extension",

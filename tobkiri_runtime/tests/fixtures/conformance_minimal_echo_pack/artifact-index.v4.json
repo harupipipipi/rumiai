@@ -5,7 +5,7 @@
   "artifacts": [
     {
       "path": "pack.v4.json",
-      "digest": "sha256:e0515041ed7a1ffaba3745c0e1fa48b02e659feb60022dfa35d415f2cd96605f",
+      "digest": "sha256:adedce500b881d43e513f5d10ee663d731c8422c6b8fc08eb26c74a5ef4dad51",
       "role": "canonical_manifest"
     },
     {
@@ -14,14 +14,19 @@
       "role": "contract_catalog"
     },
     {
+      "path": "executables.v4.json",
+      "digest": "sha256:d212a08d0c758df5aae66ad80f9d2bf20c36b7461e35c18e75543be09ef6932d",
+      "role": "sidecar"
+    },
+    {
       "path": "runtime/echo.py",
       "digest": "sha256:db83893c95d81c118325596551b3c2a60263dcbffa80da4ea7610d95ac518073",
       "role": "runtime"
     }
   ],
-  "artifact_set_digest": "sha256:6d513be7f7a46769266b36dc4d02ab837b07a8baf73a549ff3d965a3ac8c9bd3",
+  "artifact_set_digest": "sha256:7ea147ccb4770b0d912aaafb961b1b29f41f6a9449b966aeceaa204dc86462cc",
   "integrity_seal": {
     "algorithm": "sha256-canonical-v1",
-    "signed_digest": "sha256:f220d224d569ea98e402795c98183e971864d5ce5555267560934fbda3014ae0"
+    "signed_digest": "sha256:a5af69da3436e2991bfdf4311d2b8df3e00a9e083dbeae1e33d9a35af4eb489d"
   }
 }

@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:485441952e1a2ed967f01ef92d7029f93de13c5b6c976e9293c5d9604c5cf1ba",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:231757dc3254c011cf190b1195fc7bf92e6782321c0b33f902a5ee6a9bcd278c",
       "kind": "executable",
       "path": "runtime/store.py"
@@ -45,7 +50,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:4467bf368e4fc1cf1090453b4c6ec4df905158286fedc58a9b9ef79fd0c4ae1b",
+    "artifact_set_digest": "sha256:5d3b69b5258e320b73c23efa3ca44575321bfb848d51bc306a5d1dedd12b6334",
     "contract_catalog_digest": "sha256:076b56dcd9ae158aeec947c0f391f6a9d1e61b39761987acc70cc5e3dbe39f98",
     "source_identity": "sha256:3c67862413398cd57e25a7266efc914c64781b821ebaa51f1b64b893e51e5e3c"
   },
@@ -83,7 +88,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:4467bf368e4fc1cf1090453b4c6ec4df905158286fedc58a9b9ef79fd0c4ae1b",
+    "artifact_digest": "sha256:5d3b69b5258e320b73c23efa3ca44575321bfb848d51bc306a5d1dedd12b6334",
     "display_name": "Rumi Kanban State Store",
     "id": "rumi_kanban_state_store_pack",
     "kind": "normal_sandbox",

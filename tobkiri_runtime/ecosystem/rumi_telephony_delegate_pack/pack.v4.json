@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:2d2b438b11b3fae05b4eb621ca5672d567c68b76aea095e275990e60582bc2a5",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:69c822841d21f08b412311f65a02b95c5d128a68a7b9630178f5a055215372be",
     "contract_catalog_digest": "sha256:9c607a96f12f0a9c2d6a97b85fb35a35c61aa06ccb96cfdcdf5b0eb691a9c074",
     "source_identity": "sha256:c12d134bcc7c29656c44237fc17c509d35f08d44d4fd87235e3ed6e2e5b76d74"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:69c822841d21f08b412311f65a02b95c5d128a68a7b9630178f5a055215372be",
     "display_name": "Rumi Telephony Delegate Pack",
     "id": "rumi_telephony_delegate_pack",
     "kind": "application",

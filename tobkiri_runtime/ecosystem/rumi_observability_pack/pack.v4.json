@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:a31b83c0c689b4b1a98d2042366d37163d02634f454b347eefaee3ad04da7ab2",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:529760d065abf30951ada261dec751a1c8d72154ffff32de8288f0b1e10eaa81",
     "contract_catalog_digest": "sha256:fb92b309deaa0258ef27105bca1e24cb555aa79b3eedb7fd734f36a76ff56aed",
     "source_identity": "sha256:3b07422abb075235ca8ebfa3e38b76391fbfe1f348110e3398510aaaf11ffc6c"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:529760d065abf30951ada261dec751a1c8d72154ffff32de8288f0b1e10eaa81",
     "display_name": "Rumi Observability Pack",
     "id": "rumi_observability_pack",
     "kind": "application",

@@ -648,7 +648,7 @@ def _validate_staged_bundle(
         if actual != entry.get("digest"):
             raise ValueError(f"bundle lock digest mismatch: {normalized}")
         document = _read_json(path, f"bundle {kind}")
-        if kind in {"pack", "base", "shell", "profile"}:
+        if kind in {"pack", "base", "shell", "profile", "executable_catalog"}:
             validate_document(document, kind)
         else:
             raise ValueError(f"bundle lock kind is unsupported: {kind}")

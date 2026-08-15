@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:8fe42baa26e51b2f26cf2ed1c655234b5f5f473d301b50aa0e1a4824e8e77b5f",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:1adc7542788dbf49e2ec9a6fdbf4b219913ef53e70c24d4c8a325d2ae929f41e",
       "kind": "executable",
       "path": "runtime/store.py"
@@ -62,7 +67,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:8901242ec3d90aa0e7be9d145855901a15cac0657cc4af8909ef9054ca578450",
+    "artifact_set_digest": "sha256:7ef869be74baf850bb0c244bad81a9abc6d00012e1110644bb70cf827dde43e5",
     "contract_catalog_digest": "sha256:dfebb05eec3f4567b09fb9f2feef662877b93bb8a838c948a377f016f18667fa",
     "source_identity": "sha256:e6336b9d1c81b4be1e4cd4673d61c0a5c2936ad22fb1b1d226f8c551c72ab342"
   },
@@ -114,7 +119,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:8901242ec3d90aa0e7be9d145855901a15cac0657cc4af8909ef9054ca578450",
+    "artifact_digest": "sha256:7ef869be74baf850bb0c244bad81a9abc6d00012e1110644bb70cf827dde43e5",
     "display_name": "Rumi Knowledge Store",
     "id": "rumi_knowledge_store_pack",
     "kind": "host_extension",

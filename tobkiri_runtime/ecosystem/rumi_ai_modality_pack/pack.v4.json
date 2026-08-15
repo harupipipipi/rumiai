@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:bcfa22596365cadbef35d237b3789fb88c8c25b78330cd406b0e10321dc3e4c5",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:0e236ee3ad7bc63ebf89a1c14a7f19ee6d1311234f4d32fe8515cf726ce429ee",
       "kind": "executable",
       "path": "runtime/__init__.py"
@@ -84,7 +89,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:e296e2b357bcff998277adcc3c8d5cea968d0e112d7a2ae830253072c72245b8",
+    "artifact_set_digest": "sha256:04c491c29a78619201cdcfd81facf1c87dae15e540e88969c1116cbf9a662872",
     "contract_catalog_digest": "sha256:d895342a171f5ebd5784fc81669792f74ff45956a659fb550e315881611a6215",
     "source_identity": "sha256:a9c8e2e2908043cccc62fc15e1fc4f9dc094bb96a20c69ed81fd4baa5250c6b4"
   },
@@ -148,7 +153,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:e296e2b357bcff998277adcc3c8d5cea968d0e112d7a2ae830253072c72245b8",
+    "artifact_digest": "sha256:04c491c29a78619201cdcfd81facf1c87dae15e540e88969c1116cbf9a662872",
     "display_name": "Rumi AI Modality",
     "id": "rumi_ai_modality_pack",
     "kind": "host_extension",

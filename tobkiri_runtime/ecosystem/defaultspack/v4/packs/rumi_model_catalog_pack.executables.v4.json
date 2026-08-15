@@ -1,0 +1,80 @@
+{
+  "catalog_api_version": "io.tobkiri.executable-catalog.v4",
+  "catalog_digest": "sha256:3f2f26b9c1a40a92987c6670ee60204b02438139c926f4c00342a44133418a6a",
+  "pack_id": "rumi_model_catalog_pack",
+  "source_identity": "sha256:c839cd38a937c2d478e642fafe2c5e826bd958439edd05097f198a6b1f03593e",
+  "variants": [
+    {
+      "architecture": "any",
+      "backend": "tobkiri.python-pack-v4",
+      "execution_domain_profile": "sandbox.default.v1",
+      "execution_kind": "pack_vm",
+      "function_id": "rumi_model_catalog_pack.model-catalog.bundled",
+      "implementation_digest": "sha256:de0973b8ad1da4556587f199a4173c6dfb674f314981e331821026c35d8f12ab",
+      "implementation_path": "runtime/catalog.py",
+      "materialization_mode": "on_demand",
+      "operations": [
+        {
+          "contract_id": "tobkiri.resource.ai.model.catalog.v1",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "type": "object"
+          },
+          "operation_id": "rumi_model_catalog_pack.bundled-model-catalog",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:edab2fe547a7bb14d2c96ea62a5354a59065a37aeaa112dfc19e63c0b84af35c",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.resource.ai.model.catalog.v1",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "type": "object"
+          },
+          "operation_id": "rumi_model_catalog_pack.bundled-model-catalog.generate",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:edab2fe547a7bb14d2c96ea62a5354a59065a37aeaa112dfc19e63c0b84af35c",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        },
+        {
+          "contract_id": "tobkiri.resource.ai.model.catalog.v1",
+          "contract_version": "1.0.0",
+          "effect_class": "privileged",
+          "error_schema": {
+            "type": "object"
+          },
+          "idempotency": "none",
+          "input_schema": {
+            "type": "object"
+          },
+          "operation_id": "rumi_model_catalog_pack.bundled-model-catalog.stream",
+          "output_schema": {
+            "type": "object"
+          },
+          "revision_digest": "sha256:edab2fe547a7bb14d2c96ea62a5354a59065a37aeaa112dfc19e63c0b84af35c",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000
+        }
+      ],
+      "platform": "any",
+      "runtime_abi": "python3.13",
+      "variant_id": "rumi_model_catalog_pack.model-catalog.bundled.python"
+    }
+  ]
+}

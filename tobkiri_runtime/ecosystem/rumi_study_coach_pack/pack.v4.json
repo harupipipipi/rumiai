@@ -1,9 +1,15 @@
 {
-  "artifacts": [],
+  "artifacts": [
+    {
+      "digest": "sha256:a635da09f3a90fad80289d9b79ca575dd015651237002179b4325ac44b80bf55",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
   "contracts": [],
   "functions": [],
   "integrity": {
-    "artifact_set_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_set_digest": "sha256:a7837f556d5c492c64105a8988efbf22f7917dad9d5018c277a55afdb7433714",
     "contract_catalog_digest": "sha256:b28392e7c00a534ef99974ccf3744a3d9c7ab09b6d5976af413fae9ae69be64e",
     "source_identity": "sha256:8751721c92a4501658039951b619748efd2bcd389917ab7b16c51f563e2f2138"
   },
@@ -18,7 +24,7 @@
   },
   "operation_catalog": [],
   "pack": {
-    "artifact_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "artifact_digest": "sha256:a7837f556d5c492c64105a8988efbf22f7917dad9d5018c277a55afdb7433714",
     "display_name": "Rumi Study Coach Pack",
     "id": "rumi_study_coach_pack",
     "kind": "application",

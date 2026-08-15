@@ -1,6 +1,11 @@
 {
   "artifacts": [
     {
+      "digest": "sha256:0e64470a6a144055ee7fbcd2de18643062c0ac0a8cd77b310c27e9e063716aeb",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
       "digest": "sha256:3c9f17067f3e7f313bee9e243ebb98586171baa2185ffed5f9b65c0ea6027194",
       "kind": "executable",
       "path": "runtime/guards.py"
@@ -28,7 +33,7 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:bfd1d2339c9aca00c72fef22af0eed0eb458768e35562a04e1faec795f7eb8e1",
+    "artifact_set_digest": "sha256:f8972319e44b6a0349f808fe0b6bf0671cac92e3fde62aa5bda659a7bdce4e25",
     "contract_catalog_digest": "sha256:c705b148a1e428b7ab3c06c671c40bc1ccbc4c7ed0f6a82522ceadf94ea8e70a",
     "source_identity": "sha256:cfffe062c7b916e597b26d1d6d40752601ea24f8572d64fe6dcce4d5b461e172"
   },
@@ -56,7 +61,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:bfd1d2339c9aca00c72fef22af0eed0eb458768e35562a04e1faec795f7eb8e1",
+    "artifact_digest": "sha256:f8972319e44b6a0349f808fe0b6bf0671cac92e3fde62aa5bda659a7bdce4e25",
     "display_name": "Rumi Tool Guard",
     "id": "rumi_tool_guard_pack",
     "kind": "host_extension",
