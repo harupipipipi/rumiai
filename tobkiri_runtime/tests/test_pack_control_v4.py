@@ -6,8 +6,10 @@ import json
 import http.cookiejar
 import os
 import shutil
+import threading
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -137,6 +139,57 @@ def test_control_operation_reuses_only_its_scoped_capture(
     assert loads == 1
     assert _invoke(session, "catalog.read")["profile_id"] == "defaults"
     assert loads == 2
+
+
+def test_unapproved_revoke_does_not_hold_session_lock_during_slow_capture(
+    captured_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A read-only revoke denial leaves the control session available."""
+
+    session, _state_path, _user_data = captured_session
+    _invoke(session, "pack.install", {"pack_id": TARGET_PACK})
+    original_load = profile_capture.ActivationStore.load_active_snapshot
+    blocked_thread_id: int | None = None
+    load_lock = threading.Lock()
+    load_started = threading.Event()
+    release_load = threading.Event()
+
+    def delayed_load(store):
+        nonlocal blocked_thread_id
+        current_thread_id = threading.get_ident()
+        with load_lock:
+            if blocked_thread_id is None:
+                blocked_thread_id = current_thread_id
+                should_block = True
+                load_started.set()
+            else:
+                should_block = current_thread_id == blocked_thread_id
+        if should_block:
+            assert release_load.wait(timeout=2)
+        return original_load(store)
+
+    monkeypatch.setattr(
+        profile_capture.ActivationStore,
+        "load_active_snapshot",
+        delayed_load,
+    )
+    executor = ThreadPoolExecutor(max_workers=2)
+    denied = executor.submit(
+        _invoke,
+        session,
+        "approval.revoke",
+        {"pack_id": TARGET_PACK},
+    )
+    assert load_started.wait(timeout=2)
+    catalog = executor.submit(_invoke, session, "catalog.read")
+    try:
+        assert catalog.result(timeout=2)["profile_id"] == "defaults"
+    finally:
+        release_load.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+    with pytest.raises(PackControlUnapproved):
+        denied.result(timeout=2)
 
 
 def test_enable_does_not_require_unrelated_pack_install_or_approval(

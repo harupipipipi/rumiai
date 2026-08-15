@@ -257,34 +257,49 @@ class CapturedPackControlSession:
         self._reject_identity_override(arguments)
         if "approved" in arguments:
             raise PackControlUnapproved("client approval assertions are not trusted")
-        with profile_capture_scope(), self._lock:
-            if operation_id == "profile.reload":
-                self._recapture()
-                return self._status(arguments)
-            self._require_current_binding()
-            if operation_id == "catalog.read":
-                return self._catalog_payload()
-            if operation_id == "dashboard.read":
-                return self._dashboard()
-            if operation_id == "pack.install":
-                return self._install(arguments)
-            if operation_id == "approval.candidate":
-                return self._approval_candidate(arguments, session_id)
-            if operation_id == "approval.approve":
-                return self._approve(arguments, session_id)
+        with profile_capture_scope():
             if operation_id == "approval.revoke":
-                return self._revoke_approval(arguments)
-            if operation_id == "pack.enable":
-                return self._set_enabled(arguments, True)
-            if operation_id == "pack.disable":
-                return self._set_enabled(arguments, False)
-            if operation_id == "pack.status":
-                return self._status(arguments)
-            if operation_id == "runtime.restart":
-                from .restart_control import request_kernel_restart
+                # A known read-only denial must not queue behind another
+                # control mutation.  The preflight is fail-closed: if the
+                # approval is absent or invalid it raises before acquiring the
+                # session lock, while an approved request is rechecked with a
+                # fresh capture after entering that lock.
+                self._require_current_binding()
+                self._raise_known_revoke_denial(arguments)
+                from .bootstrap.profile_capture import (
+                    invalidate_profile_capture_scope,
+                )
 
-                request_kernel_restart()
-                return {"restart_requested": True, **self._binding_payload()}
+                invalidate_profile_capture_scope()
+                with self._lock:
+                    self._require_current_binding()
+                    return self._revoke_approval(arguments)
+            with self._lock:
+                if operation_id == "profile.reload":
+                    self._recapture()
+                    return self._status(arguments)
+                self._require_current_binding()
+                if operation_id == "catalog.read":
+                    return self._catalog_payload()
+                if operation_id == "dashboard.read":
+                    return self._dashboard()
+                if operation_id == "pack.install":
+                    return self._install(arguments)
+                if operation_id == "approval.candidate":
+                    return self._approval_candidate(arguments, session_id)
+                if operation_id == "approval.approve":
+                    return self._approve(arguments, session_id)
+                if operation_id == "pack.enable":
+                    return self._set_enabled(arguments, True)
+                if operation_id == "pack.disable":
+                    return self._set_enabled(arguments, False)
+                if operation_id == "pack.status":
+                    return self._status(arguments)
+                if operation_id == "runtime.restart":
+                    from .restart_control import request_kernel_restart
+
+                    request_kernel_restart()
+                    return {"restart_requested": True, **self._binding_payload()}
         raise PackControlUnapproved("qualified operation is unavailable")
 
     def _invoke_control_presentation(
@@ -402,6 +417,17 @@ class CapturedPackControlSession:
         invalidate_profile_capture_scope()
         self._binding = _capture_binding()
         self._candidates.clear()
+
+    def _raise_known_revoke_denial(self, arguments: Mapping[str, Any]) -> None:
+        """Reject a read-only revoke denial before taking the session lock."""
+
+        pack_id = _installed_pack(arguments, self._binding)
+        if pack_id in _required_profile_pack_ids(self._binding.profile_id):
+            raise PackControlUnapproved("required Pack approval cannot be revoked")
+        record = load_pack_catalog()[pack_id]
+        approved, reason = _approval_status(pack_id, record, self._binding)
+        if not approved:
+            _raise_approval_failure(reason)
 
     def _catalog_payload(self) -> dict[str, Any]:
         return _catalog_payload(self._binding)

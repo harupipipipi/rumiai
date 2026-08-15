@@ -16,6 +16,7 @@ from urllib.parse import quote
 import pytest
 
 from core_runtime.authority.v4 import AuthorityStore
+from core_runtime.bootstrap import profile_capture
 from core_runtime.bootstrap.production_v4 import capture_production_dispatch
 from core_runtime.bootstrap.profile_capture import (
     capture_default_profile,
@@ -661,6 +662,7 @@ def test_runtime_surface_operation_identity_invokes_exact_capability_binding(
 
 def test_profile_ceremony_uses_four_canonical_broker_operations(
     production_server,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     server, _session, authority = production_server
     cookie, csrf, origin = _authenticate(server)
@@ -734,6 +736,19 @@ def test_profile_ceremony_uses_four_canonical_broker_operations(
             "record_digest": approved["data"]["approval_digest"],
         }
     ]
+    read_worker_capture_loads: list[int] = []
+    original_load = profile_capture.ActivationStore.load_active_snapshot
+
+    def counted_load(store):
+        if threading.current_thread().name.startswith("tobkiri-runtime-read"):
+            read_worker_capture_loads.append(threading.get_ident())
+        return original_load(store)
+
+    monkeypatch.setattr(
+        profile_capture.ActivationStore,
+        "load_active_snapshot",
+        counted_load,
+    )
     status, activated, _ = post(
         "/api/runtime-surface/profile-change/activate",
         {
@@ -744,6 +759,10 @@ def test_profile_ceremony_uses_four_canonical_broker_operations(
     assert status == 200, activated
     assert activated["data"]["state"] == "active"
     assert activated["data"]["authoritative_snapshot"]["state"] == "ready"
+    # The session's direct active loader still performs its independent
+    # authority check.  No additional capture_default_profile store read is
+    # allowed in the worker after the mutation recapture populated the scope.
+    assert read_worker_capture_loads == []
     status, replayed, _ = post(
         "/api/runtime-surface/profile-change/activate",
         {

@@ -8,6 +8,7 @@ digest-pinned Frontend Contract Map used by the canonical Broker transport.
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import hmac
 import queue
@@ -752,10 +753,14 @@ class RuntimeSurfaceService:
                     RuntimeSurfaceErrorCode.API_FAILURE,
                     "canonical runtime read service is closed",
                 )
+            operation_context = contextvars.copy_context()
             future = _READ_EXECUTOR.submit(
                 owner=self._read_owner,
                 deadline=deadline,
-                operation=operation,
+                operation=lambda read_deadline: operation_context.run(
+                    operation,
+                    read_deadline,
+                ),
             )
         if future is None:
             deadline.cancel()
