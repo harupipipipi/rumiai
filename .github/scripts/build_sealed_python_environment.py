@@ -134,6 +134,21 @@ SEALED_APPLICATION_ROLE_TARGETS = (
     "app/ecosystem/defaultspack/defaultspack/desktop_app.py",
     "app/core_runtime/host_broker/computer_host_helper.py",
 )
+PACKAGED_APPLICATION_CLOSURE_FILES = (
+    "bundled/presentation_catalog.json",
+    "bundled/presentation_release.v4.json",
+    "bundled/shell_artifact_index.v4.json",
+    "bundled/shell_profile_lock.v4.json",
+    "ecosystem/defaultspack/pack.v4.json",
+    "ecosystem/defaultspack/contracts.v4.json",
+    "ecosystem/defaultspack/artifact-index.v4.json",
+    "ecosystem/defaultspack/executables.v4.json",
+)
+PACKAGED_APPLICATION_CLOSURE_DIRECTORIES = (
+    "bundled/presentation-artifacts",
+    "ecosystem/defaultspack/v4",
+    "ecosystem/defaultspack/platform-artifacts",
+)
 
 
 @dataclass(frozen=True)
@@ -473,6 +488,173 @@ def _copy_application_closure(
                 target,
                 _executable_flag(path, metadata, spec),
             )
+
+
+def _packaged_application_closure_records(root: Path) -> list[dict[str, object]]:
+    """Return the complete deterministic Pack/Profile/Shell closure inventory."""
+    root = _assert_root(root)
+    selected: set[Path] = set()
+    for relative in PACKAGED_APPLICATION_CLOSURE_FILES:
+        path = root / relative
+        metadata = path.lstat()
+        if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+            raise SealedEnvironmentError(
+                f"packaged application closure file is missing or unsafe: {relative}"
+            )
+        selected.add(path)
+    for relative in PACKAGED_APPLICATION_CLOSURE_DIRECTORIES:
+        directory = root / relative
+        if directory.is_symlink() or not directory.is_dir():
+            raise SealedEnvironmentError(
+                f"packaged application closure directory is missing or unsafe: {relative}"
+            )
+        files = []
+        for nested_relative, path, kind, _metadata in _walk_tree(directory):
+            if kind == "file":
+                files.append(path)
+            elif kind != "directory":
+                raise SealedEnvironmentError(
+                    "packaged application closure contains a linked or special entry: "
+                    f"{relative}/{nested_relative}"
+                )
+        if not files:
+            raise SealedEnvironmentError(
+                f"packaged application closure directory is empty: {relative}"
+            )
+        selected.update(files)
+    records = []
+    for path in sorted(selected, key=lambda item: item.relative_to(root).as_posix()):
+        metadata = path.lstat()
+        if path.is_symlink() or not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise SealedEnvironmentError(
+                "packaged application closure contains an unsafe file: "
+                f"{path.relative_to(root).as_posix()}"
+            )
+        records.append(
+            {
+                "path": path.relative_to(root).as_posix(),
+                "size": metadata.st_size,
+                "sha256": _sha256_file(path),
+                "executable": bool(metadata.st_mode & 0o111),
+            }
+        )
+    return records
+
+
+def _load_closure_json(root: Path, relative: str) -> dict[str, object]:
+    """Load one exact regular JSON object from a packaged closure."""
+    path = root / relative
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SealedEnvironmentError(
+            f"packaged application closure JSON is malformed: {relative}"
+        ) from exc
+    if not isinstance(value, dict):
+        raise SealedEnvironmentError(
+            f"packaged application closure JSON is not an object: {relative}"
+        )
+    return value
+
+
+def validate_packaged_application_closure(root: Path) -> list[dict[str, object]]:
+    """Require a fully materialized selected Shell and its canonical closure."""
+    root = _assert_root(root)
+    records = _packaged_application_closure_records(root)
+    index = _load_closure_json(root, "bundled/shell_artifact_index.v4.json")
+    catalog = _load_closure_json(root, "bundled/presentation_catalog.json")
+    artifact_id = index.get("artifact_id")
+    artifact_digest = index.get("sha256")
+    artifact_path = index.get("path")
+    digest_algorithm, digest_separator, digest_value = (
+        artifact_digest.partition(":")
+        if isinstance(artifact_digest, str)
+        else ("", "", "")
+    )
+    if (
+        not isinstance(artifact_id, str)
+        or not artifact_id
+        or digest_algorithm != "sha256"
+        or digest_separator != ":"
+        or not _is_sha256_identity(digest_value)
+        or not isinstance(artifact_path, str)
+        or not artifact_path.startswith("bundled/presentation-artifacts/")
+    ):
+        raise SealedEnvironmentError("selected Shell artifact binding is incomplete")
+
+    providers = catalog.get("shell_providers")
+    matches: list[tuple[str, dict[str, object]]] = []
+    if isinstance(providers, list):
+        for provider in providers:
+            if not isinstance(provider, dict) or not isinstance(
+                provider.get("provider_id"), str
+            ):
+                continue
+            variants = provider.get("artifact_variants")
+            if not isinstance(variants, list) or not variants:
+                continue
+            for variant in variants:
+                if isinstance(variant, dict) and variant.get("artifact_id") == artifact_id:
+                    matches.append((str(provider["provider_id"]), variant))
+    if len(matches) != 1:
+        raise SealedEnvironmentError(
+            "selected Shell must have exactly one non-empty catalog variant binding"
+        )
+    provider_id, catalog_variant = matches[0]
+    if catalog_variant.get("sha256") != artifact_digest:
+        raise SealedEnvironmentError("selected Shell catalog artifact digest is stale")
+
+    definition_relative = (
+        f"ecosystem/defaultspack/v4/{provider_id}.shell.v1.json"
+    )
+    definition = _load_closure_json(root, definition_relative)
+    launch = definition.get("launch")
+    variants = launch.get("variants") if isinstance(launch, dict) else None
+    if (
+        definition.get("availability") != "verified"
+        or definition.get("artifact_digest") != artifact_digest
+        or not isinstance(variants, list)
+        or not variants
+    ):
+        raise SealedEnvironmentError(
+            "selected Shell definition is not a verified artifact binding"
+        )
+    definition_matches = [
+        variant
+        for variant in variants
+        if isinstance(variant, dict)
+        and (
+            variant.get("artifact_id") == artifact_id
+            or (
+                "artifact_id" not in variant
+                and variant.get("platform") == index.get("platform")
+                and variant.get("architecture") == index.get("architecture")
+            )
+        )
+    ]
+    if len(definition_matches) != 1 or definition_matches[0].get(
+        "artifact_digest"
+    ) != artifact_digest:
+        raise SealedEnvironmentError("selected Shell definition variant is stale")
+    platform_relative = definition_matches[0].get(
+        "artifact_ref", definition_matches[0].get("relative_path", "")
+    )
+    platform_artifact = (
+        root / "ecosystem/defaultspack/platform-artifacts" / str(platform_relative)
+    )
+    if not platform_artifact.exists() or platform_artifact.is_symlink():
+        raise SealedEnvironmentError("selected Shell platform artifact is missing")
+    return records
+
+
+def verify_packaged_application_closure(outer_root: Path, sealed_root: Path) -> None:
+    """Require byte-, path-, mode-, and binding-exact outer/sealed closures."""
+    outer = validate_packaged_application_closure(outer_root)
+    sealed = validate_packaged_application_closure(sealed_root / "app")
+    if outer != sealed:
+        raise SealedEnvironmentError(
+            "sealed Python application closure differs from outer packaged authority"
+        )
 
 
 def _freeze_tree(root: Path, spec: TargetSpec) -> None:
@@ -2657,6 +2839,7 @@ def _extract_pinned_python_archive(archive: Path, destination: Path) -> Path:
                     continue
                 if member.isdir():
                     if use_dirfd:
+                        assert root_fd is not None
                         directory_fd = _ensure_archive_directory_fd(root_fd, parts)
                         os.close(directory_fd)
                     else:
@@ -2667,6 +2850,7 @@ def _extract_pinned_python_archive(archive: Path, destination: Path) -> Path:
                 parent_parts = parts[:-1]
                 file_path: Path | None = None
                 if use_dirfd:
+                    assert root_fd is not None
                     parent_fd = _ensure_archive_directory_fd(root_fd, parent_parts)
                     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
                     flags |= getattr(os, "O_NOFOLLOW", 0)
@@ -2711,8 +2895,9 @@ def _extract_pinned_python_archive(archive: Path, destination: Path) -> Path:
                 terminal_member = names[terminal]
                 if terminal_member.isreg():
                     parent_parts = parts[:-1]
-                    file_path: Path | None = None
+                    link_file_path: Path | None = None
                     if use_dirfd:
+                        assert root_fd is not None
                         parent_fd = _ensure_archive_directory_fd(root_fd, parent_parts)
                         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
                         flags |= getattr(os, "O_NOFOLLOW", 0)
@@ -2730,19 +2915,21 @@ def _extract_pinned_python_archive(archive: Path, destination: Path) -> Path:
                         parent = _ensure_archive_directory_path(
                             destination, parent_parts
                         )
-                        file_path = parent / parts[-1]
-                        if os.path.lexists(file_path):
+                        link_file_path = parent / parts[-1]
+                        if os.path.lexists(link_file_path):
                             raise SealedEnvironmentError(
                                 f"duplicate pinned CPython archive member: {member.name}"
                             )
                         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
                         flags |= getattr(os, "O_NOFOLLOW", 0)
-                        file_fd = os.open(file_path, flags, 0o600)
+                        file_fd = os.open(link_file_path, flags, 0o600)
                     mode = _archive_file_mode(terminal_member)
                     _write_archive_file(bundle, terminal_member, file_fd, mode)
                     if not hasattr(os, "fchmod"):
                         _chmod_archive_path(
-                            destination.joinpath(*parts) if file_path is None else file_path,
+                            destination.joinpath(*parts)
+                            if link_file_path is None
+                            else link_file_path,
                             mode,
                         )
                 else:
@@ -2759,6 +2946,7 @@ def _extract_pinned_python_archive(archive: Path, destination: Path) -> Path:
                 reverse=True,
             ):
                 if use_dirfd:
+                    assert root_fd is not None
                     directory_fd = _ensure_archive_directory_fd(root_fd, parts)
                     try:
                         os.fchmod(directory_fd, mode)
@@ -2884,6 +3072,114 @@ def assemble_environment(
             require_sealed=False,
         )
     return manifest_path
+
+
+def rebuild_environment_application_closure(
+    base_root: Path,
+    application_source: Path,
+    output_root: Path,
+    target: str,
+    *,
+    expected_base_manifest_digest: str,
+) -> Path:
+    """Re-seal an environment around the final generated application closure.
+
+    The interpreter, installed packages, bootstrap, and provenance remain those
+    of the formally built environment. Only ``app`` is reconstructed, after
+    the final Pack/Profile/Shell/presentation generator has completed.
+    """
+    spec = target_spec(target)
+    base_root = Path(base_root).resolve(strict=True)
+    application_source = Path(application_source).resolve(strict=True)
+    output_root = Path(output_root)
+    validate_environment(
+        base_root,
+        target,
+        expected_manifest_digest=expected_base_manifest_digest,
+        run_native_smoke=False,
+    )
+    validate_packaged_application_closure(application_source)
+    base_manifest = _validate_manifest_shape(
+        json.loads((base_root / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    )
+    provenance = base_manifest["package_provenance"]
+    if not isinstance(provenance, dict):
+        raise SealedEnvironmentError("base sealed package provenance is invalid")
+    release_digest = str(provenance["release_digest"])
+    if output_root.exists() or output_root.is_symlink():
+        raise SealedEnvironmentError(
+            f"re-seal destination must be empty: {output_root}"
+        )
+    output_root.parent.mkdir(parents=True, exist_ok=True)
+    output_root.mkdir()
+    output_root.chmod(0o755)
+    _copy_tree(base_root / "runtime", output_root / "runtime", spec)
+    _copy_tree(base_root / "venv", output_root / "venv", spec)
+    _copy_tree(SEALED_SOURCE_ROOT / "app", output_root / "app", spec)
+    _copy_application_closure(application_source, output_root / "app", spec)
+    sentinels = output_root / "sentinels"
+    sentinels.mkdir()
+    sentinels.chmod(0o755)
+    _write_text(output_root / LEASE_FILENAME, LEASE_CONTENT)
+    manifest_path = _write_manifest(
+        output_root,
+        _expected_manifest(output_root, spec, PYTHON_VERSION, release_digest),
+    )
+    _freeze_tree(output_root, spec)
+    digest = validate_environment(output_root, target, run_native_smoke=False)
+    verify_packaged_application_closure(application_source, output_root)
+    if digest != _sha256_file(manifest_path):
+        raise SealedEnvironmentError("re-sealed manifest identity changed")
+    return manifest_path
+
+
+def replace_environment_application_closure(
+    sealed_root: Path,
+    application_source: Path,
+    target: str,
+    *,
+    expected_base_manifest_digest: str,
+) -> Path:
+    """Atomically replace one validated stale application closure."""
+    sealed_root = Path(sealed_root).resolve(strict=True)
+    parent = sealed_root.parent.resolve(strict=True)
+    nonce = secrets.token_hex(12)
+    staged = parent / f".{sealed_root.name}.application-reseal.{nonce}"
+    previous = parent / f".{sealed_root.name}.application-previous.{nonce}"
+    published = False
+    try:
+        manifest = rebuild_environment_application_closure(
+            sealed_root,
+            application_source,
+            staged,
+            target,
+            expected_base_manifest_digest=expected_base_manifest_digest,
+        )
+        # macOS denies renaming a sealed directory whose own mode is 0555,
+        # even when its parent is writable. Validation above binds the entire
+        # old tree before this narrowly scoped publish transition.
+        sealed_root.chmod(0o755)
+        staged.chmod(0o755)
+        os.replace(sealed_root, previous)
+        try:
+            os.replace(staged, sealed_root)
+            sealed_root.chmod(IMMUTABLE_DIRECTORY_MODE)
+            published = True
+        except Exception:
+            os.replace(previous, sealed_root)
+            sealed_root.chmod(IMMUTABLE_DIRECTORY_MODE)
+            raise
+        validate_environment(sealed_root, target, run_native_smoke=False)
+        verify_packaged_application_closure(application_source, sealed_root)
+        _cleanup_published_output(previous)
+        return sealed_root / manifest.name
+    except Exception:
+        if staged.exists():
+            _cleanup_published_output(staged)
+        if published and previous.exists():
+            _cleanup_published_output(sealed_root)
+            os.replace(previous, sealed_root)
+        raise
 
 
 def _copy_verified_source_snapshot(
@@ -3260,6 +3556,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--env-output", type=Path)
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--cleanup", action="store_true")
+    parser.add_argument("--rebase-application-source", type=Path)
+    parser.add_argument("--base-root", type=Path)
+    parser.add_argument("--expected-base-manifest-sha256")
     return parser.parse_args(argv)
 
 
@@ -3269,6 +3568,42 @@ def main(argv: Sequence[str] | None = None) -> int:
     repo_root = args.repo_root.resolve()
     output_root = Path(args.output_root or repo_root / DEFAULT_OUTPUT_RELATIVE)
     try:
+        if args.rebase_application_source is not None:
+            if (
+                args.base_root is None
+                or args.output_root is None
+                or not args.expected_base_manifest_sha256
+                or args.check
+                or args.cleanup
+                or args.env_output is not None
+                or args.requirements is not None
+                or args.uv_path is not None
+                or args.release_digest is not None
+                or args.source_tree is not None
+                or args.source_inventory_sha256 is not None
+            ):
+                raise SealedEnvironmentError(
+                    "application re-seal requires only base, source, output, target, "
+                    "and expected base manifest"
+                )
+            base_root = args.base_root.resolve(strict=True)
+            if output_root.resolve(strict=False) == base_root:
+                manifest = replace_environment_application_closure(
+                    base_root,
+                    args.rebase_application_source,
+                    args.target,
+                    expected_base_manifest_digest=args.expected_base_manifest_sha256,
+                )
+            else:
+                manifest = rebuild_environment_application_closure(
+                    base_root,
+                    args.rebase_application_source,
+                    output_root,
+                    args.target,
+                    expected_base_manifest_digest=args.expected_base_manifest_sha256,
+                )
+            print(f"{MANIFEST_SHA_ENV}={_sha256_file(manifest)}")
+            return 0
         if args.cleanup:
             if args.check or args.env_output is not None:
                 raise SealedEnvironmentError("--cleanup is an exclusive action")

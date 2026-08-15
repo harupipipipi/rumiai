@@ -462,11 +462,15 @@ jobs:
       - name: Host-seal and launch-test packaged Python application resources
         if: runner.os == 'macOS'
         run: |
+          app="$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app"
+          packaged_manifest_sha="$(/usr/bin/shasum -a 256 "$app/Contents/Resources/app/python-runtime/sealed-environment.v1.json" | /usr/bin/awk '{print $1}')"
+          test "${#packaged_manifest_sha}" -eq 64
+          printf 'TOBKIRI_PACKAGED_PYTHON_INVENTORY_SHA256=%s\n' "$packaged_manifest_sha" >> "$GITHUB_ENV"
           /usr/bin/python3 -B tobkiri_launcher/scripts/verify_packaged_python.py \
             --repo-root "$GITHUB_WORKSPACE" \
-            --app-bundle "$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app" \
+            --app-bundle "$app" \
             --target '${{ matrix.target }}' \
-            --expected-manifest-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256" \
+            --expected-manifest-sha256 "$packaged_manifest_sha" \
             --seal-tauri-directories \
             --native-smoke
           test ! -e "$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app/Contents/Resources/app/logs"
@@ -505,7 +509,7 @@ jobs:
           bash scripts/verify_packaged_python_dmg.sh \
             --dmg "$dmg" \
             --target '${{ matrix.target }}' \
-            --expected-manifest-sha256 "$TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256"
+            --expected-manifest-sha256 "$TOBKIRI_PACKAGED_PYTHON_INVENTORY_SHA256"
 
       - name: Notarize and staple macOS release DMG
         if: runner.os == 'macOS'

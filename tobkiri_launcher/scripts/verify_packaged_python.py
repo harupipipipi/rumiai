@@ -182,13 +182,16 @@ def main() -> int:
         )
     digest = _without_bundle_mutation(
         app_bundle,
-        lambda: builder.validate_environment(
-            resource,
-            args.target,
-            expected_manifest_digest=args.expected_manifest_sha256,
-            run_native_smoke=args.native_smoke,
-            require_sealed=True,
-        ),
+        lambda: (
+            builder.validate_environment(
+                resource,
+                args.target,
+                expected_manifest_digest=args.expected_manifest_sha256,
+                run_native_smoke=args.native_smoke,
+                require_sealed=True,
+            ),
+            builder.verify_packaged_application_closure(resource.parent, resource),
+        )[0],
     )
     if (app_bundle / MUTABLE_LOG_RELATIVE).exists():
         raise RuntimeError("packaged verification created mutable launch logs")

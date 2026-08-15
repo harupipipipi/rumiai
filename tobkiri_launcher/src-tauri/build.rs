@@ -34,6 +34,7 @@ const SEALED_PYTHON_MANIFEST: &str = "sealed-environment.v1.json";
 const SEALED_PYTHON_DIRECTORY_MODES: &str = "sealed-directory-modes.v1.json";
 const PACKAGING_PYTHON_SNAPSHOT_ENV: &str = "TOBKIRI_PACKAGING_PYTHON_SNAPSHOT";
 const PACKAGING_PYTHON_INVENTORY_SHA_ENV: &str = "TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256";
+const PACKAGING_SOURCE_SNAPSHOT_ENV: &str = "TOBKIRI_PACKAGING_SOURCE_SNAPSHOT";
 const MACOS_ARTIFACT_POLICY_ENV: &str = "TOBKIRI_MACOS_ARTIFACT_POLICY";
 const MACOS_CI_CERT_SHA256_ENV: &str = "TOBKIRI_MACOS_CI_CERT_SHA256";
 const MACOS_CI_PUBLIC_KEY_ENV: &str = "TOBKIRI_MACOS_CI_PUBLIC_KEY";
@@ -541,7 +542,7 @@ fn stage_runtime_bundle() -> io::Result<()> {
     verify_canonical_host_package(&staged_root, &runtime_root)
         .map_err(|error| stage_error("verify canonical Host package", error))?;
     let sealed_python_source = configured_sealed_python_snapshot()?;
-    bind_sealed_python_root(&sealed_python_source)
+    bind_sealed_python_root(&sealed_python_source, true)
         .map_err(|error| stage_error("verify source sealed Python", error))?;
     copy_generated_resource_dirs(
         &project_dir,
@@ -578,9 +579,12 @@ fn stage_runtime_bundle() -> io::Result<()> {
     verify_staged_catalog(&catalog_source, &staged_catalog)
         .map_err(|error| stage_error("verify staged presentation catalog", error))?;
 
+    rebase_staged_sealed_python(&staged_root)
+        .map_err(|error| stage_error("re-seal generated Python application closure", error))?;
+
     stage_pack_shell(repo_root, &staged_root)
         .map_err(|error| stage_error("stage pack-shell", error))?;
-    bind_sealed_python_root(&staged_root.join(SEALED_PYTHON_ROOT))
+    bind_sealed_python_root(&staged_root.join(SEALED_PYTHON_ROOT), false)
         .map_err(|error| stage_error("bind sealed Python environment", error))?;
     write_runtime_resource_manifest(&staged_root)
         .map_err(|error| stage_error("seal staged runtime", error))?;
@@ -649,7 +653,90 @@ fn collect_runtime_resource_directories(root: &Path, current: &Path) -> io::Resu
     Ok(directories)
 }
 
-fn bind_sealed_python_root(root: &Path) -> io::Result<()> {
+fn rebase_staged_sealed_python(staged_root: &Path) -> io::Result<()> {
+    if core_build_stage() != CoreBuildStage::FinalApplication
+        || required_cargo_profile()? != "release"
+        || std::env::var("DEP_TAURI_DEV").ok().as_deref() == Some("true")
+    {
+        return Ok(());
+    }
+    let source_snapshot = PathBuf::from(
+        std::env::var_os(PACKAGING_SOURCE_SNAPSHOT_ENV).ok_or_else(|| {
+            invalid_release(format!("{PACKAGING_SOURCE_SNAPSHOT_ENV} is required"))
+        })?,
+    );
+    if !source_snapshot.is_absolute() {
+        return Err(invalid_release(format!(
+            "{PACKAGING_SOURCE_SNAPSHOT_ENV} must be absolute"
+        )));
+    }
+    require_directory(&source_snapshot, "packaging source snapshot")?;
+    let script = source_snapshot.join(".github/scripts/build_sealed_python_environment.py");
+    require_regular_file(&script, "sealed Python application re-seal producer")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if fs::symlink_metadata(&source_snapshot)?.permissions().mode() & 0o222 != 0
+            || fs::symlink_metadata(&script)?.permissions().mode() & 0o222 != 0
+        {
+            return Err(invalid_release(
+                "sealed Python application re-seal producer is writable",
+            ));
+        }
+    }
+    let target = required_cargo_target()?;
+    let expected = std::env::var(PACKAGING_PYTHON_INVENTORY_SHA_ENV).map_err(|_| {
+        invalid_release(format!("{PACKAGING_PYTHON_INVENTORY_SHA_ENV} is required"))
+    })?;
+    if !valid_raw_sha256(&expected) {
+        return Err(invalid_release(
+            "formal sealed Python inventory binding is invalid",
+        ));
+    }
+    let sealed_root = staged_root.join(SEALED_PYTHON_ROOT);
+    let python = packaging_toolchain::verified_tool("python")?;
+    let mut command = python.command()?;
+    command.args([
+        std::ffi::OsString::from("-B"),
+        script.as_os_str().to_owned(),
+        std::ffi::OsString::from("--target"),
+        std::ffi::OsString::from(target),
+        std::ffi::OsString::from("--output-root"),
+        sealed_root.as_os_str().to_owned(),
+        std::ffi::OsString::from("--base-root"),
+        sealed_root.as_os_str().to_owned(),
+        std::ffi::OsString::from("--expected-base-manifest-sha256"),
+        std::ffi::OsString::from(expected),
+        std::ffi::OsString::from("--rebase-application-source"),
+        staged_root.as_os_str().to_owned(),
+    ]);
+    let output = command.output()?;
+    if !output.status.success() {
+        return Err(invalid_release(format!(
+            "sealed Python application re-seal failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|_| invalid_release("sealed Python application re-seal output is not UTF-8"))?;
+    let marker = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256="))
+        .ok_or_else(|| invalid_release("sealed Python application re-seal identity is missing"))?;
+    if !valid_raw_sha256(marker)
+        || raw_byte_digest(&read_regular_file(
+            &sealed_root.join(SEALED_PYTHON_MANIFEST),
+            "re-sealed Python manifest",
+        )?) != marker
+    {
+        return Err(invalid_release(
+            "sealed Python application re-seal identity does not match its manifest",
+        ));
+    }
+    Ok(())
+}
+
+fn bind_sealed_python_root(root: &Path, require_formal_binding: bool) -> io::Result<()> {
     reject_unsupported_sealed_python_release_target()?;
     let manifest_path = root.join(SEALED_PYTHON_MANIFEST);
     if !manifest_path.exists() {
@@ -665,7 +752,7 @@ fn bind_sealed_python_root(root: &Path) -> io::Result<()> {
     require_directory(&root, "sealed Python environment root")?;
     require_regular_file(&manifest_path, "sealed Python environment manifest")?;
     let bytes = fs::read(&manifest_path)?;
-    if required_cargo_profile()? == "release" {
+    if required_cargo_profile()? == "release" && require_formal_binding {
         let expected = std::env::var(PACKAGING_PYTHON_INVENTORY_SHA_ENV).map_err(|_| {
             io::Error::new(
                 io::ErrorKind::NotFound,
@@ -5521,7 +5608,7 @@ mod tests {
         let inventory_digest = raw_byte_digest(&manifest_bytes);
         let _inventory =
             EnvironmentGuard::set_value(PACKAGING_PYTHON_INVENTORY_SHA_ENV, &inventory_digest);
-        bind_sealed_python_root(&root).unwrap();
+        bind_sealed_python_root(&root, true).unwrap();
         let staged = tree.path().join("staged");
         copy_generated_resource_dirs(
             &tree.path().join("tobkiri_launcher/src-tauri"),
@@ -5530,7 +5617,7 @@ mod tests {
             Some(&root),
         )
         .unwrap();
-        bind_sealed_python_root(&staged.join(SEALED_PYTHON_ROOT)).unwrap();
+        bind_sealed_python_root(&staged.join(SEALED_PYTHON_ROOT), true).unwrap();
 
         let mut swapped = manifest.clone();
         swapped["environment_digest"] = swapped["package_provenance"]["release_digest"].clone();
@@ -5557,7 +5644,7 @@ mod tests {
             )
             .unwrap();
         }
-        assert!(bind_sealed_python_root(&root).is_err());
+        assert!(bind_sealed_python_root(&root, true).is_err());
 
         let mut prefixed = manifest;
         prefixed["sentinels"]["stdlib_sha256"] =
@@ -5576,7 +5663,7 @@ mod tests {
             serde_json::to_vec(&prefixed).unwrap(),
         )
         .unwrap();
-        assert!(bind_sealed_python_root(&root).is_err());
+        assert!(bind_sealed_python_root(&root, true).is_err());
     }
 
     #[test]
@@ -5993,6 +6080,23 @@ mod tests {
             .unwrap()
             ..source.find("fn stage_core_verified_release(").unwrap()];
         assert!(verifier.contains("current_source_revision(&repository_root)"));
+    }
+
+    #[test]
+    fn final_generated_closure_is_resealed_before_runtime_manifest() {
+        let source = include_str!("build.rs");
+        let stage = &source[source.find("fn stage_runtime_bundle").unwrap()
+            ..source.find("fn collect_runtime_resource_files").unwrap()];
+        let generate = stage
+            .find("stage_presentation_release(&staged_root)")
+            .expect("final presentation generation must be explicit");
+        let reseal = stage
+            .find("rebase_staged_sealed_python(&staged_root)")
+            .expect("sealed application closure must be rebuilt");
+        let manifest = stage
+            .find("write_runtime_resource_manifest(&staged_root)")
+            .expect("outer runtime manifest must be final");
+        assert!(generate < reseal && reseal < manifest);
     }
 
     #[test]
