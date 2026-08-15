@@ -223,7 +223,7 @@
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi-host-authority-bridge.pack.v4.json"
     }
   ],
-  "default_profile_digest": "sha256:5a746e7bef32f613aaa66ef41551ef26235a7305d6c1bf90a0c1120abc324762",
+  "default_profile_digest": "sha256:0cbf03df16fd5457ae7d47dc9841d96781c5c627a6603a363253c577927dfe73",
   "default_profile_id": "defaults",
   "default_profile_source": "tobkiri_runtime/ecosystem/defaultspack/v4/defaults.profile.v4.json",
   "default_selection": {
@@ -255,7 +255,7 @@
           "artifact_kind": "signed_prebuilt_binary",
           "artifact_ref": "Tobkiri.app",
           "bundle_identifier": "io.tobkiri.shell.tauri",
-          "descriptor_digest": "sha256:c8fdb89f70c744ac6fd2e0fffabe1f38b283d769020368a2f8dcf2f8f87584f4",
+          "descriptor_digest": "sha256:c36687baee0fd1dd4a9357953fc0d7b930a6c827e6512c7a1568f9cd127c14c5",
           "development_command": null,
           "entrypoint": "Tobkiri.app/Contents/MacOS/tobkiri-shell",
           "path": null,
@@ -274,7 +274,7 @@
           "artifact_kind": "signed_prebuilt_binary",
           "artifact_ref": "Tobkiri.app",
           "bundle_identifier": "io.tobkiri.shell.tauri",
-          "descriptor_digest": "sha256:c8fdb89f70c744ac6fd2e0fffabe1f38b283d769020368a2f8dcf2f8f87584f4",
+          "descriptor_digest": "sha256:c36687baee0fd1dd4a9357953fc0d7b930a6c827e6512c7a1568f9cd127c14c5",
           "development_command": null,
           "entrypoint": "Tobkiri.app/Contents/MacOS/tobkiri-shell",
           "path": null,
@@ -293,7 +293,7 @@
           "artifact_kind": "signed_prebuilt_binary",
           "artifact_ref": "tobkiri-shell.exe",
           "bundle_identifier": "io.tobkiri.shell.tauri",
-          "descriptor_digest": "sha256:c8fdb89f70c744ac6fd2e0fffabe1f38b283d769020368a2f8dcf2f8f87584f4",
+          "descriptor_digest": "sha256:c36687baee0fd1dd4a9357953fc0d7b930a6c827e6512c7a1568f9cd127c14c5",
           "development_command": null,
           "entrypoint": "tobkiri-shell.exe",
           "path": null,
@@ -312,7 +312,7 @@
           "artifact_kind": "signed_prebuilt_binary",
           "artifact_ref": "Tobkiri.AppImage",
           "bundle_identifier": "io.tobkiri.shell.tauri",
-          "descriptor_digest": "sha256:c8fdb89f70c744ac6fd2e0fffabe1f38b283d769020368a2f8dcf2f8f87584f4",
+          "descriptor_digest": "sha256:c36687baee0fd1dd4a9357953fc0d7b930a6c827e6512c7a1568f9cd127c14c5",
           "development_command": null,
           "entrypoint": "Tobkiri.AppImage",
           "path": null,
@@ -349,7 +349,7 @@
     }
   ],
   "source_manifest_digests": {
-    "defaults-basepack": "sha256:6b1cecc117a9def7187f2ee41855b6b4b62e880d11327496f3c10e0c8a996301",
+    "defaults-basepack": "sha256:5090707a1b0559e7d22ed6227772154025ac864cb27e689d148028b05fe2b259",
     "defaultspack": "sha256:8cc4d183541f7dd5937558113fa50eda70be133c2276c3824d752d8b9c8f9e67",
     "rumi_ai_gateway_pack": "sha256:480f0745c3071c7ac43b29123f3ff438e05e0fa4ca690b7697fdfb33cfa10f0a",
     "rumi_ai_pipeline_pack": "sha256:f43101a1feaa0ed34c781430807c8c56f712d2dc8e2b30949813fe3ef3123aea",
@@ -364,8 +364,8 @@
     "rumi_provider_adapters_pack": "sha256:18f4ce1eb4b7131c231d561ed626258cedc38ac12ed01f6e4cc056fadbe1007f",
     "rumi_provider_registry_pack": "sha256:63cc0464ec68b612fa723d690a587cd5e7c7032da787cfbcf2ba192c12caf8ff",
     "rumi_workspace_mount_pack": "sha256:c8aa387c53b1b8203dc6b50f9476b73d37da8c6a70d83de5f5f8dcb02830024c",
-    "runtime.tauri.application.default": "sha256:d1521e7926e621e193f57c38902b007d146f36bf1d76e42a408bdbb2ace6f45d",
-    "shell.tauri.default": "sha256:c8528884b38dafb2f1adf06e0bfb10946d9918905668e5271976cf4799f61dda",
+    "runtime.tauri.application.default": "sha256:33e841ba02e16aed1367b5375391af8131f5f471afa4022852930e528a64f171",
+    "shell.tauri.default": "sha256:170768826220aeb3630934c11bc7d28a13f041734b41053b5092cd0ed0a72c67",
     "tobkiri_host_pack_control": "sha256:bb598b3ab2837e494aaa2fa7b2922efb9ac03720cdc0ea327dc532ae310cb085"
   }
 }
