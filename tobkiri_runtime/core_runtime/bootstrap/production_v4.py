@@ -806,10 +806,16 @@ def capture_production_dispatch(
         for key, binding in binding_by_key.items()
         if key not in static_edge_keys and key[0] not in _CONTROL_CONTRACTS
     }
+    mandatory_pack_ids = {
+        str(item["pack_id"])
+        for item in catalog.profiles["defaults"].get("packs", ())
+        if item.get("role") != "application"
+    }
     optional_pack_ids = {
         str(item["pack_id"])
         for item in profile.get("packs", ())
-        if str(item["pack_id"]) not in catalog.packs
+        if item.get("role") != "application"
+        and str(item["pack_id"]) not in mandatory_pack_ids
     }
     pack_by_function = {
         str(binding["function_principal"]["function_id"]): str(binding["pack_id"])
