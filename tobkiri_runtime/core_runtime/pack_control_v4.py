@@ -984,39 +984,41 @@ def resolve_profile_pack_set(
             ) from error
     elif profile_id != "defaults":
         raise PackControlUnapproved("non-default Profile requires exact catalog bindings")
-    bundled_pack_ids = frozenset(catalog.packs)
     external_packs = dict(catalog.packs)
-    pending = [pack_id for pack_id in pack_ids if pack_id not in external_packs]
-    requested_closure = set(pending)
+    pending = list(dict.fromkeys(pack_ids))
+    requested_closure: set[str] = set()
     while pending:
         pack_id = pending.pop(0)
-        if pack_id in external_packs:
-            continue
-        record = load_pack_catalog().get(pack_id)
-        if record is None:
-            raise PackControlInvalidRequest("Pack is absent from the canonical v4 catalog")
-        root = resolve_pack_root(pack_id)
-        manifest_path = root / "pack.v4.json"
-        if manifest_path.is_symlink() or not manifest_path.is_file():
-            raise PackControlDigestMismatch("Pack v4 manifest is unavailable")
-        try:
-            manifest = validate_document(manifest_path.read_bytes(), "pack")
-        except Exception as error:
-            raise PackControlDigestMismatch("Pack v4 manifest is invalid") from error
-        external_normal = record.get("authority") == "host-signed-external-normal-v4"
-        if manifest["pack"]["id"] != pack_id or (
-            external_normal
-            and (
-                manifest["pack"]["kind"] != "normal_sandbox"
-                or manifest["pack"]["artifact_digest"] != record.get("artifact_digest")
-            )
-        ):
-            raise PackControlDigestMismatch("Pack v4 manifest identity is inconsistent")
-        external_packs[pack_id] = manifest
+        if pack_id not in requested_closure:
+            requested_closure.add(pack_id)
+        manifest = external_packs.get(pack_id)
+        if manifest is None:
+            record = load_pack_catalog().get(pack_id)
+            if record is None:
+                raise PackControlInvalidRequest(
+                    "Pack is absent from the canonical v4 catalog"
+                )
+            root = resolve_pack_root(pack_id)
+            manifest_path = root / "pack.v4.json"
+            if manifest_path.is_symlink() or not manifest_path.is_file():
+                raise PackControlDigestMismatch("Pack v4 manifest is unavailable")
+            try:
+                manifest = validate_document(manifest_path.read_bytes(), "pack")
+            except Exception as error:
+                raise PackControlDigestMismatch("Pack v4 manifest is invalid") from error
+            external_normal = record.get("authority") == "host-signed-external-normal-v4"
+            if manifest["pack"]["id"] != pack_id or (
+                external_normal
+                and (
+                    manifest["pack"]["kind"] != "normal_sandbox"
+                    or manifest["pack"]["artifact_digest"] != record.get("artifact_digest")
+                )
+            ):
+                raise PackControlDigestMismatch("Pack v4 manifest identity is inconsistent")
+            external_packs[pack_id] = manifest
         dependencies = set(manifest["requirements"]["pack_dependencies"])
-        requested_closure.update(dependencies)
         pending.extend(
-            dependency for dependency in dependencies if dependency not in external_packs
+            dependency for dependency in sorted(dependencies) if dependency not in requested_closure
         )
     catalog = BundledCatalog(
         root=catalog.root,
@@ -1085,10 +1087,8 @@ def resolve_profile_pack_set(
         approved_digests = {str(item["artifact_digest"]) for item in baseline.lock["effective_set"]}
         installed = _read_control_state("defaults")
         binding = _capture_binding()
-        external_selected = {
-            pack_id for pack_id in requested_closure if pack_id not in bundled_pack_ids
-        }
-        for pack_id in external_selected:
+        selected_optional = requested_closure - mandatory
+        for pack_id in sorted(selected_optional):
             record = load_pack_catalog()[pack_id]
             if pack_id not in installed:
                 raise PackControlConflict("Pack must be installed before activation")
