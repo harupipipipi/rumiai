@@ -73,6 +73,8 @@
     "tobkiri_runtime/tests/test_complete_v4_migration_gate.py::test_legacy_registry_and_installed_lookup_are_zero",
     "tobkiri_runtime/tests/test_complete_v4_migration_gate.py::test_retired_profile_setup_and_direct_execution_modules_are_unreachable",
     "tobkiri_runtime/tests/test_complete_v4_migration_gate.py::test_pack_api_has_no_hardcoded_legacy_handler_reachability",
+    "tobkiri_runtime/tests/test_complete_v4_migration_gate.py::test_child_failure_diagnostic_preserves_exact_process_context",
+    "tobkiri_runtime/tests/test_complete_v4_migration_gate.py::test_windows_child_paths_decode_json_before_root_containment",
     "tobkiri_runtime/tests/test_complete_v4_migration_gate.py::test_fresh_home_legacy_api_probes_are_retired_without_manager_imports",
     "tobkiri_runtime/tests/test_complete_v4_migration_gate.py::test_double_authority_is_zero_by_production_reachability",
     "tobkiri_runtime/tests/test_complete_v4_migration_gate.py::test_retired_setup_functions_and_conformance_pack_are_not_production_packs",
@@ -1972,7 +1974,7 @@
   },
   "schema": "io.tobkiri.quality.complete-v4-migration-evidence.v1",
   "source": {
-    "observed_head_sha": "bbd97e5bc37140b77fa7577b5bf89476c65652f0",
+    "observed_head_sha": "18caa4039362be5a6ec6846bb6a0ee6458e0ca5e",
     "test_file": "tobkiri_runtime/tests/test_complete_v4_migration_gate.py"
   }
 }
