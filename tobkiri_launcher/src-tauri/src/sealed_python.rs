@@ -47,6 +47,8 @@ const TERMINATION_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const BACKGROUND_REAPER_TIMEOUT: Duration = Duration::from_secs(30);
 const CHILD_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_ATTESTATION_BYTES: u64 = 64 * 1024;
+const SNAPSHOT_RUNTIME_MANIFEST: &str = "app/runtime-resource-manifest.v1.json";
+const RUNTIME_OVERLAY_SCHEMA: &str = "io.tobkiri.sealed-runtime-overlay.v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PythonRole {
@@ -316,7 +318,30 @@ struct StartupAttestation {
     stdlib_sha256: String,
     site_packages_sha256: String,
     native_sha256: String,
+    runtime_overlay_sha256: String,
+    outer_runtime_manifest_sha256: String,
     lifetime_lease: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct RuntimeOverlayAuthority {
+    schema: &'static str,
+    outer_manifest_sha256: String,
+    sealed_manifest_sha256: String,
+}
+
+#[derive(Serialize)]
+struct RuntimeOverlayDocument {
+    schema: &'static str,
+    overlay: RuntimeOverlayAuthority,
+    entries: Vec<crate::runtime_resource_integrity::ResourceEntry>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct VerifiedRuntimeOverlay {
+    bytes: Vec<u8>,
+    sha256: String,
+    authority: RuntimeOverlayAuthority,
 }
 
 struct VerifiedEnvironment {
@@ -327,6 +352,7 @@ struct VerifiedEnvironment {
     _interpreter_lease: File,
     environment_lease: Option<File>,
     snapshot_path: Option<PathBuf>,
+    runtime_overlay: VerifiedRuntimeOverlay,
     cleanup_authority: CleanupAuthority,
 }
 
@@ -813,6 +839,8 @@ where
         &attestation_path,
         &verified.manifest_path,
         &verified.root,
+        &verified.runtime_overlay.sha256,
+        &verified.runtime_overlay.authority.outer_manifest_sha256,
         role_arguments,
     )?;
     {
@@ -885,6 +913,8 @@ fn append_launch_wire(
     attestation_path: &Path,
     manifest_path: &Path,
     environment_root: &Path,
+    runtime_overlay_sha256: &str,
+    outer_runtime_manifest_sha256: &str,
     role_arguments: RoleArguments,
 ) -> Result<()> {
     if role != PythonRole::Defaultspack && !role_arguments.0.is_empty() {
@@ -897,6 +927,8 @@ fn append_launch_wire(
             attestation_path.as_os_str(),
             manifest_path.as_os_str(),
             environment_root.as_os_str(),
+            runtime_overlay_sha256,
+            outer_runtime_manifest_sha256,
         ))
         .arg(protocol::ARG_SEPARATOR)
         .args(role_arguments.0);
@@ -926,12 +958,23 @@ impl VerifiedEnvironment {
         validate_manifest_contract(&manifest)?;
         verify_environment_tree(&source_root, &manifest)?;
         verify_package_provenance(config, &manifest.package_provenance)?;
-        crate::runtime_resource_integrity::verify(&config.app_dir)
+        let runtime_resource_manifest = crate::runtime_resource_integrity::verify(&config.app_dir)
             .context("[PYTHON_SEALED_PROVENANCE_INVALID] packaged resource manifest rejected")?;
+        let runtime_overlay = build_runtime_overlay(
+            &manifest,
+            &sha256_bytes(&manifest_bytes),
+            &runtime_resource_manifest,
+        )?;
         #[cfg(target_os = "macos")]
         {
-            let (root, root_lease, snapshot_path) =
-                create_macos_snapshot(config, &source_root, &manifest, &manifest_bytes)?;
+            let (root, root_lease, snapshot_path) = create_macos_snapshot(
+                config,
+                &source_root,
+                &manifest,
+                &manifest_bytes,
+                &runtime_resource_manifest,
+                &runtime_overlay,
+            )?;
             let mut pending = PendingSnapshotCleanup::new(snapshot_path, root_lease);
             let verified_root_lease = pending.root_handle().try_clone()?;
             let manifest_path = root.join(MANIFEST_FILENAME);
@@ -947,11 +990,13 @@ impl VerifiedEnvironment {
                 _interpreter_lease: interpreter_lease,
                 environment_lease: Some(environment_lease),
                 snapshot_path: Some(snapshot_path),
+                runtime_overlay,
                 cleanup_authority: CleanupAuthority::BeforeChildSpawn,
             })
         }
         #[cfg(not(target_os = "macos"))]
         {
+            let _ = runtime_resource_manifest;
             let root = source_root.clone();
             let root_lease = open_directory(&source_root)?;
             let manifest_path = root.join(MANIFEST_FILENAME);
@@ -965,6 +1010,7 @@ impl VerifiedEnvironment {
                 _interpreter_lease: interpreter_lease,
                 environment_lease: Some(environment_lease),
                 snapshot_path: None,
+                runtime_overlay,
                 cleanup_authority: CleanupAuthority::BeforeChildSpawn,
             })
         }
@@ -978,6 +1024,7 @@ impl VerifiedEnvironment {
                 self._root_lease.as_raw_fd(),
                 &self.manifest,
                 option_env!("TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256").unwrap_or_default(),
+                Some(&self.runtime_overlay),
             );
         }
         verify_environment_tree(&self.root, &self.manifest)
@@ -1111,15 +1158,66 @@ fn canonical_private_temp_root() -> Result<PathBuf> {
         .context("[PYTHON_SEALED_SNAPSHOT_INVALID] canonicalize private temp root")
 }
 
+fn build_runtime_overlay(
+    sealed_manifest: &SealedEnvironmentManifest,
+    sealed_manifest_sha256: &str,
+    outer_manifest: &crate::runtime_resource_integrity::VerifiedResourceManifest,
+) -> Result<VerifiedRuntimeOverlay> {
+    let mut entries = Vec::new();
+    for sealed_entry in sealed_manifest
+        .files
+        .iter()
+        .filter(|entry| entry.path.starts_with("app/"))
+    {
+        let outer_path = Path::new(&sealed_entry.path)
+            .strip_prefix("app")
+            .context("sealed application entry is not below app")?;
+        let outer_entry = outer_manifest.entry(outer_path).with_context(|| {
+            format!(
+                "[PYTHON_SEALED_SNAPSHOT_INVALID] outer runtime manifest omits sealed application resource: {}",
+                outer_path.display()
+            )
+        })?;
+        if outer_entry.size != sealed_entry.size || outer_entry.sha256 != sealed_entry.sha256 {
+            bail!(
+                "[PYTHON_SEALED_SNAPSHOT_INVALID] outer and sealed application bindings differ: {}",
+                outer_path.display()
+            );
+        }
+        entries.push(outer_entry.clone());
+    }
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+    if entries.is_empty() {
+        bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] runtime overlay closure is empty");
+    }
+    let authority = RuntimeOverlayAuthority {
+        schema: RUNTIME_OVERLAY_SCHEMA,
+        outer_manifest_sha256: outer_manifest.sha256().to_owned(),
+        sealed_manifest_sha256: sealed_manifest_sha256.to_owned(),
+    };
+    let bytes = serde_json::to_vec(&RuntimeOverlayDocument {
+        schema: "io.tobkiri.runtime-resource-manifest.v1",
+        overlay: authority.clone(),
+        entries,
+    })?;
+    Ok(VerifiedRuntimeOverlay {
+        sha256: sha256_bytes(&bytes),
+        bytes,
+        authority,
+    })
+}
+
 #[cfg(target_os = "macos")]
 fn create_macos_snapshot(
     config: &AppConfig,
     source_root: &Path,
     manifest: &SealedEnvironmentManifest,
     manifest_bytes: &[u8],
+    runtime_resource_manifest: &crate::runtime_resource_integrity::VerifiedResourceManifest,
+    runtime_overlay: &VerifiedRuntimeOverlay,
 ) -> Result<(PathBuf, File, Option<PathBuf>)> {
     use std::os::fd::AsRawFd;
-    use std::os::unix::fs::DirBuilderExt;
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 
     let temp_root = canonical_private_temp_root()?;
     let snapshot_path = temp_root.join(format!(
@@ -1135,6 +1233,8 @@ fn create_macos_snapshot(
 
     (|| {
         let source = open_directory(source_root)?;
+        let runtime_source = open_directory(&config.app_dir)?;
+        let runtime_source_identity = runtime_source.metadata()?;
         let snapshot = match open_directory_inheritable(&snapshot_path) {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -1157,6 +1257,44 @@ fn create_macos_snapshot(
                 entry.executable,
             )?;
         }
+        write_anchored_file(
+            pending.root_handle().as_raw_fd(),
+            Path::new(SNAPSHOT_RUNTIME_MANIFEST),
+            &runtime_overlay.bytes,
+        )?;
+        let copied_runtime_manifest = read_anchored_regular(
+            pending.root_handle().as_raw_fd(),
+            Path::new(SNAPSHOT_RUNTIME_MANIFEST),
+            64 * 1024 * 1024,
+        )?;
+        if copied_runtime_manifest != runtime_overlay.bytes
+            || sha256_bytes(&copied_runtime_manifest) != runtime_overlay.sha256
+        {
+            bail!(
+                "[PYTHON_SEALED_SNAPSHOT_INVALID] runtime resource manifest changed during snapshot"
+            );
+        }
+        let runtime_source_after = runtime_source.metadata()?;
+        if (
+            runtime_source_identity.dev(),
+            runtime_source_identity.ino(),
+            runtime_source_identity.mtime(),
+            runtime_source_identity.mtime_nsec(),
+        ) != (
+            runtime_source_after.dev(),
+            runtime_source_after.ino(),
+            runtime_source_after.mtime(),
+            runtime_source_after.mtime_nsec(),
+        ) {
+            bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] outer runtime root changed during snapshot");
+        }
+        let reverified_runtime = crate::runtime_resource_integrity::verify(&config.app_dir)
+            .context("[PYTHON_SEALED_SNAPSHOT_INVALID] outer runtime changed during snapshot")?;
+        if &reverified_runtime != runtime_resource_manifest {
+            bail!(
+                "[PYTHON_SEALED_SNAPSHOT_INVALID] runtime resource authority changed during snapshot"
+            );
+        }
         seal_snapshot_directories(pending.root_handle().as_raw_fd(), manifest)?;
         let copied_manifest = read_anchored_regular(
             pending.root_handle().as_raw_fd(),
@@ -1170,6 +1308,7 @@ fn create_macos_snapshot(
             pending.root_handle().as_raw_fd(),
             manifest,
             &sha256_bytes(manifest_bytes),
+            Some(runtime_overlay),
         )?;
         // A non-cooperating updater changing the signed source while it is
         // copied is detected before this snapshot becomes executable.
@@ -1204,34 +1343,66 @@ fn copy_anchored_file(
     relative: &Path,
     executable: bool,
 ) -> Result<()> {
+    copy_anchored_file_as(
+        source_root,
+        destination_root,
+        relative,
+        relative,
+        executable,
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn copy_anchored_file_as(
+    source_root: std::os::fd::RawFd,
+    destination_root: std::os::fd::RawFd,
+    source_relative: &Path,
+    destination_relative: &Path,
+    executable: bool,
+) -> Result<()> {
     use std::io::Write;
     use std::os::fd::FromRawFd;
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::MetadataExt;
 
-    validate_relative_path(&relative.to_string_lossy())?;
-    let components = relative.components().collect::<Vec<_>>();
+    validate_relative_path(&source_relative.to_string_lossy())?;
+    validate_relative_path(&destination_relative.to_string_lossy())?;
+    let source_components = source_relative.components().collect::<Vec<_>>();
+    let destination_components = destination_relative.components().collect::<Vec<_>>();
     let mut source_dir = duplicate_fd(source_root)?;
     let mut destination_dir = duplicate_fd(destination_root)?;
-    for component in &components[..components.len().saturating_sub(1)] {
+    for component in &source_components[..source_components.len().saturating_sub(1)] {
         let Component::Normal(name) = component else {
             bail!("unsafe snapshot component");
         };
         source_dir = openat_directory(source_dir, name)?;
+    }
+    for component in &destination_components[..destination_components.len().saturating_sub(1)] {
+        let Component::Normal(name) = component else {
+            bail!("unsafe snapshot component");
+        };
         destination_dir = mkdirat_open(destination_dir, name)?;
     }
-    let name = components
+    let source_name = source_components
         .last()
         .and_then(|component| match component {
             Component::Normal(name) => Some(name),
             _ => None,
         })
         .context("empty snapshot file path")?;
-    let name = std::ffi::CString::new(name.as_bytes())?;
+    let destination_name = destination_components
+        .last()
+        .and_then(|component| match component {
+            Component::Normal(name) => Some(name),
+            _ => None,
+        })
+        .context("empty snapshot destination file path")?;
+    let source_name = std::ffi::CString::new(source_name.as_bytes())?;
+    let destination_name = std::ffi::CString::new(destination_name.as_bytes())?;
     let source_fd = unsafe {
         libc::openat(
             source_dir,
-            name.as_ptr(),
+            source_name.as_ptr(),
             libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
         )
     };
@@ -1241,7 +1412,7 @@ fn copy_anchored_file(
     let destination_fd = unsafe {
         libc::openat(
             destination_dir,
-            name.as_ptr(),
+            destination_name.as_ptr(),
             libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
             if executable { 0o555 } else { 0o444 },
         )
@@ -1272,6 +1443,52 @@ fn copy_anchored_file(
         libc::close(source_dir);
         libc::close(destination_dir);
     }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn write_anchored_file(
+    destination_root: std::os::fd::RawFd,
+    destination_relative: &Path,
+    payload: &[u8],
+) -> Result<()> {
+    use std::io::Write;
+    use std::os::fd::FromRawFd;
+    use std::os::unix::ffi::OsStrExt;
+
+    validate_relative_path(&destination_relative.to_string_lossy())?;
+    let components = destination_relative.components().collect::<Vec<_>>();
+    let mut destination_dir = duplicate_fd(destination_root)?;
+    for component in &components[..components.len().saturating_sub(1)] {
+        let Component::Normal(name) = component else {
+            bail!("unsafe runtime overlay component");
+        };
+        destination_dir = mkdirat_open(destination_dir, name)?;
+    }
+    let name = components
+        .last()
+        .and_then(|component| match component {
+            Component::Normal(name) => Some(name),
+            _ => None,
+        })
+        .context("empty runtime overlay path")?;
+    let name = std::ffi::CString::new(name.as_bytes())?;
+    let fd = unsafe {
+        libc::openat(
+            destination_dir,
+            name.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            0o444,
+        )
+    };
+    unsafe { libc::close(destination_dir) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error()).context("create anchored runtime overlay");
+    }
+    let mut destination = unsafe { File::from_raw_fd(fd) };
+    destination.write_all(payload)?;
+    destination.flush()?;
+    destination.sync_all()?;
     Ok(())
 }
 
@@ -1415,6 +1632,7 @@ fn verify_snapshot_anchored(
     root: std::os::fd::RawFd,
     manifest: &SealedEnvironmentManifest,
     expected_manifest_digest: &str,
+    runtime_overlay: Option<&VerifiedRuntimeOverlay>,
 ) -> Result<()> {
     use std::collections::BTreeSet;
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -1454,6 +1672,23 @@ fn verify_snapshot_anchored(
             parent = value.parent();
         }
     }
+    if let Some(overlay) = runtime_overlay {
+        let file = openat_relative_regular(root, Path::new(SNAPSHOT_RUNTIME_MANIFEST))?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file()
+            || metadata.nlink() != 1
+            || metadata.len() != overlay.bytes.len() as u64
+            || metadata.permissions().mode() & 0o777 != 0o444
+        {
+            bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] runtime overlay metadata changed");
+        }
+        let mut payload = Vec::with_capacity(overlay.bytes.len());
+        file.take(overlay.bytes.len() as u64 + 1)
+            .read_to_end(&mut payload)?;
+        if payload != overlay.bytes || sha256_bytes(&payload) != overlay.sha256 {
+            bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] runtime overlay binding changed");
+        }
+    }
     for directory in &directories {
         let handle = openat_relative_directory(root, directory)?;
         let metadata = handle.metadata()?;
@@ -1481,11 +1716,15 @@ fn verify_snapshot_anchored(
     )?;
     actual_files.sort();
     actual_directories.sort();
-    let expected_files = manifest
+    let mut expected_files = manifest
         .files
         .iter()
         .map(|entry| entry.path.clone())
         .collect::<Vec<_>>();
+    if runtime_overlay.is_some() {
+        expected_files.push(SNAPSHOT_RUNTIME_MANIFEST.to_owned());
+        expected_files.sort();
+    }
     let expected_directories = portable_directory_inventory(directories);
     if actual_files != expected_files || actual_directories != expected_directories {
         let missing_file = expected_files
@@ -1594,7 +1833,7 @@ fn collect_anchored_inventory(
                 unsafe { libc::close(child) };
                 nested?;
             } else if stat.st_mode & libc::S_IFMT == libc::S_IFREG {
-                if path.file_name().and_then(|value| value.to_str()) != Some(MANIFEST_FILENAME) {
+                if path != Path::new(MANIFEST_FILENAME) {
                     files.push(path.to_string_lossy().replace('\\', "/"));
                 }
             } else {
@@ -1907,6 +2146,9 @@ fn validate_attestation(
         || value.stdlib_sha256 != verified.manifest.sentinels.stdlib_sha256
         || value.site_packages_sha256 != verified.manifest.sentinels.site_packages_sha256
         || value.native_sha256 != verified.manifest.sentinels.native_sha256
+        || value.runtime_overlay_sha256 != verified.runtime_overlay.sha256
+        || value.outer_runtime_manifest_sha256
+            != verified.runtime_overlay.authority.outer_manifest_sha256
     {
         bail!("[PYTHON_SEALED_ATTESTATION_INVALID] startup identity mismatch");
     }
@@ -2098,7 +2340,7 @@ fn collect_files(
             // intentionally absent from its own file inventory.  It remains a
             // required regular file; only omit it from `output`, not from the
             // accepted file-type branch.
-            if path.file_name().and_then(|name| name.to_str()) != Some(MANIFEST_FILENAME) {
+            if path.strip_prefix(root)? != Path::new(MANIFEST_FILENAME) {
                 output.push(
                     path.strip_prefix(root)?
                         .to_string_lossy()
@@ -2683,6 +2925,82 @@ mod tests {
         byte.to_string().repeat(64)
     }
 
+    fn test_runtime_overlay() -> VerifiedRuntimeOverlay {
+        let authority = RuntimeOverlayAuthority {
+            schema: RUNTIME_OVERLAY_SCHEMA,
+            outer_manifest_sha256: digest('8'),
+            sealed_manifest_sha256: digest('9'),
+        };
+        let bytes = b"test-runtime-overlay".to_vec();
+        VerifiedRuntimeOverlay {
+            sha256: sha256_bytes(&bytes),
+            bytes,
+            authority,
+        }
+    }
+
+    #[test]
+    fn runtime_overlay_projects_exact_sealed_catalog_and_lock_closure() {
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-runtime-overlay-source-{}-{}",
+            std::process::id(),
+            random_nonce()
+        ));
+        let resources = [
+            ("core_runtime/bootstrap.py", b"bootstrap\n".as_slice()),
+            (
+                "ecosystem/defaultspack/v4/catalog.lock.json",
+                b"{\"lock\":true}\n".as_slice(),
+            ),
+        ];
+        for (relative, payload) in resources {
+            let path = root.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, payload).unwrap();
+        }
+        let entries = resources
+            .iter()
+            .map(|(path, payload)| {
+                serde_json::json!({
+                    "path": path,
+                    "size": payload.len(),
+                    "sha256": sha256_bytes(payload),
+                })
+            })
+            .collect::<Vec<_>>();
+        fs::write(
+            root.join(crate::runtime_resource_integrity::MANIFEST_NAME),
+            serde_json::to_vec(&serde_json::json!({
+                "schema": "io.tobkiri.runtime-resource-manifest.v1",
+                "entries": entries,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let outer = crate::runtime_resource_integrity::verify(&root).unwrap();
+        let mut sealed = minimal_manifest();
+        sealed.files = resources
+            .iter()
+            .map(|(path, payload)| SealedFile {
+                path: format!("app/{path}"),
+                size: payload.len() as u64,
+                sha256: sha256_bytes(payload),
+                executable: false,
+            })
+            .collect();
+        let overlay = build_runtime_overlay(&sealed, &digest('9'), &outer).unwrap();
+        let document: serde_json::Value = serde_json::from_slice(&overlay.bytes).unwrap();
+        assert_eq!(
+            document["entries"].as_array().unwrap().len(),
+            resources.len()
+        );
+        assert_eq!(document["overlay"]["outer_manifest_sha256"], outer.sha256());
+
+        sealed.files[0].sha256 = digest('0');
+        assert!(build_runtime_overlay(&sealed, &digest('9'), &outer).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     fn minimal_manifest() -> SealedEnvironmentManifest {
         let files = required_layout_paths()
             .iter()
@@ -2861,6 +3179,7 @@ mod tests {
             _interpreter_lease: open_regular(&fixed_interpreter(&root)).unwrap(),
             environment_lease: None,
             snapshot_path: Some(root.clone()),
+            runtime_overlay: test_runtime_overlay(),
             cleanup_authority: CleanupAuthority::BeforeChildSpawn,
             root: root.clone(),
             manifest,
@@ -3009,6 +3328,8 @@ mod tests {
             Path::new("attestation"),
             Path::new("manifest"),
             Path::new("environment"),
+            &digest('a'),
+            &digest('b'),
             RoleArguments::defaultspack([OsString::from("--port=8766")]).unwrap(),
         )
         .unwrap();
@@ -3029,6 +3350,8 @@ mod tests {
             Path::new("attestation"),
             Path::new("manifest"),
             Path::new("environment"),
+            &digest('a'),
+            &digest('b'),
             RoleArguments(vec![OsString::from("unexpected")]),
         )
         .is_err());
@@ -3399,12 +3722,14 @@ mod tests {
             destination.as_raw_fd(),
             &manifest,
             &sha256_bytes(&serde_json::to_vec(&manifest).unwrap()),
+            None,
         )
         .unwrap();
         verify_snapshot_anchored(
             destination.as_raw_fd(),
             &manifest,
             &sha256_bytes(&serde_json::to_vec(&manifest).unwrap()),
+            None,
         )
         .expect("anchored inventory must be repeatable on the retained root lease");
 
@@ -3562,6 +3887,7 @@ mod tests {
             _interpreter_lease: open_regular(&fixed_interpreter(&root)).unwrap(),
             environment_lease: None,
             snapshot_path: None,
+            runtime_overlay: test_runtime_overlay(),
             cleanup_authority: CleanupAuthority::BeforeChildSpawn,
             root: root.clone(),
             manifest: manifest.clone(),
@@ -3600,6 +3926,12 @@ mod tests {
             stdlib_sha256: manifest.sentinels.stdlib_sha256.clone(),
             site_packages_sha256: manifest.sentinels.site_packages_sha256.clone(),
             native_sha256: manifest.sentinels.native_sha256.clone(),
+            runtime_overlay_sha256: verified.runtime_overlay.sha256.clone(),
+            outer_runtime_manifest_sha256: verified
+                .runtime_overlay
+                .authority
+                .outer_manifest_sha256
+                .clone(),
             lifetime_lease: true,
         };
         validate_attestation(&attestation, "nonce", PythonRole::Kernel, &verified).unwrap();

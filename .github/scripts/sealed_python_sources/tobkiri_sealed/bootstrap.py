@@ -20,8 +20,8 @@ from typing import Any, Sequence
 
 from . import SCHEMA
 
-PROTOCOL_SCHEMA = "io.tobkiri.sealed-python-launch.v1"
-ATTESTATION_SCHEMA = "io.tobkiri.sealed-python-attestation.v1"
+PROTOCOL_SCHEMA = "io.tobkiri.sealed-python-launch.v2"
+ATTESTATION_SCHEMA = "io.tobkiri.sealed-python-attestation.v2"
 ROLE_ENTRYPOINTS = {
     "typed": "kernel_entry.py",
     "defaultspack": "defaultspack_entry.py",
@@ -42,6 +42,8 @@ ROLE_TARGETS = {
     ),
 }
 MANIFEST_NAME = "sealed-environment.v1.json"
+RUNTIME_OVERLAY_NAME = "app/runtime-resource-manifest.v1.json"
+RUNTIME_OVERLAY_SCHEMA = "io.tobkiri.sealed-runtime-overlay.v1"
 DIRECTORY_MODES_NAME = "sealed-directory-modes.v1.json"
 DIRECTORY_MODES_SCHEMA = "io.tobkiri.sealed-python-directory-modes.v1"
 MANIFEST_SHA_ENV = "TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256"
@@ -376,7 +378,10 @@ def _executable(path: Path, platform_name: str) -> bool:
 def _verify_tree(root: Path, document: dict[str, Any]) -> list[dict[str, Any]]:
     """Verify exact files, bytes, permissions, links, and directory closure."""
     actual_files, actual_directories = _actual_tree(root)
-    expected_files = [str(entry["path"]) for entry in document["files"]]
+    expected_files = sorted(
+        [str(entry["path"]) for entry in document["files"]]
+        + [RUNTIME_OVERLAY_NAME]
+    )
     if actual_files != expected_files:
         raise SealedBootstrapError("sealed environment has missing or extra files")
     if actual_directories != _expected_directories(document["files"]):
@@ -430,6 +435,70 @@ def _verify_tree(root: Path, document: dict[str, Any]) -> list[dict[str, Any]]:
     if _sha256_bytes(compact) != document["environment_digest"]:
         raise SealedBootstrapError("sealed environment digest changed")
     return records
+
+
+def _verify_runtime_overlay(
+    root: Path,
+    sealed_document: dict[str, Any],
+    runtime_overlay_sha256: str,
+    outer_runtime_manifest_sha256: str,
+) -> dict[str, str]:
+    """Verify the single Host overlay separately from the sealed base domain."""
+    if not _is_sha256_identity(runtime_overlay_sha256) or not _is_sha256_identity(
+        outer_runtime_manifest_sha256
+    ):
+        raise SealedBootstrapError("runtime overlay launch binding is invalid")
+    path = root / RUNTIME_OVERLAY_NAME
+    _assert_regular_file(path, "sealed runtime overlay")
+    metadata = path.lstat()
+    if os.name != "nt" and stat.S_IMODE(metadata.st_mode) != 0o444:
+        raise SealedBootstrapError("sealed runtime overlay mode is invalid")
+    raw = path.read_bytes()
+    if _sha256_bytes(raw) != runtime_overlay_sha256:
+        raise SealedBootstrapError("sealed runtime overlay digest changed")
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SealedBootstrapError("sealed runtime overlay is malformed") from exc
+    if not isinstance(document, dict) or tuple(document) != (
+        "schema",
+        "overlay",
+        "entries",
+    ):
+        raise SealedBootstrapError("sealed runtime overlay shape is invalid")
+    if document["schema"] != "io.tobkiri.runtime-resource-manifest.v1":
+        raise SealedBootstrapError("sealed runtime overlay resource schema is invalid")
+    authority = document["overlay"]
+    if not isinstance(authority, dict) or tuple(authority) != (
+        "schema",
+        "outer_manifest_sha256",
+        "sealed_manifest_sha256",
+    ):
+        raise SealedBootstrapError("sealed runtime overlay authority is invalid")
+    sealed_manifest_sha256 = _sha256_bytes((root / MANIFEST_NAME).read_bytes())
+    if authority != {
+        "schema": RUNTIME_OVERLAY_SCHEMA,
+        "outer_manifest_sha256": outer_runtime_manifest_sha256,
+        "sealed_manifest_sha256": sealed_manifest_sha256,
+    }:
+        raise SealedBootstrapError("sealed runtime overlay authority changed")
+    expected_entries = [
+        {
+            "path": str(entry["path"])[len("app/") :],
+            "size": entry["size"],
+            "sha256": entry["sha256"],
+        }
+        for entry in sealed_document["files"]
+        if str(entry["path"]).startswith("app/")
+    ]
+    if not expected_entries or document["entries"] != expected_entries:
+        raise SealedBootstrapError(
+            "sealed runtime overlay does not exactly project the application closure"
+        )
+    return {
+        "runtime_overlay_sha256": runtime_overlay_sha256,
+        "outer_runtime_manifest_sha256": outer_runtime_manifest_sha256,
+    }
 
 
 def _group_digest(entries: Sequence[dict[str, Any]]) -> str:
@@ -862,6 +931,7 @@ def _attestation(
     document: dict[str, Any],
     sentinels: dict[str, str],
     sys_path: Sequence[str],
+    overlay_binding: dict[str, str],
 ) -> dict[str, Any]:
     executable, prefix, base_prefix = _validate_python_identity(root)
     return {
@@ -876,6 +946,10 @@ def _attestation(
         "stdlib_sha256": sentinels["stdlib_sha256"],
         "site_packages_sha256": sentinels["site_packages_sha256"],
         "native_sha256": sentinels["native_sha256"],
+        "runtime_overlay_sha256": overlay_binding["runtime_overlay_sha256"],
+        "outer_runtime_manifest_sha256": overlay_binding[
+            "outer_runtime_manifest_sha256"
+        ],
         "lifetime_lease": True,
     }
 
@@ -973,6 +1047,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--attestation", required=True)
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--environment-root", required=True)
+    parser.add_argument("--runtime-overlay-sha256", required=True)
+    parser.add_argument("--outer-runtime-manifest-sha256", required=True)
     return parser
 
 
@@ -998,6 +1074,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     manifest = _load_manifest(root, args.manifest)
     attestation_path = _attestation_destination(args.attestation, root, args.nonce)
     with _LifetimeLease(root / LEASE_NAME):
+        overlay_binding = _verify_runtime_overlay(
+            root,
+            manifest,
+            args.runtime_overlay_sha256,
+            args.outer_runtime_manifest_sha256,
+        )
         records = _verify_tree(root, manifest)
         sentinels = _sentinels_match(root, manifest, records)
         _validate_runtime_state(root, manifest, include_application=False)
@@ -1007,6 +1089,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys_path = _validate_runtime_state(root, manifest, include_application=True)
         sealed_sys_path = _SealedSysPath(root, sys_path)
         sys.path = sealed_sys_path
+        if _verify_runtime_overlay(
+            root,
+            manifest,
+            args.runtime_overlay_sha256,
+            args.outer_runtime_manifest_sha256,
+        ) != overlay_binding:
+            raise SealedBootstrapError("sealed runtime overlay changed before attestation")
         evidence = _attestation(
             root,
             args.role,
@@ -1014,6 +1103,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             manifest,
             sentinels,
             sys_path,
+            overlay_binding,
         )
         _publish_attestation(attestation_path, evidence)
         sealed_sys_path.freeze()

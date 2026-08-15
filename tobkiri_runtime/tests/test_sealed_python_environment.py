@@ -191,6 +191,50 @@ def _fixture_sys_path(output: Path, *, include_missing_zip: bool = False) -> lis
     return [str(path) for path in entries]
 
 
+def _install_runtime_overlay(output: Path) -> tuple[str, str]:
+    """Install the sole Host overlay after the sealed base fixture is verified."""
+    manifest_path = output / BUILDER.MANIFEST_FILENAME
+    sealed = json.loads(manifest_path.read_text(encoding="utf-8"))
+    outer_digest = "f" * 64
+    document = {
+        "schema": "io.tobkiri.runtime-resource-manifest.v1",
+        "overlay": {
+            "schema": "io.tobkiri.sealed-runtime-overlay.v1",
+            "outer_manifest_sha256": outer_digest,
+            "sealed_manifest_sha256": BUILDER._sha256_file(manifest_path),
+        },
+        "entries": [
+            {
+                "path": entry["path"][len("app/") :],
+                "size": entry["size"],
+                "sha256": entry["sha256"],
+            }
+            for entry in sealed["files"]
+            if entry["path"].startswith("app/")
+        ],
+    }
+    payload = json.dumps(document, separators=(",", ":")).encode("utf-8")
+    app = output / "app"
+    if os.name != "nt":
+        app.chmod(0o755)
+    overlay = app / "runtime-resource-manifest.v1.json"
+    overlay.write_bytes(payload)
+    if os.name != "nt":
+        overlay.chmod(0o444)
+        app.chmod(0o555)
+    return hashlib.sha256(payload).hexdigest(), outer_digest
+
+
+def _runtime_overlay_arguments(output: Path) -> list[str]:
+    overlay_digest, outer_digest = _install_runtime_overlay(output)
+    return [
+        "--runtime-overlay-sha256",
+        overlay_digest,
+        "--outer-runtime-manifest-sha256",
+        outer_digest,
+    ]
+
+
 def _writable_staged_fixture(base: Path, target: str) -> Path:
     """Copy one valid sealed fixture into a writable publish stage."""
     sealed = _fixture_sources(base / "fixture", target)[2]
@@ -1368,6 +1412,7 @@ def test_bootstrap_wire_dispatches_all_roles_and_publishes_attestation(
 ) -> None:
     """The parent wire reaches each canonical role with exact argv/stdin."""
     output = _fixture_sources(tmp_path / "sealed", "x86_64-unknown-linux-gnu")[2]
+    overlay_arguments = _runtime_overlay_arguments(output)
     assert output.name != "python-runtime"
     marker = tmp_path / "roles.jsonl"
 
@@ -1426,6 +1471,7 @@ def test_bootstrap_wire_dispatches_all_roles_and_publishes_attestation(
                     str(output / BUILDER.MANIFEST_FILENAME),
                     "--environment-root",
                     str(output),
+                    *overlay_arguments,
                     "--",
                     *role_args,
                 ]
@@ -1444,6 +1490,8 @@ def test_bootstrap_wire_dispatches_all_roles_and_publishes_attestation(
                 "stdlib_sha256",
                 "site_packages_sha256",
                 "native_sha256",
+                "runtime_overlay_sha256",
+                "outer_runtime_manifest_sha256",
                 "lifetime_lease",
             ]
             assert evidence["role"] == role
@@ -1467,6 +1515,7 @@ def test_bootstrap_wire_dispatches_all_roles_and_publishes_attestation(
                             str(output / BUILDER.MANIFEST_FILENAME),
                             "--environment-root",
                             str(output),
+                            *overlay_arguments,
                             "--",
                             *role_args,
                         ]
@@ -1491,6 +1540,75 @@ def test_bootstrap_wire_dispatches_all_roles_and_publishes_attestation(
         sys.stdout = old_stdout
         os.environ.clear()
         os.environ.update(old_env)
+
+
+@pytest.mark.parametrize(
+    "case",
+    ("tamper", "stale-outer", "missing-resource", "second-overlay", "wrong-path", "hardlink"),
+)
+def test_bootstrap_rejects_runtime_overlay_drift(tmp_path: Path, case: str) -> None:
+    """The Host overlay remains one exact, separately bound digest domain."""
+    output = _fixture_sources(tmp_path / "sealed", "x86_64-unknown-linux-gnu")[2]
+    overlay_digest, outer_digest = _install_runtime_overlay(output)
+    manifest = json.loads(
+        (output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8")
+    )
+    source_root = ROOT / ".github" / "scripts" / "sealed_python_sources"
+    old_path = sys.path[:]
+    old_bootstrap = sys.modules.pop("tobkiri_sealed.bootstrap", None)
+    old_package = sys.modules.pop("tobkiri_sealed", None)
+    try:
+        sys.path.insert(0, str(source_root))
+        import tobkiri_sealed.bootstrap as bootstrap
+
+        binding = bootstrap._verify_runtime_overlay(
+            output, manifest, overlay_digest, outer_digest
+        )
+        assert binding["runtime_overlay_sha256"] == overlay_digest
+        app = output / "app"
+        overlay = app / "runtime-resource-manifest.v1.json"
+        app.chmod(0o755)
+        overlay.chmod(0o644)
+        if case == "tamper":
+            overlay.write_bytes(overlay.read_bytes() + b"\n")
+        elif case in {"stale-outer", "missing-resource"}:
+            document = json.loads(overlay.read_text(encoding="utf-8"))
+            if case == "stale-outer":
+                document["overlay"]["outer_manifest_sha256"] = "e" * 64
+            else:
+                document["entries"][0]["path"] = "outer-only/missing.json"
+            payload = json.dumps(document, separators=(",", ":")).encode("utf-8")
+            overlay.write_bytes(payload)
+            overlay_digest = hashlib.sha256(payload).hexdigest()
+        elif case == "second-overlay":
+            (app / "unexpected-overlay.json").write_bytes(b"{}")
+        elif case == "wrong-path":
+            overlay.rename(app / "wrong-runtime-resource-manifest.v1.json")
+        else:
+            payload = overlay.read_bytes()
+            overlay.unlink()
+            authority = tmp_path / "overlay-authority"
+            authority.write_bytes(payload)
+            os.link(authority, overlay)
+        for path in app.iterdir():
+            if path.is_file():
+                path.chmod(0o444)
+        app.chmod(0o555)
+        with pytest.raises(bootstrap.SealedBootstrapError):
+            if case == "second-overlay":
+                bootstrap._verify_tree(output, manifest)
+            else:
+                bootstrap._verify_runtime_overlay(
+                    output, manifest, overlay_digest, outer_digest
+                )
+    finally:
+        sys.path = old_path
+        sys.modules.pop("tobkiri_sealed.bootstrap", None)
+        sys.modules.pop("tobkiri_sealed", None)
+        if old_package is not None:
+            sys.modules["tobkiri_sealed"] = old_package
+        if old_bootstrap is not None:
+            sys.modules["tobkiri_sealed.bootstrap"] = old_bootstrap
         sys.modules.pop("tobkiri_sealed.bootstrap", None)
         sys.modules.pop("tobkiri_sealed", None)
 
@@ -1622,6 +1740,7 @@ def test_bootstrap_rejects_path_environment_and_external_import_metadata(
 ) -> None:
     """Reject inherited path variables, cwd, user-site, and shadow roots."""
     output = _fixture_sources(tmp_path / "sealed", "x86_64-unknown-linux-gnu")[2]
+    overlay_arguments = _runtime_overlay_arguments(output)
     source_root = ROOT / ".github" / "scripts" / "sealed_python_sources"
     external = tmp_path / "external-shadow"
     external.mkdir()
@@ -1678,6 +1797,7 @@ def test_bootstrap_rejects_path_environment_and_external_import_metadata(
                         str(output / BUILDER.MANIFEST_FILENAME),
                         "--environment-root",
                         str(output),
+                        *overlay_arguments,
                         "--",
                     ]
                 )
@@ -1700,6 +1820,7 @@ def test_bootstrap_rejects_path_environment_and_external_import_metadata(
                     str(output / BUILDER.MANIFEST_FILENAME),
                     "--environment-root",
                     str(output),
+                    *overlay_arguments,
                     "--",
                 ]
             )
@@ -1719,6 +1840,7 @@ def test_fresh_isolated_subprocess_rejects_external_launch_metadata(
     """A real isolated interpreter starts only from the sealed snapshot."""
     target = "x86_64-pc-windows-msvc" if os.name == "nt" else "x86_64-unknown-linux-gnu"
     output = _fixture_sources(tmp_path / "sealed", target)[2]
+    overlay_digest, outer_digest = _install_runtime_overlay(output)
     source_root = ROOT / ".github" / "scripts" / "sealed_python_sources"
     external = tmp_path / "external-shadow"
     external.mkdir()
@@ -1789,6 +1911,10 @@ result = bootstrap.main(
         str(output / "sealed-environment.v1.json"),
         "--environment-root",
         str(output),
+        "--runtime-overlay-sha256",
+        os.environ["RUNTIME_OVERLAY_SHA256"],
+        "--outer-runtime-manifest-sha256",
+        os.environ["OUTER_RUNTIME_MANIFEST_SHA256"],
         "--",
         "--subprocess",
     ]
@@ -1800,6 +1926,8 @@ print(json.dumps({"result": result, "sys_path": list(sys.path)}))
     base_env["TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256"] = BUILDER._sha256_file(
         output / BUILDER.MANIFEST_FILENAME
     )
+    base_env["RUNTIME_OVERLAY_SHA256"] = overlay_digest
+    base_env["OUTER_RUNTIME_MANIFEST_SHA256"] = outer_digest
     base_env["METADATA_MARKER"] = str(tmp_path / "metadata-success")
     attestation_name = "startup-" + "d" * 64 + ".json"
     success_attestation = tmp_path / "attestation-success" / attestation_name
@@ -2270,6 +2398,8 @@ def test_role_smoke_forces_no_bytecode_environment_and_B(
     python.parent.mkdir(parents=True)
     python.write_bytes(b"synthetic python")
     python.chmod(0o755)
+    runtime_overlay_sha256 = "e" * 64
+    outer_runtime_manifest_sha256 = "f" * 64
     captured: dict[str, object] = {}
 
     def fake_run(command: list[str], **kwargs: object) -> types.SimpleNamespace:
@@ -2291,6 +2421,8 @@ def test_role_smoke_forces_no_bytecode_environment_and_B(
                     "stdlib_sha256": "b" * 64,
                     "site_packages_sha256": "c" * 64,
                     "native_sha256": "d" * 64,
+                    "runtime_overlay_sha256": runtime_overlay_sha256,
+                    "outer_runtime_manifest_sha256": outer_runtime_manifest_sha256,
                     "lifetime_lease": True,
                 }
             ),
@@ -2319,6 +2451,8 @@ def test_role_smoke_forces_no_bytecode_environment_and_B(
             environment,
             workspace,
             "a" * 64,
+            runtime_overlay_sha256,
+            outer_runtime_manifest_sha256,
         )
         assert workspace.path.is_relative_to(temp_parent)
         assert not workspace.path.is_relative_to(root.parent)
@@ -2350,6 +2484,8 @@ def test_role_smoke_forces_no_bytecode_environment_and_B(
                 environment,
                 workspace,
                 "f" * 64,
+                runtime_overlay_sha256,
+                outer_runtime_manifest_sha256,
             )
 
 
@@ -2400,6 +2536,39 @@ def test_native_smoke_environment_excludes_host_secrets(
         ))
         for key in ("HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP"):
             assert Path(environment[key]).is_relative_to(workspace.path)
+
+
+def test_native_smoke_uses_separate_single_file_runtime_overlay(tmp_path: Path) -> None:
+    """The build-script smoke path copies a valid base before adding its overlay."""
+    target = "x86_64-unknown-linux-gnu"
+    output = _fixture_sources(tmp_path / "sealed", target)[2]
+    document = json.loads(
+        (output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8")
+    )
+    assert not (output / "app/runtime-resource-manifest.v1.json").exists()
+    BUILDER.validate_environment(output, target, run_native_smoke=False)
+    with BUILDER._native_smoke_workspace(output) as workspace:
+        snapshot, overlay_digest, outer_digest = (
+            BUILDER._create_native_smoke_runtime_snapshot(
+                output,
+                BUILDER.target_spec(target),
+                workspace,
+                document,
+            )
+        )
+        overlay = snapshot / "app/runtime-resource-manifest.v1.json"
+        payload = overlay.read_bytes()
+        assert hashlib.sha256(payload).hexdigest() == overlay_digest
+        overlay_document = json.loads(payload)
+        assert overlay_document["overlay"]["outer_manifest_sha256"] == outer_digest
+        assert [
+            path.relative_to(snapshot).as_posix()
+            for path in snapshot.rglob("runtime-resource-manifest.v1.json")
+        ] == ["app/runtime-resource-manifest.v1.json"]
+        with pytest.raises(BUILDER.SealedEnvironmentError, match="inventory"):
+            BUILDER.validate_environment(snapshot, target, run_native_smoke=False)
+        BUILDER._thaw_native_smoke_runtime_snapshot(snapshot, workspace)
+    BUILDER.validate_environment(output, target, run_native_smoke=False)
 
 
 def test_native_smoke_workspace_rejects_root_swap_and_preserves_external_victim(
@@ -2982,7 +3151,7 @@ def test_bootstrap_and_resource_wiring_match_the_fixed_contract() -> None:
         )
     )
     attestation_schema = json.loads(
-        (ROOT / ".github" / "schemas" / "sealed-python-attestation.v1.schema.json").read_text(
+        (ROOT / ".github" / "schemas" / "sealed-python-attestation.v2.schema.json").read_text(
             encoding="utf-8"
         )
     )
@@ -2993,7 +3162,7 @@ def test_bootstrap_and_resource_wiring_match_the_fixed_contract() -> None:
     assert "lease.v1" in bootstrap
     assert "LOCK_SH" in bootstrap and "LK_RLCK" in bootstrap
     assert 'values.index("--")' in bootstrap
-    assert "io.tobkiri.sealed-python-launch.v1" in bootstrap
+    assert "io.tobkiri.sealed-python-launch.v2" in bootstrap
     assert "os.replace" in bootstrap
     assert "fsync" in bootstrap and "chmod" in bootstrap
     assert all(f'"{role}"' in bootstrap for role in ("typed", "defaultspack", "host_helper"))
@@ -3022,6 +3191,8 @@ def test_bootstrap_and_resource_wiring_match_the_fixed_contract() -> None:
         "stdlib_sha256",
         "site_packages_sha256",
         "native_sha256",
+        "runtime_overlay_sha256",
+        "outer_runtime_manifest_sha256",
         "lifetime_lease",
     ):
         assert f'"{field}"' in bootstrap
@@ -3061,6 +3232,8 @@ def test_bootstrap_and_resource_wiring_match_the_fixed_contract() -> None:
         '"--attestation"',
         '"--manifest"',
         '"--environment-root"',
+        '"--runtime-overlay-sha256"',
+        '"--outer-runtime-manifest-sha256"',
         '"--"',
         '"venv/bin/python3"',
         '"app/kernel_entry.py"',

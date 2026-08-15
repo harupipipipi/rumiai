@@ -5,23 +5,41 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const MANIFEST_NAME: &str = "runtime-resource-manifest.v1.json";
+pub(crate) const MANIFEST_NAME: &str = "runtime-resource-manifest.v1.json";
 const MANIFEST_SCHEMA: &str = "io.tobkiri.runtime-resource-manifest.v1";
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct VerifiedResourceManifest {
+    sha256: String,
+    entries: BTreeMap<PathBuf, ResourceEntry>,
+}
+
+impl VerifiedResourceManifest {
+    pub(crate) fn sha256(&self) -> &str {
+        &self.sha256
+    }
+
+    pub(crate) fn entry(&self, path: &Path) -> Option<&ResourceEntry> {
+        self.entries.get(path)
+    }
+}
+
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ResourceManifest {
     schema: String,
     entries: Vec<ResourceEntry>,
 }
 
-#[derive(Deserialize)]
-struct ResourceEntry {
-    path: String,
-    size: u64,
-    sha256: String,
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ResourceEntry {
+    pub(crate) path: String,
+    pub(crate) size: u64,
+    pub(crate) sha256: String,
 }
 
 fn collect_files(root: &Path, current: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
@@ -45,9 +63,7 @@ fn collect_files(root: &Path, current: &Path, files: &mut Vec<PathBuf>) -> Resul
                 );
             }
             collect_files(root, &path, files)?;
-        } else if metadata.is_file()
-            && path.file_name().and_then(|name| name.to_str()) != Some(MANIFEST_NAME)
-        {
+        } else if metadata.is_file() && path.strip_prefix(root)? != Path::new(MANIFEST_NAME) {
             if matches!(
                 path.extension().and_then(|value| value.to_str()),
                 Some("pyc" | "pyo")
@@ -63,7 +79,7 @@ fn collect_files(root: &Path, current: &Path, files: &mut Vec<PathBuf>) -> Resul
     Ok(())
 }
 
-pub(crate) fn verify(root: &Path) -> Result<()> {
+pub(crate) fn verify(root: &Path) -> Result<VerifiedResourceManifest> {
     let manifest_path = root.join(MANIFEST_NAME);
     let metadata = fs::symlink_metadata(&manifest_path).with_context(|| {
         format!(
@@ -74,13 +90,15 @@ pub(crate) fn verify(root: &Path) -> Result<()> {
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         bail!("packaged runtime manifest is not a regular file");
     }
-    let manifest: ResourceManifest = serde_json::from_slice(&fs::read(&manifest_path)?)
+    let manifest_bytes = fs::read(&manifest_path)?;
+    let manifest: ResourceManifest = serde_json::from_slice(&manifest_bytes)
         .context("packaged runtime manifest is malformed")?;
     if manifest.schema != MANIFEST_SCHEMA {
         bail!("packaged runtime manifest schema is unsupported");
     }
 
     let mut expected = BTreeMap::new();
+    let mut verified_entries = BTreeMap::new();
     for entry in manifest.entries {
         let relative = PathBuf::from(&entry.path);
         if relative.is_absolute()
@@ -91,11 +109,12 @@ pub(crate) fn verify(root: &Path) -> Result<()> {
                 )
             })
             || expected
-                .insert(relative, (entry.size, entry.sha256))
+                .insert(relative.clone(), (entry.size, entry.sha256.clone()))
                 .is_some()
         {
             bail!("packaged runtime manifest contains an unsafe or duplicate path");
         }
+        verified_entries.insert(relative, entry);
     }
 
     let mut actual_files = Vec::new();
@@ -114,7 +133,10 @@ pub(crate) fn verify(root: &Path) -> Result<()> {
             );
         }
     }
-    Ok(())
+    Ok(VerifiedResourceManifest {
+        sha256: format!("{:x}", Sha256::digest(&manifest_bytes)),
+        entries: verified_entries,
+    })
 }
 
 #[cfg(test)]
@@ -173,6 +195,15 @@ mod tests {
         fs::write(tampered.join("core_runtime/bootstrap.py"), b"tampered").unwrap();
         assert!(verify(&tampered).is_err());
         fs::remove_dir_all(tampered).unwrap();
+
+        let nested_manifest = fixture();
+        fs::write(
+            nested_manifest.join("core_runtime/runtime-resource-manifest.v1.json"),
+            b"{}",
+        )
+        .unwrap();
+        assert!(verify(&nested_manifest).is_err());
+        fs::remove_dir_all(nested_manifest).unwrap();
     }
 
     #[test]

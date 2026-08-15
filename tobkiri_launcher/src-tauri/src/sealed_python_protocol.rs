@@ -5,8 +5,8 @@
 
 use std::ffi::{OsStr, OsString};
 
-pub const PROTOCOL_SCHEMA: &str = "io.tobkiri.sealed-python-launch.v1";
-pub const ATTESTATION_SCHEMA: &str = "io.tobkiri.sealed-python-attestation.v1";
+pub const PROTOCOL_SCHEMA: &str = "io.tobkiri.sealed-python-launch.v2";
+pub const ATTESTATION_SCHEMA: &str = "io.tobkiri.sealed-python-attestation.v2";
 pub const BOOTSTRAP_MODULE: &str = "tobkiri_sealed.bootstrap";
 pub const ROLE_TYPED: &str = "typed";
 pub const ROLE_DEFAULTSPACK: &str = "defaultspack";
@@ -16,6 +16,8 @@ pub const ARG_NONCE: &str = "--nonce";
 pub const ARG_ATTESTATION: &str = "--attestation";
 pub const ARG_MANIFEST: &str = "--manifest";
 pub const ARG_ENVIRONMENT_ROOT: &str = "--environment-root";
+pub const ARG_RUNTIME_OVERLAY_SHA256: &str = "--runtime-overlay-sha256";
+pub const ARG_OUTER_RUNTIME_MANIFEST_SHA256: &str = "--outer-runtime-manifest-sha256";
 pub const ARG_SEPARATOR: &str = "--";
 
 pub const REQUIRED_TEMPLATE_FRAGMENTS: &[&str] = &[
@@ -28,6 +30,8 @@ pub const REQUIRED_TEMPLATE_FRAGMENTS: &[&str] = &[
     ARG_ATTESTATION,
     ARG_MANIFEST,
     ARG_ENVIRONMENT_ROOT,
+    ARG_RUNTIME_OVERLAY_SHA256,
+    ARG_OUTER_RUNTIME_MANIFEST_SHA256,
     "os.replace",
     "fsync",
     "chmod",
@@ -40,6 +44,8 @@ pub fn launch_arguments(
     attestation: &OsStr,
     manifest: &OsStr,
     environment_root: &OsStr,
+    runtime_overlay_sha256: &str,
+    outer_runtime_manifest_sha256: &str,
 ) -> Vec<OsString> {
     [
         OsString::from("-m"),
@@ -54,6 +60,10 @@ pub fn launch_arguments(
         manifest.to_os_string(),
         OsString::from(ARG_ENVIRONMENT_ROOT),
         environment_root.to_os_string(),
+        OsString::from(ARG_RUNTIME_OVERLAY_SHA256),
+        OsString::from(runtime_overlay_sha256),
+        OsString::from(ARG_OUTER_RUNTIME_MANIFEST_SHA256),
+        OsString::from(outer_runtime_manifest_sha256),
     ]
     .into()
 }
@@ -95,7 +105,7 @@ mod tests {
         );
         let result = validate_bootstrap_template(template);
         if template.contains(PROTOCOL_SCHEMA) {
-            result.expect("template declaring launch v1 must implement its complete wire");
+            result.expect("template declaring launch v2 must implement its complete wire");
         } else {
             let error = result.expect_err("legacy template must be rejected before packaging");
             assert!(error.contains(PROTOCOL_SCHEMA));
@@ -111,6 +121,8 @@ mod tests {
             OsStr::new("attest"),
             OsStr::new("manifest"),
             OsStr::new("root"),
+            "overlay-digest",
+            "outer-digest",
         );
         let strings = arguments
             .iter()
@@ -130,7 +142,11 @@ mod tests {
                 ARG_MANIFEST,
                 "manifest",
                 ARG_ENVIRONMENT_ROOT,
-                "root"
+                "root",
+                ARG_RUNTIME_OVERLAY_SHA256,
+                "overlay-digest",
+                ARG_OUTER_RUNTIME_MANIFEST_SHA256,
+                "outer-digest"
             ]
         );
     }

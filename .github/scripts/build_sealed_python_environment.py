@@ -51,6 +51,8 @@ MACOS_ARM64_REQUIREMENTS_RELATIVE = Path(
     "tobkiri_runtime/requirements-packaging-aarch64-apple-darwin.txt"
 )
 MANIFEST_FILENAME = "sealed-environment.v1.json"
+RUNTIME_OVERLAY_NAME = "app/runtime-resource-manifest.v1.json"
+RUNTIME_OVERLAY_SCHEMA = "io.tobkiri.sealed-runtime-overlay.v1"
 DIRECTORY_MODES_FILENAME = "sealed-directory-modes.v1.json"
 DIRECTORY_MODES_SCHEMA = "io.tobkiri.sealed-python-directory-modes.v1"
 SOURCE_SNAPSHOT_MANIFEST = ".tobkiri-source-snapshot.v1.json"
@@ -1971,6 +1973,8 @@ def _run_role_smoke(
     environment: dict[str, str],
     workspace: _NativeSmokeWorkspace,
     expected_environment_digest: str,
+    runtime_overlay_sha256: str,
+    outer_runtime_manifest_sha256: str,
 ) -> None:
     """Start one real role through the parent-compatible bootstrap wire."""
     python = _venv_python(root / "venv", spec)
@@ -1999,6 +2003,10 @@ def _run_role_smoke(
             os.fspath(root / MANIFEST_FILENAME),
             "--environment-root",
             os.fspath(root),
+            "--runtime-overlay-sha256",
+            runtime_overlay_sha256,
+            "--outer-runtime-manifest-sha256",
+            outer_runtime_manifest_sha256,
             "--",
             *role_arguments,
         ]
@@ -2069,12 +2077,17 @@ def _run_role_smoke(
                 "stdlib_sha256",
                 "site_packages_sha256",
                 "native_sha256",
+                "runtime_overlay_sha256",
+                "outer_runtime_manifest_sha256",
                 "lifetime_lease",
             )
             or evidence.get("schema") != ATTESTATION_SCHEMA
             or evidence.get("nonce") != nonce
             or evidence.get("role") != role
             or evidence.get("environment_digest") != expected_environment_digest
+            or evidence.get("runtime_overlay_sha256") != runtime_overlay_sha256
+            or evidence.get("outer_runtime_manifest_sha256")
+            != outer_runtime_manifest_sha256
             or evidence.get("lifetime_lease") is not True
         ):
             raise SealedEnvironmentError(f"{role} role attestation identity is invalid")
@@ -2203,6 +2216,82 @@ def _run_native_import_smoke(
             )
 
 
+def _create_native_smoke_runtime_snapshot(
+    root: Path,
+    spec: TargetSpec,
+    workspace: _NativeSmokeWorkspace,
+    document: dict[str, object],
+) -> tuple[Path, str, str]:
+    """Copy the sealed base and add the one versioned Host overlay for smoke."""
+    snapshot = workspace.path / "runtime-snapshot"
+    _copy_tree(root, snapshot, spec)
+    workspace.children[snapshot.name] = _smoke_identity(snapshot.lstat())
+    outer_manifest_sha256 = _sha256_bytes(
+        b"io.tobkiri.native-smoke-outer-runtime-manifest.v1\0"
+        + (root / MANIFEST_FILENAME).read_bytes()
+    )
+    files = document.get("files")
+    if not isinstance(files, list):
+        raise SealedEnvironmentError("native smoke sealed inventory is invalid")
+    entries = [
+        {
+            "path": str(entry["path"])[len("app/") :],
+            "size": entry["size"],
+            "sha256": entry["sha256"],
+        }
+        for entry in files
+        if isinstance(entry, dict) and str(entry.get("path", "")).startswith("app/")
+    ]
+    if not entries:
+        raise SealedEnvironmentError("native smoke runtime overlay closure is empty")
+    payload = json.dumps(
+        {
+            "schema": "io.tobkiri.runtime-resource-manifest.v1",
+            "overlay": {
+                "schema": RUNTIME_OVERLAY_SCHEMA,
+                "outer_manifest_sha256": outer_manifest_sha256,
+                "sealed_manifest_sha256": _sha256_file(snapshot / MANIFEST_FILENAME),
+            },
+            "entries": entries,
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    app = snapshot / "app"
+    app.chmod(0o755)
+    overlay = snapshot / RUNTIME_OVERLAY_NAME
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(overlay, flags, 0o444)
+    with os.fdopen(descriptor, "wb", closefd=True) as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    _freeze_tree(snapshot, spec)
+    workspace.verify()
+    return snapshot, _sha256_bytes(payload), outer_manifest_sha256
+
+
+def _thaw_native_smoke_runtime_snapshot(
+    snapshot: Path,
+    workspace: _NativeSmokeWorkspace,
+) -> None:
+    """Restore cleanup permissions only on the creation-bound smoke snapshot."""
+    workspace.verify()
+    expected = workspace.children.get(snapshot.name)
+    metadata = snapshot.lstat()
+    if expected is None or _smoke_identity(metadata) != expected:
+        raise SealedEnvironmentError("native smoke runtime snapshot identity changed")
+    entries = list(_walk_tree(snapshot))
+    snapshot.chmod(0o700)
+    for _relative, path, kind, entry_metadata in entries:
+        if kind == "directory":
+            path.chmod(0o700)
+        elif stat.S_ISREG(entry_metadata.st_mode):
+            path.chmod(0o700 if entry_metadata.st_mode & 0o111 else 0o600)
+        else:
+            raise SealedEnvironmentError("native smoke runtime snapshot is unsafe")
+    workspace.verify()
+
+
 def _verify_python_smoke(root: Path, spec: TargetSpec) -> None:
     """Run relocated native imports and all three fixed roles."""
     host = _native_host_spec()
@@ -2218,31 +2307,39 @@ def _verify_python_smoke(root: Path, spec: TargetSpec) -> None:
     # Native imports, Defaultspack, and bootstrap write only below this
     # Host-owned workspace. Mounted/source application resources stay read-only.
     with _native_smoke_workspace(root) as workspace:
-        environment = _native_smoke_environment(root, spec, workspace)
-        packaged_app_root = root.parent.resolve(strict=True)
-        for key in ("HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP"):
-            state_path = Path(environment[key]).resolve(strict=True)
-            if state_path == packaged_app_root or state_path.is_relative_to(
-                packaged_app_root
+        runtime_snapshot, overlay_sha256, outer_manifest_sha256 = (
+            _create_native_smoke_runtime_snapshot(root, spec, workspace, document)
+        )
+        try:
+            environment = _native_smoke_environment(runtime_snapshot, spec, workspace)
+            packaged_app_root = root.parent.resolve(strict=True)
+            for key in ("HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP"):
+                state_path = Path(environment[key]).resolve(strict=True)
+                if state_path == packaged_app_root or state_path.is_relative_to(
+                    packaged_app_root
+                ):
+                    raise SealedEnvironmentError(
+                        "native role smoke state must be outside application resources"
+                    )
+            _run_native_import_smoke(runtime_snapshot, spec, environment)
+            for role, role_arguments in (
+                ("typed", ()),
+                ("defaultspack", ()),
+                ("host_helper", ()),
             ):
-                raise SealedEnvironmentError(
-                    "native role smoke state must be outside application resources"
+                _run_role_smoke(
+                    runtime_snapshot,
+                    spec,
+                    role,
+                    role_arguments,
+                    environment,
+                    workspace,
+                    str(document["environment_digest"]),
+                    overlay_sha256,
+                    outer_manifest_sha256,
                 )
-        _run_native_import_smoke(root, spec, environment)
-        for role, role_arguments in (
-            ("typed", ()),
-            ("defaultspack", ()),
-            ("host_helper", ()),
-        ):
-            _run_role_smoke(
-                root,
-                spec,
-                role,
-                role_arguments,
-                environment,
-                workspace,
-                str(document["environment_digest"]),
-            )
+        finally:
+            _thaw_native_smoke_runtime_snapshot(runtime_snapshot, workspace)
 
 
 def validate_environment(
