@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shlex
@@ -170,7 +171,25 @@ def test_defaultspack_ecosystem_registers_desktop_app_metadata():
     assert artifact_index["integrity_seal"]["algorithm"] == "sha256-canonical-v1"
     assert {
         artifact["path"] for artifact in artifact_index["artifacts"]
-    } == {"pack.v4.json", "contracts.v4.json", "runtime/conversation.py"}
+    } == {
+        "pack.v4.json",
+        "contracts.v4.json",
+        "executables.v4.json",
+        "runtime/conversation.py",
+    }
+    executable_sidecars = [
+        artifact
+        for artifact in artifact_index["artifacts"]
+        if artifact["path"] == "executables.v4.json"
+    ]
+    assert len(executable_sidecars) == 1
+    assert executable_sidecars[0]["role"] == "sidecar"
+    assert executable_sidecars[0]["digest"] == (
+        "sha256:"
+        + hashlib.sha256(
+            (DEFAULTSPACK_ROOT / "executables.v4.json").read_bytes()
+        ).hexdigest()
+    )
     assert not (DEFAULTSPACK_ROOT / "ecosystem.json").exists()
 
 

@@ -90,6 +90,7 @@ def _v4_provider_fixture(
         catalog.shells,
         profiles,
         catalog.artifact_root,
+        executable_catalogs=catalog.executable_catalogs,
     )
 
     authority_bindings = {

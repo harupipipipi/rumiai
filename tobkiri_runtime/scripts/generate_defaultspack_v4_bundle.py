@@ -11,7 +11,7 @@ from pathlib import Path
 import shutil
 import sys
 import tempfile
-from typing import Any
+from typing import Any, Mapping
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
@@ -161,6 +161,34 @@ def _canonical_pack_sources() -> dict[Path, Path]:
         output_name = canonical_names.get(pack_id, f"{pack_id}.pack.v4.json")
         sources[PACKS / output_name] = ROOT / "ecosystem" / pack_id / "pack.v4.json"
     return sources
+
+
+def _executable_catalog_source(
+    source: Path,
+    document: Mapping[str, Any],
+) -> Path | None:
+    """Resolve the one canonical executable sidecar for a runnable Pack.
+
+    Canonical source Packs keep the sidecar beside ``pack.v4.json`` while the
+    already-rendered v4 bundle names it ``<pack_id>.executables.v4.json``.
+    Supporting both explicit layouts keeps the output deterministic and avoids
+    silently dropping a required executable catalog during bundle rendering.
+    """
+
+    kind = str(document["pack"]["kind"])
+    if kind in {"base", "shell"}:
+        return None
+    candidates = (
+        source.parent / "executables.v4.json",
+        source.with_name(f"{document['pack']['id']}.executables.v4.json"),
+    )
+    existing = tuple(candidate for candidate in candidates if candidate.is_file())
+    if len(existing) != 1:
+        raise ValueError(
+            "canonical runnable Pack must have exactly one executable catalog: "
+            f"{document['pack']['id']}"
+        )
+    return existing[0]
 
 
 def _pretty(document: dict[str, Any]) -> bytes:
@@ -545,14 +573,26 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
             if canonical_source or role_spec is not None
             else _normalize_pack(document)
         )
-        source_catalog = source.parent / "executables.v4.json"
-        if (
-            role_spec is None
-            and document["pack"]["kind"] not in {"base", "shell"}
-            and source_catalog.is_file()
-        ):
-            catalog_path = path.with_name(f"{document['pack']['id']}.executables.v4.json")
-            rendered[catalog_path] = source_catalog.read_bytes()
+        if role_spec is None:
+            source_catalog = _executable_catalog_source(source, document)
+            if source_catalog is not None:
+                catalog_path = path.with_name(
+                    f"{document['pack']['id']}.executables.v4.json"
+                )
+                catalog = validate_document(
+                    json.loads(source_catalog.read_text(encoding="utf-8")),
+                    "executable_catalog",
+                )
+                if (
+                    catalog["pack_id"] != document["pack"]["id"]
+                    or catalog["source_identity"]
+                    != document["integrity"]["source_identity"]
+                ):
+                    raise ValueError(
+                        "canonical executable catalog identity is stale: "
+                        f"{document['pack']['id']}"
+                    )
+                rendered[catalog_path] = source_catalog.read_bytes()
 
     base_path = BUNDLE / "defaults-basepack.base.v1.json"
     shell_paths = sorted(BUNDLE.glob("*.shell.v1.json"))
