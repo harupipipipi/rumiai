@@ -875,6 +875,50 @@ def test_lima_state_path_prefers_canonical_user_data_root(
     assert lima_state_path() == canonical / "sandbox" / "lima-runtime.json"
 
 
+def test_lima_state_path_uses_legacy_fallback_without_ambient_roots(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy state remains readable while ambient homes cannot select its root."""
+
+    canonical = tmp_path / "canonical-user-data"
+    legacy = tmp_path / "legacy-user-data"
+    ambient_home = tmp_path / "ambient-home"
+    ambient_lima = tmp_path / "ambient-lima"
+    monkeypatch.setenv("HOME", str(ambient_home))
+    monkeypatch.setenv("LIMA_HOME", str(ambient_lima))
+    monkeypatch.delenv("TOBKIRI_USER_DATA", raising=False)
+    monkeypatch.delenv("RUMI_USER_DATA", raising=False)
+    monkeypatch.delenv("RUMI_SANDBOX_LIMA_STATE", raising=False)
+
+    default_path = lima_state_path()
+    assert default_path.name == "lima-runtime.json"
+    assert default_path.parent.name == "sandbox"
+    assert ambient_home not in default_path.parents
+    assert ambient_lima not in default_path.parents
+
+    monkeypatch.setenv("RUMI_USER_DATA", str(legacy))
+    assert lima_state_path() == legacy / "sandbox" / "lima-runtime.json"
+
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(canonical))
+    assert lima_state_path() == canonical / "sandbox" / "lima-runtime.json"
+
+    explicit = tmp_path / "explicit-state" / "lima-runtime.json"
+    monkeypatch.setenv("RUMI_SANDBOX_LIMA_STATE", str(explicit))
+    assert lima_state_path() == explicit
+
+
+def test_packvm_lifecycle_constructor_is_filesystem_immutable(tmp_path: Path) -> None:
+    """PackVM journal recovery waits for an operation instead of creating state."""
+
+    state_dir = tmp_path / "packvm-state"
+    provisioner = PackVMLimaProvisioner(state_dir=state_dir, machine="arm64")
+
+    PackVMLifecycleV4(provisioner)
+
+    assert not state_dir.exists()
+
+
 def test_lifecycle_rejects_environment_injection_payload(provisioner) -> None:
     manager, _fake, _command = provisioner
     lifecycle = PackVMLifecycleV4(manager)

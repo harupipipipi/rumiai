@@ -89,11 +89,10 @@ class PackVMLifecycleV4:
         self._loaded_state_digest: str | None = None
         self._loaded_archive_size = 0
         self._operations_generation = 0
-        with self._journal_transaction(recover=True, reload=False):
-            self._reload_operations(recover=True)
-            if self._operations or self._archived_operations:
-                self._compact_operations()
-                self._persist_operations()
+        self._journal_loaded = False
+        if self._operations_lock_path.parent.is_dir():
+            with self._journal_transaction(recover=True):
+                pass
 
     def prepare(self, *, session_id: str | None = None) -> Mapping[str, Any]:
         """Return pinned download and runtime facts without provisioning."""
@@ -542,14 +541,19 @@ class PackVMLifecycleV4:
         """Serialize and refresh one authenticated journal transaction."""
 
         with self._lock:
+            first_load = not self._journal_loaded
             self._operations_lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             descriptor = _open_journal_lock(self._operations_lock_path)
             acquired = False
             try:
                 _acquire_journal_lock(descriptor)
                 acquired = True
-                if reload:
-                    self._reload_operations(recover=recover)
+                if reload or first_load:
+                    self._reload_operations(recover=recover or first_load)
+                    if first_load and (self._operations or self._archived_operations):
+                        self._compact_operations()
+                        self._persist_operations()
+                    self._journal_loaded = True
                 yield
             finally:
                 try:

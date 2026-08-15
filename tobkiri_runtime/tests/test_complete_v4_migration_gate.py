@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import ntpath
 import os
 import re
 import subprocess
@@ -20,6 +21,8 @@ from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping
+
+import pytest
 
 from tobkiri_protocol.validation import load_schema, validate_file
 
@@ -118,6 +121,7 @@ FALLBACK_NAMES = frozenset(
 )
 OLD_COMPOSITION_MODULE = "domain.pack_architecture"
 VALID_MANIFEST_AUTHORITIES = frozenset({"v4-authoritative"})
+_CHILD_FAILURE_DIAGNOSTIC_PREFIX = "fresh-home child process failed: "
 
 _CHILD_DIAGNOSTIC_ENV_KEYS = (
     "TOBKIRI_USER_DATA",
@@ -1715,11 +1719,55 @@ def _child_failure_diagnostic(
         "stdout": _child_output_for_diagnostic(stdout),
         "stderr": _child_output_for_diagnostic(stderr),
     }
-    return "fresh-home child process failed: " + json.dumps(
+    return _CHILD_FAILURE_DIAGNOSTIC_PREFIX + json.dumps(
         payload,
         ensure_ascii=False,
         sort_keys=True,
     )
+
+
+def _child_failure_payload(diagnostic: str) -> Mapping[str, Any]:
+    """Decode the structured JSON payload from a child failure diagnostic."""
+
+    if not diagnostic.startswith(_CHILD_FAILURE_DIAGNOSTIC_PREFIX):
+        raise AssertionError("child failure diagnostic prefix is missing")
+    payload = json.loads(diagnostic[len(_CHILD_FAILURE_DIAGNOSTIC_PREFIX) :])
+    if not isinstance(payload, dict):
+        raise AssertionError("child failure diagnostic payload is not an object")
+    return payload
+
+
+def _windows_path_is_within_root(
+    candidate: str | Path,
+    root: str | Path,
+) -> bool:
+    """Check Windows drive/UNC containment without string-prefix matching."""
+
+    candidate_text = str(candidate)
+    root_text = str(root)
+    if not ntpath.isabs(candidate_text) or not ntpath.isabs(root_text):
+        return False
+    candidate_normalized = ntpath.normcase(ntpath.normpath(candidate_text))
+    root_normalized = ntpath.normcase(ntpath.normpath(root_text))
+    try:
+        return ntpath.commonpath((candidate_normalized, root_normalized)) == root_normalized
+    except ValueError:
+        return False
+
+
+def _test_owned_path_is_within_root(candidate: str | Path, root: Path) -> bool:
+    """Use the current host's path semantics for test-owned child paths."""
+
+    if os.name == "nt":
+        return _windows_path_is_within_root(candidate, root)
+    candidate_path = Path(candidate)
+    if not candidate_path.is_absolute() or not root.is_absolute():
+        return False
+    try:
+        candidate_path.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 def test_child_failure_diagnostic_preserves_exact_process_context(tmp_path: Path) -> None:
@@ -1741,12 +1789,71 @@ def test_child_failure_diagnostic_preserves_exact_process_context(tmp_path: Path
         stderr="Traceback: child stderr",
     )
 
-    assert "python.exe" in diagnostic
-    assert str(tmp_path) in diagnostic
-    assert "child stdout" in diagnostic
-    assert "Traceback: child stderr" in diagnostic
-    assert '"returncode": 7' in diagnostic
-    assert "TOBKIRI_USER_DATA" in diagnostic
+    payload = _child_failure_payload(diagnostic)
+    environment_payload = payload["environment"]
+    assert isinstance(environment_payload, Mapping)
+    assert payload["command"] == command
+    assert _test_owned_path_is_within_root(payload["cwd"], tmp_path)
+    assert _test_owned_path_is_within_root(
+        environment_payload["TOBKIRI_USER_DATA"], tmp_path / "fresh-home"
+    )
+    assert _test_owned_path_is_within_root(
+        environment_payload["RUMI_USER_DATA"], tmp_path / "fresh-home"
+    )
+    assert environment_payload["PATH"] == r"C:\hostedtoolcache\windows\Python\3.11.9\x64"
+    assert payload["returncode"] == 7
+    assert payload["stdout"] == "child stdout"
+    assert payload["stderr"] == "Traceback: child stderr"
+
+
+@pytest.mark.parametrize(
+    ("root", "candidate", "expected"),
+    [
+        (
+            r"C:\Users\runneradmin\AppData\Local\Temp\fresh home",
+            r"C:\Users\runneradmin\AppData\Local\Temp\fresh home\child\日本語.txt",
+            True,
+        ),
+        (
+            r"C:\Users\runneradmin\AppData\Local\Temp\fresh home",
+            r"C:\Users\runneradmin\AppData\Local\Temp\fresh homepage\child",
+            False,
+        ),
+        (
+            r"\\server\share\pytest root\新しい home",
+            r"\\server\share\pytest root\新しい home\fresh-home\state.json",
+            True,
+        ),
+        (
+            r"\\server\share\pytest root\新しい home",
+            r"\\other-server\share\pytest root\新しい home\fresh-home\state.json",
+            False,
+        ),
+        (
+            r"C:\Users\runneradmin\AppData\Local\Temp\fresh home",
+            r"C:\Users\runneradmin\AppData\Local\Temp\fresh home\child\..\state.json",
+            True,
+        ),
+        (
+            r"C:\Users\runneradmin\AppData\Local\Temp\fresh home",
+            r"D:\Users\runneradmin\AppData\Local\Temp\fresh home\state.json",
+            False,
+        ),
+    ],
+)
+def test_windows_child_paths_decode_json_before_root_containment(
+    root: str,
+    candidate: str,
+    expected: bool,
+) -> None:
+    """Escaped Windows paths are checked as ntpath values, not JSON text."""
+
+    encoded = json.dumps({"path": candidate}, ensure_ascii=False)
+    decoded = json.loads(encoded)
+
+    assert "\\\\" in encoded
+    assert decoded["path"] == candidate
+    assert _windows_path_is_within_root(decoded["path"], root) is expected
 
 
 def test_fresh_home_legacy_api_probes_are_retired_without_manager_imports(
