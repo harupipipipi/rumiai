@@ -173,7 +173,15 @@ def _check_artifact_index(
             errors.append(f"v4 Pack artifact duplicates catalog file: {relative_path}")
             continue
         runtime_paths.add(relative_path)
-        expected[relative_path] = ("runtime", str(item.get("digest") or ""))
+        artifact_kind = str(item.get("kind") or "")
+        expected_role = {
+            "sidecar": "sidecar",
+            "executable": "runtime",
+        }.get(artifact_kind)
+        if expected_role is None:
+            errors.append(f"v4 Pack artifact has an unsupported kind: {relative_path}")
+            continue
+        expected[relative_path] = (expected_role, str(item.get("digest") or ""))
 
     actual_entries: dict[str, dict[str, Any]] = {}
     for item in index.get("artifacts", []):
@@ -328,7 +336,7 @@ def _check_bundle(
         errors.append("v4 bundle lock entries must be a non-empty array")
         return
 
-    valid_kinds = {"pack", "base", "shell", "profile"}
+    valid_kinds = {"pack", "base", "shell", "profile", "executable_catalog"}
     seen_paths: set[str] = set()
     bundle_documents: dict[tuple[str, str], dict[str, Any]] = {}
     for entry in entries:
@@ -365,13 +373,58 @@ def _check_bundle(
             continue
         identity_source = document.get("pack") if kind == "pack" else document
         identity_field = "id" if kind == "pack" else (
-            "pack_id" if kind == "base" else "provider_id" if kind == "shell" else "profile_id"
+            "pack_id"
+            if kind in {"base", "executable_catalog"}
+            else "provider_id"
+            if kind == "shell"
+            else "profile_id"
         )
         identity = identity_source.get(identity_field) if isinstance(identity_source, dict) else None
         identity_key = (str(kind), str(identity))
         if identity_key in bundle_documents:
             errors.append(f"v4 bundle contains a duplicate identity: {kind}:{identity}")
         bundle_documents[identity_key] = document
+
+    for (kind, identity), catalog in sorted(bundle_documents.items()):
+        if kind != "executable_catalog":
+            continue
+        manifest = bundle_documents.get(("pack", identity))
+        if manifest is None:
+            errors.append(f"executable catalog has no bundled Pack manifest: {identity}")
+            continue
+        if catalog.get("source_identity") != manifest.get("integrity", {}).get(
+            "source_identity"
+        ):
+            errors.append(f"executable catalog source identity is stale: {identity}")
+        unsigned = {key: value for key, value in catalog.items() if key != "catalog_digest"}
+        if catalog.get("catalog_digest") != canonical_digest(unsigned):
+            errors.append(f"executable catalog digest is stale: {identity}")
+        catalog_entries = [
+            item
+            for item in manifest.get("artifacts", [])
+            if isinstance(item, dict) and item.get("path") == "executables.v4.json"
+        ]
+        if len(catalog_entries) != 1:
+            errors.append(f"Pack manifest does not pin executable catalog: {identity}")
+            continue
+        catalog_path = next(
+            (
+                entry.get("path")
+                for entry in entries
+                if isinstance(entry, dict)
+                and entry.get("kind") == "executable_catalog"
+                and entry.get("path", "").endswith(
+                    f"/{identity}.executables.v4.json"
+                )
+            ),
+            None,
+        )
+        if not isinstance(catalog_path, str):
+            errors.append(f"executable catalog lock entry is missing: {identity}")
+            continue
+        catalog_digest = _sha256_file(bundle_root / catalog_path)
+        if catalog_entries[0].get("digest") != catalog_digest:
+            errors.append(f"Pack executable catalog artifact pin is stale: {identity}")
 
     actual_paths: set[str] = set()
     for path in bundle_root.rglob("*"):

@@ -38,6 +38,7 @@ from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog  # noqa: E40
 
 BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 PACKS = BUNDLE / "packs"
+PACK_SOURCE_CATALOG = ROOT / "schemas" / "pack_v4_catalog.v1.json"
 CANONICAL_PACK_FILES = {
     "defaultspack.pack.v4.json": ROOT / "ecosystem" / "defaultspack" / "pack.v4.json",
     "rumi-file-inspect.pack.v4.json": (
@@ -103,6 +104,63 @@ TAURI_ROLE_PACKS = {
 }
 DEFAULTSPACK_DESKTOP_ENTRYPOINT = "defaultspack/desktop_app.py"
 DEFAULTSPACK_FRONTEND_CONTRACT_MAP = "defaultspack/frontend_contract_map.v4.json"
+
+
+def _canonical_optional_host_extension_ids() -> tuple[str, ...]:
+    """Return the deterministic Host Extension catalog selection and closure."""
+
+    payload = json.loads(PACK_SOURCE_CATALOG.read_text(encoding="utf-8"))
+    records = payload.get("packs")
+    if not isinstance(records, list):
+        raise ValueError("canonical Pack source catalog has no packs")
+    by_id: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            raise ValueError("canonical Pack source catalog contains a malformed record")
+        pack_id = record.get("pack_id")
+        if not isinstance(pack_id, str) or not pack_id or pack_id in by_id:
+            raise ValueError(f"canonical Pack source catalog has an invalid Pack ID: {pack_id!r}")
+        by_id[pack_id] = record
+
+    selected = {
+        pack_id
+        for pack_id, record in by_id.items()
+        if record.get("kind") == "host_extension"
+    }
+    pending = sorted(selected)
+    while pending:
+        pack_id = pending.pop(0)
+        record = by_id[pack_id]
+        dependencies = record.get("dependencies")
+        if not isinstance(dependencies, dict):
+            raise ValueError(f"Pack dependencies are malformed: {pack_id}")
+        for dependency_id in sorted(dependencies):
+            if dependency_id not in by_id:
+                raise ValueError(
+                    f"canonical Pack source catalog has an unknown dependency: "
+                    f"{pack_id} -> {dependency_id}"
+                )
+            if dependency_id not in selected:
+                selected.add(dependency_id)
+                pending.append(dependency_id)
+        pending.sort()
+    return tuple(sorted(selected))
+
+
+def _canonical_pack_sources() -> dict[Path, Path]:
+    """Select Profile and catalog-referenceable Pack sources without discovery drift."""
+
+    sources = {path: path for path in PACKS.glob("*.pack.v4.json")}
+    sources.update({PACKS / name: source for name, source in CANONICAL_PACK_FILES.items()})
+    canonical_names = {
+        source.parent.name: output.name
+        for output, source in sources.items()
+        if source.parent.name
+    }
+    for pack_id in _canonical_optional_host_extension_ids():
+        output_name = canonical_names.get(pack_id, f"{pack_id}.pack.v4.json")
+        sources[PACKS / output_name] = ROOT / "ecosystem" / pack_id / "pack.v4.json"
+    return sources
 
 
 def _pretty(document: dict[str, Any]) -> bytes:
@@ -461,18 +519,22 @@ def _normalize_profile(document: dict[str, Any]) -> dict[str, Any]:
 def _render(source_commit: str | None = None) -> dict[Path, bytes]:
     source_commit = informational_source_commit(ROOT.parent, source_commit)
     rendered: dict[Path, bytes] = {}
-    pack_paths = (
-        set(PACKS.glob("*.pack.v4.json"))
-        | {PACKS / name for name in CANONICAL_PACK_FILES}
-        | {PACKS / name for name in TAURI_ROLE_PACKS}
+    pack_sources = _canonical_pack_sources()
+    pack_sources.update(
+        {
+            PACKS / name: PACKS / name
+            for name in TAURI_ROLE_PACKS
+        }
     )
-    for path in sorted(pack_paths):
+    for path in sorted(pack_sources):
+        source = pack_sources[path]
         canonical = CANONICAL_PACK_FILES.get(path.name)
         role_spec = TAURI_ROLE_PACKS.get(path.name)
+        canonical_source = canonical is not None or source.parent.parent == ROOT / "ecosystem"
         document = (
             _tauri_role_pack(role_spec, source_commit)
             if role_spec is not None
-            else json.loads((canonical or path).read_text(encoding="utf-8"))
+            else json.loads(source.read_text(encoding="utf-8"))
         )
         if str(document["pack"]["id"]).startswith("shell."):
             document = _unavailable_shell_pack(document, source_commit)
@@ -480,10 +542,10 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
             document = _declarative_base_pack(document, source_commit)
         rendered[path] = _pretty(
             validate_document(document, "pack")
-            if canonical is not None or role_spec is not None
+            if canonical_source or role_spec is not None
             else _normalize_pack(document)
         )
-        source_catalog = (canonical or path).parent / "executables.v4.json"
+        source_catalog = source.parent / "executables.v4.json"
         if (
             role_spec is None
             and document["pack"]["kind"] not in {"base", "shell"}

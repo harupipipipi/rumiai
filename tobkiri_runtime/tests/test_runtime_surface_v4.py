@@ -385,8 +385,11 @@ def test_pack_files_are_exact_manifest_artifacts(active_runtime) -> None:
     packs = _service(active_runtime).read_advanced("packs")["data"]["packs"]
     pack = next(item for item in packs if item["pack_id"] == "tobkiri_host_pack_control")
 
-    assert len(pack["artifacts"]) == 1
-    artifact = pack["artifacts"][0]
+    assert {item["path"] for item in pack["artifacts"]} == {
+        "executables.v4.json",
+        "runtime/catalog.py",
+    }
+    artifact = next(item for item in pack["artifacts"] if item["path"] == "runtime/catalog.py")
     assert artifact["entry_id"].startswith("sha256:")
     assert artifact == {
         "entry_id": artifact["entry_id"],
@@ -395,6 +398,11 @@ def test_pack_files_are_exact_manifest_artifacts(active_runtime) -> None:
         "kind": "executable",
         "artifact_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7",
     }
+    executable_catalog = next(
+        item for item in pack["artifacts"] if item["path"] == "executables.v4.json"
+    )
+    assert executable_catalog["kind"] == "sidecar"
+    assert executable_catalog["artifact_digest"].startswith("sha256:")
     payload = json.dumps(_service(active_runtime).read_profile())
     assert "/Users/" not in payload
     assert "authentication" not in payload
@@ -484,11 +492,13 @@ def test_blocked_loader_times_out_and_late_snapshot_is_not_adopted(active_runtim
         release.wait()
         return active_runtime
 
+    def load_catalog_after_recording():
+        catalog_calls.append("catalog")
+        return BundledCatalog.load(_bundle_root())
+
     service = RuntimeSurfaceService(
         snapshot_loader=blocked_snapshot,
-        catalog_loader=lambda: (
-            catalog_calls.append("catalog") or BundledCatalog.load(_bundle_root())
-        ),
+        catalog_loader=load_catalog_after_recording,
         read_timeout_seconds=0.1,
     )
     started = time.monotonic()
