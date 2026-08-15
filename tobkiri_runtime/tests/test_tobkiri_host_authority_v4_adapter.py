@@ -18,6 +18,11 @@ from core_runtime.authority.v4 import (
     authority_digest,
 )
 from tobkiri_host.admission import AdmissionEstimate, ResourceReservation
+from tobkiri_host.artifact_materialization import (
+    MaterializedArtifactFile,
+    MaterializedPackArtifact,
+    _materialization_digest,
+)
 from tobkiri_host.authority_v4 import (
     AuthorityV4Adapter,
     TriggerAuthorityBinding,
@@ -34,7 +39,10 @@ from tobkiri_host.effects import (
     InMemoryReconciliationStore,
     ProviderOutcome,
 )
-from tobkiri_host.errors import AmbiguousEffectError
+from tobkiri_host.errors import (
+    AmbiguousEffectError,
+    BackendUnavailableError,
+)
 from tobkiri_host.materialization import MaterializationCoordinator
 from tobkiri_host.models import (
     ArtifactVariant,
@@ -50,6 +58,12 @@ from tobkiri_host.models import (
     RuntimeEvidence,
 )
 from tobkiri_host.ports import FinalAuthorizationQuery, StaticAuthorityQuery
+from tobkiri_host.platform_backends import (
+    IsolationLaunch,
+    PlatformAttestation,
+    ProductionIsolationBackend,
+    _platform_attestation_digest,
+)
 
 from tests.test_authority_v4_lifecycle import _Harness
 
@@ -191,6 +205,17 @@ class _Admission:
         return None
 
 
+class _CountingAdmission(_Admission):
+    def __init__(self) -> None:
+        self.count = 0
+
+    def acquire(self, scope, estimate, wait_timeout_seconds) -> AdmissionTicket:
+        self.count += 1
+        return AdmissionTicket(
+            ResourceReservation(f"reservation-{self.count}", scope.profile_id, 1)
+        )
+
+
 class _Backend:
     def __init__(self, harness: _Harness, outcome: ProviderOutcome) -> None:
         self.outcome = outcome
@@ -216,6 +241,62 @@ class _Backend:
 
     def invoke(self, request) -> ProviderOutcome:
         return self.outcome
+
+    def cancel(self, request_id: str) -> None:
+        return None
+
+    def terminate(self, domain_id: str) -> None:
+        return None
+
+
+class _DirectVZDriver:
+    backend_id = "tobkiri.python-pack-v4"
+    substrate_id = "macos-vz"
+    backend_digest = _digest("backend")
+    platform = "macos-arm64"
+
+    def __init__(self, mode: str = "success") -> None:
+        self.mode = mode
+        self.launch_count = 0
+        self.invocations: list[object] = []
+
+    def capability(self) -> tuple[bool, str | None]:
+        return True, None
+
+    def launch(self, request: IsolationLaunch) -> PlatformAttestation:
+        self.launch_count += 1
+        attestation = PlatformAttestation(
+            domain_id=(
+                "domain:attacker"
+                if self.mode == "identity-mismatch"
+                else request.target_domain_id
+            ),
+            backend_id=self.backend_id,
+            backend_digest=self.backend_digest,
+            platform=self.platform,
+            executable_digest=request.executable_digest,
+            artifact_digest=request.artifact_digest,
+            materialization_digest=request.artifact.materialization_digest,
+            guest_artifact_identity=_digest("guest-artifact"),
+            isolation_profile=request.isolation_profile,
+            attestation_digest=_digest("pending-attestation"),
+            attestation_nonce=f"direct-vz-nonce-{self.launch_count}",
+            lease_id=request.lease.lease_id,
+            reservation_id=request.reservation_id,
+            authenticated_channel=True,
+            nonce_fresh=self.mode != "replay",
+        )
+        attestation = replace(
+            attestation,
+            attestation_digest=_platform_attestation_digest(attestation),
+        )
+        if self.mode == "attestation-tamper":
+            return replace(attestation, attestation_digest=_digest("tampered"))
+        return attestation
+
+    def invoke(self, request: object) -> ProviderOutcome:
+        self.invocations.append(request)
+        return ProviderOutcome({"ok": True})
 
     def cancel(self, request_id: str) -> None:
         return None
@@ -261,6 +342,143 @@ def _broker(
         audit=adapter,
         reconciliation=InMemoryReconciliationStore(),
     )
+
+
+def _packvm_artifact(harness: _Harness) -> PackArtifact:
+    artifact = _artifact(harness)
+    return replace(
+        artifact,
+        variants=(
+            replace(
+                artifact.variants[0],
+                execution_kind=ExecutionKind.PACK_VM,
+                runtime_abi="packvm-v1",
+                backend="tobkiri.python-pack-v4",
+            ),
+        ),
+    )
+
+
+def _materialized_packvm_artifact(harness: _Harness) -> MaterializedPackArtifact:
+    artifact_file = MaterializedArtifactFile(
+        path="runtime/handler.py",
+        digest=harness.target.function_implementation_digest,
+        executable=False,
+        content=b"B",
+    )
+    files = (artifact_file,)
+    return MaterializedPackArtifact(
+        pack_id="provider.pack",
+        artifact_digest=harness.target.parent_artifact_digest,
+        function_id=harness.target.function_id,
+        implementation_digest=harness.target.function_implementation_digest,
+        implementation_path=artifact_file.path,
+        materialization_digest=_materialization_digest(
+            "provider.pack",
+            harness.target.parent_artifact_digest,
+            harness.target.function_id,
+            harness.target.function_implementation_digest,
+            artifact_file.path,
+            files,
+        ),
+        root_device=1,
+        root_inode=1,
+        files=files,
+    )
+
+
+def _packvm_broker(
+    harness: _Harness,
+    adapter: AuthorityV4Adapter,
+    driver: _DirectVZDriver,
+) -> RequestBroker:
+    artifact = _packvm_artifact(harness)
+    catalog = OperationCatalog(
+        (artifact,),
+        (
+            OperationRoute(
+                contract_id="host.http",
+                operation_id="invoke",
+                artifact_digest=artifact.digest,
+                function_id=harness.target.function_id,
+                variant_id="provider.variant",
+                execution_domain_profile="dedicated.provider",
+                materialization_mode="on_demand",
+                target_principal_ref=OpaqueAuthorityRef(harness.target.principal_id),
+            ),
+        ),
+    )
+    backend = ProductionIsolationBackend(
+        driver,
+        artifact_resolver=lambda _binding: _materialized_packvm_artifact(harness),
+        target_domain_resolver=lambda _binding: harness.target_domain.domain_id,
+        clock=harness.clock,
+    )
+    return RequestBroker(
+        catalog=catalog,
+        adapters=AdapterPlanner(()),
+        adapter_executor=_NoAdapters(),
+        backends=BackendRegistry((backend,)),
+        materialization=MaterializationCoordinator(),
+        admission=_CountingAdmission(),
+        authority=adapter,
+        audit=adapter,
+        reconciliation=InMemoryReconciliationStore(),
+    )
+
+
+def test_packvm_broker_binds_authority_domain_and_invokes_direct_vz(
+    tmp_path: Path,
+) -> None:
+    harness = _Harness(tmp_path)
+    driver = _DirectVZDriver()
+    broker = _packvm_broker(harness, _adapter(harness), driver)
+    frame = InvocationFrame(
+        contract_id="host.http",
+        version_range=">=1,<2",
+        operation_id="invoke",
+        payload={"message": "hello"},
+        idempotency_key="packvm-request-1",
+    )
+    context = _context(harness)
+    try:
+        assert broker.invoke(
+            frame,
+            context,
+            effect_scope=harness.scope.to_dict(),
+        ) == {"ok": True}
+    finally:
+        broker.close()
+    assert len(driver.invocations) == 1
+
+
+@pytest.mark.parametrize(
+    "mode",
+    ("identity-mismatch", "replay", "attestation-tamper"),
+)
+def test_packvm_broker_rejects_mismatched_or_tampered_attestation(
+    tmp_path: Path,
+    mode: str,
+) -> None:
+    harness = _Harness(tmp_path)
+    driver = _DirectVZDriver(mode)
+    broker = _packvm_broker(harness, _adapter(harness), driver)
+    try:
+        with pytest.raises(BackendUnavailableError, match="attestation"):
+            broker.invoke(
+                InvocationFrame(
+                    contract_id="host.http",
+                    version_range=">=1,<2",
+                    operation_id="invoke",
+                    payload={},
+                    idempotency_key=f"packvm-{mode}",
+                ),
+                _context(harness),
+                effect_scope=harness.scope.to_dict(),
+            )
+    finally:
+        broker.close()
+    assert not driver.invocations
 
 
 def test_broker_end_to_end_uses_only_v4_authority_and_audit(tmp_path: Path) -> None:

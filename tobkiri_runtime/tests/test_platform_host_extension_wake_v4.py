@@ -51,6 +51,7 @@ from tobkiri_host.platform_backends import (
     ManagedLimaPackVMDriver,
     PlatformAttestation,
     ProductionIsolationBackend,
+    _platform_attestation_digest,
 )
 from tobkiri_host.ports import OpaqueInvocationLease
 from tobkiri_host.triggers import (
@@ -172,7 +173,7 @@ class Driver:
     def launch(self, request: IsolationLaunch) -> PlatformAttestation:
         self.last_launch = request
         result = PlatformAttestation(
-            domain_id="domain.vz.1",
+            domain_id=request.target_domain_id,
             backend_id=self.backend_id,
             backend_digest=self.backend_digest,
             platform=self.platform,
@@ -181,11 +182,16 @@ class Driver:
             materialization_digest=request.artifact.materialization_digest,
             guest_artifact_identity=digest("guest-artifact"),
             isolation_profile=request.isolation_profile,
-            attestation_digest=digest("attestation"),
+            attestation_digest=digest("pending-attestation"),
+            attestation_nonce="direct-vz-nonce-1",
             lease_id=request.lease.lease_id,
             reservation_id=request.reservation_id,
             authenticated_channel=True,
             nonce_fresh=True,
+        )
+        result = replace(
+            result,
+            attestation_digest=_platform_attestation_digest(result),
         )
         if self.attestation_platform is not None:
             return replace(result, platform=self.attestation_platform)
@@ -242,6 +248,7 @@ def test_platform_selection_and_attestation_fail_closed() -> None:
     backend = ProductionIsolationBackend(
         driver,
         artifact_resolver=lambda _binding: materialized_artifact(),
+        target_domain_resolver=lambda _binding: "domain.vz.1",
     )
     evidence = backend.materialize(selected, "reservation-1")
     assert evidence.resource_reservation_id == "reservation-1"
@@ -314,6 +321,7 @@ def test_managed_lima_driver_invokes_only_authenticated_guest_and_rejects_replay
         artifact_digest=digest("artifact"),
         executable_digest=digest("executable"),
         isolation_profile="packvm.default.v1",
+        target_domain_id="domain.provider.authority-owned",
         reservation_id="reservation-1",
         lease=lease,
         artifact=materialized_artifact(),
@@ -341,31 +349,10 @@ def test_managed_lima_driver_invokes_only_authenticated_guest_and_rejects_replay
     assert driver.capability() == (False, "managed Lima PackVM attestation changed")
 
 
-def test_production_composition_registers_only_a_healthy_managed_lima_attestation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from core_runtime.bootstrap import production_v4
-
-    monkeypatch.setattr(production_v4.platform, "system", lambda: "Darwin")
+def test_production_composition_never_promotes_lima_to_direct_vz() -> None:
     provisioner = Provisioner()
-    backend = _authenticated_packvm_backend(provisioner)
-    assert backend is not None
-    assert backend.status.backend_id == "tobkiri.python-pack-v4"
-    assert backend.status.ready_for_production is True
-    assert backend.status.backend_digest == provisioner.attestation
-
-    provisioner.attestation = digest("tampered-after-capture")
-    assert backend._driver.capability() == (
-        False,
-        "managed Lima PackVM attestation changed",
-    )
-    provisioner.doctor = lambda: SimpleNamespace(
-        ready=False,
-        reason="explicit provisioning required",
-        platform="macos-arm64",
-        attestation_digest=None,
-    )
     assert _authenticated_packvm_backend(provisioner) is None
+    assert ManagedLimaPackVMDriver(provisioner).substrate_id == "lima"
 
 
 class RegistrationStore:

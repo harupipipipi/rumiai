@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 from pathlib import Path
@@ -52,6 +52,7 @@ class IsolationLaunch:
     artifact_digest: str
     executable_digest: str
     isolation_profile: str
+    target_domain_id: str
     reservation_id: str
     lease: IsolationLease
     artifact: MaterializedPackArtifact
@@ -71,12 +72,15 @@ class PlatformAttestation:
     guest_artifact_identity: str
     isolation_profile: str
     attestation_digest: str
+    attestation_nonce: str
     lease_id: str
     reservation_id: str
     authenticated_channel: bool
     nonce_fresh: bool
 
     def __post_init__(self) -> None:
+        if not self.domain_id or not self.attestation_nonce:
+            raise BackendUnavailableError("platform attestation identity is missing")
         require_digest(self.backend_digest, "attested backend")
         require_digest(self.executable_digest, "attested executable")
         require_digest(self.artifact_digest, "attested artifact")
@@ -155,12 +159,14 @@ class ProductionIsolationBackend:
             [ResolvedOperationBinding], MaterializedPackArtifact
         ]
         | None = None,
+        target_domain_resolver: Callable[[ResolvedOperationBinding], str] | None = None,
         lease_seconds: float = 300.0,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         ready, reason = driver.capability()
         self._driver = driver
         self._artifact_resolver = artifact_resolver
+        self._target_domain_resolver = target_domain_resolver
         self._clock = clock
         self._lease_seconds = lease_seconds
         self._domains: dict[str, PlatformAttestation] = {}
@@ -197,6 +203,23 @@ class ProductionIsolationBackend:
             raise BackendUnavailableError("artifact resolver is already bound")
         self._artifact_resolver = resolver
 
+    def bind_target_domain_resolver(
+        self,
+        resolver: Callable[[ResolvedOperationBinding], str],
+    ) -> None:
+        """Bind the Authority-owned exact domain identity before launch."""
+
+        if self._domains or self._reservations:
+            raise BackendUnavailableError(
+                "target domain resolver cannot change after materialization"
+            )
+        if (
+            self._target_domain_resolver is not None
+            and self._target_domain_resolver is not resolver
+        ):
+            raise BackendUnavailableError("target domain resolver is already bound")
+        self._target_domain_resolver = resolver
+
     def materialize(
         self,
         binding: ResolvedOperationBinding,
@@ -216,6 +239,13 @@ class ProductionIsolationBackend:
             raise BackendUnavailableError(
                 "authenticated Pack artifact materializer is unavailable"
             )
+        if self._target_domain_resolver is None:
+            raise BackendUnavailableError(
+                "Authority-owned target domain resolver is unavailable"
+            )
+        target_domain_id = self._target_domain_resolver(binding)
+        if not isinstance(target_domain_id, str) or not target_domain_id:
+            raise BackendUnavailableError("Authority-owned target domain is invalid")
         try:
             artifact = self._artifact_resolver(binding)
         except Exception as exc:
@@ -249,6 +279,7 @@ class ProductionIsolationBackend:
             artifact_digest=binding.artifact.digest,
             executable_digest=binding.function.implementation_digest,
             isolation_profile=binding.route.execution_domain_profile,
+            target_domain_id=target_domain_id,
             reservation_id=reservation_id,
             lease=lease,
             artifact=artifact,
@@ -323,7 +354,8 @@ class ProductionIsolationBackend:
         attestation: PlatformAttestation,
     ) -> None:
         if (
-            attestation.backend_id != launch.backend_id
+            attestation.domain_id != launch.target_domain_id
+            or attestation.backend_id != launch.backend_id
             or attestation.backend_digest != self.status.backend_digest
             or attestation.platform != launch.platform
             or attestation.executable_digest != launch.executable_digest
@@ -335,6 +367,8 @@ class ProductionIsolationBackend:
             or attestation.reservation_id != launch.reservation_id
             or not attestation.authenticated_channel
             or not attestation.nonce_fresh
+            or attestation.attestation_digest
+            != _platform_attestation_digest(attestation)
         ):
             raise BackendUnavailableError("platform attestation does not match launch")
 
@@ -459,7 +493,7 @@ class ManagedLimaPackVMDriver:
     """Adapter from the explicit Lima provisioner to the v4 platform driver."""
 
     backend_id = PYTHON_PACKVM_BACKEND
-    substrate_id = "macos-vz"
+    substrate_id = "lima"
 
     def __init__(self, provisioner: Any) -> None:
         self._provisioner = provisioner
@@ -534,30 +568,8 @@ class ManagedLimaPackVMDriver:
                 "managed Lima PackVM artifact staging identity is invalid"
             ) from exc
         attestation_nonce = secrets.token_hex(32)
-        domain_id = (
-            "packvm:"
-            + _digest(
-                {
-                    "launch_key": launch_key,
-                    "attestation_nonce": attestation_nonce,
-                }
-            )[7:]
-        )
-        attestation_digest = _digest(
-            {
-                "domain_id": domain_id,
-                "backend_digest": self.backend_digest,
-                "executable_digest": request.executable_digest,
-                "artifact_digest": request.artifact_digest,
-                "materialization_digest": request.artifact.materialization_digest,
-                "guest_artifact_identity": guest_artifact_identity,
-                "lease_id": request.lease.lease_id,
-                "reservation_id": request.reservation_id,
-                "attestation_nonce": attestation_nonce,
-            }
-        )
         attestation = PlatformAttestation(
-            domain_id=domain_id,
+            domain_id=request.target_domain_id,
             backend_id=self.backend_id,
             backend_digest=self.backend_digest,
             platform=self.platform,
@@ -566,13 +578,18 @@ class ManagedLimaPackVMDriver:
             materialization_digest=request.artifact.materialization_digest,
             guest_artifact_identity=guest_artifact_identity,
             isolation_profile=request.isolation_profile,
-            attestation_digest=attestation_digest,
+            attestation_digest=_digest("pending-platform-attestation"),
+            attestation_nonce=attestation_nonce,
             lease_id=request.lease.lease_id,
             reservation_id=request.reservation_id,
             authenticated_channel=True,
             nonce_fresh=True,
         )
-        self._domains[domain_id] = attestation
+        attestation = replace(
+            attestation,
+            attestation_digest=_platform_attestation_digest(attestation),
+        )
+        self._domains[attestation.domain_id] = attestation
         return attestation
 
     def invoke(self, request: object) -> object:
@@ -679,6 +696,29 @@ def _normalize_machine(value: str) -> str:
 def _digest(value: object) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     return f"sha256:{hashlib.sha256(payload).hexdigest()}"
+
+
+def _platform_attestation_digest(attestation: PlatformAttestation) -> str:
+    """Digest every launch-bound field plus the supervisor freshness nonce."""
+
+    return _digest(
+        {
+            "domain_id": attestation.domain_id,
+            "backend_id": attestation.backend_id,
+            "backend_digest": attestation.backend_digest,
+            "platform": attestation.platform,
+            "executable_digest": attestation.executable_digest,
+            "artifact_digest": attestation.artifact_digest,
+            "materialization_digest": attestation.materialization_digest,
+            "guest_artifact_identity": attestation.guest_artifact_identity,
+            "isolation_profile": attestation.isolation_profile,
+            "lease_id": attestation.lease_id,
+            "reservation_id": attestation.reservation_id,
+            "authenticated_channel": attestation.authenticated_channel,
+            "nonce_fresh": attestation.nonce_fresh,
+            "attestation_nonce": attestation.attestation_nonce,
+        }
+    )
 
 
 __all__ = [

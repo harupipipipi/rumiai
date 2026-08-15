@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import platform
 import secrets
 import threading
 from datetime import datetime
@@ -35,10 +34,6 @@ from tobkiri_host.models import (
 )
 from tobkiri_host.errors import BackendUnavailableError
 from tobkiri_host.runtime import ProductionRuntimeV4, V4DispatchSession
-from tobkiri_host.platform_backends import (
-    ManagedLimaPackVMDriver,
-    build_platform_backend,
-)
 from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.errors import ProtocolError
 from tobkiri_protocol.platform_artifact import verify_platform_artifact
@@ -123,30 +118,13 @@ class _UnavailablePythonPackBackend:
 
 
 def _authenticated_packvm_backend(provisioner: Any | None = None) -> ExecutionBackend | None:
-    """Return a production backend only for the current healthy v4 attestation."""
+    """Fail closed until a direct VZ supervisor is supplied by the Host."""
 
-    if platform.system() != "Darwin":
-        return None
-    if provisioner is None:
-        from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
-            PackVMLimaProvisioner,
-        )
-
-        provisioner = PackVMLimaProvisioner()
-    doctor = provisioner.doctor()
-    if not doctor.ready or not doctor.attestation_digest:
-        return None
-    driver = ManagedLimaPackVMDriver(provisioner)
-    backend = build_platform_backend(
-        platform_system="Darwin",
-        machine=str(doctor.platform).removeprefix("macos-"),
-        drivers=(driver,),
-    )
-    if not backend.status.ready_for_production:
-        raise AuthorityDenied(
-            "authenticated PackVM attestation did not produce a production backend"
-        )
-    return backend
+    # Lima is a development VM manager, not the direct Virtualization.framework
+    # supervisor required by the production PackVM contract.  A healthy Lima
+    # guest must therefore never be promoted to a macos-vz production backend.
+    del provisioner
+    return None
 
 
 class _NoAdapterExecution:
@@ -960,6 +938,19 @@ def capture_production_dispatch(
         )
         approved_host_binding_keys.add(key)
         dynamic_domain_ids[(key[0], key[1], target.principal_id)] = target_domain.domain_id
+    def authority_target_domain(binding: ResolvedOperationBinding) -> str:
+        target_suffix = binding.principal_ref.value.removeprefix("sha256:")[:24]
+        domain_id = f"domain.provider.{target_suffix}.{activation_suffix}"
+        domain = authority_store.get_domain(domain_id)
+        if domain is None or not any(
+            principal.principal_id == binding.principal_ref.value
+            for principal in domain.principals
+        ):
+            raise AuthorityDenied(
+                "production PackVM target domain is not registered by Authority"
+            )
+        return domain_id
+
     registered_backends = tuple((backends or BackendRegistry(())).registered)
     if backends is None:
         authenticated_backend = _authenticated_packvm_backend(packvm_provisioner)
@@ -972,6 +963,13 @@ def capture_production_dispatch(
         if binder is None:
             raise AuthorityDenied("production PackVM backend cannot bind authenticated artifacts")
         binder(artifact_resolver)
+        domain_binder = getattr(
+            registered_backend,
+            "bind_target_domain_resolver",
+            None,
+        )
+        if domain_binder is not None:
+            domain_binder(authority_target_domain)
     if not any(item.status.backend_id == _PYTHON_PACK_BACKEND_ID for item in registered_backends):
         # The descriptor remains unavailable unless the composition root
         # supplies a real authenticated supervisor.  Registering the exact

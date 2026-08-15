@@ -218,6 +218,7 @@ def _driver_with_domain(provisioner: _BlockingProvisioner) -> ManagedLimaPackVMD
         guest_artifact_identity=_digest("guest"),
         isolation_profile="packvm.default.v1",
         attestation_digest=_digest("attestation"),
+        attestation_nonce="lima-nonce-1",
         lease_id="lease-1",
         reservation_id="reservation-1",
         authenticated_channel=True,
