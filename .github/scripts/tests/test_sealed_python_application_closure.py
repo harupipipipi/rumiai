@@ -224,6 +224,21 @@ def test_packaged_closure_binds_every_locked_executable_catalog(
         BUILDER.validate_packaged_application_closure(application)
 
 
+def test_packaged_closure_reseal_preserves_catalog_outer_inner_identity(
+    tmp_path: Path,
+) -> None:
+    """Re-sealing copies the lock-bound catalog byte-for-byte into ``app``."""
+    target = "x86_64-unknown-linux-gnu"
+    application, sealed = _embedded_sealed_application(tmp_path, target)
+    catalog, _lock_path = _add_locked_catalog(application)
+    result = _run_reseal(sealed, application, target)
+
+    assert result.returncode == 0, result.stderr
+    inner_catalog = sealed / "app" / "ecosystem/defaultspack/v4/packs/fixture.executables.v4.json"
+    assert inner_catalog.read_bytes() == catalog.read_bytes()
+    BUILDER.verify_packaged_application_closure(application, sealed)
+
+
 def test_application_reseal_stage_is_outside_source_and_sealed_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
