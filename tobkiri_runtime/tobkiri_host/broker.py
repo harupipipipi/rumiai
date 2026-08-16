@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError
+import contextvars
 from dataclasses import dataclass
 import hashlib
 import json
@@ -323,7 +324,12 @@ class RequestBroker:
             )
             if audit_reservation is not None:
                 self._audit.mark_dispatched(audit_reservation)
-            future = self._executor.submit(backend.invoke, envelope)
+            operation_context = contextvars.copy_context()
+            future = self._executor.submit(
+                operation_context.run,
+                backend.invoke,
+                envelope,
+            )
             remaining = max(0.0, deadline - time.monotonic())
             raw = future.result(timeout=remaining)
             if not isinstance(raw, ProviderOutcome):

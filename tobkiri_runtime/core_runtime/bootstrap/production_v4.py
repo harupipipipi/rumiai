@@ -738,10 +738,15 @@ def capture_production_dispatch(
         key: binding for key, binding in binding_by_key.items() if key[0] in _CONTROL_CONTRACTS
     }
     if control_bindings:
+        def load_active_profile() -> ActiveDefaultProfile:
+            from .profile_capture import capture_default_profile
+
+            return capture_default_profile()
+
         control_session = capture_pack_control_session(
             active=active,
             packvm_readiness_reader=packvm_readiness_reader,
-            active_profile_loader=activation_store.load_active_snapshot,
+            active_profile_loader=load_active_profile,
             bundle_root=bundle_root,
         )
         for key, control_binding in sorted(control_bindings.items()):
@@ -1306,8 +1311,12 @@ def capture_production_dispatch(
 
     def assert_current_capture() -> None:
         from ..pack_control_v4 import PackControlDenied
+        from .profile_capture import capture_default_profile
 
-        current = activation_store.load_active_snapshot()
+        # Reuse only the explicit operation-local capture opened by the HTTP
+        # boundary or runtime-surface operation. Outside that scope this is
+        # still a fresh canonical capture on every assertion.
+        current = capture_default_profile()
         if (
             dict(current.activation) != captured_activation
             or dict(current.resolved.profile) != captured_profile

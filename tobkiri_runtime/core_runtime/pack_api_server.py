@@ -626,21 +626,24 @@ class PackAPIHandler(
             )
 
             def _setup_install_pack(self, body: dict[str, object]) -> dict[str, object]:
-                result = super()._setup_install_pack(body)
-                if result.get("state") == "active" and bound_runtime_refresh is not None:
-                    try:
-                        bound_runtime_refresh(self.__class__._dispatch_session)
-                    except Exception:
-                        from .app_lifecycle_manager import mark_runtime_failed
+                from .bootstrap.profile_capture import profile_capture_scope
 
-                        mark_runtime_failed("canonical runtime capture failed")
-                        return {
-                            "error": "Defaults runtime capture failed",
-                            "status_code": 503,
-                            "state": "runtime_capture_failed",
-                            "write_set": [],
-                        }
-                return result
+                with profile_capture_scope():
+                    result = super()._setup_install_pack(body)
+                    if result.get("state") == "active" and bound_runtime_refresh is not None:
+                        try:
+                            bound_runtime_refresh(self.__class__._dispatch_session)
+                        except Exception:
+                            from .app_lifecycle_manager import mark_runtime_failed
+
+                            mark_runtime_failed("canonical runtime capture failed")
+                            return {
+                                "error": "Defaults runtime capture failed",
+                                "status_code": 503,
+                                "state": "runtime_capture_failed",
+                                "write_set": [],
+                            }
+                    return result
 
             @staticmethod
             def _fixed_web_mounts() -> tuple[WebMountEntry, ...]:
@@ -740,6 +743,14 @@ class PackAPIHandler(
         )
 
     def _handle_contract_request(self, method: str) -> bool:
+        """Dispatch one contract request with one explicit capture scope."""
+
+        from .bootstrap.profile_capture import profile_capture_scope
+
+        with profile_capture_scope():
+            return self._handle_contract_request_scoped(method)
+
+    def _handle_contract_request_scoped(self, method: str) -> bool:
         """Resolve, authenticate, and dispatch one exact frontend operation."""
 
         if not is_contract_route_path(urlparse(self.path).path):

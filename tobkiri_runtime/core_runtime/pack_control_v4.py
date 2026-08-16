@@ -274,6 +274,19 @@ class CapturedPackControlSession:
                 with self._lock:
                     self._require_current_binding()
                     return self._revoke_approval(arguments)
+            from .bootstrap.profile_capture import invalidate_profile_capture_scope
+
+            if operation_id not in {
+                "catalog.read",
+                "dashboard.read",
+                "pack.status",
+            }:
+                # The HTTP boundary has already checked the captured session.
+                # Every operation that can mutate authority, Profile state, or
+                # restart behavior must discard that snapshot before its own
+                # binding check. Read-only projections may reuse it only within
+                # this one explicit operation scope.
+                invalidate_profile_capture_scope()
             with self._lock:
                 if operation_id == "profile.reload":
                     self._recapture()
