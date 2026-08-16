@@ -18,6 +18,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tobkiri_protocol.canonical import canonical_digest, strict_loads  # noqa: E402
+from tobkiri_protocol.defaultspack_bundle_order import (  # noqa: E402
+    canonical_defaultspack_bundle_entries,
+)
 from tobkiri_protocol.validation import validate_document  # noqa: E402
 
 
@@ -335,6 +338,13 @@ def _check_bundle(
     if not isinstance(entries, list) or not entries:
         errors.append("v4 bundle lock entries must be a non-empty array")
         return
+    try:
+        canonical_entries = canonical_defaultspack_bundle_entries(entries)
+    except (TypeError, ValueError) as exc:
+        errors.append(f"v4 bundle lock entry contract failed: {exc}")
+    else:
+        if entries != canonical_entries:
+            errors.append("v4 bundle lock order is not canonical")
 
     valid_kinds = {"pack", "base", "shell", "profile", "executable_catalog"}
     seen_paths: set[str] = set()

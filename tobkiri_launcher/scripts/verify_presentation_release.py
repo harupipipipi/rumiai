@@ -26,6 +26,18 @@ try:
 except ModuleNotFoundError:
     from artifact_integrity import artifact_digest_and_size  # type: ignore[no-redef]
 
+try:
+    from tobkiri_protocol.defaultspack_bundle_order import (  # type: ignore[import-not-found]
+        canonical_defaultspack_bundle_entries,
+    )
+except ModuleNotFoundError:
+    _RUNTIME_ROOT = Path(__file__).resolve().parents[2] / "tobkiri_runtime"
+    if str(_RUNTIME_ROOT) not in sys.path:
+        sys.path.insert(0, str(_RUNTIME_ROOT))
+    from tobkiri_protocol.defaultspack_bundle_order import (
+        canonical_defaultspack_bundle_entries,
+    )
+
 CATALOG_SCHEMA = "io.tobkiri.launcher.presentation-catalog.v1"
 SHELL_CONTRACT = "app.shell.v1"
 PRESENTATION_COMMANDS = (
@@ -99,6 +111,109 @@ def _canonical_digest(value: Any) -> str:
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
     return _byte_digest(contents)
+
+
+def _verify_defaultspack_bundle(entries: object, bundle_root: Path) -> None:
+    """Verify the signed v4 lock order, bytes, and Pack-sidecar bindings."""
+    if not isinstance(entries, list) or not entries:
+        raise RuntimeError("Defaults bundle lock entries are missing")
+    try:
+        canonical_entries = canonical_defaultspack_bundle_entries(entries)
+    except (TypeError, ValueError) as error:
+        raise RuntimeError(f"Defaults bundle lock entry contract failed: {error}") from error
+    if entries != canonical_entries:
+        raise RuntimeError("Defaults bundle lock order is not canonical")
+    if bundle_root.is_symlink() or not bundle_root.is_dir():
+        raise RuntimeError("Defaults bundle root is missing or symlinked")
+
+    lock_paths = {str(entry["path"]) for entry in entries}
+    actual_paths: set[str] = set()
+    for candidate in bundle_root.rglob("*"):
+        relative = candidate.relative_to(bundle_root).as_posix()
+        if candidate.is_symlink():
+            raise RuntimeError(f"Defaults bundle artifact is symlinked: {relative}")
+        if candidate.is_file():
+            if relative != "bundle.lock.json":
+                actual_paths.add(relative)
+    if actual_paths != lock_paths:
+        missing = sorted(lock_paths - actual_paths)
+        extra = sorted(actual_paths - lock_paths)
+        raise RuntimeError(
+            f"Defaults bundle file set mismatch; missing={missing}, extra={extra}"
+        )
+
+    documents: dict[tuple[str, str], dict[str, Any]] = {}
+    pack_sidecars: dict[str, str] = {}
+    catalog_entries: dict[str, tuple[dict[str, Any], str]] = {}
+    for entry in entries:
+        relative = str(entry["path"])
+        path = _safe_resource_path(bundle_root, relative, "Defaults bundle entry")
+        raw = _regular_bytes(path, "Defaults bundle entry")
+        if _byte_digest(raw) != entry["digest"]:
+            raise RuntimeError(f"Defaults bundle digest mismatch: {relative}")
+        try:
+            document = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"Defaults bundle document is malformed: {relative}") from error
+        if not isinstance(document, dict):
+            raise RuntimeError(f"Defaults bundle document is not an object: {relative}")
+        kind = str(entry["kind"])
+        if kind == "pack":
+            pack = document.get("pack")
+            pack_id = pack.get("id") if isinstance(pack, dict) else None
+            if not isinstance(pack_id, str) or not pack_id:
+                raise RuntimeError(f"Defaults bundle Pack identity is missing: {relative}")
+            identity_key = (kind, pack_id)
+            if identity_key in documents:
+                raise RuntimeError(f"duplicate Defaults bundle Pack identity: {pack_id}")
+            documents[identity_key] = document
+            artifacts = document.get("artifacts")
+            if not isinstance(artifacts, list):
+                raise RuntimeError(f"Defaults bundle Pack artifacts are missing: {relative}")
+            sidecars = [
+                artifact
+                for artifact in artifacts
+                if isinstance(artifact, dict)
+                and artifact.get("kind") == "sidecar"
+                and artifact.get("path") == "executables.v4.json"
+            ]
+            if len(sidecars) > 1:
+                raise RuntimeError(f"Pack pins duplicate executable catalogs: {pack_id}")
+            if sidecars:
+                sidecar_digest = sidecars[0].get("digest")
+                if not isinstance(sidecar_digest, str):
+                    raise RuntimeError(f"Pack executable catalog digest is missing: {pack_id}")
+                pack_sidecars[pack_id] = sidecar_digest
+        elif kind == "executable_catalog":
+            pack_id = document.get("pack_id")
+            if not isinstance(pack_id, str) or not pack_id:
+                raise RuntimeError(f"executable catalog identity is missing: {relative}")
+            identity_key = (kind, pack_id)
+            if identity_key in documents:
+                raise RuntimeError(f"duplicate executable catalog identity: {pack_id}")
+            documents[identity_key] = document
+            catalog_entries[pack_id] = (document, str(entry["digest"]))
+            unsigned = {
+                key: value for key, value in document.items() if key != "catalog_digest"
+            }
+            if document.get("catalog_digest") != _canonical_digest(unsigned):
+                raise RuntimeError(f"executable catalog digest is stale: {pack_id}")
+
+    if set(pack_sidecars) != set(catalog_entries):
+        missing = sorted(set(pack_sidecars) - set(catalog_entries))
+        extra = sorted(set(catalog_entries) - set(pack_sidecars))
+        raise RuntimeError(
+            "Defaults executable catalog coverage mismatch; "
+            f"missing={missing}, extra={extra}"
+        )
+    for pack_id, sidecar_digest in pack_sidecars.items():
+        catalog, catalog_digest = catalog_entries[pack_id]
+        if sidecar_digest != catalog_digest:
+            raise RuntimeError(f"Pack executable catalog artifact pin is stale: {pack_id}")
+        if catalog.get("source_identity") != documents[("pack", pack_id)].get(
+            "integrity", {}
+        ).get("source_identity"):
+            raise RuntimeError(f"executable catalog source identity is stale: {pack_id}")
 
 
 def _regular_bytes(path: Path, label: str) -> bytes:
@@ -302,21 +417,8 @@ def verify_release_binding(catalog: dict[str, Any], root: Path) -> dict[str, Any
     entries = defaultspack_lock.get("entries") if isinstance(defaultspack_lock, dict) else None
     if not isinstance(entries, list):
         raise RuntimeError("Defaults bundle lock entries are missing")
-    paths = [entry.get("path") for entry in entries if isinstance(entry, dict)]
-    kind_order = {"pack": 0, "base": 1, "shell": 2, "profile": 3}
-    canonical_entries = sorted(
-        entries,
-        key=lambda entry: (
-            kind_order.get(str(entry.get("kind")), 99),
-            str(entry.get("path")),
-        ),
-    )
-    if (
-        len(paths) != len(entries)
-        or entries != canonical_entries
-        or len(set(paths)) != len(paths)
-    ):
-        raise RuntimeError("Defaults bundle lock order is not canonical")
+    bundle_root = root / "ecosystem" / "defaultspack" / "v4"
+    _verify_defaultspack_bundle(entries, bundle_root)
     profile_entries = [
         entry
         for entry in entries

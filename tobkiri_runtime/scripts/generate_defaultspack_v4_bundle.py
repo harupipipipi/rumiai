@@ -25,6 +25,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tobkiri_protocol.canonical import canonical_digest  # noqa: E402
+from tobkiri_protocol.defaultspack_bundle_order import (  # noqa: E402
+    canonical_defaultspack_bundle_entries,
+)
 from tobkiri_protocol.profile_scope import (  # noqa: E402
     normalize_requested_scope_template,
 )
@@ -709,6 +712,7 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
                 "digest": "sha256:" + hashlib.sha256(raw).hexdigest(),
             }
         )
+    entries = canonical_defaultspack_bundle_entries(entries)
     lock = {"schema": "io.tobkiri.defaultspack-bundle-lock.v1", "entries": entries}
     rendered[BUNDLE / "bundle.lock.json"] = (
         json.dumps(lock, indent=2, ensure_ascii=False).encode() + b"\n"

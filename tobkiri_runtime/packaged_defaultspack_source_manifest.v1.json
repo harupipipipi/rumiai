@@ -1062,8 +1062,8 @@
     {
       "path": "scripts/generate_defaultspack_v4_bundle.py",
       "type": "regular-file",
-      "size": 37460,
-      "sha256": "ff4e770a2f77f2fa38c197e0519bb15c042bfa5ca4f7620f2c22b9c97b8a8776",
+      "size": 37637,
+      "sha256": "0c8f25260f31f9c84413e7da7bd4a1c373c9047b334055122751679721d35f2d",
       "executable": false
     },
     {
@@ -1202,8 +1202,8 @@
     {
       "path": "scripts/quality/scan_defaultspack_integrity.py",
       "type": "regular-file",
-      "size": 24134,
-      "sha256": "963c973ef12aa37c58d93f5fda7c6fb6baabd1b1bc0a4f31f40e92a05733169b",
+      "size": 24565,
+      "sha256": "67f91e568a626068567975de7d83768494485f4ef0b84182eef28b067eb41e87",
       "executable": false
     },
     {
@@ -1281,6 +1281,13 @@
       "type": "regular-file",
       "size": 17492,
       "sha256": "f50e51118a151bf2fa85ad102ba23c39891bdedb3a2bfc79b534535482371875",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/defaultspack_bundle_order.py",
+      "type": "regular-file",
+      "size": 3176,
+      "sha256": "4cc681e3e4d131e14e5dfcda38296ea4c0eb5f0b80865f2bbcb156c43e9773ec",
       "executable": false
     },
     {

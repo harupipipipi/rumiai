@@ -18,6 +18,18 @@ from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 from typing import Any, Mapping
 
+try:
+    from tobkiri_protocol.defaultspack_bundle_order import (  # type: ignore[import-not-found]
+        canonical_defaultspack_bundle_entries,
+    )
+except ModuleNotFoundError:
+    _RUNTIME_ROOT = Path(__file__).resolve().parents[2] / "tobkiri_runtime"
+    if str(_RUNTIME_ROOT) not in sys.path:
+        sys.path.insert(0, str(_RUNTIME_ROOT))
+    from tobkiri_protocol.defaultspack_bundle_order import (
+        canonical_defaultspack_bundle_entries,
+    )
+
 
 CATALOG_SCHEMA = "io.tobkiri.launcher.presentation-catalog.v1"
 CATALOG_GENERATOR = "tobkiri-defaultspack-v4-presentation-catalog"
@@ -249,6 +261,12 @@ def load_v4_bundle(repository_root: Path) -> V4Bundle:
     entries = lock.get("entries")
     if not isinstance(entries, list) or not entries:
         raise PresentationCatalogError("v4 bundle lock entries must be non-empty")
+    try:
+        canonical_entries = canonical_defaultspack_bundle_entries(entries)
+    except (TypeError, ValueError) as exc:
+        raise PresentationCatalogError(f"v4 bundle lock entry contract failed: {exc}") from exc
+    if entries != canonical_entries:
+        raise PresentationCatalogError("v4 bundle lock order is not canonical")
 
     expected_paths = {BUNDLE_LOCK_NAME}
     documents: dict[str, dict[str, V4Document]] = {
