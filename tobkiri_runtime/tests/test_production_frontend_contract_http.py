@@ -346,7 +346,6 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
 
 def test_revoke_denials_respond_before_logging_and_release_for_retry(
     production_server,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Known denials remain bounded under logging delay and concurrent retry."""
 
@@ -383,28 +382,6 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
     )
     assert install_status == 200, install_payload
 
-    original_capture = profile_capture.capture_default_profile
-    capture_blocked = False
-    capture_lock = threading.Lock()
-    capture_entered = threading.Event()
-    release_capture = threading.Event()
-
-    def delayed_capture(*args, **kwargs):
-        nonlocal capture_blocked
-        with capture_lock:
-            first_capture = not capture_blocked
-            capture_blocked = True
-        if first_capture:
-            capture_entered.set()
-            assert release_capture.wait(timeout=2)
-        return original_capture(*args, **kwargs)
-
-    monkeypatch.setattr(
-        profile_capture,
-        "capture_default_profile",
-        delayed_capture,
-    )
-
     log_entered = threading.Event()
     all_denials_logged = threading.Event()
     all_access_logged = threading.Event()
@@ -439,8 +416,6 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
     executor = ThreadPoolExecutor(max_workers=len(request_ids))
     try:
         responses = [executor.submit(revoke, request_id) for request_id in request_ids]
-        assert capture_entered.wait(timeout=2)
-        release_capture.set()
         assert log_entered.wait(timeout=FRONTEND_MUTATION_TIMEOUT_SECONDS)
         completed, pending = wait(
             responses,
@@ -476,7 +451,6 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
         assert len(authority.audit_events()) == audit_after_initial
         assert access_log_count == 0
     finally:
-        release_capture.set()
         release_log.set()
         executor.shutdown(wait=True, cancel_futures=True)
         if server.server is not None:

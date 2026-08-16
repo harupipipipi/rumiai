@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, wait
 from typing import Any, cast
 
 def test_pack_api_handler_excludes_router_table_mixin_from_dispatch():
@@ -13,6 +16,111 @@ def test_pack_api_handler_uses_response_writer_mixin():
     from core_runtime.pack_api_server import PackAPIHandler
 
     assert PackAPIHandler._send_response.__module__ == "core_runtime.api.http_response"
+
+
+def test_response_logs_are_synchronous_only_after_connection_close():
+    from core_runtime.api.http_response import ResponseWriterMixin
+
+    events: list[str] = []
+
+    class ClosedResponse:
+        def finish(self) -> None:
+            events.append("closed")
+
+        def log_request(self, status: int, length: int) -> None:
+            assert (status, length) == (403, 292)
+            events.append("access")
+
+    class Writer(ResponseWriterMixin, ClosedResponse):
+        pass
+
+    class DiagnosticHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            assert record.getMessage() == "denied: UNAPPROVED"
+            events.append("diagnostic")
+
+    diagnostic = logging.Logger("response-close-order")
+    diagnostic.addHandler(DiagnosticHandler())
+    writer = Writer()
+    writer._completed_access_logs = [(403, 292)]
+    writer._defer_response_log(
+        diagnostic,
+        logging.INFO,
+        "denied: %s",
+        "UNAPPROVED",
+    )
+
+    writer.finish()
+
+    assert events == ["closed", "diagnostic", "access"]
+
+
+def test_concurrent_response_close_is_independent_of_shared_logging_lock():
+    from core_runtime.api.http_response import ResponseWriterMixin
+
+    request_count = 32
+    closed_count = 0
+    diagnostic_count = 0
+    access_count = 0
+    count_lock = threading.Lock()
+    all_closed = threading.Event()
+    diagnostic_entered = threading.Event()
+    release_diagnostics = threading.Event()
+
+    class ClosedResponse:
+        def finish(self) -> None:
+            nonlocal closed_count
+            with count_lock:
+                closed_count += 1
+                if closed_count == request_count:
+                    all_closed.set()
+
+        def log_request(self, status: int, length: int) -> None:
+            nonlocal access_count
+            assert (status, length) == (403, 292)
+            with count_lock:
+                access_count += 1
+
+    class Writer(ResponseWriterMixin, ClosedResponse):
+        pass
+
+    class DelayedDiagnostic(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            nonlocal diagnostic_count
+            assert record.getMessage() == "denied: UNAPPROVED"
+            with count_lock:
+                diagnostic_count += 1
+            diagnostic_entered.set()
+            release_diagnostics.wait()
+
+    diagnostic = logging.Logger("concurrent-response-close-order")
+    diagnostic.addHandler(DelayedDiagnostic())
+
+    def finish_response() -> None:
+        writer = Writer()
+        writer._completed_access_logs = [(403, 292)]
+        writer._defer_response_log(
+            diagnostic,
+            logging.INFO,
+            "denied: %s",
+            "UNAPPROVED",
+        )
+        writer.finish()
+
+    executor = ThreadPoolExecutor(max_workers=request_count)
+    try:
+        futures = [executor.submit(finish_response) for _index in range(request_count)]
+        assert diagnostic_entered.wait(timeout=2)
+        assert all_closed.wait(timeout=2)
+        completed, pending = wait(futures, timeout=0)
+        assert not completed
+        assert len(pending) == request_count
+    finally:
+        release_diagnostics.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+
+    assert diagnostic_count == request_count
+    assert access_count == request_count
 
 
 def test_pack_api_handler_uses_auth_gate_mixin(monkeypatch):

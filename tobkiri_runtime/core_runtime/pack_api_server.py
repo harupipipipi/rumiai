@@ -987,14 +987,18 @@ class PackAPIHandler(
                 public_result = _public_error_result(_exception_error_code(error))
                 self._send_contract_outcome(route_binding, public_result)
                 if public_result["code"] == RuntimeSurfaceErrorCode.UNAPPROVED.value:
-                    logger.info(
+                    self._defer_response_log(
+                        logger,
+                        logging.INFO,
                         "Contract dispatch denied for %s/%s: %s",
                         target.contract_id,
                         target.operation_id,
                         public_result["code"],
                     )
                 else:
-                    logger.warning(
+                    self._defer_response_log(
+                        logger,
+                        logging.WARNING,
                         "Contract dispatch failed for %s/%s",
                         target.contract_id,
                         target.operation_id,
@@ -1137,21 +1141,27 @@ class PackAPIHandler(
             # Logging a provider traceback can contend with suite-wide capture or
             # a slow sink and must never extend the frontend response deadline.
             if journal_error is not None:
-                logger.warning(
+                self._defer_response_log(
+                    logger,
+                    logging.WARNING,
                     "Contract rejection reconciliation failed for %s/%s",
                     target.contract_id,
                     target.operation_id,
                     exc_info=journal_error,
                 )
             elif public_result["code"] == RuntimeSurfaceErrorCode.UNAPPROVED.value:
-                logger.info(
+                self._defer_response_log(
+                    logger,
+                    logging.INFO,
                     "Contract dispatch denied for %s/%s: %s",
                     target.contract_id,
                     target.operation_id,
                     public_result["code"],
                 )
             else:
-                logger.warning(
+                self._defer_response_log(
+                    logger,
+                    logging.WARNING,
                     "Contract dispatch failed for %s/%s",
                     target.contract_id,
                     target.operation_id,

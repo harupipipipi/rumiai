@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -15,6 +16,9 @@ class ResponseWriterMixin(_HTTPHandlerBase):
     _panel_session_cookie: str | None
     _CLIENT_DISCONNECT_EXCEPTIONS: tuple[type[OSError], ...]
     _completed_access_logs: list[tuple[int, int]]
+    _completed_diagnostic_logs: list[
+        tuple[logging.Logger, int, str, tuple[object, ...], BaseException | None]
+    ]
 
     if TYPE_CHECKING:
         def _get_cors_origin(self, origin: str) -> str | None: ...
@@ -59,15 +63,37 @@ class ResponseWriterMixin(_HTTPHandlerBase):
             self.close_connection = True
 
     def finish(self) -> None:
-        """Close the response before access logging can contend with delivery."""
+        """Close the response before synchronous logging can contend."""
 
         try:
             super().finish()
         finally:
+            diagnostics = getattr(self, "_completed_diagnostic_logs", ())
+            self._completed_diagnostic_logs = []
             completed = getattr(self, "_completed_access_logs", ())
             self._completed_access_logs = []
-            for status, length in completed:
-                self.log_request(status, length)
+            try:
+                for log, level, message, args, error in diagnostics:
+                    log.log(level, message, *args, exc_info=error)
+            finally:
+                for status, length in completed:
+                    self.log_request(status, length)
+
+    def _defer_response_log(
+        self,
+        log: logging.Logger,
+        level: int,
+        message: str,
+        *args: object,
+        exc_info: BaseException | None = None,
+    ) -> None:
+        """Guarantee one diagnostic synchronously after response close."""
+
+        completed = getattr(self, "_completed_diagnostic_logs", None)
+        if completed is None:
+            completed = []
+            self._completed_diagnostic_logs = completed
+        completed.append((log, level, message, args, exc_info))
 
     def _send_raw_json(
         self,
