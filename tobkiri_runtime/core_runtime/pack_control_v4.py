@@ -262,17 +262,19 @@ class CapturedPackControlSession:
                 # A known read-only denial must not queue behind another
                 # control mutation.  The preflight is fail-closed: if the
                 # approval is absent or invalid it raises before acquiring the
-                # session lock, while an approved request is rechecked with a
-                # fresh capture after entering that lock.
-                self._require_current_binding()
+                # session lock, while an approved request's fresh capture is
+                # compared again at the lock boundary.
+                current_binding, _active = self._capture_current_binding()
+                self._require_captured_binding(current_binding)
                 self._raise_known_revoke_denial(arguments)
                 from .bootstrap.profile_capture import (
                     invalidate_profile_capture_scope,
                 )
 
                 invalidate_profile_capture_scope()
+                current_binding, _active = self._capture_current_binding()
                 with self._lock:
-                    self._require_current_binding()
+                    self._require_captured_binding(current_binding)
                     return self._revoke_approval(arguments)
             from .bootstrap.profile_capture import invalidate_profile_capture_scope
 
@@ -287,15 +289,17 @@ class CapturedPackControlSession:
                 # binding check. Read-only projections may reuse it only within
                 # this one explicit operation scope.
                 invalidate_profile_capture_scope()
-            with self._lock:
-                if operation_id == "profile.reload":
+            if operation_id == "profile.reload":
+                with self._lock:
                     self._recapture()
                     return self._status(arguments)
-                self._require_current_binding()
+            current_binding, active = self._capture_current_binding()
+            with self._lock:
+                self._require_captured_binding(current_binding)
                 if operation_id == "catalog.read":
-                    return self._catalog_payload()
+                    return self._catalog_payload(active_snapshot=active)
                 if operation_id == "dashboard.read":
-                    return self._dashboard()
+                    return self._dashboard(active_snapshot=active)
                 if operation_id == "pack.install":
                     return self._install(arguments)
                 if operation_id == "approval.candidate":
@@ -307,7 +311,7 @@ class CapturedPackControlSession:
                 if operation_id == "pack.disable":
                     return self._set_enabled(arguments, False)
                 if operation_id == "pack.status":
-                    return self._status(arguments)
+                    return self._status(arguments, active_snapshot=active)
                 if operation_id == "runtime.restart":
                     from .restart_control import request_kernel_restart
 
@@ -419,8 +423,22 @@ class CapturedPackControlSession:
                     raise PackControlStaleRevision("captured profile_revision does not match")
                 raise PackControlDigestMismatch(f"captured {key} does not match")
 
-    def _require_current_binding(self) -> None:
-        current = _capture_binding()
+    def _capture_current_binding(self) -> tuple[_Binding, ActiveDefaultProfile]:
+        """Capture current Profile authority without holding session state."""
+
+        from .bootstrap.profile_capture import capture_default_profile
+
+        try:
+            active = capture_default_profile()
+        except Exception as error:
+            raise PackControlDigestMismatch(
+                "active v4 Profile session is missing or invalid"
+            ) from error
+        return _capture_binding(active), active
+
+    def _require_captured_binding(self, current: _Binding) -> None:
+        """Compare a fresh external capture at the session lock boundary."""
+
         if current != self._binding:
             raise PackControlStaleRevision("captured Profile session is stale")
 
@@ -442,8 +460,12 @@ class CapturedPackControlSession:
         if not approved:
             _raise_approval_failure(reason)
 
-    def _catalog_payload(self) -> dict[str, Any]:
-        return _catalog_payload(self._binding)
+    def _catalog_payload(
+        self,
+        *,
+        active_snapshot: ActiveDefaultProfile | None = None,
+    ) -> dict[str, Any]:
+        return _catalog_payload(self._binding, active_snapshot=active_snapshot)
 
     def _install(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         pack_id, record, root = _pack(arguments)
@@ -590,9 +612,14 @@ class CapturedPackControlSession:
         self._recapture()
         return {"pack_id": pack_id, "enabled": enabled, **self._binding_payload()}
 
-    def _status(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+    def _status(
+        self,
+        arguments: Mapping[str, Any],
+        *,
+        active_snapshot: ActiveDefaultProfile | None = None,
+    ) -> dict[str, Any]:
         pack_id = str(arguments.get("pack_id") or "").strip()
-        catalog = self._catalog_payload()
+        catalog = self._catalog_payload(active_snapshot=active_snapshot)
         if not pack_id:
             return catalog
         match = next((item for item in catalog["packs"] if item["pack_id"] == pack_id), None)
@@ -600,10 +627,14 @@ class CapturedPackControlSession:
             raise PackControlInvalidRequest("Pack is absent from the canonical v4 catalog")
         return match
 
-    def _dashboard(self) -> dict[str, Any]:
+    def _dashboard(
+        self,
+        *,
+        active_snapshot: ActiveDefaultProfile | None = None,
+    ) -> dict[str, Any]:
         """Return the finite Home projection from the captured Pack state."""
 
-        catalog = self._catalog_payload()
+        catalog = self._catalog_payload(active_snapshot=active_snapshot)
         packs = catalog["packs"]
         enabled = sum(1 for item in packs if item["enabled"] is True)
         return {
@@ -704,9 +735,13 @@ def _binding_payload(binding: _Binding) -> dict[str, str]:
     }
 
 
-def _catalog_payload(binding: _Binding) -> dict[str, Any]:
+def _catalog_payload(
+    binding: _Binding,
+    *,
+    active_snapshot: ActiveDefaultProfile | None = None,
+) -> dict[str, Any]:
     installed = _read_control_state(binding.profile_id)
-    state, active_profile = _active_profile()
+    state, active_profile = _active_profile(active_snapshot)
     active = set(active_profile.get("packs") or [])
     active_grant_bindings = _active_grant_bindings(state)
     required_pack_ids = _required_profile_pack_ids(binding.profile_id)

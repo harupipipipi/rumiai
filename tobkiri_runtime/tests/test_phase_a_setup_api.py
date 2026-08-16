@@ -6,6 +6,7 @@ PackAPIHandler のセットアップ API エンドポイントをテストする
 """
 
 import json
+from io import BytesIO
 from unittest.mock import MagicMock
 
 
@@ -290,6 +291,7 @@ class TestCompleteSetup:
         handler._setup_install_pack = MagicMock(
             return_value={"error": "retired", "status_code": 410}
         )
+        handler.wfile = BytesIO()
         handler._send_mapping_result = MagicMock()
         handler._send_response = MagicMock()
         PackAPIHandler.app_lifecycle_manager = MagicMock()

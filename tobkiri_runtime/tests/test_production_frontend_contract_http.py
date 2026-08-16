@@ -383,26 +383,26 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
     )
     assert install_status == 200, install_payload
 
-    original_load = profile_capture.ActivationStore.load_active_snapshot
-    store_load_count = 0
-    store_load_lock = threading.Lock()
-    store_load_entered = threading.Event()
-    release_store_load = threading.Event()
+    original_capture = profile_capture.capture_default_profile
+    capture_count = 0
+    capture_lock = threading.Lock()
+    capture_entered = threading.Event()
+    release_capture = threading.Event()
 
-    def delayed_store_load(store):
-        nonlocal store_load_count
-        with store_load_lock:
-            store_load_count += 1
-            first_load = store_load_count == 1
-        if first_load:
-            store_load_entered.set()
-            assert release_store_load.wait(timeout=2)
-        return original_load(store)
+    def delayed_capture(*args, **kwargs):
+        nonlocal capture_count
+        with capture_lock:
+            capture_count += 1
+            first_capture = capture_count == 1
+        if first_capture:
+            capture_entered.set()
+            assert release_capture.wait(timeout=2)
+        return original_capture(*args, **kwargs)
 
     monkeypatch.setattr(
-        profile_capture.ActivationStore,
-        "load_active_snapshot",
-        delayed_store_load,
+        profile_capture,
+        "capture_default_profile",
+        delayed_capture,
     )
 
     log_entered = threading.Event()
@@ -431,8 +431,8 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
     executor = ThreadPoolExecutor(max_workers=len(request_ids))
     try:
         responses = [executor.submit(revoke, request_id) for request_id in request_ids]
-        assert store_load_entered.wait(timeout=2)
-        release_store_load.set()
+        assert capture_entered.wait(timeout=2)
+        release_capture.set()
         assert log_entered.wait(timeout=FRONTEND_MUTATION_TIMEOUT_SECONDS)
         completed, pending = wait(
             responses,
@@ -458,7 +458,7 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
         assert server.server is not None
         assert server.server._active_requests > 0
     finally:
-        release_store_load.set()
+        release_capture.set()
         release_log.set()
         executor.shutdown(wait=True, cancel_futures=True)
         if server.server is not None:
@@ -469,7 +469,7 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
         api_logger.setLevel(original_log_level)
         delayed_log.close()
 
-    assert store_load_count == len(request_ids)
+    assert capture_count == len(request_ids) * 4
     assert all_denials_logged.wait(timeout=FRONTEND_MUTATION_TIMEOUT_SECONDS)
     assert denial_log_count == len(request_ids)
     audit_after_initial = len(authority.audit_events())

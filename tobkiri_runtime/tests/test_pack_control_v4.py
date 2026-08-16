@@ -149,30 +149,30 @@ def test_unapproved_revoke_does_not_hold_session_lock_during_slow_capture(
 
     session, _state_path, _user_data = captured_session
     _invoke(session, "pack.install", {"pack_id": TARGET_PACK})
-    original_load = profile_capture.ActivationStore.load_active_snapshot
+    current_active = capture_default_profile()
     blocked_thread_id: int | None = None
-    load_lock = threading.Lock()
-    load_started = threading.Event()
-    release_load = threading.Event()
+    capture_lock = threading.Lock()
+    capture_started = threading.Event()
+    release_capture = threading.Event()
 
-    def delayed_load(store):
+    def delayed_capture(*_args, **_kwargs):
         nonlocal blocked_thread_id
         current_thread_id = threading.get_ident()
-        with load_lock:
+        with capture_lock:
             if blocked_thread_id is None:
                 blocked_thread_id = current_thread_id
                 should_block = True
-                load_started.set()
+                capture_started.set()
             else:
                 should_block = current_thread_id == blocked_thread_id
         if should_block:
-            assert release_load.wait(timeout=2)
-        return original_load(store)
+            assert release_capture.wait(timeout=2)
+        return current_active
 
     monkeypatch.setattr(
-        profile_capture.ActivationStore,
-        "load_active_snapshot",
-        delayed_load,
+        profile_capture,
+        "capture_default_profile",
+        delayed_capture,
     )
     executor = ThreadPoolExecutor(max_workers=2)
     denied = executor.submit(
@@ -181,15 +181,64 @@ def test_unapproved_revoke_does_not_hold_session_lock_during_slow_capture(
         "approval.revoke",
         {"pack_id": TARGET_PACK},
     )
-    assert load_started.wait(timeout=2)
+    assert capture_started.wait(timeout=2)
     catalog = executor.submit(_invoke, session, "catalog.read")
     try:
         assert catalog.result(timeout=2)["profile_id"] == "defaults"
     finally:
-        release_load.set()
+        release_capture.set()
         executor.shutdown(wait=True, cancel_futures=True)
     with pytest.raises(PackControlUnapproved):
         denied.result(timeout=2)
+
+
+def test_slow_catalog_capture_does_not_own_the_control_session_lock(
+    captured_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Freshness I/O occurs before catalog projection takes the session lock."""
+
+    session, _state_path, _user_data = captured_session
+    _invoke(session, "pack.install", {"pack_id": TARGET_PACK})
+    current_active = capture_default_profile()
+    capture_started = threading.Event()
+    release_capture = threading.Event()
+    capture_calls = 0
+    capture_lock = threading.Lock()
+
+    def delayed_capture(*_args, **_kwargs):
+        nonlocal capture_calls
+        with capture_lock:
+            capture_calls += 1
+            should_block = capture_calls == 1
+        if should_block:
+            capture_started.set()
+            assert release_capture.wait(timeout=2)
+        return current_active
+
+    monkeypatch.setattr(
+        profile_capture,
+        "capture_default_profile",
+        delayed_capture,
+    )
+    executor = ThreadPoolExecutor(max_workers=2)
+    catalog = executor.submit(_invoke, session, "catalog.read")
+    try:
+        assert capture_started.wait(timeout=2)
+        assert session._lock.acquire(blocking=False)
+        session._lock.release()
+        denied = executor.submit(
+            _invoke,
+            session,
+            "approval.revoke",
+            {"pack_id": TARGET_PACK},
+        )
+        with pytest.raises(PackControlUnapproved):
+            denied.result(timeout=2)
+    finally:
+        release_capture.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+    assert catalog.result(timeout=2)["profile_id"] == "defaults"
 
 
 def test_enable_does_not_require_unrelated_pack_install_or_approval(

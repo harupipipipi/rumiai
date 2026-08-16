@@ -629,21 +629,26 @@ class PackAPIHandler(
                 from .bootstrap.profile_capture import profile_capture_scope
 
                 with profile_capture_scope():
-                    result = super()._setup_install_pack(body)
-                    if result.get("state") == "active" and bound_runtime_refresh is not None:
-                        try:
-                            bound_runtime_refresh(self.__class__._dispatch_session)
-                        except Exception:
-                            from .app_lifecycle_manager import mark_runtime_failed
+                    return super()._setup_install_pack(body)
 
-                            mark_runtime_failed("canonical runtime capture failed")
-                            return {
-                                "error": "Defaults runtime capture failed",
-                                "status_code": 503,
-                                "state": "runtime_capture_failed",
-                                "write_set": [],
-                            }
-                    return result
+            def _refresh_setup_runtime_after_response(
+                self,
+                result: Mapping[str, object],
+            ) -> None:
+                """Recapture committed setup state after flushing its receipt."""
+
+                if result.get("state") != "active" or bound_runtime_refresh is None:
+                    return
+                try:
+                    bound_runtime_refresh(self.__class__._dispatch_session)
+                except Exception as error:
+                    from .app_lifecycle_manager import mark_runtime_failed
+
+                    mark_runtime_failed("canonical runtime capture failed")
+                    logger.warning(
+                        "Canonical runtime recapture failed after setup response",
+                        exc_info=error,
+                    )
 
             @staticmethod
             def _fixed_web_mounts() -> tuple[WebMountEntry, ...]:
@@ -731,6 +736,14 @@ class PackAPIHandler(
 
     def _send_not_found(self) -> None:
         self._send_response(APIResponse(False, error="Not found"), 404)
+
+    def _refresh_setup_runtime_after_response(
+        self,
+        result: Mapping[str, object],
+    ) -> None:
+        """No-op unless a canonical server handler binds runtime recapture."""
+
+        del result
 
     def _send_contract_error(self, error: ContractRouteError) -> None:
         self._send_response(
@@ -1923,7 +1936,13 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
                 return
             body = self._parse_object_body()
             if body is not None:
-                self._send_mapping_result(self._setup_install_pack(body))
+                result = self._setup_install_pack(body)
+                self._send_mapping_result(result)
+                try:
+                    self.wfile.flush()
+                except self._CLIENT_DISCONNECT_EXCEPTIONS:
+                    self.close_connection = True
+                self._refresh_setup_runtime_after_response(result)
             return
         if path == "/api/v4/dispatch":
             self._discard_request_body()

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-import json
 import http.cookiejar
+import json
 import socket
+import threading
 import urllib.error
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -20,6 +22,7 @@ from core_runtime.bootstrap.runtime import Kernel
 from core_runtime.bootstrap.profile_capture import capture_default_profile
 from core_runtime.di_container import get_container
 from core_runtime.panel_auth import PanelAuthManager, reset_panel_auth_manager_for_tests
+from core_runtime.pack_api_server import PackAPIServer
 from tobkiri_host.broker import RequestBroker
 from tobkiri_host.runtime import V4DispatchSession
 
@@ -98,6 +101,29 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
     monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
     monkeypatch.setenv("RUMI_LOG_DIR", str(tmp_path / "logs"))
     reset_panel_auth_manager_for_tests(PanelAuthManager(bootstrap_secret="first-request-bootstrap"))
+    original_refresh = PackAPIServer._refresh_runtime_capture
+    refresh_entered = threading.Event()
+    release_refresh = threading.Event()
+    refresh_completed = threading.Event()
+
+    def delayed_refresh(
+        server: PackAPIServer,
+        activated_session=None,
+        *,
+        lifecycle_generation: int,
+    ) -> None:
+        refresh_entered.set()
+        assert release_refresh.wait(timeout=5)
+        try:
+            original_refresh(
+                server,
+                activated_session,
+                lifecycle_generation=lifecycle_generation,
+            )
+        finally:
+            refresh_completed.set()
+
+    monkeypatch.setattr(PackAPIServer, "_refresh_runtime_capture", delayed_refresh)
 
     kernel = Kernel()
     try:
@@ -132,8 +158,18 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
                 }
             ).encode(),
         )
-        with urlopen(request, timeout=5) as response:
-            activated = json.load(response)["data"]
+
+        def activate() -> dict[str, object]:
+            with urlopen(request, timeout=5) as response:
+                return json.load(response)["data"]
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            activation = executor.submit(activate)
+            assert refresh_entered.wait(timeout=5)
+            activated = activation.result(timeout=2)
+            assert not release_refresh.is_set()
+            release_refresh.set()
+        assert refresh_completed.wait(timeout=5)
         assert activated["state"] == "active"
         assert activated["audit_receipt"]["state"] == "committed"
         assert activated["audit_receipt"]["activation_id"] == activated["activation_id"]
@@ -178,6 +214,7 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
             ready = json.load(response)["data"]
         assert ready["runtime_ready"] is True
     finally:
+        release_refresh.set()
         kernel.shutdown()
 
 
