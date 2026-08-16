@@ -384,16 +384,16 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
     assert install_status == 200, install_payload
 
     original_capture = profile_capture.capture_default_profile
-    capture_count = 0
+    capture_blocked = False
     capture_lock = threading.Lock()
     capture_entered = threading.Event()
     release_capture = threading.Event()
 
     def delayed_capture(*args, **kwargs):
-        nonlocal capture_count
+        nonlocal capture_blocked
         with capture_lock:
-            capture_count += 1
-            first_capture = capture_count == 1
+            first_capture = not capture_blocked
+            capture_blocked = True
         if first_capture:
             capture_entered.set()
             assert release_capture.wait(timeout=2)
@@ -407,20 +407,28 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
 
     log_entered = threading.Event()
     all_denials_logged = threading.Event()
+    all_access_logged = threading.Event()
     release_log = threading.Event()
     denial_log_count = 0
+    access_log_count = 0
     denial_log_lock = threading.Lock()
 
     class DelayedDenialLog(logging.Handler):
         def emit(self, record: logging.LogRecord) -> None:
-            nonlocal denial_log_count
-            if record.getMessage().startswith("Contract dispatch denied"):
+            nonlocal access_log_count, denial_log_count
+            message = record.getMessage()
+            if message.startswith("Contract dispatch denied"):
                 with denial_log_lock:
                     denial_log_count += 1
                     if denial_log_count == len(request_ids):
                         all_denials_logged.set()
                 log_entered.set()
                 release_log.wait()
+            elif message.startswith("API:"):
+                with denial_log_lock:
+                    access_log_count += 1
+                    if access_log_count == len(request_ids) * 2:
+                        all_access_logged.set()
 
     delayed_log = DelayedDenialLog()
     api_logger = logging.getLogger("core_runtime.pack_api_server")
@@ -457,6 +465,16 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
         assert not all_denials_logged.is_set()
         assert server.server is not None
         assert server.server._active_requests > 0
+
+        # Exact terminal replay remains available while the original handlers
+        # are blocked only in post-response diagnostics.  This proves that the
+        # session, journal, and replay admission locks have all been released.
+        audit_after_initial = len(authority.audit_events())
+        with ThreadPoolExecutor(max_workers=len(request_ids)) as retry_executor:
+            replayed = list(retry_executor.map(revoke, request_ids))
+        assert replayed == initial
+        assert len(authority.audit_events()) == audit_after_initial
+        assert access_log_count == 0
     finally:
         release_capture.set()
         release_log.set()
@@ -469,19 +487,14 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
         api_logger.setLevel(original_log_level)
         delayed_log.close()
 
-    assert capture_count == len(request_ids) * 4
     assert all_denials_logged.wait(timeout=FRONTEND_MUTATION_TIMEOUT_SECONDS)
     assert denial_log_count == len(request_ids)
-    audit_after_initial = len(authority.audit_events())
+    assert all_access_logged.wait(timeout=FRONTEND_MUTATION_TIMEOUT_SECONDS)
+    assert access_log_count == len(request_ids) * 2
     worker_count = sum(
         thread.name.startswith("tobkiri-v4-request")
         for thread in threading.enumerate()
     )
-    with ThreadPoolExecutor(max_workers=len(request_ids)) as executor:
-        replayed = list(executor.map(revoke, request_ids))
-
-    assert replayed == initial
-    assert len(authority.audit_events()) == audit_after_initial
     assert sum(
         thread.name.startswith("tobkiri-v4-request")
         for thread in threading.enumerate()

@@ -14,6 +14,7 @@ from .api_response import APIResponse
 class ResponseWriterMixin(_HTTPHandlerBase):
     _panel_session_cookie: str | None
     _CLIENT_DISCONNECT_EXCEPTIONS: tuple[type[OSError], ...]
+    _completed_access_logs: list[tuple[int, int]]
 
     if TYPE_CHECKING:
         def _get_cors_origin(self, origin: str) -> str | None: ...
@@ -49,9 +50,24 @@ class ResponseWriterMixin(_HTTPHandlerBase):
             # Complete delivery before callers perform diagnostics or other
             # post-response cleanup that may contend under suite-wide load.
             self.wfile.flush()
-            self.log_request(status, len(data))
+            completed = getattr(self, "_completed_access_logs", None)
+            if completed is None:
+                completed = []
+                self._completed_access_logs = completed
+            completed.append((status, len(data)))
         except self._CLIENT_DISCONNECT_EXCEPTIONS:
             self.close_connection = True
+
+    def finish(self) -> None:
+        """Close the response before access logging can contend with delivery."""
+
+        try:
+            super().finish()
+        finally:
+            completed = getattr(self, "_completed_access_logs", ())
+            self._completed_access_logs = []
+            for status, length in completed:
+                self.log_request(status, length)
 
     def _send_raw_json(
         self,
