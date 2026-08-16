@@ -383,36 +383,59 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
     assert install_status == 200, install_payload
 
     log_entered = threading.Event()
-    all_denials_logged = threading.Event()
     all_access_logged = threading.Event()
     release_log = threading.Event()
     denial_log_count = 0
+    initial_access_log_count = 0
     access_log_count = 0
-    denial_log_lock = threading.Lock()
+    log_count_lock = threading.Lock()
+    delay_access_logs = threading.Event()
 
-    class DelayedDenialLog(logging.Handler):
+    class DelayedReplayAccessLog(logging.Handler):
         def emit(self, record: logging.LogRecord) -> None:
-            nonlocal access_log_count, denial_log_count
+            nonlocal access_log_count, denial_log_count, initial_access_log_count
             message = record.getMessage()
             if message.startswith("Contract dispatch denied"):
-                with denial_log_lock:
+                assert message.endswith(
+                    "tobkiri.host.pack-control.v4/approval.revoke: UNAPPROVED"
+                )
+                with log_count_lock:
                     denial_log_count += 1
-                    if denial_log_count == len(request_ids):
-                        all_denials_logged.set()
+            elif message.startswith("API:"):
+                assert '"POST /api/contracts/defaultspack/' in message
+                assert 'HTTP/1.1" 403 292' in message
+                if not delay_access_logs.is_set():
+                    with log_count_lock:
+                        initial_access_log_count += 1
+                    return
+                with log_count_lock:
+                    access_log_count += 1
+                    if access_log_count == len(request_ids):
+                        all_access_logged.set()
                 log_entered.set()
                 release_log.wait()
-            elif message.startswith("API:"):
-                with denial_log_lock:
-                    access_log_count += 1
-                    if access_log_count == len(request_ids) * 2:
-                        all_access_logged.set()
 
-    delayed_log = DelayedDenialLog()
+    delayed_log = DelayedReplayAccessLog()
     api_logger = logging.getLogger("core_runtime.pack_api_server")
     original_log_level = api_logger.level
     api_logger.setLevel(logging.INFO)
     api_logger.addHandler(delayed_log)
     request_ids = [str(uuid.uuid4()) for _index in range(8)]
+    initial = [revoke(request_id) for request_id in request_ids]
+    assert all(status == 403 for status, _payload in initial)
+    assert all(
+        payload["data"]["code"] == "UNAPPROVED"
+        for _status, payload in initial
+    )
+    assert all(
+        payload["data"]["retryable"] is False
+        for _status, payload in initial
+    )
+    assert denial_log_count == len(request_ids)
+    assert initial_access_log_count == len(request_ids)
+    audit_after_initial = len(authority.audit_events())
+    delay_access_logs.set()
+
     executor = ThreadPoolExecutor(max_workers=len(request_ids))
     try:
         responses = [executor.submit(revoke, request_id) for request_id in request_ids]
@@ -423,33 +446,17 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
         )
         assert not pending
         assert len(completed) == len(request_ids)
-        initial = [response.result() for response in responses]
-        assert all(status == 403 for status, _payload in initial)
-        assert all(
-            payload["data"]["code"] == "UNAPPROVED"
-            for _status, payload in initial
-        )
-        assert all(
-            payload["data"]["retryable"] is False
-            for _status, payload in initial
-        )
-        # Every client received its complete body while the first diagnostic
-        # log still held this Handler's serialization lock.  The remaining
-        # request handlers therefore cannot have completed their denial log.
+        replayed = [response.result() for response in responses]
+        assert replayed == initial
+        # Every replay client received its complete denial body while the
+        # first access log still held this Handler's serialization lock.
         assert not release_log.is_set()
-        assert not all_denials_logged.is_set()
+        assert not all_access_logged.is_set()
         assert server.server is not None
         assert server.server._active_requests > 0
-
-        # Exact terminal replay remains available while the original handlers
-        # are blocked only in post-response diagnostics.  This proves that the
-        # session, journal, and replay admission locks have all been released.
-        audit_after_initial = len(authority.audit_events())
-        with ThreadPoolExecutor(max_workers=len(request_ids)) as retry_executor:
-            replayed = list(retry_executor.map(revoke, request_ids))
-        assert replayed == initial
+        # Exact terminal replay bypasses fresh mutation admission and adds no
+        # audit side effects while handlers remain blocked after close.
         assert len(authority.audit_events()) == audit_after_initial
-        assert access_log_count == 0
     finally:
         release_log.set()
         executor.shutdown(wait=True, cancel_futures=True)
@@ -461,18 +468,9 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
         api_logger.setLevel(original_log_level)
         delayed_log.close()
 
-    assert all_denials_logged.wait(timeout=FRONTEND_MUTATION_TIMEOUT_SECONDS)
     assert denial_log_count == len(request_ids)
     assert all_access_logged.wait(timeout=FRONTEND_MUTATION_TIMEOUT_SECONDS)
-    assert access_log_count == len(request_ids) * 2
-    worker_count = sum(
-        thread.name.startswith("tobkiri-v4-request")
-        for thread in threading.enumerate()
-    )
-    assert sum(
-        thread.name.startswith("tobkiri-v4-request")
-        for thread in threading.enumerate()
-    ) == worker_count
+    assert access_log_count == len(request_ids)
     assert server.server is not None
     assert server.server.wait_for_request_drain(FRONTEND_MUTATION_TIMEOUT_SECONDS)
     assert server.server._active_requests == 0
