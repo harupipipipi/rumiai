@@ -784,7 +784,7 @@ def _validate_packaged_bundle_lock(root: Path) -> None:
         if relative in locked_paths:
             raise SealedEnvironmentError("Pack v4 bundle lock contains a duplicate path")
         kind = entry.get("kind")
-        if kind not in PACKAGED_APPLICATION_BUNDLE_ENTRY_KINDS:
+        if not isinstance(kind, str) or kind not in PACKAGED_APPLICATION_BUNDLE_ENTRY_KINDS:
             raise SealedEnvironmentError(
                 f"Pack v4 bundle lock contains an invalid kind: {relative}"
             )
