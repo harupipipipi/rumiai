@@ -153,6 +153,15 @@ PACKAGED_APPLICATION_CLOSURE_DIRECTORIES = (
     "ecosystem/defaultspack/v4",
     "ecosystem/defaultspack/platform-artifacts",
 )
+PACKAGED_APPLICATION_BUNDLE_LOCK = "ecosystem/defaultspack/v4/bundle.lock.json"
+PACKAGED_APPLICATION_BUNDLE_LOCK_SCHEMA = "io.tobkiri.defaultspack-bundle-lock.v1"
+PACKAGED_APPLICATION_BUNDLE_ENTRY_KINDS = {
+    "pack",
+    "base",
+    "shell",
+    "profile",
+    "executable_catalog",
+}
 
 
 @dataclass(frozen=True)
@@ -740,10 +749,104 @@ def _load_closure_json(root: Path, relative: str) -> dict[str, object]:
     return value
 
 
+def _safe_packaged_bundle_relative(value: object) -> str:
+    """Return one canonical relative path from a packaged bundle lock."""
+    if not isinstance(value, str) or not value or "\\" in value or "\x00" in value:
+        raise SealedEnvironmentError("Pack v4 bundle lock contains an unsafe path")
+    if value.startswith("/") or value.startswith("~"):
+        raise SealedEnvironmentError("Pack v4 bundle lock contains an unsafe path")
+    parts = value.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise SealedEnvironmentError("Pack v4 bundle lock contains an unsafe path")
+    if Path(value).as_posix() != value:
+        raise SealedEnvironmentError("Pack v4 bundle lock contains a non-canonical path")
+    return value
+
+
+def _validate_packaged_bundle_lock(root: Path) -> None:
+    """Bind every staged v4 file, including all locked executable catalogs."""
+    lock = _load_closure_json(root, PACKAGED_APPLICATION_BUNDLE_LOCK)
+    if set(lock) != {"schema", "entries"}:
+        raise SealedEnvironmentError("Pack v4 bundle lock has unknown or missing fields")
+    if lock.get("schema") != PACKAGED_APPLICATION_BUNDLE_LOCK_SCHEMA:
+        raise SealedEnvironmentError("Pack v4 bundle lock schema is unsupported")
+    entries = lock.get("entries")
+    if not isinstance(entries, list):
+        raise SealedEnvironmentError("Pack v4 bundle lock entries are invalid")
+
+    bundle_root = root / "ecosystem/defaultspack/v4"
+    locked_paths: set[str] = set()
+    locked_catalog_paths: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {"path", "kind", "digest"}:
+            raise SealedEnvironmentError("Pack v4 bundle lock contains an invalid entry")
+        relative = _safe_packaged_bundle_relative(entry.get("path"))
+        if relative in locked_paths:
+            raise SealedEnvironmentError("Pack v4 bundle lock contains a duplicate path")
+        kind = entry.get("kind")
+        if kind not in PACKAGED_APPLICATION_BUNDLE_ENTRY_KINDS:
+            raise SealedEnvironmentError(
+                f"Pack v4 bundle lock contains an invalid kind: {relative}"
+            )
+        digest = entry.get("digest")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != len("sha256:") + 64
+            or not digest.startswith("sha256:")
+            or not _is_sha256_identity(digest[7:])
+        ):
+            raise SealedEnvironmentError(
+                f"Pack v4 bundle lock contains an invalid digest: {relative}"
+            )
+        candidate = bundle_root / relative
+        _assert_regular_entry(candidate, bundle_root)
+        if _sha256_file(candidate) != digest[7:]:
+            raise SealedEnvironmentError(
+                f"Pack v4 bundle lock digest mismatch: {relative}"
+            )
+        locked_paths.add(relative)
+        if kind == "executable_catalog":
+            if not (
+                relative.startswith("packs/")
+                and relative.endswith(".executables.v4.json")
+            ):
+                raise SealedEnvironmentError(
+                    f"Pack v4 executable catalog path is invalid: {relative}"
+                )
+            locked_catalog_paths.add(relative)
+
+    actual_paths = {
+        relative
+        for relative, _path, kind, _metadata in _walk_tree(bundle_root)
+        if kind == "file" and relative != "bundle.lock.json"
+    }
+    if actual_paths != locked_paths:
+        missing = sorted(locked_paths - actual_paths)
+        extra = sorted(actual_paths - locked_paths)
+        raise SealedEnvironmentError(
+            "Pack v4 bundle inventory differs from its lock: "
+            f"missing={missing[:20]}, extra={extra[:20]}"
+        )
+    actual_catalog_paths = {
+        relative
+        for relative in actual_paths
+        if relative.startswith("packs/")
+        and relative.endswith(".executables.v4.json")
+    }
+    if actual_catalog_paths != locked_catalog_paths:
+        missing = sorted(locked_catalog_paths - actual_catalog_paths)
+        extra = sorted(actual_catalog_paths - locked_catalog_paths)
+        raise SealedEnvironmentError(
+            "Pack v4 executable catalog closure differs from its lock: "
+            f"missing={missing[:20]}, extra={extra[:20]}"
+        )
+
+
 def validate_packaged_application_closure(root: Path) -> list[dict[str, object]]:
     """Require a fully materialized selected Shell and its canonical closure."""
     root = _assert_root(root)
     records = _packaged_application_closure_records(root)
+    _validate_packaged_bundle_lock(root)
     index = _load_closure_json(root, "bundled/shell_artifact_index.v4.json")
     catalog = _load_closure_json(root, "bundled/presentation_catalog.json")
     artifact_id = index.get("artifact_id")

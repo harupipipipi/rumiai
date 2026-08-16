@@ -73,6 +73,13 @@
       "executable": false
     },
     {
+      "path": "ecosystem/defaultspack/executables.v4.json",
+      "type": "regular-file",
+      "size": 2697,
+      "sha256": "fa7c5475ff33672c47a29de999ad86662856cfc95a039d0debfcbf3c41b50f61",
+      "executable": false
+    },
+    {
       "path": "ecosystem/defaultspack/pack.v4.json",
       "type": "regular-file",
       "size": 3677,
@@ -1083,8 +1090,8 @@
     {
       "path": "scripts/generator_source_manifest.py",
       "type": "regular-file",
-      "size": 32564,
-      "sha256": "687687c5173bf8f909c701b9c8ad15bd62889d63f00ec022eea71d93d2b71fee",
+      "size": 32614,
+      "sha256": "34d35715814b502d5dde1ee861b2442c57955c632d2475438cd68f2d63fa5974",
       "executable": false
     },
     {

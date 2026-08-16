@@ -35,6 +35,7 @@ SOURCE_FILES = (
     "ecosystem/defaultspack/pack.v4.json",
     "ecosystem/defaultspack/contracts.v4.json",
     "ecosystem/defaultspack/artifact-index.v4.json",
+    "ecosystem/defaultspack/executables.v4.json",
 )
 MANIFEST_KEYS = ("schema", "roots", "files")
 FILE_KEYS = ("path", "type", "size", "sha256", "executable")

@@ -101,6 +101,26 @@ def _fixture(root: Path) -> tuple[Path, Path, Path]:
     return checkout, bundle, artifact
 
 
+def test_relocated_source_checkout_preserves_all_locked_catalog_sidecars(
+    tmp_path: Path,
+) -> None:
+    """The source snapshot includes every lock-bound catalog and its root catalog."""
+    checkout, bundle, _ = _fixture(tmp_path / "catalog-closure")
+    lock = json.loads((bundle / "bundle.lock.json").read_text(encoding="utf-8"))
+    expected = {
+        entry["path"]: entry["digest"]
+        for entry in lock["entries"]
+        if entry["kind"] == "executable_catalog"
+    }
+    assert len(expected) == 63
+    source_root = checkout / "tobkiri_runtime"
+    assert (source_root / "ecosystem/defaultspack/executables.v4.json").is_file()
+    for relative, digest in expected.items():
+        candidate = source_root / "ecosystem/defaultspack/v4" / relative
+        assert candidate.is_file()
+        assert f"sha256:{hashlib.sha256(candidate.read_bytes()).hexdigest()}" == digest
+
+
 def _source_contract(checkout: Path) -> dict[str, str]:
     """Return the one formal provenance file bound to the relocated snapshot."""
     return {

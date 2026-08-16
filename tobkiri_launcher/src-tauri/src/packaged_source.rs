@@ -25,6 +25,7 @@ const FILES: &[&str] = &[
     "ecosystem/defaultspack/pack.v4.json",
     "ecosystem/defaultspack/contracts.v4.json",
     "ecosystem/defaultspack/artifact-index.v4.json",
+    "ecosystem/defaultspack/executables.v4.json",
 ];
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_SOURCE_BYTES: u64 = 256 * 1024 * 1024;

@@ -55,7 +55,10 @@ def _packaged_application_closure(base: Path) -> Path:
         "ecosystem/defaultspack/artifact-index.v4.json": {"artifacts": []},
         "ecosystem/defaultspack/executables.v4.json": {"executables": []},
         "ecosystem/defaultspack/v4/defaults.profile.v4.json": {"profile_id": "defaults"},
-        "ecosystem/defaultspack/v4/bundle.lock.json": {"entries": []},
+        "ecosystem/defaultspack/v4/bundle.lock.json": {
+            "schema": BUILDER.PACKAGED_APPLICATION_BUNDLE_LOCK_SCHEMA,
+            "entries": [],
+        },
         "ecosystem/defaultspack/v4/shell.fixture.default.shell.v1.json": {
             "provider_id": "shell.fixture.default",
             "availability": "verified",
@@ -80,6 +83,32 @@ def _packaged_application_closure(base: Path) -> Path:
     for index in range(28):
         extra = platform.parent / f"closure-{index:02d}.json"
         extra.write_text(f'{{"index":{index}}}\n', encoding="utf-8")
+    bundle_root = app / "ecosystem/defaultspack/v4"
+    lock_path = bundle_root / "bundle.lock.json"
+    entries = []
+    for path in sorted(bundle_root.rglob("*")):
+        if not path.is_file() or path.name == lock_path.name:
+            continue
+        relative = path.relative_to(bundle_root).as_posix()
+        kind = "profile" if path.name == "defaults.profile.v4.json" else "shell"
+        entries.append(
+            {
+                "path": relative,
+                "kind": kind,
+                "digest": f"sha256:{BUILDER._sha256_file(path)}",
+            }
+        )
+    lock_path.write_text(
+        json.dumps(
+            {
+                "schema": BUILDER.PACKAGED_APPLICATION_BUNDLE_LOCK_SCHEMA,
+                "entries": entries,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     for relative in (
         "app.py",
         "ecosystem/defaultspack/defaultspack/desktop_app.py",
@@ -90,6 +119,26 @@ def _packaged_application_closure(base: Path) -> Path:
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(source.read_bytes())
     return app
+
+
+def _add_locked_catalog(application: Path) -> tuple[Path, Path]:
+    """Add one lock-bound catalog to the synthetic packaged closure."""
+    bundle_root = application / "ecosystem/defaultspack/v4"
+    relative = "packs/fixture.executables.v4.json"
+    catalog = bundle_root / relative
+    catalog.parent.mkdir(parents=True, exist_ok=True)
+    catalog.write_bytes(b'{"fixture_catalog":true}\n')
+    lock_path = bundle_root / "bundle.lock.json"
+    lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    lock["entries"].append(
+        {
+            "path": relative,
+            "kind": "executable_catalog",
+            "digest": f"sha256:{BUILDER._sha256_file(catalog)}",
+        }
+    )
+    lock_path.write_text(json.dumps(lock, sort_keys=True) + "\n", encoding="utf-8")
+    return catalog, lock_path
 
 
 def _run_reseal(sealed: Path, application: Path, target: str) -> subprocess.CompletedProcess[str]:
@@ -145,6 +194,34 @@ def test_application_reseal_cli_replaces_stale_pre_generation_copy(tmp_path: Pat
     assert f"TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256={new_manifest}" in result.stdout
     BUILDER.validate_environment(sealed, target, run_native_smoke=False)
     BUILDER.verify_packaged_application_closure(application, sealed)
+
+
+@pytest.mark.parametrize("mutation", ("missing", "tampered", "extra", "symlink", "lock_drift"))
+def test_packaged_closure_binds_every_locked_executable_catalog(
+    tmp_path: Path, mutation: str
+) -> None:
+    """The sealed closure rejects catalog omissions and lock/tree divergence."""
+    application = _packaged_application_closure(tmp_path / "outer")
+    catalog, lock_path = _add_locked_catalog(application)
+    if mutation == "missing":
+        catalog.unlink()
+    elif mutation == "tampered":
+        catalog.write_bytes(b'{"fixture_catalog":false}\n')
+    elif mutation == "extra":
+        extra = catalog.with_name("extra.executables.v4.json")
+        extra.write_bytes(b'{"extra_catalog":true}\n')
+    elif mutation == "symlink":
+        catalog.unlink()
+        outside = tmp_path / "outside-catalog.json"
+        outside.write_bytes(b"outside\n")
+        catalog.symlink_to(outside)
+    else:
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        lock["entries"][-1]["digest"] = "sha256:" + "0" * 64
+        lock_path.write_text(json.dumps(lock, sort_keys=True) + "\n", encoding="utf-8")
+
+    with pytest.raises(BUILDER.SealedEnvironmentError):
+        BUILDER.validate_packaged_application_closure(application)
 
 
 def test_application_reseal_stage_is_outside_source_and_sealed_root(

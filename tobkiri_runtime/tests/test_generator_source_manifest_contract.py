@@ -159,3 +159,11 @@ def test_source_manifest_rejects_generated_python_bytecode(
     bytecode.write_bytes(b"ignored attacker bytecode")
     with pytest.raises(ValueError, match="generated Python bytecode"):
         generator_source_manifest.build_source_manifest(root)
+
+
+def test_source_manifest_declares_root_executable_catalog_sidecar() -> None:
+    """The packaged source closure must copy the root v4 catalog into staging."""
+    relative = "ecosystem/defaultspack/executables.v4.json"
+    assert relative in generator_source_manifest.SOURCE_FILES
+    manifest = generator_source_manifest.load_source_manifest()
+    assert any(entry["path"] == relative for entry in manifest["files"])

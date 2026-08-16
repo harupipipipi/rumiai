@@ -1712,6 +1712,7 @@ mod tests {
             "ecosystem/defaultspack/pack.v4.json",
             "ecosystem/defaultspack/contracts.v4.json",
             "ecosystem/defaultspack/artifact-index.v4.json",
+            "ecosystem/defaultspack/executables.v4.json",
         ] {
             let path = runtime_root.join(relative);
             let metadata = fs::symlink_metadata(&path).expect("source file should exist");
