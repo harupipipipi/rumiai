@@ -713,13 +713,21 @@ def test_profile_ceremony_uses_four_canonical_broker_operations(
         if item.get("role") != "application"
     ]
 
-    def post(target: str, body: Mapping[str, object]):
+    def post(
+        target: str,
+        body: Mapping[str, object],
+        *,
+        request_id: str | None = None,
+    ):
         return _request(
             server,
             "POST",
             _contract("POST", target),
             body=body,
-            headers={**headers, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+            headers={
+                **headers,
+                "X-Tobkiri-Request-ID": request_id or str(uuid.uuid4()),
+            },
         )
 
     status, resolved, _ = post(
@@ -776,12 +784,21 @@ def test_profile_ceremony_uses_four_canonical_broker_operations(
         "load_active_snapshot",
         counted_load,
     )
+    assert server.handler_class is not None
+    monkeypatch.setattr(
+        server.handler_class,
+        "_runtime_refresh",
+        staticmethod(lambda _session: None),
+    )
+    activation_request_id = str(uuid.uuid4())
+    activation_body = {
+        "approval_id": approved["data"]["approval_id"],
+        "approval_digest": approved["data"]["approval_digest"],
+    }
     status, activated, _ = post(
         "/api/runtime-surface/profile-change/activate",
-        {
-            "approval_id": approved["data"]["approval_id"],
-            "approval_digest": approved["data"]["approval_digest"],
-        },
+        activation_body,
+        request_id=activation_request_id,
     )
     assert status == 200, activated
     assert activated["data"]["state"] == "active"
@@ -790,15 +807,27 @@ def test_profile_ceremony_uses_four_canonical_broker_operations(
     # authority check.  No additional capture_default_profile store read is
     # allowed in the worker after the mutation recapture populated the scope.
     assert read_worker_capture_loads == []
+    journal = server._operation_journal
+    assert journal is not None
+    replay_mutating_calls: list[str] = []
+
+    def unexpected_replay_renew(*_args, **_kwargs) -> None:
+        replay_mutating_calls.append("renew_session")
+
+    def unexpected_replay_begin(*_args, **_kwargs):
+        replay_mutating_calls.append("begin_operation")
+        return {}, False
+
+    monkeypatch.setattr(journal, "renew_session", unexpected_replay_renew)
+    monkeypatch.setattr(journal, "begin_operation", unexpected_replay_begin)
     status, replayed, _ = post(
         "/api/runtime-surface/profile-change/activate",
-        {
-            "approval_id": approved["data"]["approval_id"],
-            "approval_digest": approved["data"]["approval_digest"],
-        },
+        activation_body,
+        request_id=activation_request_id,
     )
     assert status == 200, replayed
     assert replayed["data"] == activated["data"]
+    assert replay_mutating_calls == []
 
 
 def test_mutation_status_reconciles_lost_response_and_exact_approval_retry(
@@ -1030,6 +1059,73 @@ def test_contract_replay_unknown_and_stale_capture_fail_closed(
     with pytest.raises(Exception, match="stale|epoch"):
         stale_server.start()
     assert stale_server.server is None
+
+
+def test_stale_fresh_mutation_has_no_journal_admission_side_effects(
+    production_server,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server, _session, authority = production_server
+    cookie, csrf, origin = _authenticate(server)
+    status, profile, _ = _request(
+        server,
+        "GET",
+        _contract("GET", "/api/runtime-surface/profile"),
+        headers={"Cookie": cookie, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+    )
+    assert status == 200, profile
+    envelope = profile["data"]
+    desired = [
+        item["pack_id"]
+        for item in envelope["data"]["profile_document"]["packs"]
+        if item.get("role") != "application"
+    ]
+    journal = server._operation_journal
+    assert journal is not None
+    assert not journal.path.exists()
+    mutating_calls: list[str] = []
+    lookup_calls: list[str] = []
+    original_lookup = journal.lookup_operation
+
+    def counted_lookup(**kwargs):
+        lookup_calls.append(str(kwargs["request_id"]))
+        return original_lookup(**kwargs)
+
+    def unexpected_renew(*_args, **_kwargs) -> None:
+        mutating_calls.append("renew_session")
+
+    def unexpected_begin(*_args, **_kwargs):
+        mutating_calls.append("begin_operation")
+        return {}, False
+
+    monkeypatch.setattr(journal, "lookup_operation", counted_lookup)
+    monkeypatch.setattr(journal, "renew_session", unexpected_renew)
+    monkeypatch.setattr(journal, "begin_operation", unexpected_begin)
+    authority.advance_security_epoch("reject stale fresh mutation")
+
+    status, rejected, _ = _request(
+        server,
+        "POST",
+        _contract("POST", "/api/runtime-surface/profile-change/resolve"),
+        body={
+            "profile_id": "defaults",
+            "expected_profile_revision": envelope["profile_revision"],
+            "expected_plan_digest": envelope["plan_digest"],
+            "desired_pack_ids": desired,
+        },
+        headers={
+            "Cookie": cookie,
+            "Origin": origin,
+            "X-Rumi-CSRF": csrf,
+            "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+        },
+    )
+
+    assert status == 503, rejected
+    assert rejected["data"]["code"] == "API_FAILURE"
+    assert len(lookup_calls) == 1
+    assert mutating_calls == []
+    assert not journal.path.exists()
 
 
 def test_replayed_mutation_without_record_is_filesystem_immutable(

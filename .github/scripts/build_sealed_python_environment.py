@@ -789,18 +789,21 @@ def _validate_packaged_bundle_lock(root: Path) -> None:
                 f"Pack v4 bundle lock contains an invalid kind: {relative}"
             )
         digest = entry.get("digest")
+        digest_algorithm, digest_separator, digest_value = (
+            digest.partition(":") if isinstance(digest, str) else ("", "", "")
+        )
         if (
             not isinstance(digest, str)
-            or len(digest) != len("sha256:") + 64
-            or not digest.startswith("sha256:")
-            or not _is_sha256_identity(digest[7:])
+            or digest_algorithm != "sha256"
+            or digest_separator != ":"
+            or not _is_sha256_identity(digest_value)
         ):
             raise SealedEnvironmentError(
                 f"Pack v4 bundle lock contains an invalid digest: {relative}"
             )
         candidate = bundle_root / relative
         _assert_regular_entry(candidate, bundle_root)
-        if _sha256_file(candidate) != digest[7:]:
+        if _sha256_file(candidate) != digest_value:
             raise SealedEnvironmentError(
                 f"Pack v4 bundle lock digest mismatch: {relative}"
             )

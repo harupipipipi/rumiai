@@ -2021,6 +2021,7 @@ mod tests {
             "pack.v4.json",
             "contracts.v4.json",
             "artifact-index.v4.json",
+            "executables.v4.json",
             "runtime/conversation.py",
             "defaultspack/desktop_app.py",
             "defaultspack/frontend_contract_map.v4.json",

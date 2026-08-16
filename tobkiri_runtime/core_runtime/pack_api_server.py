@@ -875,30 +875,16 @@ class PackAPIHandler(
         payload["_session_id"] = session_id
         operation_record: Mapping[str, Any] | None = None
         operation_journal = self._operation_journal
-        if operation_journal is not None:
+        if method.upper() == "GET" and operation_journal is not None:
             try:
                 operation_journal.renew_session(
                     session_id,
                     expires_at=time.time() + session_ttl_seconds,
                 )
             except ControlReconciliationCapacityError:
-                if method.upper() != "GET":
-                    self._send_reconciliation_capacity_error()
-                    return True
+                pass
             except (ControlReconciliationUnavailableError, ControlReconciliationError):
-                if method.upper() != "GET":
-                    self._send_response(
-                        APIResponse(
-                            False,
-                            data={
-                                "state": "contract_dispatch_denied",
-                                "code": "operation_reconciliation_unavailable",
-                            },
-                            error="Control operation reconciliation is unavailable",
-                        ),
-                        503,
-                    )
-                    return True
+                pass
         if method.upper() == "GET":
             try:
                 fresh_get = replay_guard.consume(
@@ -931,6 +917,86 @@ class PackAPIHandler(
                     "payload": payload,
                 }
             )
+            try:
+                operation_record = operation_journal.lookup_operation(
+                    request_id=request_id,
+                    session_id=session_id,
+                    operation_id=target.operation_id,
+                    contract_id=target.contract_id,
+                    request_digest=request_digest,
+                )
+            except ControlReconciliationConflictError:
+                self._send_response(
+                    APIResponse(
+                        False,
+                        data={
+                            "state": "contract_dispatch_denied",
+                            "code": "operation_reconciliation_mismatch",
+                        },
+                        error="Control operation conflicts with durable state",
+                    ),
+                    409,
+                )
+                return True
+            except (ControlReconciliationUnavailableError, ControlReconciliationError):
+                self._send_response(
+                    APIResponse(
+                        False,
+                        data={
+                            "state": "contract_dispatch_denied",
+                            "code": "operation_reconciliation_unavailable",
+                        },
+                        error="Control operation reconciliation is unavailable",
+                    ),
+                    503,
+                )
+                return True
+            if operation_record is not None:
+                state = str(operation_record["state"])
+                prior_result = operation_record.get("result")
+                if state in {"succeeded", "failed"} and isinstance(
+                    prior_result, Mapping
+                ):
+                    self._send_contract_outcome(route_binding, prior_result)
+                    return True
+            try:
+                # Only an exact durable terminal result may bypass freshness.
+                # Unknown and pending requests must prove the capture current
+                # before any replay admission, renewal, or journal write.
+                session.assert_current()
+            except (
+                HostCoreError,
+                KeyError,
+                OSError,
+                RuntimeError,
+                ValueError,
+            ) as error:
+                public_result = _public_error_result(_exception_error_code(error))
+                self._send_contract_outcome(route_binding, public_result)
+                if public_result["code"] == RuntimeSurfaceErrorCode.UNAPPROVED.value:
+                    logger.info(
+                        "Contract dispatch denied for %s/%s: %s",
+                        target.contract_id,
+                        target.operation_id,
+                        public_result["code"],
+                    )
+                else:
+                    logger.warning(
+                        "Contract dispatch failed for %s/%s",
+                        target.contract_id,
+                        target.operation_id,
+                        exc_info=error,
+                    )
+                return True
+            if operation_record is not None:
+                self._send_response(
+                    APIResponse(
+                        str(operation_record["state"]) == "pending",
+                        data=dict(operation_record),
+                    ),
+                    200 if str(operation_record["state"]) == "pending" else 409,
+                )
+                return True
             replay_capacity_exhausted = False
             try:
                 fresh = replay_guard.consume(
@@ -941,37 +1007,31 @@ class PackAPIHandler(
             except _RequestReplayCapacityError:
                 fresh = False
                 replay_capacity_exhausted = True
-            try:
-                if fresh:
-                    operation_record, created = operation_journal.begin_operation(
-                        request_id=request_id,
-                        session_id=session_id,
-                        operation_id=target.operation_id,
-                        contract_id=target.contract_id,
-                        request_digest=request_digest,
-                        session_expires_at=time.time() + session_ttl_seconds,
-                    )
+            if not fresh:
+                if replay_capacity_exhausted:
+                    self._send_replay_capacity_error()
                 else:
-                    existing = operation_journal.lookup_operation(
-                        request_id=request_id,
-                        session_id=session_id,
-                        operation_id=target.operation_id,
-                        contract_id=target.contract_id,
-                        request_digest=request_digest,
+                    self._send_response(
+                        APIResponse(
+                            False,
+                            error="Canonical request identity is replayed",
+                        ),
+                        409,
                     )
-                    if existing is None:
-                        if replay_capacity_exhausted:
-                            self._send_replay_capacity_error()
-                        else:
-                            self._send_response(
-                                APIResponse(
-                                    False,
-                                    error="Canonical request identity is replayed",
-                                ),
-                                409,
-                            )
-                        return True
-                    operation_record, created = existing, False
+                return True
+            try:
+                operation_journal.renew_session(
+                    session_id,
+                    expires_at=time.time() + session_ttl_seconds,
+                )
+                operation_record, created = operation_journal.begin_operation(
+                    request_id=request_id,
+                    session_id=session_id,
+                    operation_id=target.operation_id,
+                    contract_id=target.contract_id,
+                    request_digest=request_digest,
+                    session_expires_at=time.time() + session_ttl_seconds,
+                )
             except ControlReconciliationCapacityError:
                 self._send_reconciliation_capacity_error()
                 return True
@@ -1004,7 +1064,9 @@ class PackAPIHandler(
             if not created:
                 state = str(operation_record["state"])
                 prior_result = operation_record.get("result")
-                if state in {"succeeded", "failed"} and isinstance(prior_result, Mapping):
+                if state in {"succeeded", "failed"} and isinstance(
+                    prior_result, Mapping
+                ):
                     self._send_contract_outcome(route_binding, prior_result)
                 else:
                     self._send_response(
