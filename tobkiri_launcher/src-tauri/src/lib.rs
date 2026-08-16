@@ -19,6 +19,7 @@ mod presentation;
 mod process_utils;
 mod python_env;
 mod runtime_resource_integrity;
+mod runtime_resource_paths;
 mod sealed_python;
 #[allow(dead_code)]
 mod sealed_python_protocol;

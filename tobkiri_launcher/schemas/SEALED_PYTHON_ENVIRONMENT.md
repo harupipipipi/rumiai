@@ -17,6 +17,15 @@ itself is excluded from that inventory; every other regular file is included.
 Links, special files, duplicates, missing files, extra files, writable
 executables, and non-canonical paths are rejected.
 
+Outer resource-manifest keys are always relative to `{resource_dir}/app`.
+For a sealed application entry `app/X`, the sole outer key is
+`python-runtime/app/X`, and the application snapshot key is `X`. These three
+domains are mapped exactly; unprefixed outer keys, alternate prefixes, and
+fallback lookups are invalid. Runtime resource paths are slash-separated,
+printable ASCII relative paths. Empty, dot, parent, backslash, colon, Unicode,
+and ASCII-case-ambiguous paths are rejected before hashing. Every inventoried
+regular file must have exactly one filesystem link.
+
 The fixed layout includes `runtime/`, `venv/`, `app/kernel_entry.py`,
 `app/defaultspack_entry.py`, `app/host_helper_entry.py`, `sentinels/`, and
 `lease.v1`. The interpreter is `venv/bin/python3` on Unix and

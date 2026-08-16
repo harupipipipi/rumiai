@@ -657,15 +657,73 @@ def _resource_files(dest_root: Path) -> list[Path]:
     """Return the exact regular-file inventory used by the resource seal."""
     verify_no_python_bytecode(dest_root)
     files: list[Path] = []
+    ambiguity_keys: set[str] = set()
     for path in dest_root.rglob("*"):
+        relative = path.relative_to(dest_root).as_posix()
         if path.is_symlink():
             raise RuntimeError(
                 "Staged resource contains symlink: "
-                f"{path.relative_to(dest_root).as_posix()}"
+                f"{relative}"
             )
-        if path.is_file() and path.name != RUNTIME_RESOURCE_MANIFEST:
-            files.append(path)
+        metadata = path.stat(follow_symlinks=False)
+        if stat.S_ISDIR(metadata.st_mode):
+            continue
+        if not stat.S_ISREG(metadata.st_mode):
+            raise RuntimeError(f"Staged resource contains special file: {relative}")
+        if path.name == RUNTIME_RESOURCE_MANIFEST:
+            continue
+        canonical = canonical_runtime_resource_path(relative)
+        assert_runtime_resource_path_unambiguous(canonical, ambiguity_keys)
+        if metadata.st_nlink != 1:
+            raise RuntimeError(f"Staged runtime resource is hardlinked: {canonical}")
+        files.append(path)
     return sorted(files, key=lambda item: item.relative_to(dest_root).as_posix())
+
+
+def canonical_runtime_resource_path(value: str) -> str:
+    """Validate one printable-ASCII path relative to ``Resources/app``."""
+    parts = value.split("/")
+    if (
+        not value
+        or not value.isascii()
+        or value.startswith("/")
+        or value.endswith("/")
+        or "\\" in value
+        or any(not 0x20 <= ord(character) <= 0x7E for character in value)
+        or any(
+            not part or part in {".", ".."} or ":" in part
+            for part in parts
+        )
+    ):
+        raise RuntimeError(
+            f"Runtime resource path is not a canonical portable relative: {value!r}"
+        )
+    return value
+
+
+def assert_runtime_resource_path_unambiguous(
+    value: str,
+    ambiguity_keys: set[str],
+) -> None:
+    """Reject a second portable path with the same ASCII-case identity."""
+    ambiguity_key = value.lower()
+    if ambiguity_key in ambiguity_keys:
+        raise RuntimeError(
+            "Staged runtime resource paths are ambiguous by ASCII case"
+        )
+    ambiguity_keys.add(ambiguity_key)
+
+
+def sealed_application_resource_paths(sealed_path: str) -> tuple[str, str]:
+    """Map sealed ``app/X`` to its sole outer and application path domains."""
+    sealed = canonical_runtime_resource_path(sealed_path)
+    if not sealed.startswith("app/"):
+        raise RuntimeError("Sealed application path is outside the exact app domain")
+    application = canonical_runtime_resource_path(sealed.removeprefix("app/"))
+    outer = canonical_runtime_resource_path(
+        f"{SEALED_PYTHON_RESOURCE_DIR}/{sealed}"
+    )
+    return outer, application
 
 
 def verify_no_python_bytecode(dest_root: Path) -> None:
@@ -688,9 +746,19 @@ def build_runtime_resource_manifest(dest_root: Path) -> dict[str, object]:
     entries = []
     for path in _resource_files(dest_root):
         payload = path.read_bytes()
+        relative = canonical_runtime_resource_path(
+            path.relative_to(dest_root).as_posix()
+        )
+        sealed_prefix = f"{SEALED_PYTHON_RESOURCE_DIR}/app/"
+        if relative.startswith(sealed_prefix):
+            outer, _application = sealed_application_resource_paths(
+                relative.removeprefix(f"{SEALED_PYTHON_RESOURCE_DIR}/")
+            )
+            if outer != relative:
+                raise RuntimeError("Sealed application resource domain is inconsistent")
         entries.append(
             {
-                "path": path.relative_to(dest_root).as_posix(),
+                "path": relative,
                 "size": len(payload),
                 "sha256": hashlib.sha256(payload).hexdigest(),
             }
@@ -720,6 +788,8 @@ def verify_runtime_resource_manifest(dest_root: Path) -> dict[str, object]:
         raise FileNotFoundError(
             f"Runtime resource manifest is missing or unsafe: {manifest_path}"
         )
+    if manifest_path.stat(follow_symlinks=False).st_nlink != 1:
+        raise RuntimeError("Runtime resource manifest is hardlinked")
     try:
         actual = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -737,12 +807,20 @@ def runtime_resource_expected_tree(
     if not isinstance(entries, list):
         raise RuntimeError("Runtime resource manifest entries are invalid")
     expected = {RUNTIME_RESOURCE_MANIFEST: False}
+    ambiguity_keys = {RUNTIME_RESOURCE_MANIFEST.lower()}
     for entry in entries:
         if not isinstance(entry, Mapping):
             raise RuntimeError("Runtime resource manifest entry is invalid")
         relative = entry.get("path")
-        if not isinstance(relative, str) or not relative:
+        if not isinstance(relative, str):
             raise RuntimeError("Runtime resource manifest path is invalid")
+        relative = canonical_runtime_resource_path(relative)
+        ambiguity_key = relative.lower()
+        if ambiguity_key in ambiguity_keys:
+            raise RuntimeError(
+                "Runtime resource manifest paths are ambiguous by ASCII case"
+            )
+        ambiguity_keys.add(ambiguity_key)
         if relative in expected:
             raise RuntimeError(
                 "Runtime resource manifest contains a duplicate path"

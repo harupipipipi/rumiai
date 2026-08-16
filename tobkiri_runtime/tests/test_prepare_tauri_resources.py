@@ -845,6 +845,65 @@ def test_staged_bootstrap_import_and_resource_manifest_are_self_contained(tmp_pa
             path.chmod(0o755 if path.is_dir() else 0o644)
 
 
+def test_runtime_manifest_uses_packaged_sealed_application_path_domain(tmp_path):
+    """Python generation matches the Rust path binding from the real artifact."""
+    module = _load_prepare_tauri_resources()
+    fixture = json.loads(
+        (
+            ROOT
+            / "tobkiri_launcher/schemas/runtime-resource-path-binding.v1.json"
+        ).read_text(encoding="utf-8")
+    )
+    stage = tmp_path / "app"
+    target = stage / fixture["outer_path"]
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"artifact-layout-fixture\n")
+
+    outer, application = module.sealed_application_resource_paths(
+        fixture["sealed_path"]
+    )
+    manifest = module.build_runtime_resource_manifest(stage)
+    paths = [entry["path"] for entry in manifest["entries"]]
+
+    assert outer == fixture["outer_path"]
+    assert application == fixture["application_path"]
+    assert paths == [fixture["outer_path"]]
+    assert fixture["application_path"] not in paths
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        "app/../defaultspack_entry.py",
+        "app//defaultspack_entry.py",
+        "app\\defaultspack_entry.py",
+        "application/defaultspack_entry.py",
+        "app/é.py",
+    ),
+)
+def test_runtime_resource_path_mapping_rejects_ambiguous_domains(value):
+    module = _load_prepare_tauri_resources()
+    with pytest.raises(RuntimeError):
+        module.sealed_application_resource_paths(value)
+
+
+def test_runtime_resource_manifest_rejects_case_collision_and_hardlink(tmp_path):
+    module = _load_prepare_tauri_resources()
+    ambiguity_keys: set[str] = set()
+    module.assert_runtime_resource_path_unambiguous("Entry.py", ambiguity_keys)
+    with pytest.raises(RuntimeError, match="ambiguous by ASCII case"):
+        module.assert_runtime_resource_path_unambiguous("entry.py", ambiguity_keys)
+
+    if os.name != "nt":
+        stage = tmp_path / "app"
+        stage.mkdir()
+        outside = tmp_path / "outside.py"
+        outside.write_text("shared\n", encoding="utf-8")
+        os.link(outside, stage / "entry.py")
+        with pytest.raises(RuntimeError, match="hardlinked"):
+            module.build_runtime_resource_manifest(stage)
+
+
 @pytest.mark.parametrize("case", ("missing", "tampered", "symlink", "unlisted"))
 def test_validate_bundle_rejects_host_package_drift(tmp_path, case):
     module = _load_prepare_tauri_resources()

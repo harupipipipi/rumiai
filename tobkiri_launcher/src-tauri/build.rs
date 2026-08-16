@@ -9,6 +9,8 @@ mod artifact_integrity;
 mod packaged_source;
 #[path = "src/packaging_toolchain.rs"]
 mod packaging_toolchain;
+#[path = "src/runtime_resource_paths.rs"]
+mod runtime_resource_paths;
 #[allow(dead_code)]
 #[path = "src/sealed_python_protocol.rs"]
 mod sealed_python_protocol;
@@ -612,7 +614,16 @@ fn collect_runtime_resource_files(root: &Path, current: &Path) -> io::Result<Vec
         } else if metadata.is_file()
             && path.file_name().and_then(|name| name.to_str()) != Some(RUNTIME_RESOURCE_MANIFEST)
         {
+            reject_release_hardlink(&metadata, &path)?;
             files.push(path.strip_prefix(root).unwrap_or(&path).to_path_buf());
+        } else if !metadata.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "staged runtime resource may not be special: {}",
+                    path.display()
+                ),
+            ));
         }
     }
     files.sort_by_key(|path| portable_relative_path(path));
@@ -1434,12 +1445,36 @@ fn verify_canonical_host_package(staged_root: &Path, source_root: &Path) -> io::
 }
 
 fn write_runtime_resource_manifest(staged_root: &Path) -> io::Result<()> {
+    let mut ambiguity_keys = std::collections::BTreeSet::new();
     let entries = collect_runtime_resource_files(staged_root, staged_root)?
         .into_iter()
         .map(|relative| {
+            let portable = portable_relative_path(&relative);
+            let canonical = runtime_resource_paths::CanonicalResourcePath::parse(&portable)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+            if let Some(application) = canonical.as_str().strip_prefix("python-runtime/app/") {
+                let sealed = format!("app/{application}");
+                let binding =
+                    runtime_resource_paths::SealedApplicationResourceBinding::from_sealed_path(
+                        &sealed,
+                    )
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+                if binding.outer != canonical {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "sealed application resource domain is inconsistent",
+                    ));
+                }
+            }
+            if !ambiguity_keys.insert(canonical.ambiguity_key()) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "runtime resource paths are ambiguous by ASCII case",
+                ));
+            }
             let payload = fs::read(staged_root.join(&relative))?;
             Ok(serde_json::json!({
-                "path": portable_relative_path(&relative),
+                "path": canonical.as_str(),
                 "size": payload.len(),
                 "sha256": format!("{:x}", Sha256::digest(&payload)),
             }))
@@ -5552,6 +5587,29 @@ mod tests {
                 "lib/i18n/index.ts",
             ]
         );
+    }
+
+    #[test]
+    fn runtime_manifest_rejects_case_unicode_and_hardlink_ambiguity() {
+        let upper = runtime_resource_paths::CanonicalResourcePath::parse("Entry.py").unwrap();
+        let lower = runtime_resource_paths::CanonicalResourcePath::parse("entry.py").unwrap();
+        let mut ambiguity_keys = std::collections::BTreeSet::new();
+        assert!(ambiguity_keys.insert(upper.ambiguity_key()));
+        assert!(!ambiguity_keys.insert(lower.ambiguity_key()));
+
+        let unicode_tree = TestTree::new("runtime-manifest-unicode");
+        fs::write(unicode_tree.path().join("é.py"), b"unicode\n").unwrap();
+        assert!(write_runtime_resource_manifest(unicode_tree.path()).is_err());
+
+        #[cfg(unix)]
+        {
+            let hardlink_tree = TestTree::new("runtime-manifest-hardlink");
+            let outside = hardlink_tree.path().join("outside.py");
+            fs::write(&outside, b"shared\n").unwrap();
+            fs::create_dir_all(hardlink_tree.path().join("app")).unwrap();
+            fs::hard_link(&outside, hardlink_tree.path().join("app/entry.py")).unwrap();
+            assert!(write_runtime_resource_manifest(hardlink_tree.path()).is_err());
+        }
     }
 
     #[test]

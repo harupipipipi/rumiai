@@ -90,6 +90,14 @@ sealed validator separately rejects missing, extra, tampered, symlinked, or
 hardlinked entries; the Rust build script then rechecks the same manifest and
 exact inventory before binding the resource.
 
+The outer runtime manifest uses one path domain: every key is relative to
+`{resource_dir}/app`. A sealed `app/X` entry therefore binds only to outer
+`python-runtime/app/X`; after snapshotting, its application-manifest key is
+`X`. Packaging and runtime verification use this typed three-domain mapping
+without prefix stripping, alternate candidates, or compatibility fallback.
+Portable resource keys are printable ASCII with `/` separators and are unique
+after ASCII case folding, preventing filesystem case and Unicode ambiguity.
+
 The manifest has only the fixed top-level fields and fixed nested field sets
 defined in `.github/schemas/sealed-python-environment.v1.schema.json`.
 Its provenance `kind` is `pinned-python-build-standalone-v1` on macOS,

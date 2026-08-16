@@ -36,7 +36,8 @@ use crate::sealed_python_protocol as protocol;
 
 pub const MANIFEST_SCHEMA: &str = "io.tobkiri.sealed-python-environment.v1";
 pub const ATTESTATION_SCHEMA: &str = protocol::ATTESTATION_SCHEMA;
-pub const RESOURCE_DIRECTORY: &str = "python-runtime";
+pub const RESOURCE_DIRECTORY: &str =
+    crate::runtime_resource_paths::SEALED_PYTHON_RESOURCE_DIRECTORY;
 pub const MANIFEST_FILENAME: &str = "sealed-environment.v1.json";
 const DIRECTORY_MODES_FILENAME: &str = "sealed-directory-modes.v1.json";
 const DIRECTORY_MODES_SCHEMA: &str = "io.tobkiri.sealed-python-directory-modes.v1";
@@ -1169,22 +1170,11 @@ fn build_runtime_overlay(
         .iter()
         .filter(|entry| entry.path.starts_with("app/"))
     {
-        let outer_path = Path::new(&sealed_entry.path)
-            .strip_prefix("app")
-            .context("sealed application entry is not below app")?;
-        let outer_entry = outer_manifest.entry(outer_path).with_context(|| {
-            format!(
-                "[PYTHON_SEALED_SNAPSHOT_INVALID] outer runtime manifest omits sealed application resource: {}",
-                outer_path.display()
-            )
-        })?;
-        if outer_entry.size != sealed_entry.size || outer_entry.sha256 != sealed_entry.sha256 {
-            bail!(
-                "[PYTHON_SEALED_SNAPSHOT_INVALID] outer and sealed application bindings differ: {}",
-                outer_path.display()
-            );
-        }
-        entries.push(outer_entry.clone());
+        entries.push(outer_manifest.bind_sealed_application(
+            &sealed_entry.path,
+            sealed_entry.size,
+            &sealed_entry.sha256,
+        )?);
     }
     entries.sort_by(|left, right| left.path.cmp(&right.path));
     if entries.is_empty() {
@@ -3032,7 +3022,7 @@ mod tests {
             ),
         ];
         for (relative, payload) in resources {
-            let path = root.join(relative);
+            let path = root.join("python-runtime/app").join(relative);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, payload).unwrap();
         }
@@ -3040,7 +3030,7 @@ mod tests {
             .iter()
             .map(|(path, payload)| {
                 serde_json::json!({
-                    "path": path,
+                    "path": format!("python-runtime/app/{path}"),
                     "size": payload.len(),
                     "sha256": sha256_bytes(payload),
                 })
@@ -3072,10 +3062,41 @@ mod tests {
             document["entries"].as_array().unwrap().len(),
             resources.len()
         );
+        assert_eq!(document["entries"][0]["path"], "core_runtime/bootstrap.py");
         assert_eq!(document["overlay"]["outer_manifest_sha256"], outer.sha256());
 
         sealed.files[0].sha256 = digest('0');
         assert!(build_runtime_overlay(&sealed, &digest('9'), &outer).is_err());
+
+        let legacy_root = root.join("legacy-domain");
+        fs::create_dir_all(legacy_root.join("core_runtime")).unwrap();
+        fs::write(
+            legacy_root.join("core_runtime/bootstrap.py"),
+            b"bootstrap\n",
+        )
+        .unwrap();
+        fs::write(
+            legacy_root.join(crate::runtime_resource_integrity::MANIFEST_NAME),
+            serde_json::to_vec(&serde_json::json!({
+                "schema": "io.tobkiri.runtime-resource-manifest.v1",
+                "entries": [{
+                    "path": "core_runtime/bootstrap.py",
+                    "size": 10,
+                    "sha256": sha256_bytes(b"bootstrap\n"),
+                }],
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let legacy_outer = crate::runtime_resource_integrity::verify(&legacy_root).unwrap();
+        let mut legacy_sealed = minimal_manifest();
+        legacy_sealed.files = vec![SealedFile {
+            path: "app/core_runtime/bootstrap.py".into(),
+            size: 10,
+            sha256: sha256_bytes(b"bootstrap\n"),
+            executable: false,
+        }];
+        assert!(build_runtime_overlay(&legacy_sealed, &digest('9'), &legacy_outer).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 
