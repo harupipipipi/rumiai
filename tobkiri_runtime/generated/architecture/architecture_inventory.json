@@ -7995,6 +7995,8 @@
       "tobkiri_runtime/tobkiri_protocol/durability.py",
       "tobkiri_runtime/tobkiri_protocol/errors.py",
       "tobkiri_runtime/tobkiri_protocol/fixtures/ambiguous_profile.v3.json",
+      "tobkiri_runtime/tobkiri_protocol/fixtures/defaults_setup_v4.canonical.json",
+      "tobkiri_runtime/tobkiri_protocol/fixtures/defaults_setup_v4.pre_fix_binding_shape.json",
       "tobkiri_runtime/tobkiri_protocol/fixtures/duplicate_request.json",
       "tobkiri_runtime/tobkiri_protocol/fixtures/legacy_profile.v3.json",
       "tobkiri_runtime/tobkiri_protocol/fixtures/legacy_profile.yaml",
@@ -8016,6 +8018,7 @@
       "tobkiri_runtime/tobkiri_protocol/schemas/common_v1.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/composition_catalog_v4.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/contract_v4.schema.json",
+      "tobkiri_runtime/tobkiri_protocol/schemas/defaults_setup_v4.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/distribution_v1.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/executable_catalog_v4.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/external_normal_pack_catalog_v4.schema.json",
@@ -18394,8 +18397,8 @@
     ]
   },
   "repository": {
-    "commit": "3f642252e8ed65a57e39d97296363a68daebdf0a",
-    "tree_digest": "fed9d7a78b88ab8c3b9156eb4060add61a60e3709ee16335f37e6b095f1cd390"
+    "commit": "58836db762f9f03a3f205f17eea323ca1e6d8a4f",
+    "tree_digest": "e8f35bb6c3e32eb80c0325ad05c077df937ee1a8e679b93c1b94c86bc87b701f"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
   "schema": "io.tobkiri.architecture.inventory.v1"
