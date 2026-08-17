@@ -97,28 +97,28 @@
       "path": "ecosystem/defaultspack/v4/bundle.lock.json",
       "type": "regular-file",
       "size": 26526,
-      "sha256": "35a3aef6442453ffb8dedc4cc9ab5ad4631670a3821580e3eb8c20cd8a02c82a",
+      "sha256": "5b270efc9fb6b86d79192806905a13790515bfb92ba52f8d09b5f1520b63f76c",
       "executable": false
     },
     {
       "path": "ecosystem/defaultspack/v4/defaults-basepack.base.v1.json",
       "type": "regular-file",
-      "size": 2376,
-      "sha256": "b4e1551231b9082f1d506ad1003b76c98defd27a2a8f86c7dbfdff9441532469",
+      "size": 2348,
+      "sha256": "91f27300f3188519e9fa4de375637a43ff0eaede7d9fbf3a9a5fc5aaaccd8859",
       "executable": false
     },
     {
       "path": "ecosystem/defaultspack/v4/defaults.profile.v4.json",
       "type": "regular-file",
-      "size": 42567,
-      "sha256": "0897bda91789c8758391ba487d89ace9a8bb15227fb829d6e6c220439807b810",
+      "size": 42539,
+      "sha256": "daa56478ec45f5c03f5fad5c7684577b10832b6ab022db212051a61502f779cc",
       "executable": false
     },
     {
       "path": "ecosystem/defaultspack/v4/packs/defaults-basepack.pack.v4.json",
       "type": "regular-file",
-      "size": 2537,
-      "sha256": "17b3583c4537e42ac81c1905d00659e62c6d3d44c81dc15c82bdb2f0372d70da",
+      "size": 2509,
+      "sha256": "e2e10d829f25b8dc7e421091f42d62b8ab02a12fd92abe6d9dbf874e17290f83",
       "executable": false
     },
     {
@@ -138,8 +138,8 @@
     {
       "path": "ecosystem/defaultspack/v4/packs/dev.tauri.toolchain.default.pack.v4.json",
       "type": "regular-file",
-      "size": 3900,
-      "sha256": "852748a89f367293b7680beb5503bb0caa07eac2d633c34d80a74faf1a8df0da",
+      "size": 3872,
+      "sha256": "0d63253d5d48849da38db756a20370a5cfeb9976f5ad33b4ea992bd4cfaa66c3",
       "executable": false
     },
     {
@@ -985,22 +985,22 @@
     {
       "path": "ecosystem/defaultspack/v4/packs/runtime.tauri.application.default.pack.v4.json",
       "type": "regular-file",
-      "size": 3937,
-      "sha256": "285bd9b630e3d353257edad34ab3e60538792cf96c7eb908819e83c588ab5e84",
+      "size": 3909,
+      "sha256": "a6ef4a89d1cfbb5e866de6ddfdbd611c07b32876ff3a38948313b21df348bd01",
       "executable": false
     },
     {
       "path": "ecosystem/defaultspack/v4/packs/shell.cli.default.pack.v4.json",
       "type": "regular-file",
-      "size": 3536,
-      "sha256": "aafd45ac9b756d1f0462a6a1f329f0aa487472ae2b33f5167996c2c15dc93fba",
+      "size": 3508,
+      "sha256": "25b122f99fa60d74d3d5b71857ba148d1c260c75507874282ef8b812d3ed3f06",
       "executable": false
     },
     {
       "path": "ecosystem/defaultspack/v4/packs/shell.tauri.default.pack.v4.json",
       "type": "regular-file",
-      "size": 4615,
-      "sha256": "6d5b2b447248a4d51334ca614adf11677da8e73327af49701d042c2a4583e352",
+      "size": 4587,
+      "sha256": "f3484508a06ea3e122bd70304f0c9fd0846fd2bfaf265c4cc28162648b4ce64f",
       "executable": false
     },
     {
@@ -1034,15 +1034,15 @@
     {
       "path": "ecosystem/defaultspack/v4/shell.cli.default.shell.v1.json",
       "type": "regular-file",
-      "size": 2491,
-      "sha256": "141ca2f6f7ef9b14a63f48698f20b165b86cc4bed39f8beb976c5e11c85ca8a5",
+      "size": 2463,
+      "sha256": "7fbf5610f38c660cb3c6ce287c885cb91d2c8a6b346c8b717a0b05288178142f",
       "executable": false
     },
     {
       "path": "ecosystem/defaultspack/v4/shell.tauri.default.shell.v1.json",
       "type": "regular-file",
-      "size": 3368,
-      "sha256": "c5a240cb6c4ca679d6eb0c2394ff19649a83b24b953acc8c5325d2a0a44834d6",
+      "size": 3340,
+      "sha256": "049fbb419f5b8ae391daf0b91c88ce8a164bd850947140cb505be6c1fdda29d5",
       "executable": false
     },
     {
@@ -1147,7 +1147,7 @@
       "path": "scripts/quality/evidence/complete_v4_migration_red_64b2240e.json",
       "type": "regular-file",
       "size": 72746,
-      "sha256": "75e158acf8dcc14b9ca4f63dd095dea7b564327934fa3bfcaf5ab6264c3b413c",
+      "sha256": "1a7fa7e3beaba50031ea56c2a6152613114112d0a9602296e11ea10d27a89502",
       "executable": false
     },
     {
