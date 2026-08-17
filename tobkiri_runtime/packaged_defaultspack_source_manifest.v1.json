@@ -1312,6 +1312,20 @@
       "executable": false
     },
     {
+      "path": "tobkiri_protocol/fixtures/defaults_setup_v4.canonical.json",
+      "type": "regular-file",
+      "size": 3757,
+      "sha256": "eb670110381a5fb44ce30efdf86d48ce0e77342eb27a85701ffa2e7c9d5e6fca",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/fixtures/defaults_setup_v4.pre_fix_binding_shape.json",
+      "type": "regular-file",
+      "size": 1395,
+      "sha256": "39c41257291c6457d7b9dda27bef15ee7a398defa6ef819d28882a9c38d370b6",
+      "executable": false
+    },
+    {
       "path": "tobkiri_protocol/fixtures/duplicate_request.json",
       "type": "regular-file",
       "size": 88,
@@ -1456,6 +1470,13 @@
       "type": "regular-file",
       "size": 4217,
       "sha256": "88762c00128d0aa861cae38cc5d6f686ac5e5c73b9d8a0ea790f8b3e529c14c8",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/defaults_setup_v4.schema.json",
+      "type": "regular-file",
+      "size": 6998,
+      "sha256": "c3a7c3b591000397e9bcb87f5c83d629e246e703e32bb6bb0df67e80f53a14e0",
       "executable": false
     },
     {
@@ -1615,8 +1636,8 @@
     {
       "path": "tobkiri_protocol/validation.py",
       "type": "regular-file",
-      "size": 19852,
-      "sha256": "2856dfaf6bc0ffaad43b003ce90c1ab59ab661c7319fffbc665d8c5a7e52ccb8",
+      "size": 20127,
+      "sha256": "d9359b13b939298d91114d33ccc06805f9029341f03b3316cdf12e1d2288adf7",
       "executable": false
     }
   ]

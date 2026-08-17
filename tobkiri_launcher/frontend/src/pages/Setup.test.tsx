@@ -5,6 +5,7 @@ import test from 'node:test';
 import React from 'react';
 import {renderToString} from 'react-dom/server';
 import {MemoryRouter, Route, Routes} from 'react-router';
+import {parseDefaultsSetupState} from '../lib/defaultsSetup';
 import {DefaultsReview} from './DefaultsReview';
 
 const setupSource = readFileSync(resolve(import.meta.dirname, 'Setup.tsx'), 'utf8');
@@ -52,7 +53,7 @@ test('setup activation is explicit and followed by selected presentation materia
   assert.match(setupSource, /activateDefaultsProfile/);
   const reviewSource = readFileSync(resolve(import.meta.dirname, 'DefaultsReview.tsx'), 'utf8');
   assert.match(reviewSource, /type="checkbox"/);
-  assert.match(reviewSource, /disabled=\{!reviewed \|\| activating \|\| activationCommitted\}/);
+  assert.match(reviewSource, /disabled=\{!reviewed \|\| activating \|\| !canActivate\}/);
   assert.match(reviewSource, /previous confirmation will not be submitted again/);
   assert.match(setupSource, /PresentationSelector/);
   assert.match(setupSource, /selectPresentation/);
@@ -69,6 +70,26 @@ test('setup activation is explicit and followed by selected presentation materia
   assert.match(setupSource, /activateDefaultsWithRecovery/);
   assert.match(setupSource, /recoverDefaultsActivation/);
   assert.match(setupSource, /fetchAuthoritativeSetup: fetchDefaultsSetupState/);
+});
+
+test('activation denial remains visible and disables confirmation controls', () => {
+  const fixture = JSON.parse(readFileSync(new URL(
+    '../../../../tobkiri_runtime/tobkiri_protocol/fixtures/defaults_setup_v4.canonical.json',
+    import.meta.url,
+  ), 'utf8'));
+  fixture.state = 'activation_denied';
+  fixture.denial_diagnostic = 'Profile revision is stale';
+  const html = renderToString(<DefaultsReview
+    setup={parseDefaultsSetupState(fixture)}
+    reviewed={false}
+    activating={false}
+    error={null}
+    onReviewedChange={() => undefined}
+    onActivate={() => undefined}
+  />);
+
+  assert.match(html, /Profile revision is stale/);
+  assert.match(html, /disabled=""/);
 });
 
 test('reconfirmation setup copy exposes only the Host-owned bootstrap ceremony', () => {

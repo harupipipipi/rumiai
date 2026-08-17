@@ -1,4 +1,19 @@
 import {apiFetch} from './api';
+import {
+  DEFAULTS_BASE_KEYS,
+  DEFAULTS_BINDING_DOMAIN_KINDS,
+  DEFAULTS_BINDING_EXECUTION_KINDS,
+  DEFAULTS_BINDING_KEYS,
+  DEFAULTS_CONFIRMATION_KEYS,
+  DEFAULTS_CONFIRMED_SHELL_KEYS,
+  DEFAULTS_FUNCTION_PRINCIPAL_KEYS,
+  DEFAULTS_PACK_KEYS,
+  DEFAULTS_PROFILE_KEYS,
+  DEFAULTS_PROFILE_SHELL_KEYS,
+  DEFAULTS_REQUIRED_TRANSACTION,
+  DEFAULTS_SETUP_KEYS,
+  DEFAULTS_SETUP_STATES,
+} from './generatedDefaultsSetupContract';
 
 export type DefaultsBinding = {
   readonly pack_id: string;
@@ -6,6 +21,13 @@ export type DefaultsBinding = {
   readonly contract_id: string;
   readonly operation_id: string;
   readonly domain_kind: string;
+  readonly executable_catalog_digest: string;
+  readonly variant_id: string;
+  readonly platform: string;
+  readonly architecture: string;
+  readonly runtime_abi: string;
+  readonly backend: string;
+  readonly execution_kind: string;
   readonly caller_function_id: string;
   readonly authority_reference: string;
   readonly requested_scope_digest: string;
@@ -47,7 +69,7 @@ export type DefaultsConfirmation = {
 
 export type DefaultsSetupState = {
   readonly setup_api_version: 'io.tobkiri.setup-state.v4';
-  readonly state: 'review_required' | 'active';
+  readonly state: 'review_required' | 'active' | 'activation_denied';
   readonly denial_diagnostic: string | null;
   readonly recommended_default_profile: {
     readonly profile_id: 'defaults';
@@ -115,6 +137,12 @@ function nonEmptyString(value: unknown, label: string): void {
   }
 }
 
+function enumString(value: unknown, choices: readonly string[], label: string): void {
+  if (typeof value !== 'string' || !choices.includes(value)) {
+    throw new Error(`${label} is invalid`);
+  }
+}
+
 function positiveSafeInteger(value: unknown, label: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
     throw new Error(`${label} is invalid`);
@@ -138,53 +166,42 @@ function reservationId(value: unknown, label: string): string {
   return value as string;
 }
 
-const REQUIRED_TRANSACTION = [
-  'catalog.verify',
-  'profile.resolve',
-  'authority.snapshot',
-  'activation.prepare',
-  'activation.commit',
-  'runtime.capture',
-] as const;
-
 export function parseDefaultsSetupState(value: unknown): DefaultsSetupState {
   const state = object(value, 'Defaults setup response');
-  exactKeys(state, [
-    'setup_api_version', 'state', 'denial_diagnostic', 'packs',
-    'recommended_default_profile', 'required_transaction',
-  ], 'Defaults setup response');
+  exactKeys(state, DEFAULTS_SETUP_KEYS, 'Defaults setup response');
   exactString(state.setup_api_version, 'io.tobkiri.setup-state.v4', 'Defaults setup API');
-  if (state.state !== 'review_required' && state.state !== 'active') {
-    throw new Error('Defaults setup state is invalid');
-  }
+  enumString(state.state, DEFAULTS_SETUP_STATES, 'Defaults setup state');
   if (state.denial_diagnostic !== null && typeof state.denial_diagnostic !== 'string') {
     throw new Error('Defaults setup denial diagnostic is invalid');
   }
+  if (state.state === 'active' && state.denial_diagnostic !== null) {
+    throw new Error('Active Defaults setup cannot carry a denial diagnostic');
+  }
+  if (state.state === 'activation_denied'
+    && (typeof state.denial_diagnostic !== 'string' || !state.denial_diagnostic)) {
+    throw new Error('Denied Defaults setup requires a diagnostic');
+  }
   if (
     !Array.isArray(state.required_transaction)
-    || state.required_transaction.length !== REQUIRED_TRANSACTION.length
-    || state.required_transaction.some((step, index) => step !== REQUIRED_TRANSACTION[index])
+    || state.required_transaction.length !== DEFAULTS_REQUIRED_TRANSACTION.length
+    || state.required_transaction.some(
+      (step, index) => step !== DEFAULTS_REQUIRED_TRANSACTION[index],
+    )
   ) {
     throw new Error('Defaults setup transaction is invalid');
   }
   const profile = object(state.recommended_default_profile, 'Defaults Profile');
-  exactKeys(profile, [
-    'available', 'profile_id', 'name', 'base_pack', 'shell', 'pack_ids',
-    'packs', 'conversation_provider', 'confirmation',
-  ], 'Defaults Profile');
+  exactKeys(profile, DEFAULTS_PROFILE_KEYS, 'Defaults Profile');
   exactString(profile.profile_id, 'defaults', 'Defaults Profile identity');
   exactString(profile.base_pack, 'defaults-basepack', 'Defaults base identity');
   if (profile.available !== true) throw new Error('Defaults Profile is unavailable');
   nonEmptyString(profile.name, 'Defaults Profile name');
   const shell = object(profile.shell, 'Defaults Shell');
+  exactKeys(shell, DEFAULTS_PROFILE_SHELL_KEYS, 'Defaults Shell');
   exactString(shell.provider_id, 'shell.tauri.default', 'Defaults Shell provider');
   exactString(shell.contract_id, 'app.shell.v1', 'Defaults Shell contract');
   const confirmation = object(profile.confirmation, 'Defaults confirmation');
-  exactKeys(confirmation, [
-    'confirmation_api_version', 'operation_id', 'profile_id', 'catalog_revision',
-    'profile_revision', 'plan_digest', 'authority_snapshot_digest',
-    'security_epoch', 'base', 'shell', 'bindings', 'confirmation_digest',
-  ], 'Defaults confirmation');
+  exactKeys(confirmation, DEFAULTS_CONFIRMATION_KEYS, 'Defaults confirmation');
   exactString(
     confirmation.confirmation_api_version,
     'io.tobkiri.defaults-confirmation.v1',
@@ -200,15 +217,12 @@ export function parseDefaultsSetupState(value: unknown): DefaultsSetupState {
     throw new Error('Defaults SecurityEpoch is invalid');
   }
   const base = object(confirmation.base, 'Confirmed base');
-  exactKeys(base, ['pack_id', 'artifact_digest', 'definition_digest'], 'Confirmed base');
+  exactKeys(base, DEFAULTS_BASE_KEYS, 'Confirmed base');
   exactString(base.pack_id, 'defaults-basepack', 'Confirmed base identity');
   digest(base.artifact_digest, 'Confirmed base artifact digest');
   digest(base.definition_digest, 'Confirmed base definition digest');
   const confirmedShell = object(confirmation.shell, 'Confirmed Shell');
-  exactKeys(confirmedShell, [
-    'provider_id', 'pack_id', 'artifact_digest', 'executable_artifact_digest',
-    'contract_id', 'definition_digest',
-  ], 'Confirmed Shell');
+  exactKeys(confirmedShell, DEFAULTS_CONFIRMED_SHELL_KEYS, 'Confirmed Shell');
   exactString(confirmedShell.provider_id, 'shell.tauri.default', 'Confirmed Shell provider');
   exactString(confirmedShell.pack_id, 'shell.tauri.default', 'Confirmed Shell identity');
   exactString(confirmedShell.contract_id, 'app.shell.v1', 'Confirmed Shell contract');
@@ -220,17 +234,24 @@ export function parseDefaultsSetupState(value: unknown): DefaultsSetupState {
   digest(confirmedShell.definition_digest, 'Confirmed Shell definition digest');
   const bindings = confirmation.bindings;
   if (!Array.isArray(bindings)) throw new Error('Defaults bindings are invalid');
+  const bindingIdentities = new Set<string>();
   const conversation = bindings.filter((item) => {
     const binding = object(item, 'Defaults binding');
-    exactKeys(binding, [
-      'caller_function_id', 'pack_id', 'artifact_digest', 'function_principal',
-      'contract_id', 'operation_id', 'domain_kind', 'authority_reference',
-      'requested_scope_digest', 'adapter_digests',
-    ], 'Defaults binding');
-    for (const field of ['pack_id', 'contract_id', 'operation_id', 'domain_kind', 'caller_function_id']) {
+    exactKeys(binding, DEFAULTS_BINDING_KEYS, 'Defaults binding');
+    for (const field of [
+      'pack_id', 'contract_id', 'operation_id', 'caller_function_id',
+      'variant_id', 'platform', 'architecture', 'runtime_abi', 'backend',
+    ]) {
       nonEmptyString(binding[field], `Defaults binding ${field}`);
     }
     digest(binding.artifact_digest, 'Defaults binding artifact digest');
+    digest(binding.executable_catalog_digest, 'Defaults binding executable catalog digest');
+    enumString(binding.domain_kind, DEFAULTS_BINDING_DOMAIN_KINDS, 'Defaults binding domain');
+    enumString(
+      binding.execution_kind,
+      DEFAULTS_BINDING_EXECUTION_KINDS,
+      'Defaults binding execution kind',
+    );
     if (
       typeof binding.authority_reference !== 'string'
       || !/^authority-ref:[0-9a-f]{64}$/.test(binding.authority_reference)
@@ -239,14 +260,12 @@ export function parseDefaultsSetupState(value: unknown): DefaultsSetupState {
     }
     digest(binding.requested_scope_digest, 'Defaults binding requested scope digest');
     if (!Array.isArray(binding.adapter_digests)
-      || binding.adapter_digests.some((item) => !/^sha256:[0-9a-f]{64}$/.test(String(item)))) {
+      || binding.adapter_digests.some((item) => !/^sha256:[0-9a-f]{64}$/.test(String(item)))
+      || new Set(binding.adapter_digests).size !== binding.adapter_digests.length) {
       throw new Error('Defaults binding adapter digests are invalid');
     }
     const principal = object(binding.function_principal, 'Defaults function principal');
-    exactKeys(principal, [
-      'parent_artifact_digest', 'function_implementation_digest', 'function_id',
-      'contract_revision_digest', 'operation_id',
-    ], 'Defaults function principal');
+    exactKeys(principal, DEFAULTS_FUNCTION_PRINCIPAL_KEYS, 'Defaults function principal');
     digest(principal.parent_artifact_digest, 'Defaults function parent artifact digest');
     digest(principal.function_implementation_digest, 'Defaults function implementation digest');
     nonEmptyString(principal.function_id, 'Defaults function id');
@@ -257,6 +276,16 @@ export function parseDefaultsSetupState(value: unknown): DefaultsSetupState {
     if (principal.operation_id !== binding.operation_id) {
       throw new Error('Defaults function operation binding is invalid');
     }
+    const bindingIdentity = JSON.stringify([
+      binding.caller_function_id,
+      principal.function_id,
+      binding.contract_id,
+      binding.operation_id,
+    ]);
+    if (bindingIdentities.has(bindingIdentity)) {
+      throw new Error('Defaults bindings contain a duplicate identity');
+    }
+    bindingIdentities.add(bindingIdentity);
     return binding.contract_id === 'conversation.turn.v1' && binding.operation_id === 'complete';
   });
   if (conversation.length !== 1) {
@@ -285,7 +314,7 @@ export function parseDefaultsSetupState(value: unknown): DefaultsSetupState {
   }
   for (const [index, item] of profile.packs.entries()) {
     const pack = object(item, 'Defaults selected Pack');
-    exactKeys(pack, ['pack_id', 'display_name'], 'Defaults selected Pack');
+    exactKeys(pack, DEFAULTS_PACK_KEYS, 'Defaults selected Pack');
     nonEmptyString(pack.pack_id, 'Defaults selected Pack identity');
     nonEmptyString(pack.display_name, 'Defaults selected Pack name');
     if (pack.pack_id !== profile.pack_ids[index]) {
@@ -299,7 +328,7 @@ export function parseDefaultsSetupState(value: unknown): DefaultsSetupState {
   }
   for (const [index, item] of topLevelPacks.entries()) {
     const pack = object(item, 'Defaults setup Pack');
-    exactKeys(pack, ['pack_id', 'display_name'], 'Defaults setup Pack');
+    exactKeys(pack, DEFAULTS_PACK_KEYS, 'Defaults setup Pack');
     nonEmptyString(pack.pack_id, 'Defaults setup Pack identity');
     nonEmptyString(pack.display_name, 'Defaults setup Pack name');
     const selectedPack = object(profile.packs[index], 'Defaults selected Pack');

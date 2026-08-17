@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import {
   parseDefaultsActivationResponse,
@@ -6,73 +7,17 @@ import {
   type DefaultsConfirmation,
 } from './defaultsSetup';
 
+const canonicalFixture = JSON.parse(readFileSync(new URL(
+  '../../../../tobkiri_runtime/tobkiri_protocol/fixtures/defaults_setup_v4.canonical.json',
+  import.meta.url,
+), 'utf8'));
+const preFixBindingFixture = JSON.parse(readFileSync(new URL(
+  '../../../../tobkiri_runtime/tobkiri_protocol/fixtures/defaults_setup_v4.pre_fix_binding_shape.json',
+  import.meta.url,
+), 'utf8'));
+
 function state() {
-  return {
-    setup_api_version: 'io.tobkiri.setup-state.v4',
-    state: 'review_required',
-    denial_diagnostic: null,
-    packs: [{pack_id: 'defaultspack', display_name: 'Tobkiri Defaults'}],
-    required_transaction: [
-      'catalog.verify',
-      'profile.resolve',
-      'authority.snapshot',
-      'activation.prepare',
-      'activation.commit',
-      'runtime.capture',
-    ],
-    recommended_default_profile: {
-      available: true,
-      profile_id: 'defaults',
-      name: 'Tobkiri Defaults',
-      base_pack: 'defaults-basepack',
-      shell: {provider_id: 'shell.tauri.default', contract_id: 'app.shell.v1'},
-      pack_ids: ['defaultspack'],
-      packs: [{pack_id: 'defaultspack', display_name: 'Tobkiri Defaults'}],
-      conversation_provider: 'defaultspack.conversation',
-      confirmation: {
-        confirmation_api_version: 'io.tobkiri.defaults-confirmation.v1',
-        operation_id: 'defaults.activate',
-        profile_id: 'defaults',
-        catalog_revision: `sha256:${'1'.repeat(64)}`,
-        profile_revision: `sha256:${'2'.repeat(64)}`,
-        plan_digest: `sha256:${'3'.repeat(64)}`,
-        authority_snapshot_digest: `sha256:${'4'.repeat(64)}`,
-        security_epoch: 1,
-        base: {
-          pack_id: 'defaults-basepack',
-          artifact_digest: `sha256:${'6'.repeat(64)}`,
-          definition_digest: `sha256:${'7'.repeat(64)}`,
-        },
-        shell: {
-          provider_id: 'shell.tauri.default',
-          pack_id: 'shell.tauri.default',
-          artifact_digest: `sha256:${'8'.repeat(64)}`,
-          executable_artifact_digest: `sha256:${'e'.repeat(64)}`,
-          contract_id: 'app.shell.v1',
-          definition_digest: `sha256:${'9'.repeat(64)}`,
-        },
-        bindings: [{
-          caller_function_id: 'shell.tauri.default',
-          pack_id: 'defaultspack',
-          artifact_digest: `sha256:${'a'.repeat(64)}`,
-          contract_id: 'conversation.turn.v1',
-          operation_id: 'complete',
-          domain_kind: 'pack_vm',
-          function_principal: {
-            parent_artifact_digest: `sha256:${'a'.repeat(64)}`,
-            function_implementation_digest: `sha256:${'b'.repeat(64)}`,
-            function_id: 'defaultspack.conversation',
-            contract_revision_digest: `sha256:${'c'.repeat(64)}`,
-            operation_id: 'complete',
-          },
-          authority_reference: `authority-ref:${'f'.repeat(64)}`,
-          requested_scope_digest: `sha256:${'d'.repeat(64)}`,
-          adapter_digests: [],
-        }],
-        confirmation_digest: `sha256:${'5'.repeat(64)}`,
-      },
-    },
-  };
+  return structuredClone(canonicalFixture);
 }
 
 function realActivationFixture(): {
@@ -127,6 +72,31 @@ test('packaged authenticated setup payload shape accepts the v4 binding fields',
   assert.equal(
     parsed.recommended_default_profile.confirmation.bindings[0].authority_reference,
     `authority-ref:${'f'.repeat(64)}`,
+  );
+  assert.equal(
+    parsed.recommended_default_profile.confirmation.bindings[0].executable_catalog_digest,
+    `sha256:${'e'.repeat(64)}`,
+  );
+  assert.equal(
+    parsed.recommended_default_profile.confirmation.bindings[0].execution_kind,
+    'pack_vm',
+  );
+});
+
+test('the pre-fix frontend binding fixture reproduces the packaged GUI rejection', () => {
+  const invalid = state();
+  const canonicalBinding = invalid.recommended_default_profile.confirmation.bindings[0];
+  assert.deepEqual(
+    preFixBindingFixture.missing_canonical_fields,
+    Object.keys(canonicalBinding).filter(
+      (key) => !Object.hasOwn(preFixBindingFixture.binding, key),
+    ),
+  );
+  invalid.recommended_default_profile.confirmation.bindings[0] =
+    structuredClone(preFixBindingFixture.binding);
+  assert.throws(
+    () => parseDefaultsSetupState(invalid),
+    /Defaults binding has unknown or missing fields/,
   );
 });
 
@@ -199,7 +169,46 @@ test('typed setup contract fails closed on provider mismatch or duplication', ()
   duplicate.recommended_default_profile.confirmation.bindings.push(
     {...duplicate.recommended_default_profile.confirmation.bindings[0]},
   );
-  assert.throws(() => parseDefaultsSetupState(duplicate), /exactly one conversation provider/);
+  assert.throws(() => parseDefaultsSetupState(duplicate), /duplicate identity/);
+});
+
+test('typed setup contract rejects stale, malformed, and wrong-type binding evidence', () => {
+  const staleRevision = state();
+  staleRevision.recommended_default_profile.confirmation.catalog_revision = 'stale';
+  assert.throws(() => parseDefaultsSetupState(staleRevision), /catalog_revision is invalid/);
+
+  const wrongEpochType = state();
+  wrongEpochType.recommended_default_profile.confirmation.security_epoch = '1';
+  assert.throws(() => parseDefaultsSetupState(wrongEpochType), /SecurityEpoch is invalid/);
+
+  const badExecutableCatalog = state();
+  badExecutableCatalog.recommended_default_profile.confirmation.bindings[0]
+    .executable_catalog_digest = `sha256:${'g'.repeat(64)}`;
+  assert.throws(
+    () => parseDefaultsSetupState(badExecutableCatalog),
+    /executable catalog digest is invalid/,
+  );
+
+  const wrongVariantType = state();
+  wrongVariantType.recommended_default_profile.confirmation.bindings[0].variant_id = 7;
+  assert.throws(() => parseDefaultsSetupState(wrongVariantType), /variant_id is invalid/);
+
+  const duplicateAdapter = state();
+  duplicateAdapter.recommended_default_profile.confirmation.bindings[0].adapter_digests = [
+    `sha256:${'0'.repeat(64)}`,
+    `sha256:${'0'.repeat(64)}`,
+  ];
+  assert.throws(() => parseDefaultsSetupState(duplicateAdapter), /adapter digests are invalid/);
+});
+
+test('activation denial remains typed and fail-closed', () => {
+  const denied = state();
+  denied.state = 'activation_denied';
+  denied.denial_diagnostic = 'Profile revision is stale';
+  assert.equal(parseDefaultsSetupState(denied).state, 'activation_denied');
+
+  denied.denial_diagnostic = null;
+  assert.throws(() => parseDefaultsSetupState(denied), /requires a diagnostic/);
 });
 
 test('typed setup contract rejects legacy and unknown state shapes', () => {

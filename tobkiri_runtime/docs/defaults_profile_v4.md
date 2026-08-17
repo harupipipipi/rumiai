@@ -86,6 +86,18 @@ and independently verify both bindings. Production capture consumes the
 selected definition variant rather than synthesizing one from Function
 metadata.
 
+The serialized `GET /api/setup/packs` response is defined by the single
+fail-closed schema
+`tobkiri_protocol/schemas/defaults_setup_v4.schema.json`. The backend validates
+the complete response against that schema before writing it to HTTP, while the
+Launcher exact-key tables are generated from the same schema. In particular,
+every confirmation binding carries the resolved executable placement fields
+`executable_catalog_digest`, `variant_id`, `platform`, `architecture`,
+`runtime_abi`, `backend`, and `execution_kind` in addition to its Pack,
+Function, Contract, scope, and Authority bindings. Missing, unknown, duplicate,
+wrong-type, stale, or digest-unbound fields are rejected; they are never made
+optional and never fall back to a legacy setup or Registry representation.
+
 Production callers launch the generator through the shared isolated launcher:
 the child environment is rebuilt from a small neutral allowlist, Python is
 started with `-I -B -c`, and only the canonical `tobkiri_runtime` root is

@@ -48,6 +48,7 @@ SCHEMA_ALIASES = {
     "pack_contract_catalog": "pack_contract_catalog_v4.schema.json",
     "executable_catalog": "executable_catalog_v4.schema.json",
     "external_pack_catalog": "external_normal_pack_catalog_v4.schema.json",
+    "defaults_setup": "defaults_setup_v4.schema.json",
 }
 
 _ID_FIELDS = {
@@ -311,44 +312,46 @@ def _duplicate_identity_diagnostics(document: Mapping[str, Any]) -> list[str]:
     for path, value in _walk_containers(document):
         if not isinstance(value, list):
             continue
-        if path in {"$.requested_edges", "$.bindings"}:
+        if path == "$.requested_edges" or path.endswith(".bindings"):
             seen_edges: dict[tuple[str, ...], int] = {}
             for index, item in enumerate(value):
                 if not isinstance(item, Mapping):
                     continue
-                keys = (
-                    (
-                        "caller_function_id",
-                        "target_provider_id",
-                        "contract_id",
-                        "operation_id",
-                    )
-                    if path == "$.requested_edges"
-                    else ("contract_id", "operation_id")
+                principal = item.get("function_principal")
+                target_provider_id = item.get("target_provider_id")
+                if isinstance(principal, Mapping):
+                    target_provider_id = principal.get("function_id")
+                binding_identity = (
+                    str(item.get("caller_function_id") or ""),
+                    str(target_provider_id or ""),
+                    str(item.get("contract_id") or ""),
+                    str(item.get("operation_id") or ""),
                 )
-                identity = tuple(str(item.get(key) or "") for key in keys)
-                previous = seen_edges.get(identity)
+                previous = seen_edges.get(binding_identity)
                 if previous is not None:
                     diagnostics.append(
                         f"{path}[{index}]: duplicate operation binding; first at index {previous}"
                     )
                 else:
-                    seen_edges[identity] = index
+                    seen_edges[binding_identity] = index
             continue
         if path == "$.variant_pins":
             seen_variants: dict[tuple[str, str], int] = {}
             for index, item in enumerate(value):
                 if not isinstance(item, Mapping):
                     continue
-                identity = (str(item.get("pack_id") or ""), str(item.get("variant_id") or ""))
-                previous = seen_variants.get(identity)
+                variant_identity = (
+                    str(item.get("pack_id") or ""),
+                    str(item.get("variant_id") or ""),
+                )
+                previous = seen_variants.get(variant_identity)
                 if previous is not None:
                     diagnostics.append(
                         f"{path}[{index}]: duplicate executable variant pin; "
                         f"first at index {previous}"
                     )
                 else:
-                    seen_variants[identity] = index
+                    seen_variants[variant_identity] = index
             continue
         if path == "$.operation_catalog" or path.endswith(".operations"):
             seen_operations: dict[str, int] = {}
@@ -375,14 +378,14 @@ def _duplicate_identity_diagnostics(document: Mapping[str, Any]) -> list[str]:
                 candidate = item.get(key)
                 if not isinstance(candidate, str):
                     continue
-                identity = (key, candidate)
-                previous = seen.get(identity)
+                field_identity = (key, candidate)
+                previous = seen.get(field_identity)
                 if previous is not None:
                     diagnostics.append(
                         f"{path}[{index}].{key}: duplicate identity; first at index {previous}"
                     )
                 else:
-                    seen[identity] = index
+                    seen[field_identity] = index
     return diagnostics
 
 

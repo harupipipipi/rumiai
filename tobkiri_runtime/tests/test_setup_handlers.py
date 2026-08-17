@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -13,44 +15,15 @@ class _Handler(SetupHandlersMixin):
 
 
 def _preview() -> dict[str, object]:
-    confirmation = {
-        "confirmation_api_version": "io.tobkiri.defaults-confirmation.v1",
-        "operation_id": "defaults.activate",
-        "profile_id": "defaults",
-        "catalog_revision": "sha256:" + "2" * 64,
-        "profile_revision": "sha256:" + "3" * 64,
-        "plan_digest": "sha256:" + "1" * 64,
-        "authority_snapshot_digest": "sha256:" + "4" * 64,
-        "security_epoch": 7,
-        "base": {"pack_id": "defaults-basepack"},
-        "shell": {
-            "provider_id": "shell.tauri.default",
-            "pack_id": "shell.tauri.default",
-            "artifact_digest": "sha256:" + "6" * 64,
-            "executable_artifact_digest": "sha256:" + "7" * 64,
-            "contract_id": "app.shell.v1",
-            "definition_digest": "sha256:" + "8" * 64,
-        },
-        "bindings": [],
-        "confirmation_digest": "sha256:" + "5" * 64,
-    }
-    return {
-        "available": True,
-        "profile_id": "defaults",
-        "name": "Tobkiri Defaults",
-        "base_pack": "defaults-basepack",
-        "shell": {
-            "provider_id": "shell.tauri.default",
-            "contract_id": "app.shell.v1",
-        },
-        "pack_ids": ["defaultspack", "provider.local"],
-        "packs": [
-            {"pack_id": "defaultspack", "display_name": "Tobkiri"},
-            {"pack_id": "provider.local", "display_name": "Local Provider"},
-        ],
-        "conversation_provider": "provider.local",
-        "confirmation": confirmation,
-    }
+    fixture = (
+        Path(__file__).resolve().parents[1]
+        / "tobkiri_protocol"
+        / "fixtures"
+        / "defaults_setup_v4.canonical.json"
+    )
+    return json.loads(fixture.read_text(encoding="utf-8"))[
+        "recommended_default_profile"
+    ]
 
 
 def _request(*, confirmed: bool = True) -> dict[str, object]:

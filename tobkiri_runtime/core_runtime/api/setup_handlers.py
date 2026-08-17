@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict
 
+
 class SetupHandlersMixin:
     """Expose one finite setup transaction with no legacy Registry authority."""
 
@@ -96,7 +97,7 @@ class SetupHandlersMixin:
             except ProfileResolutionDenied as error:
                 state = "activation_denied"
                 denial_diagnostic = str(error)
-        return {
+        payload = {
             "setup_api_version": "io.tobkiri.setup-state.v4",
             "state": state,
             "denial_diagnostic": denial_diagnostic,
@@ -111,6 +112,9 @@ class SetupHandlersMixin:
                 "runtime.capture",
             ],
         }
+        from .defaults_setup_contract import validate_defaults_setup_payload
+
+        return validate_defaults_setup_payload(payload)
 
     def _setup_install_pack(self, body: Dict[str, Any]) -> Dict[str, Any]:
         """Complete the explicitly confirmed Defaults v4 activation transaction."""
