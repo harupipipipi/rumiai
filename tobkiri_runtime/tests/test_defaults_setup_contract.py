@@ -18,6 +18,9 @@ from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.errors import SchemaValidationError
 
 
+pytestmark = pytest.mark.contract
+
+
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_ROOT = RUNTIME_ROOT / "tobkiri_protocol" / "fixtures"
 CANONICAL_FIXTURE = FIXTURE_ROOT / "defaults_setup_v4.canonical.json"
