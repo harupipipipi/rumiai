@@ -106,13 +106,18 @@ export function Setup() {
     // refresh may hydrate projections for PackVM pages, but doing that here
     // would issue a second load before this reconciliation has verified health.
     const packVmDoctor = await refreshPackVMDoctor({reconcile: false});
-    if (!packVmDoctor?.ready) {
+    if (!packVmDoctor) {
       const currentState = useAppStore.getState();
       throw new Error(formatPackVMRecoveryError(
-        currentState.packVmError ?? packVmDoctor?.reason,
+        currentState.packVmError,
         'PackVM readiness could not be verified.',
       ));
     }
+
+    // A valid not-ready doctor is the expected fresh-install state before the
+    // user provisions PackVM from Packs.  Keep Pack operations fail-closed via
+    // the recorded doctor while allowing the authenticated provisioning UI to
+    // become reachable.
 
     await Promise.all([
       loadPacks(false, {skipMutationReconciliation: true}),

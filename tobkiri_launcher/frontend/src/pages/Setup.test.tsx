@@ -62,6 +62,10 @@ test('setup activation is explicit and followed by selected presentation materia
   assert.match(setupSource, /refreshRuntimeHealth/);
   assert.match(setupSource, /refreshMountedRuntimeSurfaces/);
   assert.match(setupSource, /refreshPackVMDoctor\(\{reconcile: false\}\)/);
+  assert.match(setupSource, /if \(!packVmDoctor\)/);
+  assert.doesNotMatch(setupSource, /if \(!packVmDoctor\?\.ready\)/);
+  assert.match(setupSource, /expected fresh-install state before the/);
+  assert.match(setupSource, /Keep Pack operations fail-closed/);
   assert.match(setupSource, /loadPacks\(false, \{skipMutationReconciliation: true\}\)/);
   assert.match(setupSource, /loadFrontendCatalog\(false\)/);
   assert.match(setupSource, /formatPackVMRecoveryError/);
