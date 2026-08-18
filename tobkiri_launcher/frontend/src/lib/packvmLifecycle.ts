@@ -90,7 +90,7 @@ export function classifyPackVMRecoveryCode(error: unknown): PackVMRecoveryCode {
   if (
     text.includes('digest')
     || text.includes('integrity')
-    || (text.includes('catalog') && text.includes('lock'))
+    || (text.includes('catalog') && /\block\b/.test(text))
   ) return 'DIGEST_MISMATCH';
   if (text.includes('stale') || text.includes('revision')) return 'STALE_REVISION';
   if (text.includes('not active') || text.includes('profile_not_active')) {

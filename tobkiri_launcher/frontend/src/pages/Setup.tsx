@@ -119,12 +119,13 @@ export function Setup() {
     // the recorded doctor while allowing the authenticated provisioning UI to
     // become reachable.
 
-    await Promise.all([
-      loadPacks(false, {skipMutationReconciliation: true}),
-      loadFrontendCatalog(false),
-    ]);
+    await loadPacks(false, {skipMutationReconciliation: true});
+    if (packVmDoctor.ready) {
+      await loadFrontendCatalog(false);
+    }
     const refreshedState = useAppStore.getState();
-    const projectionError = refreshedState.packsError || refreshedState.frontendCatalogError;
+    const projectionError = refreshedState.packsError
+      || (packVmDoctor.ready ? refreshedState.frontendCatalogError : null);
     if (projectionError) {
       throw new Error(formatPackVMRecoveryError(
         projectionError,

@@ -30,3 +30,12 @@ test('PackVM recovery classifies bounded timeout and stale responses', () => {
     'STALE_REVISION',
   );
 });
+
+test('a blocked catalog is availability failure, not a lock digest mismatch', () => {
+  const error = 'PackVM catalog access is blocked until healthy attestation.';
+  assert.equal(classifyPackVMRecoveryCode(error), 'API_FAILURE');
+  assert.equal(
+    formatPackVMRecoveryError(error),
+    'API_FAILURE: PackVM reconciliation could not be verified; retry only after the Host is healthy.',
+  );
+});
