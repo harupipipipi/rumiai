@@ -54,20 +54,23 @@ def _prerelease_key(value: str) -> tuple[tuple[int, int | str], ...]:
 
 
 def parse_version(value: str) -> Version:
-    """Parse a strict semantic version or raise ``ValueError``."""
+    """Parse a strict semantic version or raise TypeError or ValueError."""
     if not isinstance(value, str):
-        raise ValueError("semantic version must be a string")
+        raise TypeError("semantic version must be a string")
     match = _SEMVER.fullmatch(value)
     if match is None:
         raise ValueError(f"invalid semantic version: {value!r}")
     prerelease = match.group(4)
     if prerelease is not None:
         for identifier in prerelease.split("."):
-            if identifier.isdigit() and len(identifier) > 1:
-                if identifier.startswith("0"):
-                    raise ValueError(
-                        "numeric prerelease identifiers cannot have leading zeros"
-                    )
+            if (
+                identifier.isdigit()
+                and len(identifier) > 1
+                and identifier.startswith("0")
+            ):
+                raise ValueError(
+                    "numeric prerelease identifiers cannot have leading zeros"
+                )
     return Version(
         int(match.group(1)),
         int(match.group(2)),

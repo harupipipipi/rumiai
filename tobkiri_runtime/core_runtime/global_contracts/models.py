@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
-import re
-from typing import Any, Generic, Mapping, TypeVar
+from typing import Any, Generic, TypeVar
 
 from .canonical import canonical_json
 from .semver import parse_version, validate_version_range
@@ -126,11 +127,11 @@ class ContractDescriptor:
         _validate_contract_id(self.contract_id)
         parse_version(self.version)
         if not isinstance(self.cardinality, Cardinality):
-            raise ValueError("cardinality must be a Cardinality")
+            raise TypeError("cardinality must be a Cardinality")
         if not isinstance(self.security, SecurityClassification):
-            raise ValueError("security must be a SecurityClassification")
+            raise TypeError("security must be a SecurityClassification")
         if not isinstance(self.failure, FailureSemantics):
-            raise ValueError("failure must be a FailureSemantics")
+            raise TypeError("failure must be a FailureSemantics")
         for field_name, schema in (
             ("input_schema", self.input_schema),
             ("output_schema", self.output_schema),
@@ -139,7 +140,7 @@ class ContractDescriptor:
             if schema is None:
                 continue
             if not isinstance(schema, Mapping):
-                raise ValueError(f"{field_name} must be a mapping")
+                raise TypeError(f"{field_name} must be a mapping")
             canonical_json(schema)
 
 
@@ -158,7 +159,7 @@ class ContractRequirement:
         _validate_contract_id(self.contract_id)
         validate_version_range(self.version_range)
         if not isinstance(self.cardinality, Cardinality):
-            raise ValueError("cardinality must be a Cardinality")
+            raise TypeError("cardinality must be a Cardinality")
         if self.cardinality is Cardinality.KEYED:
             if not self.instance_key:
                 raise ValueError("keyed requirement requires instance_key")
@@ -246,7 +247,7 @@ class ContractResult(Generic[T]):
     def __post_init__(self) -> None:
         """Validate the stable envelope identity and normalize diagnostics."""
         if not isinstance(self.status, ContractStatus):
-            raise ValueError("status must be a ContractStatus")
+            raise TypeError("status must be a ContractStatus")
         _validate_contract_id(self.contract_id)
         if not isinstance(self.version, str) or not self.version:
             raise ValueError("result version must be a non-empty string")

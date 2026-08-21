@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from threading import RLock
-from typing import Any, Callable
+from typing import Any
 
 from .canonical import content_identity
 from .models import (
@@ -54,8 +54,10 @@ class ContractRegistry:
                     provider,
                     ContractStatus.INCOMPATIBLE,
                     diagnostics=(
-                        "duplicate provider instance: "
-                        f"{provider.provider_instance_id}",
+                        (
+                            "duplicate provider instance: "
+                            f"{provider.provider_instance_id}"
+                        ),
                     ),
                 )
             providers = self._providers[provider.contract.contract_id]
@@ -81,8 +83,10 @@ class ContractRegistry:
                 requirement,
                 ContractStatus.STALE_RESOLUTION,
                 diagnostics=(
-                    f"expected registry revision {expected_revision}; "
-                    f"found {revision}",
+                    (
+                        f"expected registry revision {expected_revision}; "
+                        f"found {revision}"
+                    ),
                 ),
                 metadata={"revision": revision},
             )
@@ -107,8 +111,10 @@ class ContractRegistry:
                 requirement,
                 status,
                 diagnostics=(
-                    f"no compatible provider for {requirement.contract_id} "
-                    f"{requirement.version_range}",
+                    (
+                        f"no compatible provider for {requirement.contract_id} "
+                        f"{requirement.version_range}"
+                    ),
                 ),
                 metadata={"revision": revision},
             )
@@ -150,8 +156,10 @@ class ContractRegistry:
                     requirement,
                     ContractStatus.INCOMPATIBLE,
                     diagnostics=(
-                        f"expected one provider for key "
-                        f"{requirement.instance_key!r}; found {len(keyed)}",
+                        (
+                            "expected one provider for key "
+                            f"{requirement.instance_key!r}; found {len(keyed)}"
+                        ),
                     ),
                     metadata={"revision": revision},
                 )
@@ -213,8 +221,10 @@ class ContractRegistry:
                 version=contract_version,
                 provider_instance_id=provider_instance_id,
                 diagnostics=(
-                    f"expected registry revision {expected_revision}; "
-                    f"found {revision}",
+                    (
+                        f"expected registry revision {expected_revision}; "
+                        f"found {revision}"
+                    ),
                 ),
                 metadata={"revision": revision},
             )
@@ -269,7 +279,7 @@ class ContractRegistry:
                 diagnostics=(str(exc),),
                 metadata={"revision": revision},
             )
-        except Exception as exc:
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
             return _provider_result(
                 provider,
                 ContractStatus.UNAVAILABLE,
