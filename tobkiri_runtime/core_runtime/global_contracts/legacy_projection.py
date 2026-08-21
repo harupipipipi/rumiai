@@ -33,7 +33,7 @@ class LegacyRegistry(Protocol):
 
 @dataclass(frozen=True)
 class LegacyProjectionRule:
-    """Explicit migration rule from a legacy prefix to a global contract."""
+    """Explicit migration rule from a legacy prefix or exact key."""
 
     legacy_prefix: str
     contract_id: str
@@ -41,6 +41,7 @@ class LegacyProjectionRule:
     cardinality: Cardinality = Cardinality.MANY
     removal_wave: int = 10
     sunset_at: str = "2027-12-31"
+    exact_key: bool = False
 
     def __post_init__(self) -> None:
         """Validate the rule through the same typed contract boundary."""
@@ -48,6 +49,8 @@ class LegacyProjectionRule:
             raise ValueError("legacy_prefix must not be empty")
         if not 0 <= self.removal_wave <= 10:
             raise ValueError("removal_wave must be between 0 and 10")
+        if not isinstance(self.exact_key, bool):
+            raise TypeError("exact_key must be a boolean")
         ContractDescriptor(
             contract_id=self.contract_id,
             version=self.version,
@@ -90,6 +93,8 @@ class LegacyRegistryProjection:
                 entries.items(), key=lambda item: str(item[0])
             ):
                 key = str(raw_key)
+                if rule.exact_key and key != rule.legacy_prefix:
+                    continue
                 entry = raw_entry if isinstance(raw_entry, Mapping) else {}
                 raw_metadata = entry.get("last_meta")
                 metadata = (
