@@ -13,6 +13,7 @@ from jsonschema.exceptions import SchemaError
 
 from .canonical import canonical_json, content_identity
 from .models import ContractResult, ContractStatus
+from .semver import parse_version, validate_version_range
 
 SCHEMA_PATH = Path(__file__).parents[2] / "schemas" / "pack_manifest_v3.schema.json"
 _MANIFEST_CONTRACT_ID = "rumi.resource.pack.manifest.v3"
@@ -144,6 +145,31 @@ def _semantic_diagnostics(manifest: Any) -> tuple[ManifestDiagnostic, ...]:
     diagnostics: list[ManifestDiagnostic] = []
     provided = manifest["contracts"]["provides"]
     required = manifest["contracts"]["requires"]
+    for index, contract in enumerate(provided):
+        try:
+            parse_version(contract["version"])
+        except ValueError as exc:
+            diagnostics.append(
+                ManifestDiagnostic(
+                    path=(
+                        f"$['contracts']['provides'][{index}]['version']"
+                    ),
+                    message=str(exc),
+                )
+            )
+    for index, contract in enumerate(required):
+        try:
+            validate_version_range(contract["version_range"])
+        except ValueError as exc:
+            diagnostics.append(
+                ManifestDiagnostic(
+                    path=(
+                        f"$['contracts']['requires'][{index}]"
+                        "['version_range']"
+                    ),
+                    message=str(exc),
+                )
+            )
     provider_ids = [item["provider_instance_id"] for item in provided]
     _append_duplicate_diagnostics(
         diagnostics,

@@ -228,6 +228,72 @@ def test_semver_ranges_are_deterministic_and_fail_closed() -> None:
         validate_version_range("^latest")
 
 
+def test_manifest_rejects_later_provided_version_with_leading_zero(
+    tmp_path: Path,
+) -> None:
+    """Every provided version is validated at the loader boundary."""
+    manifest = _manifest()
+    later = json.loads(json.dumps(manifest["contracts"]["provides"][0]))
+    later["provider_instance_id"] = "echo.remote"
+    later["version"] = "1.0.0-01"
+    manifest["contracts"]["provides"].append(later)
+
+    result = load_manifest(_write_manifest(tmp_path, manifest))
+
+    assert result.status is ContractStatus.INVALID_MANIFEST
+    assert result.value is None
+    assert result.diagnostics == (
+        "$['contracts']['provides'][1]['version']: "
+        "numeric prerelease identifiers cannot have leading zeros",
+    )
+
+
+def test_manifest_rejects_requirement_range_with_leading_zero(
+    tmp_path: Path,
+) -> None:
+    """Every required range is validated at the loader boundary."""
+    manifest = _manifest()
+    manifest["contracts"]["requires"].append(
+        {
+            "id": ECHO_CONTRACT,
+            "version_range": ">=1.0.0-01 <2.0.0",
+            "cardinality": "one",
+            "optional": False,
+        }
+    )
+
+    result = load_manifest(_write_manifest(tmp_path, manifest))
+
+    assert result.status is ContractStatus.INVALID_MANIFEST
+    assert result.value is None
+    assert result.diagnostics == (
+        "$['contracts']['requires'][0]['version_range']: "
+        "numeric prerelease identifiers cannot have leading zeros",
+    )
+
+
+def test_manifest_accepts_valid_prerelease_and_comparator_range(
+    tmp_path: Path,
+) -> None:
+    """Strict prerelease versions and comparator ranges remain valid."""
+    manifest = _manifest()
+    manifest["contracts"]["provides"][0]["version"] = "1.0.0-rc.1"
+    manifest["contracts"]["requires"].append(
+        {
+            "id": ECHO_CONTRACT,
+            "version_range": ">=1.0.0-rc.1 <2.0.0",
+            "cardinality": "one",
+            "optional": False,
+        }
+    )
+
+    result = load_manifest(_write_manifest(tmp_path, manifest))
+
+    assert result.status is ContractStatus.OK
+    assert result.value is not None
+    assert result.diagnostics == ()
+
+
 def test_manifest_discovery_does_not_import_entrypoint(tmp_path: Path) -> None:
     """Discovery treats entrypoints as data and never imports their modules."""
     sentinel = tmp_path / "was_imported"
