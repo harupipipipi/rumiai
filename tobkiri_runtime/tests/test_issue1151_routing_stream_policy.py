@@ -67,7 +67,8 @@ def _route_payload(
         ],
         "health": dict(
             health
-            or {"adapter": {"status": "healthy", "observed_at": 1000.0}}
+            if health is not None
+            else {"adapter": {"status": "healthy", "observed_at": 1000.0}}
         ),
         "requirements": dict(requirements),
         "decision_time": decision_time,
@@ -305,8 +306,8 @@ def test_usage_cost_and_failover_are_explicit_and_replay_bound() -> None:
         assert result["reason"] == reason
 
 
-class _PartialOutputClient:
-    """Gateway fixture whose first stream is malformed after output begins."""
+class _BufferedMalformedStreamClient:
+    """Gateway fixture whose first stream buffers a malformed event."""
 
     def __init__(self) -> None:
         self.provider_calls: list[str] = []
@@ -393,7 +394,7 @@ class _PartialOutputClient:
             if provider_instance_id == "provider-a":
                 return {
                     "events": [
-                        {"type": "text_delta", "delta": "partial"},
+                        {"type": "text_delta", "delta": "buffered"},
                         {"type": "not-a-valid-event"},
                     ]
                 }
@@ -406,21 +407,53 @@ class _PartialOutputClient:
         raise AssertionError(f"unexpected contract: {contract_id}/{operation}")
 
 
-def test_stream_does_not_retry_after_partial_output() -> None:
-    client = _PartialOutputClient()
+def test_stream_fails_over_before_buffered_events_are_returned() -> None:
+    client = _BufferedMalformedStreamClient()
     stream = create_stream_operation(client)  # type: ignore[arg-type]
 
-    with pytest.raises(GlobalContractInvocationError) as captured:
-        stream(
-            "stream",
-            {
-                "request_id": "partial-output",
-                "allow_failover": True,
-                "idempotency_key": "replay-safe",
-                "deadline": time.time() + 60.0,
-                "requirements": {"modalities": ["text"]},
-            },
-        )
-    assert captured.value.code == "invalid_response"
-    assert client.provider_calls == ["provider-a"]
-    assert client.failover_calls == 0
+    result = stream(
+        "stream",
+        {
+            "request_id": "buffered-malformed",
+            "allow_failover": True,
+            "idempotency_key": "replay-safe",
+            "deadline": time.time() + 60.0,
+            "requirements": {"modalities": ["text"]},
+        },
+    )
+
+    assert client.provider_calls == ["provider-a", "provider-b"]
+    assert client.failover_calls == 1
+    assert result["provider_instance_id"] == "provider-b"
+    assert result["events"] == [
+        {
+            "request_id": "buffered-malformed",
+            "sequence": 0,
+            "type": "text_delta",
+            "delta": "fallback",
+            "tool_intent": None,
+            "usage": None,
+            "finish_reason": None,
+            "error_code": None,
+            "provider_attempt": 2,
+        },
+        {
+            "request_id": "buffered-malformed",
+            "sequence": 1,
+            "type": "finish",
+            "delta": None,
+            "tool_intent": None,
+            "usage": None,
+            "finish_reason": "stop",
+            "error_code": None,
+            "provider_attempt": 2,
+        },
+    ]
+    assert result["attempts"] == [
+        {
+            "attempt": 1,
+            "model_id": "a/model",
+            "provider_instance_id": "provider-a",
+            "error_code": "invalid_response",
+        }
+    ]
