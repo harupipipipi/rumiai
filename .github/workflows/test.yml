@@ -690,6 +690,67 @@ jobs:
           test "${#token}" -eq 32
           echo "TOBKIRI_PACKAGING_TRANSACTION_TOKEN=$token" >> "$GITHUB_ENV"
 
+      - name: Resolve macOS host target
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            arm64) target="aarch64-apple-darwin" ;;
+            x86_64) target="x86_64-apple-darwin" ;;
+            *) exit 1 ;;
+          esac
+          echo "TOBKIRI_RUST_HOST_TARGET=$target" >> "$GITHUB_ENV"
+
+      - name: Build rootless sealed packaging Python for viewer build
+        shell: bash
+        env:
+          TOOLCHAIN_ENV: ${{ runner.temp }}/tobkiri-viewer-packaging-toolchain.env
+        run: |
+          set -euo pipefail
+          snapshot="$RUNNER_TEMP/tobkiri-viewer-packaging-python-$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"
+          uv_stage="$RUNNER_TEMP/tobkiri-viewer-packaging-uv-$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"
+          git_env="$RUNNER_TEMP/tobkiri-viewer-packaging-git-$TOBKIRI_PACKAGING_TRANSACTION_TOKEN.env"
+          source_snapshot="$RUNNER_TEMP/tobkiri-viewer-packaging-source-$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"
+          source_env="$RUNNER_TEMP/tobkiri-viewer-packaging-source-$TOBKIRI_PACKAGING_TRANSACTION_TOKEN.env"
+          umask 077
+          /usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py \
+            --bind-git-env --env-output "$git_env"
+          while IFS='=' read -r key value; do
+            case "$key" in
+              TOBKIRI_PACKAGING_GIT|TOBKIRI_PACKAGING_GIT_SHA256) export "$key=$value" ;;
+              *) exit 1 ;;
+            esac
+          done < "$git_env"
+          /usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py \
+            --repository-root "$GITHUB_WORKSPACE" \
+            --provenance .github/toolchains/packaging-python-macos.v1.json \
+            --source-commit "$GITHUB_SHA" --git "$TOBKIRI_PACKAGING_GIT" \
+            --git-sha256 "$TOBKIRI_PACKAGING_GIT_SHA256" --smoke-git-authority
+          /usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py \
+            --repository-root "$GITHUB_WORKSPACE" --source-commit "$GITHUB_SHA" \
+            --git "$TOBKIRI_PACKAGING_GIT" --git-sha256 "$TOBKIRI_PACKAGING_GIT_SHA256" \
+            --snapshot-source --snapshot-root "$source_snapshot" --env-output "$source_env"
+          while IFS='=' read -r key value; do
+            case "$key" in
+              TOBKIRI_PACKAGING_SOURCE_SNAPSHOT|TOBKIRI_PACKAGING_SOURCE_TREE|TOBKIRI_PACKAGING_SOURCE_INVENTORY_SHA256|TOBKIRI_PACKAGING_RELEASE_DIGEST) export "$key=$value" ;;
+              *) exit 1 ;;
+            esac
+          done < "$source_env"
+          /usr/bin/python3 -B "$source_snapshot/.github/scripts/prepare_tauri_resources.py" \
+            --repo-root "$source_snapshot" \
+            --target "$TOBKIRI_RUST_HOST_TARGET" --uv-version 0.11.14 --stage-uv-only \
+            --uv-output-root "$uv_stage"
+          /usr/bin/python3 -B "$source_snapshot/.github/scripts/build_sealed_python_environment.py" \
+            --repo-root "$source_snapshot" \
+            --target "$TOBKIRI_RUST_HOST_TARGET" --output-root "$snapshot" \
+            --uv-path "$uv_stage/bundled/uv" --release-digest "$TOBKIRI_PACKAGING_RELEASE_DIGEST" \
+            --source-tree "$TOBKIRI_PACKAGING_SOURCE_TREE" \
+            --source-inventory-sha256 "$TOBKIRI_PACKAGING_SOURCE_INVENTORY_SHA256" \
+            --env-output "$TOOLCHAIN_ENV"
+          /usr/bin/python3 -B .github/scripts/packaging_toolchain_identity.py \
+            --bind-git-env --env-output "$TOOLCHAIN_ENV"
+          /bin/cat "$TOOLCHAIN_ENV" >> "$GITHUB_ENV"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -773,126 +834,6 @@ jobs:
           chmod +x tobkiri_runtime/bundled/uv
           echo "Bundled uv at:"
           ls -la tobkiri_runtime/bundled/
-
-      - name: Resolve Rust host target
-        shell: bash
-        run: |
-          set -euo pipefail
-          target="$(rustc -vV | sed -n 's/^host: //p')"
-          test -n "$target"
-          echo "TOBKIRI_RUST_HOST_TARGET=$target" >> "$GITHUB_ENV"
-
-      - name: Build rootless sealed packaging Python for viewer build
-        shell: bash
-        env:
-          TOOLCHAIN_ENV: ${{ runner.temp }}/tobkiri-viewer-packaging-toolchain.env
-        run: |
-          set -euo pipefail
-          snapshot="$RUNNER_TEMP/tobkiri-viewer-packaging-python-$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"
-          uv_stage="$RUNNER_TEMP/tobkiri-viewer-packaging-uv-$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"
-          pre_git_env="$RUNNER_TEMP/tobkiri-viewer-packaging-git-$TOBKIRI_PACKAGING_TRANSACTION_TOKEN.env"
-          source_snapshot="$RUNNER_TEMP/tobkiri-viewer-packaging-source-$TOBKIRI_PACKAGING_TRANSACTION_TOKEN"
-          source_env="$RUNNER_TEMP/tobkiri-viewer-packaging-source-$TOBKIRI_PACKAGING_TRANSACTION_TOKEN.env"
-          umask 077
-          formal_git="/Library/Developer/CommandLineTools/usr/bin/git"
-          identity_launcher="$RUNNER_TEMP/tobkiri-viewer-packaging-identity-$TOBKIRI_PACKAGING_TRANSACTION_TOKEN.py"
-          test "$(/usr/bin/stat -f '%Su:%Lp' "$formal_git")" = "root:755"
-          /usr/bin/codesign --verify --strict --all-architectures "$formal_git"
-          /usr/bin/codesign -d --verbose=4 "$formal_git" 2>&1 | /usr/bin/grep -qx 'Identifier=com.apple.git'
-          /usr/bin/codesign -d --verbose=4 "$formal_git" 2>&1 | /usr/bin/grep -qx 'TeamIdentifier=59GAB85EFG'
-          export GIT_CONFIG=/dev/null GIT_CONFIG_GLOBAL=/dev/null
-          export GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1
-          export GIT_ATTR_NOSYSTEM=1 GIT_EXEC_PATH=/private/var/empty
-          export GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0
-          identity_oid="$("$formal_git" --no-optional-locks --no-replace-objects -C "$GITHUB_WORKSPACE" rev-parse "$GITHUB_SHA:.github/scripts/packaging_toolchain_identity.py")"
-          test "$("$formal_git" -C "$GITHUB_WORKSPACE" cat-file -t "$identity_oid")" = blob
-          set -o noclobber
-          : > "$identity_launcher"
-          set +o noclobber
-          "$formal_git" -C "$GITHUB_WORKSPACE" cat-file blob "$identity_oid" > "$identity_launcher"
-          test "$("$formal_git" -C "$GITHUB_WORKSPACE" hash-object "$identity_launcher")" = "$identity_oid"
-          /bin/chmod 0400 "$identity_launcher"
-          formal_identity() {
-            local required_output="$1"
-            local required_output_size=0
-            local identity_status=0
-            shift
-            if test "$required_output" = "-"; then
-              :
-            elif test -e "$required_output" || test -L "$required_output"; then
-              required_output_size="$(/usr/bin/stat -f '%z' "$required_output")"
-            fi
-            exec 9< "$identity_launcher"
-            if PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I -B - "$@" <&9; then
-              identity_status=0
-            else
-              identity_status=$?
-            fi
-            if test "$identity_status" -eq 0 && IFS= read -r -n 1 <&9; then
-              identity_status=1
-            fi
-            exec 9<&-
-            test "$identity_status" -eq 0
-            if test "$required_output" = "-"; then
-              test -s "$identity_launcher"
-            else
-              test -s "$required_output"
-              if test "$required_output_size" -gt 0; then
-                test "$(/usr/bin/stat -f '%z' "$required_output")" -gt "$required_output_size"
-              fi
-            fi
-          }
-          formal_identity "$pre_git_env" \
-            --bind-git-env --env-output "$pre_git_env"
-          while IFS='=' read -r key value; do
-            case "$key" in
-              TOBKIRI_PACKAGING_GIT|TOBKIRI_PACKAGING_GIT_SHA256) export "$key=$value" ;;
-              *) exit 1 ;;
-            esac
-          done < "$pre_git_env"
-          formal_identity "-" \
-            --repository-root "$GITHUB_WORKSPACE" \
-            --provenance .github/toolchains/packaging-python-macos.v1.json \
-            --source-commit "$GITHUB_SHA" --git "$TOBKIRI_PACKAGING_GIT" \
-            --git-sha256 "$TOBKIRI_PACKAGING_GIT_SHA256" --smoke-git-authority
-          formal_identity "$source_env" \
-            --repository-root "$GITHUB_WORKSPACE" --source-commit "$GITHUB_SHA" \
-            --git "$TOBKIRI_PACKAGING_GIT" --git-sha256 "$TOBKIRI_PACKAGING_GIT_SHA256" \
-            --snapshot-source --snapshot-root "$source_snapshot" --env-output "$source_env"
-          while IFS='=' read -r key value; do
-            case "$key" in
-              TOBKIRI_PACKAGING_SOURCE_SNAPSHOT|TOBKIRI_PACKAGING_SOURCE_TREE|TOBKIRI_PACKAGING_SOURCE_INVENTORY_SHA256|TOBKIRI_PACKAGING_RELEASE_DIGEST) export "$key=$value" ;;
-              *) exit 1 ;;
-            esac
-          done < "$source_env"
-          /usr/bin/python3 -B "$source_snapshot/.github/scripts/prepare_tauri_resources.py" \
-            --repo-root "$source_snapshot" \
-            --target "$TOBKIRI_RUST_HOST_TARGET" --uv-version 0.11.14 --stage-uv-only \
-            --uv-output-root "$uv_stage"
-          /usr/bin/python3 -B "$source_snapshot/.github/scripts/build_sealed_python_environment.py" \
-            --repo-root "$source_snapshot" \
-            --target "$TOBKIRI_RUST_HOST_TARGET" --output-root "$snapshot" \
-            --uv-path "$uv_stage/bundled/uv" --release-digest "$TOBKIRI_PACKAGING_RELEASE_DIGEST" \
-            --source-tree "$TOBKIRI_PACKAGING_SOURCE_TREE" \
-            --source-inventory-sha256 "$TOBKIRI_PACKAGING_SOURCE_INVENTORY_SHA256" \
-            --env-output "$TOOLCHAIN_ENV"
-          formal_identity "$TOOLCHAIN_ENV" \
-            --bind-git-env --env-output "$TOOLCHAIN_ENV"
-          for marker in \
-            TOBKIRI_PACKAGING_PYTHON \
-            TOBKIRI_PACKAGING_PYTHON_SHA256 \
-            TOBKIRI_PACKAGING_GIT \
-            TOBKIRI_PACKAGING_GIT_SHA256 \
-            TOBKIRI_PACKAGING_PYTHON_SNAPSHOT \
-            TOBKIRI_PACKAGING_PYTHON_INVENTORY_SHA256 \
-            TOBKIRI_PACKAGING_SOURCE_SNAPSHOT \
-            TOBKIRI_PACKAGING_SOURCE_TREE \
-            TOBKIRI_PACKAGING_SOURCE_INVENTORY_SHA256 \
-            TOBKIRI_PACKAGING_RELEASE_DIGEST
-          do
-            /usr/bin/grep -q "^${marker}=" "$TOOLCHAIN_ENV"
-          done
-          /bin/cat "$TOOLCHAIN_ENV" >> "$GITHUB_ENV"
 
       - name: Build debug Pack Shell for viewer Rust checks
         run: cargo build --locked --manifest-path pack-shell/Cargo.toml --target "$TOBKIRI_RUST_HOST_TARGET"

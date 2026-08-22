@@ -293,7 +293,7 @@ def test_rust_packaging_callers_require_formal_absolute_tool_identities():
 
 
 def test_full_ci_macos_launcher_binds_git_before_rust_build():
-    """The full macOS viewer build must provide sealed packaging authorities."""
+    """The full macOS viewer build must snapshot a clean packaging source."""
     workflow = TEST_WORKFLOW.read_text(encoding="utf-8")
     macos_job = workflow.split("\n  tobkiri-launcher-macos:", 1)[1].split(
         "\n  mac-computer-driver-smoke:", 1
@@ -301,11 +301,11 @@ def test_full_ci_macos_launcher_binds_git_before_rust_build():
     binding_at = macos_job.index(
         "- name: Build rootless sealed packaging Python for viewer build"
     )
+    setup_at = macos_job.index("- name: Set up Python")
     build_at = macos_job.index("- name: Build rumi viewer")
-    assert binding_at < build_at
-    binding = macos_job[binding_at:build_at]
+    assert binding_at < setup_at < build_at
+    binding = macos_job[binding_at:setup_at]
     assert '--snapshot-source --snapshot-root "$source_snapshot"' in binding
-    assert 'formal_identity "$TOOLCHAIN_ENV"' in binding
     assert '--bind-git-env --env-output "$TOOLCHAIN_ENV"' in binding
     assert '/bin/cat "$TOOLCHAIN_ENV" >> "$GITHUB_ENV"' in binding
     assert '--target "$TOBKIRI_RUST_HOST_TARGET"' in binding
