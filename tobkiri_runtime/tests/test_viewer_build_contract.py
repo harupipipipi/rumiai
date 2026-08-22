@@ -306,8 +306,13 @@ def test_macos_installer_uses_finder_free_verified_dmg_packager():
         "workspace_identity",
         '--device "$work_device"',
         "owned_image_paths",
-        "Resource busy",
-        "trap 'cleanup $?' EXIT",
+        'create_stderr="$work_dir/hdiutil-create.stderr"',
+        '"$temporary_dmg_path" 2>"$create_stderr"',
+        "create_status=$?",
+        'replay_stderr "$create_stderr"',
+        'exit "$create_status"',
+        "TOBKIRI_PACKAGING_PYTHON_SHA256",
+        'trap \'cleanup "$?"\' EXIT',
         "trap 'exit 130' INT",
         "trap 'exit 143' TERM",
         'ln "$source_path" "$dmg_path"',
@@ -315,6 +320,14 @@ def test_macos_installer_uses_finder_free_verified_dmg_packager():
         "unsafe version for a DMG filename",
     ):
         assert required in packager
+    assert packager.count("hdiutil create") == 1
+    assert packager.count('replay_stderr "$create_stderr"') == 2
+    packager_lower = packager.lower()
+    for forbidden in (
+        "create_attempts", "create_attempt", "resource busy", "resource-busy",
+        "resource_busy", "ebusy", "sleep", "retry",
+    ):
+        assert forbidden not in packager_lower
     assert MACOS_DMG_CLEANUP.is_file()
     assert MACOS_DMG_VERIFIER.is_file()
     mounted_verifier = MACOS_DMG_VERIFIER.read_text(encoding="utf-8")

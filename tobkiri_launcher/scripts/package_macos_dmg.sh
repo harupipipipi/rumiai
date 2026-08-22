@@ -1,20 +1,14 @@
 #!/usr/bin/env bash
-# Package a signed Tauri macOS app without Finder automation.
-#
-# Tauri's bundled create-dmg wrapper mounts an intermediate HFS+ image and
-# invokes Finder through AppleScript.  That is unnecessary for CI packaging
-# and has been observed to fail on the GitHub macOS Intel image after the app
-# bundle has already been built and signed.  Keep the app signature intact and
-# use hdiutil's direct read-only image path instead.
+# Package a signed Tauri macOS application without Finder automation.
 
 set -Eeuo pipefail
 
 usage() {
-  cat >&2 <<'EOF'
+  cat >&2 <<'USAGE'
 Usage: package_macos_dmg.sh --app-bundle PATH --target TARGET --output-dir PATH \
   [--signing-identity "Developer ID Application: ..." | --allow-ad-hoc-local | \
    --ci-e2e-cert-sha256 SHA256]
-EOF
+USAGE
 }
 
 app_bundle=''
@@ -97,178 +91,220 @@ esac
 }
 
 command -v codesign >/dev/null 2>&1 || {
-  printf 'codesign is required to verify the signed app bundle\n' >&2
+  printf '%s\n' 'codesign is required to verify the signed app bundle' >&2
   exit 1
 }
-if [[ -n "$signing_identity" && "$signing_identity" != "Developer ID Application: "* ]]; then
-  printf 'release macOS signing identity must be Developer ID Application, not ad-hoc\n' >&2
-  exit 1
-fi
-if [[ -z "$signing_identity" && "$allow_ad_hoc_local" -ne 1 \
-   && -z "$ci_e2e_cert_sha256" ]]; then
-  printf 'a Developer ID identity or explicit non-publishable CI/E2E identity is required\n' >&2
-  exit 1
-fi
-if [[ -n "$ci_e2e_cert_sha256" \
-   && ! "$ci_e2e_cert_sha256" =~ ^[0-9a-f]{64}$ ]]; then
-  printf 'CI/E2E signing certificate identity must be a lowercase SHA-256\n' >&2
-  exit 1
-fi
 command -v ditto >/dev/null 2>&1 || {
-  printf 'ditto is required to stage the app bundle\n' >&2
+  printf '%s\n' 'ditto is required to stage the app bundle' >&2
   exit 1
 }
 command -v plutil >/dev/null 2>&1 || {
-  printf 'plutil is required to read the app bundle version\n' >&2
+  printf '%s\n' 'plutil is required to read the app bundle version' >&2
   exit 1
 }
 command -v hdiutil >/dev/null 2>&1 || {
-  printf 'hdiutil is required to create the macOS installer\n' >&2
+  printf '%s\n' 'hdiutil is required to create the macOS installer' >&2
   exit 1
 }
 
-app_bundle=$(cd "$app_bundle" && pwd -P)
-mkdir -p "$output_dir"
-output_dir=$(cd "$output_dir" && pwd -P)
-
-app_name=$(basename "$app_bundle")
-[[ "$app_name" == *.app ]] || {
-  printf 'Expected a .app bundle, got: %s\n' "$app_name" >&2
+if [[ -n "$signing_identity" && "$signing_identity" != "Developer ID Application: "* ]]; then
+  printf '%s\n' 'release macOS signing identity must be Developer ID Application' >&2
   exit 1
-}
-app_stem=${app_name%.app}
-version=$(plutil -extract CFBundleShortVersionString raw -o - \
-  "$app_bundle/Contents/Info.plist")
-[[ -n "$version" ]] || {
-  printf 'Tauri app bundle has no CFBundleShortVersionString: %s\n' "$app_bundle" >&2
+fi
+if [[ -z "$signing_identity" && "$allow_ad_hoc_local" -ne 1 && -z "$ci_e2e_cert_sha256" ]]; then
+  printf '%s\n' 'a Developer ID identity or explicit non-publishable CI/E2E identity is required' >&2
   exit 1
-}
-if [[ ! "$version" =~ ^[A-Za-z0-9][A-Za-z0-9.+_-]*$ ]]; then
-  printf 'Tauri app bundle has an unsafe version for a DMG filename: %s\n' "$version" >&2
+fi
+if [[ -n "$ci_e2e_cert_sha256" && ! "$ci_e2e_cert_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+  printf '%s\n' 'CI/E2E signing certificate identity must be a lowercase SHA-256' >&2
   exit 1
 fi
 
-dmg_path="$output_dir/${app_stem}_${version}_${architecture_suffix}.dmg"
-if [[ -e "$dmg_path" || -L "$dmg_path" ]]; then
-  printf 'Refusing to overwrite existing macOS installer: %s\n' "$dmg_path" >&2
-  exit 1
-fi
+tobkiri_packaging_python="${TOBKIRI_PACKAGING_PYTHON-}"
+tobkiri_packaging_python_sha256="${TOBKIRI_PACKAGING_PYTHON_SHA256-}"
 
-script_dir=$(cd "$(dirname "$0")" && pwd -P)
-workspace_identity=$(/usr/bin/python3 -I -B \
-  "$script_dir/cleanup_macos_dmg_workspace.py" create --parent "$output_dir")
-IFS=$'\t' read -r work_dir work_device work_inode <<<"$workspace_identity"
-[[ -n "$work_dir" && "$work_device" =~ ^[0-9]+$ && "$work_inode" =~ ^[0-9]+$ ]] || {
-  printf 'DMG workspace helper returned an invalid ownership identity\n' >&2
-  exit 1
-}
-staging_dir="$work_dir/staging"
-image_dir="$work_dir/images"
-mkdir "$staging_dir" "$image_dir"
-owned_image_paths=()
-cleanup() {
-  local exit_status
-  exit_status=$1
-
-  trap - EXIT HUP INT QUIT TERM
-
-  if [[ -n "${work_dir:-}" && ( -e "$work_dir" || -L "$work_dir" ) ]]; then
-    local workspace_verified=0
-    if /usr/bin/python3 -I -B \
-      "$script_dir/cleanup_macos_dmg_workspace.py" verify \
-      --parent "$output_dir" \
-      --workspace "$work_dir" \
-      --device "$work_device" \
-      --inode "$work_inode"; then
-      workspace_verified=1
-    else
-      printf 'Temporary DMG workspace identity changed; cleanup refused: %s\n' \
-        "$work_dir" >&2
-      if ((exit_status == 0)); then
-        exit_status=1
-      fi
-    fi
-    if ((workspace_verified == 1)) && ! detach_owned_images; then
-      printf 'Could not detach every invocation-owned disk image during cleanup\n' >&2
-      if ((exit_status == 0)); then
-        exit_status=1
-      fi
-    fi
-    if ((workspace_verified == 1)) && ! /usr/bin/python3 -I -B \
-      "$script_dir/cleanup_macos_dmg_workspace.py" cleanup \
-      --parent "$output_dir" \
-      --workspace "$work_dir" \
-      --device "$work_device" \
-      --inode "$work_inode"; then
-      printf 'Could not remove temporary DMG workspace: %s\n' "$work_dir" >&2
-      if ((exit_status == 0)); then
-        exit_status=1
-      fi
-    fi
+verify_formal_python() {
+  local actual_sha256=''
+  if [[ -z "$tobkiri_packaging_python" || -z "$tobkiri_packaging_python_sha256" ]]; then
+    printf '%s\n' 'missing formal Python binding: TOBKIRI_PACKAGING_PYTHON path and TOBKIRI_PACKAGING_PYTHON_SHA256 digest are required' >&2
+    return 1
   fi
-  return "$exit_status"
+  if [[ "$tobkiri_packaging_python" != /* || "$tobkiri_packaging_python" == python3 || "$tobkiri_packaging_python" == python ]]; then
+    printf '%s\n' 'TOBKIRI_PACKAGING_PYTHON must be an absolute path, not ambient python3' >&2
+    return 1
+  fi
+  if [[ ! -f "$tobkiri_packaging_python" || -L "$tobkiri_packaging_python" || ! -x "$tobkiri_packaging_python" ]]; then
+    printf '%s\n' 'TOBKIRI_PACKAGING_PYTHON wrapper path is not a regular executable' >&2
+    return 1
+  fi
+  if [[ ! "$tobkiri_packaging_python_sha256" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    printf '%s\n' 'TOBKIRI_PACKAGING_PYTHON_SHA256 is not a hexadecimal digest' >&2
+    return 1
+  fi
+  actual_sha256=$(shasum -a 256 "$tobkiri_packaging_python" | awk '{print $1}')
+  if [[ "$actual_sha256" != "$tobkiri_packaging_python_sha256" ]]; then
+    printf '%s\n' 'TOBKIRI_PACKAGING_PYTHON_SHA256 mismatch for the wrapper path' >&2
+    return 1
+  fi
 }
-trap 'cleanup $?' EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 131' QUIT
-trap 'exit 143' TERM
 
-find_owned_device() {
-  local target=$1
+run_formal_python() {
+  verify_formal_python || return 1
+  "$tobkiri_packaging_python" -I -B "$@"
+}
+
+image_identity() {
+  local image_path=$1
+  run_formal_python - "$image_path" <<'PY'
+import os
+import stat
+import sys
+
+try:
+    metadata = os.lstat(sys.argv[1])
+except OSError:
+    raise SystemExit(1)
+if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+    raise SystemExit(1)
+if metadata.st_uid != os.geteuid():
+    raise SystemExit(1)
+print("%d:%d:%d:%d:%d" % (
+    metadata.st_dev,
+    metadata.st_ino,
+    metadata.st_uid,
+    metadata.st_size,
+    metadata.st_mode,
+))
+PY
+}
+
+find_exact_device() {
+  local target_path=$1
   local info=''
-
   if ! info=$(hdiutil info); then
     return 1
   fi
-
-  awk -v target="$target" '
-    function trim(value) {
-      sub(/^[[:space:]]+/, "", value)
-      sub(/[[:space:]]+$/, "", value)
-      return value
+  awk -v target="$target_path" '
+    function finish_record() {
+      if (has_record) {
+        if (record_path == target) {
+          target_records++
+          if (record_devices != 1) {
+            invalid = 1
+          } else {
+            selected_device = record_device
+          }
+        }
+      }
+      has_record = 0
+      record_path = ""
+      record_device = ""
+      record_devices = 0
     }
-
-    /^image-path[[:space:]]*:/ {
-      path = $0
-      sub(/^[^:]*:[[:space:]]*/, "", path)
-      in_target = (trim(path) == target)
+    BEGIN {
+      has_record = 0
+      target_records = 0
+      selected_device = ""
+      invalid = 0
+    }
+    /^[[:space:]]*image-path[[:space:]]*:/ {
+      finish_record()
+      record_path = $0
+      sub(/^[^:]*:[[:space:]]*/, "", record_path)
+      sub(/^[[:space:]]+/, "", record_path)
+      sub(/[[:space:]]+$/, "", record_path)
+      if (record_path == "") {
+        invalid = 1
+      }
+      has_record = 1
       next
     }
-
-    in_target && $0 ~ /^\/dev\/disk[0-9]+([[:space:]]|$)/ {
-      print $1
-      exit
+    /^[[:space:]]*=+[[:space:]]*$/ {
+      finish_record()
+      next
+    }
+    has_record && $0 ~ /^[[:space:]]*\/dev\/disk[0-9]+[[:space:]]/ {
+      record_devices++
+      if (record_devices == 1) {
+        record_device = $1
+      }
+      next
+    }
+    has_record && $0 ~ /^[[:space:]]*\/dev\/disk[0-9]+s[0-9]+[[:space:]]/ {
+      next
+    }
+    has_record && $0 ~ /^[[:space:]]*\/dev\/disk/ {
+      invalid = 1
+      next
+    }
+    END {
+      finish_record()
+      if (invalid || target_records != 1 || selected_device == "") {
+        exit 1
+      }
+      print selected_device
     }
   ' <<<"$info"
 }
 
-detach_owned_image() {
-  local image_path=$1
-  local device=''
+owned_image_paths=()
+owned_image_identities=()
+owned_image_devices=()
 
-  if ! device=$(find_owned_device "$image_path"); then
-    printf 'Could not inspect hdiutil state while checking owned image: %s\n' \
-      "$image_path" >&2
+record_owned_image() {
+  local image_path=$1
+  local image_id=''
+  local image_device=''
+  [[ -f "$image_path" && ! -L "$image_path" ]] || return 1
+  image_id=$(image_identity "$image_path") || return 1
+  image_device=$(find_exact_device "$image_path") || return 1
+  [[ "$image_device" == /dev/disk[0-9]* ]] || return 1
+  owned_image_paths[${#owned_image_paths[@]}]="$image_path"
+  owned_image_identities[${#owned_image_identities[@]}]="$image_id"
+  owned_image_devices[${#owned_image_devices[@]}]="$image_device"
+}
+
+record_failed_image_if_owned() {
+  local image_path=$1
+  if [[ -f "$image_path" && ! -L "$image_path" ]]; then
+    record_owned_image "$image_path" || true
+  fi
+}
+
+detach_owned_image() {
+  local index_value=$1
+  local image_path="${owned_image_paths[$index_value]}"
+  local expected_id="${owned_image_identities[$index_value]}"
+  local expected_device="${owned_image_devices[$index_value]}"
+  local current_id=''
+  local current_device=''
+  if ! current_id=$(image_identity "$image_path"); then
+    printf 'image path identity changed; detach refused: %s\n' "$image_path" >&2
     return 1
   fi
-  [[ -n "$device" ]] || return 0
-
-  printf 'Detaching invocation-owned disk image: %s (%s)\n' "$image_path" "$device" >&2
-  if ! hdiutil detach "$device"; then
-    printf 'Could not detach invocation-owned disk image: %s (%s)\n' \
-      "$image_path" "$device" >&2
+  if [[ "$current_id" != "$expected_id" ]]; then
+    printf 'image path identity changed; detach refused: %s\n' "$image_path" >&2
+    return 1
+  fi
+  if ! current_device=$(find_exact_device "$image_path"); then
+    printf 'exact image mapping is unavailable; detach refused: %s\n' "$image_path" >&2
+    return 1
+  fi
+  if [[ "$current_device" != "$expected_device" ]]; then
+    printf 'image device mapping changed; foreign detach refused: %s (%s)\n' "$image_path" "$current_device" >&2
+    return 1
+  fi
+  if ! hdiutil detach "$expected_device"; then
+    printf 'owned image detach failed: %s (%s)\n' "$image_path" "$expected_device" >&2
     return 1
   fi
 }
 
 detach_owned_images() {
-  local image_path=''
+  local index_value=0
   local failed=0
-
-  (( ${#owned_image_paths[@]} > 0 )) || return 0
-  for image_path in "${owned_image_paths[@]}"; do
-    if ! detach_owned_image "$image_path"; then
+  for index_value in "${!owned_image_paths[@]}"; do
+    if ! detach_owned_image "$index_value"; then
       failed=1
     fi
   done
@@ -282,72 +318,138 @@ replay_stderr() {
   fi
 }
 
-is_transient_busy_failure() {
-  local status=$1
-  local stderr_path=$2
-
-  # hdiutil's canonical diagnostic is "Resource busy"; EBUSY is status 16.
-  if [[ "$status" -eq 16 ]]; then
-    return 0
-  fi
-  [[ "$status" -eq 1 ]] || return 1
-  grep -Eiq 'resource[[:space:]]+busy|(^|[^[:alnum:]_])ebusy([^[:alnum:]_]|$)' \
-    "$stderr_path"
-}
-
 publish_verified_dmg() {
   local source_path=$1
-
+  local expected_id=$2
+  local current_id=''
   if [[ -e "$dmg_path" || -L "$dmg_path" ]]; then
     printf 'Refusing to overwrite existing macOS installer: %s\n' "$dmg_path" >&2
     return 1
   fi
-
-  # A hard link creates the final name atomically and fails if another writer
-  # wins the race.  It is safe here because both paths are in output_dir.
+  if ! current_id=$(image_identity "$source_path"); then
+    printf 'temporary image identity changed before publication: %s\n' "$source_path" >&2
+    return 1
+  fi
+  if [[ "$current_id" != "$expected_id" ]]; then
+    printf 'temporary image identity changed before publication: %s\n' "$source_path" >&2
+    return 1
+  fi
   if ! ln "$source_path" "$dmg_path"; then
-    printf 'Could not publish macOS installer without overwriting output: %s\n' \
-      "$dmg_path" >&2
+    printf 'Could not publish macOS installer without overwriting output: %s\n' "$dmg_path" >&2
+    return 1
+  fi
+  if ! current_id=$(image_identity "$source_path") || [[ "$current_id" != "$expected_id" ]]; then
+    printf 'temporary image identity changed before unlink: %s\n' "$source_path" >&2
     return 1
   fi
   if ! rm -f -- "$source_path"; then
-    printf 'Published macOS installer but could not remove its temporary link: %s\n' \
-      "$source_path" >&2
+    printf 'Published macOS installer but could not remove its temporary image: %s\n' "$source_path" >&2
     return 1
   fi
 }
 
+app_bundle=$(cd "$app_bundle" && pwd -P)
+mkdir -p "$output_dir"
+output_dir=$(cd "$output_dir" && pwd -P)
+
+app_name=$(basename "$app_bundle")
+[[ "$app_name" == *.app ]] || {
+  printf 'Expected a .app bundle, got: %s\n' "$app_name" >&2
+  exit 1
+}
+app_stem=${app_name%.app}
+version=$(plutil -extract CFBundleShortVersionString raw -o - "$app_bundle/Contents/Info.plist")
+[[ -n "$version" && "$version" =~ ^[A-Za-z0-9][A-Za-z0-9.+_-]*$ ]] || {
+  printf 'Tauri app bundle has an unsafe version for a DMG filename: %s\n' "$version" >&2
+  exit 1
+}
+
+dmg_path="$output_dir/${app_stem}_${version}_${architecture_suffix}.dmg"
+if [[ -e "$dmg_path" || -L "$dmg_path" ]]; then
+  printf 'Refusing to overwrite existing macOS installer: %s\n' "$dmg_path" >&2
+  exit 1
+fi
+
+verify_formal_python
+script_dir=$(cd "$(dirname "$0")" && pwd -P)
+workspace_identity=$(run_formal_python "$script_dir/cleanup_macos_dmg_workspace.py" create --parent "$output_dir")
+IFS=$'\t' read -r work_dir work_device work_inode <<<"$workspace_identity"
+[[ -n "$work_dir" && "$work_device" =~ ^[0-9]+$ && "$work_inode" =~ ^[0-9]+$ ]] || {
+  printf '%s\n' 'DMG workspace helper returned an invalid ownership identity' >&2
+  exit 1
+}
+staging_dir="$work_dir/staging"
+image_dir="$work_dir/images"
+mkdir "$staging_dir" "$image_dir"
+
+cleanup() {
+  local exit_status=$1
+  local workspace_verified=0
+  trap - EXIT HUP INT QUIT TERM
+  if [[ -n "${work_dir:-}" && ( -e "$work_dir" || -L "$work_dir" ) ]]; then
+    if run_formal_python "$script_dir/cleanup_macos_dmg_workspace.py" verify \
+      --parent "$output_dir" --workspace "$work_dir" \
+      --device "$work_device" --inode "$work_inode"; then
+      workspace_verified=1
+    else
+      printf 'Temporary DMG workspace identity changed; cleanup refused: %s\n' "$work_dir" >&2
+      if ((exit_status == 0)); then
+        exit_status=1
+      fi
+    fi
+    if ((workspace_verified == 1)); then
+      if detach_owned_images; then
+        if ! run_formal_python "$script_dir/cleanup_macos_dmg_workspace.py" cleanup \
+          --parent "$output_dir" --workspace "$work_dir" \
+          --device "$work_device" --inode "$work_inode"; then
+          printf 'Could not remove temporary DMG workspace: %s\n' "$work_dir" >&2
+          if ((exit_status == 0)); then
+            exit_status=1
+          fi
+        fi
+      else
+        printf 'Temporary DMG image ownership could not be revalidated; workspace preserved: %s\n' "$work_dir" >&2
+        if ((exit_status == 0)); then
+          exit_status=1
+        fi
+      fi
+    fi
+  fi
+  return "$exit_status"
+}
+trap 'cleanup "$?"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 131' QUIT
+trap 'exit 143' TERM
+
 printf 'Verifying signed app bundle: %s\n' "$app_bundle"
 codesign --verify --deep --strict --verbose=2 "$app_bundle"
 if [[ -n "$signing_identity" ]]; then
-  signing_details="$(codesign --display --verbose=4 "$app_bundle" 2>&1)"
-  if ! grep -Fqx "Authority=$signing_identity" <<<"$signing_details"; then
-    printf 'macOS app is not signed by the requested Developer ID identity\n' >&2
+  signing_details=$(codesign --display --verbose=4 "$app_bundle" 2>&1)
+  grep -Fqx "Authority=$signing_identity" <<<"$signing_details" || {
+    printf '%s\n' 'macOS app is not signed by the requested Developer ID identity' >&2
     exit 1
-  fi
+  }
 elif [[ -n "$ci_e2e_cert_sha256" ]]; then
-  bundle_identifier=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
-    "$app_bundle/Contents/Info.plist")
+  bundle_identifier=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_bundle/Contents/Info.plist")
   [[ "$bundle_identifier" == 'dev.tobkiri.launcher.ci-e2e' ]] || {
-    printf 'CI/E2E artifact has the wrong bundle identifier: %s\n' \
-      "$bundle_identifier" >&2
+    printf 'CI/E2E artifact has the wrong bundle identifier: %s\n' "$bundle_identifier" >&2
     exit 1
   }
   marker="$app_bundle/Contents/Resources/NON_PUBLISHABLE_CI_E2E_ARTIFACT.txt"
   [[ -f "$marker" && ! -L "$marker" ]] || {
-    printf 'CI/E2E artifact is missing its signed non-publishable marker\n' >&2
+    printf '%s\n' 'CI/E2E artifact is missing its signed non-publishable marker' >&2
     exit 1
   }
   artifact_policy="$app_bundle/Contents/Resources/ci-e2e-artifact-policy.v1.json"
   expected_policy="$script_dir/../src-tauri/ci-e2e/ci-e2e-artifact-policy.v1.json"
-  [[ -f "$artifact_policy" && ! -L "$artifact_policy" ]] \
-    && cmp -s "$expected_policy" "$artifact_policy" || {
-    printf 'CI/E2E artifact policy is missing or differs from its build domain\n' >&2
+  [[ -f "$artifact_policy" && ! -L "$artifact_policy" ]] && cmp -s "$expected_policy" "$artifact_policy" || {
+    printf '%s\n' 'CI/E2E artifact policy is missing or differs from its build domain' >&2
     exit 1
   }
-  python3 -B "$script_dir/../../.github/scripts/macos_ci_artifact.py" verify \
-    --app-bundle "$app_bundle" \
-    --expected-certificate-sha256 "$ci_e2e_cert_sha256"
+  run_formal_python "$script_dir/../../.github/scripts/macos_ci_artifact.py" verify \
+    --app-bundle "$app_bundle" --expected-certificate-sha256 "$ci_e2e_cert_sha256"
 fi
 
 printf 'Staging signed app bundle for DMG: %s\n' "$app_name"
@@ -355,73 +457,46 @@ ditto "$app_bundle" "$staging_dir/$app_name"
 codesign --verify --deep --strict --verbose=2 "$staging_dir/$app_name"
 ln -s /Applications "$staging_dir/Applications"
 
-create_attempts=3
-temporary_dmg_path=''
-create_status=1
-for ((attempt = 1; attempt <= create_attempts; attempt++)); do
-  temporary_dmg_path="$image_dir/${app_stem}_${version}_${architecture_suffix}.attempt-${attempt}.dmg"
-  owned_image_paths+=("$temporary_dmg_path")
-  create_stderr="$work_dir/hdiutil-create-${attempt}.stderr"
-
-  printf 'Creating read-only UDZO installer (attempt %d/%d): %s\n' \
-    "$attempt" "$create_attempts" "$temporary_dmg_path"
-  if hdiutil create \
-    -srcfolder "$staging_dir" \
-    -volname "$app_stem" \
-    -fs APFS \
-    -format UDZO \
-    "$temporary_dmg_path" \
-    2>"$create_stderr"; then
-    replay_stderr "$create_stderr"
-    create_status=0
-    break
-  else
-    create_status=$?
-    replay_stderr "$create_stderr"
-  fi
-
-  if ! is_transient_busy_failure "$create_status" "$create_stderr"; then
-    printf 'hdiutil create failed with status %d; not retrying\n' "$create_status" >&2
-    exit "$create_status"
-  fi
-  if ((attempt == create_attempts)); then
-    printf 'hdiutil create exhausted %d attempts on a recognized busy failure\n' \
-      "$create_attempts" >&2
-    exit "$create_status"
-  fi
-
-  if ! detach_owned_image "$temporary_dmg_path"; then
-    printf 'Refusing to retry hdiutil create without safely detaching its owned image\n' >&2
-    exit "$create_status"
-  fi
-  if ! rm -f -- "$temporary_dmg_path"; then
-    printf 'Could not remove failed temporary disk image: %s\n' \
-      "$temporary_dmg_path" >&2
-    exit 1
-  fi
-  printf 'Retrying hdiutil create after recognized busy failure\n' >&2
-  sleep "$attempt"
-done
-
-if ((create_status != 0)); then
-  printf 'hdiutil create did not produce a disk image\n' >&2
+temporary_dmg_path="$image_dir/${app_stem}_${version}_${architecture_suffix}.dmg"
+[[ ! -e "$temporary_dmg_path" && ! -L "$temporary_dmg_path" ]] || {
+  printf '%s\n' 'temporary image path was not fresh' >&2
   exit 1
+}
+create_stderr="$work_dir/hdiutil-create.stderr"
+create_status=0
+printf 'Creating read-only UDZO installer: %s\n' "$temporary_dmg_path"
+if hdiutil create \
+  -srcfolder "$staging_dir" \
+  -volname "$app_stem" \
+  -fs APFS \
+  -format UDZO \
+  "$temporary_dmg_path" 2>"$create_stderr"; then
+  replay_stderr "$create_stderr"
+else
+  create_status=$?
+  replay_stderr "$create_stderr"
+  record_failed_image_if_owned "$temporary_dmg_path"
+  exit "$create_status"
 fi
+
+record_owned_image "$temporary_dmg_path" || {
+  printf '%s\n' 'hdiutil image identity or exact device mapping was not verified' >&2
+  exit 1
+}
+owned_image_id="${owned_image_identities[0]}"
 
 printf 'Verifying disk image integrity: %s\n' "$temporary_dmg_path"
 hdiutil verify "$temporary_dmg_path"
 [[ -s "$temporary_dmg_path" ]] || {
-  printf 'hdiutil created an empty disk image: %s\n' "$temporary_dmg_path" >&2
+  printf 'created an empty disk image: %s\n' "$temporary_dmg_path" >&2
   exit 1
 }
-
-# hdiutil can leave a failed or verified image attached while diskimages-helper
-# drains.  Before publication, prove that every candidate is detached.  The
-# cleanup trap repeats the same exact-path-only check on all exit paths.
 if ! detach_owned_images; then
-  printf 'Refusing to publish a disk image that could not be safely detached\n' >&2
+  printf '%s\n' 'Refusing to publish a disk image whose ownership could not be revalidated' >&2
   exit 1
 fi
-publish_verified_dmg "$temporary_dmg_path"
-
+publish_verified_dmg "$temporary_dmg_path" "$owned_image_id"
+owned_image_paths=()
+owned_image_identities=()
+owned_image_devices=()
 printf 'Created verified macOS installer: %s\n' "$dmg_path"
