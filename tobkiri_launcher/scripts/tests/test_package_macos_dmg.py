@@ -170,6 +170,8 @@ def _prepare(root: Path, mode: str) -> tuple[Path, Path, Path, dict[str, str]]:
     app = _fixture_app(root)
     output_dir = root / "output"
     output_dir.mkdir()
+    formal_python_snapshot = root / "formal-python-snapshot"
+    formal_python_snapshot.mkdir()
     bin_dir, state_path = _create_fake_tools(root, mode)
     victim = root / "external-victim"
     victim.mkdir()
@@ -183,6 +185,7 @@ def _prepare(root: Path, mode: str) -> tuple[Path, Path, Path, dict[str, str]]:
             "FAKE_EXTERNAL_VICTIM": str(victim),
             "TOBKIRI_PACKAGING_PYTHON": interpreter,
             "TOBKIRI_PACKAGING_PYTHON_SHA256": digest,
+            "TOBKIRI_PACKAGING_PYTHON_SNAPSHOT": str(formal_python_snapshot),
         }
     )
     return app, output_dir, state_path, environment
@@ -283,6 +286,62 @@ def test_formal_python_helpers_use_verified_interpreter_and_digest(tmp_path: Pat
     assert "mismatch" in mismatch.stderr.lower()
     assert "wrapper" in mismatch.stderr.lower()
     assert _state(state_path)["create_count"] == 0
+
+    missing_snapshot_environment = environment.copy()
+    missing_snapshot_environment.pop("TOBKIRI_PACKAGING_PYTHON_SNAPSHOT")
+    missing_snapshot = subprocess.run(
+        argv,
+        capture_output=True,
+        check=False,
+        env=missing_snapshot_environment,
+        text=True,
+    )
+    assert isinstance(missing_snapshot, subprocess.CompletedProcess)
+    assert missing_snapshot.returncode != 0
+    assert "snapshot" in missing_snapshot.stderr.lower()
+    assert _state(state_path)["create_count"] == 0
+
+
+def test_formal_python_runs_from_the_sealed_snapshot_root(tmp_path: Path) -> None:
+    app, output_dir, state_path, environment = _prepare(tmp_path, "permanent")
+    snapshot = tmp_path / "formal-python-snapshot"
+    delegate = Path(os.path.realpath(sys.executable))
+    wrapper = tmp_path / "formal-python"
+    _write_executable(
+        wrapper,
+        """#!/bin/sh
+set -eu
+if [ "$PWD" != "$EXPECTED_FORMAL_PYTHON_CWD" ]; then
+  printf 'unexpected formal Python cwd: %s\\n' "$PWD" >&2
+  exit 88
+fi
+exec "$FORMAL_PYTHON_DELEGATE" "$@"
+""",
+    )
+    environment.update(
+        {
+            "EXPECTED_FORMAL_PYTHON_CWD": str(snapshot),
+            "FORMAL_PYTHON_DELEGATE": str(delegate),
+            "TOBKIRI_PACKAGING_PYTHON": str(wrapper),
+            "TOBKIRI_PACKAGING_PYTHON_SHA256": hashlib.sha256(
+                wrapper.read_bytes()
+            ).hexdigest(),
+        }
+    )
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    result = subprocess.run(
+        _command(app, output_dir),
+        capture_output=True,
+        check=False,
+        cwd=caller,
+        env=environment,
+        text=True,
+    )
+    assert isinstance(result, subprocess.CompletedProcess)
+    assert result.returncode == 7, result.stderr
+    assert "permission denied" in result.stderr
+    assert _state(state_path)["create_count"] == 1
 
 
 def test_failure_cleanup_only_detaches_owned_images(tmp_path: Path) -> None:

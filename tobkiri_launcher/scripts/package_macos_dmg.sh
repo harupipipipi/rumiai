@@ -122,6 +122,7 @@ fi
 
 tobkiri_packaging_python="${TOBKIRI_PACKAGING_PYTHON-}"
 tobkiri_packaging_python_sha256="${TOBKIRI_PACKAGING_PYTHON_SHA256-}"
+tobkiri_packaging_python_snapshot="${TOBKIRI_PACKAGING_PYTHON_SNAPSHOT-}"
 
 verify_formal_python() {
   local actual_sha256=''
@@ -137,6 +138,13 @@ verify_formal_python() {
     printf '%s\n' 'TOBKIRI_PACKAGING_PYTHON wrapper path is not a regular executable' >&2
     return 1
   fi
+  if [[ -z "$tobkiri_packaging_python_snapshot" \
+     || "$tobkiri_packaging_python_snapshot" != /* \
+     || ! -d "$tobkiri_packaging_python_snapshot" \
+     || -L "$tobkiri_packaging_python_snapshot" ]]; then
+    printf '%s\n' 'TOBKIRI_PACKAGING_PYTHON_SNAPSHOT must be an absolute, real directory' >&2
+    return 1
+  fi
   if [[ ! "$tobkiri_packaging_python_sha256" =~ ^[0-9a-fA-F]{64}$ ]]; then
     printf '%s\n' 'TOBKIRI_PACKAGING_PYTHON_SHA256 is not a hexadecimal digest' >&2
     return 1
@@ -150,7 +158,16 @@ verify_formal_python() {
 
 run_formal_python() {
   verify_formal_python || return 1
-  "$tobkiri_packaging_python" -I -B "$@"
+  # The sealed venv resolves its relocatable home from the launch root.
+  # Keep that root stable even when the caller's working directory is elsewhere.
+  (
+    cd "$tobkiri_packaging_python_snapshot" || {
+      printf 'Could not enter formal Python snapshot: %s\n' \
+        "$tobkiri_packaging_python_snapshot" >&2
+      exit 1
+    }
+    "$tobkiri_packaging_python" -I -B "$@"
+  )
 }
 
 image_identity() {
