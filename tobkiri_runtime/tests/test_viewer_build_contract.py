@@ -316,7 +316,7 @@ def test_macos_installer_uses_finder_free_verified_dmg_packager():
         "trap 'exit 130' INT",
         "trap 'exit 143' TERM",
         'ln "$source_path" "$dmg_path"',
-        "hdiutil verify",
+        "verify_bound_image",
         "unsafe version for a DMG filename",
     ):
         assert required in packager
