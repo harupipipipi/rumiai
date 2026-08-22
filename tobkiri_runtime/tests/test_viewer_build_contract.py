@@ -292,6 +292,22 @@ def test_rust_packaging_callers_require_formal_absolute_tool_identities():
     assert 'unwrap_or_else(|| "python"' not in build
 
 
+def test_full_ci_macos_launcher_binds_git_before_rust_build():
+    """The full macOS viewer build must provide the formal Git authority."""
+    workflow = TEST_WORKFLOW.read_text(encoding="utf-8")
+    macos_job = workflow.split("\n  tobkiri-launcher-macos:", 1)[1].split(
+        "\n  mac-computer-driver-smoke:", 1
+    )[0]
+    binding = (
+        "python -B .github/scripts/packaging_toolchain_identity.py\n"
+        "          --bind-git-env\n"
+        '          --env-output "$GITHUB_ENV"'
+    )
+    binding_at = macos_job.index(binding)
+    build_at = macos_job.index("- name: Build rumi viewer")
+    assert binding_at < build_at
+
+
 def test_macos_installer_uses_finder_free_verified_dmg_packager():
     assert MACOS_DMG_PACKAGER.is_file()
     packager = MACOS_DMG_PACKAGER.read_text(encoding="utf-8")

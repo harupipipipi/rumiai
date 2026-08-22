@@ -774,6 +774,12 @@ jobs:
           test -n "$target"
           echo "TOBKIRI_RUST_HOST_TARGET=$target" >> "$GITHUB_ENV"
 
+      - name: Bind formal packaging Git for viewer build
+        run: >-
+          python -B .github/scripts/packaging_toolchain_identity.py
+          --bind-git-env
+          --env-output "$GITHUB_ENV"
+
       - name: Build debug Pack Shell for viewer Rust checks
         run: cargo build --locked --manifest-path pack-shell/Cargo.toml --target "$TOBKIRI_RUST_HOST_TARGET"
 
