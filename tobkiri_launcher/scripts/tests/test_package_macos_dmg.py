@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -30,6 +31,8 @@ def _create_fake_tools(root: Path, mode: str) -> tuple[Path, Path]:
                 "attached": {},
                 "detach": [],
                 "commands": [],
+                "events": [],
+                "requested_size": None,
             }
         ),
         encoding="utf-8",
@@ -85,6 +88,12 @@ if command == "create":
     output = Path(sys.argv[-1])
     state["create_count"] += 1
     state["commands"].append(sys.argv[1:])
+    state["events"].append("create")
+    try:
+        size_arg = sys.argv[sys.argv.index("-size") + 1]
+    except (ValueError, IndexError):
+        fail("hdiutil: create missing -size", 8)
+    state["requested_size"] = size_arg
     mode = state["mode"]
     if mode == "primary_error":
         workspace = output.parents[1]
@@ -94,7 +103,20 @@ if command == "create":
         fail("hdiutil: create failed - permission denied", 7)
     if mode == "permanent":
         fail("hdiutil: create failed - permission denied", 7)
-    output.write_bytes(("DMG-%d" % state["create_count"]).encode("ascii"))
+    if mode == "symlink":
+        output.symlink_to(Path(os.environ["FAKE_EXTERNAL_VICTIM"]) / "keep.txt")
+    elif mode == "directory":
+        output.mkdir()
+    elif mode == "fifo":
+        os.mkfifo(output)
+    else:
+        output.write_bytes(("DMG-%d" % state["create_count"]).encode("ascii"))
+        if mode == "under_floor":
+            with output.open("r+b") as stream:
+                stream.truncate(10240000000 - 1024)
+        else:
+            with output.open("r+b") as stream:
+                stream.truncate(10240000000)
     state["attached"][str(output)] = "/dev/disk42"
     if mode == "resource_busy":
         fail("hdiutil: create failed - Resource busy", 1)
@@ -108,6 +130,7 @@ if command == "create":
     raise SystemExit(0)
 
 if command == "info":
+    state["events"].append("info")
     state["info_count"] += 1
     print("framework : test")
     print("image-path      : /foreign/foreign.dmg")
@@ -127,15 +150,21 @@ if command == "info":
     raise SystemExit(0)
 
 if command == "detach":
+    state["events"].append("detach")
     state["detach"].append(sys.argv[2])
     state["attached"] = {}
     save()
     raise SystemExit(0)
 
 if command == "verify":
-    image_path = Path(sys.argv[-1])
-    if not image_path.is_file():
+    state["events"].append("verify")
+    verification_path = Path(sys.argv[-1])
+    if not verification_path.is_file():
         fail("missing image", 2)
+    attached_paths = list(state["attached"])
+    if len(attached_paths) != 1:
+        fail("missing named image", 2)
+    image_path = Path(attached_paths[0])
     if state["mode"] == "replaced_path":
         replacement = Path(os.environ["FAKE_EXTERNAL_VICTIM"]) / "replacement.bin"
         replacement.write_bytes(b"replacement-bytes")
@@ -178,6 +207,35 @@ def _prepare(root: Path, mode: str) -> tuple[Path, Path, Path, dict[str, str]]:
     (victim / "keep.txt").write_text("keep", encoding="utf-8")
     interpreter, digest = _formal_binding()
     environment = os.environ.copy()
+    if mode == "fifo_substitution":
+        fifo_wrapper = root / "formal-python-fifo-substitution"
+        _write_executable(
+            fifo_wrapper,
+            """#!/usr/bin/env python3
+import os
+import subprocess
+import sys
+
+
+source = sys.stdin.read()
+needle = "    named_metadata = os.lstat(sys.argv[1])\\n"
+if os.environ.get("FAKE_FIFO_SUBSTITUTION") == "1":
+    source = source.replace(
+        needle,
+        needle + "    os.unlink(sys.argv[1])\\n    os.mkfifo(sys.argv[1])\\n",
+        1,
+    )
+result = subprocess.run(
+    [os.environ["FORMAL_PYTHON_DELEGATE"], *sys.argv[1:]],
+    input=source,
+    text=True,
+    check=False,
+)
+raise SystemExit(result.returncode)
+""",
+        )
+        interpreter = str(fifo_wrapper)
+        digest = hashlib.sha256(fifo_wrapper.read_bytes()).hexdigest()
     environment.update(
         {
             "PATH": f"{bin_dir}{os.pathsep}{environment['PATH']}",
@@ -188,6 +246,13 @@ def _prepare(root: Path, mode: str) -> tuple[Path, Path, Path, dict[str, str]]:
             "TOBKIRI_PACKAGING_PYTHON_SNAPSHOT": str(formal_python_snapshot),
         }
     )
+    if mode == "fifo_substitution":
+        environment.update(
+            {
+                "FAKE_FIFO_SUBSTITUTION": "1",
+                "FORMAL_PYTHON_DELEGATE": str(Path(os.path.realpath(sys.executable))),
+            }
+        )
     return app, output_dir, state_path, environment
 
 
@@ -205,14 +270,40 @@ def _command(app: Path, output_dir: Path) -> list[str]:
     ]
 
 
-def _run_packager(root: Path, mode: str) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+def _run_packager(
+    root: Path, mode: str, *, timeout: float | None = None
+) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     app, output_dir, state_path, environment = _prepare(root, mode)
-    result = subprocess.run(
+    process = subprocess.Popen(
         _command(app, output_dir),
-        capture_output=True,
-        check=False,
-        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
+        env=environment,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as timeout_error:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            stdout, stderr = process.communicate(timeout=1)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            stdout, stderr = process.communicate()
+        raise AssertionError(
+            "packager timed out while opening a FIFO substitution\n"
+            f"stdout={stdout}\n"
+            f"stderr={stderr}"
+        ) from timeout_error
+    result = subprocess.CompletedProcess(
+        process.args, process.returncode, stdout, stderr
     )
     return result, output_dir, state_path
 
@@ -399,7 +490,10 @@ def test_cleanup_failure_after_success_fails_without_deleting_published_dmg(
     assert isinstance(result, subprocess.CompletedProcess)
     assert result.returncode == 1
     assert "Could not remove temporary DMG workspace" in result.stderr
-    assert (output_dir / FINAL_NAME).read_bytes() == b"DMG-1"
+    published_path = output_dir / FINAL_NAME
+    with published_path.open("rb") as stream:
+        assert stream.read(len(b"DMG-1")) == b"DMG-1"
+    assert published_path.stat().st_size == 10240000000
     assert (tmp_path / "external-victim" / "keep.txt").read_text(
         encoding="utf-8"
     ) == "keep"
@@ -450,3 +544,63 @@ def test_replaced_image_path_is_not_unlinked_or_detached(tmp_path: Path) -> None
     assert (tmp_path / "external-victim" / "replacement.bin").read_bytes() == (
         b"replacement-bytes"
     )
+
+
+def test_detached_create_result_is_identity_bound_regular_file_until_retention_verification(
+    tmp_path: Path,
+) -> None:
+    result, output_dir, state_path = _run_packager(tmp_path, "success")
+    state = _state(state_path)
+    assert result.returncode == 0, result.stderr
+    assert state["requested_size"] == "10000000k"
+    events = state["events"]
+    assert "attach" not in events
+    assert events.index("create") < events.index("verify")
+    assert events.index("verify") < events.index("detach")
+    assert (output_dir / FINAL_NAME).stat().st_size >= 10240000000
+
+
+def test_detached_create_result_replacement_fails_before_attach(tmp_path: Path) -> None:
+    result, output_dir, state_path = _run_packager(tmp_path, "replaced_path")
+    state = _state(state_path)
+    assert result.returncode == 1
+    assert "identity changed during retained verification" in result.stderr
+    assert "attach" not in state["events"]
+    assert state["detach"] == []
+    assert not (output_dir / FINAL_NAME).exists()
+
+
+def test_detached_create_result_non_regular_fails_before_attach(tmp_path: Path) -> None:
+    for mode in ("symlink", "directory", "fifo", "fifo_substitution"):
+        result, output_dir, state_path = _run_packager(
+            tmp_path / mode, mode, timeout=5
+        )
+        state = _state(state_path)
+        assert result.returncode == 1
+        assert "detached regular file" in result.stderr
+        assert "attach" not in state["events"]
+        assert "verify" not in state["events"]
+        assert state["detach"] == []
+        assert not (output_dir / FINAL_NAME).exists()
+
+
+def test_precreate_floor_is_at_least_10000000_kib_before_attach(tmp_path: Path) -> None:
+    below, below_output, below_state_path = _run_packager(
+        tmp_path / "below", "under_floor"
+    )
+    below_state = _state(below_state_path)
+    assert below.returncode == 1
+    assert below_state["requested_size"] == "10000000k"
+    assert "logical size is below 10000000 KiB" in below.stderr
+    assert "verify" not in below_state["events"]
+    assert "attach" not in below_state["events"]
+    assert not (below_output / FINAL_NAME).exists()
+
+    boundary, boundary_output, boundary_state_path = _run_packager(
+        tmp_path / "boundary", "success"
+    )
+    boundary_state = _state(boundary_state_path)
+    assert boundary.returncode == 0, boundary.stderr
+    assert boundary_state["requested_size"] == "10000000k"
+    assert (boundary_output / FINAL_NAME).stat().st_size == 10240000000
+    assert "attach" not in boundary_state["events"]

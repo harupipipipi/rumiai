@@ -123,6 +123,8 @@ fi
 tobkiri_packaging_python="${TOBKIRI_PACKAGING_PYTHON-}"
 tobkiri_packaging_python_sha256="${TOBKIRI_PACKAGING_PYTHON_SHA256-}"
 tobkiri_packaging_python_snapshot="${TOBKIRI_PACKAGING_PYTHON_SNAPSHOT-}"
+minimum_dmg_size_kib=10000000
+minimum_dmg_size_bytes=10240000000
 
 verify_formal_python() {
   local actual_sha256=''
@@ -170,7 +172,7 @@ run_formal_python() {
   )
 }
 
-image_identity() {
+bound_image_metadata() {
   local image_path=$1
   run_formal_python - "$image_path" <<'PY'
 import os
@@ -178,13 +180,36 @@ import stat
 import sys
 
 try:
-    metadata = os.lstat(sys.argv[1])
+    named_metadata = os.lstat(sys.argv[1])
 except OSError:
     raise SystemExit(1)
-if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+if stat.S_ISLNK(named_metadata.st_mode) or not stat.S_ISREG(named_metadata.st_mode):
     raise SystemExit(1)
-if metadata.st_uid != os.geteuid():
+try:
+    nofollow = os.O_NOFOLLOW
+except AttributeError:
     raise SystemExit(1)
+try:
+    descriptor = os.open(
+        sys.argv[1],
+        os.O_RDONLY
+        | nofollow
+        | os.O_NONBLOCK
+        | getattr(os, "O_CLOEXEC", 0),
+    )
+except OSError:
+    raise SystemExit(1)
+try:
+    metadata = os.fstat(descriptor)
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or metadata.st_dev != named_metadata.st_dev
+        or metadata.st_ino != named_metadata.st_ino
+    ):
+        raise SystemExit(1)
+finally:
+    os.close(descriptor)
 print("%d:%d:%d:%d:%d" % (
     metadata.st_dev,
     metadata.st_ino,
@@ -192,6 +217,92 @@ print("%d:%d:%d:%d:%d" % (
     metadata.st_size,
     metadata.st_mode,
 ))
+PY
+}
+
+image_identity() {
+  bound_image_metadata "$1"
+}
+
+verify_bound_image() {
+  local image_path=$1
+  local expected_identity=$2
+  run_formal_python - "$image_path" "$expected_identity" <<'PY'
+import os
+import stat
+import subprocess
+import sys
+
+image_path = sys.argv[1]
+expected_identity = sys.argv[2]
+
+
+def identity(metadata: os.stat_result) -> str:
+    return "%d:%d:%d:%d:%d" % (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_uid,
+        metadata.st_size,
+        metadata.st_mode,
+    )
+
+
+try:
+    named_metadata = os.lstat(image_path)
+except OSError:
+    raise SystemExit(1)
+if stat.S_ISLNK(named_metadata.st_mode) or not stat.S_ISREG(named_metadata.st_mode):
+    raise SystemExit(1)
+try:
+    nofollow = os.O_NOFOLLOW
+except AttributeError:
+    raise SystemExit(1)
+try:
+    descriptor = os.open(
+        image_path,
+        os.O_RDONLY
+        | nofollow
+        | os.O_NONBLOCK
+        | getattr(os, "O_CLOEXEC", 0),
+    )
+except OSError:
+    raise SystemExit(1)
+try:
+    opened_metadata = os.fstat(descriptor)
+    if (
+        not stat.S_ISREG(opened_metadata.st_mode)
+        or opened_metadata.st_uid != os.geteuid()
+        or identity(opened_metadata) != expected_identity
+        or identity(named_metadata) != expected_identity
+    ):
+        raise SystemExit(1)
+    os.set_inheritable(descriptor, True)
+    verification_status = subprocess.run(
+        ["hdiutil", "verify", f"/dev/fd/{descriptor}"],
+        check=False,
+        pass_fds=(descriptor,),
+    ).returncode
+    retained_metadata = os.fstat(descriptor)
+    try:
+        retained_path_metadata = os.lstat(image_path)
+    except OSError:
+        retained_path_metadata = None
+    if (
+        identity(retained_metadata) != expected_identity
+        or retained_path_metadata is None
+        or stat.S_ISLNK(retained_path_metadata.st_mode)
+        or not stat.S_ISREG(retained_path_metadata.st_mode)
+        or identity(retained_path_metadata) != expected_identity
+    ):
+        print(
+            "detached image identity changed during retained verification: "
+            + image_path,
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+finally:
+    os.close(descriptor)
+raise SystemExit(verification_status)
 PY
 }
 
@@ -270,10 +381,12 @@ owned_image_devices=()
 
 record_owned_image() {
   local image_path=$1
-  local image_id=''
+  local image_id="${2-}"
   local image_device=''
   [[ -f "$image_path" && ! -L "$image_path" ]] || return 1
-  image_id=$(image_identity "$image_path") || return 1
+  if [[ -z "$image_id" ]]; then
+    image_id=$(image_identity "$image_path") || return 1
+  fi
   image_device=$(find_exact_device "$image_path") || return 1
   [[ "$image_device" == /dev/disk[0-9]* ]] || return 1
   owned_image_paths[${#owned_image_paths[@]}]="$image_path"
@@ -483,6 +596,7 @@ create_stderr="$work_dir/hdiutil-create.stderr"
 create_status=0
 printf 'Creating read-only UDZO installer: %s\n' "$temporary_dmg_path"
 if hdiutil create \
+  -size "${minimum_dmg_size_kib}k" \
   -srcfolder "$staging_dir" \
   -volname "$app_stem" \
   -fs APFS \
@@ -496,14 +610,42 @@ else
   exit "$create_status"
 fi
 
-record_owned_image "$temporary_dmg_path" || {
+detached_image_identity=$(bound_image_metadata "$temporary_dmg_path") || {
+  printf '%s\n' 'hdiutil result is not a detached regular file with a bound identity' >&2
+  exit 1
+}
+current_id=''
+if ! current_id=$(image_identity "$temporary_dmg_path") || \
+  [[ "$current_id" != "$detached_image_identity" ]]; then
+  printf 'detached image identity changed before size verification: %s\n' \
+    "$temporary_dmg_path" >&2
+  exit 1
+fi
+IFS=: read -r detached_device detached_inode detached_uid detached_size detached_mode \
+  <<<"$detached_image_identity"
+if [[ ! "$detached_size" =~ ^[0-9]+$ ]] || \
+  ((detached_size < minimum_dmg_size_bytes)); then
+  printf 'detached image logical size is below %s KiB: %s\n' \
+    "$minimum_dmg_size_kib" "$temporary_dmg_path" >&2
+  exit 1
+fi
+record_owned_image "$temporary_dmg_path" "$detached_image_identity" || {
   printf '%s\n' 'hdiutil image identity or exact device mapping was not verified' >&2
   exit 1
 }
 owned_image_id="${owned_image_identities[0]}"
+if [[ "$owned_image_id" != "$detached_image_identity" ]]; then
+  printf 'detached image identity changed before retained verification: %s\n' \
+    "$temporary_dmg_path" >&2
+  exit 1
+fi
 
 printf 'Verifying disk image integrity: %s\n' "$temporary_dmg_path"
-hdiutil verify "$temporary_dmg_path"
+if ! verify_bound_image "$temporary_dmg_path" "$detached_image_identity"; then
+  printf 'detached image retained verification failed: %s\n' \
+    "$temporary_dmg_path" >&2
+  exit 1
+fi
 [[ -s "$temporary_dmg_path" ]] || {
   printf 'created an empty disk image: %s\n' "$temporary_dmg_path" >&2
   exit 1

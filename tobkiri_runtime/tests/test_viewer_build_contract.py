@@ -352,6 +352,33 @@ def test_macos_installer_uses_finder_free_verified_dmg_packager():
     assert "osascript" not in packager
     assert "bundle_dmg.sh" not in packager
 
+
+def test_package_macos_dmg_retains_identity_verification_without_guard_attach():
+    """The detached create result is bound and retained verification stays intact."""
+    packager = MACOS_DMG_PACKAGER.read_text(encoding="utf-8")
+    assert "minimum_dmg_size_kib=10000000" in packager
+    assert "minimum_dmg_size_bytes=10240000000" in packager
+    assert "bound_image_metadata()" in packager
+    assert "os.O_NOFOLLOW" in packager
+    assert packager.count("os.O_NONBLOCK") == 2
+    assert "os.fstat(descriptor)" in packager
+    assert "hdiutil attach" not in packager
+    helper_start = packager.index("verify_bound_image() {")
+    helper_end = packager.index("\nfind_exact_device() {", helper_start)
+    helper = packager[helper_start:helper_end]
+    assert '["hdiutil", "verify", f"/dev/fd/{descriptor}"]' in helper
+    assert "pass_fds=(descriptor,)" in helper
+    assert "identity changed during retained verification" in helper
+    bind_index = packager.index('detached_image_identity=$(bound_image_metadata')
+    identity_index = packager.index('current_id=$(image_identity "$temporary_dmg_path")', bind_index)
+    floor_index = packager.index("detached_size < minimum_dmg_size_bytes", identity_index)
+    verify_index = packager.index(
+        'if ! verify_bound_image "$temporary_dmg_path" "$detached_image_identity"; then',
+        floor_index,
+    )
+    assert bind_index < identity_index < floor_index < verify_index
+    assert '[[ -s "$temporary_dmg_path" ]]' in packager
+
     desktop_workflow = (
         ROOT / ".github" / "workflows" / "desktop-installers.yml"
     ).read_text(encoding="utf-8")
