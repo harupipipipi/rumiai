@@ -230,17 +230,25 @@ pub(crate) fn verify(root: &Path) -> Result<VerifiedResourceManifest> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    fn fixture_path(nonce: u128) -> PathBuf {
+        let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "tobkiri-runtime-integrity-{}-{nonce}-{sequence}",
+            std::process::id()
+        ))
+    }
 
     fn fixture() -> PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "tobkiri-runtime-integrity-{}-{nonce}",
-            std::process::id()
-        ));
+        let root = fixture_path(nonce);
         fs::create_dir_all(root.join("core_runtime")).unwrap();
         let payload = b"bootstrap\n";
         fs::write(root.join("core_runtime/bootstrap.py"), payload).unwrap();
@@ -261,9 +269,15 @@ mod tests {
     }
 
     #[test]
+    fn fixture_paths_are_unique_when_clock_values_match() {
+        assert_ne!(fixture_path(0), fixture_path(0));
+    }
+
+    #[test]
     fn accepts_exact_resource_tree() {
         let root = fixture();
-        assert!(verify(&root).is_ok());
+        let verification = verify(&root);
+        assert!(verification.is_ok(), "{verification:?}");
         fs::remove_dir_all(root).unwrap();
     }
 
