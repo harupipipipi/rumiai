@@ -302,13 +302,16 @@ def test_full_ci_macos_launcher_binds_git_before_rust_build():
         "- name: Build rootless sealed packaging Python for viewer build"
     )
     setup_at = macos_job.index("- name: Set up Python")
-    build_at = macos_job.index("- name: Build rumi viewer")
-    assert binding_at < setup_at < build_at
+    test_at = macos_job.index("- name: Run rumi viewer tests")
+    assert binding_at < setup_at < test_at
     binding = macos_job[binding_at:setup_at]
     assert '--snapshot-source --snapshot-root "$source_snapshot"' in binding
     assert '--bind-git-env --env-output "$TOOLCHAIN_ENV"' in binding
     assert '/bin/cat "$TOOLCHAIN_ENV" >> "$GITHUB_ENV"' in binding
     assert '--target "$TOBKIRI_RUST_HOST_TARGET"' in binding
+    rust_checks = macos_job[setup_at:]
+    assert "- name: Build rumi viewer" not in rust_checks
+    assert "run: cargo test --locked" in rust_checks
 
 
 def test_macos_installer_uses_finder_free_verified_dmg_packager():

@@ -845,10 +845,6 @@ jobs:
           --target "$TOBKIRI_RUST_HOST_TARGET"
           --profile debug
 
-      - name: Build rumi viewer
-        working-directory: tobkiri_launcher/src-tauri
-        run: cargo build --locked
-
       - name: Run rumi viewer tests
         working-directory: tobkiri_launcher/src-tauri
         run: cargo test --locked
