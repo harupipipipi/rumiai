@@ -1,16 +1,34 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
+import plistlib
+import shutil
 import signal
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 SCRIPT = Path(__file__).resolve().parents[1] / "package_macos_dmg.sh"
+PUBLISHER_PATH = Path(__file__).resolve().parents[1] / "publish_macos_dmg.py"
 FINAL_NAME = "Tobkiri Launcher_1.2.3_x64.dmg"
+
+
+def _load_publisher():
+    spec = importlib.util.spec_from_file_location("publish_macos_dmg", PUBLISHER_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+PUBLISHER = _load_publisher()
 
 
 def _write_executable(path: Path, contents: str) -> None:
@@ -32,7 +50,7 @@ def _create_fake_tools(root: Path, mode: str) -> tuple[Path, Path]:
                 "detach": [],
                 "commands": [],
                 "events": [],
-                "requested_size": None,
+                "created_path": None,
             }
         ),
         encoding="utf-8",
@@ -62,7 +80,7 @@ printf '%s\\n' '1.2.3'
     )
     _write_executable(
         bin_dir / "hdiutil",
-        r'''#!/usr/bin/env python3
+        r"""#!/usr/bin/env python3
 import json
 import os
 import sys
@@ -89,11 +107,6 @@ if command == "create":
     state["create_count"] += 1
     state["commands"].append(sys.argv[1:])
     state["events"].append("create")
-    try:
-        size_arg = sys.argv[sys.argv.index("-size") + 1]
-    except (ValueError, IndexError):
-        fail("hdiutil: create missing -size", 8)
-    state["requested_size"] = size_arg
     mode = state["mode"]
     if mode == "primary_error":
         workspace = output.parents[1]
@@ -111,14 +124,9 @@ if command == "create":
         os.mkfifo(output)
     else:
         output.write_bytes(("DMG-%d" % state["create_count"]).encode("ascii"))
-        if mode == "under_floor":
-            with output.open("r+b") as stream:
-                stream.truncate(10240000000 - 1024)
-        else:
-            with output.open("r+b") as stream:
-                stream.truncate(10240000000)
-    state["attached"][str(output)] = "/dev/disk42"
-    if mode == "resource_busy":
+    state["created_path"] = str(output)
+    if mode in {"resource_busy", "rebound_device", "mount_rebinding"}:
+        state["attached"][str(output)] = "/dev/disk42"
         fail("hdiutil: create failed - Resource busy", 1)
     if mode == "success_cleanup_failure":
         workspace = output.parents[1]
@@ -161,10 +169,10 @@ if command == "verify":
     verification_path = Path(sys.argv[-1])
     if not verification_path.is_file():
         fail("missing image", 2)
-    attached_paths = list(state["attached"])
-    if len(attached_paths) != 1:
+    created_path = state.get("created_path")
+    if not isinstance(created_path, str):
         fail("missing named image", 2)
-    image_path = Path(attached_paths[0])
+    image_path = Path(created_path)
     if state["mode"] == "replaced_path":
         replacement = Path(os.environ["FAKE_EXTERNAL_VICTIM"]) / "replacement.bin"
         replacement.write_bytes(b"replacement-bytes")
@@ -174,7 +182,7 @@ if command == "verify":
     raise SystemExit(0)
 
 fail("unexpected hdiutil command: %s" % command, 2)
-''',
+""",
     )
     return bin_dir, state_path
 
@@ -345,7 +353,9 @@ def test_permanent_hdiutil_error_is_not_retried_and_stderr_is_preserved(
     assert _temporary_workspaces(output_dir) == []
 
 
-def test_formal_python_helpers_use_verified_interpreter_and_digest(tmp_path: Path) -> None:
+def test_formal_python_helpers_use_verified_interpreter_and_digest(
+    tmp_path: Path,
+) -> None:
     app, output_dir, state_path, environment = _prepare(tmp_path, "permanent")
     argv = _command(app, output_dir)
     missing_environment = environment.copy()
@@ -446,7 +456,9 @@ def test_failure_cleanup_only_detaches_owned_images(tmp_path: Path) -> None:
     assert _temporary_workspaces(output_dir) == []
 
 
-def test_output_publication_never_clobbers_existing_trusted_file(tmp_path: Path) -> None:
+def test_output_publication_never_clobbers_existing_trusted_file(
+    tmp_path: Path,
+) -> None:
     app, output_dir, state_path, environment = _prepare(tmp_path, "success")
     final_path = output_dir / FINAL_NAME
     final_path.write_bytes(b"trusted-existing-output")
@@ -484,20 +496,18 @@ def test_primary_package_error_wins_when_cleanup_rejects_external_link(
 def test_cleanup_failure_after_success_fails_without_deleting_published_dmg(
     tmp_path: Path,
 ) -> None:
-    result, output_dir, state_path = _run_packager(
-        tmp_path, "success_cleanup_failure"
-    )
+    result, output_dir, state_path = _run_packager(tmp_path, "success_cleanup_failure")
     assert isinstance(result, subprocess.CompletedProcess)
     assert result.returncode == 1
     assert "Could not remove temporary DMG workspace" in result.stderr
     published_path = output_dir / FINAL_NAME
     with published_path.open("rb") as stream:
         assert stream.read(len(b"DMG-1")) == b"DMG-1"
-    assert published_path.stat().st_size == 10240000000
+    assert published_path.stat().st_size == len(b"DMG-1")
     assert (tmp_path / "external-victim" / "keep.txt").read_text(
         encoding="utf-8"
     ) == "keep"
-    assert _state(state_path)["detach"] == ["/dev/disk42"]
+    assert _state(state_path)["detach"] == []
     assert len(_temporary_workspaces(output_dir)) == 1
 
 
@@ -552,12 +562,12 @@ def test_detached_create_result_is_identity_bound_regular_file_until_retention_v
     result, output_dir, state_path = _run_packager(tmp_path, "success")
     state = _state(state_path)
     assert result.returncode == 0, result.stderr
-    assert state["requested_size"] == "10000000k"
+    assert "-size" not in state["commands"][0]
     events = state["events"]
     assert "attach" not in events
     assert events.index("create") < events.index("verify")
-    assert events.index("verify") < events.index("detach")
-    assert (output_dir / FINAL_NAME).stat().st_size >= 10240000000
+    assert "detach" not in events
+    assert (output_dir / FINAL_NAME).read_bytes() == b"DMG-1"
 
 
 def test_detached_create_result_replacement_fails_before_attach(tmp_path: Path) -> None:
@@ -572,9 +582,7 @@ def test_detached_create_result_replacement_fails_before_attach(tmp_path: Path) 
 
 def test_detached_create_result_non_regular_fails_before_attach(tmp_path: Path) -> None:
     for mode in ("symlink", "directory", "fifo", "fifo_substitution"):
-        result, output_dir, state_path = _run_packager(
-            tmp_path / mode, mode, timeout=5
-        )
+        result, output_dir, state_path = _run_packager(tmp_path / mode, mode, timeout=5)
         state = _state(state_path)
         assert result.returncode == 1
         assert "detached regular file" in result.stderr
@@ -584,23 +592,139 @@ def test_detached_create_result_non_regular_fails_before_attach(tmp_path: Path) 
         assert not (output_dir / FINAL_NAME).exists()
 
 
-def test_precreate_floor_is_at_least_10000000_kib_before_attach(tmp_path: Path) -> None:
-    below, below_output, below_state_path = _run_packager(
-        tmp_path / "below", "under_floor"
-    )
-    below_state = _state(below_state_path)
-    assert below.returncode == 1
-    assert below_state["requested_size"] == "10000000k"
-    assert "logical size is below 10000000 KiB" in below.stderr
-    assert "verify" not in below_state["events"]
-    assert "attach" not in below_state["events"]
-    assert not (below_output / FINAL_NAME).exists()
+def test_srcfolder_capacity_does_not_require_a_large_compressed_file(
+    tmp_path: Path,
+) -> None:
+    result, output_dir, state_path = _run_packager(tmp_path, "success")
+    state = _state(state_path)
+    assert result.returncode == 0, result.stderr
+    assert "-size" not in state["commands"][0]
+    assert (output_dir / FINAL_NAME).read_bytes() == b"DMG-1"
+    assert "attach" not in state["events"]
+    assert "detach" not in state["events"]
 
-    boundary, boundary_output, boundary_state_path = _run_packager(
-        tmp_path / "boundary", "success"
+
+def test_descriptor_bound_publisher_moves_the_exact_inode(tmp_path: Path) -> None:
+    source_dir = tmp_path / "source"
+    destination_dir = tmp_path / "destination"
+    source_dir.mkdir()
+    destination_dir.mkdir()
+    source = source_dir / "temporary.dmg"
+    destination = destination_dir / "published.dmg"
+    source.write_bytes(b"verified-image")
+    expected_identity = PUBLISHER.format_identity(source.stat())
+
+    PUBLISHER.publish(source, destination, expected_identity)
+
+    assert not source.exists()
+    assert destination.read_bytes() == b"verified-image"
+    assert PUBLISHER.format_identity(destination.stat()) == expected_identity
+
+
+def test_descriptor_bound_publisher_never_replaces_an_existing_file(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "temporary.dmg"
+    destination = tmp_path / "published.dmg"
+    source.write_bytes(b"verified-image")
+    destination.write_bytes(b"trusted-existing-output")
+    expected_identity = PUBLISHER.format_identity(source.stat())
+
+    with pytest.raises(PUBLISHER.PublicationError, match="overwrite"):
+        PUBLISHER.publish(source, destination, expected_identity)
+
+    assert source.read_bytes() == b"verified-image"
+    assert destination.read_bytes() == b"trusted-existing-output"
+
+
+def test_descriptor_bound_publisher_rejects_a_source_swap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_dir = tmp_path / "source"
+    destination_dir = tmp_path / "destination"
+    source_dir.mkdir()
+    destination_dir.mkdir()
+    source = source_dir / "temporary.dmg"
+    retained = source_dir / "retained-original.dmg"
+    foreign = source_dir / "foreign.dmg"
+    destination = destination_dir / "published.dmg"
+    source.write_bytes(b"verified-image")
+    foreign.write_bytes(b"foreign-image")
+    expected_identity = PUBLISHER.format_identity(source.stat())
+    real_rename = PUBLISHER._rename_exclusive
+
+    def swap_then_rename(
+        source_directory: int,
+        source_name: str,
+        destination_directory: int,
+        destination_name: str,
+    ) -> None:
+        source.rename(retained)
+        foreign.rename(source)
+        real_rename(
+            source_directory,
+            source_name,
+            destination_directory,
+            destination_name,
+        )
+
+    monkeypatch.setattr(PUBLISHER, "_rename_exclusive", swap_then_rename)
+    with pytest.raises(PUBLISHER.PublicationError, match="identity changed"):
+        PUBLISHER.publish(source, destination, expected_identity)
+
+    assert retained.read_bytes() == b"verified-image"
+    assert destination.read_bytes() == b"foreign-image"
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires the real hdiutil")
+def test_real_hdiutil_create_is_detached_and_compressed(tmp_path: Path) -> None:
+    hdiutil = shutil.which("hdiutil")
+    assert hdiutil is not None
+    source = tmp_path / "source"
+    source.mkdir()
+    image = tmp_path / "probe.dmg"
+    created = subprocess.run(
+        [
+            hdiutil,
+            "create",
+            "-srcfolder",
+            str(source),
+            "-volname",
+            "TobkiriProbe",
+            "-fs",
+            "APFS",
+            "-format",
+            "UDZO",
+            str(image),
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
     )
-    boundary_state = _state(boundary_state_path)
-    assert boundary.returncode == 0, boundary.stderr
-    assert boundary_state["requested_size"] == "10000000k"
-    assert (boundary_output / FINAL_NAME).stat().st_size == 10240000000
-    assert "attach" not in boundary_state["events"]
+    assert created.returncode == 0, created.stderr
+    image_info = subprocess.run(
+        [hdiutil, "imageinfo", "-plist", str(image)],
+        capture_output=True,
+        check=False,
+    )
+    assert image_info.returncode == 0, image_info.stderr.decode(errors="replace")
+    metadata = plistlib.loads(image_info.stdout)
+    assert metadata["Format"] == "UDZO"
+    assert metadata["Properties"]["Checksummed"] is True
+    assert metadata["Properties"]["Compressed"] is True
+    assert metadata["Size Information"]["Total Bytes"] > image.stat().st_size
+    verified = subprocess.run(
+        [hdiutil, "verify", str(image)],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert verified.returncode == 0, verified.stderr
+    active_images = subprocess.run(
+        [hdiutil, "info"],
+        capture_output=True,
+        check=True,
+        text=True,
+    ).stdout
+    assert str(image) not in active_images

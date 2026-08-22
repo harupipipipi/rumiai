@@ -30,6 +30,9 @@ MACOS_DMG_PACKAGER = ROOT / "tobkiri_launcher" / "scripts" / "package_macos_dmg.
 MACOS_DMG_CLEANUP = (
     ROOT / "tobkiri_launcher" / "scripts" / "cleanup_macos_dmg_workspace.py"
 )
+MACOS_DMG_PUBLISHER = (
+    ROOT / "tobkiri_launcher" / "scripts" / "publish_macos_dmg.py"
+)
 MACOS_DMG_VERIFIER = (
     ROOT / "tobkiri_launcher" / "scripts" / "verify_packaged_python_dmg.py"
 )
@@ -315,7 +318,7 @@ def test_macos_installer_uses_finder_free_verified_dmg_packager():
         'trap \'cleanup "$?"\' EXIT',
         "trap 'exit 130' INT",
         "trap 'exit 143' TERM",
-        'ln "$source_path" "$dmg_path"',
+        "publish_macos_dmg.py",
         "verify_bound_image",
         "unsafe version for a DMG filename",
     ):
@@ -356,8 +359,8 @@ def test_macos_installer_uses_finder_free_verified_dmg_packager():
 def test_package_macos_dmg_retains_identity_verification_without_guard_attach():
     """The detached create result is bound and retained verification stays intact."""
     packager = MACOS_DMG_PACKAGER.read_text(encoding="utf-8")
-    assert "minimum_dmg_size_kib=10000000" in packager
-    assert "minimum_dmg_size_bytes=10240000000" in packager
+    assert '-size "${minimum_dmg_size_kib}k"' not in packager
+    assert "minimum_dmg_size_bytes" not in packager
     assert "bound_image_metadata()" in packager
     assert "os.O_NOFOLLOW" in packager
     assert packager.count("os.O_NONBLOCK") == 2
@@ -371,13 +374,23 @@ def test_package_macos_dmg_retains_identity_verification_without_guard_attach():
     assert "identity changed during retained verification" in helper
     bind_index = packager.index('detached_image_identity=$(bound_image_metadata')
     identity_index = packager.index('current_id=$(image_identity "$temporary_dmg_path")', bind_index)
-    floor_index = packager.index("detached_size < minimum_dmg_size_bytes", identity_index)
     verify_index = packager.index(
         'if ! verify_bound_image "$temporary_dmg_path" "$detached_image_identity"; then',
-        floor_index,
+        identity_index,
     )
-    assert bind_index < identity_index < floor_index < verify_index
+    publish_index = packager.index(
+        'publish_verified_dmg "$temporary_dmg_path" "$detached_image_identity"',
+        verify_index,
+    )
+    assert bind_index < identity_index < verify_index < publish_index
     assert '[[ -s "$temporary_dmg_path" ]]' in packager
+    assert MACOS_DMG_PUBLISHER.is_file()
+    publisher = MACOS_DMG_PUBLISHER.read_text(encoding="utf-8")
+    assert "renameatx_np" in publisher
+    assert "RENAME_EXCL" in publisher
+    assert "renameat2" in publisher
+    assert "RENAME_NOREPLACE" in publisher
+    assert "_validate_regular_image(os.fstat(destination_descriptor)" in publisher
 
     desktop_workflow = (
         ROOT / ".github" / "workflows" / "desktop-installers.yml"

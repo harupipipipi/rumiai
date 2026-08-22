@@ -123,8 +123,6 @@ fi
 tobkiri_packaging_python="${TOBKIRI_PACKAGING_PYTHON-}"
 tobkiri_packaging_python_sha256="${TOBKIRI_PACKAGING_PYTHON_SHA256-}"
 tobkiri_packaging_python_snapshot="${TOBKIRI_PACKAGING_PYTHON_SNAPSHOT-}"
-minimum_dmg_size_kib=10000000
-minimum_dmg_size_bytes=10240000000
 
 verify_formal_python() {
   local actual_sha256=''
@@ -204,18 +202,21 @@ try:
     if (
         not stat.S_ISREG(metadata.st_mode)
         or metadata.st_uid != os.geteuid()
+        or metadata.st_nlink != 1
+        or named_metadata.st_nlink != 1
         or metadata.st_dev != named_metadata.st_dev
         or metadata.st_ino != named_metadata.st_ino
     ):
         raise SystemExit(1)
 finally:
     os.close(descriptor)
-print("%d:%d:%d:%d:%d" % (
+print("%d:%d:%d:%d:%d:%d" % (
     metadata.st_dev,
     metadata.st_ino,
     metadata.st_uid,
     metadata.st_size,
     metadata.st_mode,
+    metadata.st_nlink,
 ))
 PY
 }
@@ -238,12 +239,13 @@ expected_identity = sys.argv[2]
 
 
 def identity(metadata: os.stat_result) -> str:
-    return "%d:%d:%d:%d:%d" % (
+    return "%d:%d:%d:%d:%d:%d" % (
         metadata.st_dev,
         metadata.st_ino,
         metadata.st_uid,
         metadata.st_size,
         metadata.st_mode,
+        metadata.st_nlink,
     )
 
 
@@ -451,31 +453,10 @@ replay_stderr() {
 publish_verified_dmg() {
   local source_path=$1
   local expected_id=$2
-  local current_id=''
-  if [[ -e "$dmg_path" || -L "$dmg_path" ]]; then
-    printf 'Refusing to overwrite existing macOS installer: %s\n' "$dmg_path" >&2
-    return 1
-  fi
-  if ! current_id=$(image_identity "$source_path"); then
-    printf 'temporary image identity changed before publication: %s\n' "$source_path" >&2
-    return 1
-  fi
-  if [[ "$current_id" != "$expected_id" ]]; then
-    printf 'temporary image identity changed before publication: %s\n' "$source_path" >&2
-    return 1
-  fi
-  if ! ln "$source_path" "$dmg_path"; then
-    printf 'Could not publish macOS installer without overwriting output: %s\n' "$dmg_path" >&2
-    return 1
-  fi
-  if ! current_id=$(image_identity "$source_path") || [[ "$current_id" != "$expected_id" ]]; then
-    printf 'temporary image identity changed before unlink: %s\n' "$source_path" >&2
-    return 1
-  fi
-  if ! rm -f -- "$source_path"; then
-    printf 'Published macOS installer but could not remove its temporary image: %s\n' "$source_path" >&2
-    return 1
-  fi
+  run_formal_python "$script_dir/publish_macos_dmg.py" \
+    --source "$source_path" \
+    --destination "$dmg_path" \
+    --expected-identity "$expected_id"
 }
 
 app_bundle=$(cd "$app_bundle" && pwd -P)
@@ -596,7 +577,6 @@ create_stderr="$work_dir/hdiutil-create.stderr"
 create_status=0
 printf 'Creating read-only UDZO installer: %s\n' "$temporary_dmg_path"
 if hdiutil create \
-  -size "${minimum_dmg_size_kib}k" \
   -srcfolder "$staging_dir" \
   -volname "$app_stem" \
   -fs APFS \
@@ -621,25 +601,6 @@ if ! current_id=$(image_identity "$temporary_dmg_path") || \
     "$temporary_dmg_path" >&2
   exit 1
 fi
-IFS=: read -r detached_device detached_inode detached_uid detached_size detached_mode \
-  <<<"$detached_image_identity"
-if [[ ! "$detached_size" =~ ^[0-9]+$ ]] || \
-  ((detached_size < minimum_dmg_size_bytes)); then
-  printf 'detached image logical size is below %s KiB: %s\n' \
-    "$minimum_dmg_size_kib" "$temporary_dmg_path" >&2
-  exit 1
-fi
-record_owned_image "$temporary_dmg_path" "$detached_image_identity" || {
-  printf '%s\n' 'hdiutil image identity or exact device mapping was not verified' >&2
-  exit 1
-}
-owned_image_id="${owned_image_identities[0]}"
-if [[ "$owned_image_id" != "$detached_image_identity" ]]; then
-  printf 'detached image identity changed before retained verification: %s\n' \
-    "$temporary_dmg_path" >&2
-  exit 1
-fi
-
 printf 'Verifying disk image integrity: %s\n' "$temporary_dmg_path"
 if ! verify_bound_image "$temporary_dmg_path" "$detached_image_identity"; then
   printf 'detached image retained verification failed: %s\n' \
@@ -650,12 +611,5 @@ fi
   printf 'created an empty disk image: %s\n' "$temporary_dmg_path" >&2
   exit 1
 }
-if ! detach_owned_images; then
-  printf '%s\n' 'Refusing to publish a disk image whose ownership could not be revalidated' >&2
-  exit 1
-fi
-publish_verified_dmg "$temporary_dmg_path" "$owned_image_id"
-owned_image_paths=()
-owned_image_identities=()
-owned_image_devices=()
+publish_verified_dmg "$temporary_dmg_path" "$detached_image_identity"
 printf 'Created verified macOS installer: %s\n' "$dmg_path"
