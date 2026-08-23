@@ -24,8 +24,13 @@ function appSource(): string {
 
 test("chat browser approval card exposes deny and settles stale request-backed cards", () => {
   const source = appSource();
-  const cardStart = source.indexOf("{visibleBrowserApproval && (");
-  const cardEnd = source.indexOf("{!visibleBrowserApproval && authorityApproval", cardStart);
+  const cardStart = source.indexOf(
+    "{!sideApprovalActive && visibleBrowserApproval && (",
+  );
+  const cardEnd = source.indexOf(
+    "{!sideApprovalActive && !visibleBrowserApproval && pendingCommandApproval",
+    cardStart,
+  );
   const browserCardSource = source.slice(cardStart, cardEnd);
 
   assert.match(source, /const denyBrowserAction = async \(\) => \{/);

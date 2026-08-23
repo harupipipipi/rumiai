@@ -74,13 +74,39 @@ class ConversationStore:
         normalized = _conversation(record, allow_messages=False)
         with NamedLock(self.lock_root, "conversations"):
             state = self._read()
+            parent_id = normalized.get("parent_conversation_id")
+            if _is_side_conversation(normalized):
+                if parent_id is None:
+                    raise ValueError("side conversation requires a parent")
+                parent_id = _identifier(parent_id)
+                parent = state["conversations"].get(parent_id)
+                if not isinstance(parent, Mapping):
+                    raise KeyError("parent conversation is unknown")
+                if not _is_main_conversation(parent):
+                    raise ValueError("side conversation parent must be a main conversation")
+                _canonicalize_side_conversation(normalized, parent_id)
+                existing = next(
+                    (
+                        value
+                        for value in state["conversations"].values()
+                        if isinstance(value, Mapping)
+                        and value.get("parent_conversation_id") == parent_id
+                        and _is_side_conversation(value)
+                    ),
+                    None,
+                )
+                if isinstance(existing, Mapping):
+                    return {
+                        "action": "existing",
+                        "conversation": _copy(existing),
+                        "store_revision": state["revision"],
+                    }
             _assert_store_revision(state, expected_revision)
             conversation_id = normalized["id"]
             if conversation_id in state["conversations"]:
                 raise ConversationConflict("conversation already exists")
             now = _now_ms()
             normalized["child_conversation_ids"] = []
-            parent_id = normalized.get("parent_conversation_id")
             if parent_id is not None:
                 parent_id = _identifier(parent_id)
                 parent = state["conversations"].get(parent_id)
@@ -164,6 +190,47 @@ class ConversationStore:
                         if key == "metadata"
                         else _safe(patch[key])
                     )
+            original = state["conversations"][conversation_id]
+            was_side = _is_side_conversation(original)
+            was_main = _is_main_conversation(original)
+            is_side = _is_side_conversation(current)
+            if was_side and not is_side:
+                raise ValueError("side conversation channel is immutable")
+            if (
+                was_main
+                and not _is_main_conversation(current)
+                and any(
+                    isinstance(value, Mapping)
+                    and value.get("parent_conversation_id") == conversation_id
+                    and _is_side_conversation(value)
+                    for value in state["conversations"].values()
+                )
+            ):
+                raise ValueError(
+                    "conversation with a side child must remain a main conversation"
+                )
+            if is_side:
+                if requested_parent_id is None:
+                    raise ValueError("side conversation requires a parent")
+                parent = state["conversations"].get(requested_parent_id)
+                if not isinstance(parent, Mapping):
+                    raise KeyError("parent conversation is unknown")
+                if not _is_main_conversation(parent):
+                    raise ValueError(
+                        "side conversation parent must be a main conversation"
+                    )
+                _canonicalize_side_conversation(current, requested_parent_id)
+                if any(
+                    child_id != conversation_id
+                    and isinstance(value, Mapping)
+                    and value.get("parent_conversation_id")
+                    == requested_parent_id
+                    and _is_side_conversation(value)
+                    for child_id, value in state["conversations"].items()
+                ):
+                    raise ConversationConflict(
+                        "side conversation already exists for parent"
+                    )
             now = _now_ms()
             if requested_parent_id != prior_parent_id:
                 _relink_conversation_parent(
@@ -190,7 +257,7 @@ class ConversationStore:
         *,
         expected_conversation_revision: int,
     ) -> dict[str, Any]:
-        """Delete a conversation and all owned messages atomically."""
+        """Delete a conversation, its messages, and owned side threads atomically."""
         conversation_id = _identifier(conversation_id)
         with NamedLock(self.lock_root, "conversations"):
             state = self._read()
@@ -199,6 +266,7 @@ class ConversationStore:
                 raise KeyError("conversation is unknown")
             _assert_conversation_revision(current, expected_conversation_revision)
             message_count = len(current.get("messages") or [])
+            deleted_side_conversation_ids: list[str] = []
             now = _now_ms()
             parent_id = current.get("parent_conversation_id")
             if parent_id in state["conversations"]:
@@ -210,6 +278,11 @@ class ConversationStore:
                 ]
                 _touch_conversation(parent, now)
                 state["conversations"][parent_id] = parent
+            descendants_to_delete: set[str] = set()
+            if _is_side_conversation(current):
+                descendants_to_delete.update(
+                    _conversation_descendants(state["conversations"], conversation_id)
+                )
             for child_id, child_value in list(state["conversations"].items()):
                 if child_id == conversation_id or not isinstance(
                     child_value, Mapping
@@ -217,10 +290,21 @@ class ConversationStore:
                     continue
                 if child_value.get("parent_conversation_id") != conversation_id:
                     continue
+                if _is_side_conversation(child_value):
+                    side_owned_ids = {child_id, *_conversation_descendants(
+                        state["conversations"], child_id
+                    )}
+                    descendants_to_delete.update(side_owned_ids)
+                    deleted_side_conversation_ids.append(child_id)
+                    continue
                 child = dict(child_value)
                 child["parent_conversation_id"] = None
                 _touch_conversation(child, now)
                 state["conversations"][child_id] = child
+            for descendant_id in sorted(descendants_to_delete):
+                descendant = state["conversations"].pop(descendant_id, None)
+                if isinstance(descendant, Mapping):
+                    message_count += len(descendant.get("messages") or [])
             del state["conversations"][conversation_id]
             state["revision"] += 1
             self._write(state)
@@ -228,6 +312,7 @@ class ConversationStore:
             "action": "deleted",
             "conversation_id": conversation_id,
             "deleted_messages": message_count,
+            "deleted_side_conversation_ids": deleted_side_conversation_ids,
             "store_revision": state["revision"],
         }
 
@@ -765,6 +850,69 @@ def _normalize_message_links(messages: list[dict[str, Any]]) -> None:
             raise ValueError("message parent is unknown")
         item["parent_id"] = parent_id
         parent["children_ids"].append(item["id"])
+
+
+def _is_side_conversation(value: Mapping[str, Any]) -> bool:
+    metadata = value.get("metadata")
+    channel = (
+        str(metadata.get("conversation_channel") or "").strip().lower()
+        if isinstance(metadata, Mapping)
+        else ""
+    )
+    kind = str(value.get("conversation_kind") or "").strip().lower()
+    return kind == "side" or channel == "side"
+
+
+def _is_main_conversation(value: Mapping[str, Any]) -> bool:
+    """Return whether a record is a user-visible main-chat conversation."""
+    if _is_side_conversation(value):
+        return False
+    metadata = value.get("metadata")
+    if isinstance(metadata, Mapping) and metadata.get("hidden") is True:
+        return False
+    return str(value.get("conversation_kind") or "chat").strip().lower() not in {
+        "subagent",
+        "system",
+    }
+
+
+def _canonicalize_side_conversation(
+    value: dict[str, Any],
+    parent_id: str,
+) -> None:
+    """Restore immutable side-channel identity fields before persistence."""
+    metadata = _conversation_metadata(value.get("metadata"))
+    metadata.update(
+        {
+            "hidden": True,
+            "conversation_channel": "side",
+            "side_parent_conversation_id": parent_id,
+        }
+    )
+    value["conversation_kind"] = "side"
+    value["parent_conversation_id"] = parent_id
+    value["metadata"] = metadata
+
+
+def _conversation_descendants(
+    conversations: Mapping[str, Any],
+    conversation_id: str,
+) -> set[str]:
+    """Return every descendant owned below a conversation without recursion."""
+    descendants: set[str] = set()
+    pending = [conversation_id]
+    while pending:
+        parent_id = pending.pop()
+        for child_id, value in conversations.items():
+            if (
+                child_id not in descendants
+                and child_id != conversation_id
+                and isinstance(value, Mapping)
+                and value.get("parent_conversation_id") == parent_id
+            ):
+                descendants.add(child_id)
+                pending.append(child_id)
+    return descendants
 
 
 def _conversation_metadata(value: Any) -> dict[str, Any]:

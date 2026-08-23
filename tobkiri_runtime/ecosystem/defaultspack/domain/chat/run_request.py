@@ -304,6 +304,14 @@ def prepare_chat_run(
     conversation = store.get_conversation(conversation_id)
     if conversation is None:
         raise ValueError("Conversation not found")
+    from domain.chat.conversation_channel import (
+        conversation_channel,
+        is_side_conversation,
+        side_execution_conversation,
+    )
+
+    is_side_channel = is_side_conversation(conversation)
+    conversation = side_execution_conversation(store, conversation)
     conversation_metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
     if conversation_metadata.get("shared_read_only") is True:
         raise ValueError("This imported conversation is read-only. Create a continue copy to send messages.")
@@ -399,7 +407,10 @@ def prepare_chat_run(
 
     params = dict(prepared_input.get("params") or {})
     tool_selection = _normalize_tool_selection(prepared_input)
-    requested_model = str(params.get("model") or params.get("profile_id") or "").strip()
+    untrusted_requested_model = str(
+        params.get("model") or params.get("profile_id") or ""
+    ).strip()
+    requested_model = "" if is_side_channel else untrusted_requested_model
     tool_selection = _apply_tool_selection_preview_snapshot(
         tool_selection,
         context if isinstance(context, dict) else {},
@@ -413,8 +424,12 @@ def prepare_chat_run(
         model = requested_model
     model_settings_service = ModelRuntimeSettingsService()
     model_settings = model_settings_service.get_settings()
-    route_override = _consume_turn_model_route_override(
-        store, conversation_id, conversation, metadata
+    route_override = (
+        {}
+        if is_side_channel
+        else _consume_turn_model_route_override(
+            store, conversation_id, conversation, metadata
+        )
     )
     preferred_group_override = (
         str(route_override.get("preferred_group") or "").strip()
@@ -450,6 +465,16 @@ def prepare_chat_run(
         request_context["user_requested_computer_use"] = True
         request_context = _apply_computer_use_context_preferences(request_context, user_text)
     request_context["conversation_id"] = conversation_id
+    request_context["conversation_channel"] = conversation_channel(conversation)
+    if is_side_channel and untrusted_requested_model:
+        request_context["ignored_side_requested_model"] = (
+            untrusted_requested_model
+        )
+    parent_conversation_id = str(
+        conversation.get("parent_conversation_id") or ""
+    ).strip()
+    if parent_conversation_id:
+        request_context["parent_conversation_id"] = parent_conversation_id
     request_context["conversation_workspace_dir"] = str(
         store.conversation_workspace_dir(conversation_id)
     )
@@ -494,7 +519,12 @@ def prepare_chat_run(
     ).strip()
     if resolved_agent_id:
         request_context["agent_id"] = resolved_agent_id
-    _propagate_conversation_workspace(request_context, metadata, conversation_metadata)
+    _propagate_conversation_workspace(
+        request_context,
+        metadata,
+        conversation_metadata,
+        conversation_authoritative=is_side_channel,
+    )
     if authority_resume_followup:
         request_context["authority_resume_followup"] = True
     request_context.update(_approval_followup_tool_context(metadata))
@@ -600,6 +630,12 @@ def prepare_chat_run(
     if effective_system_prompt:
         system_prompt = effective_system_prompt
         _replace_system_prompt_message(standard_messages, effective_system_prompt)
+    from domain.chat.conversation_channel import side_system_instruction
+
+    _append_system_context_message(
+        standard_messages,
+        side_system_instruction(conversation),
+    )
     temporal_context = current_datetime_context(request_context)
     request_context["current_datetime_context"] = temporal_context
     request_context.setdefault("current_datetime", temporal_context["iso"])
@@ -2399,19 +2435,23 @@ def _propagate_conversation_workspace(
     request_context: dict[str, Any],
     message_metadata: dict[str, Any] | None,
     conversation_metadata: dict[str, Any] | None,
+    *,
+    conversation_authoritative: bool = False,
 ) -> None:
     if not isinstance(request_context, dict):
         return
+    workspace_sources = (
+        (conversation_metadata,)
+        if conversation_authoritative
+        else (request_context, message_metadata, conversation_metadata)
+    )
     workspace_id = _first_non_empty_str(
-        request_context, message_metadata, conversation_metadata, keys=_WORKSPACE_ID_KEYS
+        *workspace_sources, keys=_WORKSPACE_ID_KEYS
     )
     if workspace_id:
         request_context["workspace_id"] = workspace_id
     workspace_root = _first_non_empty_str(
-        request_context,
-        message_metadata,
-        conversation_metadata,
-        keys=_WORKSPACE_ROOT_KEYS,
+        *workspace_sources, keys=_WORKSPACE_ROOT_KEYS
     )
     if workspace_root:
         request_context["workspace_root"] = workspace_root

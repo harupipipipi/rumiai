@@ -2425,7 +2425,7 @@ export type ToolSelectionPreviewResponse = {
   };
 };
 
-type SendMessageOptions = {
+export type SendMessageOptions = {
   idempotency_key?: string;
   thinking_level?: string | null;
   deepthink_enabled?: boolean;
@@ -2469,7 +2469,7 @@ export type ChatStreamEvent =
   | { type: "error"; error?: ChatStreamError }
   | ChatToolStreamEvent;
 
-type ChatStreamHandlers = {
+export type ChatStreamHandlers = {
   onEvent?: (event: ChatStreamEvent) => void;
   onDelta?: (delta: string) => void;
   onThinkingDelta?: (delta: string) => void;

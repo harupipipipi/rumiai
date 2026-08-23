@@ -56,3 +56,28 @@ def test_legacy_chat_search_still_returns_matching_messages(tmp_path, monkeypatc
     assert result["data"]["results"][0]["conversation_id"] == conversation["id"]
     assert result["data"]["results"][0]["raw_text"] == "完全一致検索"
     ChatStore._instance = None
+
+
+def test_global_chat_search_excludes_hidden_side_history(tmp_path, monkeypatch):
+    """Side-only messages must not leak into main/global search results."""
+    from blocks.chat.search import run
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    store = ChatStore()
+    parent = store.create_conversation(model="stub/default")
+    side = store.create_conversation(
+        model="stub/default",
+        parent_conversation_id=parent["id"],
+        conversation_kind="side",
+        metadata={"conversation_channel": "side", "hidden": True},
+    )
+    store.add_message(side["id"], {"role": "user", "content": "side-only-needle"})
+
+    result = run({"query": "side-only-needle"}, {})
+
+    assert result["status"] == "ok"
+    assert result["data"]["results"] == []
+    ChatStore._instance = None

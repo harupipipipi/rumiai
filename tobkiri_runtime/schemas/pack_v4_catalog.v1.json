@@ -4814,7 +4814,7 @@
             {
               "entrypoint_id": "conversation-manage",
               "id": "rumi_conversation_store_pack.conversation-manage",
-              "implementation_digest": "sha256:9157e336a496cbbf2dc8f6a664b77d818d0676ee4c7bc6deb8ff0486a57c5116"
+              "implementation_digest": "sha256:ac5fdcd1efbbd9bf0c2c60eb674f1e72aba5f6811ff8d390ac02a4b306519195"
             }
           ],
           "owner": "rumi_conversation_store_pack",
@@ -4849,7 +4849,7 @@
             {
               "entrypoint_id": "conversation-migrate",
               "id": "rumi_conversation_store_pack.conversation-migrate",
-              "implementation_digest": "sha256:9157e336a496cbbf2dc8f6a664b77d818d0676ee4c7bc6deb8ff0486a57c5116"
+              "implementation_digest": "sha256:ac5fdcd1efbbd9bf0c2c60eb674f1e72aba5f6811ff8d390ac02a4b306519195"
             }
           ],
           "owner": "rumi_conversation_store_pack",
@@ -4884,7 +4884,7 @@
             {
               "entrypoint_id": "message-manage",
               "id": "rumi_conversation_store_pack.message-manage",
-              "implementation_digest": "sha256:9157e336a496cbbf2dc8f6a664b77d818d0676ee4c7bc6deb8ff0486a57c5116"
+              "implementation_digest": "sha256:ac5fdcd1efbbd9bf0c2c60eb674f1e72aba5f6811ff8d390ac02a4b306519195"
             }
           ],
           "owner": "rumi_conversation_store_pack",
@@ -4919,7 +4919,7 @@
             {
               "entrypoint_id": "conversation-resource",
               "id": "rumi_conversation_store_pack.conversation-resource",
-              "implementation_digest": "sha256:9157e336a496cbbf2dc8f6a664b77d818d0676ee4c7bc6deb8ff0486a57c5116"
+              "implementation_digest": "sha256:ac5fdcd1efbbd9bf0c2c60eb674f1e72aba5f6811ff8d390ac02a4b306519195"
             }
           ],
           "owner": "rumi_conversation_store_pack",
@@ -4954,7 +4954,7 @@
             {
               "entrypoint_id": "message-resource",
               "id": "rumi_conversation_store_pack.message-resource",
-              "implementation_digest": "sha256:9157e336a496cbbf2dc8f6a664b77d818d0676ee4c7bc6deb8ff0486a57c5116"
+              "implementation_digest": "sha256:ac5fdcd1efbbd9bf0c2c60eb674f1e72aba5f6811ff8d390ac02a4b306519195"
             }
           ],
           "owner": "rumi_conversation_store_pack",
@@ -4977,7 +4977,7 @@
       "required_contracts": [],
       "runtime_artifacts": [
         {
-          "digest": "sha256:9157e336a496cbbf2dc8f6a664b77d818d0676ee4c7bc6deb8ff0486a57c5116",
+          "digest": "sha256:ac5fdcd1efbbd9bf0c2c60eb674f1e72aba5f6811ff8d390ac02a4b306519195",
           "kind": "executable",
           "path": "runtime/store.py"
         }

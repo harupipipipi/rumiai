@@ -973,6 +973,7 @@ export function RightSidebar({
   selectedToolIds = [],
   companyPanel,
   codingPanel,
+  sideChatPanel,
   keyboardButtonNavigation = true,
   selectedProfile = null,
   toolFilterEntries = [],
@@ -1007,6 +1008,7 @@ export function RightSidebar({
   selectedToolIds?: string[];
   companyPanel?: ReactNode;
   codingPanel?: ReactNode;
+  sideChatPanel?: ReactNode;
   keyboardButtonNavigation?: boolean;
   selectedProfile?: ModelProfile | null;
   toolFilterEntries?: ToolFilterEntry[];
@@ -1197,6 +1199,7 @@ export function RightSidebar({
     if (activePanel === "__prompt_usage__" && hasPromptWidget) return;
     if (activePanel === "__company_workspace__" && companyPanel) return;
     if (activePanel === "__coding_widget__" && codingPanel) return;
+    if (activePanel === "__side_chat__" && sideChatPanel) return;
     if (activePanel === "__workspace_tabs__" && workspaceTabs.length > 0) return;
     if (activePanel.startsWith(PLACEMENT_PANEL_PREFIX) && placementManifestMap.has(activePanel.slice(PLACEMENT_PANEL_PREFIX.length))) {
       return;
@@ -1204,7 +1207,7 @@ export function RightSidebar({
     if (!items.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
-  }, [activePanel, codingPanel, companyPanel, hasPromptWidget, items, placementManifestMap, workspaceTabs.length]);
+  }, [activePanel, codingPanel, companyPanel, hasPromptWidget, items, placementManifestMap, sideChatPanel, workspaceTabs.length]);
 
   useEffect(() => {
     if (!activePanel || categoryFilter === "all") return;
@@ -1328,7 +1331,7 @@ export function RightSidebar({
     [hiddenToolIdSet, items, searchQuery, tagMap],
   );
   useEffect(() => {
-    if (!activePanel || activePanel === "__tool_manager__" || activePanel === "__tool_filter_log__" || activePanel === "__runtime_status__" || activePanel === "__context_usage__" || activePanel === "__prompt_usage__" || activePanel === "__company_workspace__" || activePanel === "__coding_widget__" || activePanel === "__workspace_tabs__" || !searchQuery.trim()) return;
+    if (!activePanel || activePanel === "__tool_manager__" || activePanel === "__tool_filter_log__" || activePanel === "__runtime_status__" || activePanel === "__context_usage__" || activePanel === "__prompt_usage__" || activePanel === "__company_workspace__" || activePanel === "__coding_widget__" || activePanel === "__side_chat__" || activePanel === "__workspace_tabs__" || !searchQuery.trim()) return;
     if (!searchFilteredItems.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
@@ -1429,6 +1432,7 @@ export function RightSidebar({
   const isPromptUsageActive = activePanel === "__prompt_usage__" && hasPromptWidget;
   const isCompanyPanelActive = activePanel === "__company_workspace__" && Boolean(companyPanel);
   const isCodingPanelActive = activePanel === "__coding_widget__" && Boolean(codingPanel);
+  const isSideChatPanelActive = activePanel === "__side_chat__" && Boolean(sideChatPanel);
   const isWorkspaceTabsActive = activePanel === "__workspace_tabs__" && workspaceTabs.length > 0;
   const isPlacementPanelActive = Boolean(activePlacementManifest);
   const activeToolGroupId = activeItem?.category === "tool" ? toolGroupFor(activeItem).id : null;
@@ -1793,7 +1797,7 @@ export function RightSidebar({
 
   return (
     <aside aria-label="Tools and utility panels" className="rumi-right-sidebar relative hidden h-full flex-shrink-0 border-l border-zinc-800/60 bg-[#09090b] transition-[width,opacity] duration-200 ease-out md:flex">
-      {(activeItem || isPlacementPanelActive || isToolManagerActive || isToolFilterLogActive || isRuntimeStatusActive || isContextUsageActive || isPromptUsageActive || isCompanyPanelActive || isCodingPanelActive || isWorkspaceTabsActive) && (
+      {(activeItem || isPlacementPanelActive || isToolManagerActive || isToolFilterLogActive || isRuntimeStatusActive || isContextUsageActive || isPromptUsageActive || isCompanyPanelActive || isCodingPanelActive || isSideChatPanelActive || isWorkspaceTabsActive) && (
         <div
           className="rumi-right-sidebar-panel rumi-layer-local-popover relative flex min-w-0 flex-col border-r border-zinc-800/40 bg-[#0a0a0c] shadow-2xl animate-in slide-in-from-right-2 duration-200"
           style={{ width: panelWidthPx }}
@@ -1813,8 +1817,8 @@ export function RightSidebar({
           />
           <div className="flex h-11 flex-shrink-0 items-center justify-between gap-2 border-b border-zinc-800/60 px-2.5">
             <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isWorkspaceTabsActive ? "bg-emerald-300" : isPromptUsageActive ? "bg-cyan-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
-              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Employees" : isCodingPanelActive ? "Coding widget" : isWorkspaceTabsActive ? "Workspace tabs" : isPromptUsageActive ? "Current prompts" : isToolFilterLogActive ? "選定ログ" : isContextUsageActive ? "Context usage" : isRuntimeStatusActive ? "Runtime status" : "機能")}</h3>
+              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isSideChatPanelActive ? "bg-indigo-300" : isWorkspaceTabsActive ? "bg-emerald-300" : isPromptUsageActive ? "bg-cyan-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
+              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Employees" : isCodingPanelActive ? "Coding widget" : isSideChatPanelActive ? "サイドチャット" : isWorkspaceTabsActive ? "Workspace tabs" : isPromptUsageActive ? "Current prompts" : isToolFilterLogActive ? "選定ログ" : isContextUsageActive ? "Context usage" : isRuntimeStatusActive ? "Runtime status" : "機能")}</h3>
               {activeItem?.badge && (
                 <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 py-0.5 rounded-full font-bold flex-shrink-0">
                   {activeItem.badge}
@@ -1942,6 +1946,8 @@ export function RightSidebar({
               companyPanel
             ) : isCodingPanelActive ? (
               codingPanel
+            ) : isSideChatPanelActive ? (
+              sideChatPanel
             ) : isWorkspaceTabsActive ? (
               <WorkspaceTabRailPanel
                 tabs={workspaceTabs}
@@ -2626,6 +2632,25 @@ export function RightSidebar({
               title="Coding widget"
             >
               <Code2 size={17} className="h-[17px] w-[17px] shrink-0" />
+            </button>
+          )}
+          {sideChatPanel && (
+            <button
+              type="button"
+              tabIndex={buttonTabIndex}
+              onClick={() => setActivePanel((current) => (current === "__side_chat__" ? null : "__side_chat__"))}
+              className={cn(
+                RAIL_BUTTON_CLASS,
+                activePanel === "__side_chat__"
+                  ? "bg-indigo-500/15 text-indigo-200 ring-1 ring-indigo-500/30"
+                  : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+              )}
+              title="サイドチャット"
+              aria-label="サイドチャットを開く"
+              aria-pressed={activePanel === "__side_chat__"}
+              data-testid="side-chat-toggle"
+            >
+              <MessageSquareText size={17} className="h-[17px] w-[17px] shrink-0" />
             </button>
           )}
           <div className="w-5 h-px bg-zinc-800 my-1" />

@@ -116,6 +116,144 @@ def test_conversation_parent_links_are_updated_atomically(tmp_path: Path) -> Non
     assert detached_child["parent_conversation_id"] is None
 
 
+def test_parent_delete_cascades_only_owned_side_conversations(
+    tmp_path: Path,
+) -> None:
+    """Side history cannot orphan while other child conversation kinds survive."""
+    store = ConversationStore("default", user_data_root=tmp_path)
+    parent = store.create({"id": "parent"}, expected_revision=0)
+    side = store.create(
+        {
+            "id": "side",
+            "parent_conversation_id": "parent",
+            "conversation_kind": "side",
+            "metadata": {"conversation_channel": "side", "hidden": True},
+        },
+        expected_revision=parent["store_revision"],
+    )
+    side_child = store.create(
+        {
+            "id": "side-subagent",
+            "parent_conversation_id": "side",
+            "conversation_kind": "subagent",
+        },
+        expected_revision=side["store_revision"],
+    )
+    child = store.create(
+        {
+            "id": "subagent",
+            "parent_conversation_id": "parent",
+            "conversation_kind": "subagent",
+        },
+        expected_revision=side_child["store_revision"],
+    )
+
+    result = store.delete(
+        "parent",
+        expected_conversation_revision=store.get("parent")[
+            "conversation_revision"
+        ],
+    )
+
+    assert result["deleted_side_conversation_ids"] == ["side"]
+    assert store.get("side") is None
+    assert store.get("side-subagent") is None
+    detached_child = store.get("subagent")
+    assert detached_child is not None
+    assert detached_child["parent_conversation_id"] is None
+
+
+def test_side_conversation_create_is_atomic_and_unique_per_parent(
+    tmp_path: Path,
+) -> None:
+    """A stale concurrent create converges on the owner-selected side record."""
+    store = ConversationStore("default", user_data_root=tmp_path)
+    parent = store.create({"id": "parent"}, expected_revision=0)
+    record = {
+        "parent_conversation_id": "parent",
+        "conversation_kind": "chat",
+        "metadata": {"conversation_channel": "side", "hidden": False},
+    }
+    first = store.create(
+        {"id": "side-a", **record},
+        expected_revision=parent["store_revision"],
+    )
+    second = store.create(
+        {"id": "side-b", **record},
+        expected_revision=parent["store_revision"],
+    )
+
+    assert first["action"] == "created"
+    assert second["action"] == "existing"
+    assert second["conversation"]["id"] == "side-a"
+    assert store.get("parent")["child_conversation_ids"] == ["side-a"]
+    assert first["conversation"]["conversation_kind"] == "side"
+    assert first["conversation"]["metadata"] == {
+        "conversation_channel": "side",
+        "hidden": True,
+        "side_parent_conversation_id": "parent",
+    }
+
+    updated = store.update(
+        "side-a",
+        {
+            "conversation_kind": "side",
+            "metadata": {"conversation_channel": "side", "hidden": False},
+        },
+        expected_conversation_revision=first["conversation"][
+            "conversation_revision"
+        ],
+    )
+    assert updated["conversation"]["metadata"] == {
+        "conversation_channel": "side",
+        "hidden": True,
+        "side_parent_conversation_id": "parent",
+    }
+
+    parent_after_side_create = store.get("parent")
+    assert parent_after_side_create is not None
+    with pytest.raises(ValueError, match="must remain a main conversation"):
+        store.update(
+            "parent",
+            {"conversation_kind": "subagent"},
+            expected_conversation_revision=parent_after_side_create[
+                "conversation_revision"
+            ],
+        )
+
+
+def test_side_conversation_rejects_non_main_parent(tmp_path: Path) -> None:
+    """Hidden and subagent records cannot own a user side channel."""
+    store = ConversationStore("default", user_data_root=tmp_path)
+    hidden = store.create(
+        {"id": "hidden", "metadata": {"hidden": True}},
+        expected_revision=0,
+    )
+    with pytest.raises(ValueError, match="main conversation"):
+        store.create(
+            {
+                "id": "hidden-side",
+                "parent_conversation_id": "hidden",
+                "conversation_kind": "side",
+            },
+            expected_revision=hidden["store_revision"],
+        )
+
+    subagent = store.create(
+        {"id": "subagent", "conversation_kind": "subagent"},
+        expected_revision=hidden["store_revision"],
+    )
+    with pytest.raises(ValueError, match="main conversation"):
+        store.create(
+            {
+                "id": "subagent-side",
+                "parent_conversation_id": "subagent",
+                "conversation_kind": "side",
+            },
+            expected_revision=subagent["store_revision"],
+        )
+
+
 def test_conversation_create_rejects_unknown_parent(tmp_path: Path) -> None:
     store = ConversationStore("default", user_data_root=tmp_path)
 
