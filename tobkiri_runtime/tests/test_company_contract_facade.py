@@ -144,13 +144,20 @@ def test_company_status_projects_selected_state_without_runtime_store(
 
 
 def test_company_facade_resolves_mentions_from_selected_members(monkeypatch) -> None:
-    """Mention aliases are resolved from the selected Company member projection."""
+    """Selected-state mentions follow the shared Unicode and escape contract."""
 
     import domain.company.contract_facade as contract_facade
 
     monkeypatch.setattr(contract_facade, "_profile_id", lambda: "test")
     facade = contract_facade.CompanyContractFacade(
-        {"company_id": "acme", "content": "@pm and @missing"}, {}
+        {
+            "company_id": "acme",
+            "content": (
+                "お願い@pm、\\@reviewer mail@example.com "
+                "https://example.com/@ops_manager @@all @missing"
+            ),
+        },
+        {},
     )
     monkeypatch.setattr(
         facade,
