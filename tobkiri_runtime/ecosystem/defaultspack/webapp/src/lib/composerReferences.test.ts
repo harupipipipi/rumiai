@@ -13,6 +13,7 @@ import {
 
 const tools = [{ id: "web_search", label: "Web Search", category: "tool" }];
 const skills = [{ id: "feedback/live-review", label: "Live Review", metadata: { revision: 3 } }];
+const services = [{ id: "github", label: "GitHub" }];
 
 test("composer references serialize and restore the selected entities", () => {
   const text = "Use @web_search with @feedback/live-review.";
@@ -26,23 +27,44 @@ test("composer references serialize and restore the selected entities", () => {
 });
 
 test("composer references preserve display labels in custom clipboard data", () => {
-  const text = "Use @Web Search";
+  const text = "Use @Browser Computer";
   const references: ComposerEntityReference[] = [
-    { kind: "tool", id: "web_search", syntax: "@Web Search" },
+    { kind: "tool", id: "browser_computer", syntax: "@Browser Computer" },
   ];
   const serialized = serializeComposerReferences(text, references);
   assert.ok(serialized);
-  assert.deepEqual(restoreComposerReferences(serialized, { tools, skills }), { text, references });
+  assert.deepEqual(restoreComposerReferences(serialized, {
+    tools: [{
+      id: "browser_computer",
+      label: "Browser",
+      category: "tool",
+      ui: { composer_label: "Browser Computer" },
+    }],
+    skills,
+  }), { text, references });
 });
 
-test("composer references use portable Codex-style markdown on the plain-text clipboard", () => {
+test("composer references keep internal ids out of the plain-text clipboard", () => {
   const text = "Use @Web Search now";
   const references: ComposerEntityReference[] = [
     { kind: "tool", id: "web_search", syntax: "@Web Search" },
   ];
   assert.equal(
     composerReferencesAsMarkdown(text, references),
-    "Use [@Web Search](plugin://web_search) now",
+    "Use @Web Search now",
+  );
+});
+
+test("composer references serialize and restore service identity", () => {
+  const text = "Use @GitHub";
+  const references: ComposerEntityReference[] = [
+    { kind: "service", id: "github", syntax: "@GitHub" },
+  ];
+  const serialized = serializeComposerReferences(text, references);
+  assert.ok(serialized);
+  assert.deepEqual(
+    restoreComposerReferences(serialized, { tools, skills, services }),
+    { text, references },
   );
 });
 
@@ -55,6 +77,19 @@ test("Codex-style plugin mention paste restores installed semantic tools", () =>
     {
       text: "Ask @Web Search now",
       references: [{ kind: "tool", id: "web_search", syntax: "@Web Search" }],
+    },
+  );
+});
+
+test("Codex-style plugin mention paste restores installed semantic services", () => {
+  assert.deepEqual(
+    restoreComposerMarkdownReferences(
+      "Ask [@GitHub](plugin://github@openai-bundled) now",
+      { tools, skills, services },
+    ),
+    {
+      text: "Ask @GitHub now",
+      references: [{ kind: "service", id: "github", syntax: "@GitHub" }],
     },
   );
 });

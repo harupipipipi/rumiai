@@ -3313,14 +3313,18 @@ export function ComposerRenderer({
 	        onDropWidget?.(composerFileMentionWidget(candidate.file));
 	      }
 	      onInputChange(next.value);
-	      if (candidate.kind !== "service") {
-	        const reference: ComposerEntityReference = {
-	          kind: candidate.kind,
-	          id: candidate.kind === "tool" ? candidate.item.id : candidate.kind === "skill" ? candidate.skill.id : candidate.file,
-	          syntax: `@${candidate.label}`,
-	        };
-	        onEntityReferencesChange?.(mergeComposerReferences(entityReferences, [reference], next.value));
-	      }
+	      const reference: ComposerEntityReference = {
+	        kind: candidate.kind,
+	        id: candidate.kind === "tool"
+	          ? candidate.item.id
+	          : candidate.kind === "skill"
+	            ? candidate.skill.id
+	            : candidate.kind === "service"
+	              ? candidate.service.id
+	              : candidate.file,
+	        syntax: `@${candidate.label}`,
+	      };
+	      onEntityReferencesChange?.(mergeComposerReferences(entityReferences, [reference], next.value));
 	      if (candidate.kind === "file" && mode === "coding") {
 	        onAtFileAttach?.(candidate.file);
 	      }
@@ -3364,6 +3368,7 @@ export function ComposerRenderer({
     const catalog = {
       tools: toolItems,
       skills: skillExtensions,
+      services: toolGroups,
       files: mode === "coding" ? codingContext?.files ?? [] : [],
     };
     const restored = raw
@@ -3382,6 +3387,14 @@ export function ComposerRenderer({
       } else if (reference.kind === "skill") {
         const skill = skillExtensions.find((candidate) => candidate.id === reference.id);
         if (skill) onDropWidget?.(composerSkillMentionWidget(skill, reference.syntax));
+      } else if (reference.kind === "service") {
+        const service = toolGroups.find((candidate) => candidate.id === reference.id);
+        if (service) onDropWidget?.(composerServiceMentionWidget({
+          id: service.id,
+          label: service.label,
+          description: service.description,
+          toolIds: service.items.map((item) => item.id),
+        }, reference.syntax));
       } else if (mode === "coding") {
         onDropWidget?.(composerFileMentionWidget(reference.id, reference.syntax));
         onAtFileAttach?.(reference.id);
@@ -3391,7 +3404,7 @@ export function ComposerRenderer({
       textarea.setSelectionRange(next.cursor, next.cursor);
       textarea.focus();
     }, 0);
-  }, [attachFiles, codingContext?.files, entityReferences, input, mode, onAtFileAttach, onDropWidget, onEntityReferencesChange, onInputChange, skillExtensions, toolItems]);
+  }, [attachFiles, codingContext?.files, entityReferences, input, mode, onAtFileAttach, onDropWidget, onEntityReferencesChange, onInputChange, skillExtensions, toolGroups, toolItems]);
 
   const requestAudioTranscript = useCallback(async (
     file: AttachedFile,

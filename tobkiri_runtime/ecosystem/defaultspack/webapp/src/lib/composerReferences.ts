@@ -4,7 +4,7 @@ import { hasUnescapedMentionSyntax } from "./mentionContract";
 export const COMPOSER_REFERENCE_MIME = "application/x-rumi-composer-references+json";
 
 export type ComposerEntityReference = {
-  kind: "tool" | "skill" | "file";
+  kind: "tool" | "skill" | "service" | "file";
   id: string;
   syntax: string;
 };
@@ -12,6 +12,7 @@ export type ComposerEntityReference = {
 type ComposerReferenceCatalog = {
   tools: ComposerExtensionItem[];
   skills: ComposerSkillItem[];
+  services?: Array<{ id: string; label: string }>;
   files?: string[];
 };
 
@@ -33,7 +34,7 @@ function referenceKey(reference: Pick<ComposerEntityReference, "kind" | "id">): 
 }
 
 function isReferenceKind(value: unknown): value is ComposerEntityReference["kind"] {
-  return value === "tool" || value === "skill" || value === "file";
+  return value === "tool" || value === "skill" || value === "service" || value === "file";
 }
 
 function parsePayload(raw: string): ComposerReferenceClipboardPayload | null {
@@ -100,14 +101,22 @@ export function restoreComposerReferences(
     const knownSyntaxes = item.kind === "tool"
       ? catalog.tools
           .filter((entry) => !entry.disabled && entry.id === item.id)
-          .flatMap((entry) => [`@${entry.id}`, `@${entry.label}`])
+          .flatMap((entry) => [
+            `@${entry.id}`,
+            `@${entry.label}`,
+            ...(entry.ui?.composer_label ? [`@${entry.ui.composer_label}`] : []),
+          ])
       : item.kind === "skill"
         ? catalog.skills
             .filter((entry) => entry.id === item.id)
             .flatMap((entry) => [`@${entry.id}`, `@${entry.label}`, ...(entry.aliases ?? []).map((alias) => `@${alias}`)])
-        : fileIds.has(item.id)
-          ? [`@${item.id}`]
-          : [];
+        : item.kind === "service"
+          ? (catalog.services ?? [])
+              .filter((entry) => entry.id === item.id)
+              .flatMap((entry) => [`@${entry.id}`, `@${entry.label}`])
+          : fileIds.has(item.id)
+            ? [`@${item.id}`]
+            : [];
     if (!knownSyntaxes.includes(syntax)) continue;
     const reference = { kind: item.kind, id: item.id, syntax } satisfies ComposerEntityReference;
     const key = referenceKey(reference);
@@ -123,29 +132,14 @@ function normalizedReferenceId(value: string): string {
 }
 
 /**
- * Convert semantic mentions to a portable plain-text representation. Clipboard
- * consumers that do not understand Rumi's custom MIME still retain entity ids.
+ * Keep the plain-text clipboard human-readable. Stable ids travel only in the
+ * private structured clipboard flavor understood by the composer.
  */
 export function composerReferencesAsMarkdown(
   text: string,
-  references: ComposerEntityReference[],
+  _references: ComposerEntityReference[],
 ): string {
-  const ranges = findReferenceRanges(text, references);
-  if (ranges.length === 0) return text;
-  let result = "";
-  let cursor = 0;
-  for (const range of ranges) {
-    const reference = references.find((candidate) => (
-      candidate.kind === range.kind
-      && candidate.id === range.id
-      && candidate.syntax === text.slice(range.start, range.end)
-    ));
-    if (!reference) continue;
-    result += text.slice(cursor, range.start);
-    result += `[${reference.syntax}](plugin://${reference.id})`;
-    cursor = range.end;
-  }
-  return `${result}${text.slice(cursor)}`;
+  return text;
 }
 
 /**
@@ -173,14 +167,19 @@ export function restoreComposerMarkdownReferences(
     const skill = catalog.skills.find((entry) => (
       normalizedReferenceId(entry.id) === normalizedTarget
     ));
+    const service = (catalog.services ?? []).find((entry) => (
+      normalizedReferenceId(entry.id) === normalizedTarget
+    ));
     const file = (catalog.files ?? []).find((entry) => normalizedReferenceId(entry) === normalizedTarget);
     const reference = tool
       ? { kind: "tool" as const, id: tool.id, syntax }
       : skill
         ? { kind: "skill" as const, id: skill.id, syntax }
-        : file
-          ? { kind: "file" as const, id: file, syntax }
-          : null;
+        : service
+          ? { kind: "service" as const, id: service.id, syntax }
+          : file
+            ? { kind: "file" as const, id: file, syntax }
+            : null;
     text += raw.slice(cursor, match.index);
     text += syntax;
     if (reference) references.push(reference);
