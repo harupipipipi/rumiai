@@ -1380,6 +1380,7 @@ function CalendarComposerPanel({
                   >
                     {timeOptions.map((option, index) => (
                       <button
+                        onClick={() => selectTimeOption(option, index)}
                         ref={(node) => {
                           if (node) timeOptionRefs.current.set(index, node);
                           else timeOptionRefs.current.delete(index);
@@ -1397,7 +1398,6 @@ function CalendarComposerPanel({
                         )}
                         onMouseDown={(event) => event.preventDefault()}
                         onMouseEnter={() => setTimeMenuActiveIndex(index)}
-                        onClick={() => selectTimeOption(option, index)}
                       >
                         {formatCalendarTime(option)}
                       </button>
