@@ -1823,8 +1823,15 @@ mod tests {
         serde_json::from_str(include_str!("../capabilities/presentation-catalog.json")).unwrap()
     }
 
-    fn catalog_capability_allows_origin(window_label: &str, origin: &str) -> bool {
-        let capability = presentation_catalog_capability();
+    fn presentation_control_capability() -> serde_json::Value {
+        serde_json::from_str(include_str!("../capabilities/presentation-control.json")).unwrap()
+    }
+
+    fn capability_allows_origin(
+        capability: &serde_json::Value,
+        window_label: &str,
+        origin: &str,
+    ) -> bool {
         let window_allowed = capability["windows"]
             .as_array()
             .unwrap()
@@ -1869,9 +1876,7 @@ mod tests {
             vec!["allow-get-presentation-catalog"]
         );
 
-        let control: serde_json::Value =
-            serde_json::from_str(include_str!("../capabilities/presentation-control.json"))
-                .unwrap();
+        let control = presentation_control_capability();
         assert_eq!(control["windows"], serde_json::json!(["main"]));
         assert_eq!(
             capability_permissions(&control),
@@ -1887,22 +1892,20 @@ mod tests {
         );
         assert_eq!(
             control["remote"]["urls"],
-            serde_json::json!([
-                "http://127.0.0.1:8765/panel",
-                "http://127.0.0.1:8765/panel/*",
-                "http://localhost:8765/panel",
-                "http://localhost:8765/panel/*"
-            ])
+            serde_json::json!(["http://127.0.0.1:8765", "http://localhost:8765"])
         );
     }
 
     #[test]
-    fn presentation_catalog_acl_allows_first_start_and_restart_origins() {
+    fn presentation_acl_allows_first_start_and_restart_origins() {
         // Tauri authorizes remote IPC with the browser's origin-only Origin
         // header. The path is deliberately enforced below by the live-Webview
         // caller check, not represented as a misleading ACL URL pattern.
+        let catalog = presentation_catalog_capability();
+        let control = presentation_control_capability();
         for origin in ["http://127.0.0.1:8765/", "http://localhost:8765/"] {
-            assert!(catalog_capability_allows_origin("main", origin));
+            assert!(capability_allows_origin(&catalog, "main", origin));
+            assert!(capability_allows_origin(&control, "main", origin));
         }
 
         for live_url in [
@@ -1920,7 +1923,7 @@ mod tests {
     }
 
     #[test]
-    fn presentation_catalog_acl_rejects_wrong_labels_and_untrusted_origins() {
+    fn presentation_acl_rejects_wrong_labels_and_untrusted_origins() {
         for label in [
             "panel",
             "defaultspack-main",
@@ -1928,7 +1931,8 @@ mod tests {
             "defaults-console",
             "host-permissions",
         ] {
-            assert!(!catalog_capability_allows_origin(
+            assert!(!capability_allows_origin(
+                &presentation_catalog_capability(),
                 label,
                 "http://127.0.0.1:8765/"
             ));
@@ -1941,13 +1945,23 @@ mod tests {
             "http://127.0.0.1:8764/",
             "http://127.0.0.1:8766/",
         ] {
-            assert!(!catalog_capability_allows_origin("main", origin));
+            assert!(!capability_allows_origin(
+                &presentation_catalog_capability(),
+                "main",
+                origin
+            ));
+            assert!(!capability_allows_origin(
+                &presentation_control_capability(),
+                "main",
+                origin
+            ));
         }
     }
 
     #[test]
     fn forged_allowed_origin_cannot_bypass_live_webview_route_check() {
-        assert!(catalog_capability_allows_origin(
+        assert!(capability_allows_origin(
+            &presentation_catalog_capability(),
             "main",
             "http://127.0.0.1:8765/"
         ));

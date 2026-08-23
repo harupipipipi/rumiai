@@ -5,10 +5,8 @@
   "windows": ["main"],
   "remote": {
     "urls": [
-      "http://127.0.0.1:8765/panel",
-      "http://127.0.0.1:8765/panel/*",
-      "http://localhost:8765/panel",
-      "http://localhost:8765/panel/*"
+      "http://127.0.0.1:8765",
+      "http://localhost:8765"
     ]
   },
   "permissions": [
