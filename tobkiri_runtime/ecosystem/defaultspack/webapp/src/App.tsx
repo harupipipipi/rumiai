@@ -2524,6 +2524,9 @@ function ChatApp() {
   const [spotlightSelectedIndex, setSpotlightSelectedIndex] = useState(0);
   const [spotlightLoading, setSpotlightLoading] = useState(false);
   const [modelPickerRequestId, setModelPickerRequestId] = useState(0);
+  const [branchPickerRequestId, setBranchPickerRequestId] = useState(0);
+  const [branchPickerStatus, setBranchPickerStatus] = useState<"loading" | "ready" | "error">("ready");
+  const [branchPickerError, setBranchPickerError] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [requestedSettingsSectionId, setRequestedSettingsSectionId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -2580,6 +2583,7 @@ function ChatApp() {
   const [ultraYoloRestoreYoloMode, setUltraYoloRestoreYoloMode] = useLocalStorage("rumi-ultra-yolo-restore-yolo-mode", false);
   const [mode, setMode] = useLocalStorage<AppMode>("rumi-app-mode", "agent");
   const [codingContext, setCodingContext] = useState<CodingContext | null>(null);
+  const codingContextRequestRef = useRef(0);
   const [codingWorkspaces, setCodingWorkspaces] = useState<CodingWorkspaceRecord[]>([]);
   const [selectedCodingWorkspaceId, setSelectedCodingWorkspaceId] = useState<string | null>(null);
   const [pendingNewTaskContext, setPendingNewTaskContext] = useState<PendingNewTaskContext | null>(null);
@@ -3235,26 +3239,63 @@ function ChatApp() {
   const effectiveConsoleKey = `${effectiveGroupId ?? "ungrouped"}:${effectiveWorkspaceId ?? "no-workspace"}`;
 
   const loadCodingContext = useCallback(async (workspaceIdOverride?: string | null) => {
+    const requestId = ++codingContextRequestRef.current;
     const workspaceId = workspaceIdOverride ?? effectiveWorkspaceId;
     try {
-      const [result, branchInfo] = await Promise.all([
+      const [result, branchResult] = await Promise.all([
         api.getCodingContext({ directory: codingDirectory, workspace_id: workspaceId }),
-        api.getGitBranch({ workspace_id: workspaceId }).catch(() => null),
+        api.getGitBranch({ workspace_id: workspaceId })
+          .then((branchInfo) => ({ branchInfo, error: null as unknown }))
+          .catch((error: unknown) => ({ branchInfo: null, error })),
       ]);
+      if (requestId !== codingContextRequestRef.current) {
+        return { ok: false as const, stale: true as const, error: null };
+      }
       setCodingContext({
-        branch: result.branch,
+        branch: branchResult.branchInfo?.branch ?? result.branch,
         rootFolder: result.root_folder,
         workspaceId: result.workspace_id ?? workspaceId,
         directory: result.directory ?? codingDirectory,
-        branches: branchInfo?.branches ?? [],
+        branches: branchResult.branchInfo?.branches ?? [],
         files: result.files,
         entries: result.entries,
         git: result.git,
       });
-    } catch {
+      return branchResult.error
+        ? { ok: false as const, stale: false as const, error: branchResult.error }
+        : { ok: true as const, stale: false as const, error: null };
+    } catch (contextError) {
+      if (requestId !== codingContextRequestRef.current) {
+        return { ok: false as const, stale: true as const, error: null };
+      }
       setCodingContext(null);
+      return { ok: false as const, stale: false as const, error: contextError };
     }
   }, [codingDirectory, effectiveWorkspaceId]);
+
+  const refreshBranchPicker = useCallback(async (): Promise<void> => {
+    setBranchPickerStatus("loading");
+    setBranchPickerError(null);
+    let result = await loadCodingContext();
+    // Entering coding mode also refreshes the context. If that newer request
+    // supersedes this picker read, retry once it has yielded so the picker does
+    // not turn a stale result into an authoritative empty state.
+    for (let attempt = 0; result.stale && attempt < 2; attempt += 1) {
+      result = await loadCodingContext();
+    }
+    if (result.ok) {
+      setBranchPickerStatus("ready");
+      return;
+    }
+    setBranchPickerStatus("error");
+    setBranchPickerError(
+      result.stale
+        ? "ブランチ候補の読み込み中にワークスペースが更新されました。もう一度読み込んでください。"
+        : result.error instanceof Error && result.error.message.trim()
+        ? result.error.message
+        : "ブランチ候補を読み込めませんでした。ワークスペースの権限とGitの状態を確認してください。",
+    );
+  }, [loadCodingContext]);
 
   useEffect(() => {
     if (!activeConversationId) {
@@ -4735,7 +4776,12 @@ function ChatApp() {
         return;
       case "open_branch_picker":
         handleModeChange("coding");
-        if (args.name) setInput(`Create or switch to branch ${String(args.name)}.`);
+        if (args.name) {
+          setInput(`Create or switch to branch ${String(args.name)}.`);
+        } else {
+          setBranchPickerRequestId((value) => value + 1);
+          void refreshBranchPicker();
+        }
         return;
       case "prepare_test_run":
         handleModeChange("coding");
@@ -5168,10 +5214,31 @@ function ChatApp() {
     }
   };
 
-  const handleCodingBranchSwitch = (branch: string, create = false) => {
-    void api.switchGitBranch(branch, create, { workspace_id: effectiveWorkspaceId })
-      .then(() => loadCodingContext())
-      .catch((branchError) => setError(branchError instanceof Error ? branchError.message : "ブランチ切り替えに失敗しました。"));
+  const handleCodingBranchSwitch = async (branch: string, create = false): Promise<void> => {
+    try {
+      const result = await api.switchGitBranch(branch, create, { workspace_id: effectiveWorkspaceId });
+      const response = result as typeof result & {
+        approval_required?: boolean;
+        message?: string;
+        reason?: string;
+      };
+      if (!result.switched) {
+        const fallback = response.approval_required
+          ? "このブランチの切り替えには承認が必要です。承認後にもう一度選択してください。"
+          : "ブランチを切り替えられませんでした。ワークスペースの権限とGitの状態を確認してください。";
+        throw new Error(response.message || response.reason || fallback);
+      }
+      const refreshResult = await loadCodingContext();
+      if (!refreshResult.ok && !refreshResult.stale) {
+        throw new Error("ブランチは切り替わりましたが、最新の候補を再読み込みできませんでした。");
+      }
+    } catch (branchError) {
+      const message = branchError instanceof Error && branchError.message.trim()
+        ? branchError.message
+        : "ブランチ切り替えに失敗しました。権限とワークスペースの状態を確認してください。";
+      setError(message);
+      throw new Error(message);
+    }
   };
 
   const handleCodingDirectoryChange = (directory: string) => {
@@ -6952,6 +7019,9 @@ function ChatApp() {
       structuredInputValues={effectiveStructuredComposerValues}
       modelCommandCandidates={modelCommandCandidates}
       modelPickerRequestId={modelPickerRequestId}
+      branchPickerRequestId={branchPickerRequestId}
+      branchPickerStatus={branchPickerStatus}
+      branchPickerError={branchPickerError}
       modelStatusIndicators={composerModelStatusIndicators}
       voiceInputEnabled={settingsValues.general?.voice_input_enabled !== false}
       voiceInputUseAi={settingsValues.general?.voice_input_use_ai === true}
@@ -7007,6 +7077,7 @@ function ChatApp() {
       onWidgetAction={handleWidgetAction}
       onWidgetToggle={handleWidgetToggle}
       onCodingBranchSwitch={handleCodingBranchSwitch}
+      onBranchPickerRefresh={refreshBranchPicker}
       onCodingDirectoryChange={handleCodingDirectoryChange}
       onCodingWorkspaceSelect={handleCodingWorkspaceSelect}
       onCodingWorkspaceTrust={handleCodingWorkspaceTrust}

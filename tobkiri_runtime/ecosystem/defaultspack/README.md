@@ -385,6 +385,13 @@ chat.*                       → chat ドメインの全権限
 | `git.remote.list` | リモート一覧 |
 | `git.remote.manage` | リモート管理 |
 
+Coding mode の composer で `/branch` を実行すると、現在の workspace から
+取得した branch picker が開きます。候補は検索でき、矢印キー、Enter、Esc
+でも操作できます。`/branch <name>` は従来どおり、新しい branch の作成または
+指定 branch への切り替えを依頼する composer prompt を準備します。branch の
+切り替え自体は既存の `git.branch.switch` approval/authority 経路を通り、候補の
+取得や切り替えに失敗した場合は picker 内に再試行可能なエラーを表示します。
+
 ### memory ドメイン（13権限）
 
 | 権限 | 説明 |

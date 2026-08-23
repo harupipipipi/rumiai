@@ -99,6 +99,10 @@ type ApiMockOptions = {
   codingApprovalAfterTerminal?: boolean;
   codingApprovalAfterRestore?: boolean;
   structuredComposer?: boolean;
+  gitBranchReadFailures?: number;
+  shouldFailGitBranchRead?: () => boolean;
+  gitBranchSwitchResponse?: Record<string, unknown>;
+  onGitBranchSwitch?: (payload: Record<string, unknown>) => void;
 };
 
 function ok(data: unknown) {
@@ -616,6 +620,9 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
   }));
   let conversationToolPreferences: Record<string, unknown> = {};
   let codingApprovalRequest: Record<string, unknown> | null = null;
+  let currentGitBranch = "main";
+  let remainingGitBranchReadFailures = options.gitBranchReadFailures ?? 0;
+  const gitBranches = ["main", "codex/pr97", "topic"];
   const settledApprovalRequestIds = new Set<string>();
   const codingCheckpoints: Record<string, unknown>[] = options.codingApprovalAfterRestore
     ? [{ snapshot_id: "checkpoint-1", path: "/repo/.rumi/checkpoints/checkpoint-1" }]
@@ -750,6 +757,39 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
         catalog_revision: "e2e-revision-1",
         commands: [
           protocolCommand("coding", "Coding Mode", "low", "set_mode_coding"),
+          {
+            canonical_id: "defaultspack:branch",
+            pack_id: "defaultspack",
+            pack_generation: 1,
+            command_version: "1.0.0",
+            identity: { id: "branch", name: "branch", aliases: [], version: "1.0.0" },
+            presentation: {
+              label: { fallback: "Branch" },
+              description: { fallback: "Open branch picker or create a branch." },
+              category: "coding",
+              visibility: "default",
+              icon: "branch",
+              input: {
+                kind: "form",
+                fields: [{ argument: "name", control: "text", required: false }],
+              },
+              mounts: [{
+                slot_ref: "tobkiri:command_palette.commands",
+                display: "command",
+                order: 100,
+              }],
+            },
+            execution: { kind: "host_operation", operation_ref: "host:open_branch_picker" },
+            authorization: {
+              risk: "medium",
+              permissions: [],
+              approval_required: false,
+              approval_policy: "never",
+              executor_policy_ref: "tobkiri.command.standard",
+            },
+            constraints: { modes: ["coding"] },
+            availability: { status: "available" },
+          },
           protocolCommand("yolo", "Full Access (YOLO)", "medium", "toggle_ultra_yolo"),
         ],
         state_snapshots: [],
@@ -772,6 +812,18 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
             execution: { type: "frontend", action: "set_mode_coding" },
           },
           {
+            id: "branch",
+            name: "branch",
+            label: "Branch",
+            description: "Open branch picker or create a branch.",
+            category: "coding",
+            visibility: "default",
+            risk: "medium",
+            modes: ["coding"],
+            args: [{ name: "name", type: "string", required: false }],
+            execution: { type: "frontend", action: "open_branch_picker" },
+          },
+          {
             id: "yolo",
             name: "yolo",
             label: "Full Access (YOLO)",
@@ -790,11 +842,39 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       const payload = request.postDataJSON() as Record<string, unknown>;
       return fulfill(route, {
         executed: true,
-        action: payload.command === "coding"
+        action: payload.command === "branch" || payload.command === "defaultspack:branch"
+          ? "open_branch_picker"
+          : payload.command === "coding" || payload.command === "defaultspack:coding"
           ? "set_mode_coding"
-          : payload.command === "yolo"
+          : payload.command === "yolo" || payload.command === "defaultspack:yolo"
             ? "toggle_ultra_yolo"
             : "",
+        args: payload.args ?? {},
+      });
+    }
+
+    if (path === routeKey("api/command-protocol/v1/invoke") && method === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      const command = String(payload.command_ref ?? payload.command ?? "");
+      const action = command === "defaultspack:branch"
+        ? "open_branch_picker"
+        : command === "defaultspack:coding"
+          ? "set_mode_coding"
+          : command === "defaultspack:yolo"
+            ? "toggle_ultra_yolo"
+            : "";
+      return fulfill(route, {
+        api_version: "command-protocol/v1",
+        invocation_id: String(payload.invocation_id ?? "invocation-e2e"),
+        command_ref: command,
+        status: "completed",
+        legacy_result: {
+          command: { id: command, name: command, label: command },
+          executed: false,
+          requires_approval: false,
+          action,
+          args: payload.args ?? {},
+        },
       });
     }
 
@@ -966,7 +1046,36 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     }
 
     if (path === routeKey("api/coding/git/branch")) {
-      return fulfill(route, { branch: "main", branches: ["main", "codex/pr97"], workspace_id: "ws-main" });
+      if (method === "POST") {
+        const payload = request.postDataJSON() as Record<string, unknown>;
+        options.onGitBranchSwitch?.(payload);
+        if (options.gitBranchSwitchResponse) {
+          return fulfill(route, options.gitBranchSwitchResponse);
+        }
+        currentGitBranch = String(payload.branch ?? currentGitBranch);
+        return fulfill(route, {
+          branch: currentGitBranch,
+          branches: gitBranches,
+          workspace_id: "ws-main",
+          switched: true,
+        });
+      }
+      if (remainingGitBranchReadFailures > 0 || options.shouldFailGitBranchRead?.()) {
+        remainingGitBranchReadFailures -= 1;
+        return route.fulfill({
+          status: 403,
+          contentType: "application/json",
+          body: JSON.stringify({
+            status: "error",
+            error: { message: "ブランチ候補を読み込む権限がありません。" },
+          }),
+        });
+      }
+      return fulfill(route, {
+        branch: currentGitBranch,
+        branches: gitBranches,
+        workspace_id: "ws-main",
+      });
     }
 
     if (path === routeKey("api/coding/git/status")) {
@@ -2587,6 +2696,88 @@ test("coding slash command toggles coding mode off again", async ({ page }) => {
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/chat(?:\?|$)/);
   await expect(page.getByRole("button", { name: "Coding widget" })).toBeHidden();
+});
+
+test("branch slash command opens a searchable keyboard-accessible picker", async ({ page }) => {
+  test.setTimeout(180_000);
+  const switches: Record<string, unknown>[] = [];
+  await installDefaultspackApiMocks(page, {
+    onGitBranchSwitch: (payload) => switches.push(payload),
+  });
+  await page.goto("/chat");
+  await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible({ timeout: 45_000 });
+
+  const composer = page.locator("textarea.rumi-composer-textarea");
+  await composer.fill("/coding");
+  await composer.press("Enter");
+  await expect(page).toHaveURL(/\/coding(?:\?|$)/);
+
+  await composer.fill("/branch");
+  await expect(page.getByTestId("composer-slash-command-candidates")).toContainText("/branch");
+  await composer.press("Enter");
+
+  const picker = page.locator('[data-branch-picker="open"]');
+  await expect(picker).toBeVisible();
+  await expect(picker).toHaveAttribute("role", "dialog");
+  await expect(picker.getByRole("option", { name: /main/ })).toBeDisabled();
+  await expect(picker.getByRole("option", { name: "codex/pr97" })).toBeVisible();
+
+  const search = picker.getByRole("combobox", { name: "ブランチを検索" });
+  await expect(search).toBeFocused();
+  await search.fill("pr97");
+  await expect(picker.getByRole("option", { name: "codex/pr97" })).toBeVisible();
+  await expect(picker.getByRole("option", { name: /main/ })).toBeHidden();
+
+  await search.press("ArrowDown");
+  await search.press("Enter");
+  await expect.poll(() => switches).toEqual([
+    expect.objectContaining({ action: "switch", branch: "codex/pr97", create: false }),
+  ]);
+  await expect(picker).toBeHidden();
+  await expect(composer).toBeFocused();
+
+  await composer.fill("/branch");
+  await expect(page.getByTestId("composer-slash-command-candidates")).toContainText("/branch");
+  await composer.press("Enter");
+  await expect(picker.getByRole("option", { name: /codex\/pr97/ })).toBeDisabled();
+  await picker.getByRole("combobox", { name: "ブランチを検索" }).press("Escape");
+
+  await composer.fill("/branch codex/example");
+  await expect(page.getByTestId("composer-command-argument-guide")).toContainText("/branch");
+  await composer.press("Enter");
+  await expect(composer).toHaveValue("Create or switch to branch codex/example.");
+});
+
+test("branch picker retries reads and keeps stale or denied switch errors visible", async ({ page }) => {
+  test.setTimeout(180_000);
+  let failBranchReads = true;
+  await installDefaultspackApiMocks(page, {
+    shouldFailGitBranchRead: () => failBranchReads,
+    gitBranchSwitchResponse: {
+      approval_required: true,
+      message: "ブランチが削除されたか、切り替え権限がありません。",
+    },
+  });
+  await page.goto("/chat");
+  await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible({ timeout: 45_000 });
+
+  const composer = page.locator("textarea.rumi-composer-textarea");
+  await composer.fill("/coding");
+  await composer.press("Enter");
+  await composer.fill("/branch");
+  await expect(page.getByTestId("composer-slash-command-candidates")).toContainText("/branch");
+  await composer.press("Enter");
+
+  const picker = page.locator('[data-branch-picker="open"]');
+  await expect(picker.getByRole("alert")).toContainText("権限", { timeout: 30_000 });
+  failBranchReads = false;
+  await picker.getByRole("button", { name: "再読み込み" }).click();
+  await expect(picker.getByRole("option", { name: "topic" })).toBeVisible({ timeout: 30_000 });
+  await picker.getByRole("option", { name: "topic" }).click();
+  await expect(picker.getByRole("alert")).toContainText(
+    "削除されたか、切り替え権限がありません",
+    { timeout: 30_000 },
+  );
 });
 
 test("tool timeline shows streamed activity details", async ({ page }) => {

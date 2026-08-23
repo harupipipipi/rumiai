@@ -193,6 +193,9 @@ export type ComposerRendererProps = {
   structuredInputValues?: Record<string, string>;
   modelCommandCandidates?: ModelCommandCandidate[];
   modelPickerRequestId?: number;
+  branchPickerRequestId?: number;
+  branchPickerStatus?: "loading" | "ready" | "error";
+  branchPickerError?: string | null;
   modelStatusIndicators?: ComposerModelStatusIndicator[];
   voiceInputEnabled?: boolean;
   voiceInputUseAi?: boolean;
@@ -247,7 +250,8 @@ export type ComposerRendererProps = {
   onEntityReferencesChange?: (references: ComposerEntityReference[]) => void;
   onWidgetAction?: (widget: DroppedWidget) => void;
   onWidgetToggle?: (widgetId: string) => void;
-  onCodingBranchSwitch?: (branch: string, create?: boolean) => void;
+  onCodingBranchSwitch?: (branch: string, create?: boolean) => Promise<void> | void;
+  onBranchPickerRefresh?: () => Promise<void> | void;
   onCodingDirectoryChange?: (directory: string) => void;
   onCodingWorkspaceSelect?: (workspaceId: string) => void;
   onCodingWorkspaceTrust?: (workspaceId: string) => void;

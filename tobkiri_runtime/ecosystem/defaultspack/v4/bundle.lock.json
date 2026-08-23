@@ -244,12 +244,12 @@
     {
       "path": "packs/rumi_git_read_pack.executables.v4.json",
       "kind": "executable_catalog",
-      "digest": "sha256:863462154b0c9a081e372455964836782bf818909c3f4ecc2a176eba32c9d4df"
+      "digest": "sha256:3732fa5335c357534f649cc1bd9ae6c99f92b25cccc5f0f3e0a8025226fb3c0e"
     },
     {
       "path": "packs/rumi_git_read_pack.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:cbbe92e1a12efa98fb371fd948687019a62b2136b2e4de89145c2b749aad9470"
+      "digest": "sha256:6ccdb1d0908d61c976768c3d123002c510799c3f35446165aac58107a91ca915"
     },
     {
       "path": "packs/rumi_git_write_pack.executables.v4.json",

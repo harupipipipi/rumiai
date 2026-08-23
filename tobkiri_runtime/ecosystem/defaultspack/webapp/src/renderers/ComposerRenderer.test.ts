@@ -1087,6 +1087,48 @@ test("composer suppresses slash command suggestions when template disables slash
   assert.doesNotMatch(html, /Write a context handoff file/);
 });
 
+test("composer renders the requested branch picker independently of coding context refresh", () => {
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "",
+      placeholder: "メッセージを入力...",
+      isGenerating: false,
+      selectedProfile: {
+        profile_id: "stub/default",
+        display_name: "Stub Default",
+        provider_id: "stub",
+        model_id: "default",
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [],
+      belowExtensions: [],
+      thinkingLevel: null,
+      contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+      mode: "coding",
+      codingContext: {
+        branch: "main",
+        rootFolder: "/repo",
+        directory: ".",
+        branches: ["main", "origin/topic", "origin/topic"],
+        files: [],
+        entries: [],
+        git: null,
+      },
+      branchPickerRequestId: 1,
+      branchPickerStatus: "ready",
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-branch-picker="open"/);
+  assert.match(html, /role="dialog"/);
+  assert.match(html, /ブランチを検索/);
+  assert.match(html, /origin\/topic/);
+});
+
 test("composer input template metadata changes safe input copy without replacing the component", () => {
   const html = renderToStaticMarkup(
     createElement(ComposerRenderer, {
