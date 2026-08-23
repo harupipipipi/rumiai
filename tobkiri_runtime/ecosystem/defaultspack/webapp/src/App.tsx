@@ -65,6 +65,10 @@ import {
   filterModelProfilesBySelector,
   modelSelectorSchemaFromCatalog,
 } from "./features/models";
+import {
+  externalInputPolicySummary,
+  externalInputSetupGuide,
+} from "./features/settings/externalInputPresentation";
 import type { ConversationToolPreferences } from "./features/tools/types";
 import { useToolSelectionController } from "./features/tools/useToolSelectionController";
 import {
@@ -421,7 +425,7 @@ const fallbackExternalIoTemplates: ExternalIoTemplateRecord[] = [
     direction: "input",
     provider: "generic",
     input_profile_id: "generic.webhook.default",
-    endpoint: { id: "generic-main", route: defaultspackCanonicalRouteKey("api/webhooks/inbound/{webhook_id}") },
+    endpoint: { id: "test-webhook", route: defaultspackCanonicalRouteKey("api/webhooks/inbound/{webhook_id}") },
   },
   {
     id: "line.output.default",
@@ -478,6 +482,16 @@ function firstExternalIoTemplateForProvider(catalog: UICatalog | null, direction
   return externalIoTemplateItems(catalog, direction).find((item) => (
     String(item.provider ?? "") === provider && String(item.origin ?? "") !== "custom"
   )) ?? null;
+}
+
+function externalInputPresentationPatch(
+  template: ExternalIoTemplateRecord,
+  provider: string,
+): Record<string, unknown> {
+  return {
+    input_setup_guide: externalInputSetupGuide(template, provider),
+    policy_summary: externalInputPolicySummary(provider),
+  };
 }
 
 function externalIoTemplateRoute(template: ExternalIoTemplateRecord | null): string {
@@ -4193,6 +4207,7 @@ function ChatApp() {
           ?? firstExternalIoTemplateForProvider(catalog, "input", "line");
         if (template) {
           const resolvedProvider = String(template.provider ?? provider);
+          Object.assign(sectionPatch, externalInputPresentationPatch(template, resolvedProvider));
           sectionPatch.input_provider = resolvedProvider;
           sectionPatch.input_template_id = String(template.id ?? "");
           sectionPatch.input_profile_id = String(template.input_profile_id ?? `${resolvedProvider}.default`);
@@ -4210,6 +4225,7 @@ function ChatApp() {
         const template = externalIoTemplateById(catalog, "input", templateId);
         if (template) {
           const provider = String(template.provider ?? (templateId.split(".")[0] || "line"));
+          Object.assign(sectionPatch, externalInputPresentationPatch(template, provider));
           sectionPatch.input_provider = provider;
           sectionPatch.input_profile_id = String(template.input_profile_id ?? `${provider}.default`);
           sectionPatch.input_endpoint_id = externalIoInputEndpointId(template, provider);
@@ -4226,6 +4242,7 @@ function ChatApp() {
         const template = externalIoTemplateForResponsePreset(catalog, preset);
         if (template) {
           const provider = String(template.provider ?? "line");
+          Object.assign(sectionPatch, externalInputPresentationPatch(template, provider));
           sectionPatch.input_provider = provider;
           sectionPatch.input_template_id = String(template.id ?? "");
           sectionPatch.input_profile_id = String(template.input_profile_id ?? `${provider}.default`);

@@ -40,6 +40,7 @@ from domain.frontend_settings_store import (
 )
 from domain.tool.catalog_contract_client import ContractToolCatalog as ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
+from domain.webhook.url_defaults import default_local_url, resolved_local_url
 from transport.registry import (
     component_http_route_specs,
     component_route_diagnostics,
@@ -1484,7 +1485,7 @@ class FrontendRegistry:
                         "type": "public_url",
                         "default": {
                             "provider_id": "cloudflare_quick_tunnel",
-                            "local_url": "http://127.0.0.1:8766",
+                            "local_url": default_local_url(),
                             "route_path": "/api/integrations/line/webhook",
                         },
                         "help": "LINE/Slack/DiscordのWebhook URL欄へ貼る一時公開URLを発行します。Cloudflareはprovider実装の1つです。",
@@ -3056,7 +3057,7 @@ class FrontendRegistry:
                 "input_endpoint_id": "line-main",
                 "public_url_launcher": {
                     "provider_id": "cloudflare_quick_tunnel",
-                    "local_url": "http://127.0.0.1:8766",
+                    "local_url": default_local_url(),
                     "route_path": "/api/integrations/line/webhook",
                 },
                 "provider_route_copy": (
@@ -3909,15 +3910,15 @@ class FrontendRegistry:
         enabled_count = sum(1 for endpoint in endpoints if endpoint.get("enabled"))
         self._sync_external_input_selection(external_input, input_templates, endpoints=endpoints)
         self._sync_external_output_selection(external_output, output_templates)
-        external_input.setdefault(
-            "input_setup_guide",
-            (
-                "1. Providerを選ぶ\n"
-                "2. Temporary Public URLでWebhook URLを発行する\n"
-                "3. ProviderのWebhook URL欄へコピーする\n"
-                "4. External Outputで必要なtokenを貼る\n"
-                "5. 送信元を伝える / default応答を選ぶ"
-            ),
+        selected_input_template = self._template_map(input_templates).get(
+            str(external_input.get("input_template_id") or "").strip()
+        )
+        selected_input_provider = str(
+            external_input.get("input_provider") or "line"
+        ).strip()
+        external_input["input_setup_guide"] = self._input_setup_guide(
+            selected_input_template,
+            selected_input_provider,
         )
         external_input["endpoint_summary"] = f"{len(endpoints)} endpoints ({enabled_count} enabled)"
         external_input.setdefault("input_provider", "line")
@@ -3928,14 +3929,16 @@ class FrontendRegistry:
             "public_url_launcher",
             {
                 "provider_id": "cloudflare_quick_tunnel",
-                "local_url": "http://127.0.0.1:8766",
+                "local_url": default_local_url(),
                 "route_path": self._route_for_input_provider(str(external_input.get("input_provider") or "line"), input_templates),
             },
         )
         if isinstance(external_input.get("public_url_launcher"), dict):
             public_url_launcher = external_input["public_url_launcher"]
             public_url_launcher.setdefault("provider_id", "cloudflare_quick_tunnel")
-            public_url_launcher.setdefault("local_url", "http://127.0.0.1:8766")
+            public_url_launcher["local_url"] = resolved_local_url(
+                public_url_launcher.get("local_url")
+            )
             public_url_launcher["route_path"] = self._route_for_input_provider(str(external_input.get("input_provider") or "line"), input_templates)
         external_input["provider_route_copy"] = self._provider_route_copy(input_templates)
         external_input["input_template_summary"] = self._template_summary(input_templates)
@@ -3943,7 +3946,9 @@ class FrontendRegistry:
         external_input.setdefault("include_source_context", True)
         external_input.setdefault("default_response_mode", "same_response")
         external_input.setdefault("input_response_preset", "same_source_reply")
-        external_input.setdefault("policy_summary", "line.production: verified text only, saved source allowed, unknown source denied.")
+        external_input["policy_summary"] = self._input_policy_summary(
+            selected_input_provider
+        )
         external_input["saved_sources_summary"] = self._external_sources_summary()
         external_output.setdefault(
             "output_setup_guide",
@@ -4255,6 +4260,53 @@ class FrontendRegistry:
         if provider == "generic":
             return "/api/webhooks/inbound/{webhook_id}"
         return "/api/integrations/line/webhook"
+
+    @staticmethod
+    def _input_setup_guide(
+        template: dict[str, Any] | None,
+        provider: str,
+    ) -> str:
+        raw_steps = template.get("setup_steps") if isinstance(template, dict) else None
+        steps = (
+            [str(item).strip() for item in raw_steps if str(item or "").strip()]
+            if isinstance(raw_steps, list)
+            else []
+        )
+        if not steps:
+            steps = [
+                f"Select the {provider or 'external'} input template.",
+                "Review its route, credentials, endpoint, and source rules before enabling it.",
+            ]
+        return "\n".join(f"{index}. {step}" for index, step in enumerate(steps, 1))
+
+    @staticmethod
+    def _input_policy_summary(provider: str) -> str:
+        summaries = {
+            "line": (
+                "line.production: verified LINE signatures and text messages required; "
+                "saved sources allowed; unknown sources denied."
+            ),
+            "discord": (
+                "discord.production: verified Discord signatures required; "
+                "verified sources allowed by default."
+            ),
+            "slack": (
+                "slack.production: verified Slack signatures required; "
+                "verified sources allowed by default."
+            ),
+            "generic": (
+                "Generic endpoint policy: shared-secret verification follows the endpoint "
+                "configuration; unverified input is denied when security is configured."
+            ),
+        }
+        normalized_provider = provider.strip().lower()
+        return summaries.get(
+            normalized_provider,
+            (
+                f"{normalized_provider or 'Custom'} input policy: review the selected "
+                "endpoint's verification and audience rules."
+            ),
+        )
 
     @staticmethod
     def _legacy_default_target(values: dict[str, Any]) -> str:
