@@ -16,7 +16,6 @@ import hashlib
 import json
 import threading
 import time
-import calendar
 import math
 import re
 from itertools import count
@@ -34,6 +33,18 @@ from domain.agent.schedule_store import (
     delete_schedule as store_delete,
     append_history,
     load_history,
+)
+from domain.agent.schedule_execution_store import (
+    CANCELLED,
+    COMPLETED,
+    FAILED,
+    RUNNING,
+    TIMED_OUT,
+    WAITING_APPROVAL,
+    ScheduleExecutionAlreadyActive,
+    ScheduleExecutionStore,
+    ScheduleExecutionTransitionError,
+    default_schedule_execution_db_path,
 )
 from domain.tool.scheduled_approval import (
     approve_schedule_pending_approval,
@@ -69,6 +80,13 @@ class _SchedulerConversationBusy(RuntimeError):
     def __init__(self, conversation_id: str):
         self.conversation_id = conversation_id
         super().__init__("conversation is already running: " + conversation_id)
+
+
+class _SchedulerExecutionSuperseded(RuntimeError):
+    """Raised before invocation when a reserved schedule input is no longer current."""
+
+    def __init__(self):
+        super().__init__("schedule execution input changed before model invocation")
 
 
 def _format_timeout_seconds(value: float) -> str:
@@ -974,6 +992,8 @@ def _stale_running_execution(sched: dict[str, Any], *, now_dt: datetime | None =
     running = _running_execution_details(sched)
     if running is None:
         return None
+    if running.get("status") == WAITING_APPROVAL:
+        return None
     started_at, started_dt = _running_execution_started_at(sched)
     if started_dt is None:
         return None
@@ -1141,6 +1161,9 @@ class Scheduler:
         self._conversation_lock_holders = {}  # conversation_id -> in-process holder metadata
         self._active_execution_ids = set()
         self._stale_recovered_execution_ids = set()
+        self._execution_store = None
+        self._execution_store_path = None
+        self._execution_cancel_events = {}
         self._loaded = False
         self._loaded_schedules_dir = None
 
@@ -1151,13 +1174,19 @@ class Scheduler:
         should_load = False
         timers_to_cancel = []
         schedules_dir = current_schedules_dir()
+        execution_store_path = str(default_schedule_execution_db_path().absolute())
         with self._lock:
-            if self._loaded_schedules_dir != schedules_dir:
+            if (
+                self._loaded_schedules_dir != schedules_dir
+                or self._execution_store_path != execution_store_path
+            ):
                 timers_to_cancel = list(self._timers.values())
                 self._timers.clear()
                 self._schedules.clear()
                 self._stale_recovered_execution_ids.clear()
                 self._conversation_lock_holders.clear()
+                self._execution_store = ScheduleExecutionStore(execution_store_path)
+                self._execution_store_path = execution_store_path
                 self._loaded = False
                 self._loaded_schedules_dir = schedules_dir
             if not self._loaded:
@@ -1173,8 +1202,174 @@ class Scheduler:
                     continue
                 with self._lock:
                     self._schedules[sid] = sd
+                self._migrate_legacy_running_execution(sd)
+            self._reconcile_durable_execution_records()
         self._recover_stale_running_executions()
         self._ensure_active_timers()
+
+    def _durable_execution_store(self):
+        """Return the pack-local durable schedule execution ledger."""
+        if self._execution_store is None:
+            execution_store_path = str(default_schedule_execution_db_path().absolute())
+            self._execution_store = ScheduleExecutionStore(execution_store_path)
+            self._execution_store_path = execution_store_path
+        return self._execution_store
+
+    def _migrate_legacy_running_execution(self, sched):
+        """Adopt a legacy mutable marker into the canonical ledger once."""
+        running = _running_execution_details(sched)
+        if running is None:
+            return None
+        if _obsolete_running_execution(sched) is not None:
+            return None
+        schedule_id = str(sched.get("id") or "").strip()
+        execution_id = str(running.get("execution_id") or "").strip()
+        if not schedule_id or not execution_id:
+            return None
+        existing = self._durable_execution_store().get(execution_id)
+        if existing is not None:
+            return existing
+        try:
+            revision = int(sched.get("revision", 0))
+        except (TypeError, ValueError):
+            revision = 0
+        try:
+            return self._durable_execution_store().reserve(
+                schedule_id=schedule_id,
+                idempotency_key="legacy:" + execution_id,
+                expected_revision=max(0, revision),
+                input_fingerprint=str(
+                    running.get("input_fingerprint")
+                    or _schedule_execution_input_fingerprint(sched)
+                ),
+                execution_id=execution_id,
+                initial_status=RUNNING,
+                metadata={
+                    "trigger": _running_execution_trigger(sched),
+                    "timeout_seconds": _running_execution_timeout_seconds(sched),
+                    "migrated_legacy_marker": True,
+                },
+                now=running.get("started_at") or timestamp(),
+            )
+        except ScheduleExecutionAlreadyActive:
+            return self._durable_execution_store().active_for_schedule(schedule_id)
+
+    def _reconcile_durable_execution_records(self):
+        """Reconcile active ledger records after a process restart."""
+        for active in self._durable_execution_store().list_active(limit=1000):
+            schedule_id = str(active.get("schedule_id") or "").strip()
+            execution_id = str(active.get("execution_id") or "").strip()
+            with self._lock:
+                sched = self._schedules.get(schedule_id)
+            if sched is None:
+                self._durable_execution_store().settle(
+                    execution_id,
+                    CANCELLED,
+                    error="schedule_missing_after_restart",
+                )
+                continue
+            if active.get("input_fingerprint") != _schedule_execution_input_fingerprint(
+                sched
+            ):
+                self._durable_execution_store().settle(
+                    execution_id,
+                    CANCELLED,
+                    error="execution_input_changed",
+                )
+                continue
+            if active.get("status") == "queued":
+                terminal = self._durable_execution_store().settle(
+                    execution_id,
+                    FAILED,
+                    error="scheduler restarted before model invocation",
+                )
+                self._recover_terminal_execution_projection(sched, terminal)
+                sched["updated_at"] = timestamp()
+                save_schedule(sched)
+                with self._lock:
+                    self._schedules[schedule_id] = sched
+        with self._lock:
+            schedules = list(self._schedules.values())
+        for sched in schedules:
+            self._reconcile_schedule_execution_projection(sched)
+
+    def _reconcile_schedule_execution_projection(self, sched):
+        """Replay the canonical ledger into one schedule compatibility projection."""
+        schedule_id = str(sched.get("id") or "").strip()
+        if not schedule_id:
+            return
+        projection = self._durable_active_projection(schedule_id)
+        if projection is not None:
+            sched["running_execution"] = projection
+            sched["running_started_at"] = projection.get("started_at")
+        else:
+            running = _running_execution_details(sched)
+            execution_id = str((running or {}).get("execution_id") or "").strip()
+            terminal = (
+                self._durable_execution_store().get(execution_id)
+                if execution_id
+                else None
+            )
+            if isinstance(terminal, dict) and terminal.get("completed_at"):
+                self._recover_terminal_execution_projection(sched, terminal)
+            else:
+                return
+        sched["updated_at"] = timestamp()
+        save_schedule(sched)
+        with self._lock:
+            self._schedules[schedule_id] = sched
+
+    def _recover_terminal_execution_projection(self, sched, terminal):
+        """Finish history and metadata after a crash between ledger and JSON writes."""
+        schedule_id = str(sched.get("id") or "").strip()
+        execution_id = str(terminal.get("execution_id") or "").strip()
+        entries, _total = load_history(schedule_id, limit=200)
+        already_recorded = any(
+            isinstance(entry, dict)
+            and str(entry.get("execution_id") or "").strip() == execution_id
+            for entry in entries
+        )
+        metadata = terminal.get("metadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+        ledger_status = str(terminal.get("status") or FAILED)
+        history_status = "completed" if ledger_status == COMPLETED else "error"
+        completed_at = terminal.get("completed_at") or terminal.get("updated_at")
+        if not already_recorded:
+            entry = {
+                "execution_id": execution_id,
+                "schedule_id": schedule_id,
+                "started_at": terminal.get("started_at") or terminal.get("created_at"),
+                "completed_at": completed_at,
+                "status": history_status,
+                "trigger": metadata.get("trigger") or "scheduled",
+                "result": terminal.get("result"),
+                "error": terminal.get("error"),
+                "ledger_status": ledger_status,
+                "recovered_terminal_execution": True,
+            }
+            if terminal.get("error") == "scheduler restarted before model invocation":
+                entry["error_code"] = "SCHEDULER_RESTART_BEFORE_START"
+                entry["recovered_queued_execution"] = True
+            append_history(schedule_id, entry)
+        try:
+            execution_count = int(sched.get("execution_count", 0))
+        except (TypeError, ValueError):
+            execution_count = 0
+        sched["execution_count"] = execution_count + 1
+        sched["last_executed_at"] = completed_at
+        sched["last_execution_status"] = history_status
+        if terminal.get("error"):
+            sched["last_execution_error"] = terminal.get("error")
+        else:
+            sched.pop("last_execution_error", None)
+        if metadata.get("trigger") != "manual":
+            if sched.get("type") == "once":
+                sched["status"] = "completed"
+                sched["next_execution_at"] = None
+            elif sched.get("status") == "active":
+                sched["next_execution_at"] = self._compute_next_execution(sched)
+        sched.pop("running_execution", None)
+        sched.pop("running_started_at", None)
 
     def create_schedule(self, schedule_type, task_config, schedule_config, name="", description=""):
         """Create and persist a new schedule.
@@ -1240,6 +1435,7 @@ class Scheduler:
             "task": task,
             "config": schedule_config,
             "status": "active",
+            "revision": 0,
             "execution_count": 0,
             "last_executed_at": None,
             "next_execution_at": None,
@@ -1334,7 +1530,31 @@ class Scheduler:
                 changed = True
 
         if changed:
+            try:
+                revision = int(sched.get("revision", 0))
+            except (TypeError, ValueError):
+                revision = 0
+            sched["revision"] = revision + 1
             sched["updated_at"] = timestamp()
+            active = self._durable_execution_store().active_for_schedule(schedule_id)
+            if (
+                isinstance(active, dict)
+                and active.get("input_fingerprint")
+                != _schedule_execution_input_fingerprint(sched)
+            ):
+                execution_id = str(active.get("execution_id") or "").strip()
+                with self._lock:
+                    cancel_event = self._execution_cancel_events.get(execution_id)
+                if cancel_event is not None:
+                    cancel_event.set()
+                try:
+                    self._durable_execution_store().settle(
+                        execution_id,
+                        CANCELLED,
+                        error="execution_input_changed",
+                    )
+                except ScheduleExecutionTransitionError:
+                    pass
             if sched.get("status") == "active":
                 sched["next_execution_at"] = self._compute_next_execution(sched)
             save_schedule(sched)
@@ -1350,6 +1570,16 @@ class Scheduler:
         """Delete a schedule. Returns True if deleted."""
         self.ensure_loaded()
         self._cancel_timer(schedule_id)
+        active = self._durable_execution_store().active_for_schedule(schedule_id)
+        if isinstance(active, dict):
+            try:
+                self._durable_execution_store().settle(
+                    str(active.get("execution_id")),
+                    CANCELLED,
+                    error="schedule_deleted",
+                )
+            except ScheduleExecutionTransitionError:
+                pass
         with self._lock:
             removed = self._schedules.pop(schedule_id, None)
         store_delete(schedule_id)
@@ -1444,6 +1674,14 @@ class Scheduler:
         recovered_exec_id = "sexec_recovery_" + gen_id()
         source_metadata = current.get("source_metadata") if isinstance(current.get("source_metadata"), dict) else {}
         exec_id = str(source_metadata.get("schedule_execution_id") or recovered_exec_id).strip()
+        durable_original = self._durable_execution_store().get(exec_id)
+        resumed_durable = False
+        if (
+            isinstance(durable_original, dict)
+            and durable_original.get("status") == WAITING_APPROVAL
+        ):
+            self._durable_execution_store().resume_after_approval(exec_id)
+            resumed_durable = True
         trigger = str(source_metadata.get("trigger") or "scheduled").strip() or "scheduled"
         timeout_seconds = _task_timeout_seconds(task_cfg.get("timeout", 300))
         params, tools = _scheduler_chat_params_and_tools(task_cfg, timeout_seconds=timeout_seconds)
@@ -1498,6 +1736,15 @@ class Scheduler:
                 cancel_event=cancel_event,
             )
             if not auto_approvals:
+                if resumed_durable:
+                    try:
+                        self._durable_execution_store().transition(
+                            exec_id,
+                            WAITING_APPROVAL,
+                            expected_status=RUNNING,
+                        )
+                    except ScheduleExecutionTransitionError:
+                        pass
                 return {"schedule_id": schedule_id, "continued_count": 0, "continued": [], "status": "not_approved"}
 
             if isinstance(result, dict) and result.get("status") == "ok":
@@ -1538,13 +1785,49 @@ class Scheduler:
         if auto_approvals:
             history_entry["auto_approvals"] = auto_approvals
             history_entry["completed_at"] = timestamp()
+            durable_history = dict(history_entry)
+            durable_history["execution_id"] = exec_id
+            durable_outcome = self._settle_durable_execution(durable_history)
             append_history(schedule_id, history_entry)
+            with self._lock:
+                sched = self._schedules.get(schedule_id)
+                if sched is not None:
+                    if (
+                        isinstance(durable_outcome, dict)
+                        and durable_outcome.get("status") == WAITING_APPROVAL
+                    ):
+                        projection = self._durable_active_projection(schedule_id)
+                        if projection is not None:
+                            sched["running_execution"] = projection
+                            sched["running_started_at"] = projection.get("started_at")
+                    else:
+                        sched.pop("running_execution", None)
+                        sched.pop("running_started_at", None)
+                        sched["execution_count"] = sched.get("execution_count", 0) + 1
+                        sched["last_executed_at"] = history_entry["completed_at"]
+                    sched["updated_at"] = timestamp()
+                    save_schedule(sched)
+                    self._schedules[schedule_id] = sched
             return {
                 "schedule_id": schedule_id,
                 "continued_count": len(auto_approvals),
                 "continued": auto_approvals,
                 "status": history_entry["status"],
             }
+        if resumed_durable:
+            if history_entry.get("status") == "error":
+                durable_history = dict(history_entry)
+                durable_history["execution_id"] = exec_id
+                self._settle_durable_execution(durable_history)
+            else:
+                try:
+                    self._durable_execution_store().transition(
+                        exec_id,
+                        WAITING_APPROVAL,
+                        expected_status=RUNNING,
+                    )
+                except ScheduleExecutionTransitionError:
+                    pass
         return {"schedule_id": schedule_id, "continued_count": 0, "continued": [], "status": "not_approved"}
 
     # ---- internal ----
@@ -1712,6 +1995,27 @@ class Scheduler:
                     history_entry["conversation_id"] = conversation_id
                     history_entry["assistant_error_message_id"] = stored_error.get("id")
             append_history(schedule_id, history_entry)
+            durable = self._durable_execution_store().get(stale["execution_id"])
+            if isinstance(durable, dict) and durable.get("status") in {
+                "queued",
+                RUNNING,
+                WAITING_APPROVAL,
+            }:
+                try:
+                    if stale.get("recovery_kind") == "obsolete":
+                        self._durable_execution_store().settle(
+                            stale["execution_id"],
+                            CANCELLED,
+                            error=history_entry.get("obsolete_reason"),
+                        )
+                    else:
+                        self._durable_execution_store().settle(
+                            stale["execution_id"],
+                            TIMED_OUT,
+                            error=history_entry.get("error"),
+                        )
+                except ScheduleExecutionTransitionError:
+                    pass
 
             with self._lock:
                 sched = self._schedules.get(schedule_id)
@@ -1730,6 +2034,9 @@ class Scheduler:
                     execution_count = 0
                 sched["execution_count"] = execution_count + 1
                 sched["last_executed_at"] = completed_at
+                sched["last_execution_status"] = history_entry.get("status")
+                if history_entry.get("error"):
+                    sched["last_execution_error"] = history_entry.get("error")
                 if stale["trigger"] != "manual":
                     if sched.get("type") == "once":
                         sched["status"] = "completed"
@@ -1785,13 +2092,118 @@ class Scheduler:
         if timer is not None:
             timer.cancel()
 
+    def _durable_active_projection(self, schedule_id):
+        """Return the compatibility projection of the canonical active run."""
+        active = self._durable_execution_store().active_for_schedule(schedule_id)
+        if active is None:
+            return None
+        metadata = active.get("metadata") if isinstance(active.get("metadata"), dict) else {}
+        return {
+            "execution_id": active.get("execution_id"),
+            "schedule_id": active.get("schedule_id"),
+            "started_at": active.get("started_at") or active.get("created_at"),
+            "trigger": metadata.get("trigger") or "scheduled",
+            "timeout_seconds": metadata.get("timeout_seconds"),
+            "input_fingerprint": active.get("input_fingerprint"),
+            "status": active.get("status"),
+        }
+
+    def _reserve_durable_execution(
+        self,
+        *,
+        schedule_id,
+        execution_id,
+        sched,
+        trigger,
+        timeout_seconds,
+    ):
+        """Reserve one queued run before any model or conversation work starts."""
+        try:
+            revision = int(sched.get("revision", 0))
+        except (TypeError, ValueError):
+            revision = 0
+        return self._durable_execution_store().reserve(
+            schedule_id=schedule_id,
+            idempotency_key=execution_id,
+            expected_revision=max(0, revision),
+            input_fingerprint=_schedule_execution_input_fingerprint(sched),
+            execution_id=execution_id,
+            metadata={
+                "trigger": trigger,
+                "timeout_seconds": timeout_seconds,
+            },
+        )
+
+    def _settle_durable_execution(self, history_entry):
+        """Settle or suspend the durable run from one scheduler outcome."""
+        execution_id = str(history_entry.get("execution_id") or "").strip()
+        if not execution_id:
+            return None
+        store = self._durable_execution_store()
+        record = store.get(execution_id)
+        if record is None:
+            return None
+        status = str(history_entry.get("status") or "error")
+        try:
+            if status in _APPROVAL_REQUIRED_FINISH_REASONS:
+                if record.get("status") == RUNNING:
+                    return store.transition(execution_id, WAITING_APPROVAL)
+                return record
+            if status == "completed":
+                return store.settle(
+                    execution_id,
+                    COMPLETED,
+                    result=history_entry.get("result"),
+                )
+            if history_entry.get("timeout_seconds") is not None:
+                return store.settle(
+                    execution_id,
+                    TIMED_OUT,
+                    error=history_entry.get("error"),
+                )
+            return store.settle(
+                execution_id,
+                FAILED,
+                error=history_entry.get("error"),
+                result=history_entry.get("result"),
+            )
+        except ScheduleExecutionTransitionError:
+            return store.get(execution_id)
+
+    def _assert_execution_input_current(self, schedule_id, execution_id):
+        """Fail closed when the reserved revision no longer matches the schedule."""
+        record = self._durable_execution_store().get(execution_id)
+        if not isinstance(record, dict) or record.get("status") != RUNNING:
+            raise _SchedulerExecutionSuperseded()
+        persisted = load_schedule(schedule_id)
+        if not isinstance(persisted, dict):
+            raise _SchedulerExecutionSuperseded()
+        try:
+            revision = int(persisted.get("revision", 0))
+        except (TypeError, ValueError):
+            revision = 0
+        if (
+            revision != record.get("expected_revision")
+            or _schedule_execution_input_fingerprint(persisted)
+            != record.get("input_fingerprint")
+        ):
+            raise _SchedulerExecutionSuperseded()
+
     def _mark_schedule_running(self, schedule_id, execution_id, started_at, trigger, timeout_seconds):
+        """Persist a compatibility projection of the durable active run."""
+        durable = self._durable_execution_store().get(execution_id)
+        if isinstance(durable, dict) and durable.get("status") == "queued":
+            self._durable_execution_store().transition(
+                execution_id,
+                RUNNING,
+                now=started_at,
+            )
         with self._lock:
             sched = self._schedules.get(schedule_id)
         if sched is None:
             return
         marked_at = timestamp()
-        sched["running_execution"] = {
+        projection = self._durable_active_projection(schedule_id) or {
             "execution_id": execution_id,
             "schedule_id": schedule_id,
             "started_at": started_at,
@@ -1800,6 +2212,7 @@ class Scheduler:
             "timeout_seconds": timeout_seconds,
             "input_fingerprint": _schedule_execution_input_fingerprint(sched),
         }
+        sched["running_execution"] = projection
         sched["running_started_at"] = started_at
         sched["updated_at"] = marked_at
         save_schedule(sched)
@@ -2047,17 +2460,20 @@ class Scheduler:
         self._recover_stale_running_execution(schedule_id)
         with self._lock:
             sched = self._schedules.get(schedule_id)
-            running = _active_running_execution(sched) if sched is not None else None
+            legacy_running = _active_running_execution(sched) if sched is not None else None
         if sched is None:
             return None
+        running = self._durable_active_projection(schedule_id) or legacy_running
         if running is not None:
             history_entry = self._already_running_entry(schedule_id, running, manual)
-            if not manual:
+            if manual:
+                history_entry["status"] = "error"
+                history_entry["error_code"] = "ALREADY_RUNNING"
+            else:
                 if not self._last_history_is_duplicate_already_running_skip(schedule_id, running):
                     append_history(schedule_id, history_entry)
                 self._advance_after_skipped_scheduled_execution(schedule_id)
             return history_entry
-
         task_cfg = sched.get("task", {})
         message = task_cfg.get("message", "")
         model = task_cfg.get("model", "default")
@@ -2081,11 +2497,34 @@ class Scheduler:
         }
         auto_approvals = []
         trigger = _scheduler_trigger_name(manual)
+        try:
+            self._reserve_durable_execution(
+                schedule_id=schedule_id,
+                execution_id=exec_id,
+                sched=sched,
+                trigger=trigger,
+                timeout_seconds=timeout_seconds,
+            )
+        except ScheduleExecutionAlreadyActive:
+            running = self._durable_active_projection(schedule_id) or {}
+            history_entry = self._already_running_entry(schedule_id, running, manual)
+            if manual:
+                history_entry["status"] = "error"
+                history_entry["error_code"] = "ALREADY_RUNNING"
+            else:
+                if not self._last_history_is_duplicate_already_running_skip(
+                    schedule_id, running
+                ):
+                    append_history(schedule_id, history_entry)
+                self._advance_after_skipped_scheduled_execution(schedule_id)
+            return history_entry
+        deadline = time.monotonic() + timeout_seconds
         conversation_lock = None
         conversation_lock_acquired = False
         history_finalized = False
         with self._lock:
             self._active_execution_ids.add(exec_id)
+            self._execution_cancel_events[exec_id] = cancel_event
         try:
             if conversation_id:
                 conversation_lock = self._conversation_execution_lock(conversation_id)
@@ -2106,6 +2545,12 @@ class Scheduler:
                     cancel_event.set()
                     if manual:
                         raise _SchedulerConversationBusy(str(conversation_id))
+                    self._durable_execution_store().settle(
+                        exec_id,
+                        FAILED,
+                        error="conversation is already running: "
+                        + str(conversation_id),
+                    )
                     history_entry = self._conversation_running_entry(schedule_id, conversation_id, manual=False)
                     if not self._last_history_is_duplicate_conversation_running_skip(schedule_id, conversation_id):
                         append_history(schedule_id, history_entry)
@@ -2124,6 +2569,7 @@ class Scheduler:
                     orphan_releasable=False,
                 )
                 self._mark_schedule_running(schedule_id, exec_id, started_at, trigger, timeout_seconds)
+                deadline = time.monotonic() + timeout_seconds
                 self._set_conversation_lock_holder(
                     conversation_id,
                     schedule_id=schedule_id,
@@ -2140,6 +2586,7 @@ class Scheduler:
                     params, tools = _scheduler_chat_params_and_tools(task_cfg, timeout_seconds=timeout_seconds)
 
                     def run_chat_task():
+                        self._assert_execution_input_current(schedule_id, exec_id)
                         initial_parent_id = _current_conversation_node_id(str(conversation_id))
                         chat_result = chat_send_run(
                             _scheduler_chat_payload(
@@ -2179,6 +2626,7 @@ class Scheduler:
                     conversation_lock_acquired = False
             else:
                 self._mark_schedule_running(schedule_id, exec_id, started_at, trigger, timeout_seconds)
+                deadline = time.monotonic() + timeout_seconds
                 from blocks.ai.complete import run as ai_complete_run
 
                 messages = []
@@ -2194,6 +2642,7 @@ class Scheduler:
                 _apply_scheduler_execution_timeout_to_params(completion_params, timeout_seconds)
 
                 def run_completion_task():
+                    self._assert_execution_input_current(schedule_id, exec_id)
                     payload = {"messages": messages, "model": model}
                     if completion_params:
                         payload["params"] = completion_params
@@ -2231,10 +2680,14 @@ class Scheduler:
                 err = result.get("error", {})
                 if isinstance(err, dict):
                     err_msg = err.get("message", str(err))
+                    err_code = str(err.get("code") or "").strip()
                 else:
                     err_msg = str(err)
+                    err_code = ""
                 history_entry["status"] = "error"
                 history_entry["error"] = err_msg
+                if err_code:
+                    history_entry["error_code"] = err_code
 
         except Exception as exc:
             history_entry["status"] = "error"
@@ -2244,6 +2697,9 @@ class Scheduler:
             elif isinstance(exc, _SchedulerConversationBusy):
                 history_entry["error_code"] = "CONVERSATION_RUNNING"
                 history_entry["skipped_reason"] = "conversation_running"
+            elif isinstance(exc, _SchedulerExecutionSuperseded):
+                history_entry["error_code"] = "SCHEDULE_EXECUTION_SUPERSEDED"
+                history_entry["skipped_reason"] = "execution_input_changed"
             if conversation_id and not isinstance(exc, _SchedulerConversationBusy):
                 history_entry["conversation_id"] = str(conversation_id)
                 stored_error = _ensure_scheduled_chat_error_message(
@@ -2261,6 +2717,18 @@ class Scheduler:
                 self._release_conversation_execution_lock(conversation_id, conversation_lock, exec_id)
 
             try:
+                durable_outcome = self._settle_durable_execution(history_entry)
+                if (
+                    isinstance(durable_outcome, dict)
+                    and durable_outcome.get("status") == CANCELLED
+                ):
+                    history_entry["status"] = "error"
+                    history_entry["error"] = (
+                        durable_outcome.get("error") or "schedule execution cancelled"
+                    )
+                    history_entry.setdefault(
+                        "error_code", "SCHEDULE_EXECUTION_CANCELLED"
+                    )
                 with self._lock:
                     recovered_as_stale = exec_id in self._stale_recovered_execution_ids
                 if not recovered_as_stale and not history_finalized:
@@ -2271,17 +2739,39 @@ class Scheduler:
                     with self._lock:
                         sched = self._schedules.get(schedule_id)
                     if sched is not None:
-                        current = _running_execution_details(sched)
-                        if isinstance(current, dict):
-                            current_execution_id = str(current.get("execution_id") or "").strip()
-                            if not current_execution_id or current_execution_id == exec_id:
+                        if (
+                            isinstance(durable_outcome, dict)
+                            and durable_outcome.get("status") == WAITING_APPROVAL
+                        ):
+                            projection = self._durable_active_projection(schedule_id)
+                            if projection is not None:
+                                sched["running_execution"] = projection
+                                sched["running_started_at"] = projection.get(
+                                    "started_at"
+                                )
+                        else:
+                            current = _running_execution_details(sched)
+                            if isinstance(current, dict):
+                                current_execution_id = str(
+                                    current.get("execution_id") or ""
+                                ).strip()
+                                if not current_execution_id or current_execution_id == exec_id:
+                                    sched.pop("running_execution", None)
+                                    sched.pop("running_started_at", None)
+                            else:
                                 sched.pop("running_execution", None)
                                 sched.pop("running_started_at", None)
+                        if not (
+                            isinstance(durable_outcome, dict)
+                            and durable_outcome.get("status") == WAITING_APPROVAL
+                        ):
+                            sched["execution_count"] = sched.get("execution_count", 0) + 1
+                            sched["last_executed_at"] = history_entry["completed_at"]
+                        sched["last_execution_status"] = history_entry.get("status")
+                        if history_entry.get("error"):
+                            sched["last_execution_error"] = history_entry.get("error")
                         else:
-                            sched.pop("running_execution", None)
-                            sched.pop("running_started_at", None)
-                        sched["execution_count"] = sched.get("execution_count", 0) + 1
-                        sched["last_executed_at"] = history_entry["completed_at"]
+                            sched.pop("last_execution_error", None)
                         if not manual:
                             if sched.get("type") == "once":
                                 sched["status"] = "completed"
@@ -2296,6 +2786,7 @@ class Scheduler:
                 with self._lock:
                     self._active_execution_ids.discard(exec_id)
                     self._stale_recovered_execution_ids.discard(exec_id)
+                    self._execution_cancel_events.pop(exec_id, None)
         return history_entry
 
     def shutdown(self):

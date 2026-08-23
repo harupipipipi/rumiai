@@ -1024,7 +1024,8 @@ def test_trigger_now_skips_when_schedule_has_active_running_execution(tmp_path, 
     try:
         history = scheduler.trigger_now(schedule_id)
 
-        assert history["status"] == "skipped"
+        assert history["status"] == "error"
+        assert history["error_code"] == "ALREADY_RUNNING"
         assert history["skipped_reason"] == "already_running"
         assert history["trigger"] == "manual"
         assert active_execution_id in history["error"]
