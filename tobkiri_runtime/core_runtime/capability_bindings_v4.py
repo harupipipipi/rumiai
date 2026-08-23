@@ -194,7 +194,7 @@ def _dynamic_payload_keys(contract_id: str) -> frozenset[str]:
     if contract_id == "tobkiri.service.media.inspect.v1":
         return frozenset({"name", "path", "encoding", "max_bytes", "start_line", "end_line"})
     if contract_id in ENTITY_PICKER_CONTRACTS:
-        return entity_picker_input_keys()
+        return entity_picker_input_keys(contract_id)
     return frozenset()
 
 

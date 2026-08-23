@@ -43,7 +43,7 @@
 
 Supported presentations are `popup`, `palette`, `inline`, `settings`, and `status_surface`. Selection is `single` or `multi`. Value scope is `draft`, `conversation`, `run`, `settings`, `workspace`, or `global`. Draft, conversation, and run values remain ephemeral in the shell. Settings, workspace, and global values require `on_select_action_id`.
 
-When `trigger_command` is present the projector adds a normal Composer command with a greedy `query` argument and the registered frontend presentation action `open_entity_picker`. Invocation still passes through Command Protocol v1 before the shell opens the picker. The same `EntityPickerHost` renders Composer-inline, Settings, and status-surface controls. All three declarative presentations mount in their named shell surface without requiring a slash command; a settings picker command also opens Settings.
+When `trigger_command` is present on a popup, palette, or settings picker, the projector adds a normal Composer command with a greedy `query` argument and the registered frontend presentation action `open_entity_picker`. Invocation still passes through Command Protocol v1 before the shell opens the picker. The same `EntityPickerHost` renders Composer-inline, Settings, and status-surface controls. Persistent inline and status controls mount in their named shell surface and do not project a command that could misleadingly fail to focus them; a settings picker command opens Settings and applies its query.
 
 ## Data sources and actions
 
@@ -51,7 +51,9 @@ When `trigger_command` is present the projector adds a normal Composer command w
 
 Selection/create action metadata similarly identifies an active v4 `action` contribution and operation, and that contribution must declare `rumi.action.entity-picker.v1`. Every capability call carries the exact profile, ResolvedPlan hash, frontend catalog hash, contribution ID, owner Pack ID, and contract. The Host derives the operation from that captured target; the browser never transmits an operation selector. Stale plan/catalog identity, undeclared operations, replay, missing local approval, or a quarantined/disabled Pack fails closed before PackVM dispatch. Legacy action URLs and mutable command strings are not an execution authority.
 
-Selection actions receive typed values only:
+Selection and create actions receive typed values only. `selected_ids` and
+`value_scope` are required for action calls; remote-only `query` and `cursor`
+fields are rejected:
 
 ```json
 {

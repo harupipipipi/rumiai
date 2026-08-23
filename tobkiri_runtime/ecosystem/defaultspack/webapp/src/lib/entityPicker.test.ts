@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import type { UICatalog } from "./api";
 import {
+  entityPickerPageFromCapabilityResult,
   ENTITY_PICKER_API_VERSION,
   ENTITY_PICKER_ACTION_CONTRACT,
   ENTITY_PICKER_DATA_SOURCE_CONTRACT,
@@ -169,6 +170,17 @@ test("resolves unrelated local and remote pickers from registered catalog declar
   assert.equal(resolved[1]?.nextCursor, "page-2");
   assert.equal(entityPickerForCommand(resolved, { id: "agent-profile", name: "agent-profile" })?.id, "agent_profile");
   assert.equal(entityPickerForCommand(resolved, { id: "alias", name: "alias", aliases: ["agent-profile"] })?.id, "agent_profile");
+
+  const nestedPage = entityPickerPageFromCapabilityResult(resolved[1]!, {
+    page: {
+      items: [{ id: "main", label: "Main" }],
+      next_cursor: "page-3",
+      source_revision: "branches-r9",
+    },
+  });
+  assert.deepEqual(nestedPage.items.map((item) => item.id), ["main"]);
+  assert.equal(nestedPage.nextCursor, "page-3");
+  assert.equal(nestedPage.sourceRevision, "branches-r9");
 });
 
 test("fails closed for URLs, unsafe paths, unregistered sources, actions, and versions", () => {

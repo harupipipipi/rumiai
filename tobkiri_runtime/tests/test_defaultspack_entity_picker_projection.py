@@ -85,6 +85,32 @@ def test_entity_picker_projects_picker_and_generic_slash_command() -> None:
     assert "selected_ids" in _dynamic_payload_keys("rumi.action.entity-picker.v1")
     assert "cursor" in _dynamic_payload_keys("tobkiri.data.entity-picker.v1")
 
+
+def test_inline_and_status_pickers_do_not_project_unfocusable_commands() -> None:
+    catalog = project_resolved_templates(
+        [
+            _template(
+                "test.entity_picker.surfaces",
+                [
+                    {
+                        "id": presentation,
+                        "kind": "entity_picker",
+                        "picker": {
+                            "picker_id": presentation,
+                            "data_source": presentation,
+                            "presentation": presentation,
+                            "trigger_command": f"/{presentation}",
+                        },
+                    }
+                    for presentation in ("inline", "status_surface")
+                ],
+            )
+        ]
+    )
+
+    assert catalog["commands"] == []
+
+
 def test_entity_picker_public_id_collision_excludes_both_declarations() -> None:
     catalog = project_resolved_templates(
         [

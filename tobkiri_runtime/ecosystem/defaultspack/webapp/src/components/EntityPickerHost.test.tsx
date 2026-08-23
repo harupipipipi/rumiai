@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   EntityPickerHost,
+  entityPickerPageRequest,
   nextEntityPickerActiveIndex,
   retainSelectedEntityPickerItems,
 } from "./EntityPickerHost";
@@ -70,6 +71,18 @@ test("remote search retains the selected item while replacing stale results", ()
 
   assert.deepEqual(refreshed.map((item) => item.id), ["__create__", "reviewer", "writer"]);
   assert.equal(refreshed.some((item) => item.id === "offline"), false);
+});
+
+test("remote requests retain the latest accepted source revision", () => {
+  const remote = picker({ remote: true, sourceRevision: "r8" });
+  const first = entityPickerPageRequest(remote, "rev", remote.sourceRevision);
+  const afterPage = entityPickerPageRequest(remote, "writer", "r9");
+  const nextPage = entityPickerPageRequest(remote, "writer", "r9", "cursor-2");
+
+  assert.equal(first.sourceRevision, "r8");
+  assert.equal(afterPage.sourceRevision, "r9");
+  assert.equal(nextPage.sourceRevision, "r9");
+  assert.equal(nextPage.cursor, "cursor-2");
 });
 
 test("crafted selected IDs cannot select disabled or unknown entries", () => {

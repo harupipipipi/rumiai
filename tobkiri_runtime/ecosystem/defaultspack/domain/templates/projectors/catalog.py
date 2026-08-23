@@ -291,7 +291,8 @@ def _entity_picker(template: RumiTemplate, piece: TemplatePiece) -> dict[str, An
 
 def _entity_picker_command(picker: dict[str, Any]) -> dict[str, Any] | None:
     trigger = str(picker.get("trigger_command") or "").strip().lstrip("/")
-    if not trigger:
+    presentation = str(picker.get("presentation") or "popup").strip()
+    if not trigger or presentation not in {"popup", "palette", "settings"}:
         return None
     return {
         "id": trigger,

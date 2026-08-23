@@ -692,7 +692,7 @@ def test_entity_picker_http_route_derives_exact_operation_and_validates_input(
         operation_id="profiles.select",
         provider_id="qa.entity-picker",
         function_id="qa.entity-picker",
-        allowed_payload_keys=entity_picker_input_keys(),
+        allowed_payload_keys=entity_picker_input_keys(ENTITY_PICKER_ACTION_CONTRACT),
         owner_pack_id="qa",
         artifact_digest="sha256:" + "a" * 64,
     )
@@ -702,7 +702,9 @@ def test_entity_picker_http_route_derives_exact_operation_and_validates_input(
         operation_id="profiles.list",
         provider_id="qa.entity-picker",
         function_id="qa.entity-picker",
-        allowed_payload_keys=entity_picker_input_keys(),
+        allowed_payload_keys=entity_picker_input_keys(
+            ENTITY_PICKER_DATA_SOURCE_CONTRACT
+        ),
         owner_pack_id="qa",
         artifact_digest="sha256:" + "a" * 64,
     )
@@ -838,6 +840,24 @@ def test_entity_picker_http_route_derives_exact_operation_and_validates_input(
         )
         assert duplicate_status == 400
         assert duplicate["data"]["code"] == "invalid_contract_payload"
+
+        invalid_payloads = (
+            (action_target, {**selection, "picker_id": 7}),
+            (action_target, {**selection, "picker_id": {"id": "profiles"}}),
+            (action_target, {**selection, "data_source_id": False}),
+            (action_target, {**selection, "selected_ids": [True]}),
+            (action_target, {**selection, "selected_ids": [{"id": "reviewer"}]}),
+            (action_target, {**selection, "query": "cross-stage"}),
+            (source_target, {
+                "picker_id": "agent_profiles",
+                "data_source_id": "profiles.list",
+                "selected_ids": ["reviewer"],
+            }),
+        )
+        for target, invalid_payload in invalid_payloads:
+            invalid_status, invalid, _ = invoke(target, invalid_payload)
+            assert invalid_status == 400
+            assert invalid["data"]["code"] == "invalid_contract_payload"
     finally:
         server.stop()
 
@@ -851,7 +871,9 @@ def test_dynamic_catalog_projects_entity_picker_data_source_kind() -> None:
         operation_id="profiles.list",
         provider_id="qa.entity-picker",
         function_id="qa.entity-picker",
-        allowed_payload_keys=entity_picker_input_keys(),
+        allowed_payload_keys=entity_picker_input_keys(
+            ENTITY_PICKER_DATA_SOURCE_CONTRACT
+        ),
         owner_pack_id="qa",
         artifact_digest="sha256:" + "a" * 64,
     )

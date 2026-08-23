@@ -555,3 +555,23 @@ export function filterEntityPickerItems(items: EntityPickerItem[], query: string
     || left.id.localeCompare(right.id)
   ));
 }
+
+export function entityPickerPageFromCapabilityResult(
+  picker: ResolvedEntityPicker,
+  result: unknown,
+): EntityPickerPage {
+  const payload = record(result) ?? {};
+  const page = record(payload.page) ?? {};
+  return {
+    items: normalizeEntityPickerItems(
+      picker,
+      payload.items ?? payload.results ?? page.items,
+    ),
+    nextCursor: typeof payload.next_cursor === "string"
+      ? payload.next_cursor
+      : typeof page.next_cursor === "string" ? page.next_cursor : undefined,
+    sourceRevision: typeof payload.source_revision === "string"
+      ? payload.source_revision
+      : typeof page.source_revision === "string" ? page.source_revision : undefined,
+  };
+}

@@ -107,6 +107,7 @@ import { conversationMatchesSpotlightFilter, conversationToSearchResult, type Sp
 import { boundedDurationLabel } from "./lib/duration";
 import {
   entityPickerForCommand,
+  entityPickerPageFromCapabilityResult,
   entityPickersForPresentation,
   normalizeEntityPickerItems,
   resolveEntityPickers,
@@ -7010,7 +7011,6 @@ function ChatApp() {
         data_source_id: request.dataSourceId,
         source_revision: request.sourceRevision,
         value_scope: request.valueScope,
-        query: request.query,
       },
     });
     const key = entityPickerSelectionKey(request.pickerId, request.valueScope);
@@ -7054,18 +7054,7 @@ function ChatApp() {
         source_revision: request.sourceRevision,
       },
     });
-    const payload = isRecord(result) ? result : {};
-    const page = isRecord(payload.page) ? payload.page : {};
-    return {
-      items: normalizeEntityPickerItems(
-        picker,
-        payload.items ?? payload.results ?? page.items,
-      ),
-      nextCursor: typeof payload.next_cursor === "string"
-        ? payload.next_cursor
-        : typeof page.next_cursor === "string" ? page.next_cursor : undefined,
-      sourceRevision: typeof payload.source_revision === "string" ? payload.source_revision : undefined,
-    };
+    return entityPickerPageFromCapabilityResult(picker, result);
   };
   const activeEntityPickerSelectedIds = activeEntityPicker
     ? entityPickerSelections[

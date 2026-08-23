@@ -43,6 +43,21 @@ export function retainSelectedEntityPickerItems(
   return mergeItems(retained, incoming);
 }
 
+export function entityPickerPageRequest(
+  picker: ResolvedEntityPicker,
+  query: string,
+  sourceRevision: string | undefined,
+  cursor?: string,
+): EntityPickerPageRequest {
+  return {
+    pickerId: picker.id,
+    query,
+    cursor,
+    dataSourceId: picker.dataSourceId,
+    sourceRevision,
+  };
+}
+
 function groupLabel(item: EntityPickerItem): string {
   if (item.create) return "Actions";
   if (item.favorite) return "Favorites";
@@ -98,6 +113,23 @@ function PickerBody({
   const [error, setError] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState(picker.nextCursor);
   const [sourceRevision, setSourceRevision] = useState(picker.sourceRevision);
+  const sourceRevisionRef = useRef(picker.sourceRevision);
+
+  useEffect(() => {
+    setQuery(initialQuery);
+    if (initialQuery && picker.presentation === "settings") inputRef.current?.focus();
+  }, [initialQuery, picker.presentation]);
+
+  useEffect(() => {
+    if (picker.remote) return;
+    setItems(picker.items);
+    const next = new Set(selectableIds(picker.items, selectionRef.current));
+    selectionRef.current = next;
+    setSelection(next);
+    setNextCursor(picker.nextCursor);
+    sourceRevisionRef.current = picker.sourceRevision;
+    setSourceRevision(picker.sourceRevision);
+  }, [picker.items, picker.nextCursor, picker.remote, picker.sourceRevision]);
 
   useEffect(() => {
     const modal = picker.presentation === "popup" || picker.presentation === "palette";
@@ -120,12 +152,11 @@ function PickerBody({
     const timer = window.setTimeout(() => {
       setLoading(true);
       setError(null);
-      void onLoadPage({
-        pickerId: picker.id,
+      void onLoadPage(entityPickerPageRequest(
+        picker,
         query,
-        dataSourceId: picker.dataSourceId,
-        sourceRevision: picker.sourceRevision,
-      }).then((page) => {
+        sourceRevisionRef.current,
+      )).then((page) => {
         if (!active) return;
         setItems((current) => {
           const nextItems = retainSelectedEntityPickerItems(
@@ -141,7 +172,9 @@ function PickerBody({
           return nextItems;
         });
         setNextCursor(page.nextCursor);
-        setSourceRevision(page.sourceRevision ?? picker.sourceRevision);
+        const nextRevision = page.sourceRevision ?? sourceRevisionRef.current;
+        sourceRevisionRef.current = nextRevision;
+        setSourceRevision(nextRevision);
       }).catch((reason) => {
         if (active) setError(message(reason));
       }).finally(() => {
@@ -244,7 +277,12 @@ function PickerBody({
     setLoading(true);
     setError(null);
     try {
-      const page = await onLoadPage({ pickerId: picker.id, query, cursor: nextCursor, dataSourceId: picker.dataSourceId, sourceRevision });
+      const page = await onLoadPage(entityPickerPageRequest(
+        picker,
+        query,
+        sourceRevisionRef.current,
+        nextCursor,
+      ));
       setItems((current) => {
         const nextItems = mergeItems(current, page.items);
         const nextSelection = new Set(
@@ -255,7 +293,9 @@ function PickerBody({
         return nextItems;
       });
       setNextCursor(page.nextCursor);
-      setSourceRevision(page.sourceRevision ?? sourceRevision);
+      const nextRevision = page.sourceRevision ?? sourceRevisionRef.current;
+      sourceRevisionRef.current = nextRevision;
+      setSourceRevision(nextRevision);
     } catch (reason) {
       setError(message(reason));
     } finally {
