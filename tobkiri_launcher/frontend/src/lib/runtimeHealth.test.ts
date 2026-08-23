@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { describeRuntimeBadge, describeRuntimeBanner, runtimeMonitorDelay } from "./runtimeHealth";
+import { describeRuntimeStatus, runtimeMonitorDelay } from "./runtimeHealth";
 import {getRuntimeDispatchStatus, setRuntimeDispatchStatus} from "./runtimeDispatchGate";
 import {useAppStore} from "@/src/store";
 
@@ -25,23 +25,23 @@ test("runtimeMonitorDelay polls quickly while recovering from a disconnect", () 
   }), 2_500);
 });
 
-test("describeRuntimeBadge highlights reconnecting state with an offline badge", () => {
-  const badge = describeRuntimeBadge({
+test("describeRuntimeStatus makes disconnected state canonical", () => {
+  const status = describeRuntimeStatus({
     runtimeReady: false,
     runtimeStatus: "error",
     runtimeError: "connection lost",
     runtimeDisconnected: true,
     lastRuntimeHealthyAt: 30_000,
-  }, 90_000);
+  });
 
-  assert.equal(badge.tone, "danger");
-  assert.equal(badge.label, "Reconnecting");
-  assert.equal(badge.showOfflineBadge, true);
-  assert.match(badge.detail, /最後に安定していた/);
+  assert.equal(status.kind, "disconnected");
+  assert.equal(status.tone, "danger");
+  assert.equal(status.labelKey, "runtime.reconnecting_label");
+  assert.equal(status.errorDetail, "connection lost");
 });
 
-test("describeRuntimeBanner returns crafted warmup copy", () => {
-  const banner = describeRuntimeBanner({
+test("describeRuntimeStatus returns localized keys for warmup copy", () => {
+  const status = describeRuntimeStatus({
     runtimeReady: false,
     runtimeStatus: "starting",
     runtimeError: null,
@@ -49,31 +49,23 @@ test("describeRuntimeBanner returns crafted warmup copy", () => {
     lastRuntimeHealthyAt: null,
   });
 
-  assert.equal(banner.tone, "warning");
-  assert.match(banner.title, /静かに起動中/);
+  assert.equal(status.kind, "warming");
+  assert.equal(status.tone, "warning");
+  assert.equal(status.titleKey, "runtime.warming_title");
 });
 
-test("reconfirmation is a distinct actionable state, not warmup or runtime error", () => {
-  const badge = describeRuntimeBadge({
+test("reconfirmation is distinct and does not expose Host diagnostics", () => {
+  const status = describeRuntimeStatus({
     runtimeReady: false,
     runtimeStatus: "profile_reconfirmation_required",
     runtimeError: "private Host diagnostic",
     runtimeDisconnected: false,
     lastRuntimeHealthyAt: null,
   });
-  assert.equal(badge.label, "Profile reconfirmation required");
-  assert.equal(badge.tone, "warning");
-  assert.doesNotMatch(badge.detail, /private Host diagnostic/);
-
-  const banner = describeRuntimeBanner({
-    runtimeReady: false,
-    runtimeStatus: "profile_reconfirmation_required",
-    runtimeError: "private Host diagnostic",
-    runtimeDisconnected: false,
-    lastRuntimeHealthyAt: null,
-  });
-  assert.match(banner.title, /Profile reconfirmation/);
-  assert.doesNotMatch(banner.detail, /private Host diagnostic/);
+  assert.equal(status.kind, "reconfirmation");
+  assert.equal(status.tone, "warning");
+  assert.equal(status.labelKey, "runtime.reconfirmation_label");
+  assert.equal(status.errorDetail, null);
   assert.equal(runtimeMonitorDelay({
     runtimeReady: false,
     runtimeStatus: "profile_reconfirmation_required",

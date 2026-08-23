@@ -1,10 +1,9 @@
 import { Link, useLocation } from 'react-router';
 import { Menu } from 'lucide-react';
-import { TobkiriLoadingMark } from '@/src/components/ui/TobkiriLoader';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
-import { describeRuntimeBadge } from '@/src/lib/runtimeHealth';
+import { describeRuntimeStatus } from '@/src/lib/runtimeHealth';
 import { isPanelRouteActive, panelRouteMeta, panelRouteTitleKey, panelRoutes, viewerNavGroups } from '@/src/lib/routes';
 import { preloadPanelRoute } from '@/src/lib/routeModules';
 import { Avatar } from '@/src/components/ui/Avatar';
@@ -19,45 +18,14 @@ export function Header() {
   const runtimeDisconnected = useAppStore(state => state.runtimeDisconnected);
   const lastRuntimeHealthyAt = useAppStore(state => state.lastRuntimeHealthyAt);
   const location = useLocation();
-  const runtimeBadge = describeRuntimeBadge({
+  const runtimeStatusDescription = describeRuntimeStatus({
     runtimeReady,
     runtimeStatus,
     runtimeError,
     runtimeDisconnected,
     lastRuntimeHealthyAt,
   });
-  const profileReconfirmationRequired = runtimeStatus === 'profile_reconfirmation_required';
-
   const pageTitle = t(panelRouteTitleKey(location.pathname));
-
-  const runtimePill = (() => {
-    if (profileReconfirmationRequired) {
-      return {
-        label: 'Profile reconfirmation required',
-        dotClass: 'bg-amber-500',
-        textClass: 'text-amber-600 dark:text-amber-400',
-      };
-    }
-    if (runtimeStatus === 'error') {
-      return {
-        label: 'Runtime error',
-        dotClass: 'bg-red-500',
-        textClass: 'text-red-600 dark:text-red-400',
-      };
-    }
-    if (!runtimeReady) {
-      return {
-        label: 'Warming up',
-        dotClass: 'bg-amber-500 animate-pulse',
-        textClass: 'text-amber-600 dark:text-amber-400',
-      };
-    }
-    return {
-      label: 'Runtime ready',
-      dotClass: 'bg-emerald-500',
-      textClass: 'text-emerald-600 dark:text-emerald-400',
-    };
-  })();
 
   return (
     <header
@@ -102,58 +70,32 @@ export function Header() {
             </PopoverContent>
           </Popover>
         </div>
-        <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-2">
-            <h1 className="truncate text-sm font-medium text-text-main">{pageTitle}</h1>
-            <span
-              className={`hidden rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] sm:inline-flex ${
-                runtimeBadge.tone === 'success'
-                  ? 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-300'
-                  : runtimeBadge.tone === 'danger'
-                    ? 'bg-red-500/12 text-red-600 dark:text-red-300'
-                    : 'bg-amber-500/12 text-amber-600 dark:text-amber-300'
-              }`}
-            >
-              {runtimeBadge.label}
-            </span>
-          </div>
-          <p className="hidden truncate text-[11px] text-text-muted sm:block">{runtimeBadge.detail}</p>
-        </div>
+        <h1 className="min-w-0 truncate text-sm font-medium text-text-main">{pageTitle}</h1>
       </div>
 
       <div className="flex items-center gap-3">
-        {profileReconfirmationRequired ? (
+        {runtimeStatusDescription.kind === 'reconfirmation' ? (
           <Link
             to={panelRoutes.setup}
-            className={cn(
-              "rumi-control-pill inline-flex min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]",
-              runtimePill.textClass,
-            )}
-            aria-label="Profile reconfirmation required. Open Setup to review and activate the Profile."
+            className="rumi-control-pill inline-flex min-h-11 text-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] dark:text-amber-400"
+            aria-label={`${t(runtimeStatusDescription.labelKey)}. ${t('runtime.open_setup')}`}
             aria-live="polite"
-            title={runtimePill.label}
+            title={t(runtimeStatusDescription.detailKey)}
           >
-            <span className={cn("rumi-control-pill-dot", runtimePill.dotClass)} />
-            <span>{runtimePill.label}</span>
+            <span className="rumi-control-pill-dot bg-amber-500" />
+            <span>{t(runtimeStatusDescription.labelKey)}</span>
           </Link>
-        ) : (
+        ) : runtimeStatusDescription.kind === 'healthy' ? (
           <div
-            className={cn(
-              "rumi-control-pill hidden md:inline-flex",
-              runtimePill.textClass,
-            )}
+            className="rumi-control-pill hidden text-emerald-600 dark:text-emerald-400 sm:inline-flex"
             role="status"
             aria-live="polite"
-            title={runtimePill.label}
+            title={t(runtimeStatusDescription.detailKey)}
           >
-            {!runtimeReady && runtimeStatus !== 'error' ? (
-              <TobkiriLoadingMark className="h-3 w-6" />
-            ) : (
-              <span className={cn("rumi-control-pill-dot", runtimePill.dotClass)} />
-            )}
-            <span>{runtimePill.label}</span>
+            <span className="rumi-control-pill-dot bg-emerald-500" />
+            <span>{t(runtimeStatusDescription.labelKey)}</span>
           </div>
-        )}
+        ) : null}
         <Popover>
           <PopoverTrigger
             className="flex min-h-11 items-center gap-2 rounded-lg px-2 text-left transition hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"

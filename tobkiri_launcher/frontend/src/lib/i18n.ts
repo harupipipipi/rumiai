@@ -9,6 +9,117 @@ export type Locale = 'en' | 'ja' | 'zh' | 'ko' | 'es' | 'fr' | 'de' | 'pt' | 'ru
 
 type Dict = Record<string, string>;
 
+const runtimeCopy: Record<Locale, Dict> = {
+  en: {
+    'runtime.healthy_label': 'Runtime ready',
+    'runtime.healthy_title': 'Runtime ready',
+    'runtime.healthy_detail': 'The local runtime is ready.',
+    'runtime.warming_label': 'Warming up',
+    'runtime.warming_title': 'Runtime is warming up',
+    'runtime.warming_detail': 'You can continue as soon as startup finishes.',
+    'runtime.reconnecting_label': 'Reconnecting',
+    'runtime.disconnected_title': 'Runtime connection lost',
+    'runtime.disconnected_detail': 'Tobkiri is reconnecting. Retry now or open Settings if it does not recover.',
+    'runtime.error_label': 'Runtime error',
+    'runtime.error_title': 'Runtime needs attention',
+    'runtime.error_detail': 'Retry startup or open Settings to diagnose the problem.',
+    'runtime.reconfirmation_label': 'Profile reconfirmation required',
+    'runtime.reconfirmation_title': 'Profile reconfirmation required',
+    'runtime.reconfirmation_detail': 'Review and activate the exact Defaults Profile before runtime operations resume.',
+    'runtime.retry': 'Retry',
+    'runtime.open_settings': 'Open Settings',
+    'runtime.copy_details': 'Copy details',
+    'runtime.copied': 'Details copied',
+    'runtime.open_setup': 'Open Setup to review and activate the Profile.',
+  },
+  ja: {
+    'runtime.healthy_label': 'Runtime 準備完了',
+    'runtime.healthy_title': 'Runtime 準備完了',
+    'runtime.healthy_detail': 'ローカル Runtime は操作可能です。',
+    'runtime.warming_label': '起動中',
+    'runtime.warming_title': 'Runtime を起動中です',
+    'runtime.warming_detail': '準備が完了すると、そのまま操作を続けられます。',
+    'runtime.reconnecting_label': '再接続中',
+    'runtime.disconnected_title': 'Runtime との接続が切れました',
+    'runtime.disconnected_detail': 'Tobkiri は再接続を試みています。復帰しない場合は再試行するか、設定を開いてください。',
+    'runtime.error_label': 'Runtime エラー',
+    'runtime.error_title': 'Runtime の確認が必要です',
+    'runtime.error_detail': '再試行するか、設定を開いて原因を確認してください。',
+    'runtime.reconfirmation_label': 'プロフィールの再確認が必要です',
+    'runtime.reconfirmation_title': 'プロフィールの再確認が必要です',
+    'runtime.reconfirmation_detail': 'Runtime 操作を再開する前に、Defaults Profile の内容を確認して有効化してください。',
+    'runtime.retry': '再試行',
+    'runtime.open_settings': '設定を開く',
+    'runtime.copy_details': '詳細をコピー',
+    'runtime.copied': '詳細をコピーしました',
+    'runtime.open_setup': 'セットアップを開いてプロフィールを確認し、有効化します。',
+  },
+  zh: {
+    'runtime.healthy_label': '运行时已就绪', 'runtime.healthy_title': '运行时已就绪', 'runtime.healthy_detail': '本地运行时已就绪。',
+    'runtime.warming_label': '正在启动', 'runtime.warming_title': '运行时正在启动', 'runtime.warming_detail': '启动完成后即可继续操作。',
+    'runtime.reconnecting_label': '正在重新连接', 'runtime.disconnected_title': '运行时连接已断开', 'runtime.disconnected_detail': 'Tobkiri 正在重新连接。如果未恢复，请重试或打开设置。',
+    'runtime.error_label': '运行时错误', 'runtime.error_title': '运行时需要处理', 'runtime.error_detail': '请重试启动或打开设置以诊断问题。',
+    'runtime.reconfirmation_label': '需要重新确认配置文件', 'runtime.reconfirmation_title': '需要重新确认配置文件', 'runtime.reconfirmation_detail': '恢复运行时操作前，请检查并激活准确的 Defaults Profile。',
+    'runtime.retry': '重试', 'runtime.open_settings': '打开设置', 'runtime.copy_details': '复制详情', 'runtime.copied': '已复制详情', 'runtime.open_setup': '打开设置流程以检查并激活配置文件。',
+  },
+  ko: {
+    'runtime.healthy_label': '런타임 준비 완료', 'runtime.healthy_title': '런타임 준비 완료', 'runtime.healthy_detail': '로컬 런타임을 사용할 수 있습니다.',
+    'runtime.warming_label': '시작 중', 'runtime.warming_title': '런타임 시작 중', 'runtime.warming_detail': '시작이 끝나면 계속할 수 있습니다.',
+    'runtime.reconnecting_label': '재연결 중', 'runtime.disconnected_title': '런타임 연결 끊김', 'runtime.disconnected_detail': 'Tobkiri가 다시 연결 중입니다. 복구되지 않으면 다시 시도하거나 설정을 여세요.',
+    'runtime.error_label': '런타임 오류', 'runtime.error_title': '런타임 확인 필요', 'runtime.error_detail': '시작을 다시 시도하거나 설정을 열어 문제를 진단하세요.',
+    'runtime.reconfirmation_label': '프로필 재확인 필요', 'runtime.reconfirmation_title': '프로필 재확인 필요', 'runtime.reconfirmation_detail': '런타임 작업을 재개하기 전에 정확한 Defaults Profile을 검토하고 활성화하세요.',
+    'runtime.retry': '다시 시도', 'runtime.open_settings': '설정 열기', 'runtime.copy_details': '세부 정보 복사', 'runtime.copied': '세부 정보 복사됨', 'runtime.open_setup': '설정을 열어 프로필을 검토하고 활성화합니다.',
+  },
+  es: {
+    'runtime.healthy_label': 'Runtime listo', 'runtime.healthy_title': 'Runtime listo', 'runtime.healthy_detail': 'El runtime local está listo.',
+    'runtime.warming_label': 'Iniciando', 'runtime.warming_title': 'El runtime se está iniciando', 'runtime.warming_detail': 'Podrás continuar cuando termine el inicio.',
+    'runtime.reconnecting_label': 'Reconectando', 'runtime.disconnected_title': 'Se perdió la conexión con el runtime', 'runtime.disconnected_detail': 'Tobkiri se está reconectando. Reintenta o abre Ajustes si no se recupera.',
+    'runtime.error_label': 'Error del runtime', 'runtime.error_title': 'El runtime requiere atención', 'runtime.error_detail': 'Reintenta el inicio o abre Ajustes para diagnosticar el problema.',
+    'runtime.reconfirmation_label': 'Se requiere reconfirmar el perfil', 'runtime.reconfirmation_title': 'Se requiere reconfirmar el perfil', 'runtime.reconfirmation_detail': 'Revisa y activa el Defaults Profile exacto antes de reanudar las operaciones.',
+    'runtime.retry': 'Reintentar', 'runtime.open_settings': 'Abrir Ajustes', 'runtime.copy_details': 'Copiar detalles', 'runtime.copied': 'Detalles copiados', 'runtime.open_setup': 'Abre la configuración para revisar y activar el perfil.',
+  },
+  fr: {
+    'runtime.healthy_label': 'Runtime prêt', 'runtime.healthy_title': 'Runtime prêt', 'runtime.healthy_detail': 'Le runtime local est prêt.',
+    'runtime.warming_label': 'Démarrage', 'runtime.warming_title': 'Le runtime démarre', 'runtime.warming_detail': 'Vous pourrez continuer dès la fin du démarrage.',
+    'runtime.reconnecting_label': 'Reconnexion', 'runtime.disconnected_title': 'Connexion au runtime perdue', 'runtime.disconnected_detail': 'Tobkiri se reconnecte. Réessayez ou ouvrez les paramètres si la connexion ne revient pas.',
+    'runtime.error_label': 'Erreur du runtime', 'runtime.error_title': 'Le runtime nécessite votre attention', 'runtime.error_detail': 'Réessayez le démarrage ou ouvrez les paramètres pour diagnostiquer le problème.',
+    'runtime.reconfirmation_label': 'Reconfirmation du profil requise', 'runtime.reconfirmation_title': 'Reconfirmation du profil requise', 'runtime.reconfirmation_detail': 'Vérifiez et activez le Defaults Profile exact avant de reprendre les opérations.',
+    'runtime.retry': 'Réessayer', 'runtime.open_settings': 'Ouvrir les paramètres', 'runtime.copy_details': 'Copier les détails', 'runtime.copied': 'Détails copiés', 'runtime.open_setup': 'Ouvrez la configuration pour vérifier et activer le profil.',
+  },
+  de: {
+    'runtime.healthy_label': 'Runtime bereit', 'runtime.healthy_title': 'Runtime bereit', 'runtime.healthy_detail': 'Die lokale Runtime ist bereit.',
+    'runtime.warming_label': 'Wird gestartet', 'runtime.warming_title': 'Runtime wird gestartet', 'runtime.warming_detail': 'Nach Abschluss des Starts können Sie fortfahren.',
+    'runtime.reconnecting_label': 'Verbindung wird wiederhergestellt', 'runtime.disconnected_title': 'Runtime-Verbindung verloren', 'runtime.disconnected_detail': 'Tobkiri stellt die Verbindung wieder her. Versuchen Sie es erneut oder öffnen Sie die Einstellungen.',
+    'runtime.error_label': 'Runtime-Fehler', 'runtime.error_title': 'Runtime erfordert Aufmerksamkeit', 'runtime.error_detail': 'Versuchen Sie den Start erneut oder öffnen Sie die Einstellungen zur Diagnose.',
+    'runtime.reconfirmation_label': 'Profil muss erneut bestätigt werden', 'runtime.reconfirmation_title': 'Profil muss erneut bestätigt werden', 'runtime.reconfirmation_detail': 'Prüfen und aktivieren Sie das genaue Defaults Profile, bevor Runtime-Vorgänge fortgesetzt werden.',
+    'runtime.retry': 'Erneut versuchen', 'runtime.open_settings': 'Einstellungen öffnen', 'runtime.copy_details': 'Details kopieren', 'runtime.copied': 'Details kopiert', 'runtime.open_setup': 'Öffnen Sie die Einrichtung, um das Profil zu prüfen und zu aktivieren.',
+  },
+  pt: {
+    'runtime.healthy_label': 'Runtime pronto', 'runtime.healthy_title': 'Runtime pronto', 'runtime.healthy_detail': 'O runtime local está pronto.',
+    'runtime.warming_label': 'Iniciando', 'runtime.warming_title': 'O runtime está iniciando', 'runtime.warming_detail': 'Você poderá continuar quando a inicialização terminar.',
+    'runtime.reconnecting_label': 'Reconectando', 'runtime.disconnected_title': 'Conexão com o runtime perdida', 'runtime.disconnected_detail': 'O Tobkiri está reconectando. Tente novamente ou abra as Configurações se não recuperar.',
+    'runtime.error_label': 'Erro do runtime', 'runtime.error_title': 'O runtime precisa de atenção', 'runtime.error_detail': 'Tente iniciar novamente ou abra as Configurações para diagnosticar o problema.',
+    'runtime.reconfirmation_label': 'É preciso reconfirmar o perfil', 'runtime.reconfirmation_title': 'É preciso reconfirmar o perfil', 'runtime.reconfirmation_detail': 'Revise e ative o Defaults Profile exato antes de retomar as operações.',
+    'runtime.retry': 'Tentar novamente', 'runtime.open_settings': 'Abrir Configurações', 'runtime.copy_details': 'Copiar detalhes', 'runtime.copied': 'Detalhes copiados', 'runtime.open_setup': 'Abra a configuração para revisar e ativar o perfil.',
+  },
+  ru: {
+    'runtime.healthy_label': 'Runtime готов', 'runtime.healthy_title': 'Runtime готов', 'runtime.healthy_detail': 'Локальный Runtime готов к работе.',
+    'runtime.warming_label': 'Запуск', 'runtime.warming_title': 'Runtime запускается', 'runtime.warming_detail': 'После завершения запуска можно продолжить работу.',
+    'runtime.reconnecting_label': 'Переподключение', 'runtime.disconnected_title': 'Соединение с Runtime потеряно', 'runtime.disconnected_detail': 'Tobkiri восстанавливает соединение. Повторите попытку или откройте настройки, если оно не восстановится.',
+    'runtime.error_label': 'Ошибка Runtime', 'runtime.error_title': 'Runtime требует внимания', 'runtime.error_detail': 'Повторите запуск или откройте настройки для диагностики проблемы.',
+    'runtime.reconfirmation_label': 'Требуется повторное подтверждение профиля', 'runtime.reconfirmation_title': 'Требуется повторное подтверждение профиля', 'runtime.reconfirmation_detail': 'Проверьте и активируйте точный Defaults Profile перед возобновлением операций.',
+    'runtime.retry': 'Повторить', 'runtime.open_settings': 'Открыть настройки', 'runtime.copy_details': 'Копировать сведения', 'runtime.copied': 'Сведения скопированы', 'runtime.open_setup': 'Откройте настройку, чтобы проверить и активировать профиль.',
+  },
+  ar: {
+    'runtime.healthy_label': 'وقت التشغيل جاهز', 'runtime.healthy_title': 'وقت التشغيل جاهز', 'runtime.healthy_detail': 'وقت التشغيل المحلي جاهز.',
+    'runtime.warming_label': 'جارٍ البدء', 'runtime.warming_title': 'جارٍ بدء وقت التشغيل', 'runtime.warming_detail': 'يمكنك المتابعة عند اكتمال البدء.',
+    'runtime.reconnecting_label': 'جارٍ إعادة الاتصال', 'runtime.disconnected_title': 'انقطع الاتصال بوقت التشغيل', 'runtime.disconnected_detail': 'يعيد Tobkiri الاتصال. أعد المحاولة أو افتح الإعدادات إذا لم يتعافَ.',
+    'runtime.error_label': 'خطأ في وقت التشغيل', 'runtime.error_title': 'وقت التشغيل يحتاج إلى الانتباه', 'runtime.error_detail': 'أعد محاولة البدء أو افتح الإعدادات لتشخيص المشكلة.',
+    'runtime.reconfirmation_label': 'يلزم إعادة تأكيد الملف الشخصي', 'runtime.reconfirmation_title': 'يلزم إعادة تأكيد الملف الشخصي', 'runtime.reconfirmation_detail': 'راجع Defaults Profile الدقيق وفعّله قبل استئناف عمليات وقت التشغيل.',
+    'runtime.retry': 'إعادة المحاولة', 'runtime.open_settings': 'فتح الإعدادات', 'runtime.copy_details': 'نسخ التفاصيل', 'runtime.copied': 'تم نسخ التفاصيل', 'runtime.open_setup': 'افتح الإعداد لمراجعة الملف الشخصي وتفعيله.',
+  },
+};
+
 const en: Dict = {
   'nav.home': 'Home',
   'nav.packs': 'Packs',
@@ -546,7 +657,7 @@ export function resolveLocale(language?: string): Locale {
 
 export function translate(key: string, params?: Record<string, string>, language?: string): string {
   const locale = resolveLocale(language ?? useAppStore.getState().profile.language);
-  let text = dict[locale][key] ?? dict.en[key] ?? key;
+  let text = runtimeCopy[locale][key] ?? dict[locale][key] ?? runtimeCopy.en[key] ?? dict.en[key] ?? key;
   if (params) {
     Object.entries(params).forEach(([k, v]) => {
       text = text.replace(`{${k}}`, v);
