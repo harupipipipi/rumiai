@@ -87,6 +87,43 @@ test("keeps the startup boundary until slash commands and mention sources are re
   await expect(page.getByTestId("composer-at-mention-candidates")).toContainText("@Web Search");
 });
 
+test("workspace tab shortcuts create, close, and restore tabs from the composer", async ({ page }) => {
+  await installDefaultspackApiMocks(page);
+  await page.goto("/chat");
+
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const tabs = page.getByRole("tablist", { name: "Open workspaces" }).getByRole("tab");
+  await expect(composer).toBeVisible();
+  await expect(tabs).toHaveCount(1);
+  await composer.focus();
+
+  await page.keyboard.press("Control+t");
+  await expect(tabs).toHaveCount(2);
+  await expect(tabs.filter({ hasText: "New Conversation" }).last()).toHaveAttribute("aria-selected", "true");
+
+  await page.keyboard.press("Control+w");
+  await expect(tabs).toHaveCount(1);
+  await expect(page).toHaveURL(/\/chat/);
+
+  await page.keyboard.press("Control+Shift+t");
+  await expect(tabs).toHaveCount(2);
+  await expect(tabs.filter({ hasText: "New Conversation" }).last()).toHaveAttribute("aria-selected", "true");
+
+  await page.keyboard.press("Control+w");
+  await expect(tabs).toHaveCount(1);
+  await page.keyboard.press("Control+w");
+  await expect(tabs).toHaveCount(1);
+  await expect(page).toHaveURL(/\/chat/);
+
+  await page.keyboard.press("Meta+t");
+  await expect(tabs).toHaveCount(2);
+  await page.keyboard.press("Meta+w");
+  await expect(tabs).toHaveCount(1);
+  await page.keyboard.press("Meta+Shift+t");
+  await expect(tabs).toHaveCount(2);
+  await expect(tabs.filter({ hasText: "New Conversation" }).last()).toHaveAttribute("aria-selected", "true");
+});
+
 type ApiMockOptions = {
   beforeCommandCatalogResponse?: () => Promise<void> | void;
   beforeWorkspaceFileReadResponse?: (payload: Record<string, unknown>) => Promise<void> | void;
