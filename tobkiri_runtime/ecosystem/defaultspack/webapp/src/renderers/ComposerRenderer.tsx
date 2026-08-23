@@ -2616,6 +2616,7 @@ export function ComposerRenderer({
   structuredInputValues = {},
   modelCommandCandidates = [],
   modelPickerRequestId = 0,
+  composerResetToken = 0,
   modelStatusIndicators = [],
   voiceInputEnabled = true,
   voiceInputUseAi = false,
@@ -2715,6 +2716,7 @@ export function ComposerRenderer({
   const chromeWidgetNodeMapRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const submissionLockRef = useRef<ComposerSubmissionLock | null>(null);
   const lastModelPickerRequestIdRef = useRef(modelPickerRequestId);
+  const lastComposerResetTokenRef = useRef(composerResetToken);
   const chromeButtonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const isVoiceListening = voiceStatus === "listening";
   const profileName = profileDisplayName(selectedProfile);
@@ -3125,6 +3127,26 @@ export function ComposerRenderer({
     setModelDropdownOpen(true);
     window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
   }, [modelPickerRequestId]);
+
+  useEffect(() => {
+    if (composerResetToken === lastComposerResetTokenRef.current) return;
+    lastComposerResetTokenRef.current = composerResetToken;
+    setMenuOpen(false);
+    setAttachmentMenuOpen(false);
+    setModelDropdownOpen(false);
+    setOpenModelStatusId(null);
+    setApiKeyPromptProfile(null);
+    setModeSelectorOpen(false);
+    setAtMentionOpen(false);
+    setAtMentionQuery("");
+    setAtMentionStart(null);
+    setSelectedAtMentionIndex(0);
+    setSelectedCommandIndex(0);
+    setSelectedModelCandidateIndex(0);
+    setComposerPopoverStyle(undefined);
+    setTextareaCollapsed(false);
+    onModelCommandCandidatesClose?.();
+  }, [composerResetToken, onModelCommandCandidatesClose]);
 
   useEffect(() => {
     if (!suppressPopovers) return;
