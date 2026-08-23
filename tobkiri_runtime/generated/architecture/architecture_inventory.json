@@ -7987,7 +7987,6 @@
       "tobkiri_runtime/ecosystem/search_home_pack/ecosystem.json",
       "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/ecosystem.json",
       "tobkiri_runtime/ecosystem/tobkiri_workflow_pack/ecosystem.json",
-      "tobkiri_runtime/tobkiri_protocol/README.md",
       "tobkiri_runtime/tobkiri_protocol/__init__.py",
       "tobkiri_runtime/tobkiri_protocol/canonical.py",
       "tobkiri_runtime/tobkiri_protocol/composition.py",
@@ -8009,6 +8008,7 @@
       "tobkiri_runtime/tobkiri_protocol/platform_paths.py",
       "tobkiri_runtime/tobkiri_protocol/profile_scope.py",
       "tobkiri_runtime/tobkiri_protocol/provenance.py",
+      "tobkiri_runtime/tobkiri_protocol/README.md",
       "tobkiri_runtime/tobkiri_protocol/scanners.py",
       "tobkiri_runtime/tobkiri_protocol/schema_hashes.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/activation_record_v1.schema.json",
@@ -8023,8 +8023,10 @@
       "tobkiri_runtime/tobkiri_protocol/schemas/executable_catalog_v4.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/external_normal_pack_catalog_v4.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/function_principal_v1.schema.json",
+      "tobkiri_runtime/tobkiri_protocol/schemas/generated_repair_pack_v1.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/inventory_v1.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/pack_artifact_index_v4.schema.json",
+      "tobkiri_runtime/tobkiri_protocol/schemas/pack_conflict_report_v1.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/pack_contract_catalog_v4.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/pack_manifest_v4.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/profile_lock_v4.schema.json",
@@ -8033,6 +8035,7 @@
       "tobkiri_runtime/tobkiri_protocol/schemas/profile_v5.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/provenance_v1.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/provenance_v2.schema.json",
+      "tobkiri_runtime/tobkiri_protocol/schemas/repair_pack_plan_v1.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/request_envelope_v1.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/request_frame_v1.schema.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/resolved_plan_v1.schema.json",
@@ -18397,8 +18400,8 @@
     ]
   },
   "repository": {
-    "commit": "3199d4de820c31e78f76df94a3f1dc51a71ef053",
-    "tree_digest": "e8f35bb6c3e32eb80c0325ad05c077df937ee1a8e679b93c1b94c86bc87b701f"
+    "commit": "7405eec1f01f96061d7d0a31cd19f42fc05dc355",
+    "tree_digest": "78b1f914712f2ca9b6077a0131fc047b6787925c9a79c0885e162277ac395049"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
   "schema": "io.tobkiri.architecture.inventory.v1"

@@ -1419,8 +1419,8 @@
     {
       "path": "tobkiri_protocol/schema_hashes.json",
       "type": "regular-file",
-      "size": 3259,
-      "sha256": "f81649ac6ab0752e194db3f20e405fa01e3e34d455eeed528e3c1aab7f84e2d9",
+      "size": 3648,
+      "sha256": "4bb7a55105d3a8529fd1837ad527ce88459f2da8542cf5ad6c0fe2cb1f6d8c86",
       "executable": false
     },
     {
@@ -1508,6 +1508,13 @@
       "executable": false
     },
     {
+      "path": "tobkiri_protocol/schemas/generated_repair_pack_v1.schema.json",
+      "type": "regular-file",
+      "size": 1585,
+      "sha256": "5cc97f2ce3069b54f1acc3cf8d8e87753dc1e70165ae9a1000b86099299f1efc",
+      "executable": false
+    },
+    {
       "path": "tobkiri_protocol/schemas/inventory_v1.schema.json",
       "type": "regular-file",
       "size": 4997,
@@ -1519,6 +1526,13 @@
       "type": "regular-file",
       "size": 1504,
       "sha256": "861c30621208af2aac98c2e8c678171c6aba493d8fcec4d37b6ed00d769af305",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/pack_conflict_report_v1.schema.json",
+      "type": "regular-file",
+      "size": 2419,
+      "sha256": "2a7a4bd70c16ae6c47e0fa026022991a8d0c6bca6eadb5421154d76d46304946",
       "executable": false
     },
     {
@@ -1575,6 +1589,13 @@
       "type": "regular-file",
       "size": 299,
       "sha256": "309e0e2a6d2f27b774a1a7d9d1347fc41ad69ba6f3e4d1a8c8bac8e6dafe2665",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/repair_pack_plan_v1.schema.json",
+      "type": "regular-file",
+      "size": 2324,
+      "sha256": "21d46fdfbb330186b70e9866ec734a7f10f0a8aec39e02743fbbbf1c127de394",
       "executable": false
     },
     {
@@ -1636,8 +1657,8 @@
     {
       "path": "tobkiri_protocol/validation.py",
       "type": "regular-file",
-      "size": 20127,
-      "sha256": "d9359b13b939298d91114d33ccc06805f9029341f03b3316cdf12e1d2288adf7",
+      "size": 20322,
+      "sha256": "f99769b49adc85e61bf0aafd3404686b5fec011ed6f03606c4a339893f2e26c7",
       "executable": false
     }
   ]

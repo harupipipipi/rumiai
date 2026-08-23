@@ -10,6 +10,7 @@ import { panelRoutes } from '@/src/lib/routes';
 import { AlertTriangle, Search, Package, ShieldCheck } from 'lucide-react';
 import { Button } from '@/src/components/ui/Button';
 import { InlineLoadError } from '@/src/components/ui/InlineLoadError';
+import {PackConflictCenter} from '@/src/components/packs/PackConflictCenter';
 
 type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning';
 
@@ -59,6 +60,9 @@ function PackListSkeleton() {
 export function Packs() {
   const t = useT();
   const packs = useAppStore(state => state.packs);
+  const packConflicts = useAppStore(state => state.packConflicts);
+  const packRepairPending = useAppStore(state => state.packRepairPending);
+  const runPackRepairAction = useAppStore(state => state.runPackRepairAction);
   const packsLoading = useAppStore(state => state.packsLoading);
   const packsError = useAppStore(state => state.packsError);
   const packInstallPending = useAppStore(state => state.packInstallPending);
@@ -136,6 +140,12 @@ export function Packs() {
             stale={packs.length > 0}
           />
         ) : null}
+
+        <PackConflictCenter
+          conflicts={packConflicts}
+          pending={packRepairPending}
+          onAction={runPackRepairAction}
+        />
 
         {/* Search */}
         <div className="relative">
