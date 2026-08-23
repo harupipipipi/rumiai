@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b1a6a71f8570ada13835c7eb2626eb2baa2f54f79bd99199c8f5c245a08b311b",
+    "digest": "d7e4d8513206c252c5f599b334a518893f581d88bb30e562f6bcbcb686f7f3da",
     "entries": [
       {
         "path": "index.html",
@@ -1260,13 +1260,13 @@
       },
       {
         "path": "src/lib/composerWidgets.test.ts",
-        "size": 12845,
-        "sha256": "ad04fa174aefe19f4d7c8acd894530d33f690c30e9e85e8014ed8cde7116f7b7"
+        "size": 15710,
+        "sha256": "1d1ff758490cf65d01943db2e4e7523f6e160b107dd27a702def2c2cb487bd95"
       },
       {
         "path": "src/lib/composerWidgets.ts",
-        "size": 19577,
-        "sha256": "77c8d60cf284050c37bf7a1b104538bce096b9c4835be6ba8aad49072373776d"
+        "size": 20587,
+        "sha256": "05fe2b5a1ebb2d151d6a2d887c9e8f2d76263cf4cc3a1829c0ac42df12f44c30"
       },
       {
         "path": "src/lib/conversationSpotlight.test.ts",
@@ -1806,7 +1806,7 @@
     ]
   },
   "bundle": {
-    "digest": "9cd085f42faba6ad8779b2e2b4182b247b74b00acf07912cc1cfb403abd6794f",
+    "digest": "9be4666efd19e4847a0247172640dd1ce5724f6cbd42771d2601ea5385275cb1",
     "entries": [
       {
         "path": "shell-app.css",
@@ -1820,8 +1820,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2195531,
-        "sha256": "bb3b0526fbd28a17f12989930d01607192f4c6bb84816e359e8735988abbbb96"
+        "size": 2195962,
+        "sha256": "3d29b31bc865a6542f68daee1ae73216c1806f7eb70a8458985c843cd96f1c70"
       },
       {
         "path": "shell-rolldown-runtime.js",
