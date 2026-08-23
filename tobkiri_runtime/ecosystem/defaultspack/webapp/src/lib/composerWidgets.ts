@@ -7,6 +7,7 @@ import {
 import type { ComposerExtensionItem, ComposerSkillItem, DroppedWidget } from "../renderers/types";
 import { extractMentionTokens, hasUnescapedMentionSyntax } from "./mentionContract";
 import { supportedComposerDropKind, supportsComposerToggleDrop } from "./toolUi";
+import { resolveCatalogDisplayMetadata } from "./catalogDisplay";
 
 export type ComposerDropAction =
   | { type: "select_model"; profileId: string }
@@ -15,9 +16,13 @@ export type ComposerDropAction =
 
 export type ComposerMentionMetadata = {
   id: string;
-  kind: "file" | "service" | "skill" | "tool";
+  kind: "agent" | "conversation" | "file" | "memory" | "service" | "skill" | "tool";
   label: string;
   syntax: string;
+  icon?: string;
+  image?: string;
+  risk?: string;
+  status?: string;
 };
 
 export type ReconciledComposerSemanticDraft = {
@@ -34,8 +39,9 @@ function composerWidgetTypeForKind(kind: ComposerWidgetKind): DroppedWidget["typ
 }
 
 function trustedComposerWidgetFromItem(item: ComposerExtensionItem, kind: ComposerWidgetKind, enabled = true): DroppedWidget {
-  const label = item.ui?.composer_label ?? item.label ?? item.id;
-  const description = item.ui?.composer_description ?? item.description;
+  const display = composerToolMentionDisplay(item);
+  const label = display.label;
+  const description = display.description;
   return {
     id: item.id,
     type: composerWidgetTypeForKind(kind),
@@ -45,7 +51,7 @@ function trustedComposerWidgetFromItem(item: ComposerExtensionItem, kind: Compos
     action: item.ui?.composer_action,
     sourceItemId: item.id,
     description,
-    icon: item.ui?.composer_icon ?? item.ui?.item_icon ?? item.ui?.group_icon,
+    icon: display.icon,
     metadata: {
       source: "composer_catalog_drop",
       tool: {
@@ -110,15 +116,28 @@ export function filterComposerToolMentions(items: ComposerExtensionItem[], query
   return candidates.filter((item) => composerToolSearchText(item).includes(q)).slice(0, limit);
 }
 
-export function composerToolMentionDisplay(item: ComposerExtensionItem): { label: string; description?: string } {
-  const label = item.ui?.composer_label ?? item.label ?? item.id;
-  const description = item.ui?.composer_description ?? item.description;
-  return { label, description: description && description !== label ? description : undefined };
+export function composerToolMentionDisplay(item: ComposerExtensionItem) {
+  const display = resolveCatalogDisplayMetadata({
+    id: item.id,
+    kind: "tool",
+    label: item.ui?.composer_label ?? item.label ?? item.id,
+    description: item.ui?.composer_description ?? item.description,
+    icon: item.ui?.composer_icon ?? item.ui?.item_icon ?? item.ui?.group_icon,
+    risk: item.risk ?? undefined,
+    status: item.status ?? (item.disabled ? "unavailable" : undefined),
+  });
+  return {
+    ...display,
+    description: display.description && display.description !== display.label
+      ? display.description
+      : undefined,
+  };
 }
 
 export function composerToolMentionWidget(item: ComposerExtensionItem, syntaxOverride?: string): DroppedWidget {
-  const label = item.ui?.composer_label ?? item.label ?? item.id;
-  const description = item.ui?.composer_description ?? item.description;
+  const display = composerToolMentionDisplay(item);
+  const label = display.label;
+  const description = display.description;
   return {
     id: item.id,
     type: "tool",
@@ -128,7 +147,7 @@ export function composerToolMentionWidget(item: ComposerExtensionItem, syntaxOve
     action: item.ui?.composer_action,
     sourceItemId: item.id,
     description,
-    icon: item.ui?.composer_icon ?? item.ui?.item_icon ?? item.ui?.group_icon,
+    icon: display.icon,
     metadata: {
       source: "composer_at_mention",
       mention: {
@@ -167,16 +186,29 @@ export function filterComposerSkillMentions(items: ComposerSkillItem[], query: s
   return items.filter((item) => composerSkillSearchText(item).includes(q)).slice(0, limit);
 }
 
-export function composerSkillMentionDisplay(item: ComposerSkillItem): { label: string; description?: string } {
-  const label = item.label || item.id;
+export function composerSkillMentionDisplay(item: ComposerSkillItem) {
+  const display = resolveCatalogDisplayMetadata({
+    id: item.id,
+    kind: "skill",
+    label: item.label || item.id,
+    description: item.description,
+    aliases: item.aliases,
+    icon: String(item.metadata?.icon ?? ""),
+    image: String(item.metadata?.image ?? ""),
+    risk: String(item.metadata?.risk ?? ""),
+    status: String(item.metadata?.status ?? ""),
+  });
   return {
-    label,
-    description: item.description && item.description !== label ? item.description : undefined,
+    ...display,
+    description: display.description && display.description !== display.label
+      ? display.description
+      : undefined,
   };
 }
 
 export function composerSkillMentionWidget(item: ComposerSkillItem, syntaxOverride?: string): DroppedWidget {
-  const label = item.label || item.id;
+  const display = composerSkillMentionDisplay(item);
+  const label = display.label;
   return {
     id: item.id,
     type: "skill",
@@ -184,7 +216,8 @@ export function composerSkillMentionWidget(item: ComposerSkillItem, syntaxOverri
     enabled: true,
     widgetKind: "skill_prompt",
     sourceItemId: item.id,
-    description: item.description,
+    description: display.description,
+    icon: display.icon,
     metadata: {
       source: "composer_at_mention",
       mention: {
@@ -311,7 +344,7 @@ export function composerMentionMetadataFromWidgets(
     if (!mention || typeof mention !== "object" || Array.isArray(mention)) continue;
     const record = mention as Record<string, unknown>;
     const kind = String(record.kind ?? widget.type);
-    if (!["file", "service", "skill", "tool"].includes(kind)) continue;
+    if (!["agent", "conversation", "file", "memory", "service", "skill", "tool"].includes(kind)) continue;
     const id = String(
       record.id
       ?? record.tool_id
@@ -529,7 +562,7 @@ export function normalizeComposerMentionMetadata(
     const kind = String(record.kind ?? "");
     const id = String(record.id ?? "").trim();
     const label = String(record.label ?? "").trim();
-    if (!["file", "service", "skill", "tool"].includes(kind) || !id || !label) continue;
+    if (!["agent", "conversation", "file", "memory", "service", "skill", "tool"].includes(kind) || !id || !label) continue;
     if (seen.has(`${kind}:${id}`)) continue;
     seen.add(`${kind}:${id}`);
     result.push({

@@ -106,7 +106,15 @@ import {
   transcriptAttachmentFromAudio,
 } from "../features/voice/composerVoice";
 import { fileToAttachment } from "../lib/attachments";
-import { composerFileMentionWidget, composerKnownMentionValues, composerMentionToolIdsFromWidgets, composerServiceMentionWidget, composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
+import {
+  catalogDisplayAliases,
+  filterCatalogDisplayMetadata,
+  mergeCatalogDisplayMetadata,
+  resolveCatalogDisplayMetadata,
+  type CatalogDisplayMetadata,
+  type CatalogReferenceKind,
+} from "../lib/catalogDisplay";
+import { composerFileMentionWidget, composerKnownMentionValues, composerMentionMetadataFromWidgets, composerMentionToolIdsFromWidgets, composerServiceMentionWidget, composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
 import {
   COMPOSER_REFERENCE_MIME,
   composerReferencesAsMarkdown,
@@ -360,6 +368,8 @@ function composerIconForName(iconName: string | undefined, fallback: LucideIcon)
   if (/code|terminal|shell|cli/.test(normalized)) return Code2;
   if (/model|cpu|provider|ai/.test(normalized)) return Cpu;
   if (/think|brain|reason/.test(normalized)) return BrainCircuit;
+  if (/agent|bot|assistant/.test(normalized)) return Bot;
+  if (/memory|database|memo|knowledge/.test(normalized)) return Database;
   if (/key|auth|credential/.test(normalized)) return KeyRound;
   if (/message|chat|conversation/.test(normalized)) return MessageSquare;
   if (/mention|at/.test(normalized)) return AtSign;
@@ -1984,17 +1994,21 @@ function ModeSelector({
 }
 
 type ComposerAtMentionCandidate =
-  | { kind: "tool"; id: string; label: string; description?: string; item: ComposerExtensionItem }
   | { kind: "service"; id: string; label: string; description?: string; service: ToolGroup }
-  | { kind: "skill"; id: string; label: string; description?: string; skill: ComposerSkillItem }
-  | { kind: "file"; id: string; label: string; description?: string; file: string };
+  | {
+      kind: CatalogReferenceKind;
+      id: string;
+      label: string;
+      description?: string;
+      reference: CatalogDisplayMetadata;
+    };
 
 export type JsonListPanelItem = {
   id: string;
   title: string;
   description?: string;
   icon?: string;
-  fallbackIcon: "tool" | "service" | "skill" | "file" | "command";
+  fallbackIcon: CatalogReferenceKind | "service" | "command";
   badges?: Array<{
     label: string;
     tone: "sky" | "cyan" | "violet" | "blue" | "emerald" | "amber" | "rose" | "neutral";
@@ -2057,7 +2071,10 @@ const JSON_LIST_FALLBACK_ICON: Record<JsonListPanelItem["fallbackIcon"], LucideI
   tool: Wrench,
   service: Wrench,
   skill: BrainCircuit,
+  agent: Bot,
   file: FileText,
+  memory: Database,
+  conversation: MessageSquare,
   command: SlidersHorizontal,
 };
 
@@ -2086,11 +2103,13 @@ export function JsonListPanel({
   activeIndex,
   onActiveIndexChange,
   onSelect,
+  anchorStyle,
 }: {
   payload: JsonListPanelPayload;
   activeIndex: number;
   onActiveIndexChange: (index: number) => void;
   onSelect: (index: number) => void;
+  anchorStyle?: CSSProperties;
 }) {
   const HeaderIcon = composerIconForName(payload.header.icon, Wrench);
   const maxHeightRem = Math.min(Math.max(payload.maxHeightRem ?? 24, 12), 32);
@@ -2104,8 +2123,11 @@ export function JsonListPanel({
       data-testid={payload.testId}
       data-json-list-template={payload.id}
       data-composer-mention-menu
-      style={style}
-      className="rumi-composer-mention-menu absolute bottom-full left-0 mb-2 rumi-layer-modal w-full overflow-hidden rumi-popover"
+      style={{ ...style, ...anchorStyle }}
+      data-menu-placement={anchorStyle ? "viewport" : "composer"}
+      className={`rumi-composer-mention-menu rumi-layer-modal overflow-hidden rumi-popover ${
+        anchorStyle ? "fixed" : "absolute bottom-full left-0 mb-2 w-full"
+      }`}
     >
       <div className="border-b border-white/[0.06] px-3 py-2 flex items-center justify-between gap-2">
         <span className="inline-flex min-w-0 items-center gap-2">
@@ -2167,27 +2189,34 @@ export function JsonListPanel({
 
 export function atMentionPalettePayload(candidates: ComposerAtMentionCandidate[]): JsonListPanelPayload {
   const items: JsonListPanelItem[] = candidates.map((candidate) => {
-    const icon = candidate.kind === "tool"
-      ? candidate.item.ui?.composer_icon ?? candidate.item.ui?.item_icon ?? candidate.item.ui?.group_icon
-      : candidate.kind === "service"
-        ? candidate.service.id
-        : candidate.kind === "skill"
-          ? String(candidate.skill.metadata?.icon ?? candidate.skill.id)
-          : candidate.file;
-    const tone: NonNullable<JsonListPanelItem["badges"]>[number]["tone"] = candidate.kind === "tool"
-      ? "sky"
-      : candidate.kind === "service"
-        ? "cyan"
-        : candidate.kind === "skill"
-          ? "violet"
-          : "blue";
+    const reference = candidate.kind === "service" ? null : candidate.reference;
+    const icon = candidate.kind === "service"
+      ? candidate.service.id
+      : candidate.reference.icon;
+    const toneByKind: Record<ComposerAtMentionCandidate["kind"], NonNullable<JsonListPanelItem["badges"]>[number]["tone"]> = {
+      tool: "sky",
+      service: "cyan",
+      skill: "violet",
+      agent: "emerald",
+      file: "blue",
+      memory: "amber",
+      conversation: "neutral",
+    };
+    const tone = toneByKind[candidate.kind];
     return {
       id: candidate.id,
       title: candidate.label,
       description: candidate.description,
       icon,
       fallbackIcon: candidate.kind,
-      badges: [{ label: candidate.kind, tone }],
+      badges: [
+        { label: candidate.kind, tone },
+        ...(reference?.risk ? [{
+          label: reference.risk,
+          tone: reference.risk === "high" ? "rose" as const : "amber" as const,
+        }] : []),
+        ...(reference?.status ? [{ label: reference.status, tone: "neutral" as const }] : []),
+      ],
     };
   });
 
@@ -2292,17 +2321,35 @@ export function insertAtMentionText(
 export type ComposerInlineMentionPart = {
   mention: boolean;
   text: string;
+  reference?: CatalogDisplayMetadata | {
+    id: string;
+    kind: "service";
+    label: string;
+    icon: string;
+    risk?: string;
+    status?: string;
+  };
 };
 
-const INLINE_MENTION_TOKEN_CHAR = /[\p{L}\p{M}\p{N}_./:-]/u;
-
-function composerMentionSyntaxFromWidget(widget: DroppedWidget): string | null {
-  if (widget.metadata?.source !== "composer_at_mention") return null;
-  const mention = widget.metadata.mention;
-  if (!mention || typeof mention !== "object" || Array.isArray(mention)) return null;
-  const syntax = String((mention as Record<string, unknown>).syntax ?? "").trim();
-  return syntax.startsWith("@") && syntax.length > 1 ? syntax : null;
+function legacyServiceMentionReferences(
+  widgets: DroppedWidget[],
+): Array<{ item: NonNullable<ComposerInlineMentionPart["reference"]>; syntax: string }> {
+  return composerMentionMetadataFromWidgets(widgets).flatMap((mention) => (
+    mention.kind === "service" && mention.syntax.startsWith("@")
+      ? [{
+          item: {
+            id: mention.id,
+            kind: "service" as const,
+            label: mention.label,
+            icon: mention.id,
+          },
+          syntax: mention.syntax,
+        }]
+      : []
+  ));
 }
+
+const INLINE_MENTION_TOKEN_CHAR = /[\p{L}\p{M}\p{N}_./:-]/u;
 
 function inlineMentionMatchesAt(input: string, syntax: string, offset: number): boolean {
   const codePointIndex = utf16OffsetToCodePointIndex(input, offset);
@@ -2317,24 +2364,39 @@ function inlineMentionMatchesAt(input: string, syntax: string, offset: number): 
 /** Split composer text into ordinary and selected semantic-mention runs. */
 export function composerInlineMentionParts(
   input: string,
-  widgets: DroppedWidget[],
+  references: ComposerEntityReference[],
+  catalog: CatalogDisplayMetadata[],
+  compatibilityWidgets: DroppedWidget[] = [],
 ): ComposerInlineMentionPart[] {
   if (!input) return [];
-  const syntaxes = [...new Set(
-    widgets
-      .map(composerMentionSyntaxFromWidget)
-      .filter((syntax): syntax is string => Boolean(syntax)),
-  )].sort((left, right) => right.length - left.length);
-  if (syntaxes.length === 0) return [{ mention: false, text: input }];
+  const resolved = [...references.flatMap((reference) => {
+    const item = catalog.find((candidate) => (
+      candidate.kind === reference.kind && candidate.id === reference.id
+    ));
+    const syntax = reference.syntax.trim();
+    return item && syntax.startsWith("@") && syntax.length > 1
+      ? [{ item, syntax }]
+      : [];
+  }), ...legacyServiceMentionReferences(compatibilityWidgets)]
+    .sort((left, right) => right.syntax.length - left.syntax.length);
+  if (resolved.length === 0) return [{ mention: false, text: input }];
 
-  const matches: Array<{ end: number; start: number }> = [];
+  const matches: Array<{
+    end: number;
+    item: NonNullable<ComposerInlineMentionPart["reference"]>;
+    start: number;
+  }> = [];
   let cursor = 0;
   while (cursor < input.length) {
-    let best: { end: number; start: number } | null = null;
-    for (const syntax of syntaxes) {
+    let best: {
+      end: number;
+      item: NonNullable<ComposerInlineMentionPart["reference"]>;
+      start: number;
+    } | null = null;
+    for (const { item, syntax } of resolved) {
       for (let offset = input.indexOf(syntax, cursor); offset >= 0; offset = input.indexOf(syntax, offset + 1)) {
         if (!inlineMentionMatchesAt(input, syntax, offset)) continue;
-        const candidate = { start: offset, end: offset + syntax.length };
+        const candidate = { start: offset, end: offset + syntax.length, item };
         if (!best || candidate.start < best.start || (candidate.start === best.start && candidate.end > best.end)) {
           best = candidate;
         }
@@ -2351,11 +2413,36 @@ export function composerInlineMentionParts(
   cursor = 0;
   for (const match of matches) {
     if (match.start > cursor) parts.push({ mention: false, text: input.slice(cursor, match.start) });
-    parts.push({ mention: true, text: input.slice(match.start, match.end) });
+    parts.push({
+      mention: true,
+      text: input.slice(match.start, match.end),
+      reference: match.item,
+    });
     cursor = match.end;
   }
   if (cursor < input.length) parts.push({ mention: false, text: input.slice(cursor) });
   return parts;
+}
+
+function ComposerInlineMentionRun({ part }: { part: ComposerInlineMentionPart }) {
+  if (!part.mention || !part.reference) return <span>{part.text}</span>;
+  const Icon = composerIconForName(
+    part.reference.icon,
+    JSON_LIST_FALLBACK_ICON[part.reference.kind],
+  );
+  return (
+    <span
+      className="rumi-composer-inline-mention"
+      data-composer-inline-reference={part.reference.kind}
+      data-reference-id={part.reference.id}
+      data-reference-icon={part.reference.icon}
+      data-reference-risk={part.reference.risk}
+      data-reference-status={part.reference.status}
+    >
+      <Icon className="rumi-composer-inline-mention-icon" aria-hidden="true" />
+      {part.text}
+    </span>
+  );
 }
 
 export function atomicComposerMentionEdit(
@@ -2363,11 +2450,12 @@ export function atomicComposerMentionEdit(
   selectionStart: number,
   selectionEnd: number,
   key: "Backspace" | "Delete",
-  widgets: DroppedWidget[],
+  references: ComposerEntityReference[],
+  catalog: CatalogDisplayMetadata[],
 ): { value: string; cursor: number } | null {
   let cursor = 0;
   const ranges: Array<{ start: number; end: number }> = [];
-  for (const part of composerInlineMentionParts(input, widgets)) {
+  for (const part of composerInlineMentionParts(input, references, catalog)) {
     const start = cursor;
     cursor += part.text.length;
     if (part.mention) ranges.push({ start, end: cursor });
@@ -2522,6 +2610,24 @@ export function modelCandidatePopupStyleForAnchor(
   };
 }
 
+export function composerMentionPopupStyleForAnchor(
+  anchorRect: PopupAnchorRect | null,
+  viewportWidth: number,
+): CSSProperties | undefined {
+  if (!anchorRect || viewportWidth <= 0) return undefined;
+  const width = Math.min(
+    Math.max(anchorRect.right - anchorRect.left - 2, 260),
+    Math.max(260, viewportWidth - 16),
+  );
+  const left = Math.max(8, Math.min(anchorRect.left, viewportWidth - width - 8));
+  return {
+    left,
+    top: Math.max(8, anchorRect.top - 8),
+    width,
+    transform: "translateY(-100%)",
+  };
+}
+
 function ModelCommandCandidatePopup({
   candidates,
   activeIndex,
@@ -2611,6 +2717,7 @@ export function ComposerRenderer({
   inlineExtensions,
   belowExtensions,
   skillExtensions = [],
+  referenceItems = [],
   commands = [],
   composerInput = null,
   structuredInputValues = {},
@@ -2768,6 +2875,20 @@ export function ComposerRenderer({
   const templateAllowsAtMentions = templateFeatureFlags.at_mentions !== false
     && templateFeatureFlags.mentions !== false;
 	  const toolItems = useMemo(() => [...inlineExtensions, ...belowExtensions], [inlineExtensions, belowExtensions]);
+  const resolvedReferenceItems = useMemo(() => mergeCatalogDisplayMetadata(
+    referenceItems,
+    toolItems.filter((item) => !item.disabled).map(composerToolMentionDisplay),
+    skillExtensions.map(composerSkillMentionDisplay),
+    mode === "coding"
+      ? (codingContext?.files ?? []).map((file) => resolveCatalogDisplayMetadata({
+          id: file,
+          kind: "file",
+          label: file,
+          description: "workspace file",
+          icon: file,
+        }))
+      : [],
+  ), [codingContext?.files, mode, referenceItems, skillExtensions, toolItems]);
   const resolvedModelSelectorSchema = useMemo(
     () => modelSelectorSchemaForSurface(modelSelectorSchema, "composer"),
     [modelSelectorSchema],
@@ -2805,8 +2926,13 @@ export function ComposerRenderer({
     [inlineMentionToolIdSet, toolSelectionTargets, visibleToolWidgetIdSet],
   );
   const inlineMentionParts = useMemo(
-    () => composerInlineMentionParts(input, droppedWidgets),
-    [droppedWidgets, input],
+    () => composerInlineMentionParts(
+      input,
+      entityReferences,
+      resolvedReferenceItems,
+      droppedWidgets,
+    ),
+    [droppedWidgets, entityReferences, input, resolvedReferenceItems],
   );
   const hasInlineMentions = inlineMentionParts.some((part) => part.mention);
   const syncInlineMentionScroll = useCallback((textarea: HTMLTextAreaElement) => {
@@ -2889,32 +3015,21 @@ export function ComposerRenderer({
   const currentDirectory = codingContext?.directory || ".";
   const selectedCodingWorkspace = codingWorkspaces.find((workspace) => workspace.workspace_id === (selectedCodingWorkspaceId || codingContext?.workspaceId)) ?? codingWorkspaces[0] ?? null;
   const atMentionKnownValues = useMemo(() => [
-    ...composerKnownMentionValues(toolItems),
-    ...composerKnownMentionValues(skillExtensions),
+    ...resolvedReferenceItems.flatMap(catalogDisplayAliases),
     ...toolGroups.flatMap((service) => [service.id, service.label]),
-    ...(mode === "coding" ? codingContext?.files ?? [] : []),
-  ], [codingContext?.files, mode, skillExtensions, toolGroups, toolItems]);
+  ], [resolvedReferenceItems, toolGroups]);
   const atMentionCandidates = useMemo<ComposerAtMentionCandidate[]>(() => {
-    const toolCandidates = filterComposerToolMentions(toolItems, atMentionQuery, 14).map((item) => {
-      const display = composerToolMentionDisplay(item);
-      return {
-        kind: "tool" as const,
-        id: `tool:${item.id}`,
-        label: display.label,
-        description: display.description,
-        item,
-      };
-    });
-    const skillCandidates = filterComposerSkillMentions(skillExtensions, atMentionQuery, 8).map((skill) => {
-      const display = composerSkillMentionDisplay(skill);
-      return {
-        kind: "skill" as const,
-        id: `skill:${skill.id}`,
-        label: display.label,
-        description: display.description,
-        skill,
-      };
-    });
+    const referenceCandidates = filterCatalogDisplayMetadata(
+      resolvedReferenceItems,
+      atMentionQuery,
+      40,
+    ).map((reference) => ({
+      kind: reference.kind,
+      id: `${reference.kind}:${reference.id}`,
+      label: reference.label,
+      description: reference.description,
+      reference,
+    }));
     const normalizedServiceQuery = atMentionQuery.trim().toLowerCase();
     const serviceCandidates = toolGroups
       .filter((service) => service.items.some((item) => !item.disabled))
@@ -2932,17 +3047,8 @@ export function ComposerRenderer({
         description: service.description,
         service,
       }));
-    const fileCandidates = mode === "coding"
-      ? filterAtMentionFiles(codingContext?.files ?? [], atMentionQuery).slice(0, 8).map((file) => ({
-          kind: "file" as const,
-          id: `file:${file}`,
-          label: file,
-          description: "workspace file",
-          file,
-        }))
-      : [];
-	    return [...toolCandidates, ...skillCandidates, ...serviceCandidates, ...fileCandidates];
-	  }, [atMentionQuery, codingContext?.files, mode, skillExtensions, toolGroups, toolItems]);
+	    return [...referenceCandidates, ...serviceCandidates];
+	  }, [atMentionQuery, resolvedReferenceItems, toolGroups]);
 
   const atMentionPalette = useMemo(() => atMentionPalettePayload(atMentionCandidates), [atMentionCandidates]);
   const commandPalette = useMemo(() => commandPalettePayload(matchedCommands), [matchedCommands]);
@@ -2976,9 +3082,16 @@ export function ComposerRenderer({
 
   const updateComposerPopoverAnchor = useCallback(() => {
     if (typeof window === "undefined") return;
-    const anchorRect = textareaRef.current?.getBoundingClientRect() ?? null;
-    setComposerPopoverStyle(modelCandidatePopupStyleForAnchor(anchorRect, window.innerWidth));
-  }, []);
+    const textarea = textareaRef.current;
+    const anchorRect = atMentionOpen
+      ? textarea?.closest("form")?.getBoundingClientRect() ?? null
+      : textarea?.getBoundingClientRect() ?? null;
+    setComposerPopoverStyle(
+      atMentionOpen
+        ? composerMentionPopupStyleForAnchor(anchorRect, window.innerWidth)
+        : modelCandidatePopupStyleForAnchor(anchorRect, window.innerWidth),
+    );
+  }, [atMentionOpen]);
 
   const resizeComposerTextarea = useCallback(
     (textarea: HTMLTextAreaElement | null = textareaRef.current) => {
@@ -3141,7 +3254,7 @@ export function ComposerRenderer({
   }, [openFolder, templateAllowsSlashCommands]);
 
   useEffect(() => {
-    if (!hasModelCommandCandidates) return;
+    if (!hasModelCommandCandidates && !atMentionOpen) return;
     updateComposerPopoverAnchor();
     window.addEventListener("resize", updateComposerPopoverAnchor);
     window.addEventListener("scroll", updateComposerPopoverAnchor, true);
@@ -3149,7 +3262,7 @@ export function ComposerRenderer({
       window.removeEventListener("resize", updateComposerPopoverAnchor);
       window.removeEventListener("scroll", updateComposerPopoverAnchor, true);
     };
-  }, [hasModelCommandCandidates, updateComposerPopoverAnchor]);
+  }, [atMentionOpen, hasModelCommandCandidates, updateComposerPopoverAnchor]);
 
   useEffect(() => {
     textareaRef.current?.focus({ preventScroll: true });
@@ -3272,9 +3385,9 @@ export function ComposerRenderer({
   }, [input, textareaFocused, updateAtMentionStateFromInput]);
 
   useIsomorphicLayoutEffect(() => {
-    if (!hasModelCommandCandidates) return;
+    if (!hasModelCommandCandidates && !atMentionOpen) return;
     updateComposerPopoverAnchor();
-  }, [hasModelCommandCandidates, updateComposerPopoverAnchor]);
+  }, [atMentionOpen, hasModelCommandCandidates, updateComposerPopoverAnchor]);
 
   const handleInputChange = useCallback(
     (value: string) => {
@@ -3299,9 +3412,11 @@ export function ComposerRenderer({
         : atMentionStart + atMentionQuery.length + 1;
       const next = insertAtMentionText(input, cursorPos, candidate.label, atMentionKnownValues);
 	      if (candidate.kind === "tool") {
-	        onDropWidget?.(composerToolMentionWidget(candidate.item));
+          const item = toolItems.find((tool) => tool.id === candidate.reference.id);
+          if (item) onDropWidget?.(composerToolMentionWidget(item));
 	      } else if (candidate.kind === "skill") {
-	        onDropWidget?.(composerSkillMentionWidget(candidate.skill));
+          const skill = skillExtensions.find((item) => item.id === candidate.reference.id);
+          if (skill) onDropWidget?.(composerSkillMentionWidget(skill));
 	      } else if (candidate.kind === "service") {
 	        onDropWidget?.(composerServiceMentionWidget({
 	          id: candidate.service.id,
@@ -3309,20 +3424,20 @@ export function ComposerRenderer({
 	          description: candidate.service.description,
 	          toolIds: candidate.service.items.map((item) => item.id),
 	        }));
-	      } else {
-	        onDropWidget?.(composerFileMentionWidget(candidate.file));
+	      } else if (candidate.kind === "file") {
+	        onDropWidget?.(composerFileMentionWidget(candidate.reference.id));
 	      }
 	      onInputChange(next.value);
-	      if (candidate.kind !== "service") {
+	      if (candidate.kind !== "service" && candidate.kind !== "file") {
 	        const reference: ComposerEntityReference = {
 	          kind: candidate.kind,
-	          id: candidate.kind === "tool" ? candidate.item.id : candidate.kind === "skill" ? candidate.skill.id : candidate.file,
+	          id: candidate.reference.id,
 	          syntax: `@${candidate.label}`,
 	        };
 	        onEntityReferencesChange?.(mergeComposerReferences(entityReferences, [reference], next.value));
 	      }
 	      if (candidate.kind === "file" && mode === "coding") {
-	        onAtFileAttach?.(candidate.file);
+	        onAtFileAttach?.(candidate.reference.id);
 	      }
       setAtMentionOpen(false);
       setAtMentionQuery("");
@@ -3333,7 +3448,7 @@ export function ComposerRenderer({
         textarea.focus();
       }, 0);
     },
-		    [atMentionKnownValues, atMentionQuery.length, atMentionStart, entityReferences, input, mode, onAtFileAttach, onDropWidget, onEntityReferencesChange, onInputChange],
+		    [atMentionKnownValues, atMentionQuery.length, atMentionStart, entityReferences, input, mode, onAtFileAttach, onDropWidget, onEntityReferencesChange, onInputChange, skillExtensions, toolItems],
 		  );
 
   const attachFiles = useCallback(async (files: FileList | File[] | null) => {
@@ -3361,11 +3476,7 @@ export function ComposerRenderer({
       return;
     }
     const raw = event.clipboardData.getData(COMPOSER_REFERENCE_MIME);
-    const catalog = {
-      tools: toolItems,
-      skills: skillExtensions,
-      files: mode === "coding" ? codingContext?.files ?? [] : [],
-    };
+    const catalog = { items: resolvedReferenceItems };
     const restored = raw
       ? restoreComposerReferences(raw, catalog)
       : restoreComposerMarkdownReferences(event.clipboardData.getData("text/plain"), catalog);
@@ -3382,7 +3493,7 @@ export function ComposerRenderer({
       } else if (reference.kind === "skill") {
         const skill = skillExtensions.find((candidate) => candidate.id === reference.id);
         if (skill) onDropWidget?.(composerSkillMentionWidget(skill, reference.syntax));
-      } else if (mode === "coding") {
+      } else if (reference.kind === "file" && mode === "coding") {
         onDropWidget?.(composerFileMentionWidget(reference.id, reference.syntax));
         onAtFileAttach?.(reference.id);
       }
@@ -3391,7 +3502,7 @@ export function ComposerRenderer({
       textarea.setSelectionRange(next.cursor, next.cursor);
       textarea.focus();
     }, 0);
-  }, [attachFiles, codingContext?.files, entityReferences, input, mode, onAtFileAttach, onDropWidget, onEntityReferencesChange, onInputChange, skillExtensions, toolItems]);
+  }, [attachFiles, entityReferences, input, mode, onAtFileAttach, onDropWidget, onEntityReferencesChange, onInputChange, resolvedReferenceItems, skillExtensions, toolItems]);
 
   const requestAudioTranscript = useCallback(async (
     file: AttachedFile,
@@ -3600,7 +3711,8 @@ export function ComposerRenderer({
           textarea.selectionStart,
           textarea.selectionEnd,
           event.key,
-          droppedWidgets,
+          entityReferences,
+          resolvedReferenceItems,
         );
         if (atomicEdit) {
           event.preventDefault();
@@ -3736,13 +3848,14 @@ export function ComposerRenderer({
       atMentionQuery.length,
       atMentionStart,
       chooseModelCommandCandidate,
-      droppedWidgets,
+      entityReferences,
       hasModelCommandCandidates,
       hasSlashCommandPrefix,
       handleAtMentionSelect,
       handleInputChange,
       handleSubmitWithApiKeyGuard,
       input,
+      resolvedReferenceItems,
       isSteerMode,
       matchedCommands,
       menuOpen,
@@ -4281,7 +4394,7 @@ export function ComposerRenderer({
             />
           )}
 
-          {atMentionOpen && (
+          {atMentionOpen && typeof document !== "undefined" && createPortal(
             <>
               <button
                 type="button"
@@ -4292,11 +4405,13 @@ export function ComposerRenderer({
               />
               <JsonListPanel
                 payload={atMentionPalette}
-              activeIndex={selectedAtMentionIndex}
-              onActiveIndexChange={setSelectedAtMentionIndex}
+                activeIndex={selectedAtMentionIndex}
+                onActiveIndexChange={setSelectedAtMentionIndex}
                 onSelect={(index) => handleAtMentionSelect(atMentionCandidates[index])}
+                anchorStyle={composerPopoverStyle}
               />
-            </>
+            </>,
+            document.body,
           )}
 
           {menuOpen && (
@@ -4621,7 +4736,7 @@ export function ComposerRenderer({
                         className={`rumi-composer-inline-mention-layer absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-0 py-2.5 text-[16px] font-medium leading-[24px] text-zinc-100 ${textareaCanCollapse ? "pr-9" : ""}`}
                       >
                         {inlineMentionParts.map((part, index) => (
-                          <span key={`${index}:${part.text}`} className={part.mention ? "rumi-composer-inline-mention" : undefined}>{part.text}</span>
+                          <ComposerInlineMentionRun key={`${index}:${part.text}`} part={part} />
                         ))}
                       </div>
                     )}
@@ -4725,7 +4840,7 @@ export function ComposerRenderer({
                       className={`rumi-composer-inline-mention-layer absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-2 pb-0 pt-2.5 text-[15px] leading-[22px] text-zinc-100 max-[640px]:pb-0 max-[640px]:pt-2.5 max-[640px]:text-[13px] ${textareaCanCollapse ? "pr-11 max-[640px]:pr-10" : ""}`}
                     >
                       {inlineMentionParts.map((part, index) => (
-                        <span key={`${index}:${part.text}`} className={part.mention ? "rumi-composer-inline-mention" : undefined}>{part.text}</span>
+                        <ComposerInlineMentionRun key={`${index}:${part.text}`} part={part} />
                       ))}
                     </div>
                   )}

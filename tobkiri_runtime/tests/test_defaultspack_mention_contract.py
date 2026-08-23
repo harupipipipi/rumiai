@@ -139,3 +139,23 @@ def test_chat_tool_inference_uses_the_same_safe_boundaries(monkeypatch) -> None:
         "お願い@Web Search で調べて"
     ) == ["web_search"]
     assert run_request._tool_mention_ids_from_text("お願い@unknown.example") == []
+
+
+def test_structured_non_tool_reference_masks_legacy_tool_label_inference() -> None:
+    from domain.chat import run_request
+
+    text = "Compare @Web Search with the current conversation"
+    metadata = {
+        "mentions": [
+            {
+                "kind": "conversation",
+                "id": "conversation-1",
+                "label": "Web Search",
+                "syntax": "@Web Search",
+            }
+        ]
+    }
+
+    masked = run_request._text_for_structured_tool_mentions(text, metadata)
+    assert "@Web Search" not in masked
+    assert len(masked) == len(text)

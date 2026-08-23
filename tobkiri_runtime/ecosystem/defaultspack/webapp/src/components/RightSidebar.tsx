@@ -79,6 +79,7 @@ import { WorkspaceTabRailPanel, type WorkspaceTab, type WorkspaceTabKind } from 
 import { LayerPortal } from "../ui/layers/LayerPortal";
 import { PromptSidebarWidget } from "./prompts/PromptSidebarWidget";
 import type { ContextUsageInfo } from "../renderers/types";
+import { resolveCatalogDisplayMetadata } from "../lib/catalogDisplay";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -487,8 +488,20 @@ export function sidebarActionDisabledReason(action: SidebarAction, activeConvers
   return "";
 }
 
+export function sidebarItemDisplayMetadata(item: SidebarItem) {
+  return resolveCatalogDisplayMetadata({
+    id: item.id,
+    kind: "tool",
+    label: item.ui?.composer_label ?? item.label,
+    description: item.ui?.composer_description ?? item.description,
+    icon: item.ui?.composer_icon ?? item.ui?.item_icon ?? item.ui?.group_icon,
+    risk: item.risk ?? undefined,
+    status: item.badge ?? undefined,
+  });
+}
+
 function iconForItem(item: SidebarItem) {
-  const declaredIcon = item.ui?.item_icon || item.ui?.group_icon;
+  const declaredIcon = sidebarItemDisplayMetadata(item).icon;
   if (declaredIcon && ITEM_ICONS[declaredIcon]) return ITEM_ICONS[declaredIcon];
 
   // Legacy fallback for pre-ui metadata tools.
@@ -1544,14 +1557,15 @@ export function RightSidebar({
     const kind = supportedComposerDropKind(item);
     if (!kind) return;
     const type = kind === "tool_toggle" ? "tool" : kind;
+    const display = sidebarItemDisplayMetadata(item);
     event.dataTransfer.setData(
       "application/rumi-widget",
       JSON.stringify({
         id: item.id,
         type,
-        label: item.ui?.composer_label ?? item.label,
-        description: item.ui?.composer_description ?? item.description,
-        icon: item.ui?.composer_icon ?? item.ui?.item_icon ?? item.ui?.group_icon,
+        label: display.label,
+        description: display.description,
+        icon: display.icon,
         widgetKind: kind,
         action: item.ui?.composer_action,
         sourceItemId: item.id,

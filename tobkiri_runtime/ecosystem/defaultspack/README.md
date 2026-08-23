@@ -85,6 +85,18 @@ defaults 単体で既存の AI サービス（ChatGPT / Claude / Cursor / Devin�
 
 `webapp/` は `Tobkiri` の standalone frontend source です。`defaultspack` の `/api/chat/...`、`/api/ui/...`、`/api/health` に接続します。`npm run build` の出力先は `ui/` で、HTTP サーバーはその build 済み asset を `/` と `/static/...` で配信します。
 
+### Composer references
+
+The composer uses one trusted display catalog for `@tool`, `@skill`,
+`@agent`, `@file`, `@memory`, and `@conversation` references. The same
+resolved label, icon, image, risk, and status fields are reused by composer
+menus, inline chips, widgets, and sidebar surfaces. Clipboard data stores only
+the reference kind, stable id, and text range; paste re-resolves those
+identities against the current local catalog. Missing, disabled, malformed, or
+forged references remain ordinary text and never acquire tool or host
+authority. Explicit drag-and-drop widgets remain separate from inline
+references.
+
 ## AI Agent Service Defaults
 
 defaultspack includes local-first building blocks inspired by Codex, Claude Code, ChatGPT Projects, Manus, Genspark, and OpenClaw. The core contract is:

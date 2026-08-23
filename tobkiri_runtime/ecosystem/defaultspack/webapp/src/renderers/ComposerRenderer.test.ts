@@ -20,6 +20,7 @@ import {
   composerClipboardFiles,
   composerHelperCopy,
   composerModelControlWidth,
+  composerMentionPopupStyleForAnchor,
   composerPlaceholderCopy,
   modelDropdownPlacementClassName,
   nextModelPickerOpenState,
@@ -51,6 +52,7 @@ import {
 } from "./ComposerRenderer";
 import { COMPOSER_BUTTON_DROP, COMPOSER_PANEL_DROP, COMPOSER_SELECTOR_DROP, COMPOSER_TOGGLE_DROP } from "../lib/toolUi";
 import type { ComposerCommandItem } from "../lib/api";
+import { resolveCatalogDisplayMetadata } from "../lib/catalogDisplay";
 
 test("composer file mention filters string context files", () => {
   const files = ["README.md", "src/App.tsx", "docs/context.md"];
@@ -127,7 +129,7 @@ test("composer tool mentions resolve searchable tools and JSON metadata", () => 
     action: undefined,
     sourceItemId: "web_search",
     description: "Search the web.",
-    icon: undefined,
+    icon: "wrench",
     metadata: {
       source: "composer_at_mention",
       mention: {
@@ -279,8 +281,43 @@ test("empty mention listbox is visible and announced", () => {
   assert.match(html, /一致する候補はありません/);
   assert.doesNotMatch(html, /role="option"/);
   assert.match(html, /data-composer-mention-menu="true"/);
-  assert.match(html, /rumi-composer-mention-menu absolute bottom-full left-0 mb-2/);
+  assert.match(html, /data-menu-placement="composer"/);
+  assert.match(html, /absolute bottom-full left-0 mb-2 w-full/);
   assert.doesNotMatch(html, /fixed rumi-layer-modal/);
+});
+
+test("mention palette renders every unified reference kind with trusted metadata", () => {
+  const references = ([
+    ["tool", "search", "Search"],
+    ["skill", "review", "Review"],
+    ["agent", "planner", "Planner"],
+    ["file", "src/app.ts", "src/app.ts"],
+    ["memory", "memo-1", "Launch notes"],
+    ["conversation", "chat-1", "Roadmap"],
+  ] as const).map(([kind, id, label]) => resolveCatalogDisplayMetadata({
+    id,
+    kind,
+    label,
+    risk: kind === "tool" ? "medium" : undefined,
+    status: kind === "conversation" ? "active" : undefined,
+  }));
+  const payload = atMentionPalettePayload(references.map((reference) => ({
+    kind: reference.kind,
+    id: `${reference.kind}:${reference.id}`,
+    label: reference.label,
+    description: reference.description,
+    reference,
+  })));
+  assert.deepEqual(payload.items.map((item) => item.fallbackIcon), [
+    "tool",
+    "skill",
+    "agent",
+    "file",
+    "memory",
+    "conversation",
+  ]);
+  assert.deepEqual(payload.items[0].badges?.map((badge) => badge.label), ["tool", "medium"]);
+  assert.deepEqual(payload.items[5].badges?.map((badge) => badge.label), ["conversation", "active"]);
 });
 
 test("JSON list panel renders trigger-neutral payload data", () => {
@@ -510,7 +547,9 @@ test("selected mentions render inline while explicit tool toggles own their sele
   }));
 
   assert.match(referenceHtml, /data-composer-inline-mentions="true"/);
-  assert.match(referenceHtml, /rumi-composer-inline-mention[^>]*>@Web Search<\/span>/);
+  assert.match(referenceHtml, /data-composer-inline-reference="tool"/);
+  assert.match(referenceHtml, /data-reference-icon="wrench"/);
+  assert.match(referenceHtml, /rumi-composer-inline-mention[\s\S]*@Web Search<\/span>/);
   assert.match(referenceHtml, />Use @Web Search then review<\/textarea>/);
   assert.match(referenceHtml, /rumi-composer-textarea-highlighted text-transparent/);
   assert.doesNotMatch(referenceHtml, /rumi-composer-context-strip[\s\S]*Web Search/);
@@ -531,34 +570,49 @@ test("selected mentions render inline while explicit tool toggles own their sele
 });
 
 test("inline mention parts color only active exact semantic mentions", () => {
-  const widget = composerToolMentionWidget({ id: "browser_companion", label: "Browser Companion", category: "tool" });
+  const item = resolveCatalogDisplayMetadata({
+    id: "browser_companion",
+    kind: "tool",
+    label: "Browser Companion",
+    icon: "browser",
+  });
+  const reference = { kind: "tool" as const, id: item.id, syntax: "@Browser Companion" };
   assert.deepEqual(
-    composerInlineMentionParts("Use @Browser Companion now", [widget]),
+    composerInlineMentionParts("Use @Browser Companion now", [reference], [item]),
     [
       { mention: false, text: "Use " },
-      { mention: true, text: "@Browser Companion" },
+      { mention: true, text: "@Browser Companion", reference: item },
       { mention: false, text: " now" },
     ],
   );
   assert.deepEqual(
-    composerInlineMentionParts("\\@Browser Companion and @Browser CompanionX", [widget]),
+    composerInlineMentionParts(
+      "\\@Browser Companion and @Browser CompanionX",
+      [reference],
+      [item],
+    ),
     [{ mention: false, text: "\\@Browser Companion and @Browser CompanionX" }],
   );
 });
 
 test("semantic mentions delete atomically from either edge or a partial selection", () => {
-  const widget = composerToolMentionWidget({ id: "browser_companion", label: "Browser Companion", category: "tool" });
+  const item = resolveCatalogDisplayMetadata({
+    id: "browser_companion",
+    kind: "tool",
+    label: "Browser Companion",
+  });
+  const reference = { kind: "tool" as const, id: item.id, syntax: "@Browser Companion" };
   const input = "Use @Browser Companion now";
   assert.deepEqual(
-    atomicComposerMentionEdit(input, 22, 22, "Backspace", [widget]),
+    atomicComposerMentionEdit(input, 22, 22, "Backspace", [reference], [item]),
     { value: "Use  now", cursor: 4 },
   );
   assert.deepEqual(
-    atomicComposerMentionEdit(input, 4, 4, "Delete", [widget]),
+    atomicComposerMentionEdit(input, 4, 4, "Delete", [reference], [item]),
     { value: "Use  now", cursor: 4 },
   );
   assert.deepEqual(
-    atomicComposerMentionEdit(input, 8, 12, "Backspace", [widget]),
+    atomicComposerMentionEdit(input, 8, 12, "Backspace", [reference], [item]),
     { value: "Use  now", cursor: 4 },
   );
 });
@@ -703,6 +757,17 @@ test("model candidate popup stays inside the viewport when anchored near the lef
       width: 344,
       transform: "translateY(-100%)",
     },
+  );
+});
+
+test("mention menu stays within normal and narrow viewport bounds", () => {
+  assert.deepEqual(
+    composerMentionPopupStyleForAnchor({ left: 440, right: 1000, top: 700 }, 1440),
+    { left: 440, top: 692, width: 558, transform: "translateY(-100%)" },
+  );
+  assert.deepEqual(
+    composerMentionPopupStyleForAnchor({ left: 8, right: 382, top: 620 }, 390),
+    { left: 8, top: 612, width: 372, transform: "translateY(-100%)" },
   );
 });
 

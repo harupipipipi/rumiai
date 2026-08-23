@@ -1426,6 +1426,16 @@ export type Conversation = {
   messages: ChatMessage[];
 };
 
+export type MemoNote = {
+  id: string;
+  title?: string;
+  content?: string;
+  folder_id?: string;
+  source?: string;
+  metadata?: Record<string, unknown>;
+  updated_at?: number | string;
+};
+
 export type ConversationShareBundle = {
   schema_version: number;
   kind: "rumi.defaultspack.conversation_share";
@@ -3213,6 +3223,12 @@ async function nativeCodingApprovalOperator(
 }
 
 export const api = {
+  listMemoNotes(limit = 50) {
+    return request<{ notes: MemoNote[] }>(
+      withQuery(defaultspackContractRoute("api/memory/memo/notes"), { limit }),
+    );
+  },
+
   listConversations(options?: ConversationListOptions) {
     return request<{ conversations: Conversation[]; total: number }>(
       withQuery(defaultspackContractRoute("api/chat/conversations"), options),

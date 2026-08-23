@@ -373,7 +373,11 @@ def prepare_chat_run(
         visible_user_text = _last_visible_user_text(model_message_chain)
         if visible_user_text:
             user_text = visible_user_text
-    inferred_tool_ids = _infer_requested_tools_from_message(user_text)
+    tool_mention_text = _text_for_structured_tool_mentions(user_text, metadata)
+    inferred_tool_ids = _infer_requested_tools_from_message(
+        user_text,
+        tool_mention_text=tool_mention_text,
+    )
     effective_inferred_tool_ids = (
         [] if _has_explicit_selected_tools(input_data) else inferred_tool_ids
     )
@@ -621,7 +625,10 @@ def prepare_chat_run(
     )
 
     raw_tools, provider_tools, tool_context = _available_tools(
-        request_context, tool_resolution_input, user_text=user_text
+        request_context,
+        tool_resolution_input,
+        user_text=user_text,
+        tool_mention_text=tool_mention_text,
     )
     if frontend_precision:
         tool_context["frontend_precision"] = frontend_precision
@@ -3368,7 +3375,45 @@ def _profile_prefers_vector_tool_assist(context: dict[str, Any] | None) -> bool:
     return candidate in _VECTOR_TOOL_ASSIST_PROFILE_IDS
 
 
-def _infer_requested_tools_from_message(user_text: str) -> list[str]:
+def _text_for_structured_tool_mentions(
+    user_text: str,
+    metadata: dict[str, Any] | None,
+) -> str:
+    """Mask resolved non-tool references before legacy tool-label inference.
+
+    Client metadata is not execution authority. It may only make inference more
+    restrictive, preventing a trusted non-tool reference label from being
+    reinterpreted as a tool by the compatibility parser.
+    """
+
+    if not isinstance(user_text, str) or not isinstance(metadata, dict):
+        return user_text
+    mentions = metadata.get("mentions")
+    if not isinstance(mentions, list):
+        return user_text
+    masked = user_text
+    for mention in mentions[:100]:
+        if not isinstance(mention, dict):
+            continue
+        if str(mention.get("kind") or "").strip() not in {
+            "agent",
+            "file",
+            "memory",
+            "conversation",
+        }:
+            continue
+        syntax = str(mention.get("syntax") or "").strip()
+        if not syntax.startswith("@") or len(syntax) > 161:
+            continue
+        masked = masked.replace(syntax, " " * len(syntax))
+    return masked
+
+
+def _infer_requested_tools_from_message(
+    user_text: str,
+    *,
+    tool_mention_text: str | None = None,
+) -> list[str]:
     inferred: list[str] = []
     seen: set[str] = set()
 
@@ -3390,7 +3435,9 @@ def _infer_requested_tools_from_message(user_text: str) -> list[str]:
         for tool_id in _CODING_PR_TOOL_IDS:
             add(tool_id)
 
-    for tool_id in _tool_mention_ids_from_text(user_text):
+    for tool_id in _tool_mention_ids_from_text(
+        tool_mention_text if tool_mention_text is not None else user_text
+    ):
         add(tool_id)
 
     return inferred
@@ -3823,6 +3870,7 @@ def _available_tools(
     input_data: dict[str, Any],
     *,
     user_text: str = "",
+    tool_mention_text: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     selection = _normalize_tool_selection(input_data)
     caller_provider_tools = _caller_provider_tool_definitions(input_data)
@@ -3831,7 +3879,11 @@ def _available_tools(
     verified_explicit_tool_ids = list(
         dict.fromkeys(
             [
-                *_tool_mention_ids_from_text(user_text),
+                *_tool_mention_ids_from_text(
+                    tool_mention_text
+                    if tool_mention_text is not None
+                    else user_text
+                ),
                 *_verified_approval_followup_tool_ids(input_data),
             ]
         )

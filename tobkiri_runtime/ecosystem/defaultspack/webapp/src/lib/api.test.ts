@@ -2649,6 +2649,28 @@ test("listConversations serializes metadata filters", async () => {
   );
 });
 
+test("listMemoNotes loads the local memory reference catalog", async () => {
+  let requestUrl = "";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    requestUrl = requestTarget(input);
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { notes: [{ id: "memo-1", title: "Launch notes" }] },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    assert.deepEqual(await api.listMemoNotes(25), {
+      notes: [{ id: "memo-1", title: "Launch notes" }],
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, routeKey("api/memory/memo/notes?limit=25"));
+});
+
 test("company and p2p helpers target frontend workspace routes", async () => {
   const seen: Array<{ input: string; method: string; body?: unknown }> = [];
   const originalFetch = globalThis.fetch;

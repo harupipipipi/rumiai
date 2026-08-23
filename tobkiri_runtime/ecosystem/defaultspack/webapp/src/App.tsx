@@ -52,7 +52,7 @@ import { ConversationShareLanding, ImportedConversationNotice } from "./pages/Co
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { ChatStreamInterruptedError, api, composerCommandFeedbackTone, composerCommandResultMessage, defaultspackApiFetch, defaultspackCanonicalRouteKey, defaultspackContractRoute, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type ResolvedCommandCatalog, type SettingsSection, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
+import { ChatStreamInterruptedError, api, composerCommandFeedbackTone, composerCommandResultMessage, defaultspackApiFetch, defaultspackCanonicalRouteKey, defaultspackContractRoute, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MemoNote, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type ResolvedCommandCatalog, type SettingsSection, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
 import { applyCommandStateSnapshots, createCommandInvocationId } from "./lib/commandState";
 import type { ActionApprovalMode } from "./features/tools/ActionApprovalControl";
 import {
@@ -81,13 +81,20 @@ import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegri
 import { isMessageScrollerNearBottom } from "./lib/chatScroll";
 import { loadConversationForRefresh, resolveSupersededConversationRedirect } from "./lib/chatRouteLoading";
 import { cn } from "./lib/cn";
+import {
+  mergeCatalogDisplayMetadata,
+  resolveCatalogDisplayMetadata,
+  type CatalogDisplayMetadata,
+} from "./lib/catalogDisplay";
 import { deleteCalendarScheduleBeforeLocalChange } from "./lib/calendarScheduleDeletion";
 import {
   canExecuteComposerEndpointAction,
   composerMentionMetadataFromWidgets,
   composerMentionSyntaxesForToolId,
   composerMentionToolIdsFromWidgets,
+  composerSkillMentionDisplay,
   composerSkillMentionWidget,
+  composerToolMentionDisplay,
   composerToolMentionWidget,
   isSafeLocalEndpoint,
   normalizeComposerMentionMetadata,
@@ -101,7 +108,11 @@ import {
 import { hasUnescapedMentionSyntax } from "./lib/mentionContract";
 import { fileToAttachment } from "./lib/attachments";
 import { toolGroupFor } from "./lib/toolUi";
-import type { ComposerEntityReference } from "./lib/composerReferences";
+import {
+  composerReferenceMetadata,
+  mergeComposerReferences,
+  type ComposerEntityReference,
+} from "./lib/composerReferences";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
 import { openAuthorityApprovalWindow, openFingerRecordingWindow } from "./lib/desktopApproval";
@@ -2220,8 +2231,87 @@ function composerExtensionItems(items: SidebarItem[]): ComposerExtensionItem[] {
       category: item.category,
       description: item.description,
       tags: item.tags ?? [],
+      risk: item.risk,
+      status: item.badge,
       ui: item.ui,
     }));
+}
+
+function referenceAliases(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => String(item ?? "").trim()).filter(Boolean)
+    : [];
+}
+
+/** Build non-tool reference projections from already-authoritative local data. */
+export function composerContextReferenceItems({
+  catalog,
+  conversations,
+  memoNotes,
+}: {
+  catalog: UICatalog | null;
+  conversations: Conversation[];
+  memoNotes: MemoNote[];
+}): CatalogDisplayMetadata[] {
+  const profileItems = (catalog?.agent_service?.profiles ?? []).flatMap((profile) => {
+    const id = cleanOptionalString(profile.profile_id ?? profile.id);
+    if (!id) return [];
+    const metadata = profile.metadata && typeof profile.metadata === "object"
+      ? profile.metadata as Record<string, unknown>
+      : {};
+    return [resolveCatalogDisplayMetadata({
+      id,
+      kind: "agent",
+      label: cleanOptionalString(
+        profile.display_name ?? profile.name ?? profile.label,
+      ) ?? id,
+      description: cleanOptionalString(profile.description) ?? undefined,
+      aliases: referenceAliases(profile.aliases),
+      icon: cleanOptionalString(profile.icon ?? metadata.icon) ?? undefined,
+      image: cleanOptionalString(profile.image ?? metadata.image) ?? undefined,
+      risk: cleanOptionalString(profile.risk ?? metadata.risk) ?? undefined,
+      status: cleanOptionalString(profile.status ?? metadata.status) ?? undefined,
+    })];
+  });
+  const inferredAgentItems = conversations.flatMap((conversation) => {
+    const id = cleanOptionalString(conversation.agent_id);
+    return id
+      ? [resolveCatalogDisplayMetadata({ id, kind: "agent", label: id })]
+      : [];
+  });
+  const memoryItems = memoNotes.flatMap((note) => {
+    const id = cleanOptionalString(note.id);
+    if (!id) return [];
+    const label = cleanOptionalString(note.title) ?? id;
+    const description = cleanOptionalString(note.content)?.slice(0, 160);
+    return [resolveCatalogDisplayMetadata({
+      id,
+      kind: "memory",
+      label,
+      description,
+      aliases: [cleanOptionalString(note.folder_id), cleanOptionalString(note.source)]
+        .filter((item): item is string => Boolean(item)),
+      icon: cleanOptionalString(note.metadata?.icon) ?? undefined,
+      image: cleanOptionalString(note.metadata?.image) ?? undefined,
+      status: cleanOptionalString(note.metadata?.status) ?? undefined,
+    })];
+  });
+  const conversationItems = conversations.map((conversation) => (
+    resolveCatalogDisplayMetadata({
+      id: conversation.id,
+      kind: "conversation",
+      label: conversation.title || conversation.id,
+      description: conversation.is_archived ? "Archived conversation" : "Conversation",
+      aliases: conversation.tags ?? [],
+      status: conversation.is_archived ? "archived" : undefined,
+    })
+  ));
+  return mergeCatalogDisplayMetadata(
+    profileItems,
+    inferredAgentItems,
+    memoryItems,
+    conversationItems,
+  );
 }
 
 function chatIdFromLocation(): string | null {
@@ -2503,6 +2593,7 @@ function ChatApp() {
   const [usesResolvedCommandProtocol, setUsesResolvedCommandProtocol] = useState(false);
   const [commandProtocolInfo, setCommandProtocolInfo] = useState<ResolvedCommandCatalog | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [memoNotes, setMemoNotes] = useState<MemoNote[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const widgetContext = useMemo(
     () => createWidgetConversationContext(activeConversationId),
@@ -2877,6 +2968,20 @@ function ChatApp() {
       metadata: skill.metadata,
     }))
   ), [catalog?.skills]);
+  const composerReferenceItems = useMemo(() => mergeCatalogDisplayMetadata(
+    composerExtensions.filter((item) => !item.disabled).map(composerToolMentionDisplay),
+    composerSkills.map(composerSkillMentionDisplay),
+    mode === "coding"
+      ? (codingContext?.files ?? []).map((file) => resolveCatalogDisplayMetadata({
+          id: file,
+          kind: "file",
+          label: file,
+          description: "workspace file",
+          icon: file,
+        }))
+      : [],
+    composerContextReferenceItems({ catalog, conversations, memoNotes }),
+  ), [catalog, codingContext?.files, composerExtensions, composerSkills, conversations, memoNotes, mode]);
   const settingsAssistantSkill = useMemo<ComposerSkillItem>(() => (
     resolveSettingsAssistantSkill(composerSkills)
   ), [composerSkills]);
@@ -3653,6 +3758,18 @@ function ChatApp() {
     });
   }
 
+  async function refreshComposerReferenceMemories() {
+    try {
+      const result = await api.listMemoNotes(50);
+      setMemoNotes(Array.isArray(result.notes) ? result.notes : []);
+    } catch (memoryError) {
+      // Memory references are an optional local projection. The composer must
+      // remain usable offline even when the memo surface is unavailable.
+      console.warn("Memory reference catalog is unavailable", memoryError);
+      setMemoNotes([]);
+    }
+  }
+
   useEffect(() => subscribeAuthorityApprovalSettlements((event) => {
     setSettledRuntimeApprovalIds((ids) => (
       ids.includes(event.requestId) ? ids : [...ids, event.requestId].slice(-50)
@@ -3738,7 +3855,10 @@ function ChatApp() {
           return result;
         });
       updateStartupStep("conversations", "loading", "会話とワークスペースを復元しています…");
-      const conversationBootstrap = refreshConversations(null).then(() => {
+      const conversationBootstrap = Promise.all([
+        refreshConversations(null),
+        refreshComposerReferenceMemories(),
+      ]).then(() => {
         updateStartupStep("conversations", "ready", "会話とワークスペースを復元しました");
       });
       try {
@@ -5251,6 +5371,11 @@ function ChatApp() {
             ),
           ];
         });
+        setComposerEntityReferences((current) => mergeComposerReferences(
+          current,
+          [{ kind: "file", id: normalizedPath, syntax: `@${normalizedPath}` }],
+          input,
+        ));
       })
       .catch((readError) => {
         const currentRequest = pendingMentionAttachmentRequestsRef.current.get(
@@ -5341,6 +5466,7 @@ function ChatApp() {
   };
 
   const handleFileRemove = (fileId: string) => {
+    const removedFile = attachedFiles.find((file) => file.id === fileId);
     const remainingFiles = attachedFiles.filter((file) => file.id !== fileId);
     const reconciled = reconcileComposerSemanticDraft({
       attachmentPaths: semanticAttachmentPathsIncludingPending(remainingFiles),
@@ -5350,6 +5476,11 @@ function ChatApp() {
       text: input,
     });
     setAttachedFiles(remainingFiles);
+    if (removedFile?.sourcePath) {
+      setComposerEntityReferences((current) => current.filter((reference) => (
+        reference.kind !== "file" || reference.id !== removedFile.sourcePath
+      )));
+    }
     setDroppedWidgets(reconciled.droppedWidgets);
     setStoredSelectedToolIds(reconciled.selectedToolIds);
   };
@@ -6221,7 +6352,17 @@ function ChatApp() {
       .filter((item) => !droppedWidgetSkillIds.has(item.id))
       .map((item) => composerSkillMentionWidget(item));
     const submittedDroppedWidgets = [...droppedWidgetsForSubmit, ...mentionedToolWidgets, ...mentionedSkillWidgets];
-    const submittedMentions = composerMentionMetadataFromWidgets(submittedDroppedWidgets);
+    const submittedMentionsByIdentity = new Map(
+      composerMentionMetadataFromWidgets(submittedDroppedWidgets)
+        .map((mention) => [`${mention.kind}:${mention.id}`, mention] as const),
+    );
+    for (const mention of composerReferenceMetadata(
+      composerEntityReferences,
+      { items: composerReferenceItems },
+    )) {
+      submittedMentionsByIdentity.set(`${mention.kind}:${mention.id}`, mention);
+    }
+    const submittedMentions = [...submittedMentionsByIdentity.values()];
     const selectedToolLabels = submittedToolIds.map((toolId) => composerToolById.get(toolId)?.label || toolId);
     const activeContextForSubmit = workspaceContextFromConversation(activeConversation);
     const groupIdForSubmit = pendingNewTaskContext?.groupId ?? activeContextForSubmit.groupId;
@@ -6947,6 +7088,7 @@ function ChatApp() {
       inlineExtensions={composerExtensions}
       belowExtensions={[]}
       skillExtensions={composerSkills}
+      referenceItems={composerReferenceItems}
       commands={composerCommands}
       composerInput={composerInputMetadata}
       structuredInputValues={effectiveStructuredComposerValues}

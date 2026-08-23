@@ -1,18 +1,28 @@
-import type { ComposerExtensionItem, ComposerSkillItem } from "../renderers/types";
+import {
+  catalogDisplayAliases,
+  type CatalogDisplayMetadata,
+  type CatalogReferenceKind,
+} from "./catalogDisplay";
 import { hasUnescapedMentionSyntax } from "./mentionContract";
 
 export const COMPOSER_REFERENCE_MIME = "application/x-rumi-composer-references+json";
 
 export type ComposerEntityReference = {
-  kind: "tool" | "skill" | "file";
+  kind: CatalogReferenceKind;
   id: string;
   syntax: string;
 };
 
 type ComposerReferenceCatalog = {
-  tools: ComposerExtensionItem[];
-  skills: ComposerSkillItem[];
-  files?: string[];
+  items: CatalogDisplayMetadata[];
+};
+
+export type ComposerReferenceMetadata = ComposerEntityReference & {
+  label: string;
+  icon?: string;
+  image?: string;
+  risk?: string;
+  status?: string;
 };
 
 type SerializedComposerReference = {
@@ -33,7 +43,12 @@ function referenceKey(reference: Pick<ComposerEntityReference, "kind" | "id">): 
 }
 
 function isReferenceKind(value: unknown): value is ComposerEntityReference["kind"] {
-  return value === "tool" || value === "skill" || value === "file";
+  return value === "tool"
+    || value === "skill"
+    || value === "agent"
+    || value === "file"
+    || value === "memory"
+    || value === "conversation";
 }
 
 function parsePayload(raw: string): ComposerReferenceClipboardPayload | null {
@@ -91,23 +106,17 @@ export function restoreComposerReferences(
 ): { text: string; references: ComposerEntityReference[] } | null {
   const payload = parsePayload(raw);
   if (!payload) return null;
-  const fileIds = new Set(catalog.files ?? []);
   const seen = new Set<string>();
   const references: ComposerEntityReference[] = [];
 
   for (const item of payload.references) {
     const syntax = payload.text.slice(item.start, item.end);
-    const knownSyntaxes = item.kind === "tool"
-      ? catalog.tools
-          .filter((entry) => !entry.disabled && entry.id === item.id)
-          .flatMap((entry) => [`@${entry.id}`, `@${entry.label}`])
-      : item.kind === "skill"
-        ? catalog.skills
-            .filter((entry) => entry.id === item.id)
-            .flatMap((entry) => [`@${entry.id}`, `@${entry.label}`, ...(entry.aliases ?? []).map((alias) => `@${alias}`)])
-        : fileIds.has(item.id)
-          ? [`@${item.id}`]
-          : [];
+    const trustedItem = catalog.items.find((entry) => (
+      entry.kind === item.kind && entry.id === item.id
+    ));
+    const knownSyntaxes = trustedItem
+      ? catalogDisplayAliases(trustedItem).map((alias) => `@${alias}`)
+      : [];
     if (!knownSyntaxes.includes(syntax)) continue;
     const reference = { kind: item.kind, id: item.id, syntax } satisfies ComposerEntityReference;
     const key = referenceKey(reference);
@@ -120,6 +129,14 @@ export function restoreComposerReferences(
 
 function normalizedReferenceId(value: string): string {
   return value.trim().toLowerCase().replace(/[_\s]+/g, "-");
+}
+
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -142,7 +159,10 @@ export function composerReferencesAsMarkdown(
     ));
     if (!reference) continue;
     result += text.slice(cursor, range.start);
-    result += `[${reference.syntax}](plugin://${reference.id})`;
+    const target = reference.kind === "tool" || reference.kind === "skill"
+      ? `plugin://${reference.id}`
+      : `tobkiri-reference://${reference.kind}/${encodeURIComponent(reference.id)}`;
+    result += `[${reference.syntax}](${target})`;
     cursor = range.end;
   }
   return `${result}${text.slice(cursor)}`;
@@ -156,31 +176,46 @@ export function restoreComposerMarkdownReferences(
   raw: string,
   catalog: ComposerReferenceCatalog,
 ): { text: string; references: ComposerEntityReference[] } | null {
-  if (!raw || raw.length > 1_000_000 || !raw.includes("plugin://")) return null;
-  const pattern = /\[(@[^\]\r\n]{1,160})\]\(plugin:\/\/([^)\s"']{1,240})["']?\)/g;
+  if (
+    !raw
+    || raw.length > 1_000_000
+    || (!raw.includes("plugin://") && !raw.includes("tobkiri-reference://"))
+  ) return null;
+  const pattern = /\[(@[^\]\r\n]{1,160})\]\((plugin:\/\/[^)\s"']{1,240}|tobkiri-reference:\/\/[^)\s"']{1,300})["']?\)/g;
   const references: ComposerEntityReference[] = [];
   let text = "";
   let cursor = 0;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(raw)) !== null) {
     const syntax = match[1];
-    const target = decodeURIComponent(match[2]).split("@", 1)[0];
-    const normalizedTarget = normalizedReferenceId(target);
-    const tool = catalog.tools.find((entry) => (
-      !entry.disabled
+    const target = match[2];
+    let requestedKind: CatalogReferenceKind | null = null;
+    let requestedId = "";
+    let targetIsValid = true;
+    if (target.startsWith("plugin://")) {
+      requestedId = safeDecodeURIComponent(target.slice("plugin://".length)).split("@", 1)[0];
+    } else {
+      const typedTarget = target.slice("tobkiri-reference://".length);
+      const separator = typedTarget.indexOf("/");
+      const kind = separator >= 0 ? typedTarget.slice(0, separator) : "";
+      requestedKind = isReferenceKind(kind) ? kind : null;
+      targetIsValid = requestedKind !== null;
+      requestedId = separator >= 0
+        ? safeDecodeURIComponent(typedTarget.slice(separator + 1))
+        : "";
+    }
+    const normalizedTarget = normalizedReferenceId(requestedId);
+    const trustedItem = targetIsValid ? catalog.items.find((entry) => (
+      (!requestedKind || entry.kind === requestedKind)
+      && (requestedKind || entry.kind === "tool" || entry.kind === "skill")
       && normalizedReferenceId(entry.id) === normalizedTarget
-    ));
-    const skill = catalog.skills.find((entry) => (
-      normalizedReferenceId(entry.id) === normalizedTarget
-    ));
-    const file = (catalog.files ?? []).find((entry) => normalizedReferenceId(entry) === normalizedTarget);
-    const reference = tool
-      ? { kind: "tool" as const, id: tool.id, syntax }
-      : skill
-        ? { kind: "skill" as const, id: skill.id, syntax }
-        : file
-          ? { kind: "file" as const, id: file, syntax }
-          : null;
+    )) : undefined;
+    const syntaxIsTrusted = trustedItem
+      ? catalogDisplayAliases(trustedItem).some((alias) => `@${alias}` === syntax)
+      : false;
+    const reference = trustedItem && syntaxIsTrusted
+      ? { kind: trustedItem.kind, id: trustedItem.id, syntax }
+      : null;
     text += raw.slice(cursor, match.index);
     text += syntax;
     if (reference) references.push(reference);
@@ -189,6 +224,31 @@ export function restoreComposerMarkdownReferences(
   if (cursor === 0) return null;
   text += raw.slice(cursor);
   return { text, references };
+}
+
+/** Resolve selected reference identities to current trusted submission metadata. */
+export function composerReferenceMetadata(
+  references: ComposerEntityReference[],
+  catalog: ComposerReferenceCatalog,
+): ComposerReferenceMetadata[] {
+  const metadata: ComposerReferenceMetadata[] = [];
+  const seen = new Set<string>();
+  for (const reference of references) {
+    const key = referenceKey(reference);
+    if (seen.has(key)) continue;
+    const item = catalog.items.find((candidate) => (
+      candidate.kind === reference.kind && candidate.id === reference.id
+    ));
+    if (!item) continue;
+    seen.add(key);
+    metadata.push({
+      id: item.id,
+      kind: item.kind,
+      label: item.label,
+      syntax: reference.syntax,
+    });
+  }
+  return metadata;
 }
 
 export function insertComposerReferencePaste(

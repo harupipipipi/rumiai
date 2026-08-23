@@ -15,6 +15,7 @@ import type { ComposerEntityReference } from "../lib/composerReferences";
 import type { WidgetConversationContext } from "../lib/widgetContext";
 import type { ModelSelectorSchema } from "../features/models";
 import type { ProjectInfo } from "../features/projects/projectStorage";
+import type { CatalogDisplayMetadata } from "../lib/catalogDisplay";
 
 export type { ComposerCommandItem } from "../lib/api";
 
@@ -58,6 +59,8 @@ export type ComposerExtensionItem = {
   description?: string;
   tags?: string[];
   disabled?: boolean;
+  risk?: string | null;
+  status?: string | null;
   ui?: SidebarItem["ui"];
 };
 
@@ -188,6 +191,7 @@ export type ComposerRendererProps = {
   inlineExtensions: ComposerExtensionItem[];
   belowExtensions: ComposerExtensionItem[];
   skillExtensions?: ComposerSkillItem[];
+  referenceItems?: CatalogDisplayMetadata[];
   commands?: ComposerCommandItem[];
   composerInput?: TemplateComposerInput | null;
   structuredInputValues?: Record<string, string>;

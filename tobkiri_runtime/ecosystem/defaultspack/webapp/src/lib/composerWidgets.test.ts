@@ -192,6 +192,7 @@ test("composer skill mentions resolve aliases and create prompt widgets", () => 
     widgetKind: "skill_prompt",
     sourceItemId: "feedback/live-review",
     description: "Require evidence-backed verification.",
+    icon: "brain",
     metadata: {
       source: "composer_at_mention",
       mention: {
@@ -220,17 +221,47 @@ test("composer mention display keeps internal ids out of normal UI", () => {
     category: "tool",
     description: "Read a workspace file.",
   }), {
+    id: "coding_file_read",
+    kind: "tool",
     label: "Read File",
     description: "Read a workspace file.",
+    icon: "wrench",
+    aliases: [],
   });
   assert.deepEqual(composerSkillMentionDisplay({
     id: "feedback/live-review",
     label: "Live Review",
     description: "Require evidence-backed verification.",
   }), {
+    id: "feedback/live-review",
+    kind: "skill",
     label: "Live Review",
     description: "Require evidence-backed verification.",
+    icon: "brain",
+    aliases: [],
   });
+});
+
+test("tools and skills resolve equivalent shared icon and status metadata", () => {
+  const tool = composerToolMentionDisplay({
+    id: "review_tool",
+    label: "Review",
+    risk: "medium",
+    status: "ready",
+    ui: { item_icon: "shared-review" },
+  });
+  const skill = composerSkillMentionDisplay({
+    id: "review_skill",
+    label: "Review",
+    metadata: { icon: "shared-review", risk: "medium", status: "ready" },
+  });
+  assert.deepEqual(
+    [tool, skill].map(({ label, icon, risk, status }) => ({ label, icon, risk, status })),
+    [
+      { label: "Review", icon: "shared-review", risk: "medium", status: "ready" },
+      { label: "Review", icon: "shared-review", risk: "medium", status: "ready" },
+    ],
+  );
 });
 
 test("semantic mention metadata keeps stable ids separate from human labels", () => {

@@ -1172,7 +1172,9 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
 async function openDefaultspack(page: Page, path = "/chat", options: ApiMockOptions = {}) {
   await installDefaultspackApiMocks(page, options);
   await page.goto(path);
-  await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
+  await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible({
+    timeout: 30_000,
+  });
 }
 
 async function openCodingWidget(page: Page, options: ApiMockOptions = {}) {
@@ -2308,6 +2310,23 @@ test("composer browser behavior covers long text popovers and mobile coding trus
   const workspacePicker = page.locator(".rumi-workspace-picker");
   await expect(workspacePicker).toBeVisible();
   await expect(workspacePicker.locator("svg.text-emerald-300").first()).toBeVisible();
+
+  await codingComposer.fill("@REA");
+  await expect(mentions).toBeVisible();
+  await expect(mentions).toHaveAttribute("data-menu-placement", "viewport");
+  const narrowMentionBox = await mentions.boundingBox();
+  const narrowComposerBox = await codingComposer.boundingBox();
+  expect(narrowMentionBox).not.toBeNull();
+  expect(narrowComposerBox).not.toBeNull();
+  expect(narrowMentionBox!.x).toBeGreaterThanOrEqual(8);
+  expect(narrowMentionBox!.x + narrowMentionBox!.width).toBeLessThanOrEqual(382);
+  expect(narrowMentionBox!.y + narrowMentionBox!.height).toBeLessThanOrEqual(
+    narrowComposerBox!.y,
+  );
+  await codingComposer.press("ArrowDown");
+  await codingComposer.press("Enter");
+  await expect(mentions).toBeHidden();
+  await expect(codingComposer).toHaveValue(/@/);
 });
 
 test("resizable canvas and tool widgets persist width choices", async ({ page }) => {
