@@ -12,6 +12,7 @@ import {
   MIMO_CODING_DEFAULT_FAST_MODEL,
   MIMO_CODING_DEFAULT_MODEL,
   MIMO_CODING_DEFAULT_VISION_MODEL,
+  composerCommandAllowedByVisibility,
   frontendCommandArgs,
   keepSelectedToolsAfterSend,
   parseCommandBoolean,
@@ -19,6 +20,7 @@ import {
   resolveMimoCodingModel,
   resolveMimoFastModel,
   resolveMimoVisionModel,
+  resolveFileSearchCommand,
   resolveUltraYoloModeState,
   resolvedFrontendCommandArgs,
 } from "../App";
@@ -39,6 +41,54 @@ function requestTarget(input: RequestInfo | URL): string {
   const separator = operation.indexOf(" ");
   return separator < 0 ? operation : operation.slice(separator + 1);
 }
+
+test("advanced slash command visibility follows the advanced commands toggle", () => {
+  const filesCommand: ComposerCommandItem = {
+    id: "files",
+    name: "files",
+    label: "Files",
+    description: "Search workspace files.",
+    category: "coding",
+    visibility: "advanced",
+    risk: "low",
+    modes: ["coding"],
+    args: [{ name: "query", type: "string", required: false }],
+    execution: { type: "frontend", action: "open_file_search" },
+  };
+  const defaultCommand: ComposerCommandItem = {
+    ...filesCommand,
+    id: "chat",
+    name: "chat",
+    visibility: "default",
+  };
+  const hiddenCommand: ComposerCommandItem = {
+    ...filesCommand,
+    id: "commit",
+    name: "commit",
+    visibility: "hidden",
+  };
+
+  assert.equal(composerCommandAllowedByVisibility(filesCommand, false), false);
+  assert.equal(composerCommandAllowedByVisibility(filesCommand, true), true);
+  assert.equal(composerCommandAllowedByVisibility(defaultCommand, false), true);
+  assert.equal(composerCommandAllowedByVisibility(hiddenCommand, true), false);
+});
+
+test("/files without a query leaves visible feedback and a searchable prompt", () => {
+  assert.deepEqual(resolveFileSearchCommand({}), {
+    input: "Find workspace files. Type a file name or path after /files, for example /files README.",
+    feedback: "Type a file name or path after /files, for example /files README.",
+    shouldClearInput: false,
+  });
+});
+
+test("/files with a query keeps the existing workspace file search prompt", () => {
+  assert.deepEqual(resolveFileSearchCommand({ query: "  README  " }), {
+    input: "Find workspace files matching README.",
+    feedback: null,
+    shouldClearInput: false,
+  });
+});
 
 test("command event stream reconnects after fetch failure", async () => {
   const originalFetch = globalThis.fetch;
