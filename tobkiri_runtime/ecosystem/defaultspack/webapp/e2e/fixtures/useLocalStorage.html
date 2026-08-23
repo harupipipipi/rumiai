@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tobkiri storage probe</title>
+  </head>
+  <body>
+    <main>
+      <h1>Tobkiri storage probe</h1>
+      <div id="root"></div>
+    </main>
+    <script type="module">
+      import { createElement } from "react";
+      import { createRoot } from "react-dom/client";
+      import { useLocalStorage } from "../../src/lib/useLocalStorage";
+
+      function StorageProbe() {
+        const [value, setValue] = useLocalStorage("rumi-input", "");
+        return createElement("input", {
+          "aria-label": "Storage persistence probe",
+          value,
+          onChange: (event) => setValue(event.target.value),
+        });
+      }
+
+      createRoot(document.getElementById("root")).render(
+        createElement(StorageProbe),
+      );
+    </script>
+  </body>
+</html>

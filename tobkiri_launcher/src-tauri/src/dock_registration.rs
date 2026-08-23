@@ -2,6 +2,7 @@
 
 use std::ffi::OsString;
 use std::fs;
+use std::io::{Read, Write};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
@@ -14,6 +15,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result as AnyResult};
 use log::{error, info, warn};
+use rand::{distributions::Alphanumeric, Rng};
 use serde_json::json;
 use serde_json::Value;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
@@ -819,15 +821,13 @@ fn read_desktop_api_token_from_config(config: &AppConfig) -> AnyResult<String> {
     if saw_hmac_store && encrypted_store_error.is_some() {
         match read_saved_desktop_api_token(&token_path) {
             Ok(token) => {
-                info!(
-                    "active HMAC store is encrypted; using the Kernel-managed desktop token cache"
-                );
+                info!("active HMAC store is encrypted; using the Launcher-owned guardian token");
                 return Ok(token);
             }
             Err(cache_error) => {
                 return Err(cache_error).with_context(|| {
                     format!(
-                        "active HMAC store is encrypted and the Kernel-managed desktop token cache is unavailable at {}",
+                        "active HMAC store is encrypted and the Launcher-owned guardian token is unavailable at {}",
                         token_path.display()
                     )
                 });
@@ -836,16 +836,33 @@ fn read_desktop_api_token_from_config(config: &AppConfig) -> AnyResult<String> {
     }
 
     if !saw_hmac_store {
-        if let Ok(token) = read_saved_desktop_api_token(&token_path) {
-            info!(
-                "read_desktop_api_token_from_config: no HMAC store yet; using Kernel-managed desktop token cache"
-            );
-            return Ok(token);
+        // Pack API v4 deliberately does not project a Kernel HMAC token. The
+        // Launcher owns this loopback guardian and its bearer credential,
+        // which is passed to the child only through the trusted host contract.
+        // This credential does not authorize or revive the Kernel API.
+        match read_saved_desktop_api_token(&token_path) {
+            Ok(token) => {
+                info!(
+                    "read_desktop_api_token_from_config: no HMAC store; using Launcher-owned guardian token"
+                );
+                return Ok(token);
+            }
+            Err(error) if token_path.exists() => {
+                return Err(error)
+                    .context("Launcher-owned Defaultspack guardian token is unreadable");
+            }
+            Err(_) => {
+                let token = generate_desktop_api_token();
+                persist_desktop_api_token(config, &token)
+                    .context("failed to create Launcher-owned Defaultspack guardian token")?;
+                info!("read_desktop_api_token_from_config: created Launcher-owned guardian token");
+                return Ok(token);
+            }
         }
     }
 
     bail!(
-        "local auth token is not configured (checked {}, {}, and {}). Start or restart the Kernel first.",
+        "local auth token is not configured (checked {}, {}, and {})",
         candidates[0].display(),
         candidates[1].display(),
         token_path.display()
@@ -853,7 +870,9 @@ fn read_desktop_api_token_from_config(config: &AppConfig) -> AnyResult<String> {
 }
 
 fn read_saved_desktop_api_token(token_path: &Path) -> AnyResult<String> {
-    let token = fs::read_to_string(token_path)
+    let mut file = secure_desktop_api_token_reader(token_path)?;
+    let mut token = String::new();
+    file.read_to_string(&mut token)
         .with_context(|| format!("failed to read {}", token_path.display()))?;
     let token = token.trim().to_string();
     if token.is_empty() {
@@ -862,17 +881,131 @@ fn read_saved_desktop_api_token(token_path: &Path) -> AnyResult<String> {
     Ok(token)
 }
 
+fn generate_desktop_api_token() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(64)
+        .map(char::from)
+        .collect()
+}
+
+#[cfg(unix)]
+fn secure_desktop_api_token_reader(token_path: &Path) -> AnyResult<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(token_path)
+        .with_context(|| {
+            format!(
+                "failed to securely open Launcher-owned Defaultspack guardian token at {}",
+                token_path.display()
+            )
+        })?;
+    let metadata = file.metadata().with_context(|| {
+        format!(
+            "failed to inspect Launcher-owned Defaultspack guardian token at {}",
+            token_path.display()
+        )
+    })?;
+    if !metadata.is_file() {
+        bail!(
+            "Launcher-owned Defaultspack guardian token is not a regular file at {}",
+            token_path.display()
+        );
+    }
+    if metadata.permissions().mode() & 0o077 != 0 {
+        file.set_permissions(fs::Permissions::from_mode(0o600))
+            .with_context(|| {
+                format!(
+                    "failed to restrict Launcher-owned Defaultspack guardian token permissions at {}",
+                    token_path.display()
+                )
+            })?;
+    }
+    Ok(file)
+}
+
+#[cfg(not(unix))]
+fn secure_desktop_api_token_reader(token_path: &Path) -> AnyResult<fs::File> {
+    fs::File::open(token_path).with_context(|| {
+        format!(
+            "failed to open Launcher-owned Defaultspack guardian token at {}",
+            token_path.display()
+        )
+    })
+}
+
+#[cfg(unix)]
+fn secure_desktop_api_token_file(token_path: &Path) -> AnyResult<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    match fs::symlink_metadata(token_path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            bail!(
+                "refusing to overwrite symlinked Launcher-owned Defaultspack guardian token at {}",
+                token_path.display()
+            );
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to inspect Launcher-owned Defaultspack guardian token before writing at {}",
+                    token_path.display()
+                )
+            });
+        }
+    }
+
+    fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(token_path)
+        .with_context(|| {
+            format!(
+                "failed to securely open Launcher-owned Defaultspack guardian token at {}",
+                token_path.display()
+            )
+        })
+}
+
+#[cfg(not(unix))]
+fn secure_desktop_api_token_file(token_path: &Path) -> AnyResult<fs::File> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(token_path)
+        .with_context(|| {
+            format!(
+                "failed to open Launcher-owned Defaultspack guardian token at {}",
+                token_path.display()
+            )
+        })
+}
+
 fn persist_desktop_api_token(config: &AppConfig, api_token: &str) -> AnyResult<PathBuf> {
     let token_path = config.desktop_api_token_path();
     if let Some(parent) = token_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(&token_path, api_token)
-        .with_context(|| format!("failed to write token to {}", token_path.display()))?;
+    let mut file = secure_desktop_api_token_file(&token_path)?;
     #[cfg(unix)]
-    {
-        let _ = fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600));
-    }
+    file.set_permissions(fs::Permissions::from_mode(0o600))
+        .with_context(|| {
+            format!(
+                "failed to restrict Launcher-owned Defaultspack guardian token permissions at {}",
+                token_path.display()
+            )
+        })?;
+    file.write_all(api_token.as_bytes())
+        .with_context(|| format!("failed to write token to {}", token_path.display()))?;
     info!("Desktop API token saved to {}", token_path.display());
     Ok(token_path)
 }
@@ -1210,7 +1343,7 @@ mod tests {
     }
 
     #[test]
-    fn config_token_uses_kernel_cache_only_for_encrypted_hmac_store() {
+    fn config_token_uses_launcher_guardian_cache_for_encrypted_hmac_store() {
         let root =
             std::env::temp_dir().join(format!("rumi_dock_encrypted_token_{}", std::process::id()));
         let config = test_config(&root);
@@ -1225,6 +1358,84 @@ mod tests {
         let token = read_desktop_api_token_from_config(&config).unwrap();
 
         assert_eq!(token, "kernel-cache-token");
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn config_token_creates_and_reuses_launcher_guardian_token_on_clean_boot() {
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri_dock_clean_boot_token_{}",
+            std::process::id()
+        ));
+        fs::remove_dir_all(&root).ok();
+        let config = test_config(&root);
+
+        let created = read_desktop_api_token_from_config(&config).unwrap();
+        let reused = read_desktop_api_token_from_config(&config).unwrap();
+
+        assert_eq!(created.len(), 64);
+        assert!(created
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric()));
+        assert_eq!(reused, created);
+        assert_eq!(
+            fs::read_to_string(config.desktop_api_token_path()).unwrap(),
+            created
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            fs::metadata(config.desktop_api_token_path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn config_token_does_not_replace_missing_cache_for_encrypted_hmac_store() {
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri_dock_encrypted_without_cache_{}",
+            std::process::id()
+        ));
+        fs::remove_dir_all(&root).ok();
+        let config = test_config(&root);
+        fs::create_dir_all(&config.user_data_dir).unwrap();
+        fs::write(
+            config.user_data_dir.join("hmac_keys.json"),
+            r#"{"version":"1.0","encryption":"fernet","payload":"abc"}"#,
+        )
+        .unwrap();
+
+        let error = read_desktop_api_token_from_config(&config).unwrap_err();
+
+        assert!(error.to_string().contains("guardian token is unavailable"));
+        assert!(!config.desktop_api_token_path().exists());
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_token_rejects_symlinked_launcher_guardian_token() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri_dock_symlinked_token_{}",
+            std::process::id()
+        ));
+        fs::remove_dir_all(&root).ok();
+        let config = test_config(&root);
+        fs::create_dir_all(config.user_data_dir.parent().unwrap()).unwrap();
+        let foreign = root.join("foreign-token");
+        fs::write(&foreign, "foreign-secret").unwrap();
+        symlink(&foreign, config.desktop_api_token_path()).unwrap();
+
+        let error = read_desktop_api_token_from_config(&config).unwrap_err();
+
+        assert!(format!("{error:#}").contains("securely open"));
+        assert_eq!(fs::read_to_string(&foreign).unwrap(), "foreign-secret");
         fs::remove_dir_all(&root).ok();
     }
 
