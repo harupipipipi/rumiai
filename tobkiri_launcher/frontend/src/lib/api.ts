@@ -50,6 +50,10 @@ const API_BASE_URL =
   (import.meta as ImportMeta & {env?: Record<string, string>}).env?.VITE_API_BASE_URL ?? '';
 const PANEL_CSRF_STORAGE_KEY = 'rumi-panel-csrf';
 const PANEL_AUTH_EXCHANGE_PATH = '/api/panel/auth/exchange';
+const PANEL_SESSION_REOPEN_MESSAGE =
+  'Panel authentication expired. Reopen this panel from Tobkiri Launcher to authenticate again.';
+const PANEL_SESSION_RENEWAL_FAILED_MESSAGE =
+  'Tobkiri Launcher could not renew panel authentication. Reopen the panel and try again.';
 export type FrontendContractMethod = 'GET' | 'POST';
 
 const EXACT_NON_MAP_API_ROUTES = [
@@ -77,9 +81,9 @@ const EXACT_PACKVM_LIFECYCLE_PATHS = new Set([
   '/api/v4/packvm/stop',
   '/api/v4/packvm/cleanup',
 ]);
-let panelBootstrapPromise: Promise<void> | null = null;
-let panelBootstrapCodeInFlight: string | null = null;
+let panelBootstrapPromise: Promise<boolean> | null = null;
 let panelSessionRecoveryPromise: Promise<boolean> | null = null;
+let panelSessionGeneration = 0;
 const getRequestCoordinator = new GetRequestCoordinator();
 const FOREGROUND_GET_TIMEOUT_MS = 10_000;
 const MUTATION_TIMEOUT_MS = 10_000;
@@ -98,6 +102,16 @@ export class ApiContractError extends Error {
     super(message);
     this.name = 'ApiContractError';
     this.data = data;
+  }
+}
+
+class PanelBootstrapExchangeError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'PanelBootstrapExchangeError';
+    this.status = status;
   }
 }
 
@@ -399,44 +413,66 @@ export function hasPendingPanelBootstrapCode(href = window.location.href): boole
   return new URL(href).searchParams.has('code');
 }
 
+/** Remove rejected one-time authentication state without creating history. */
+function scrubPanelBootstrapCode(code?: string): void {
+  const url = new URL(window.location.href);
+  if (code !== undefined && url.searchParams.get('code') !== code) return;
+  if (!url.searchParams.has('code')) return;
+  url.searchParams.delete('code');
+  window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+}
+
+function redactedPanelBootstrapError(error: unknown, code: string): PanelBootstrapExchangeError {
+  const message = error instanceof Error ? error.message : String(error);
+  const status = error instanceof PanelBootstrapExchangeError ? error.status : 0;
+  return new PanelBootstrapExchangeError(message.replaceAll(code, '[redacted]'), status);
+}
+
 async function exchangePanelBootstrapCode(
   code: string,
   currentRequestSignal?: AbortSignal,
 ): Promise<void> {
-  const url = new URL(window.location.href);
   if (!code) return;
 
-  const response = await fetch(`${API_BASE_URL}${PANEL_AUTH_EXCHANGE_PATH}`, {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({code}),
-  });
+  try {
+    const response = await fetch(`${API_BASE_URL}${PANEL_AUTH_EXCHANGE_PATH}`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({code}),
+    });
 
-  if (!response.ok) {
-    let errorMessage = `Panel bootstrap failed: ${response.status} ${response.statusText}`;
-    try {
-      const errorBody: ApiResponse<unknown> = await response.json();
-      if (errorBody.error) errorMessage = errorBody.error;
-    } catch (error) {
-      recordClientDiagnostic({
-        code: 'panel.bootstrap.error_envelope_unavailable',
-        operation: 'panel.bootstrap.exchange',
-        error,
-      });
+    if (!response.ok) {
+      let errorMessage = `Panel bootstrap failed: ${response.status} ${response.statusText}`;
+      try {
+        const errorBody: ApiResponse<unknown> = await response.json();
+        if (errorBody.error) errorMessage = errorBody.error;
+      } catch (error) {
+        recordClientDiagnostic({
+          code: 'panel.bootstrap.error_envelope_unavailable',
+          operation: 'panel.bootstrap.exchange',
+          error,
+        });
+      }
+      throw new PanelBootstrapExchangeError(errorMessage, response.status);
     }
-    throw new Error(errorMessage);
-  }
 
-  const envelope: ApiResponse<{csrf_token: string}> = await response.json();
-  if (!envelope.success || !envelope.data?.csrf_token) {
-    throw new Error(envelope.error || 'Panel bootstrap failed');
-  }
+    const envelope: ApiResponse<{csrf_token: string}> = await response.json();
+    if (!envelope.success || !envelope.data?.csrf_token) {
+      throw new PanelBootstrapExchangeError(
+        envelope.error || 'Panel bootstrap failed',
+        response.status,
+      );
+    }
 
-  setStoredPanelCsrfToken(envelope.data.csrf_token);
-  getRequestCoordinator.invalidate({preserveSignal: currentRequestSignal});
-  url.searchParams.delete('code');
-  window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+    setStoredPanelCsrfToken(envelope.data.csrf_token);
+    panelSessionGeneration += 1;
+    getRequestCoordinator.invalidate({preserveSignal: currentRequestSignal});
+    scrubPanelBootstrapCode(code);
+  } catch (error) {
+    scrubPanelBootstrapCode(code);
+    throw redactedPanelBootstrapError(error, code);
+  }
 }
 
 function getTauriInvoke(): TauriInvoke | null {
@@ -558,15 +594,14 @@ async function recoverExpiredPanelSession(currentRequestSignal?: AbortSignal): P
   if (panelSessionRecoveryPromise) return panelSessionRecoveryPromise;
 
   panelSessionRecoveryPromise = (async () => {
-    if (hasPendingPanelBootstrapCode()) {
-      await bootstrapPanelSession(currentRequestSignal);
+    try {
+      const code = await requestDesktopPanelBootstrapCode();
+      if (!code) return false;
+      await exchangePanelBootstrapCode(code, currentRequestSignal);
       return true;
+    } catch {
+      throw new Error(PANEL_SESSION_RENEWAL_FAILED_MESSAGE);
     }
-
-    const code = await requestDesktopPanelBootstrapCode();
-    if (!code) return false;
-    await exchangePanelBootstrapCode(code, currentRequestSignal);
-    return true;
   })();
 
   try {
@@ -576,22 +611,38 @@ async function recoverExpiredPanelSession(currentRequestSignal?: AbortSignal): P
   }
 }
 
-export async function bootstrapPanelSession(currentRequestSignal?: AbortSignal): Promise<void> {
+export async function bootstrapPanelSession(
+  currentRequestSignal?: AbortSignal,
+): Promise<boolean> {
   const url = new URL(window.location.href);
-  const code = url.searchParams.get('code');
-  if (!code) return;
-
-  if (panelBootstrapPromise && panelBootstrapCodeInFlight === code) {
-    return panelBootstrapPromise;
+  if (!url.searchParams.has('code')) return false;
+  const code = url.searchParams.get('code') ?? '';
+  if (!code) {
+    scrubPanelBootstrapCode();
+    return false;
   }
 
-  panelBootstrapCodeInFlight = code;
-  panelBootstrapPromise = exchangePanelBootstrapCode(code, currentRequestSignal);
+  if (panelBootstrapPromise) return panelBootstrapPromise;
+
+  panelBootstrapPromise = (async () => {
+    try {
+      await exchangePanelBootstrapCode(code, currentRequestSignal);
+      return false;
+    } catch (error) {
+      if (
+        !(error instanceof PanelBootstrapExchangeError)
+        || !isRecoverablePanelAuthError(error.status, error.message)
+      ) {
+        throw error;
+      }
+      if (await recoverExpiredPanelSession(currentRequestSignal)) return true;
+      throw new Error(PANEL_SESSION_REOPEN_MESSAGE);
+    }
+  })();
   try {
-    await panelBootstrapPromise;
+    return await panelBootstrapPromise;
   } finally {
     panelBootstrapPromise = null;
-    panelBootstrapCodeInFlight = null;
   }
 }
 
@@ -599,12 +650,15 @@ async function ensurePanelSessionForRequest(
   path: string,
   method: string,
   currentRequestSignal?: AbortSignal,
-): Promise<void> {
-  if (!isPanelSessionApiPath(path)) return;
-  if (!isUnsafeMethod(method) && !hasPendingPanelBootstrapCode() && !panelBootstrapPromise) return;
-  if (panelBootstrapPromise || hasPendingPanelBootstrapCode()) {
-    await bootstrapPanelSession(currentRequestSignal);
+): Promise<boolean> {
+  if (!isPanelSessionApiPath(path)) return false;
+  if (!isUnsafeMethod(method) && !hasPendingPanelBootstrapCode() && !panelBootstrapPromise) {
+    return false;
   }
+  if (panelBootstrapPromise || hasPendingPanelBootstrapCode()) {
+    return bootstrapPanelSession(currentRequestSignal);
+  }
+  return false;
 }
 
 export interface ApiRequestPolicy {
@@ -632,7 +686,8 @@ export async function apiFetch<T>(
     allowPanelRecovery = true,
     signal?: AbortSignal,
   ): Promise<T> => {
-    await ensurePanelSessionForRequest(path, method, signal);
+    const recoveredBeforeRequest = await ensurePanelSessionForRequest(path, method, signal);
+    const requestSessionGeneration = panelSessionGeneration;
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -673,10 +728,16 @@ export async function apiFetch<T>(
       if (
         allowPanelRecovery &&
         isPanelSessionApiPath(path) &&
-        isRecoverablePanelAuthError(response.status, errorMessage) &&
-        await recoverExpiredPanelSession(signal)
+        isRecoverablePanelAuthError(response.status, errorMessage)
       ) {
-        return fetchRequest(false, signal);
+        if (recoveredBeforeRequest) {
+          throw new ApiContractError(PANEL_SESSION_RENEWAL_FAILED_MESSAGE, errorData);
+        }
+        if (requestSessionGeneration !== panelSessionGeneration) {
+          return fetchRequest(false, signal);
+        }
+        if (await recoverExpiredPanelSession(signal)) return fetchRequest(false, signal);
+        throw new ApiContractError(PANEL_SESSION_REOPEN_MESSAGE, errorData);
       }
       throw new ApiContractError(errorMessage, errorData);
     }
@@ -687,10 +748,16 @@ export async function apiFetch<T>(
       if (
         allowPanelRecovery &&
         isPanelSessionApiPath(path) &&
-        isRecoverablePanelAuthError(response.status, errorMessage) &&
-        await recoverExpiredPanelSession(signal)
+        isRecoverablePanelAuthError(response.status, errorMessage)
       ) {
-        return fetchRequest(false, signal);
+        if (recoveredBeforeRequest) {
+          throw new ApiContractError(PANEL_SESSION_RENEWAL_FAILED_MESSAGE, envelope.data);
+        }
+        if (requestSessionGeneration !== panelSessionGeneration) {
+          return fetchRequest(false, signal);
+        }
+        if (await recoverExpiredPanelSession(signal)) return fetchRequest(false, signal);
+        throw new ApiContractError(PANEL_SESSION_REOPEN_MESSAGE, envelope.data);
       }
       throw new ApiContractError(errorMessage, envelope.data);
     }

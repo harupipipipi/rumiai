@@ -1797,14 +1797,60 @@ class PackAPIHandler(
 
     def _serve_panel_bootstrap_page(self) -> None:
         document = b"""<!doctype html><meta charset=\"utf-8\"><title>Tobkiri</title>
+<body><p id="message" role="status" aria-live="polite">Authenticating with Tobkiri Launcher\xe2\x80\xa6</p>
 <script>
-const code=new URL(location.href).searchParams.get('code');
-if(!code){document.body.textContent='Tobkiri Launcher authentication required';}
-else fetch('/api/panel/auth/exchange',{method:'POST',credentials:'same-origin',
-headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
-.then(r=>{if(!r.ok)throw new Error('authentication failed');return r.json()})
-.then(v=>{sessionStorage.setItem('rumi-panel-csrf',v.data.csrf_token);location.replace('/panel/')})
-.catch(()=>{document.body.textContent='Tobkiri Launcher authentication failed';});
+const message=document.getElementById('message');
+const url=new URL(location.href);
+const code=url.searchParams.get('code');
+const scrubCode=(expected)=>{
+  if(expected!==undefined&&url.searchParams.get('code')!==expected)return;
+  if(!url.searchParams.has('code'))return;
+  url.searchParams.delete('code');
+  history.replaceState({},document.title,url.pathname+url.search+url.hash);
+};
+const exchange=async(oneTimeCode)=>{
+  const response=await fetch('/api/panel/auth/exchange',{
+    method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({code:oneTimeCode})
+  });
+  const envelope=await response.json().catch(()=>({}));
+  if(!response.ok||!envelope.success||!envelope.data||!envelope.data.csrf_token){
+    const error=new Error('authentication failed');
+    error.status=response.status;
+    throw error;
+  }
+  return envelope.data.csrf_token;
+};
+const fail=()=>{
+  scrubCode(code);
+  message.setAttribute('role','alert');
+  message.textContent='Authentication failed. Reopen this panel from Tobkiri Launcher.';
+};
+if(!code){
+  fail();
+}else void(async()=>{
+  try{
+    let csrfToken;
+    try{
+      csrfToken=await exchange(code);
+    }catch(initialError){
+      scrubCode(code);
+      const invoke=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;
+      if(!initialError||initialError.status!==401||typeof invoke!=='function')throw initialError;
+      message.textContent='Renewing Tobkiri Launcher authentication\xe2\x80\xa6';
+      const replacementCode=await invoke('reauthorize_panel_session');
+      if(typeof replacementCode!=='string'||!replacementCode){
+        throw new Error('authentication renewal failed');
+      }
+      csrfToken=await exchange(replacementCode);
+    }
+    sessionStorage.setItem('rumi-panel-csrf',csrfToken);
+    scrubCode();
+    location.reload();
+  }catch(_error){
+    fail();
+  }
+})();
 </script>"""
         try:
             self.send_response(200)

@@ -1359,6 +1359,28 @@ def test_panel_bootstrap_rejects_wrong_secret(
     assert status == 401
 
 
+def test_public_panel_bootstrap_recovers_one_expired_code_without_leaking_it(
+    live_server: tuple[PackAPIServer, _Dispatch],
+) -> None:
+    server, _ = live_server
+    connection = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
+    connection.request("GET", "/panel/?code=expired-test-code")
+    response = connection.getresponse()
+    html = response.read().decode("utf-8")
+    connection.close()
+
+    assert response.status == 200
+    assert "reauthorize_panel_session" in html
+    assert "history.replaceState" in html
+    assert "url.searchParams.delete('code')" in html
+    assert "initialError.status!==401" in html
+    assert "location.reload()" in html
+    assert "role=\"status\" aria-live=\"polite\"" in html
+    assert "message.setAttribute('role','alert')" in html
+    assert "Reopen this panel from Tobkiri Launcher" in html
+    assert "envelope.error" not in html
+
+
 def test_panel_exchange_rejects_foreign_origin(
     live_server: tuple[PackAPIServer, _Dispatch],
 ) -> None:
