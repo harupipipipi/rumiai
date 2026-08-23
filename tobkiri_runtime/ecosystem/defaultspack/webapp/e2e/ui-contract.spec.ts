@@ -89,12 +89,17 @@ test("keeps the startup boundary until slash commands and mention sources are re
 
 type ApiMockOptions = {
   beforeCommandCatalogResponse?: () => Promise<void> | void;
+  beforeStreamResponse?: () => Promise<void> | void;
   beforeWorkspaceFileReadResponse?: (payload: Record<string, unknown>) => Promise<void> | void;
+  initialStoredMode?: unknown;
   initialSettingsValues?: Record<string, Record<string, unknown>>;
   onConversationCreate?: (payload: Record<string, unknown>) => void;
   onStreamRequest?: (payload: Record<string, unknown>) => void;
+  persistStreamResponse?: boolean;
   streamEvents?: (message: Record<string, unknown>) => Record<string, unknown>[];
   conversationMutator?: (conversation: ReturnType<typeof smokeConversation>) => void;
+  secondaryConversationMutator?: (conversation: ReturnType<typeof smokeConversation>) => void;
+  failedConversationIds?: string[];
   onApprovalDecision?: (decision: "approve" | "deny", payload: Record<string, unknown>) => void;
   codingApprovalAfterTerminal?: boolean;
   codingApprovalAfterRestore?: boolean;
@@ -567,10 +572,13 @@ async function fulfillStreamEvents(route: Route, events: Record<string, unknown>
 }
 
 async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions = {}) {
-  await page.addInitScript(() => {
+  await page.addInitScript((initialStoredMode) => {
     localStorage.clear();
     sessionStorage.clear();
-  });
+    if (initialStoredMode !== null) {
+      localStorage.setItem("rumi-app-mode", JSON.stringify(initialStoredMode));
+    }
+  }, options.initialStoredMode ?? null);
   await page.addInitScript(() => {
     Object.defineProperty(window, "__TAURI__", {
       configurable: true,
@@ -623,6 +631,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
   const mcpServers = [
     { server_id: "filesystem", name: "Filesystem MCP", transport: "stdio", connected: true, permissions: { approved: true }, tools: ["mcp_fs_read_file"] },
   ];
+  let persistedStreamMessage: Record<string, unknown> | null = null;
 
   await page.route("**/api/contracts/defaultspack/**", async (route) => {
     const request = route.request();
@@ -631,6 +640,13 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     const method = request.method();
     const conversation = smokeConversation();
     options.conversationMutator?.(conversation);
+    const secondaryConversation = smokeConversation();
+    secondaryConversation.id = "c-secondary";
+    secondaryConversation.title = "Secondary Conversation";
+    options.secondaryConversationMutator?.(secondaryConversation);
+    if (persistedStreamMessage) {
+      (conversation.messages as Record<string, unknown>[]).push(persistedStreamMessage);
+    }
     const conversationMessages = conversation.messages as Array<{ events?: Record<string, unknown>[] }>;
     for (const message of conversationMessages) {
       if (!message.events) continue;
@@ -839,7 +855,14 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     }
 
     if (path === routeKey("api/chat/conversations") && method === "GET") {
-      return fulfill(route, { conversations: [{ ...conversation, messages: [] }], total: 1 });
+      const listedConversations = [{ ...conversation, messages: [] }];
+      if (options.secondaryConversationMutator) {
+        listedConversations.push({ ...secondaryConversation, messages: [] });
+      }
+      return fulfill(route, {
+        conversations: listedConversations,
+        total: listedConversations.length,
+      });
     }
 
     if (path === routeKey("api/chat/conversations") && method === "POST") {
@@ -857,6 +880,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     if (path === routeKey("api/chat/conversations/c-smoke/stream") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       options.onStreamRequest?.(payload);
+      await options.beforeStreamResponse?.();
       const message = {
         id: "m-assistant-streamed",
         role: "assistant",
@@ -878,11 +902,26 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       if (options.streamEvents) {
         return fulfillStreamEvents(route, options.streamEvents(message));
       }
+      if (options.persistStreamResponse) persistedStreamMessage = message;
       return fulfillStream(route, message);
     }
 
     if (path === routeKey("api/chat/conversations/c-smoke")) {
       return fulfill(route, conversation);
+    }
+
+    for (const failedConversationId of options.failedConversationIds ?? []) {
+      if (path === routeKey(`api/chat/conversations/${failedConversationId}`)) {
+        return route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ status: "error", message: "Fixture conversation load failed." }),
+        });
+      }
+    }
+
+    if (options.secondaryConversationMutator && path === routeKey("api/chat/conversations/c-secondary")) {
+      return fulfill(route, secondaryConversation);
     }
 
     if ((path === routeKey("api/conversations/c-smoke/tool-preferences") || path === routeKey("api/chat/conversations/c-smoke/tool-preferences")) && method === "PUT") {
@@ -1187,6 +1226,184 @@ async function openCodingWidget(page: Page, options: ApiMockOptions = {}) {
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
 }
 
+async function openIssue574Chat(page: Page, options: ApiMockOptions = {}) {
+  await installDefaultspackApiMocks(page, options);
+  await page.goto("/chat?chat=c-smoke");
+  await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator("textarea.rumi-composer-textarea")).toBeVisible();
+}
+
+test("plain chat rejects stale coding state across route changes, drafts, sending, mobile, and keyboard", async ({ page }) => {
+  test.slow();
+  let releaseStream: (() => void) | undefined;
+  let markStreamStarted: (() => void) | undefined;
+  const streamGate = new Promise<void>((resolve) => {
+    releaseStream = resolve;
+  });
+  const streamStarted = new Promise<void>((resolve) => {
+    markStreamStarted = resolve;
+  });
+  let streamRequest: Record<string, unknown> | null = null;
+  await openIssue574Chat(page, {
+    initialStoredMode: "coding",
+    conversationMutator: (conversation) => {
+      conversation.conversation_kind = "chat";
+      conversation.tags = [];
+      conversation.metadata = {
+        mode: "agent",
+        workspace_id: "stale-workspace",
+        workspace_root: "/stale/workspace",
+      };
+    },
+    onStreamRequest: (payload) => {
+      streamRequest = payload;
+      markStreamStarted?.();
+    },
+    beforeStreamResponse: () => streamGate,
+    persistStreamResponse: true,
+  });
+  const composer = page.locator("textarea.rumi-composer-textarea");
+  const modelButton = page.locator('[data-composer-widget="model-picker"] button').first();
+  await expect(page.locator(".rumi-workspace-picker")).toHaveCount(0);
+  await expect(modelButton).toBeVisible();
+  await expect(modelButton).toContainText("Stub Default");
+  await expect(composer).not.toHaveAttribute("placeholder", /変更したい内容/);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(modelButton).toBeHidden();
+
+  await composer.fill("draft survives route restoration");
+  await page.evaluate(() => {
+    window.history.pushState({}, "", "/coding?chat=c-smoke");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await expect(page).toHaveURL(/\/coding\?chat=c-smoke/);
+  await expect(page.getByRole("complementary", { name: "Coding widget" })).toBeVisible({ timeout: 20_000 });
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/chat\?chat=c-smoke/);
+  await expect(page.locator(".rumi-workspace-picker")).toHaveCount(0);
+  await expect(composer).toHaveValue("draft survives route restoration");
+
+  await expect(modelButton).toHaveAttribute("aria-label", /Stub Default/);
+  await composer.focus();
+  await expect(composer).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(composer).not.toBeFocused();
+
+  await composer.fill("send from plain chat");
+  await composer.press("Enter");
+  await streamStarted;
+  expect(streamRequest).not.toBeNull();
+  expect((streamRequest?.tool_policy as Record<string, unknown> | undefined)?.workspace_id).toBeUndefined();
+  expect((streamRequest?.metadata as Record<string, unknown> | undefined)?.workspace_id).toBeUndefined();
+  await expect(page.locator(".rumi-workspace-picker")).toHaveCount(0);
+  await expect(modelButton).toContainText("Stub Default");
+  releaseStream?.();
+  await expect(page.getByText("Structured response accepted.")).toBeVisible();
+});
+
+test("conversation switches, reload, and load failures cannot restore stale coding chrome", async ({ page }) => {
+  test.slow();
+  await openIssue574Chat(page, {
+    initialStoredMode: "coding",
+    conversationMutator: (conversation) => {
+      conversation.conversation_kind = "chat";
+      conversation.tags = [];
+      conversation.metadata = { mode: "agent" };
+    },
+    secondaryConversationMutator: (conversation) => {
+      conversation.conversation_kind = "coding";
+      conversation.tags = ["coding"];
+      conversation.metadata = { mode: "coding", workspace_id: "workspace-secondary" };
+    },
+    failedConversationIds: ["c-missing"],
+  });
+
+  await page.evaluate(() => {
+    window.history.pushState({}, "", "/chat?chat=c-secondary");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await expect(page.getByText("Secondary Conversation").first()).toBeVisible();
+  await expect(page.locator(".rumi-workspace-picker")).toBeVisible({ timeout: 20_000 });
+
+  await page.evaluate(() => {
+    window.history.pushState({}, "", "/chat?chat=c-smoke");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
+  await expect(page.locator(".rumi-workspace-picker")).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator(".rumi-workspace-picker")).toHaveCount(0);
+
+  await page.evaluate(() => {
+    window.history.pushState({}, "", "/chat?chat=c-missing");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await expect(page.locator(".rumi-workspace-picker")).toHaveCount(0);
+  await expect(page.locator("textarea.rumi-composer-textarea")).not.toHaveAttribute("placeholder", /変更したい内容/);
+});
+
+test("interrupted plain-chat streams restore the editable draft without coding context", async ({ page }) => {
+  test.slow();
+  let streamRequest: Record<string, unknown> | null = null;
+  await openIssue574Chat(page, {
+    initialStoredMode: "coding",
+    conversationMutator: (conversation) => {
+      conversation.conversation_kind = "chat";
+      conversation.tags = [];
+      conversation.metadata = { mode: "agent", workspace_id: "stale-workspace" };
+    },
+    onStreamRequest: (payload) => {
+      streamRequest = payload;
+    },
+    streamEvents: () => [{ type: "delta", delta: "partial response" }],
+  });
+
+  const composer = page.locator("textarea.rumi-composer-textarea");
+  await composer.fill("restore this interrupted draft");
+  await composer.press("Enter");
+
+  await expect(composer).toHaveValue("restore this interrupted draft");
+  await expect(page.locator(".rumi-workspace-picker")).toHaveCount(0);
+  expect(streamRequest).not.toBeNull();
+  expect((streamRequest?.tool_policy as Record<string, unknown> | undefined)?.workspace_id).toBeUndefined();
+  expect((streamRequest?.metadata as Record<string, unknown> | undefined)?.workspace_id).toBeUndefined();
+});
+
+test("plain chat displays an unavailable conversation model without restoring coding chrome", async ({ page }) => {
+  test.slow();
+  await openIssue574Chat(page, {
+    initialStoredMode: "legacy-coding-mode",
+    conversationMutator: (conversation) => {
+      conversation.conversation_kind = "chat";
+      conversation.tags = [];
+      conversation.metadata = {};
+      conversation.model = "opencode-zen/mimo-v2.5-free";
+    },
+  });
+
+  await expect(page.locator(".rumi-workspace-picker")).toHaveCount(0);
+  const modelButton = page.locator('[data-composer-widget="model-picker"] button').first();
+  await expect(modelButton).toContainText("opencode-zen/mimo-v2.5-free");
+  await expect(modelButton).toHaveAttribute("aria-label", /opencode-zen\/mimo-v2.5-free/);
+});
+
+test("coding conversations restore coding controls on chat and coding routes", async ({ page }) => {
+  test.slow();
+  await openIssue574Chat(page, { initialStoredMode: "agent" });
+
+  await expect(page.locator(".rumi-workspace-picker")).toBeVisible({ timeout: 20_000 });
+
+  const composer = page.locator("textarea.rumi-composer-textarea");
+  await composer.fill("/coding");
+  await composer.press("Enter");
+  await expect(page).toHaveURL(/\/coding(?:\?|$)/);
+  await expect(page.locator(".rumi-workspace-picker")).toBeVisible({ timeout: 20_000 });
+});
+
 test("manual runtime mode control is hidden by default and available after explicit opt-in", async ({ page }) => {
   await openDefaultspack(page, "/chat");
   await expect(page.getByRole("status", { name: "現在の実行オプション" })).toHaveCount(0);
@@ -1205,6 +1422,11 @@ test("manual runtime mode control opens the mode selector when enabled", async (
   await openDefaultspack(page, "/chat", {
     initialSettingsValues: {
       general: { manual_runtime_mode_selection: true },
+    },
+    conversationMutator: (conversation) => {
+      conversation.conversation_kind = "chat";
+      conversation.tags = [];
+      conversation.metadata = { mode: "agent" };
     },
   });
 
@@ -2576,7 +2798,13 @@ test("late stream activity after final message does not leave an empty draft pen
 });
 
 test("coding slash command toggles coding mode off again", async ({ page }) => {
-  await openDefaultspack(page, "/chat");
+  await openDefaultspack(page, "/chat", {
+    conversationMutator: (conversation) => {
+      conversation.conversation_kind = "chat";
+      conversation.tags = [];
+      conversation.metadata = { mode: "agent" };
+    },
+  });
 
   await page.locator("textarea.rumi-composer-textarea").fill("/coding");
   await page.keyboard.press("Enter");
