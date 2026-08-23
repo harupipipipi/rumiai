@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import threading
 import time
-import re
 from collections import OrderedDict
 from typing import Any
 
@@ -20,19 +19,6 @@ from core_runtime.resolved_profile_scope import persisted_resolved_profile
 _REPLAY_LIMIT = 2048
 _SEEN_REQUESTS: OrderedDict[str, float] = OrderedDict()
 _REPLAY_LOCK = threading.Lock()
-_ENTITY_PICKER_CONTRACTS = {
-    "rumi.action.entity-picker.v1",
-    "tobkiri.data.entity-picker.v1",
-}
-_ENTITY_PICKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-_ENTITY_PICKER_SCOPES = {
-    "draft",
-    "conversation",
-    "run",
-    "settings",
-    "workspace",
-    "global",
-}
 
 
 def _consume_request(request_id: str, expires_at: float) -> bool:
@@ -64,49 +50,6 @@ def _declared_contracts(contribution: Any) -> set[str]:
     if isinstance(isolated, dict):
         contracts.update(str(value) for value in isolated.get("rpc_contracts", []))
     return contracts
-
-
-def _validated_entity_picker_input(
-    contract_id: str,
-    value: dict[str, Any],
-) -> dict[str, Any]:
-    """Validate the finite entity-picker payload before PackVM dispatch."""
-
-    if contract_id not in _ENTITY_PICKER_CONTRACTS:
-        return value
-    allowed = {
-        "picker_id",
-        "selected_ids",
-        "data_source_id",
-        "source_revision",
-        "value_scope",
-        "query",
-        "cursor",
-    }
-    if set(value) - allowed:
-        raise ValueError("entity picker input contains unknown fields")
-    for field in ("picker_id", "data_source_id"):
-        if _ENTITY_PICKER_ID.fullmatch(str(value.get(field) or "")) is None:
-            raise ValueError(f"entity picker {field} is invalid")
-    selected = value.get("selected_ids", [])
-    if not isinstance(selected, list) or len(selected) > 100:
-        raise ValueError("entity picker selected_ids is invalid")
-    normalized_selected = [str(item) for item in selected]
-    if (
-        len(set(normalized_selected)) != len(normalized_selected)
-        or any(_ENTITY_PICKER_ID.fullmatch(item) is None for item in normalized_selected)
-    ):
-        raise ValueError("entity picker selected_ids is invalid")
-    scope = value.get("value_scope")
-    if scope is not None and str(scope) not in _ENTITY_PICKER_SCOPES:
-        raise ValueError("entity picker value_scope is invalid")
-    for field, limit in (("source_revision", 160), ("query", 500), ("cursor", 200)):
-        field_value = value.get(field)
-        if field_value is not None and (
-            not isinstance(field_value, str) or len(field_value) > limit
-        ):
-            raise ValueError(f"entity picker {field} is invalid")
-    return {**value, "selected_ids": normalized_selected}
 
 
 def run(input_data: dict, context: dict) -> dict:
@@ -162,10 +105,6 @@ def run(input_data: dict, context: dict) -> dict:
     if not operation or not isinstance(contract_input, dict):
         return error("Capability request is invalid", "INVALID_CAPABILITY_REQUEST")
     contract_input = dict(contract_input)
-    try:
-        contract_input = _validated_entity_picker_input(contract_id, contract_input)
-    except ValueError as exc:
-        return error(str(exc), "INVALID_CAPABILITY_REQUEST")
     contract_input.setdefault("profile_id", profile_id)
     try:
         return ok(

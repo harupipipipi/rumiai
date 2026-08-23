@@ -3041,6 +3041,14 @@ function ChatApp() {
     () => entityPickersForPresentation(entityPickers, "status_surface"),
     [entityPickers],
   );
+  const entityPickerInlineSurfaces = useMemo(
+    () => entityPickersForPresentation(entityPickers, "inline"),
+    [entityPickers],
+  );
+  const entityPickerSettingsSurfaces = useMemo(
+    () => entityPickersForPresentation(entityPickers, "settings"),
+    [entityPickers],
+  );
   const activeEntityPicker = activeEntityPickerRequest
     ? entityPickers.find((picker) => picker.id === activeEntityPickerRequest.pickerId) ?? null
     : null;
@@ -4598,6 +4606,7 @@ function ChatApp() {
           pickerId: picker.id,
           query: String(args.query ?? "").trim(),
         });
+        if (picker.presentation === "settings") setIsSettingsOpen(true);
         return;
       }
       case "open_model_picker": {
@@ -6995,7 +7004,6 @@ function ChatApp() {
       contribution_id: capability.contributionId,
       owner_pack_id: capability.ownerPackId,
       contract_id: capability.contractId,
-      operation: capability.operationId,
       input: {
         picker_id: request.pickerId,
         selected_ids: request.selectedIds,
@@ -7038,7 +7046,6 @@ function ChatApp() {
       contribution_id: capability.contributionId,
       owner_pack_id: capability.ownerPackId,
       contract_id: capability.contractId,
-      operation: capability.operationId,
       input: {
         picker_id: request.pickerId,
         query: request.query,
@@ -7074,7 +7081,28 @@ function ChatApp() {
     if (!isCentered && activeConversation?.metadata?.shared_read_only === true) {
       return <div role="status" className="mx-3 mb-3 flex min-h-14 items-center justify-center border border-zinc-800 bg-zinc-950 px-4 text-center text-sm text-zinc-400">Read-only imported copy. Import the share again with continue mode to send messages.</div>;
     }
-    return <Renderers.composer
+    return <>
+      {entityPickerInlineSurfaces.length > 0 && (
+        <section
+          aria-label="Composer entity pickers"
+          className="mx-3 mb-2 grid max-h-72 gap-2 overflow-y-auto"
+        >
+          {entityPickerInlineSurfaces.map((picker) => (
+            <EntityPickerHost
+              key={picker.id}
+              picker={picker}
+              initialQuery={activeEntityPickerRequest?.pickerId === picker.id
+                ? activeEntityPickerRequest.query
+                : undefined}
+              selectedIds={selectedIdsForEntityPicker(picker)}
+              onSelect={handleEntityPickerSelect}
+              onCreate={handleEntityPickerCreate}
+              onLoadPage={handleEntityPickerLoadPage}
+            />
+          ))}
+        </section>
+      )}
+      <Renderers.composer
       widgetContext={widgetContext}
       input={input}
       placeholder={isCentered ? getNewConversationPlaceholder() : placeholder}
@@ -7158,7 +7186,8 @@ function ChatApp() {
       onProjectSelect={handleComposerProjectSelect}
       onProjectDirectorySelect={handleDirectorySelect}
       onProjectStoragePrepare={handlePrepareChatGroupStorage}
-    />;
+      />
+    </>;
   };
 
   if (isLoading) {
@@ -7176,7 +7205,7 @@ function ChatApp() {
     <div className="rumi-app-shell flex h-screen min-h-0 w-full flex-col overflow-hidden bg-[#09090b] font-sans text-zinc-300 selection:bg-zinc-800">
       {showRegion("title_bar") && <Renderers.titleBar appName={composerHomeTitle || catalog?.app?.name} appIcon={catalog?.app?.icon} />}
 
-      {activeEntityPicker && activeEntityPicker.presentation !== "status_surface" && (
+      {activeEntityPicker && (
         activeEntityPicker.presentation === "popup" || activeEntityPicker.presentation === "palette"
           ? <LayerPortal layer="globalOverlay"><EntityPickerHost
               picker={activeEntityPicker}
@@ -7187,15 +7216,7 @@ function ChatApp() {
               onCreate={handleEntityPickerCreate}
               onLoadPage={handleEntityPickerLoadPage}
             /></LayerPortal>
-          : <EntityPickerHost
-              picker={activeEntityPicker}
-              initialQuery={activeEntityPickerRequest?.query}
-              selectedIds={activeEntityPickerSelectedIds}
-              onClose={() => setActiveEntityPickerRequest(null)}
-              onSelect={handleEntityPickerSelect}
-              onCreate={handleEntityPickerCreate}
-              onLoadPage={handleEntityPickerLoadPage}
-            />
+          : null
       )}
 
       {entityPickerStatusSurfaces.length > 0 && (
@@ -7679,6 +7700,23 @@ function ChatApp() {
           loadState={settingsLoadState}
           modelProfilesLoadState={modelProfilesLoadState}
           locale={locale}
+          extensionSurfaces={entityPickerSettingsSurfaces.length > 0 ? (
+            <div className="grid gap-3">
+              {entityPickerSettingsSurfaces.map((picker) => (
+                <EntityPickerHost
+                  key={picker.id}
+                  picker={picker}
+                  initialQuery={activeEntityPickerRequest?.pickerId === picker.id
+                    ? activeEntityPickerRequest.query
+                    : undefined}
+                  selectedIds={selectedIdsForEntityPicker(picker)}
+                  onSelect={handleEntityPickerSelect}
+                  onCreate={handleEntityPickerCreate}
+                  onLoadPage={handleEntityPickerLoadPage}
+                />
+              ))}
+            </div>
+          ) : undefined}
           onClose={() => setIsSettingsOpen(false)}
           onStartSettingsChat={startSettingsChat}
           onOpenSection={openSettingsSection}

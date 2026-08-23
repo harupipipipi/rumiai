@@ -22,6 +22,7 @@ function picker(overrides: Partial<ResolvedEntityPicker> = {}): ResolvedEntityPi
     searchable: true,
     placeholder: "Search profiles",
     dataSourceId: "profiles",
+    remote: false,
     optimistic: true,
     items: [
       { id: "__create__", label: "Create profile", badges: [], disabled: false, favorite: false, recent: false, fixed: true, create: true },

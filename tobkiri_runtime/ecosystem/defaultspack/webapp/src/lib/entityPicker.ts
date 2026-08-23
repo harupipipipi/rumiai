@@ -41,7 +41,6 @@ export type EntityPickerCapabilityBinding = {
   contributionId: string;
   ownerPackId: string;
   contractId: typeof ENTITY_PICKER_DATA_SOURCE_CONTRACT | typeof ENTITY_PICKER_ACTION_CONTRACT;
-  operationId: string;
 };
 
 export type ResolvedEntityPicker = {
@@ -56,6 +55,7 @@ export type ResolvedEntityPicker = {
   searchable: boolean;
   placeholder: string;
   dataSourceId: string;
+  remote: boolean;
   dataSourceCapability?: EntityPickerCapabilityBinding;
   optimistic: boolean;
   selectActionId?: string;
@@ -216,11 +216,19 @@ function capabilityBinding(
 ): EntityPickerCapabilityBinding | undefined {
   if (!referenceId || !metadata) return undefined;
   const dynamic = catalog?.dynamic_host;
-  const contributionId = safeId(metadata.contribution_id ?? referenceId);
   const operationId = safeId(metadata.operation_id ?? metadata.function_id ?? referenceId);
+  const pickerPackId = provenance(picker).sourcePackId;
+  const metadataPackId = provenance(metadata).sourcePackId;
+  const contributionId = safeId(
+    metadata.contribution_id
+      ?? (metadataPackId && operationId
+        ? `pack.${metadataPackId}.${operationId}`
+        : referenceId),
+  );
   const matches = dynamic?.contributions.filter((contribution) => (
     contribution.contribution_id === contributionId
     && contribution.kind === expectedKind
+    && contribution.operation_id === operationId
     && contribution.resolved_plan_hash === dynamic.plan_hash
   )) ?? [];
   const contribution: VerifiedFrontendContribution | undefined = matches.length === 1
@@ -232,8 +240,6 @@ function capabilityBinding(
   const expectedContract = expectedKind === "action"
     ? ENTITY_PICKER_ACTION_CONTRACT
     : ENTITY_PICKER_DATA_SOURCE_CONTRACT;
-  const pickerPackId = provenance(picker).sourcePackId;
-  const metadataPackId = provenance(metadata).sourcePackId;
   if (
     !dynamic
     || !contribution
@@ -258,7 +264,6 @@ function capabilityBinding(
     contributionId: contribution.contribution_id,
     ownerPackId: contribution.owner_pack_id,
     contractId: expectedContract,
-    operationId,
   };
 }
 
@@ -379,6 +384,7 @@ function unsupportedPicker(raw: TemplateCatalogMetadataItem, id: string, diagnos
     searchable: false,
     placeholder: "Unavailable",
     dataSourceId: "unsupported",
+    remote: false,
     optimistic: false,
     items: [],
     selectedIds: [],
@@ -406,7 +412,8 @@ function resolveOne(
   if (!dataSourceId) diagnostics.push(diagnostic(raw, id, "entity_picker.invalid_data_source", "data_source must be an opaque registered ID", "data_source"));
   const source = dataSourceId ? sources.get(dataSourceId) : undefined;
   if (dataSourceId && !source) diagnostics.push(diagnostic(raw, id, "entity_picker.unregistered_data_source", `unregistered data source: ${dataSourceId}`, "data_source"));
-  const dataSourceCapability = capabilityBinding(
+  const remote = bool(config.remote) || bool(source?.remote);
+  const dataSourceCapability = remote ? capabilityBinding(
     catalog,
     source,
     dataSourceId,
@@ -415,7 +422,7 @@ function resolveOne(
     id,
     diagnostics,
     "data_source",
-  );
+  ) : undefined;
   const paths = itemPaths(config, diagnostics, raw, id);
   const scopeText = text(config.value_scope, 40) as EntityPickerValueScope | undefined;
   const valueScope = scopeText && SCOPES.has(scopeText) ? scopeText : "draft";
@@ -452,7 +459,6 @@ function resolveOne(
     "create_item.action_id",
   );
   if (create && (!createActionId || !createAction || !createActionCapability)) diagnostics.push(diagnostic(raw, id, "entity_picker.unregistered_action", "create item requires a registered executable action", "create_item.action_id"));
-  const remote = bool(config.remote) || bool(source?.remote);
   if (remote && !dataSourceCapability) diagnostics.push(diagnostic(raw, id, "entity_picker.unregistered_data_source", "remote source requires an active ProfileLock/ResolvedPlan capability", "data_source"));
   const trigger = text(config.trigger_command, 48)?.replace(/^\/+/, "").toLowerCase();
   if (trigger && !VALID_COMMAND.test(trigger)) diagnostics.push(diagnostic(raw, id, "entity_picker.invalid_trigger", "trigger command is invalid", "trigger_command"));
@@ -471,6 +477,7 @@ function resolveOne(
     searchable: config.searchable !== false,
     placeholder: text(config.placeholder, 200) ?? "Search items",
     dataSourceId: dataSourceId!,
+    remote,
     dataSourceCapability,
     optimistic: valueScope === "draft" || valueScope === "conversation" || valueScope === "run" || bool(config.optimistic),
     selectActionId,

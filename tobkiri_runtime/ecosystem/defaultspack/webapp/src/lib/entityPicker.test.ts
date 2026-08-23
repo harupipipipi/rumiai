@@ -21,7 +21,12 @@ function catalog(overrides: Partial<UICatalog>): UICatalog {
     kind: "action" | "data_source",
     id: string,
   ) => ({
-    contribution_id: String(item.contribution_id ?? id),
+    contribution_id: String(
+      item.contribution_id
+        ?? (item.source_pack_id
+          ? `pack.${String(item.source_pack_id)}.${String(item.operation_id ?? item.function_id ?? id)}`
+          : id),
+    ),
     kind,
     mode: "declarative" as const,
     label: id,
@@ -32,6 +37,7 @@ function catalog(overrides: Partial<UICatalog>): UICatalog {
     resolved_profile_revision: "sha256:profile",
     resolved_plan_hash: planHash,
     descriptor_hash: "sha256:descriptor",
+    operation_id: String(item.operation_id ?? item.function_id ?? id),
     action_contract: kind === "action" ? ENTITY_PICKER_ACTION_CONTRACT : null,
     data_source_contract: kind === "data_source" ? ENTITY_PICKER_DATA_SOURCE_CONTRACT : null,
     localization: {},
@@ -116,16 +122,30 @@ test("resolves unrelated local and remote pickers from registered catalog declar
         load_action_id: "branches.load",
         presentation: "status_surface",
       },
+      {
+        picker_id: "composer_profile",
+        label: "Composer profile",
+        data_source: "agent_profiles",
+        presentation: "inline",
+      },
+      {
+        picker_id: "settings_profile",
+        label: "Settings profile",
+        data_source: "agent_profiles",
+        presentation: "settings",
+      },
     ],
   }));
 
-  assert.equal(resolved.length, 2);
+  assert.equal(resolved.length, 4);
   const profiles = resolved[0]!;
   assert.equal(profiles.unsupported, false);
   assert.equal(profiles.triggerCommand, "agent-profile");
   assert.equal(profiles.selectionMode, "multi");
   assert.equal(profiles.optimistic, false);
   assert.equal(profiles.sourceRevision, "profiles-r4");
+  assert.equal(profiles.remote, false);
+  assert.equal(profiles.dataSourceCapability, undefined);
   assert.deepEqual(profiles.items.map((item) => item.id), ["__create__", "inherit", "none", "reviewer", "builder"]);
   assert.deepEqual(profiles.items[3], {
     id: "reviewer",
@@ -142,7 +162,10 @@ test("resolves unrelated local and remote pickers from registered catalog declar
   assert.equal(profiles.items[4]?.disabledReason, "Unavailable offline");
   assert.equal(resolved[1]?.presentation, "status_surface");
   assert.deepEqual(entityPickersForPresentation(resolved, "status_surface").map((picker) => picker.id), ["branch"]);
-  assert.equal(resolved[1]?.dataSourceCapability?.operationId, "branches");
+  assert.deepEqual(entityPickersForPresentation(resolved, "inline").map((picker) => picker.id), ["composer_profile"]);
+  assert.deepEqual(entityPickersForPresentation(resolved, "settings").map((picker) => picker.id), ["settings_profile"]);
+  assert.equal(resolved[1]?.remote, true);
+  assert.equal(resolved[1]?.dataSourceCapability?.contributionId, "branches");
   assert.equal(resolved[1]?.nextCursor, "page-2");
   assert.equal(entityPickerForCommand(resolved, { id: "agent-profile", name: "agent-profile" })?.id, "agent_profile");
   assert.equal(entityPickerForCommand(resolved, { id: "alias", name: "alias", aliases: ["agent-profile"] })?.id, "agent_profile");
@@ -220,13 +243,49 @@ test("ephemeral scopes remain local while persistent scopes require registered a
   assert.equal(resolved[3]?.diagnostics[0]?.code, "entity_picker.unregistered_action");
 });
 
-test("catalog metadata without an active ProfileLock capability fails closed", () => {
-  const resolved = resolveEntityPickers(catalog({
+test("local snapshots stay local while remote sources require an active v4 capability", () => {
+  const local = resolveEntityPickers(catalog({
     dynamic_host: null,
     data_sources: [{ data_source: "items", snapshot: { items: [{ id: "one", label: "One" }] } }],
     entity_pickers: [{ picker_id: "items", data_source: "items" }],
   }));
+  const remote = resolveEntityPickers(catalog({
+    dynamic_host: null,
+    data_sources: [{ data_source: "items", remote: true, snapshot: { items: [] } }],
+    entity_pickers: [{ picker_id: "items", data_source: "items", remote: true }],
+  }));
 
-  assert.equal(resolved[0]?.unsupported, true);
-  assert.equal(resolved[0]?.diagnostics[0]?.code, "entity_picker.unbound_capability");
+  assert.equal(local[0]?.unsupported, false);
+  assert.equal(local[0]?.remote, false);
+  assert.equal(remote[0]?.unsupported, true);
+  assert.equal(remote[0]?.diagnostics[0]?.code, "entity_picker.unbound_capability");
+});
+
+test("sibling-pack action metadata resolves only its exact captured operation", () => {
+  const resolved = resolveEntityPickers(catalog({
+    data_sources: [{
+      data_source: "profiles",
+      source_pack_id: "profiles-pack",
+      snapshot: { items: [{ id: "reviewer", label: "Reviewer" }] },
+    }],
+    actions: [{
+      action_id: "profiles.select",
+      operation_id: "profiles.select",
+      source_pack_id: "profiles-pack",
+      execution: { type: "rumi_function", qualified_name: "profiles:select" },
+    }],
+    entity_pickers: [{
+      picker_id: "profiles",
+      data_source: "profiles",
+      value_scope: "workspace",
+      on_select_action_id: "profiles.select",
+      source_pack_id: "profiles-pack",
+    }],
+  }));
+
+  assert.equal(resolved[0]?.unsupported, false);
+  assert.equal(
+    resolved[0]?.selectActionCapability?.contributionId,
+    "pack.profiles-pack.profiles.select",
+  );
 });

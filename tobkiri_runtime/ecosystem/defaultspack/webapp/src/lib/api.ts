@@ -3571,7 +3571,6 @@ export const api = {
     contribution_id: string;
     owner_pack_id: string;
     contract_id: string;
-    operation: string;
     input: Record<string, unknown>;
   }) {
     return request<unknown>(defaultspackContractRoute("api/ui/capability/invoke"), {
@@ -3586,7 +3585,7 @@ export const api = {
         contribution_id: payload.contribution_id,
         owner_pack_id: payload.owner_pack_id,
         contract_id: payload.contract_id,
-        payload: { operation: payload.operation, input: payload.input },
+        payload: payload.input,
       }),
     });
   },

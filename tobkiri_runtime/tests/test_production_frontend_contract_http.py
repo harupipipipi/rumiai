@@ -16,18 +16,25 @@ from urllib.parse import quote
 import pytest
 
 from core_runtime.authority.v4 import AuthorityStore
+from core_runtime.authority.v4_models import AuthorityDenied
 from core_runtime.bootstrap import profile_capture
 from core_runtime.bootstrap.production_v4 import capture_production_dispatch
 from core_runtime.bootstrap.profile_capture import (
     capture_default_profile,
     prepare_default_profile_confirmation,
 )
+from core_runtime.capability_bindings_v4 import capture_capability_binding_snapshot
+from core_runtime.entity_picker_contract_v4 import (
+    ENTITY_PICKER_ACTION_CONTRACT,
+    ENTITY_PICKER_DATA_SOURCE_CONTRACT,
+    entity_picker_input_keys,
+)
 from core_runtime.frontend_contract_routes import load_frontend_contract_bindings
 from core_runtime.frontend_contract_routes import (
     FrontendContractBinding,
     FrontendContractTarget,
 )
-from core_runtime.pack_api_server import PackAPIServer
+from core_runtime.pack_api_server import PackAPIHandler, PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 from tobkiri_host.backends import BackendRegistry
@@ -670,6 +677,226 @@ def test_runtime_surface_operation_identity_invokes_exact_capability_binding(
         denied_code, denied_response = invoke(denied)
         assert denied_code == 404
         assert denied_response["success"] is False
+
+
+def test_entity_picker_http_route_derives_exact_operation_and_validates_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real HTTP adapter, not browser input, selects the picker operation."""
+
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(tmp_path / "user-data"))
+    action_target = FrontendContractTarget(
+        contribution_id="pack.qa.profiles.select",
+        contract_id=ENTITY_PICKER_ACTION_CONTRACT,
+        operation_id="profiles.select",
+        provider_id="qa.entity-picker",
+        function_id="qa.entity-picker",
+        allowed_payload_keys=entity_picker_input_keys(),
+        owner_pack_id="qa",
+        artifact_digest="sha256:" + "a" * 64,
+    )
+    source_target = FrontendContractTarget(
+        contribution_id="pack.qa.profiles.list",
+        contract_id=ENTITY_PICKER_DATA_SOURCE_CONTRACT,
+        operation_id="profiles.list",
+        provider_id="qa.entity-picker",
+        function_id="qa.entity-picker",
+        allowed_payload_keys=entity_picker_input_keys(),
+        owner_pack_id="qa",
+        artifact_digest="sha256:" + "a" * 64,
+    )
+    binding = FrontendContractBinding(
+        method="POST",
+        path="/api/ui/capability/invoke",
+        presentation="capability_result",
+        targets=(action_target, source_target),
+    )
+
+    class PickerSession:
+        profile_id = "defaults"
+        plan_digest = "sha256:" + "4" * 64
+
+        def __init__(self) -> None:
+            self.action_approved = False
+            self.calls: list[tuple[str, str, dict[str, object]]] = []
+
+        def assert_current(self) -> None:
+            return None
+
+        def assert_operation_ready(self, contract_id: str, operation_id: str) -> None:
+            assert (contract_id, operation_id) in {
+                (ENTITY_PICKER_ACTION_CONTRACT, "profiles.select"),
+                (ENTITY_PICKER_DATA_SOURCE_CONTRACT, "profiles.list"),
+            }
+
+        def provider_metadata(self, contract_id: str):
+            target = (
+                action_target
+                if contract_id == ENTITY_PICKER_ACTION_CONTRACT
+                else source_target
+            )
+            return ({
+                "provider_id": target.provider_id,
+                "function_id": target.function_id,
+                "operation_id": target.operation_id,
+                "profile_id": self.profile_id,
+                "plan_digest": self.plan_digest,
+                "artifact_digest": target.artifact_digest,
+            },)
+
+        def invoke(
+            self,
+            contract_id: str,
+            operation_id: str,
+            payload: Mapping[str, object],
+            *,
+            version_range: str | None = None,
+        ) -> Mapping[str, object]:
+            del version_range
+            if contract_id == ENTITY_PICKER_ACTION_CONTRACT and not self.action_approved:
+                raise AuthorityDenied("approval required", code="authority_denied")
+            call = (contract_id, operation_id, dict(payload))
+            self.calls.append(call)
+            return {"operation_id": operation_id, "accepted": True}
+
+    session = PickerSession()
+    snapshot = capture_capability_binding_snapshot(
+        binding,
+        session=session,
+        catalog={"packs": []},
+    )
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="desktop-bootstrap"),
+        dispatch_session=session,
+        contract_bindings=(binding,),
+    )
+    server.start()
+    try:
+        cookie, csrf, origin = _authenticate(server)
+        headers = {"Cookie": cookie, "Origin": origin, "X-Rumi-CSRF": csrf}
+
+        def invoke(target: FrontendContractTarget, payload: Mapping[str, object]):
+            return _request(
+                server,
+                "POST",
+                _contract("POST", "/api/ui/capability/invoke"),
+                body={
+                    "request_id": str(uuid.uuid4()),
+                    "expires_at": time.time() + 30,
+                    "profile_id": session.profile_id,
+                    "plan_hash": session.plan_digest,
+                    "catalog_hash": snapshot.catalog_hash,
+                    "contribution_id": target.contribution_id,
+                    "owner_pack_id": target.owner_pack_id,
+                    "contract_id": target.contract_id,
+                    "payload": dict(payload),
+                },
+                headers={**headers, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+            )
+
+        selection = {
+            "picker_id": "agent_profiles",
+            "data_source_id": "profiles.list",
+            "selected_ids": ["reviewer"],
+            "value_scope": "workspace",
+            "source_revision": "r8",
+        }
+        denied_status, denied, _ = invoke(action_target, selection)
+        assert denied_status == 403
+        assert denied["data"]["code"] == "UNAPPROVED"
+
+        session.action_approved = True
+        accepted_status, accepted, _ = invoke(action_target, selection)
+        assert accepted_status == 200, accepted
+        assert accepted["data"]["operation_id"] == "profiles.select"
+        assert session.calls[-1][1] == "profiles.select"
+        assert session.calls[-1][2]["profile_id"] == "defaults"
+
+        source_status, source, _ = invoke(
+            source_target,
+            {
+                "picker_id": "agent_profiles",
+                "data_source_id": "profiles.list",
+                "query": "rev",
+            },
+        )
+        assert source_status == 200, source
+        assert session.calls[-1][1] == "profiles.list"
+
+        forged_status, forged, _ = invoke(
+            action_target,
+            {"operation": "profiles.list", "input": selection},
+        )
+        assert forged_status == 400
+        assert forged["data"]["code"] == "invalid_contract_payload"
+
+        duplicate_status, duplicate, _ = invoke(
+            action_target,
+            {**selection, "selected_ids": ["reviewer", "reviewer"]},
+        )
+        assert duplicate_status == 400
+        assert duplicate["data"]["code"] == "invalid_contract_payload"
+    finally:
+        server.stop()
+
+
+def test_dynamic_catalog_projects_entity_picker_data_source_kind() -> None:
+    """The captured data-source target is distinguishable from picker actions."""
+
+    target = FrontendContractTarget(
+        contribution_id="pack.qa.profiles.list",
+        contract_id=ENTITY_PICKER_DATA_SOURCE_CONTRACT,
+        operation_id="profiles.list",
+        provider_id="qa.entity-picker",
+        function_id="qa.entity-picker",
+        allowed_payload_keys=entity_picker_input_keys(),
+        owner_pack_id="qa",
+        artifact_digest="sha256:" + "a" * 64,
+    )
+    capability_binding = FrontendContractBinding(
+        method="POST",
+        path="/api/ui/capability/invoke",
+        presentation="capability_result",
+        targets=(target,),
+    )
+    catalog_binding = FrontendContractBinding(
+        method="GET",
+        path="/api/ui/catalog",
+        presentation="dynamic_pack_catalog",
+        targets=(target,),
+    )
+
+    class CatalogSession:
+        profile_id = "defaults"
+        plan_digest = "sha256:" + "4" * 64
+
+        def provider_metadata(self, _contract_id: str):
+            return ({
+                "provider_id": target.provider_id,
+                "function_id": target.function_id,
+                "operation_id": target.operation_id,
+                "profile_id": self.profile_id,
+                "plan_digest": self.plan_digest,
+                "artifact_digest": target.artifact_digest,
+            },)
+
+        def assert_operation_ready(self, _contract_id: str, _operation_id: str) -> None:
+            return None
+
+    handler = object.__new__(PackAPIHandler)
+    handler._dispatch_session = CatalogSession()
+    handler._contract_routes = {
+        ("POST", "/api/ui/capability/invoke"): capability_binding,
+    }
+    handler._capability_catalog_cache = {"packs": []}
+    presented = handler._present_contract_result(catalog_binding, {"packs": []})
+    contribution = presented["dynamic_host"]["contributions"][0]
+
+    assert contribution["kind"] == "data_source"
+    assert contribution["data_source_contract"] == ENTITY_PICKER_DATA_SOURCE_CONTRACT
+    assert "action_contract" not in contribution
 
 
 def test_profile_ceremony_uses_four_canonical_broker_operations(

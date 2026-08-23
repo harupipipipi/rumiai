@@ -90,6 +90,42 @@ test("command event stream resumes clean EOF with Last-Event-ID", async () => {
   }
 });
 
+test("entity picker capability sends finite input without a browser operation selector", async () => {
+  const originalFetch = globalThis.fetch;
+  let body: Record<string, unknown> = {};
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    return new Response(JSON.stringify({ status: "ok", data: { accepted: true } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+  try {
+    await api.invokeFrontendCapability({
+      profile_id: "defaults",
+      plan_hash: "sha256:plan",
+      catalog_hash: "sha256:catalog",
+      contribution_id: "pack.qa.profiles.select",
+      owner_pack_id: "qa",
+      contract_id: "rumi.action.entity-picker.v1",
+      input: {
+        picker_id: "agent_profiles",
+        data_source_id: "profiles.list",
+        selected_ids: ["reviewer"],
+      },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(body.payload, {
+    picker_id: "agent_profiles",
+    data_source_id: "profiles.list",
+    selected_ids: ["reviewer"],
+  });
+  assert.equal(JSON.stringify(body).includes("operation"), false);
+});
+
 test("shareTokenFromPath accepts only a single landing path segment", () => {
   assert.equal(shareTokenFromPath("/share/local-token_123"), "local-token_123");
   assert.equal(shareTokenFromPath("/share/tunnel-token/"), "tunnel-token");

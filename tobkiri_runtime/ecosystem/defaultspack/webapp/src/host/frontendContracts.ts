@@ -28,6 +28,7 @@ export type VerifiedFrontendContribution = {
   route?: string | null;
   region?: string | null;
   renderer?: string | null;
+  operation_id?: string | null;
   action_contract?: string | null;
   data_source_contract?: string | null;
   schema?: Record<string, unknown> | null;
@@ -68,7 +69,7 @@ export type FrontendCatalog = {
 
 export type CapabilityInvocation = {
   contractId: string;
-  payload: Record<string, unknown>;
+  payload: { input: Record<string, unknown>; operation?: string };
   contributionId: string;
   ownerPackId: string;
   planHash: string;

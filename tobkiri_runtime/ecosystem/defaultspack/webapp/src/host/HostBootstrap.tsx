@@ -66,7 +66,7 @@ async function invokeCapability(
       contribution_id: request.contributionId,
       owner_pack_id: request.ownerPackId,
       contract_id: request.contractId,
-      payload: request.payload,
+      payload: request.payload.input,
     }),
   });
   const envelope = await response.json() as ApiEnvelope<unknown>;

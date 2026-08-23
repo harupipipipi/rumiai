@@ -86,6 +86,9 @@ function PickerBody({
   const [selection, setSelection] = useState(
     () => new Set(selectableIds(picker.items, selectedIds ?? picker.selectedIds)),
   );
+  const selectionRef = useRef(
+    new Set(selectableIds(picker.items, selectedIds ?? picker.selectedIds)),
+  );
   const committedSelectionRef = useRef(
     new Set(selectableIds(picker.items, selectedIds ?? picker.selectedIds)),
   );
@@ -107,11 +110,12 @@ function PickerBody({
   useEffect(() => {
     const next = new Set(selectableIds(items, selectedIds ?? picker.selectedIds));
     committedSelectionRef.current = next;
+    selectionRef.current = next;
     setSelection(next);
-  }, [items, picker.selectedIds, selectedIds]);
+  }, [picker.id, picker.selectedIds, selectedIds]);
 
   useEffect(() => {
-    if (!picker.dataSourceCapability || !onLoadPage) return undefined;
+    if (!picker.remote || !picker.dataSourceCapability || !onLoadPage) return undefined;
     let active = true;
     const timer = window.setTimeout(() => {
       setLoading(true);
@@ -123,11 +127,19 @@ function PickerBody({
         sourceRevision: picker.sourceRevision,
       }).then((page) => {
         if (!active) return;
-        setItems((current) => retainSelectedEntityPickerItems(
-          current,
-          page.items,
-          committedSelectionRef.current,
-        ));
+        setItems((current) => {
+          const nextItems = retainSelectedEntityPickerItems(
+            current,
+            page.items,
+            selectionRef.current,
+          );
+          const nextSelection = new Set(
+            selectableIds(nextItems, selectionRef.current),
+          );
+          selectionRef.current = nextSelection;
+          setSelection(nextSelection);
+          return nextItems;
+        });
         setNextCursor(page.nextCursor);
         setSourceRevision(page.sourceRevision ?? picker.sourceRevision);
       }).catch((reason) => {
@@ -143,8 +155,11 @@ function PickerBody({
   }, [onLoadPage, picker, query]);
 
   const visible = useMemo(
-    () => filterEntityPickerItems(items, picker.dataSourceCapability && onLoadPage ? "" : query),
-    [items, onLoadPage, picker.dataSourceCapability, query],
+    () => filterEntityPickerItems(
+      items,
+      picker.remote && picker.dataSourceCapability && onLoadPage ? "" : query,
+    ),
+    [items, onLoadPage, picker.dataSourceCapability, picker.remote, query],
   );
   const groups = useMemo(() => {
     const result: Array<{ label: string; items: EntityPickerItem[] }> = [];
@@ -176,15 +191,20 @@ function PickerBody({
   const commit = async (ids: string[]) => {
     const previous = new Set(committedSelectionRef.current);
     const next = selectableIds(items, ids);
-    if (picker.optimistic) setSelection(new Set(next));
+    if (picker.optimistic) {
+      selectionRef.current = new Set(next);
+      setSelection(selectionRef.current);
+    }
     setPending(true);
     setError(null);
     try {
       await onSelect?.(request(next));
       committedSelectionRef.current = new Set(next);
-      setSelection(new Set(next));
+      selectionRef.current = new Set(next);
+      setSelection(selectionRef.current);
       if (picker.selectionMode === "single") onClose?.();
     } catch (reason) {
+      selectionRef.current = previous;
       setSelection(previous);
       setError(message(reason));
     } finally {
@@ -208,17 +228,32 @@ function PickerBody({
       const next = new Set(current);
       if (next.has(item.id)) next.delete(item.id);
       else next.add(item.id);
+      selectionRef.current = next;
       return next;
     });
   };
 
   const loadMore = async () => {
-    if (!picker.dataSourceCapability || !onLoadPage || !nextCursor || loading) return;
+    if (
+      !picker.remote
+      || !picker.dataSourceCapability
+      || !onLoadPage
+      || !nextCursor
+      || loading
+    ) return;
     setLoading(true);
     setError(null);
     try {
       const page = await onLoadPage({ pickerId: picker.id, query, cursor: nextCursor, dataSourceId: picker.dataSourceId, sourceRevision });
-      setItems((current) => mergeItems(current, page.items));
+      setItems((current) => {
+        const nextItems = mergeItems(current, page.items);
+        const nextSelection = new Set(
+          selectableIds(nextItems, selectionRef.current),
+        );
+        selectionRef.current = nextSelection;
+        setSelection(nextSelection);
+        return nextItems;
+      });
       setNextCursor(page.nextCursor);
       setSourceRevision(page.sourceRevision ?? sourceRevision);
     } catch (reason) {
