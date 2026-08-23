@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "7d734fa1bef241623a9f0053a20c8055f0da80be49f867e6b536ad075d8be56e",
+    "digest": "4216a2a1586d1892cba2e9bdc7c4b6054b13ce81aed71c57045a5530b8813fe1",
     "entries": [
       {
         "path": "index.html",
@@ -625,8 +625,8 @@
       },
       {
         "path": "src/components/company/CompanyWorkspacePanel.tsx",
-        "size": 35316,
-        "sha256": "e0880d3eb87b48808ee89c06fbbef39f7257a7c3f6f16922c0b59fc028a51a7c"
+        "size": 37335,
+        "sha256": "2677971265e8dc129e5109a31c1e5aa45ce3ec252f7f792c9c1ff836b71e8baf"
       },
       {
         "path": "src/components/desktops/DesktopControlSurface.tsx",
@@ -1640,8 +1640,8 @@
       },
       {
         "path": "src/renderers/defaultspackRenderers.test.ts",
-        "size": 27290,
-        "sha256": "10035db5f7ec13c70be2b63b311b40908ffd67d42143d80ad23a42a908a43aaa"
+        "size": 28673,
+        "sha256": "4bd2a1632248aa38baa9fc0a02cdf7f5607ab4d965ac77a990c66237a4044c66"
       },
       {
         "path": "src/renderers/defaultspackRenderers.ts",
@@ -1806,12 +1806,12 @@
     ]
   },
   "bundle": {
-    "digest": "77ddcaeb39194dcc2bfc68feac430c9b2c5dec5fa0f7a612ea8b96923df1d4da",
+    "digest": "c90af184170280a06c0bf2a4472411fc5c3d78f0fbffbaa544c4afdde55109ec",
     "entries": [
       {
         "path": "shell-app.css",
-        "size": 221321,
-        "sha256": "a92cabe894a8c55f80b0d402e34bc8fb4f299ef42f85775f0be8c6d61aebc1a3"
+        "size": 221298,
+        "sha256": "c3747a3ae3fa7a32dfa74420041886d02c4ebc4b14e352bff3bf111b19f143f2"
       },
       {
         "path": "shell-app.js",
@@ -1820,8 +1820,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2196111,
-        "sha256": "c297281b97253524d74441bb619e876e66650da4b2faeb7e597f692ee9ac791f"
+        "size": 2196756,
+        "sha256": "34b4171c6cfb850482d5c95e6135013cbc2d682de077a040cff67e54bf1b75bc"
       },
       {
         "path": "shell-rolldown-runtime.js",
