@@ -77,7 +77,7 @@ test("keeps the startup boundary until slash commands and mention sources are re
   releaseCommands?.();
 
   await expect(loader).toBeHidden();
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
   await expect(composer).toBeVisible();
 
   await composer.fill("/");
@@ -1243,7 +1243,7 @@ test("projects replace New Group and are searchable from the composer", async ({
   expect(persistedProject).toMatchObject({ title: "E2E Project" });
   expect(String(persistedProject?.id ?? "")).toMatch(/^group-\d+$/);
 
-  await page.getByRole("combobox", { name: "Rumiにメッセージを送信" }).fill("Project scoped message");
+  await page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" }).fill("Project scoped message");
   await page.locator(".rumi-send-button").click();
   await expect.poll(() => conversationCreates.length).toBe(1);
   expect(conversationCreates[0].group_id).toBe(persistedProject?.id);
@@ -1321,7 +1321,7 @@ test("composer approval menu opens action permissions while selection modes live
 test("slash yolo toggles Full Access back to Ask without a duplicate status chip", async ({ page }) => {
   await openDefaultspack(page, "/chat");
 
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
   const approval = page.getByRole("button", { name: "アクションの承認方法" });
   await expect(approval).toContainText("承認");
 
@@ -1616,7 +1616,7 @@ test("composer removes semantic tool state after an escaped edit", async ({ page
   await openDefaultspack(page, "/chat", {
     onStreamRequest: (payload) => escapedRequests.push(payload),
   });
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
 
   await composer.fill("Use @web");
   await expect(page.getByRole("option", { name: /@web search/i })).toBeVisible();
@@ -1644,7 +1644,7 @@ test("composer renders semantic tool mentions inline and clears state after an e
   await openDefaultspack(page, "/chat", {
     onStreamRequest: (payload) => chipRequests.push(payload),
   });
-  const chipComposer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const chipComposer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
   await chipComposer.fill("Use @web");
   await expect(page.getByRole("option", { name: /@web search/i })).toBeVisible();
   await chipComposer.press("Enter");
@@ -1671,7 +1671,7 @@ test("composer reconciles an escaped service mention before submit", async ({ pa
   await openDefaultspack(page, "/chat", {
     onStreamRequest: (payload) => serviceRequests.push(payload),
   });
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
 
   await composer.fill("Use @gith");
   const githubOption = page.getByRole("option").filter({ hasText: "@GitHub" }).filter({ hasText: "service" });
@@ -1698,7 +1698,7 @@ test("composer reconciles an escaped service mention before submit", async ({ pa
 test("slash and mention candidates share one full-width JSON palette", async ({ page }) => {
   await openDefaultspack(page, "/chat");
 
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
   await composer.fill("@");
   const mentions = page.getByTestId("composer-at-mention-candidates");
   await expect(mentions).toBeVisible();
@@ -1725,7 +1725,7 @@ test("composer removes file mention metadata when its attachment is removed", as
   await openDefaultspack(page, "/chat", {
     onStreamRequest: (payload) => fileRequests.push(payload),
   });
-  const fileComposer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const fileComposer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
   await fileComposer.fill("/coding");
   await fileComposer.press("Enter");
   await fileComposer.fill("Review @REA");
@@ -1747,7 +1747,7 @@ test("composer supplementary-plane mention keeps textarea and parser indices ali
   await openDefaultspack(page, "/chat", {
     onStreamRequest: (payload) => streamRequests.push(payload),
   });
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
 
   await composer.fill("先𐐀 @𐐀");
   await expect(page.getByRole("option", { name: /@𐐀tool/i })).toBeVisible();
@@ -1768,7 +1768,7 @@ test("composer removes a no-space mention atomically without leaving tool state"
   await openDefaultspack(page, "/chat", {
     onStreamRequest: (payload) => streamRequests.push(payload),
   });
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
 
   await composer.fill("Use @𐐀");
   await composer.press("Enter");
@@ -1797,7 +1797,7 @@ test("editing and reselecting an atomically deleted no-space mention restores it
   await openDefaultspack(page, "/chat", {
     onStreamRequest: (payload) => streamRequests.push(payload),
   });
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
 
   await composer.fill("Use @𐐀");
   await composer.press("Enter");
@@ -1826,7 +1826,7 @@ test("workspace mention waits for its attachment before submit", async ({ page }
     beforeWorkspaceFileReadResponse: () => readGate,
     onStreamRequest: (payload) => streamRequests.push(payload),
   });
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
   await composer.fill("/coding");
   await composer.press("Enter");
   await composer.fill("Review @REA");
@@ -1860,7 +1860,7 @@ test("cancelling a pending workspace mention discards its late result", async ({
     beforeWorkspaceFileReadResponse: () => readGate,
     onStreamRequest: (payload) => streamRequests.push(payload),
   });
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
   await composer.fill("/coding");
   await composer.press("Enter");
   await composer.fill("Review @REA");
@@ -1891,7 +1891,7 @@ test("cancelling one pending workspace mention preserves another transaction", a
     ),
     onStreamRequest: (payload) => streamRequests.push(payload),
   });
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
   await composer.fill("/coding");
   await composer.press("Enter");
   await composer.fill("Review @REA");
@@ -1924,7 +1924,7 @@ test("starting a new draft discards a pending workspace mention result", async (
   await openDefaultspack(page, "/chat", {
     beforeWorkspaceFileReadResponse: () => readGate,
   });
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
   await composer.fill("/coding");
   await composer.press("Enter");
   await composer.fill("Review @REA");
@@ -1949,7 +1949,7 @@ test("migrated keyboard navigation marker keeps composer controls reachable", as
     },
   });
 
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
   await composer.focus();
   await composer.press("Tab");
   await expect(composer).not.toBeFocused();
@@ -1961,7 +1961,7 @@ test("composer mention keyboard and ARIA contracts stay predictable at Unicode a
     onStreamRequest: (payload) => streamRequests.push(payload),
   });
 
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
   const mentions = page.getByTestId("composer-at-mention-candidates");
 
   await composer.fill("@");
@@ -2036,7 +2036,7 @@ test("coding file mentions keep stable semantic metadata through submit", async 
     onStreamRequest: (payload) => streamRequests.push(payload),
   });
 
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
   await composer.fill("/coding");
   await composer.press("Enter");
   await expect(page).toHaveURL(/\/coding(?:\?|$)/);
@@ -2077,7 +2077,7 @@ test("coding file mentions keep stable semantic metadata through submit", async 
 test("composer controls are keyboard reachable, visibly named, and at least 44px", async ({ page }) => {
   await openDefaultspack(page, "/chat");
 
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
   await composer.focus();
   await composer.press("Tab");
   await expect(composer).not.toBeFocused();
@@ -2102,7 +2102,7 @@ test("composer uses a leading plus menu and accepts clipboard and workspace file
   await page.getByTitle("New Chat").first().click();
   await expect(page.locator(".rumi-composer-new")).toHaveCSS("filter", "blur(0px)");
 
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
   const attach = page.getByRole("button", { name: "ファイルを添付" });
   const composerBox = await composer.boundingBox();
   const attachBox = await attach.boundingBox();
@@ -2114,9 +2114,19 @@ test("composer uses a leading plus menu and accepts clipboard and workspace file
   expect(Math.abs(attachCenterY - composerCenterY)).toBeLessThanOrEqual(1);
 
   await attach.click();
-  await expect(page.getByRole("menu", { name: "添付メニュー" })).toBeVisible();
-  await expect(page.getByRole("menuitem", { name: /写真とファイルを追加/ })).toBeVisible();
-  await attach.click();
+  const attachmentMenu = page.getByRole("menu", { name: "添付メニュー" });
+  const attachmentMenuItem = page.getByRole("menuitem", { name: /写真とファイルを追加/ });
+  await expect(attachmentMenu).toBeVisible();
+  await expect(attach).toHaveAttribute("aria-haspopup", "menu");
+  await expect(attach).toHaveAttribute("aria-expanded", "true");
+  await expect(attach).toHaveAttribute("aria-controls", "composer-attachment-menu");
+  await expect(attachmentMenu).toHaveAttribute("id", "composer-attachment-menu");
+  await attachmentMenuItem.focus();
+  await page.keyboard.press("Escape");
+  await expect(attachmentMenu).toBeHidden();
+  await expect(attach).toHaveAttribute("aria-expanded", "false");
+  await expect(attach).not.toHaveAttribute("aria-controls");
+  await expect(attach).toBeFocused();
 
   await composer.evaluate((target) => {
     const dataTransfer = new DataTransfer();
@@ -2176,7 +2186,7 @@ test("composer uses a leading plus menu and accepts clipboard and workspace file
 
 test("composer mentions paste portably and delete as one semantic unit", async ({ page }) => {
   await openDefaultspack(page, "/chat");
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
 
   await composer.evaluate((target) => {
     const dataTransfer = new DataTransfer();
@@ -2202,7 +2212,7 @@ test("attachment remove and cancel actions expose 44px visible focus targets", a
   await openDefaultspack(page, "/chat", {
     beforeWorkspaceFileReadResponse: () => readGate,
   });
-  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const composer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
   await composer.fill("/coding");
   await composer.press("Enter");
   await composer.fill("Review @REA");
@@ -2233,7 +2243,7 @@ test("attachment remove and cancel actions expose 44px visible focus targets", a
   expect(await inlineRemove.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe("none");
 
   await page.getByTitle("New Chat").first().click();
-  const newComposer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  const newComposer = page.getByRole("combobox", { name: "Tobkiriにメッセージを送信" });
   await newComposer.fill("Review @REA");
   await page.getByRole("option").filter({ hasText: "@README.md" }).click();
   const cardRemove = page.getByRole("button", { name: "README.md を削除" });
