@@ -97,7 +97,7 @@
       "path": "ecosystem/defaultspack/v4/bundle.lock.json",
       "type": "regular-file",
       "size": 26526,
-      "sha256": "5b270efc9fb6b86d79192806905a13790515bfb92ba52f8d09b5f1520b63f76c",
+      "sha256": "dc4e5af102b325d06db2491dd37a4787b78f5dfa062c7acdb84f137bc3356344",
       "executable": false
     },
     {
@@ -1020,15 +1020,15 @@
     {
       "path": "ecosystem/defaultspack/v4/packs/tobkiri_workflow_pack.executables.v4.json",
       "type": "regular-file",
-      "size": 33621,
-      "sha256": "ecc173dc300e21629626b7f86129b43dc41e33e44cc73b0f2549763d443642ed",
+      "size": 35263,
+      "sha256": "ec925091a8737b66f06d231ce01a8585dd4a133d114244c7ae91c768fba8d3c8",
       "executable": false
     },
     {
       "path": "ecosystem/defaultspack/v4/packs/tobkiri_workflow_pack.pack.v4.json",
       "type": "regular-file",
-      "size": 15167,
-      "sha256": "236be52320fbcdc0fa58ce6ca704da25ec8285a8bf0d63884316ddc892d81689",
+      "size": 15904,
+      "sha256": "370236a53119467c10340c4fca45a805842d07198dabc4c9618ec0a027af1349",
       "executable": false
     },
     {
