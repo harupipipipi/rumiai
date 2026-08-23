@@ -12,6 +12,8 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.templates import ResolvedTemplate, parse_template, project_resolved_templates  # noqa: E402
 from domain.templates.projectors import empty_template_catalog  # noqa: E402
+from domain.frontend.command_protocol import LEGACY_FRONTEND_HANDLERS  # noqa: E402
+from core_runtime.capability_bindings_v4 import _dynamic_payload_keys  # noqa: E402
 
 
 def _template(template_id: str, pieces: list[dict[str, Any]]) -> ResolvedTemplate:
@@ -79,6 +81,9 @@ def test_entity_picker_projects_picker_and_generic_slash_command() -> None:
     assert command["args"] == [
         {"name": "query", "type": "string", "required": False, "greedy": True}
     ]
+    assert "open_entity_picker" in LEGACY_FRONTEND_HANDLERS
+    assert "selected_ids" in _dynamic_payload_keys("rumi.action.entity-picker.v1")
+    assert "cursor" in _dynamic_payload_keys("tobkiri.data.entity-picker.v1")
 
 def test_entity_picker_public_id_collision_excludes_both_declarations() -> None:
     catalog = project_resolved_templates(

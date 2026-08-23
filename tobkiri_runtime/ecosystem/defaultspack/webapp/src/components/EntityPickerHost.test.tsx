@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { EntityPickerHost } from "./EntityPickerHost";
+import { EntityPickerHost, nextEntityPickerActiveIndex } from "./EntityPickerHost";
 import type { ResolvedEntityPicker } from "../lib/entityPicker";
 
 function picker(overrides: Partial<ResolvedEntityPicker> = {}): ResolvedEntityPicker {
@@ -18,7 +18,7 @@ function picker(overrides: Partial<ResolvedEntityPicker> = {}): ResolvedEntityPi
     searchable: true,
     placeholder: "Search profiles",
     dataSourceId: "profiles",
-    remote: false,
+    optimistic: true,
     items: [
       { id: "__create__", label: "Create profile", badges: [], disabled: false, favorite: false, recent: false, fixed: true, create: true },
       { id: "reviewer", label: "Reviewer", description: "Checks diffs", group: "Quality", badges: ["safe"], disabled: false, favorite: true, recent: false },
@@ -39,6 +39,7 @@ test("popup renders an accessible searchable grouped multi-select contract", () 
   assert.match(html, /role="dialog"/);
   assert.match(html, /aria-modal="true"/);
   assert.match(html, /role="combobox"/);
+  assert.match(html, /aria-autocomplete="list"/);
   assert.match(html, /role="listbox"/);
   assert.match(html, /aria-multiselectable="true"/);
   assert.match(html, /aria-label="Actions"/);
@@ -47,6 +48,21 @@ test("popup renders an accessible searchable grouped multi-select contract", () 
   assert.match(html, /Unavailable offline/);
   assert.match(html, />safe</);
   assert.match(html, />Apply</);
+});
+
+test("keyboard navigation skips disabled options", () => {
+  assert.equal(nextEntityPickerActiveIndex(picker().items, 1, 1), 0);
+  assert.equal(nextEntityPickerActiveIndex(picker().items, 0, -1), 1);
+});
+
+test("crafted selected IDs cannot select disabled or unknown entries", () => {
+  const html = renderToStaticMarkup(createElement(EntityPickerHost, {
+    picker: picker(),
+    selectedIds: ["reviewer", "offline", "unknown"],
+  }));
+  assert.match(html, /id="entity-picker-option-agent_profile-reviewer"[^>]*aria-selected="true"/);
+  assert.match(html, /id="entity-picker-option-agent_profile-offline"[^>]*aria-selected="false"/);
+  assert.doesNotMatch(html, /unknown/);
 });
 
 test("status surface presentation is inline and preserves picker semantics", () => {

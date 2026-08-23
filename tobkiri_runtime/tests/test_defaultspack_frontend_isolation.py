@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from core_runtime.pack_artifact_integrity import write_host_install_record
 
 
@@ -118,6 +120,121 @@ def test_frontend_capability_rejects_a_catalog_not_seen_by_the_host(
 
     assert result["status"] == "error"
     assert result["error"]["code"] == "STALE_CATALOG"
+
+
+def test_entity_picker_capability_payload_is_finite_and_typed() -> None:
+    from blocks.ui.frontend_capability import _validated_entity_picker_input
+
+    result = _validated_entity_picker_input(
+        "rumi.action.entity-picker.v1",
+        {
+            "picker_id": "reviewer-picker",
+            "data_source_id": "agent_profiles.list",
+            "selected_ids": ["reviewer", "builder"],
+            "value_scope": "workspace",
+            "source_revision": "revision-8",
+        },
+    )
+
+    assert result["selected_ids"] == ["reviewer", "builder"]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "picker_id": "reviewer-picker",
+            "data_source_id": "agent_profiles.list",
+            "selected_ids": ["disabled", "disabled"],
+        },
+        {
+            "picker_id": "reviewer-picker",
+            "data_source_id": "https://example.test/items",
+            "selected_ids": [],
+        },
+        {
+            "picker_id": "reviewer-picker",
+            "data_source_id": "agent_profiles.list",
+            "selected_ids": [],
+            "profile_id": "forged-profile",
+        },
+    ],
+)
+def test_entity_picker_capability_rejects_crafted_payloads(
+    payload: dict[str, object],
+) -> None:
+    from blocks.ui.frontend_capability import _validated_entity_picker_input
+
+    with pytest.raises(ValueError):
+        _validated_entity_picker_input("rumi.action.entity-picker.v1", payload)
+
+
+def test_entity_picker_action_is_bound_to_exact_v4_catalog_and_local_approval(
+    monkeypatch,
+) -> None:
+    from blocks.ui import frontend_capability
+
+    frontend_capability._SEEN_REQUESTS.clear()
+    plan = SimpleNamespace(plan_hash="plan-picker", profile_id="profile-picker")
+    contribution = SimpleNamespace(
+        contribution_id="profiles.select",
+        owner_pack_id="profiles-pack",
+        resolved_plan_hash="plan-picker",
+        action_contract="rumi.action.entity-picker.v1",
+        data_source_contract=None,
+        isolated=None,
+    )
+    catalog = SimpleNamespace(
+        plan_hash="plan-picker",
+        catalog_hash="sha256:picker-catalog",
+        contributions=(contribution,),
+    )
+    monkeypatch.setattr(frontend_capability, "persisted_resolved_profile", lambda: plan)
+    monkeypatch.setattr(frontend_capability, "build_frontend_catalog", lambda _plan: catalog)
+    monkeypatch.setattr(
+        frontend_capability,
+        "invoke_global_contract",
+        lambda _registry, contract_id, operation, payload: {
+            "contract_id": contract_id,
+            "operation": operation,
+            "payload": payload,
+        },
+    )
+    request = {
+        "request_id": "picker-action-1",
+        "expires_at": time.time() + 30,
+        "profile_id": "profile-picker",
+        "plan_hash": "plan-picker",
+        "catalog_hash": "sha256:picker-catalog",
+        "owner_pack_id": "profiles-pack",
+        "contribution_id": "profiles.select",
+        "contract_id": "rumi.action.entity-picker.v1",
+        "payload": {
+            "operation": "reviewer.set",
+            "input": {
+                "picker_id": "reviewer-picker",
+                "data_source_id": "agent_profiles.list",
+                "selected_ids": ["reviewer"],
+                "value_scope": "workspace",
+            },
+        },
+    }
+
+    denied = frontend_capability.run(
+        request,
+        {"v4_dispatch_session": object()},
+    )
+    request["request_id"] = "picker-action-2"
+    accepted = frontend_capability.run(
+        request,
+        {"v4_dispatch_session": object(), "_tool_server_approved": True},
+    )
+
+    assert denied["status"] == "error"
+    assert denied["error"]["code"] == "CAPABILITY_DENIED"
+    assert accepted["status"] == "ok"
+    assert accepted["data"]["operation"] == "reviewer.set"
+    assert accepted["data"]["payload"]["profile_id"] == "profile-picker"
 
 
 def test_isolated_asset_is_bound_to_persisted_plan_and_artifact_evidence(

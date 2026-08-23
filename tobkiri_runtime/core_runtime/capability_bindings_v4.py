@@ -189,6 +189,22 @@ def _capture_operation_target(
 def _dynamic_payload_keys(contract_id: str) -> frozenset[str]:
     if contract_id == "tobkiri.service.media.inspect.v1":
         return frozenset({"name", "path", "encoding", "max_bytes", "start_line", "end_line"})
+    if contract_id in {
+        "rumi.action.entity-picker.v1",
+        "tobkiri.data.entity-picker.v1",
+    }:
+        return frozenset(
+            {
+                "picker_id",
+                "selected_ids",
+                "data_source_id",
+                "source_revision",
+                "value_scope",
+                "query",
+                "cursor",
+                "profile_id",
+            }
+        )
     return frozenset()
 
 

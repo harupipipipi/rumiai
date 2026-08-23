@@ -40,6 +40,26 @@ function groupLabel(item: EntityPickerItem): string {
   return item.group ?? "Items";
 }
 
+function selectableIds(items: EntityPickerItem[], ids: Iterable<string>): string[] {
+  const allowed = new Set(
+    items.filter((item) => !item.disabled && !item.create).map((item) => item.id),
+  );
+  return [...new Set(ids)].filter((id) => allowed.has(id));
+}
+
+export function nextEntityPickerActiveIndex(
+  items: EntityPickerItem[],
+  current: number,
+  delta: 1 | -1,
+): number {
+  if (items.length === 0) return 0;
+  for (let offset = 1; offset <= items.length; offset += 1) {
+    const candidate = (current + delta * offset + items.length) % items.length;
+    if (!items[candidate]?.disabled) return candidate;
+  }
+  return current;
+}
+
 function PickerBody({
   picker,
   initialQuery = "",
@@ -53,8 +73,12 @@ function PickerBody({
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const [query, setQuery] = useState(initialQuery);
   const [items, setItems] = useState(picker.items);
-  const [selection, setSelection] = useState(() => new Set(selectedIds ?? picker.selectedIds));
-  const committedSelectionRef = useRef(new Set(selectedIds ?? picker.selectedIds));
+  const [selection, setSelection] = useState(
+    () => new Set(selectableIds(picker.items, selectedIds ?? picker.selectedIds)),
+  );
+  const committedSelectionRef = useRef(
+    new Set(selectableIds(picker.items, selectedIds ?? picker.selectedIds)),
+  );
   const [activeIndex, setActiveIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [pending, setPending] = useState(false);
@@ -63,26 +87,27 @@ function PickerBody({
   const [sourceRevision, setSourceRevision] = useState(picker.sourceRevision);
 
   useEffect(() => {
+    const modal = picker.presentation === "popup" || picker.presentation === "palette";
+    if (!modal) return undefined;
     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     inputRef.current?.focus();
     return () => previousFocusRef.current?.focus();
-  }, []);
+  }, [picker.presentation]);
 
   useEffect(() => {
-    const next = new Set(selectedIds ?? picker.selectedIds);
+    const next = new Set(selectableIds(items, selectedIds ?? picker.selectedIds));
     committedSelectionRef.current = next;
     setSelection(next);
-  }, [picker.selectedIds, selectedIds]);
+  }, [items, picker.selectedIds, selectedIds]);
 
   useEffect(() => {
-    if (!picker.remote || !onLoadPage) return undefined;
+    if (!picker.dataSourceCapability || !onLoadPage) return undefined;
     let active = true;
     const timer = window.setTimeout(() => {
       setLoading(true);
       setError(null);
       void onLoadPage({
         pickerId: picker.id,
-        actionId: picker.loadActionId,
         query,
         dataSourceId: picker.dataSourceId,
         sourceRevision: picker.sourceRevision,
@@ -105,8 +130,8 @@ function PickerBody({
   }, [onLoadPage, picker, query]);
 
   const visible = useMemo(
-    () => filterEntityPickerItems(items, picker.remote && onLoadPage ? "" : query),
-    [items, onLoadPage, picker.remote, query],
+    () => filterEntityPickerItems(items, picker.dataSourceCapability && onLoadPage ? "" : query),
+    [items, onLoadPage, picker.dataSourceCapability, query],
   );
   const groups = useMemo(() => {
     const result: Array<{ label: string; items: EntityPickerItem[] }> = [];
@@ -119,11 +144,15 @@ function PickerBody({
     return result;
   }, [visible]);
 
-  useEffect(() => setActiveIndex((current) => Math.min(current, Math.max(0, visible.length - 1))), [visible.length]);
+  useEffect(() => setActiveIndex((current) => {
+    const bounded = Math.min(current, Math.max(0, visible.length - 1));
+    if (!visible[bounded]?.disabled) return bounded;
+    return nextEntityPickerActiveIndex(visible, bounded, 1);
+  }), [visible]);
 
   const request = (ids: string[], actionId = picker.selectActionId): EntityPickerSelectionRequest => ({
     pickerId: picker.id,
-    selectedIds: ids,
+    selectedIds: selectableIds(items, ids),
     actionId,
     valueScope: picker.valueScope,
     dataSourceId: picker.dataSourceId,
@@ -133,12 +162,14 @@ function PickerBody({
 
   const commit = async (ids: string[]) => {
     const previous = new Set(committedSelectionRef.current);
-    setSelection(new Set(ids));
+    const next = selectableIds(items, ids);
+    if (picker.optimistic) setSelection(new Set(next));
     setPending(true);
     setError(null);
     try {
-      await onSelect?.(request(ids));
-      committedSelectionRef.current = new Set(ids);
+      await onSelect?.(request(next));
+      committedSelectionRef.current = new Set(next);
+      setSelection(new Set(next));
       if (picker.selectionMode === "single") onClose?.();
     } catch (reason) {
       setSelection(previous);
@@ -169,11 +200,11 @@ function PickerBody({
   };
 
   const loadMore = async () => {
-    if (!picker.remote || !onLoadPage || !nextCursor || loading) return;
+    if (!picker.dataSourceCapability || !onLoadPage || !nextCursor || loading) return;
     setLoading(true);
     setError(null);
     try {
-      const page = await onLoadPage({ pickerId: picker.id, actionId: picker.loadActionId, query, cursor: nextCursor, dataSourceId: picker.dataSourceId, sourceRevision });
+      const page = await onLoadPage({ pickerId: picker.id, query, cursor: nextCursor, dataSourceId: picker.dataSourceId, sourceRevision });
       setItems((current) => mergeItems(current, page.items));
       setNextCursor(page.nextCursor);
       setSourceRevision(page.sourceRevision ?? sourceRevision);
@@ -188,7 +219,7 @@ function PickerBody({
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const delta = event.key === "ArrowDown" ? 1 : -1;
-      setActiveIndex((current) => (current + delta + Math.max(1, visible.length)) % Math.max(1, visible.length));
+      setActiveIndex((current) => nextEntityPickerActiveIndex(visible, current, delta));
     } else if (event.key === "Enter" && visible[activeIndex]) {
       event.preventDefault();
       choose(visible[activeIndex]);
@@ -224,6 +255,7 @@ function PickerBody({
           aria-label={`Search ${picker.label}`}
           aria-controls={`entity-picker-list-${picker.id}`}
           aria-expanded="true"
+          aria-autocomplete="list"
           aria-activedescendant={visible[activeIndex] ? `entity-picker-option-${picker.id}-${visible[activeIndex].id}` : undefined}
           placeholder={picker.placeholder}
           value={query}

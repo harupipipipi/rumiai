@@ -1,6 +1,9 @@
 import type { TemplateCatalogMetadataItem, UICatalog } from "./api";
+import type { FrontendContributionKind, VerifiedFrontendContribution } from "../host/frontendContracts";
 
 export const ENTITY_PICKER_API_VERSION = "rumi.entity_picker.v1";
+export const ENTITY_PICKER_DATA_SOURCE_CONTRACT = "tobkiri.data.entity-picker.v1";
+export const ENTITY_PICKER_ACTION_CONTRACT = "rumi.action.entity-picker.v1";
 
 export type EntityPickerSelectionMode = "single" | "multi";
 export type EntityPickerPresentation = "popup" | "palette" | "inline" | "settings" | "status_surface";
@@ -31,6 +34,16 @@ export type EntityPickerItem = {
   create?: boolean;
 };
 
+export type EntityPickerCapabilityBinding = {
+  profileId: string;
+  planHash: string;
+  catalogHash: string;
+  contributionId: string;
+  ownerPackId: string;
+  contractId: typeof ENTITY_PICKER_DATA_SOURCE_CONTRACT | typeof ENTITY_PICKER_ACTION_CONTRACT;
+  operationId: string;
+};
+
 export type ResolvedEntityPicker = {
   id: string;
   apiVersion: typeof ENTITY_PICKER_API_VERSION;
@@ -43,10 +56,12 @@ export type ResolvedEntityPicker = {
   searchable: boolean;
   placeholder: string;
   dataSourceId: string;
-  remote: boolean;
-  loadActionId?: string;
+  dataSourceCapability?: EntityPickerCapabilityBinding;
+  optimistic: boolean;
   selectActionId?: string;
+  selectActionCapability?: EntityPickerCapabilityBinding;
   createActionId?: string;
+  createActionCapability?: EntityPickerCapabilityBinding;
   sourceRevision?: string;
   nextCursor?: string;
   items: EntityPickerItem[];
@@ -85,7 +100,6 @@ export type EntityPickerSelectionRequest = {
 
 export type EntityPickerPageRequest = {
   pickerId: string;
-  actionId?: string;
   query: string;
   cursor?: string;
   dataSourceId: string;
@@ -162,17 +176,12 @@ function identity(item: TemplateCatalogMetadataItem, ...keys: string[]): string[
   return keys.map((key) => safeId(item[key])).filter((item): item is string => Boolean(item));
 }
 
-function executableActionIds(catalog: UICatalog | null | undefined): Set<string> {
-  const result = new Set<string>();
-  for (const command of catalog?.commands ?? []) {
-    if (!record(command.execution)) continue;
-    identity(command, "id", "name", "command_id").forEach((id) => result.add(id));
-  }
+function actionMap(catalog: UICatalog | null | undefined): Map<string, TemplateCatalogMetadataItem> {
+  const result = new Map<string, TemplateCatalogMetadataItem>();
   for (const action of catalog?.actions ?? []) {
-    const nested = record(action.command);
-    if (!record(action.execution) && !record(nested?.execution)) continue;
-    identity(action, "action_id", "id", "command_id", "name").forEach((id) => result.add(id));
-    if (nested) identity(nested, "action_id", "id", "command_id", "name").forEach((id) => result.add(id));
+    for (const id of identity(action, "action_id", "id", "command_id", "name")) {
+      if (!result.has(id)) result.set(id, action);
+    }
   }
   return result;
 }
@@ -192,6 +201,64 @@ function provenance(raw: TemplateCatalogMetadataItem) {
     templateId: text(raw.template_id, 160),
     sourcePackId: text(raw.source_pack_id ?? record(raw.origin)?.pack_id, 160),
     trustLevel: text(raw.trust_level, 40),
+  };
+}
+
+function capabilityBinding(
+  catalog: UICatalog | null | undefined,
+  metadata: TemplateCatalogMetadataItem | undefined,
+  referenceId: string | undefined,
+  expectedKind: Extract<FrontendContributionKind, "action" | "data_source">,
+  picker: TemplateCatalogMetadataItem,
+  pickerId: string,
+  diagnostics: EntityPickerDiagnostic[],
+  path: string,
+): EntityPickerCapabilityBinding | undefined {
+  if (!referenceId || !metadata) return undefined;
+  const dynamic = catalog?.dynamic_host;
+  const contributionId = safeId(metadata.contribution_id ?? referenceId);
+  const operationId = safeId(metadata.operation_id ?? metadata.function_id ?? referenceId);
+  const matches = dynamic?.contributions.filter((contribution) => (
+    contribution.contribution_id === contributionId
+    && contribution.kind === expectedKind
+    && contribution.resolved_plan_hash === dynamic.plan_hash
+  )) ?? [];
+  const contribution: VerifiedFrontendContribution | undefined = matches.length === 1
+    ? matches[0]
+    : undefined;
+  const contractId = expectedKind === "action"
+    ? contribution?.action_contract
+    : contribution?.data_source_contract;
+  const expectedContract = expectedKind === "action"
+    ? ENTITY_PICKER_ACTION_CONTRACT
+    : ENTITY_PICKER_DATA_SOURCE_CONTRACT;
+  const pickerPackId = provenance(picker).sourcePackId;
+  const metadataPackId = provenance(metadata).sourcePackId;
+  if (
+    !dynamic
+    || !contribution
+    || !operationId
+    || contractId !== expectedContract
+    || (pickerPackId && contribution.owner_pack_id !== pickerPackId)
+    || (metadataPackId && contribution.owner_pack_id !== metadataPackId)
+  ) {
+    diagnostics.push(diagnostic(
+      picker,
+      pickerId,
+      "entity_picker.unbound_capability",
+      `${expectedKind} is not bound to the active ProfileLock/ResolvedPlan catalog`,
+      path,
+    ));
+    return undefined;
+  }
+  return {
+    profileId: dynamic.profile_id,
+    planHash: dynamic.plan_hash,
+    catalogHash: dynamic.catalog_hash,
+    contributionId: contribution.contribution_id,
+    ownerPackId: contribution.owner_pack_id,
+    contractId: expectedContract,
+    operationId,
   };
 }
 
@@ -312,7 +379,7 @@ function unsupportedPicker(raw: TemplateCatalogMetadataItem, id: string, diagnos
     searchable: false,
     placeholder: "Unavailable",
     dataSourceId: "unsupported",
-    remote: false,
+    optimistic: false,
     items: [],
     selectedIds: [],
     itemPaths: { id: "id", label: "label" },
@@ -323,7 +390,12 @@ function unsupportedPicker(raw: TemplateCatalogMetadataItem, id: string, diagnos
   };
 }
 
-function resolveOne(raw: TemplateCatalogMetadataItem, sources: Map<string, TemplateCatalogMetadataItem>, actions: Set<string>): ResolvedEntityPicker {
+function resolveOne(
+  raw: TemplateCatalogMetadataItem,
+  catalog: UICatalog | null | undefined,
+  sources: Map<string, TemplateCatalogMetadataItem>,
+  actions: Map<string, TemplateCatalogMetadataItem>,
+): ResolvedEntityPicker {
   const config = payload(raw);
   const id = safeId(config.picker_id ?? config.id ?? raw.id) ?? `invalid_${text(raw.piece_id, 60) ?? "picker"}`;
   const diagnostics: EntityPickerDiagnostic[] = [];
@@ -334,24 +406,54 @@ function resolveOne(raw: TemplateCatalogMetadataItem, sources: Map<string, Templ
   if (!dataSourceId) diagnostics.push(diagnostic(raw, id, "entity_picker.invalid_data_source", "data_source must be an opaque registered ID", "data_source"));
   const source = dataSourceId ? sources.get(dataSourceId) : undefined;
   if (dataSourceId && !source) diagnostics.push(diagnostic(raw, id, "entity_picker.unregistered_data_source", `unregistered data source: ${dataSourceId}`, "data_source"));
+  const dataSourceCapability = capabilityBinding(
+    catalog,
+    source,
+    dataSourceId,
+    "data_source",
+    raw,
+    id,
+    diagnostics,
+    "data_source",
+  );
   const paths = itemPaths(config, diagnostics, raw, id);
   const scopeText = text(config.value_scope, 40) as EntityPickerValueScope | undefined;
   const valueScope = scopeText && SCOPES.has(scopeText) ? scopeText : "draft";
+  const persistent = valueScope === "settings" || valueScope === "workspace" || valueScope === "global";
   if (scopeText && !SCOPES.has(scopeText)) diagnostics.push(diagnostic(raw, id, "entity_picker.invalid_scope", `unsupported value scope: ${scopeText}`, "value_scope"));
   const selectActionId = safeId(config.on_select_action_id);
-  if (valueScope !== "draft" && (!selectActionId || !actions.has(selectActionId))) {
+  const selectAction = selectActionId ? actions.get(selectActionId) : undefined;
+  const selectActionCapability = capabilityBinding(
+    catalog,
+    selectAction,
+    selectActionId,
+    "action",
+    raw,
+    id,
+    diagnostics,
+    "on_select_action_id",
+  );
+  if (persistent && (!selectActionId || !selectAction || !selectActionCapability)) {
     diagnostics.push(diagnostic(raw, id, "entity_picker.unregistered_action", "persistent selection requires a registered executable action", "on_select_action_id"));
-  } else if (selectActionId && !actions.has(selectActionId)) {
+  } else if (selectActionId && (!selectAction || !selectActionCapability)) {
     diagnostics.push(diagnostic(raw, id, "entity_picker.unregistered_action", `unregistered select action: ${selectActionId}`, "on_select_action_id"));
   }
   const create = record(config.create_item);
   const createActionId = safeId(create?.action_id);
-  if (create && (!createActionId || !actions.has(createActionId))) diagnostics.push(diagnostic(raw, id, "entity_picker.unregistered_action", "create item requires a registered executable action", "create_item.action_id"));
-  const loadActionId = safeId(config.load_action_id ?? source?.load_action_id);
+  const createAction = createActionId ? actions.get(createActionId) : undefined;
+  const createActionCapability = capabilityBinding(
+    catalog,
+    createAction,
+    createActionId,
+    "action",
+    raw,
+    id,
+    diagnostics,
+    "create_item.action_id",
+  );
+  if (create && (!createActionId || !createAction || !createActionCapability)) diagnostics.push(diagnostic(raw, id, "entity_picker.unregistered_action", "create item requires a registered executable action", "create_item.action_id"));
   const remote = bool(config.remote) || bool(source?.remote);
-  if (loadActionId && !actions.has(loadActionId)) {
-    diagnostics.push(diagnostic(raw, id, "entity_picker.unregistered_action", "load action must be registered", "load_action_id"));
-  }
+  if (remote && !dataSourceCapability) diagnostics.push(diagnostic(raw, id, "entity_picker.unregistered_data_source", "remote source requires an active ProfileLock/ResolvedPlan capability", "data_source"));
   const trigger = text(config.trigger_command, 48)?.replace(/^\/+/, "").toLowerCase();
   if (trigger && !VALID_COMMAND.test(trigger)) diagnostics.push(diagnostic(raw, id, "entity_picker.invalid_trigger", "trigger command is invalid", "trigger_command"));
   if (diagnostics.length) return unsupportedPicker(raw, id, diagnostics);
@@ -369,10 +471,12 @@ function resolveOne(raw: TemplateCatalogMetadataItem, sources: Map<string, Templ
     searchable: config.searchable !== false,
     placeholder: text(config.placeholder, 200) ?? "Search items",
     dataSourceId: dataSourceId!,
-    remote,
-    loadActionId,
+    dataSourceCapability,
+    optimistic: valueScope === "draft" || valueScope === "conversation" || valueScope === "run" || bool(config.optimistic),
     selectActionId,
+    selectActionCapability,
     createActionId,
+    createActionCapability,
     sourceRevision: text(source?.revision ?? record(source?.snapshot)?.revision, 160),
     nextCursor: text(source?.next_cursor ?? record(source?.snapshot)?.next_cursor, 200),
     items: [],
@@ -397,11 +501,11 @@ function resolveOne(raw: TemplateCatalogMetadataItem, sources: Map<string, Templ
 
 export function resolveEntityPickers(catalog: UICatalog | null | undefined): ResolvedEntityPicker[] {
   const sources = sourceMap(catalog);
-  const actions = executableActionIds(catalog);
+  const actions = actionMap(catalog);
   const seen = new Set<string>();
   return (catalog?.entity_pickers ?? [])
     .filter((item) => item.enabled !== false)
-    .map((item) => resolveOne(item, sources, actions))
+    .map((item) => resolveOne(item, catalog, sources, actions))
     .filter((picker) => {
       if (seen.has(picker.id)) return false;
       seen.add(picker.id);
@@ -419,6 +523,15 @@ export function entityPickerForCommand(
       .filter(Boolean),
   );
   return pickers.find((picker) => picker.triggerCommand && names.has(picker.triggerCommand));
+}
+
+export function entityPickersForPresentation(
+  pickers: ResolvedEntityPicker[],
+  presentation: EntityPickerPresentation,
+): ResolvedEntityPicker[] {
+  return pickers.filter((picker) => (
+    !picker.unsupported && picker.presentation === presentation
+  ));
 }
 
 export function filterEntityPickerItems(items: EntityPickerItem[], query: string): EntityPickerItem[] {
