@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import os
 import signal
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -435,6 +437,116 @@ def _wait_until_chat_ready(url: str, timeout: float = 10.0) -> bool:
     return False
 
 
+def _fetch_ui_readiness(url: str) -> dict[str, object] | None:
+    """Fetch and authenticate one canonical UI readiness snapshot."""
+
+    from core_runtime.host_contract import host_contract_value
+    from core_runtime.ui_readiness import (
+        REQUIRED_UI_READINESS_PROBES,
+        UI_READINESS_AUTHORIZATION_HEADER,
+        UI_READINESS_CHALLENGE_HEADER,
+        UI_READINESS_PATH,
+        UI_READINESS_SCHEMA,
+        ui_readiness_request_proof,
+        ui_readiness_response_proof,
+    )
+
+    bootstrap_secret = host_contract_value("panel_bootstrap_secret")
+    if not bootstrap_secret:
+        return None
+    challenge = secrets.token_urlsafe(24)
+    readiness_url = url.split("/chat", 1)[0].rstrip("/") + UI_READINESS_PATH
+    request = urllib.request.Request(
+        readiness_url,
+        headers={
+            UI_READINESS_CHALLENGE_HEADER: challenge,
+            UI_READINESS_AUTHORIZATION_HEADER: ui_readiness_request_proof(
+                bootstrap_secret,
+                challenge,
+            ),
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=3.0) as response:
+            if not 200 <= response.status < 300:
+                return None
+            envelope = json.loads(response.read().decode("utf-8"))
+    except (OSError, ValueError, urllib.error.URLError):
+        return None
+    data = envelope.get("data") if isinstance(envelope, dict) else None
+    if not isinstance(data, dict) or data.get("schema") != UI_READINESS_SCHEMA:
+        return None
+    expected = ui_readiness_response_proof(bootstrap_secret, challenge)
+    actual = data.get("desktop_challenge_response")
+    if not isinstance(actual, str) or not hmac.compare_digest(actual, expected):
+        return None
+    probes = data.get("probes")
+    if not isinstance(probes, dict) or set(REQUIRED_UI_READINESS_PROBES) - set(probes):
+        return None
+    return data
+
+
+def _wait_until_ui_ready(url: str, timeout: float = 60.0) -> dict[str, object]:
+    """Wait for the complete UI bootstrap contract, returning final evidence."""
+
+    deadline = time.monotonic() + timeout
+    last_snapshot: dict[str, object] | None = None
+    while time.monotonic() < deadline:
+        snapshot = _fetch_ui_readiness(url)
+        if snapshot is not None:
+            last_snapshot = snapshot
+            if _ui_readiness_allows_launch(snapshot):
+                return snapshot
+        time.sleep(0.25)
+    return last_snapshot or {
+        "schema": "io.tobkiri.ui-readiness.v1",
+        "status": "DOWN",
+        "ready": False,
+        "probes": {
+            "readiness_endpoint": {
+                "status": "DOWN",
+                "code": "READINESS_ENDPOINT_UNAVAILABLE",
+                "message": "UI readiness endpoint did not return authenticated evidence",
+                "duration_ms": round(timeout * 1000.0, 2),
+            }
+        },
+    }
+
+
+def _ui_readiness_allows_launch(snapshot: dict[str, object]) -> bool:
+    """Return whether canonical readiness permits opening the desktop surface."""
+
+    if snapshot.get("ready") is not True:
+        return False
+    if snapshot.get("status") == "UP":
+        return True
+    return (
+        snapshot.get("status") == "DEGRADED"
+        and snapshot.get("mode") == "profile_reconfirmation_required"
+    )
+
+
+def _failed_readiness_probes(snapshot: object) -> list[dict[str, str]]:
+    """Return safe named failures for launch diagnostics and user errors."""
+
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("probes"), dict):
+        return [{"name": "readiness_endpoint", "code": "INVALID_READINESS"}]
+    failures: list[dict[str, str]] = []
+    for name, result in snapshot["probes"].items():
+        if not isinstance(result, dict) or result.get("status") != "UP":
+            failures.append(
+                {
+                    "name": str(name),
+                    "code": str(
+                        result.get("code", "INVALID_PROBE")
+                        if isinstance(result, dict)
+                        else "INVALID_PROBE"
+                    ),
+                }
+            )
+    return failures
+
+
 def _require_host_panel_auth_manager() -> PanelAuthManager:
     """Return the singleton bound to the exact Launcher-owned Host contract."""
     from core_runtime.host_contract import host_contract_value
@@ -495,26 +607,10 @@ def main(argv: list[str] | None = None) -> int:
         load_integration_secrets_into_env()
     except Exception as exc:
         _write_launch_event("secrets_load_skipped", error=repr(exc), port=port, url=url)
-    from core_runtime.api.web_mounts import WebMountEntry
     from core_runtime.pack_api_server import PackAPIServer
+    from core_runtime.ui_readiness import defaultspack_ui_web_mounts
 
-    ui_root = _pack_root() / "ui"
-    web_mounts: tuple[WebMountEntry, ...] = (
-        {
-            "path_prefix": "/chat",
-            "web_root": ui_root,
-            "spa_fallback": True,
-            "index_file": "shell.html",
-            "auth_required": True,
-        },
-        {
-            "path_prefix": "/static",
-            "web_root": ui_root,
-            "spa_fallback": False,
-            "index_file": "shell.html",
-            "auth_required": True,
-        },
-    )
+    web_mounts = defaultspack_ui_web_mounts()
     auth = _require_host_panel_auth_manager()
     server = PackAPIServer(
         host="127.0.0.1",
@@ -546,15 +642,29 @@ def main(argv: list[str] | None = None) -> int:
     else:
         mark_profile_reconfirmation_required(reconfirmation_error)
 
-    health_ready = _wait_until_ready(url)
-    chat_ready = _wait_until_chat_ready(url)
+    ui_readiness = _wait_until_ui_ready(url)
+    readiness_failures = _failed_readiness_probes(ui_readiness)
     _write_launch_event(
         "readiness_complete",
-        chat_ready=chat_ready,
-        health_ready=health_ready,
+        failures=readiness_failures,
         port=port,
+        ready=ui_readiness.get("ready") is True,
+        status=ui_readiness.get("status"),
         url=url,
     )
+    if not _ui_readiness_allows_launch(ui_readiness):
+        server.stop()
+        _write_launch_event(
+            "readiness_failed",
+            failures=readiness_failures,
+            port=port,
+            status=ui_readiness.get("status"),
+            url=url,
+        )
+        names = ", ".join(item["name"] for item in readiness_failures)
+        raise RuntimeError(
+            "Tobkiri UI bootstrap is not ready" + (f"; failing probes: {names}" if names else "")
+        )
 
     from defaultspack.native_webview import open_desktop_surface
 
