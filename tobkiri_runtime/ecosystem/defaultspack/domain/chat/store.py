@@ -454,10 +454,17 @@ class ChatStore:
         if source is None:
             return None
         chain = self.get_message_chain(conversation_id, message_id) if message_id else []
+        branch_metadata = _branch_metadata(source.get("metadata"))
+        if branch_metadata.get("shared_read_only") is True:
+            branch_metadata["shared_read_only"] = False
+            branch_metadata["shared_import_mode"] = "continue_copy"
         branch = self.create_conversation(
             model=source.get("model"), system_prompt_id=source.get("system_prompt_id"),
             agent_id=source.get("agent_id"), tags=list(source.get("tags") or []),
             parent_conversation_id=conversation_id,
+            conversation_kind=source.get("conversation_kind"),
+            metadata=branch_metadata,
+            group_id=source.get("group_id"),
         )
         self.update_conversation(branch["id"], {"title": f"{source.get('title')} (branch)"})
         id_map = {item["id"]: str(uuid.uuid4()) for item in chain}
@@ -647,6 +654,40 @@ def _message_text(message: Mapping[str, Any]) -> str:
             for item in content
         )
     return str(content or "")
+
+
+_BRANCH_METADATA_DENY_FRAGMENTS = (
+    "approval",
+    "authority",
+    "credential",
+    "grant",
+    "password",
+    "secret",
+    "token",
+    "ui_operator",
+)
+
+
+def _branch_metadata(value: Any) -> dict[str, Any]:
+    """Copy conversation context without carrying ambient authority material."""
+    if not isinstance(value, Mapping):
+        return {}
+
+    def sanitize(item: Any) -> Any:
+        if isinstance(item, Mapping):
+            return {
+                str(key): sanitize(child)
+                for key, child in item.items()
+                if not any(
+                    fragment in str(key).casefold()
+                    for fragment in _BRANCH_METADATA_DENY_FRAGMENTS
+                )
+            }
+        if isinstance(item, list):
+            return [sanitize(child) for child in item]
+        return copy.deepcopy(item)
+
+    return sanitize(value)
 
 
 def _read_only(conversation: Mapping[str, Any]) -> bool:

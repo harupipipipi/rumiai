@@ -56,6 +56,7 @@ server = start_http_server(facade)  # KernelFacade or None
 | `POST` | `/api/chat/conversations/{id}/messages` | `defaultspack.chat_turn` (`blocks/chat/send.py` fallback) |
 | `POST` | `/api/chat/conversations/{id}/stream` | `defaultspack.chat_stream_turn` (`blocks/chat/stream.py` fallback) |
 | `POST` | `/api/chat/conversations/{id}/export` | `blocks/chat/export_conversation.py` |
+| `POST` | `/api/chat/conversations/{id}/fork` | `blocks/chat/fork_conversation.py` |
 | `POST` | `/api/chat/conversations/{id}/summarize` | `blocks/chat/summarize_and_trim.py` |
 | `POST` | `/api/chat/conversations/{id}/auto-trim` | `blocks/chat/auto_trim.py` |
 | `POST` | `/api/agent/execute` | `blocks/agent/execute.py` |
@@ -179,6 +180,7 @@ stdio transport は `transport/registry.py` の canonical route specs を使う�
 | `POST` | `/api/chat/conversations/{id}/messages` | `defaultspack.chat_turn` | `conversation_id` ← `id` |
 | `POST` | `/api/chat/conversations/{id}/stream` | `defaultspack.chat_stream_turn` | `conversation_id` ← `id` |
 | `POST` | `/api/chat/conversations/{id}/export` | `blocks.chat.export_conversation` | `conversation_id` ← `id` |
+| `POST` | `/api/chat/conversations/{id}/fork` | `blocks.chat.fork_conversation` | `conversation_id` ← `id` |
 | `POST` | `/api/agent/execute` | `blocks.agent.execute` | — |
 | `POST` | `/api/agent/{id}/approve` | `blocks.agent.approve` | `execution_id` ← `id` |
 | `POST` | `/api/agent/{id}/reject` | `blocks.agent.reject` | `execution_id` ← `id` |

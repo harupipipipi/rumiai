@@ -53,6 +53,13 @@ import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./componen
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
 import { ChatStreamInterruptedError, api, composerCommandFeedbackTone, composerCommandResultMessage, defaultspackApiFetch, defaultspackCanonicalRouteKey, defaultspackContractRoute, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type ResolvedCommandCatalog, type SettingsSection, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
+import {
+  conversationExportFilename,
+  conversationExportMimeType,
+  isUnresolvedSlashCommandInput,
+  runConversationSlashAction,
+  writeConversationExportClipboard,
+} from "./lib/conversationSlashActions";
 import { applyCommandStateSnapshots, createCommandInvocationId } from "./lib/commandState";
 import type { ActionApprovalMode } from "./features/tools/ActionApprovalControl";
 import {
@@ -1702,6 +1709,8 @@ type PendingCommandApproval = {
   args: Record<string, unknown>;
   conversationId: string | null;
   mode: ComposerCommandMode;
+  rawInput?: string;
+  catalogRevision?: string;
   approvalKind: "authority" | "coding";
   authorityRequestId?: string;
   authorityToken?: string;
@@ -2844,6 +2853,7 @@ function ChatApp() {
   const deepthinkDesiredStateRef = useRef(deepthinkEnabled);
   const deepthinkPendingCountRef = useRef(0);
   const commandClientSequenceRef = useRef(0);
+  const composerCommandsInFlightRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (deepthinkPendingCountRef.current === 0) {
       deepthinkDesiredStateRef.current = deepthinkEnabled;
@@ -4559,11 +4569,81 @@ function ChatApp() {
     });
   };
 
-  const runFrontendCommandAction = (
+  const runFrontendCommandAction = async (
     action: string | undefined,
     command: ComposerCommandItem,
     args: Record<string, unknown>,
-  ) => {
+  ): Promise<boolean | void> => {
+    const conversationOutcome = await runConversationSlashAction(action, args, {
+      activeConversation,
+      activeConversationId,
+      api,
+    });
+    if (conversationOutcome.handled) {
+      if (conversationOutcome.effect === "error") {
+        setError(conversationOutcome.message);
+        return false;
+      }
+      closeSpotlight();
+      setComposerCandidateMenu(null);
+      if (conversationOutcome.effect === "history") {
+        setIsHistoryMinimized(false);
+        if (conversationOutcome.message) setError(conversationOutcome.message);
+        return conversationOutcome.clearInput;
+      }
+      if (conversationOutcome.effect === "export") {
+        const { exported } = conversationOutcome;
+        const copied = await writeConversationExportClipboard(
+          exported.content ?? "",
+          (value) => api.writeClipboard(value),
+        );
+        try {
+          const blob = new Blob([exported.content ?? ""], {
+            type: `${conversationExportMimeType(exported.format)};charset=utf-8`,
+          });
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = conversationExportFilename(exported.format);
+          anchor.hidden = true;
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+          window.setTimeout(() => URL.revokeObjectURL(url), 0);
+        } catch {
+          // The export remains available in the trusted preview when download is blocked.
+        }
+        pushActionPreview(
+          { id: "conversation.export", label: "Export", icon: "download" },
+          "Conversation Export",
+          { ...exported, copied_to_clipboard: copied },
+        );
+        setError(copied
+          ? "Conversation export をダウンロードし、clipboard にもコピーしました。"
+          : "Conversation export を作成しました。Canvas preview から内容を確認できます。");
+        return conversationOutcome.clearInput;
+      }
+
+      const { conversation } = conversationOutcome;
+      if (conversationOutcome.effect === "fork") {
+        setPendingNewTaskContext(null);
+        setActiveConversationId(conversation.id);
+      }
+      setActiveConversation(conversation);
+      try {
+        await Promise.all([
+          loadConversation(conversation.id, false),
+          refreshConversations(conversation.id),
+        ]);
+        setError(conversationOutcome.message);
+      } catch (refreshError) {
+        setError(refreshError instanceof Error
+          ? refreshError.message
+          : "会話は更新されましたが、表示の再読み込みに失敗しました。");
+      }
+      return conversationOutcome.clearInput;
+    }
+
     switch (action) {
       case "open_model_picker": {
         const query = String(args.query ?? "").trim().toLowerCase();
@@ -4749,58 +4829,6 @@ function ChatApp() {
         handleModeChange("coding");
         if (args.query) setInput(`Find workspace files matching ${String(args.query)}.`);
         return;
-      case "open_history":
-        setIsHistoryMinimized(false);
-        return;
-      case "export_conversation":
-        if (!activeConversationId) {
-          setError("エクスポートする会話がありません。");
-          return;
-        }
-        void handlePanelAction(
-          {} as SidebarItem,
-          { id: "conversation.export" } as SidebarAction,
-        );
-        return;
-      case "fork_conversation":
-        if (!activeConversationId) {
-          setError("forkする会話がありません。");
-          return;
-        }
-        void api.createConversation({
-          model: preferredModel || "stub/default",
-          parent_conversation_id: activeConversationId,
-          metadata: { forked_from: activeConversationId },
-        }).then((conversation) => {
-          setActiveConversationId(conversation.id);
-          void loadConversation(conversation.id, false);
-          void refreshConversations(conversation.id);
-        }).catch((forkError) => {
-          setError(forkError instanceof Error ? forkError.message : "会話のforkに失敗しました。");
-        });
-        return;
-      case "resume_conversation":
-        if (activeConversationId) {
-          void loadConversation(activeConversationId, false);
-          return;
-        }
-        setIsHistoryMinimized(false);
-        setError("履歴から再開する会話を選択してください。");
-        return;
-      case "rename_conversation": {
-        const title = String(args.title ?? "").replace(/\s+/g, " ").trim();
-        if (!activeConversationId || !title) {
-          setError("現在の会話と新しいtitleを指定してください。");
-          return;
-        }
-        void api.updateConversation(activeConversationId, { title }).then((conversation) => {
-          setActiveConversation(conversation);
-          void refreshConversations(conversation.id);
-        }).catch((renameError) => {
-          setError(renameError instanceof Error ? renameError.message : "会話名の変更に失敗しました。");
-        });
-        return;
-      }
       case "open_memory_inspector":
         setActiveSidebarItemId("__context_usage__");
         setSidebarSelectionTick((value) => value + 1);
@@ -4917,14 +4945,19 @@ function ChatApp() {
     };
     if (!parsed.command) {
       setError(`/${commandId} は未登録の command です。`);
-      return;
+      return false;
     }
+    const commandSignature = parsed.raw.trim();
+    if (composerCommandsInFlightRef.current.has(commandSignature)) {
+      setError(`/${parsed.command.name} はすでに実行中です。`);
+      return false;
+    }
+    composerCommandsInFlightRef.current.add(commandSignature);
     try {
       setError(null);
       if (isRegisteredSlashCommand(parsed.command) && !parsed.command.canonical_id) {
         const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
-        runFrontendCommandAction(frontendAction, parsed.command, parsed.args);
-        return true;
+        return (await runFrontendCommandAction(frontendAction, parsed.command, parsed.args)) !== false;
       }
       const commandArgs = { ...parsed.args };
       if (parsed.command.id === "think" && commandArgs.level && activeProfile) {
@@ -4958,6 +4991,7 @@ function ChatApp() {
             invocation_id: invocationId,
             idempotency_key: invocationId,
             client_sequence: clientSequence,
+            catalog_revision: commandProtocolInfo?.catalog_revision,
             expected_revision: Number.isInteger(expectedRevision) ? expectedRevision : undefined,
           });
         };
@@ -4979,6 +5013,8 @@ function ChatApp() {
           conversation_id: activeConversationId,
           mode: mode as ComposerCommandMode,
           invocation_id: invocationId,
+          idempotency_key: invocationId,
+          catalog_revision: commandProtocolInfo?.catalog_revision,
         });
       }
       const appliedStatePaths = applyAuthoritativeCommandState(result);
@@ -4993,13 +5029,15 @@ function ChatApp() {
             args: commandArgs,
             conversationId: activeConversationId,
             mode: mode as ComposerCommandMode,
+            rawInput: parsed.raw,
+            catalogRevision: commandProtocolInfo?.catalog_revision,
             approvalKind: result.approval_kind === "authority"
               ? "authority"
               : "coding",
           });
         }
         setError(feedbackMessage ?? `/${parsed.command.name} は approval center 経由で実行してください。`);
-        return;
+        return false;
       }
       if (isModelCommand(parsed.command)) {
         if (result.action === "show_model_candidates") {
@@ -5034,13 +5072,14 @@ function ChatApp() {
         }
       }
 
+      let shouldClearInput = true;
       if (result.action || parsed.command.execution.type === "frontend") {
         const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
-        runFrontendCommandAction(
+        shouldClearInput = (await runFrontendCommandAction(
           result.action ?? frontendAction,
           parsed.command,
           resolvedFrontendCommandArgs(parsed.command, parsed.args, result.args),
-        );
+        )) !== false;
       }
       if (parsed.command.execution.type === "rumi_function" && appliedStatePaths.length === 0) {
         await refreshCatalog();
@@ -5058,14 +5097,24 @@ function ChatApp() {
           });
         }
       }
+      return shouldClearInput;
     } catch (commandError) {
       setError(commandError instanceof Error ? commandError.message : "command execution に失敗しました。");
+      void refreshCatalog();
+      return false;
+    } finally {
+      composerCommandsInFlightRef.current.delete(commandSignature);
     }
   };
 
   const handleComposerCommand = (commandId: string, rawInput?: string) => {
     if (!slashCommandsEnabled) return;
-    void executeComposerCommand(commandId, rawInput);
+    const submittedInput = rawInput ?? `/${commandId}`;
+    void executeComposerCommand(commandId, submittedInput).then((shouldClearInput) => {
+      if (shouldClearInput !== false && input.trim() === submittedInput.trim()) {
+        setInput("");
+      }
+    });
   };
 
   const handleModelCommandCandidateSelect = (candidate: ModelCommandCandidate) => {
@@ -5719,6 +5768,7 @@ function ChatApp() {
         conversation_id: pending.conversationId,
         mode: pending.mode,
         invocation_id: pending.invocationId,
+        catalog_revision: pending.catalogRevision ?? commandProtocolInfo?.catalog_revision,
       });
       if (resumed.status === "approval_required" && resumed.approval?.request_id) {
         setPendingCommandApproval({
@@ -5737,12 +5787,16 @@ function ChatApp() {
         throw new Error(resumed.error?.message || "command resume failed");
       }
       applyAuthoritativeCommandState(resumed.legacy_result);
+      let shouldClearInput = true;
       if (resumed.legacy_result.executed !== true) {
-        runFrontendCommandAction(
+        shouldClearInput = (await runFrontendCommandAction(
           resumed.legacy_result.action,
           pending.command,
           resumed.legacy_result.args ?? pending.args,
-        );
+        )) !== false;
+      }
+      if (shouldClearInput && pending.rawInput && input.trim() === pending.rawInput) {
+        setInput("");
       }
       setPendingCommandApproval(null);
     } catch (approvalError) {
@@ -6129,6 +6183,16 @@ function ChatApp() {
     if (commandInput) {
       const shouldClearInput = await executeComposerCommand(commandInput.command.id, commandInput.raw);
       if (shouldClearInput !== false) setInput("");
+      return;
+    }
+
+    const trimmedCommandCandidate = inputForSubmit.trim();
+    if (
+      !override
+      && isUnresolvedSlashCommandInput(inputForSubmit, slashCommandsEnabled)
+    ) {
+      const commandName = trimmedCommandCandidate.slice(1).split(/\s+/, 1)[0] || "command";
+      setError(`/${commandName} は未登録か利用できない command です。通常のメッセージとして送るには // で始めてください。`);
       return;
     }
 

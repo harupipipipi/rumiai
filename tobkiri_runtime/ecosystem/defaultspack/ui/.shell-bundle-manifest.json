@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b1a6a71f8570ada13835c7eb2626eb2baa2f54f79bd99199c8f5c245a08b311b",
+    "digest": "aa735d9ba958fdfdeb6db8bc7bfb3414dee82ea2c6f711786d7d17b6949dc092",
     "entries": [
       {
         "path": "index.html",
@@ -15,8 +15,8 @@
       },
       {
         "path": "package.json",
-        "size": 5348,
-        "sha256": "45eb795fd69947b6821b7e217223bdcd64168e0bcee1b432ab9692dfb1040b40"
+        "size": 5389,
+        "sha256": "2b2c926bd3afe1ca4f6d806f7edec54f80afb9b9f84655674b5ea0ce8ba18e01"
       },
       {
         "path": "public/assets/tobkiri-startup-blade-cut.svg",
@@ -115,8 +115,8 @@
       },
       {
         "path": "src/App.tsx",
-        "size": 340052,
-        "sha256": "1529c4349429da1ced99275ed3ebb7bc2add26deb900711adde7cb26f7f098ba"
+        "size": 342840,
+        "sha256": "a1e21f620d76a797f77cc403563e0109bedbb1d015d796a0525de8297bb7aafe"
       },
       {
         "path": "src/adaptive/ActivityCenter.tsx",
@@ -1075,13 +1075,13 @@
       },
       {
         "path": "src/lib/api.test.ts",
-        "size": 104386,
-        "sha256": "8a62e4bca2a6d86be23c859f3d8d92714466c029a661224d748ae48414d17c4d"
+        "size": 105774,
+        "sha256": "a9515c6073ec8e9a9ee7c576e8600f9c08d8357a9340041ef4c162f17abcfb0a"
       },
       {
         "path": "src/lib/api.ts",
-        "size": 167704,
-        "sha256": "27094e324157240c913da7a3ea7b4e823759cdc13723e36f400274c8755df770"
+        "size": 168000,
+        "sha256": "d6b5e0432b2026a1f6cef1f6bc0e78a6cae281c66bf7c6af9f64633c7970eb1e"
       },
       {
         "path": "src/lib/approvalPresentation.ts",
@@ -1267,6 +1267,16 @@
         "path": "src/lib/composerWidgets.ts",
         "size": 19577,
         "sha256": "77c8d60cf284050c37bf7a1b104538bce096b9c4835be6ba8aad49072373776d"
+      },
+      {
+        "path": "src/lib/conversationSlashActions.test.ts",
+        "size": 7062,
+        "sha256": "cddc6c8b1c75c79b22e13c1760c58a1873670b2125ef975b3479d4485cd480ea"
+      },
+      {
+        "path": "src/lib/conversationSlashActions.ts",
+        "size": 6162,
+        "sha256": "26beca0b6d0ec838bc37634599ce83f4642e918681e2793a75b9717278a0225e"
       },
       {
         "path": "src/lib/conversationSpotlight.test.ts",
@@ -1540,8 +1550,8 @@
       },
       {
         "path": "src/lib/widgetContext.ts",
-        "size": 1198,
-        "sha256": "712581a2d7c875877683395ef83590ebfbc3b788e91651cd39d25c7a7344d0e5"
+        "size": 1207,
+        "sha256": "f04418e1b5a239007bad6b3ab84ef8027788aa284c486e302a3c707925a4020c"
       },
       {
         "path": "src/lib/workspaceAttachments.test.ts",
@@ -1605,8 +1615,8 @@
       },
       {
         "path": "src/renderers/ComposerRenderer.tsx",
-        "size": 202438,
-        "sha256": "af5ab124e246b145e9c0f728ab9c903a03d824575a243a78e2d07d0dcb210a16"
+        "size": 202291,
+        "sha256": "167b140aa55e34b11523d0eada28c8be2611bd9f980bacff99a8bc563ce1e0f8"
       },
       {
         "path": "src/renderers/HistoryBoardRenderer.tsx",
@@ -1806,7 +1816,7 @@
     ]
   },
   "bundle": {
-    "digest": "9cd085f42faba6ad8779b2e2b4182b247b74b00acf07912cc1cfb403abd6794f",
+    "digest": "e2dda0854424abdd9a53dcc0a78c57f93fc295b636223e23595731dcf0736582",
     "entries": [
       {
         "path": "shell-app.css",
@@ -1820,8 +1830,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2195531,
-        "sha256": "bb3b0526fbd28a17f12989930d01607192f4c6bb84816e359e8735988abbbb96"
+        "size": 2199135,
+        "sha256": "8cd09bca50c130ee361479c58ecb8dd7fcb486e482137d393a1847f14e1de58d"
       },
       {
         "path": "shell-rolldown-runtime.js",

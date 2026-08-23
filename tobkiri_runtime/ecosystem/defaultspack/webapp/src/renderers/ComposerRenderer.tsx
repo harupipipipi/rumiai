@@ -3193,7 +3193,6 @@ export function ComposerRenderer({
       const source = commands.find((command) => command.id === protocolOption.protocol_source_command_id);
       if (!source) return;
       onCommandSelect?.(source.id, `/${source.name} ${protocolOption.protocol_option_value}`);
-      onInputChange("");
       return;
     }
 
@@ -3228,9 +3227,6 @@ export function ComposerRenderer({
       setMenuOpen(true);
     }
     onCommandSelect?.(commandId, rawInput);
-    if (!(command?.protocol_presentation?.input.kind === "search_select" && rawHasArgs)) {
-      onInputChange("");
-    }
   };
 
   const chooseModelCommandCandidate = useCallback(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -9,6 +10,113 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+
+def test_conversation_slash_commands_are_discoverable_and_argument_aware():
+    commands = json.loads(
+        (DEFAULTSPACK_ROOT / "commands" / "default_commands.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    by_name = {command["name"]: command for command in commands}
+
+    for name in ("history", "export", "fork", "resume", "rename"):
+        assert by_name[name]["visibility"] == "default"
+        assert by_name[name]["execution"]["type"] == "frontend"
+    assert by_name["export"]["args"] == [
+        {"name": "format", "type": "string", "required": False}
+    ]
+    assert by_name["rename"]["args"][0]["greedy"] is True
+
+
+def test_conversation_export_block_accepts_documented_aliases(
+    defaultspack_conversation_owner,
+):
+    from blocks.chat.export_conversation import run as export_conversation
+    from domain.chat.store import ChatStore
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    store.update_conversation(conversation["id"], {"title": "Slash Export QA"})
+    store.add_message(
+        conversation["id"],
+        {"role": "user", "content": [{"type": "text", "text": "plain export"}]},
+    )
+
+    text_result = export_conversation(
+        {"conversation_id": conversation["id"], "format": ".TXT"},
+        {},
+    )
+    markdown_result = export_conversation(
+        {"conversation_id": conversation["id"], "format": "md"},
+        {},
+    )
+    invalid_result = export_conversation(
+        {"conversation_id": conversation["id"], "format": "pdf"},
+        {},
+    )
+
+    assert text_result["status"] == "ok"
+    assert text_result["data"]["format"] == "text"
+    assert "Title: Slash Export QA" in text_result["data"]["content"]
+    assert "User:\nplain export" in text_result["data"]["content"]
+    assert markdown_result["status"] == "ok"
+    assert markdown_result["data"]["format"] == "markdown"
+    assert "# Slash Export QA" in markdown_result["data"]["content"]
+    assert invalid_result["status"] == "error"
+    assert invalid_result["error"]["code"] == "INVALID_INPUT"
+
+
+def test_conversation_fork_copies_current_chain_and_safe_context(
+    defaultspack_conversation_owner,
+):
+    from blocks.chat.fork_conversation import run as fork_conversation
+    from domain.chat.store import ChatStore
+
+    store = ChatStore()
+    source = store.create_conversation(
+        model="stub/default",
+        system_prompt_id="prompt-1",
+        agent_id="agent-1",
+        tags=["coding", "review"],
+        conversation_kind="coding",
+        group_id="group-1",
+        metadata={
+            "workspace_id": "workspace-1",
+            "workspace_root": "/safe/workspace",
+            "approval_token": "must-not-cross-fork",
+        },
+    )
+    source = store.update_conversation(source["id"], {"title": "Fork Source"})
+    first = store.add_message(
+        source["id"],
+        {"role": "user", "content": [{"type": "text", "text": "first"}]},
+    )
+    second = store.add_message(
+        source["id"],
+        {"role": "assistant", "content": [{"type": "text", "text": "second"}]},
+    )
+
+    result = fork_conversation({"conversation_id": source["id"]}, {})
+
+    assert result["status"] == "ok"
+    fork = result["data"]
+    assert fork["id"] != source["id"]
+    assert fork["title"] == "Fork Source (fork)"
+    assert fork["parent_conversation_id"] == source["id"]
+    assert fork["conversation_kind"] == "coding"
+    assert fork["group_id"] == "group-1"
+    assert fork["system_prompt_id"] == "prompt-1"
+    assert fork["agent_id"] == "agent-1"
+    assert fork["tags"] == ["coding", "review"]
+    assert fork["metadata"]["workspace_id"] == "workspace-1"
+    assert "approval_token" not in fork["metadata"]
+    assert fork["metadata"]["forked_from_conversation_id"] == source["id"]
+    assert [message["raw_text"] for message in fork["messages"]] == ["first", "second"]
+    assert {message["id"] for message in fork["messages"]}.isdisjoint(
+        {first["id"], second["id"]}
+    )
+    assert fork["messages"][1]["parent_id"] == fork["messages"][0]["id"]
 
 
 @pytest.fixture

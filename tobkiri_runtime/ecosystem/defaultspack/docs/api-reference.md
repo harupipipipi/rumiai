@@ -234,14 +234,31 @@ OpenAI 互換エンドポイント。メッセージを送信して AI レスポ
 
 | パラメータ | 必須 | 型 | 説明 |
 |---|---|---|---|
-| `format` | 任意 | `string` | `"markdown"` または `"json"`。デフォルト `"markdown"` |
+| `format` | 任意 | `string` | `"markdown"` / `"md"`、`"json"`、`"text"` / `"txt"`。デフォルト `"markdown"` |
 
 **Response (`data`):**
 
 | フィールド | 型 | 説明 |
 |---|---|---|
+| `conversation_id` | `string` | エクスポート元の会話 ID |
 | `content` | `string` | エクスポートされた文字列 |
-| `format` | `string` | フォーマット名 |
+| `format` | `string` | canonical フォーマット名 |
+| `audit` | `object` | export の監査 event |
+
+---
+
+### POST /api/chat/conversations/{id}/fork
+
+会話 owner の current message chain を、新しい message ID と writable conversation identity へコピーする。Request Body の `message_id` は任意で、省略時は owner の `current_node_id` を使用する。ambient approval/authority metadata は継承しない。
+
+**Response (`data`):**
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `id` | `string` | 新しい writable 会話 ID |
+| `parent_conversation_id` | `string` | fork 元の会話 ID |
+| `messages` | `array` | 新しい ID へ再マッピングされた message chain |
+| `metadata` | `object` | authority material を除いた継承 context と fork provenance |
 
 **エラーケース:**
 
