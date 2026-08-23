@@ -1052,7 +1052,7 @@ export function CanvasCloseButton({ onClose }: { onClose: () => void }) {
     <button
       type="button"
       onClick={onClose}
-      className="p-1 text-zinc-600 hover:text-zinc-300 transition-colors"
+      className="rumi-canvas-close-button p-1 text-zinc-600 hover:text-zinc-300 transition-colors"
       title={CANVAS_CLOSE_LABEL}
       aria-label={CANVAS_CLOSE_LABEL}
     >

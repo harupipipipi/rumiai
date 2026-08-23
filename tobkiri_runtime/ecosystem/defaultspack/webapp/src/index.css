@@ -978,8 +978,27 @@ body {
 }
 
 @media (max-width: 900px) {
+  .rumi-app-shell {
+    width: 100vw;
+    max-width: 100vw;
+  }
+
+  .rumi-shell-body {
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
   .rumi-workspace-main.has-activity-preview {
     display: flex;
+    flex-direction: column;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .rumi-workspace-main.has-activity-preview .rumi-chat-pane {
+    flex: 1 1 auto;
+    min-height: 160px;
   }
 
   .rumi-activity-preview-resize-handle {
@@ -987,7 +1006,49 @@ body {
   }
 
   .rumi-activity-preview-pane {
-    display: none;
+    display: block;
+    flex: 0 1 clamp(220px, 56%, 480px);
+    width: 100%;
+    height: clamp(220px, 56%, 480px);
+    max-height: calc(100% - 160px);
+    border-top: 1px solid rgba(63, 63, 70, 0.92);
+    background: rgba(10, 10, 12, 0.98);
+    box-shadow: 0 -20px 48px rgba(0, 0, 0, 0.32);
+  }
+
+  .rumi-activity-preview-pane.rumi-anim-fade-right {
+    animation-name: rumi-fade-in;
+    animation-timing-function: var(--rumi-ease-out);
+  }
+
+  .rumi-activity-preview-pane:focus-visible {
+    outline: 2px solid rgba(129, 140, 248, 0.9);
+    outline-offset: -2px;
+  }
+
+  .rumi-activity-preview-pane > * {
+    border-left: 0;
+  }
+
+  .rumi-activity-preview-pane .rumi-canvas-close-button {
+    display: inline-flex;
+    width: 32px;
+    height: 32px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+  }
+}
+
+@media (max-width: 520px) {
+  .rumi-workspace-main.has-activity-preview .rumi-chat-pane {
+    min-height: 140px;
+  }
+
+  .rumi-activity-preview-pane {
+    flex-basis: clamp(200px, 58%, 420px);
+    height: clamp(200px, 58%, 420px);
+    max-height: calc(100% - 140px);
   }
 }
 

@@ -99,6 +99,7 @@ type ApiMockOptions = {
   codingApprovalAfterTerminal?: boolean;
   codingApprovalAfterRestore?: boolean;
   structuredComposer?: boolean;
+  readyTimeoutMs?: number;
 };
 
 function ok(data: unknown) {
@@ -1172,7 +1173,9 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
 async function openDefaultspack(page: Page, path = "/chat", options: ApiMockOptions = {}) {
   await installDefaultspackApiMocks(page, options);
   await page.goto(path);
-  await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
+  await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible({
+    timeout: options.readyTimeoutMs,
+  });
 }
 
 async function openCodingWidget(page: Page, options: ApiMockOptions = {}) {
@@ -2410,6 +2413,123 @@ test("preview pane opens from the chat canvas peek", async ({ page }) => {
   const preview = page.getByLabel("Activity preview");
   await expect(preview).toBeVisible();
   await expect(preview).toContainText("calendar-smoke.json");
+});
+
+for (const viewport of [
+  { name: "900px breakpoint", width: 900, height: 900 },
+  { name: "tablet", width: 768, height: 900 },
+  { name: "phone", width: 390, height: 820 },
+]) {
+  test(`compact activity preview remains accessible on ${viewport.name}`, async ({ page }) => {
+    test.slow();
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await openDefaultspack(page, "/chat", { readyTimeoutMs: 20_000 });
+
+    const openButton = page.getByRole("button", { name: /Canvas previewを開く/ });
+    await expect(openButton).toBeVisible();
+    await expect(openButton).toHaveAttribute("aria-controls", "activity-preview-panel");
+    await openButton.focus();
+    await page.keyboard.press("Enter");
+
+    const preview = page.getByRole("complementary", { name: "Activity preview" });
+    const closeButton = preview.getByRole("button", { name: "Canvasを閉じる" });
+    const composer = page.locator(".rumi-composer-frame");
+    await expect(preview).toBeVisible();
+    await expect(preview).toContainText("calendar-smoke.json");
+    await expect(closeButton).toBeVisible();
+    await expect(composer).toBeVisible();
+    await expect(page.getByLabel("Canvas幅を変更")).toBeHidden();
+    await expect(preview).toBeFocused();
+
+    const [previewBox, composerBox] = await Promise.all([
+      preview.boundingBox(),
+      composer.boundingBox(),
+    ]);
+    expect(previewBox).not.toBeNull();
+    expect(composerBox).not.toBeNull();
+    expect(previewBox!.x).toBeGreaterThanOrEqual(0);
+    expect(previewBox!.y).toBeGreaterThanOrEqual(0);
+    expect(previewBox!.x + previewBox!.width).toBeLessThanOrEqual(viewport.width + 1);
+    expect(previewBox!.y + previewBox!.height).toBeLessThanOrEqual(viewport.height + 1);
+    expect(composerBox!.y + composerBox!.height).toBeLessThanOrEqual(previewBox!.y + 1);
+
+    await page.keyboard.press("Escape");
+    await expect(preview).toBeHidden();
+    await expect(openButton).toBeVisible();
+    await expect(openButton).toBeFocused();
+
+    await openButton.click();
+    await expect(preview).toBeVisible();
+    await closeButton.click();
+    await expect(preview).toBeHidden();
+    await expect(openButton).toBeFocused();
+  });
+}
+
+test("activity preview keeps the desktop resize affordance above the compact breakpoint", async ({ page }) => {
+  test.slow();
+  await page.setViewportSize({ width: 901, height: 900 });
+  await openDefaultspack(page, "/chat", { readyTimeoutMs: 20_000 });
+  await page.getByRole("button", { name: /Canvas previewを開く/ }).click();
+
+  const preview = page.getByRole("complementary", { name: "Activity preview" });
+  const resizeHandle = page.getByLabel("Canvas幅を変更");
+  await expect(preview).toBeVisible();
+  await expect(resizeHandle).toBeVisible();
+
+  const previewStyle = await preview.evaluate((element) => {
+    const style = window.getComputedStyle(element);
+    return { position: style.position, width: style.width };
+  });
+  expect(previewStyle.position).toBe("static");
+  expect(Number.parseFloat(previewStyle.width)).toBeGreaterThanOrEqual(220);
+});
+
+test("compact activity preview keeps its controls and composer visible at keyboard height", async ({ page }) => {
+  test.slow();
+  await page.setViewportSize({ width: 390, height: 500 });
+  await openDefaultspack(page, "/chat", { readyTimeoutMs: 20_000 });
+  await page.getByRole("button", { name: /Canvas previewを開く/ }).click();
+
+  const preview = page.getByRole("complementary", { name: "Activity preview" });
+  const closeButton = preview.getByRole("button", { name: "Canvasを閉じる" });
+  const composer = page.locator(".rumi-composer-frame");
+  await expect(preview).toBeVisible();
+  await expect(closeButton).toBeVisible();
+  await expect(composer).toBeVisible();
+
+  const [previewBox, closeBox, composerBox] = await Promise.all([
+    preview.boundingBox(),
+    closeButton.boundingBox(),
+    composer.boundingBox(),
+  ]);
+  expect(previewBox).not.toBeNull();
+  expect(closeBox).not.toBeNull();
+  expect(composerBox).not.toBeNull();
+  expect(closeBox!.y).toBeGreaterThanOrEqual(previewBox!.y);
+  expect(closeBox!.y + closeBox!.height).toBeLessThanOrEqual(previewBox!.y + previewBox!.height);
+  expect(composerBox!.y + composerBox!.height).toBeLessThanOrEqual(previewBox!.y + 1);
+
+  const scrollRegion = preview.locator(".overflow-y-auto").first();
+  await expect(scrollRegion).toBeVisible();
+  await expect.poll(() => scrollRegion.evaluate((element) => window.getComputedStyle(element).overflowY)).toBe("auto");
+});
+
+test("compact activity preview preserves keyboard access from the chat header", async ({ page }) => {
+  test.slow();
+  await page.setViewportSize({ width: 390, height: 820 });
+  await openDefaultspack(page, "/chat", { readyTimeoutMs: 20_000 });
+
+  const headerButton = page.getByTitle("Open canvas");
+  await headerButton.focus();
+  await page.keyboard.press("Enter");
+
+  const preview = page.getByRole("complementary", { name: "Activity preview" });
+  await expect(preview).toBeVisible();
+  await expect(preview).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(preview).toBeHidden();
+  await expect(headerButton).toBeFocused();
 });
 
 test("calendar action renders a scheduler preview", async ({ page }) => {

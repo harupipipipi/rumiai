@@ -1610,15 +1610,23 @@ function previewLabel(preview: ToolPreviewItem | undefined): string {
   return data.alt || "Image preview";
 }
 
+function isCompactActivityPreviewViewport(): boolean {
+  return typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia("(max-width: 900px)").matches;
+}
+
 function CanvasPeek({
   previews,
   memo,
   activePreviewId,
+  buttonRef,
   onOpen,
 }: {
   previews: ToolPreviewItem[];
   memo: string;
   activePreviewId: string | null;
+  buttonRef: { current: HTMLButtonElement | null };
   onOpen: () => void;
 }) {
   const items = buildToolPreviewDisplayItems(previews, memo, activePreviewId);
@@ -1630,10 +1638,14 @@ function CanvasPeek({
   const subLabel = isMemo ? "Canvas · memo" : "Canvas · tool activity";
   return (
     <button
+      ref={buttonRef}
       type="button"
       onClick={onOpen}
       className="mx-auto mb-2 flex w-[min(620px,calc(100%_-_40px))] items-center justify-between gap-3 rounded-xl border border-zinc-800/90 bg-zinc-950/85 px-3 py-2 text-left shadow-[0_14px_38px_rgba(0,0,0,0.24)] transition-colors hover:border-zinc-700 hover:bg-zinc-900/90"
       title="Canvas を開く"
+      aria-controls="activity-preview-panel"
+      aria-expanded="false"
+      aria-label={`Canvas previewを開く (${count}件)`}
     >
       <span className="flex min-w-0 items-center gap-3">
         <span className="h-8 w-8 flex-shrink-0 rounded-lg border border-zinc-800 bg-zinc-900/80" />
@@ -2562,6 +2574,10 @@ function ChatApp() {
   const [canvasMemo, setCanvasMemo] = useLocalStorage("rumi-canvas-memo", "");
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
+  const canvasPeekButtonRef = useRef<HTMLButtonElement | null>(null);
+  const activityPreviewPaneRef = useRef<HTMLElement | null>(null);
+  const activityPreviewTriggerRef = useRef<HTMLElement | null>(null);
+  const compactPreviewFocusPendingRef = useRef(false);
   const [settledRuntimeApprovalIds, setSettledRuntimeApprovalIds] = useState<string[]>([]);
   const [settledBrowserApprovalKeys, setSettledBrowserApprovalKeys] = useState<string[]>([]);
   const [pendingCommandApproval, setPendingCommandApproval] = useState<PendingCommandApproval | null>(null);
@@ -3013,6 +3029,36 @@ function ChatApp() {
   }, [messageToolPreviews, previews]);
   const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo) || liveBrowserState.state_revision >= 0;
   const effectiveShowPreview = showPreview && canShowCanvas;
+  const openActivityPreview = useCallback(() => {
+    const isCompact = isCompactActivityPreviewViewport();
+    compactPreviewFocusPendingRef.current = isCompact;
+    activityPreviewTriggerRef.current = isCompact && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    setShowPreview(true);
+  }, [setShowPreview]);
+  const closeActivityPreview = useCallback(() => {
+    const shouldRestoreFocus = isCompactActivityPreviewViewport()
+      && Boolean(activityPreviewPaneRef.current?.contains(document.activeElement));
+    const trigger = activityPreviewTriggerRef.current;
+    activityPreviewTriggerRef.current = null;
+    setShowPreview(false);
+    if (shouldRestoreFocus) {
+      window.requestAnimationFrame(() => {
+        if (trigger?.isConnected) {
+          trigger.focus();
+          return;
+        }
+        canvasPeekButtonRef.current?.focus();
+      });
+    }
+  }, [setShowPreview]);
+
+  useEffect(() => {
+    if (!effectiveShowPreview || !compactPreviewFocusPendingRef.current) return;
+    compactPreviewFocusPendingRef.current = false;
+    window.requestAnimationFrame(() => activityPreviewPaneRef.current?.focus());
+  }, [effectiveShowPreview]);
   const effectiveCommandCatalog = useMemo(() => (
     usesResolvedCommandProtocol
       ? commandCatalog
@@ -5134,7 +5180,7 @@ function ChatApp() {
       return;
     }
     if (tab.kind === "canvas") {
-      setShowPreview(true);
+      openActivityPreview();
     }
     if (tab.kind === "tools") {
       setActiveSidebarItemId("__tool_manager__");
@@ -5826,7 +5872,7 @@ function ChatApp() {
     const preview = previewFromAction(action, title, data);
     setPreviews((current) => [preview, ...current].slice(0, 30));
     setActivePreviewId(preview.id);
-    setShowPreview(true);
+    openActivityPreview();
   };
 
   const operationsHeartbeatSchedule = () => (
@@ -7135,7 +7181,12 @@ function ChatApp() {
                 canShowPreview={showRegion("activity_preview") && canShowCanvas}
                 canOpenSettings={showRegion("settings_modal")}
                 onTogglePreview={() => {
-                  if (canShowCanvas) setShowPreview((value) => !value);
+                  if (!canShowCanvas) return;
+                  if (effectiveShowPreview) {
+                    closeActivityPreview();
+                  } else {
+                    openActivityPreview();
+                  }
                 }}
                 onOpenSettings={openSettingsHome}
               />
@@ -7272,7 +7323,7 @@ function ChatApp() {
                 onSuggestionClick={(text) => setInput(text)}
                 onOpenToolPreview={(previewId) => {
                   setActivePreviewId(previewId);
-                  setShowPreview(true);
+                  openActivityPreview();
                 }}
                 onLoadPromptTrace={promptResources.getTraceUsage}
                 onRetry={retryableSubmission && error === retryableSubmission.errorMessage ? handleRetryLastFailedSubmission : undefined}
@@ -7287,7 +7338,8 @@ function ChatApp() {
                     previews={canvasPreviews}
                     memo={canvasMemo}
                     activePreviewId={activePreviewId}
-                    onOpen={() => setShowPreview(true)}
+                    buttonRef={canvasPeekButtonRef}
+                    onOpen={openActivityPreview}
                   />
                 )}
                 {visibleBrowserApproval && (
@@ -7392,12 +7444,24 @@ function ChatApp() {
           )}
 
           {isActivityPreviewVisible && (
-            <aside className="rumi-activity-preview-pane rumi-anim-fade-right" aria-label="Activity preview">
+            <aside
+              id="activity-preview-panel"
+              ref={activityPreviewPaneRef}
+              className="rumi-activity-preview-pane rumi-layer-panel rumi-anim-fade-right"
+              aria-label="Activity preview"
+              tabIndex={-1}
+              onKeyDown={(event) => {
+                if (event.key !== "Escape" || !isCompactActivityPreviewViewport()) return;
+                event.preventDefault();
+                event.stopPropagation();
+                closeActivityPreview();
+              }}
+            >
               <Renderers.toolPreviewPanel
                 widgetContext={widgetContext}
                 previews={canvasPreviews}
                 showPreview={effectiveShowPreview}
-                onClose={() => setShowPreview(false)}
+                onClose={closeActivityPreview}
                 previewMode={previewMode}
                 onModeChange={setPreviewMode}
                 activePreviewId={activePreviewId}
