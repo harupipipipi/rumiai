@@ -1142,7 +1142,7 @@ impl Drop for PendingSnapshotCleanup {
 
 #[cfg(target_os = "macos")]
 fn cleanup_macos_snapshot(path: &Path, root_handle: &File) {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     let Ok(path_metadata) = fs::symlink_metadata(path) else {
         return;
@@ -1762,7 +1762,7 @@ fn verify_snapshot_anchored(
     runtime_overlay: Option<&VerifiedRuntimeOverlay>,
 ) -> Result<()> {
     use std::collections::BTreeSet;
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::os::unix::fs::PermissionsExt;
 
     let mut expected_identity_paths = manifest
         .files
