@@ -73,7 +73,8 @@ export const viewerNavGroups = [
 ] as const;
 
 export function panelRouteTitleKey(pathname: string): string {
-  if (pathname === panelRoutes.packs || pathname.startsWith(`${panelRoutes.packs}/`)) {
+  const isPackDetail = /^\/packs\/[^/]+\/?$/.test(pathname);
+  if (pathname === panelRoutes.packs || isPackDetail) {
     return panelRouteMeta.packs.titleKey;
   }
 

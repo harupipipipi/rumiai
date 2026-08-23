@@ -68,3 +68,21 @@ test('PackDetail does not mislabel a failed catalog request as an unknown id', a
   await act(async () => root.unmount());
   dom.window.close();
 });
+
+test('PackDetail identifies a stale pack id after a successful catalog load', async () => {
+  useAppStore.setState({
+    packs: [],
+    packsError: null,
+    packsLoading: false,
+    loadPacks: async () => {},
+  });
+  const {dom, root} = await renderPage(
+    <MemoryRouter initialEntries={['/packs/stale-pack-id']}>
+      <Routes><Route path="/packs/:id" element={<PackDetail />} /></Routes>
+    </MemoryRouter>,
+  );
+  assert.match(document.body.textContent ?? '', /Pack not found/);
+  assert.match(document.body.textContent ?? '', /Back to packs/);
+  await act(async () => root.unmount());
+  dom.window.close();
+});

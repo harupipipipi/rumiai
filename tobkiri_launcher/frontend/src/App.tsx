@@ -8,6 +8,7 @@ import {
 import { Layout } from '@/src/components/layout/Layout';
 import { Setup } from '@/src/pages/Setup';
 import { Dashboard } from '@/src/pages/Dashboard';
+import { NotFound } from '@/src/pages/NotFound';
 import { ToastContainer } from '@/src/components/ui/ToastContainer';
 import { DialogContainer } from '@/src/components/ui/DialogContainer';
 import { bootstrapPanelSession, hasPendingPanelBootstrapCode } from '@/src/lib/api';
@@ -186,6 +187,7 @@ function DeferredRouteTree({
           <Route path={panelRoutes.aiInput.slice(1)} element={<LazyAiInput />} />
           <Route path={panelRoutes.apiMap.slice(1)} element={<LazyApiMap />} />
           <Route path={panelRoutes.nodeManager.slice(1)} element={<LazyNodeManager />} />
+          <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>
       {routePending && (
