@@ -650,6 +650,41 @@ export function buildCompactHistoryRailItems(groups: ChatGroup[]): CompactHistor
   return items;
 }
 
+export type HistoryChatCardInteractionState = {
+  attachSortableAttributes: boolean;
+  draggable: boolean;
+  tabIndex: 0 | -1;
+};
+
+export function historyChatCardInteractionState(
+  isEditing: boolean,
+  selectionMode: boolean,
+): HistoryChatCardInteractionState {
+  const isInteractiveCard = !isEditing && !selectionMode;
+  return {
+    attachSortableAttributes: isInteractiveCard,
+    draggable: isInteractiveCard,
+    tabIndex: isEditing ? -1 : 0,
+  };
+}
+
+export type HistoryChatRenameResolution = {
+  title: string;
+  shouldRename: boolean;
+};
+
+export function resolveHistoryChatRename(
+  title: string,
+  originalTitle: string,
+  commit: boolean,
+): HistoryChatRenameResolution {
+  const nextTitle = title.trim();
+  if (commit && nextTitle && nextTitle !== originalTitle) {
+    return { title: nextTitle, shouldRename: true };
+  }
+  return { title: originalTitle, shouldRename: false };
+}
+
 // ============================================================
 // Custom collision detection
 // ============================================================
@@ -694,6 +729,7 @@ function SortableChatItem({ chat, activeChatId, selectedChatId = null, selection
   const expanded = hasChildren && isChildrenExpanded(chat.id);
   const isActive = activeChatId === chat.id;
   const isSelected = selectedChatId === chat.id;
+  const interactionState = historyChatCardInteractionState(isEditing, selectionMode);
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: chat.id,
@@ -708,10 +744,14 @@ function SortableChatItem({ chat, activeChatId, selectedChatId = null, selection
     paddingLeft: `${depth * 14 + 6}px`,
   };
 
-  const handleBlur = () => {
+  const finishEditing = (commit: boolean) => {
     setIsEditing(false);
-    if (title.trim() && title !== chat.title) onRename(chat.id, title);
-    else setTitle(chat.title);
+    const resolution = resolveHistoryChatRename(title, chat.title, commit);
+    setTitle(resolution.title);
+    if (resolution.shouldRename) {
+      onRename(chat.id, resolution.title);
+      return;
+    }
   };
 
   const icon = <HistoryChatIcon chat={chat} />;
@@ -721,11 +761,17 @@ function SortableChatItem({ chat, activeChatId, selectedChatId = null, selection
       <div
         ref={setNodeRef}
         style={style}
-        {...(selectionMode ? { role: "button", "aria-selected": isSelected } : attributes)}
-        {...(selectionMode ? {} : listeners)}
-        draggable={!selectionMode}
+        {...(
+          isEditing
+            ? {}
+            : selectionMode
+              ? { role: "button", "aria-selected": isSelected }
+              : attributes
+        )}
+        {...(interactionState.attachSortableAttributes ? listeners : {})}
+        draggable={interactionState.draggable}
         onDragStart={(event) => {
-          if (selectionMode) return;
+          if (!interactionState.draggable) return;
           const payload = historyChatDragPayload({ ...chat, groupId: chatGroupId(chat) || undefined });
           event.dataTransfer.setData(HISTORY_CHAT_DROP_MIME, JSON.stringify(payload));
           event.dataTransfer.setData("text/plain", chat.title);
@@ -747,8 +793,13 @@ function SortableChatItem({ chat, activeChatId, selectedChatId = null, selection
             onChatSelect(chat.id);
           }
         }}
-        onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
-        tabIndex={0}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          if (selectionMode) return;
+          setTitle(chat.title);
+          setIsEditing(true);
+        }}
+        tabIndex={interactionState.tabIndex}
       >
         <GripVertical size={10} className="w-3 text-zinc-700 group-hover/chat:text-zinc-500 flex-shrink-0" />
         {icon}
@@ -768,12 +819,20 @@ function SortableChatItem({ chat, activeChatId, selectedChatId = null, selection
         {isEditing ? (
           <input
             autoFocus
+            aria-label={`Rename ${chat.title}`}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            onBlur={handleBlur}
+            onBlur={() => finishEditing(true)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') { e.preventDefault(); handleBlur(); }
-              if (e.key === 'Escape') { setIsEditing(false); setTitle(chat.title); }
+              e.stopPropagation();
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                finishEditing(false);
+              }
             }}
             onClick={(e) => e.stopPropagation()}
             className="bg-zinc-900 text-zinc-100 text-[13px] px-1 py-0.5 rounded outline-none w-full border border-emerald-500/50"

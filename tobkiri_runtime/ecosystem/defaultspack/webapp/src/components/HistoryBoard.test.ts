@@ -8,13 +8,51 @@ import {
   buildCompactHistoryRailItems,
   buildGroupsFromChats,
   buildHistoryCalendarSummary,
+  historyChatCardInteractionState,
   HistoryBoard,
   loadCustomGroups,
+  resolveHistoryChatRename,
   type ChatItem,
   type CustomGroupInfo,
 } from "./HistoryBoard";
 import { droppedWidgetFromHistoryChat, historyChatDragPayload, parseHistoryChatDrop } from "../lib/historyComposer";
 import { filterProjects, newProjectId, projectTaskContext } from "../features/projects/projectStorage";
+
+test("history rename removes disabled sortable semantics from the editable card", () => {
+  assert.deepEqual(historyChatCardInteractionState(true, false), {
+    attachSortableAttributes: false,
+    draggable: false,
+    tabIndex: -1,
+  });
+});
+
+test("history cards retain sortable and keyboard behavior outside rename mode", () => {
+  assert.deepEqual(historyChatCardInteractionState(false, false), {
+    attachSortableAttributes: true,
+    draggable: true,
+    tabIndex: 0,
+  });
+  assert.deepEqual(historyChatCardInteractionState(false, true), {
+    attachSortableAttributes: false,
+    draggable: false,
+    tabIndex: 0,
+  });
+});
+
+test("history rename commits trimmed titles and cancels without mutation", () => {
+  assert.deepEqual(resolveHistoryChatRename("  Updated title  ", "Original", true), {
+    title: "Updated title",
+    shouldRename: true,
+  });
+  assert.deepEqual(resolveHistoryChatRename("Updated title", "Original", false), {
+    title: "Original",
+    shouldRename: false,
+  });
+  assert.deepEqual(resolveHistoryChatRename("   ", "Original", true), {
+    title: "Original",
+    shouldRename: false,
+  });
+});
 
 test("buildGroupsFromChats places LINE conversations into a dedicated group", () => {
   const chats: ChatItem[] = [
