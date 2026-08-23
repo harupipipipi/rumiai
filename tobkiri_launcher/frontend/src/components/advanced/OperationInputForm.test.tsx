@@ -104,6 +104,86 @@ test('OperationInputForm renders the declared schema and invokes the exact paylo
   }
 });
 
+test('OperationInputForm renders write-only credentials without defaults or browser autofill', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  const secureOperation = operation();
+  secureOperation.input_schema = {
+    type: 'object',
+    required: ['api_key'],
+    properties: {
+      api_key: {type: 'string', title: 'API key', writeOnly: true},
+    },
+  };
+  try {
+    await act(async () => {
+      root.render(
+        <OperationInputForm
+          operation={secureOperation}
+          descriptor={LAUNCHER_ADVANCED_VIEWS.providerConnections}
+          busy={false}
+          canInvoke
+          onInvoke={async () => {}}
+          submitLabel="Set credential"
+        />,
+      );
+    });
+    const secret = container.querySelector<HTMLInputElement>('input[type="password"]');
+    assert.ok(secret);
+    assert.equal(secret.type, 'password');
+    assert.equal(secret.autocomplete, 'new-password');
+    assert.equal(secret.value, '');
+    assert.equal(container.querySelector('button[type="submit"]')?.textContent, 'Set credential');
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
+test('OperationInputForm binds a provider instance without exposing an editable identity field', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  const boundOperation = operation();
+  boundOperation.input_schema = {
+    ...boundOperation.input_schema!,
+    required: ['provider_instance_id'],
+    properties: {
+      provider_instance_id: {type: 'string', title: 'Provider instance'},
+    },
+  };
+  let received: Record<string, unknown> | null = null;
+  try {
+    await act(async () => {
+      root.render(
+        <OperationInputForm
+          operation={boundOperation}
+          descriptor={LAUNCHER_ADVANCED_VIEWS.providerConnections}
+          busy={false}
+          canInvoke
+          fixedValues={{provider_instance_id: 'fixture.work'}}
+          onInvoke={async (payload) => { received = payload; }}
+        />,
+      );
+    });
+    assert.equal(container.querySelector('input'), null);
+    const form = container.querySelector<HTMLFormElement>('form');
+    assert.ok(form);
+    await act(async () => {
+      form.dispatchEvent(new dom.window.Event('submit', {bubbles: true, cancelable: true}));
+    });
+    assert.deepEqual(received, {provider_instance_id: 'fixture.work'});
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
 test('OperationInputForm disables invocation when Host readiness is not authoritative', async () => {
   const previousWindow = globalThis.window;
   const previousDocument = globalThis.document;

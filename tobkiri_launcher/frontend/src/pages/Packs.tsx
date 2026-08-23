@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router';
 import { useAppStore, type Pack } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
@@ -10,6 +10,8 @@ import { panelRoutes } from '@/src/lib/routes';
 import { AlertTriangle, Search, Package, ShieldCheck } from 'lucide-react';
 import { Button } from '@/src/components/ui/Button';
 import { InlineLoadError } from '@/src/components/ui/InlineLoadError';
+import { useRuntimeSurface } from '@/src/hooks/useRuntimeSurface';
+import { projectProviderConnections } from '@/src/lib/providerConnections';
 
 type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning';
 
@@ -73,14 +75,24 @@ export function Packs() {
   const showDialog = useAppStore(state => state.showDialog);
   const togglePack = useAppStore(state => state.togglePack);
   const [search, setSearch] = useState('');
+  const [aiProvidersOnly, setAiProvidersOnly] = useState(false);
   const [installingPackId, setInstallingPackId] = useState<string | null>(null);
   const [approvingPackId, setApprovingPackId] = useState<string | null>(null);
+  const providerContracts = useRuntimeSurface<unknown>('contracts');
+  const providerOperations = useRuntimeSurface<unknown>('operations');
+  const providerPackIds = useMemo(() => new Set(projectProviderConnections({
+    contractsData: providerContracts.data?.data,
+    operationsData: providerOperations.data?.data,
+  }).map((provider) => provider.pack.pack_id)), [providerContracts.data, providerOperations.data]);
 
   useEffect(() => {
     void loadPacks();
   }, [loadPacks]);
 
-  const filteredPacks = packs.filter(pack => pack.name.toLowerCase().includes(search.toLowerCase()));
+  const filteredPacks = packs.filter((pack) => (
+    pack.name.toLowerCase().includes(search.toLowerCase())
+    && (!aiProvidersOnly || providerPackIds.has(pack.id))
+  ));
 
   const handleApprove = async (packId: string) => {
     setApprovingPackId(packId);
@@ -148,6 +160,15 @@ export function Packs() {
             aria-label="Search packs"
           />
         </div>
+        <label className="flex min-h-11 items-center gap-3 rounded-lg border border-border px-3 py-2 text-sm text-text-main">
+          <input
+            type="checkbox"
+            checked={aiProvidersOnly}
+            onChange={(event) => setAiProvidersOnly(event.target.checked)}
+            className="size-4 accent-[var(--accent)]"
+          />
+          Show only Packs declaring AI provider connections
+        </label>
 
         {/* Pack list */}
         {packsLoading && packs.length === 0 ? (

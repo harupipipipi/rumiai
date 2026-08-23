@@ -202,6 +202,12 @@ export interface RuntimeJsonSchema {
   type?: string;
   title?: string;
   description?: string;
+  format?: string;
+  pattern?: string;
+  minLength?: number;
+  maxLength?: number;
+  writeOnly?: boolean;
+  readOnly?: boolean;
   properties?: Record<string, RuntimeJsonSchema>;
   required?: string[];
   enum?: unknown[];

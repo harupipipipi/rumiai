@@ -379,12 +379,12 @@
     {
       "path": "packs/rumi_provider_adapters_pack.executables.v4.json",
       "kind": "executable_catalog",
-      "digest": "sha256:3524642449ad337c00e0b027e23600d294b58f9d3167d7f553d7889bae3dcf0a"
+      "digest": "sha256:7ec4ed98ad3a53c72bdf2dd1f26a00bf732a863a30b9656bee6621f983d05f63"
     },
     {
       "path": "packs/rumi_provider_adapters_pack.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:18f4ce1eb4b7131c231d561ed626258cedc38ac12ed01f6e4cc056fadbe1007f"
+      "digest": "sha256:5618a7a073ae593c9b4453a5feebfc9d93dd792e2f7b18fd5c589cbb18f4ea4f"
     },
     {
       "path": "packs/rumi_provider_registry_pack.executables.v4.json",
@@ -674,7 +674,7 @@
     {
       "path": "defaults.profile.v4.json",
       "kind": "profile",
-      "digest": "sha256:daa56478ec45f5c03f5fad5c7684577b10832b6ab022db212051a61502f779cc"
+      "digest": "sha256:22e1bc0310be533331fc4305f72ef35a1c0fee8ffdb5043ab79fb8dfd240a25f"
     }
   ]
 }

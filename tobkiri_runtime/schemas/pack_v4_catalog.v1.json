@@ -10583,6 +10583,37 @@
         {
           "cardinality": "many",
           "contract_id": "tobkiri.service.ai.provider.generate.v1",
+          "connection": {
+            "auth_modes": [
+              "none",
+              "local"
+            ],
+            "configured": true,
+            "credential_present": false,
+            "description": "The provider route selected by the active Defaults Profile and its resolved AI provider contracts.",
+            "display_name": "Defaults Profile AI provider",
+            "endpoint_requirements": {
+              "local_allowed": true,
+              "network_required": false
+            },
+            "icon_id": "sparkles",
+            "instance_id": "defaults-profile.provider",
+            "kind": "ai_provider",
+            "last_refresh_at": null,
+            "model_count": null,
+            "multi_instance": false,
+            "operations": {
+              "test": "rumi_provider_adapters_pack.provider-generate"
+            },
+            "secret_fields": [],
+            "settings_schema": {
+              "additionalProperties": false,
+              "properties": {},
+              "type": "object"
+            },
+            "status": "healthy",
+            "ui_hints": {}
+          },
           "failure": "fail_closed",
           "isolation": "in_process",
           "lifecycle": {

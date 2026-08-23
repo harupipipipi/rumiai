@@ -323,7 +323,14 @@ def _import_record(pack_root: Path) -> dict[str, Any]:
                 "lifecycle": contract["lifecycle"],
                 **{
                     key: contract[key]
-                    for key in ("routing_keys", "instance_key", "priority", "before", "after")
+                    for key in (
+                        "routing_keys",
+                        "instance_key",
+                        "priority",
+                        "before",
+                        "after",
+                        "connection",
+                    )
                     if key in contract
                 },
             }
@@ -702,6 +709,7 @@ def _contract_document(
             "priority",
             "before",
             "after",
+            "connection",
         )
         if key in source
     }

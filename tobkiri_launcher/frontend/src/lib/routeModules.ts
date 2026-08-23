@@ -5,6 +5,7 @@ import type {PanelRouteKey} from './routes';
 export type RouteModuleKey =
   | 'packs'
   | 'packDetail'
+  | 'providers'
   | 'profile'
   | 'settings'
   | 'profileWiring'
@@ -20,6 +21,7 @@ type RouteModuleLoader = () => Promise<unknown>;
 const rawRouteModuleLoaders: Record<RouteModuleKey, RouteModuleLoader> = {
   packs: () => import('../pages/Packs'),
   packDetail: () => import('../pages/PackDetail'),
+  providers: () => import('../pages/Providers'),
   profile: () => import('../pages/Profile'),
   settings: () => import('../pages/Settings'),
   profileWiring: () => import('../pages/ProfileWiring'),
@@ -34,6 +36,7 @@ const rawRouteModuleLoaders: Record<RouteModuleKey, RouteModuleLoader> = {
 export const routeModuleSources: Record<RouteModuleKey, string> = {
   packs: 'src/pages/Packs.tsx',
   packDetail: 'src/pages/PackDetail.tsx',
+  providers: 'src/pages/Providers.tsx',
   profile: 'src/pages/Profile.tsx',
   settings: 'src/pages/Settings.tsx',
   profileWiring: 'src/pages/ProfileWiring.tsx',
@@ -61,6 +64,7 @@ export function preloadRouteModule(key: RouteModuleKey): Promise<unknown> {
 
 const panelRouteToModule: Partial<Record<PanelRouteKey, RouteModuleKey>> = {
   packs: 'packs',
+  providers: 'providers',
   profile: 'profile',
   settings: 'settings',
   profileWiring: 'profileWiring',
@@ -93,6 +97,7 @@ function lazyNamedRoute(
 
 export const LazyPacks = lazyNamedRoute('packs', 'Packs');
 export const LazyPackDetail = lazyNamedRoute('packDetail', 'PackDetail');
+export const LazyProviders = lazyNamedRoute('providers', 'Providers');
 export const LazyProfile = lazyNamedRoute('profile', 'Profile');
 export const LazySettings = lazyNamedRoute('settings', 'Settings');
 export const LazyProfileWiring = lazyNamedRoute('profileWiring', 'ProfileWiring');
