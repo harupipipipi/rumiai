@@ -60,6 +60,8 @@ jobs:
   build-installer:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.tobkiri-desktop-installer-target
     strategy:
       fail-fast: false
       matrix:
@@ -318,6 +320,7 @@ jobs:
       - name: Cache Rust builds
         uses: Swatinem/rust-cache@v2
         with:
+          cache-targets: "false"
           shared-key: desktop-installers-${{ matrix.target }}
           workspaces: |
             pack-shell -> target
@@ -430,7 +433,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          artifact="$(find "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -type d -name 'Tobkiri.app' -print -quit)"
+          artifact="$(find "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -type d -name 'Tobkiri.app' -print -quit)"
           test -n "$artifact"
           /usr/bin/codesign --force --sign - "$artifact"
           /usr/bin/codesign --verify --deep --strict --verbose=2 "$artifact"
@@ -447,7 +450,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app="$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app"
+          app="$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app"
           test -d "$app"
           python .github/scripts/macos_ci_artifact.py attest \
             --app-bundle "$app" \
@@ -465,7 +468,7 @@ jobs:
       - name: Host-seal and launch-test packaged Python application resources
         if: runner.os == 'macOS'
         run: |
-          app="$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app"
+          app="$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app"
           packaged_manifest_sha="$(/usr/bin/shasum -a 256 "$app/Contents/Resources/app/python-runtime/sealed-environment.v1.json" | /usr/bin/awk '{print $1}')"
           test "${#packaged_manifest_sha}" -eq 64
           printf 'TOBKIRI_PACKAGED_PYTHON_INVENTORY_SHA256=%s\n' "$packaged_manifest_sha" >> "$GITHUB_ENV"
@@ -476,9 +479,9 @@ jobs:
             --expected-manifest-sha256 "$packaged_manifest_sha" \
             --seal-tauri-directories \
             --native-smoke
-          test ! -e "$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app/Contents/Resources/app/logs"
+          test ! -e "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app/Contents/Resources/app/logs"
           /usr/bin/codesign --verify --deep --strict --verbose=2 \
-            "$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app"
+            "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app"
 
       - name: Build macOS DMG installer
         if: runner.os == 'macOS'
@@ -487,17 +490,17 @@ jobs:
         run: |
           set -o pipefail
           bash scripts/package_macos_dmg.sh \
-            --app-bundle "src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app" \
+            --app-bundle "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app" \
             --target '${{ matrix.target }}' \
             --ci-e2e-cert-sha256 "$TOBKIRI_MACOS_CI_CERT_SHA256" \
-            --output-dir "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" \
+            --output-dir "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/dmg" \
             2>&1 | tee "$RUNNER_TEMP/tobkiri-macos-dmg-${{ matrix.target }}.log"
 
       - name: Verify mounted macOS installer packaged Python
         if: runner.os == 'macOS'
         working-directory: tobkiri_launcher
         run: |
-          dmg="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          dmg="$(find "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
           test -n "$dmg"
           bash scripts/verify_packaged_python_dmg.sh \
             --dmg "$dmg" \
@@ -509,7 +512,7 @@ jobs:
         with:
           name: tobkiri-non-publishable-ci-e2e-${{ matrix.artifact_suffix }}-${{ steps.checked_out_source.outputs.source_revision }}
           path: |
-            tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            ${{ env.CARGO_TARGET_DIR }}/${{ matrix.target }}/release/bundle/dmg/*.dmg
           if-no-files-found: error
 
       - name: Destroy ephemeral macOS CI signing identity
@@ -537,7 +540,7 @@ jobs:
             command -v hdiutil || true
             hdiutil info || true
             ps auxww | grep -E '[h]diutil|[d]iskimages' || true
-            bundle_dir="src-tauri/target/${{ matrix.target }}/release/bundle"
+            bundle_dir="$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle"
             find "$bundle_dir" -maxdepth 3 -type f -o -type d | sort || true
             generated_script="$bundle_dir/dmg/bundle_dmg.sh"
             if [[ -f "$generated_script" ]]; then

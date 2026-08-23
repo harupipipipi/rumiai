@@ -29,6 +29,8 @@ jobs:
             presentation_platform: macos
             presentation_architecture: arm64
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.tobkiri-release-target
 
     steps:
       - name: Checkout
@@ -337,6 +339,7 @@ jobs:
       - name: Cache Rust builds
         uses: Swatinem/rust-cache@v2
         with:
+          cache-targets: "false"
           shared-key: release-${{ matrix.target }}
           workspaces: |
             pack-shell -> target
@@ -437,7 +440,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          artifact="$(find "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -type d -name 'Tobkiri.app' -print -quit)"
+          artifact="$(find "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -type d -name 'Tobkiri.app' -print -quit)"
           test -n "$artifact"
           python scripts/release_gate.py sign-artifacts \
             --repo-root "$GITHUB_WORKSPACE" \
@@ -462,7 +465,7 @@ jobs:
       - name: Host-seal and launch-test packaged Python application resources
         if: runner.os == 'macOS'
         run: |
-          app="$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app"
+          app="$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app"
           packaged_manifest_sha="$(/usr/bin/shasum -a 256 "$app/Contents/Resources/app/python-runtime/sealed-environment.v1.json" | /usr/bin/awk '{print $1}')"
           test "${#packaged_manifest_sha}" -eq 64
           printf 'TOBKIRI_PACKAGED_PYTHON_INVENTORY_SHA256=%s\n' "$packaged_manifest_sha" >> "$GITHUB_ENV"
@@ -473,7 +476,7 @@ jobs:
             --expected-manifest-sha256 "$packaged_manifest_sha" \
             --seal-tauri-directories \
             --native-smoke
-          test ! -e "$GITHUB_WORKSPACE/tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app/Contents/Resources/app/logs"
+          test ! -e "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app/Contents/Resources/app/logs"
 
       - name: Verify Developer ID signed macOS application
         if: runner.os == 'macOS'
@@ -482,7 +485,7 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           bash scripts/verify_macos_release.sh \
-            --app-bundle "src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app" \
+            --app-bundle "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app" \
             --signing-identity "$APPLE_SIGNING_IDENTITY"
 
       - name: Build macOS DMG installer
@@ -494,17 +497,17 @@ jobs:
         run: |
           set -o pipefail
           bash scripts/package_macos_dmg.sh \
-            --app-bundle "src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app" \
+            --app-bundle "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app" \
             --target '${{ matrix.target }}' \
             --signing-identity "$APPLE_SIGNING_IDENTITY" \
-            --output-dir "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" \
+            --output-dir "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/dmg" \
             2>&1 | tee "$RUNNER_TEMP/tobkiri-macos-dmg-${{ matrix.target }}.log"
 
       - name: Verify mounted macOS installer packaged Python
         if: runner.os == 'macOS'
         working-directory: tobkiri_launcher
         run: |
-          dmg="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          dmg="$(find "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
           test -n "$dmg"
           bash scripts/verify_packaged_python_dmg.sh \
             --dmg "$dmg" \
@@ -523,9 +526,9 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          app="tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app"
+          app="$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app"
           test -d "$app"
-          dmg="$(find "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          dmg="$(find "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
           test -n "$dmg"
           test -s "$dmg"
           python scripts/release_gate.py sign-artifacts \
@@ -550,10 +553,7 @@ jobs:
           runner_os = "${{ runner.os }}"
           target = "${{ matrix.target }}"
           bundle_root = os.path.join(
-              os.environ["GITHUB_WORKSPACE"],
-              "tobkiri_launcher",
-              "src-tauri",
-              "target",
+              os.environ["CARGO_TARGET_DIR"],
               target,
               "release",
               "bundle",
@@ -604,7 +604,7 @@ jobs:
             command -v hdiutil || true
             hdiutil info || true
             ps auxww | grep -E '[h]diutil|[d]iskimages' || true
-            bundle_dir="src-tauri/target/${{ matrix.target }}/release/bundle"
+            bundle_dir="$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle"
             find "$bundle_dir" -maxdepth 3 -type f -o -type d | sort || true
             generated_script="$bundle_dir/dmg/bundle_dmg.sh"
             if [[ -f "$generated_script" ]]; then

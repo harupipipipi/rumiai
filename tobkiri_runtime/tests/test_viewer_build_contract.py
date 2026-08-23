@@ -515,6 +515,31 @@ def test_debug_pack_shell_is_built_and_sealed_before_launcher_rust_checks():
         assert "--profile debug" in relevant
 
 
+def test_packaging_workflows_isolate_cargo_outputs_from_restored_bundle_caches():
+    """Read-only packaged bundles from Rust caches cannot block a rebuild."""
+    workflows = (
+        (
+            ROOT / ".github" / "workflows" / "desktop-installers.yml",
+            ".tobkiri-desktop-installer-target",
+        ),
+        (RELEASE_WORKFLOW, ".tobkiri-release-target"),
+    )
+    cached_bundle_roots = (
+        "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle",
+        "src-tauri/target/${{ matrix.target }}/release/bundle",
+    )
+    for workflow, isolated_target in workflows:
+        contents = workflow.read_text(encoding="utf-8")
+        assert (
+            f"CARGO_TARGET_DIR: ${{{{ github.workspace }}}}/{isolated_target}"
+            in contents
+        )
+        assert 'cache-targets: "false"' in contents
+        assert 'bundle_dir="$CARGO_TARGET_DIR/' in contents
+        for cached_root in cached_bundle_roots:
+            assert cached_root not in contents
+
+
 def test_release_pack_shell_rebuilds_from_empty_or_cached_targets_and_seals_both_profiles():
     contents = RELEASE_WORKFLOW.read_text(encoding="utf-8")
     clean_at = contents.index("Clean cached Pack Shell outputs before verified build")
