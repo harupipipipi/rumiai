@@ -15782,6 +15782,11 @@
               "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
             },
             {
+              "entrypoint_id": "graph.compile-preview",
+              "id": "graph.compile-preview",
+              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
+            },
+            {
               "entrypoint_id": "operation.palette",
               "id": "operation.palette",
               "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
@@ -15898,6 +15903,12 @@
           "path": "schemas/workflow-definition.v4.schema.json"
         },
         {
+          "digest": "sha256:162dee9d19424c6316739b973e97607491a9a607b1b009590373ebc1c41d182b",
+          "index_role": "schema",
+          "kind": "schema",
+          "path": "schemas/rumi-graph.v1.schema.json"
+        },
+        {
           "digest": "sha256:e4e9d62afc0f41dd9ac026010f588e9e6829933ba87e71b31e9cf3b67c5cad4e",
           "index_role": "schema",
           "kind": "schema",
@@ -15922,13 +15933,13 @@
           "path": "schemas/frontend-contract-map.v4.schema.json"
         },
         {
-          "digest": "sha256:26cef1a25d1184d03285cf1a261372e73cf47d9a4ff0b65cee1acf55366fdb86",
+          "digest": "sha256:0095d1dbc4be9f7ce336d791fde45486a29fce2697db350dcbd1d797953606c9",
           "index_role": "asset",
           "kind": "asset",
           "path": "frontend_contract_map.v4.json"
         },
         {
-          "digest": "sha256:975fc9cc3122ec8e08abc08dc873dc97309dae6a02c0e39a3d6f25f99a9f127b",
+          "digest": "sha256:5ac115b79c5004203944f6f9b931e4a236a18abfb7a6f52ae7a753fa343ac6a0",
           "index_role": "asset",
           "kind": "asset",
           "path": "backend-integrity.v4.json"
@@ -15937,27 +15948,32 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:5753b4a86708cfb85f6b1365ea56f918b61acb85c6be194e975386a1cad274d8",
+          "digest": "sha256:bb79f510a54d9ab6243950c5465104823f1c93cc4cc0c7506362448bf9ed6374",
           "path": "ecosystem/tobkiri_workflow_pack/generate_v4.py",
           "rule_id": "workflow-v4-canonical-source"
         },
         {
-          "digest": "sha256:da40d71dce8a893305036c767481cd60fad1675fe2ca91e603ec899d8e77d16e",
+          "digest": "sha256:87fa6f81160b8d623cd0e1a8c9d306377ff66689b59e3cf1da44b75227176eef",
           "path": "core_runtime/workflow_v4/__init__.py",
           "rule_id": "workflow-v4-canonical-source"
         },
         {
-          "digest": "sha256:4fda245ac2e586d999b1e7698cf516b4960803297473a2b76500e0a0dbbee12b",
+          "digest": "sha256:0cdc57c4f01f25b766c3ae73e477b02936600b3430cf9317a207ae6a999269e5",
           "path": "core_runtime/workflow_v4/engine.py",
           "rule_id": "workflow-v4-canonical-source"
         },
         {
-          "digest": "sha256:19f1da94324333fa4291aa738b30e2651df361a07638a82ce49393e88469dffc",
+          "digest": "sha256:2a241170da7570c1ae10e11f39a611ab634be783f5d094e2205db5456127b733",
+          "path": "core_runtime/workflow_v4/graph_compiler.py",
+          "rule_id": "workflow-v4-canonical-source"
+        },
+        {
+          "digest": "sha256:ed2959affeccbc68ef92e2ea4a1bb7f93f9a2c8cdbdd593c75f2a4bc5783f831",
           "path": "core_runtime/workflow_v4/integration.py",
           "rule_id": "workflow-v4-canonical-source"
         },
         {
-          "digest": "sha256:b10c9fda239788a3333e58b1ba0245375a592541dd3459f95d2e3caaa3e79684",
+          "digest": "sha256:b0ea417c3507761d8f3b024534b7e67d183807c9978ef7676437bfd8d43dbbb6",
           "path": "core_runtime/workflow_v4/models.py",
           "rule_id": "workflow-v4-canonical-source"
         },
@@ -15967,7 +15983,7 @@
           "rule_id": "workflow-v4-canonical-source"
         },
         {
-          "digest": "sha256:569c73c554d42405da5cf5f5c224b0ead282590fb4d870064b63b2d4b7286a58",
+          "digest": "sha256:a3cab8434b68e04e30e0c56835a565f4759ac146c6807c7404dce69cbaffa967",
           "path": "core_runtime/workflow_v4/provider.py",
           "rule_id": "workflow-v4-canonical-source"
         },
@@ -15979,6 +15995,11 @@
         {
           "digest": "sha256:6ce340ccfa37ae1f4bb14106d80e202d98b618b92a646eb8e1cbbedcc44f8fcd",
           "path": "ecosystem/tobkiri_workflow_pack/schemas/workflow-definition.v4.schema.json",
+          "rule_id": "workflow-v4-canonical-source"
+        },
+        {
+          "digest": "sha256:162dee9d19424c6316739b973e97607491a9a607b1b009590373ebc1c41d182b",
+          "path": "ecosystem/tobkiri_workflow_pack/schemas/rumi-graph.v1.schema.json",
           "rule_id": "workflow-v4-canonical-source"
         },
         {
@@ -16002,12 +16023,12 @@
           "rule_id": "workflow-v4-canonical-source"
         },
         {
-          "digest": "sha256:26cef1a25d1184d03285cf1a261372e73cf47d9a4ff0b65cee1acf55366fdb86",
+          "digest": "sha256:0095d1dbc4be9f7ce336d791fde45486a29fce2697db350dcbd1d797953606c9",
           "path": "ecosystem/tobkiri_workflow_pack/frontend_contract_map.v4.json",
           "rule_id": "workflow-v4-canonical-source"
         },
         {
-          "digest": "sha256:975fc9cc3122ec8e08abc08dc873dc97309dae6a02c0e39a3d6f25f99a9f127b",
+          "digest": "sha256:5ac115b79c5004203944f6f9b931e4a236a18abfb7a6f52ae7a753fa343ac6a0",
           "path": "ecosystem/tobkiri_workflow_pack/backend-integrity.v4.json",
           "rule_id": "workflow-v4-canonical-source"
         }

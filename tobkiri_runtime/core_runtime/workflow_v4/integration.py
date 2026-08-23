@@ -34,6 +34,7 @@ class _ResolvedCatalog:
         self.schemas: dict[str, Mapping[str, Any]] = {}
         for binding in context.catalog_bindings:
             input_digest = canonical_digest(binding.operation.input_schema)
+            output_digest = canonical_digest(binding.operation.output_schema)
             self.schemas[input_digest] = binding.operation.input_schema
             operations.append(
                 {
@@ -43,6 +44,7 @@ class _ResolvedCatalog:
                     "function_principal_id": binding.principal_ref.value,
                     "provider_id": binding.function.function_id,
                     "input_schema_digest": input_digest,
+                    "output_schema_digest": output_digest,
                     "effect_ceiling": [binding.operation.effect_class.value],
                 }
             )
