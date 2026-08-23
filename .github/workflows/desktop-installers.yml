@@ -61,7 +61,7 @@ jobs:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     env:
-      CARGO_TARGET_DIR: ${{ github.workspace }}/.tobkiri-desktop-installer-target
+      CARGO_TARGET_DIR: ${{ github.workspace }}/tobkiri_launcher/src-tauri/target/desktop-installers
     strategy:
       fail-fast: false
       matrix:

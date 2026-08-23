@@ -30,7 +30,7 @@ jobs:
             presentation_architecture: arm64
     runs-on: ${{ matrix.os }}
     env:
-      CARGO_TARGET_DIR: ${{ github.workspace }}/.tobkiri-release-target
+      CARGO_TARGET_DIR: ${{ github.workspace }}/tobkiri_launcher/src-tauri/target/release-workflow
 
     steps:
       - name: Checkout

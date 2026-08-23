@@ -520,9 +520,12 @@ def test_packaging_workflows_isolate_cargo_outputs_from_restored_bundle_caches()
     workflows = (
         (
             ROOT / ".github" / "workflows" / "desktop-installers.yml",
-            ".tobkiri-desktop-installer-target",
+            "tobkiri_launcher/src-tauri/target/desktop-installers",
         ),
-        (RELEASE_WORKFLOW, ".tobkiri-release-target"),
+        (
+            RELEASE_WORKFLOW,
+            "tobkiri_launcher/src-tauri/target/release-workflow",
+        ),
     )
     cached_bundle_roots = (
         "tobkiri_launcher/src-tauri/target/${{ matrix.target }}/release/bundle",
