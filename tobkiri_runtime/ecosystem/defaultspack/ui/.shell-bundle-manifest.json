@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b1a6a71f8570ada13835c7eb2626eb2baa2f54f79bd99199c8f5c245a08b311b",
+    "digest": "5709e281c596a00d977fb9f091ef7c78392af08d78485c21e2fffd109035fc5f",
     "entries": [
       {
         "path": "index.html",
@@ -15,8 +15,8 @@
       },
       {
         "path": "package.json",
-        "size": 5348,
-        "sha256": "45eb795fd69947b6821b7e217223bdcd64168e0bcee1b432ab9692dfb1040b40"
+        "size": 5393,
+        "sha256": "3a63bdfb0dd32a768bfb9921daa03c1259fb0e6a13d264bf48dfe8811019d7ea"
       },
       {
         "path": "public/assets/tobkiri-startup-blade-cut.svg",
@@ -1640,13 +1640,13 @@
       },
       {
         "path": "src/renderers/defaultspackRenderers.test.ts",
-        "size": 25455,
-        "sha256": "3010af0a0854e1f7cdcef9abc913699b2ef9be3bfaa9872a01fd2d8f54b9ad6a"
+        "size": 25529,
+        "sha256": "bb4219953c1ca4b05992b090430b4fc49b86d8104611778d3d92ff5d4135305c"
       },
       {
         "path": "src/renderers/defaultspackRenderers.ts",
-        "size": 2248,
-        "sha256": "74e375e615b92a0beb686642a8ed5ff621cecdaaba93fb90cc0700b5e53c6dce"
+        "size": 2370,
+        "sha256": "8832d2cbcb1337af58c274a69ead9b9954e4e76afd72887dd426a861d7756deb"
       },
       {
         "path": "src/renderers/settings/ModelRoutingOverview.tsx",
@@ -1764,6 +1764,16 @@
         "sha256": "f0485ea564f727cdc371b333910e46e92ad504a0906c52327fd77dc6d7473fe8"
       },
       {
+        "path": "src/surface/SurfaceTemplateRenderer.test.tsx",
+        "size": 3490,
+        "sha256": "c014f9b433acde8a28296e5c8666be8d8ab6e741d9d2ecfe20d54b0261ed926a"
+      },
+      {
+        "path": "src/surface/SurfaceTemplateRenderer.tsx",
+        "size": 10330,
+        "sha256": "32c7109fd00d85c4dcdadbc496067c97344ef8a124d7c6a8939b27717e78e7b2"
+      },
+      {
         "path": "src/templates/composerPalette.template.json",
         "size": 127,
         "sha256": "acb4010d392316da9af81c11f512e7c21228d7e8835b63aa1f218e6d7593e132"
@@ -1806,12 +1816,12 @@
     ]
   },
   "bundle": {
-    "digest": "9cd085f42faba6ad8779b2e2b4182b247b74b00acf07912cc1cfb403abd6794f",
+    "digest": "181c524ce02f553e17e161c08ed0cf4037fa966767bf2a27df951f46e038f0ba",
     "entries": [
       {
         "path": "shell-app.css",
-        "size": 221221,
-        "sha256": "f01a4899a910991eb5365da18678fbe0b6d868c25036771f93f3b78a3386c9b0"
+        "size": 221569,
+        "sha256": "808e9ec42f08d54937d86791b7f6f16a0d292ab2b183cb50c425a1da9df61908"
       },
       {
         "path": "shell-app.js",
