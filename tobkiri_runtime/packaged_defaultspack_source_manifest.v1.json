@@ -1097,15 +1097,15 @@
     {
       "path": "scripts/migrate_manifest_authority.py",
       "type": "regular-file",
-      "size": 19780,
-      "sha256": "855a358696ff075be42c369d417666176542884f7b82a84ffeac36bb32c5f2fb",
+      "size": 20041,
+      "sha256": "05c200607638b68e9a25272f652131a29ea5ef4e7fea1f2260058c1a818e779d",
       "executable": false
     },
     {
       "path": "scripts/migrate_pack_artifacts_v4.py",
       "type": "regular-file",
-      "size": 52776,
-      "sha256": "bb6969f41e1ba3cd86226ba79dcbd7afe3d48dc62a873edcef5d0743d0e67155",
+      "size": 52991,
+      "sha256": "2537fdff23d6e649f55ba8e97e7ddb393d0653e51637851ba2bf1b62253688e7",
       "executable": false
     },
     {
@@ -1134,6 +1134,13 @@
       "type": "regular-file",
       "size": 1293,
       "sha256": "f9ccbe7233a14a52d702140732e6bb6798d26f269bd9d27bf01886dd04b56845",
+      "executable": false
+    },
+    {
+      "path": "scripts/quality/check_team_vocabulary.py",
+      "type": "regular-file",
+      "size": 2659,
+      "sha256": "443330f83ca947a49cff02b5587bd78522816ad935bf61d2fe4e87f6117bafa1",
       "executable": false
     },
     {

@@ -24,7 +24,7 @@
 
 - `defaultspack`: Owns provider and tooling handoffs for dialing, ASR/TTS-adjacent runtime, transcript/media handling, and contact or calendar lookup outside this pack.
 - `rumi_local_agent_pack`: Can consume redacted transcript packets for recap, note-taking, and other local-first follow-up artifacts.
-- `rumi_operations_company_pack`: Owns approval-aware escalation, real-world action risk review, and downstream business workflow execution after human approval.
+- `rumi_operations_team_pack`: Owns approval-aware escalation, real-world action risk review, and downstream business workflow execution after human approval.
 
 ## Required Secrets
 

@@ -90,7 +90,7 @@ def test_required_starter_packs_exist() -> None:
     for pack_id in [
         "rumi_default_tools_pack",
         "rumi_local_agent_pack",
-        "rumi_operations_company_pack",
+        "rumi_operations_team_pack",
         "rumi_reference_ui_pack",
         "rumi_model_catalog_pack",
     ]:

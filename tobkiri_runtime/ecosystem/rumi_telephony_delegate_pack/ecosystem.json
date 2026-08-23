@@ -115,7 +115,7 @@
         "reason": "Consume redacted transcript packets for recap, note-taking, and other local-first follow-up artifacts."
       },
       {
-        "pack_id": "rumi_operations_company_pack",
+        "pack_id": "rumi_operations_team_pack",
         "reason": "Own approval-aware escalation, real-world action risk review, and downstream business workflow execution after human approval."
       }
     ],

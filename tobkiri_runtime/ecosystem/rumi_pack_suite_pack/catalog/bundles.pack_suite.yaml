@@ -10,4 +10,4 @@ bundles:
   - bundle_id: personal_agent_os
     packs: [defaultspack, rumi_default_tools_pack, rumi_local_agent_pack, rumi_model_catalog_pack, rumi_reference_ui_pack]
   - bundle_id: integration_gateway
-    packs: [defaultspack, rumi_default_tools_pack, rumi_operations_company_pack, rumi_reference_ui_pack]
+    packs: [defaultspack, rumi_default_tools_pack, rumi_operations_team_pack, rumi_reference_ui_pack]
