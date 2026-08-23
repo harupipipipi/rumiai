@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { EntityPickerHost, nextEntityPickerActiveIndex } from "./EntityPickerHost";
+import {
+  EntityPickerHost,
+  nextEntityPickerActiveIndex,
+  retainSelectedEntityPickerItems,
+} from "./EntityPickerHost";
 import type { ResolvedEntityPicker } from "../lib/entityPicker";
 
 function picker(overrides: Partial<ResolvedEntityPicker> = {}): ResolvedEntityPicker {
@@ -53,6 +57,18 @@ test("popup renders an accessible searchable grouped multi-select contract", () 
 test("keyboard navigation skips disabled options", () => {
   assert.equal(nextEntityPickerActiveIndex(picker().items, 1, 1), 0);
   assert.equal(nextEntityPickerActiveIndex(picker().items, 0, -1), 1);
+});
+
+test("remote search retains the selected item while replacing stale results", () => {
+  const items = picker().items;
+  const refreshed = retainSelectedEntityPickerItems(
+    items,
+    [{ id: "writer", label: "Writer", badges: [], disabled: false, favorite: false, recent: false }],
+    ["reviewer"],
+  );
+
+  assert.deepEqual(refreshed.map((item) => item.id), ["__create__", "reviewer", "writer"]);
+  assert.equal(refreshed.some((item) => item.id === "offline"), false);
 });
 
 test("crafted selected IDs cannot select disabled or unknown entries", () => {

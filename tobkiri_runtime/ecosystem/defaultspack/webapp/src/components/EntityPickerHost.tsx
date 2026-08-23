@@ -33,6 +33,16 @@ function mergeItems(current: EntityPickerItem[], incoming: EntityPickerItem[]): 
   return [...byId.values()];
 }
 
+export function retainSelectedEntityPickerItems(
+  current: EntityPickerItem[],
+  incoming: EntityPickerItem[],
+  selectedIds: Iterable<string>,
+): EntityPickerItem[] {
+  const selected = new Set(selectedIds);
+  const retained = current.filter((item) => item.fixed || selected.has(item.id));
+  return mergeItems(retained, incoming);
+}
+
 function groupLabel(item: EntityPickerItem): string {
   if (item.create) return "Actions";
   if (item.favorite) return "Favorites";
@@ -113,8 +123,11 @@ function PickerBody({
         sourceRevision: picker.sourceRevision,
       }).then((page) => {
         if (!active) return;
-        const fixed = picker.items.filter((item) => item.fixed);
-        setItems(mergeItems(fixed, page.items));
+        setItems((current) => retainSelectedEntityPickerItems(
+          current,
+          page.items,
+          committedSelectionRef.current,
+        ));
         setNextCursor(page.nextCursor);
         setSourceRevision(page.sourceRevision ?? picker.sourceRevision);
       }).catch((reason) => {
