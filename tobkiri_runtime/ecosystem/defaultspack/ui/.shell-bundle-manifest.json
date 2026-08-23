@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "ecc836ca17e6e305dba23e30e36ebde53f02d46e146505e7c6a567bbd9f849a2",
+    "digest": "b16fa8bdad7b14c1794fd668ff4a6427f994f26048074d3d920b53d74feb6d5c",
     "entries": [
       {
         "path": "index.html",
@@ -1445,13 +1445,13 @@
       },
       {
         "path": "src/lib/statusSurfaces.test.ts",
-        "size": 9502,
-        "sha256": "1e3f4de7206a48f3d4ad645e351af829681448b5d3989561d82bc66a3d5c12d2"
+        "size": 10079,
+        "sha256": "2cdf3cd87e6c730c21f2f95e409c2e7787395d8ceebdefa8b11504b6c86240dd"
       },
       {
         "path": "src/lib/statusSurfaces.ts",
-        "size": 24251,
-        "sha256": "5437cbaa00713baf72ff47d5d5c2b6c2aacf064abbe13a1f80ee39c150958a8f"
+        "size": 24116,
+        "sha256": "43c9878f04f0747ca7a9798ca828895c82c45ffefcae3e6d86a0700767a51404"
       },
       {
         "path": "src/lib/structuredComposer.ts",
@@ -1826,7 +1826,7 @@
     ]
   },
   "bundle": {
-    "digest": "fe5694b341d27d82fcb3bc5e76d96ee571f9e7d4b9f0007edaafff91459c63af",
+    "digest": "b5b2cb89b3e7f052176dffbd20b043543a68e40e6c49348e136a6db19e3a4874",
     "entries": [
       {
         "path": "shell-app.css",
@@ -1840,8 +1840,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2218658,
-        "sha256": "5c344ac0df63ec7e2825d0960a1e04884da0947bccbfa3fc11b3002263e139d9"
+        "size": 2218602,
+        "sha256": "9cf0bc98d311f2300341204c1ceacde5b2c13ee318eb5769d144ba5c957ec220"
       },
       {
         "path": "shell-rolldown-runtime.js",
