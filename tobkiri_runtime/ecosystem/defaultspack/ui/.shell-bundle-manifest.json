@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b1a6a71f8570ada13835c7eb2626eb2baa2f54f79bd99199c8f5c245a08b311b",
+    "digest": "4cab0aceaea9fec4d96409606a8ccb6d1a8159f7d974474e1ecc2ec6ebebdcea",
     "entries": [
       {
         "path": "index.html",
@@ -375,13 +375,13 @@
       },
       {
         "path": "src/components/HistoryBoard.test.ts",
-        "size": 12864,
-        "sha256": "78425b6cf023e8b9e5c95fec583f48e5994faaba3c61436d145d8669de0cc1c4"
+        "size": 13376,
+        "sha256": "d5b947c8aea6e4a80d69d1674438415c66245770d4015ef55e3bde5de8f233b6"
       },
       {
         "path": "src/components/HistoryBoard.tsx",
-        "size": 93164,
-        "sha256": "37f23aeb948564820d3b64dff37f06fff9ef13b9ae1d7307bfc0e8876019ba1c"
+        "size": 93191,
+        "sha256": "201e44b30230ef8bfb8c809331a717dbce332977dd0c362a51578943d097ae7d"
       },
       {
         "path": "src/components/MobilePairingApproval.tsx",
@@ -705,8 +705,8 @@
       },
       {
         "path": "src/components/history/ConversationPinStarMenu.tsx",
-        "size": 2809,
-        "sha256": "525fd215b2ac90cedffea6c3dc5c31c4475169797598f3ece178794aa8d4ccc5"
+        "size": 9742,
+        "sha256": "6af6cfa7e367c3c9ffb6d2a3aec61156514e5656330468b5d99bf0f0e02e71bd"
       },
       {
         "path": "src/components/history/ConversationSearchBar.tsx",
@@ -1806,12 +1806,12 @@
     ]
   },
   "bundle": {
-    "digest": "9cd085f42faba6ad8779b2e2b4182b247b74b00acf07912cc1cfb403abd6794f",
+    "digest": "49ab5b39e8cb118531dda07d2907752d262c670c6477472339625db58636aba6",
     "entries": [
       {
         "path": "shell-app.css",
-        "size": 221221,
-        "sha256": "f01a4899a910991eb5365da18678fbe0b6d868c25036771f93f3b78a3386c9b0"
+        "size": 221961,
+        "sha256": "fe290f1eaa614bb98bf8d07b49905143901b87fbaa688f99718f3f9fb1736174"
       },
       {
         "path": "shell-app.js",
@@ -1820,8 +1820,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2195531,
-        "sha256": "bb3b0526fbd28a17f12989930d01607192f4c6bb84816e359e8735988abbbb96"
+        "size": 2199045,
+        "sha256": "dfacd078f944567f733f89c63715de8f326853af45eb09841a553ad0af708c05"
       },
       {
         "path": "shell-rolldown-runtime.js",
