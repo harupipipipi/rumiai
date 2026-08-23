@@ -17,6 +17,7 @@ runtime 内の curated table は互換 fallback であり、新規 provider を�
 | `google` | Google Gemini API（Gemini 2.5 Pro, Gemini 2.5 Flash 等） |
 | `openrouter` | OpenRouter API（defaultspack bundled catalog allowlist） |
 | `gitlawb-opengateway` | Gitlawb OpenGateway（MiMo の固定allowlist。全モデルで API key 必須） |
+| `opencode-zen` | OpenCode Zen（account-visible live inventory。API key 必須） |
 | `groq` | Groq OpenAI-compatible API |
 | `cerebras` | Cerebras OpenAI-compatible API |
 | `nvidia` | NVIDIA NIM OpenAI-compatible API |
@@ -97,6 +98,28 @@ OPENAI_BASE_URL=https://opengateway.gitlawb.com/v1
 OPENAI_API_KEY=ogw_live_...
 OPENAI_MODEL=mimo-v2-omni
 ```
+
+### OpenCode Zen
+
+OpenCode Zen は account-visible な `/v1/models` inventory を authority とし、
+`OPENCODE_ZEN_API_KEY` が設定された host provider 経路だけで実行する。
+
+```bash
+OPENCODE_ZEN_API_KEY=...
+# オプション:
+OPENCODE_ZEN_BASE_URL=https://opencode.ai/zen
+OPENCODE_ZEN_USER_AGENT="Mozilla/5.0 ..."  # gateway 要件に合わせる場合のみ
+```
+
+OpenCode Zen の Cloudflare 互換性のため、chat-completions と messages の両方に
+browser-compatible User-Agent を既定で送る。`OPENCODE_ZEN_USER_AGENT` は明示設定時のみ
+その値で上書きする。
+
+`opencode-zen/mimo-v2.5-free` は provider の長時間 pending SSE を回避するため、公開
+`stream()` 呼び出しでも bounded non-stream chat completion を実行し、その結果を
+`reasoning_delta` / `content_delta` / tool-call events / `stream_end` に変換する。空の
+completion や provider/network failure は成功として終端せず runtime error として返す。
+他の live inventory model は native SSE path を維持する。
 
 ### Cloud OpenAI-compatible providers
 
