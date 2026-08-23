@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b1a6a71f8570ada13835c7eb2626eb2baa2f54f79bd99199c8f5c245a08b311b",
+    "digest": "96cbc8be5516c69305ceba3ab0bac0041d73ad1e22c9054cf51797a122664fc8",
     "entries": [
       {
         "path": "index.html",
@@ -685,13 +685,13 @@
       },
       {
         "path": "src/components/desktops/RuntimeSetupDialog.test.tsx",
-        "size": 1310,
-        "sha256": "b56e3157bf4b1205da90c8cd2f1bfbd537c0b56341f60d4ece1e30479b1e2bc9"
+        "size": 2655,
+        "sha256": "e5623e16d53aa68d2986a6f33f4d69fe758fe2c0ea79c5ee05935121e724c7d4"
       },
       {
         "path": "src/components/desktops/RuntimeSetupDialog.tsx",
-        "size": 3656,
-        "sha256": "600de326e22bfa6ae6e0b80ce7960a2af83b74a4067b9a65c500a70d75f48137"
+        "size": 4099,
+        "sha256": "77063816b7862deff4c50f388421117bcb1b8586c0f99118d5b4057c4516a7f0"
       },
       {
         "path": "src/components/desktops/desktopCoordinates.test.ts",
@@ -895,13 +895,13 @@
       },
       {
         "path": "src/features/sandboxes/api.test.ts",
-        "size": 20250,
-        "sha256": "6d4a02b295a51c9afca889b3ea6833bc03a59b36c917bd5e13d01f650908998e"
+        "size": 20360,
+        "sha256": "57c9fa4c4bc0b13a73125cfd2623b6901573d8e3c364afb56776962c2f5d0b65"
       },
       {
         "path": "src/features/sandboxes/api.ts",
-        "size": 16958,
-        "sha256": "49975ab7fcc762c35c031b8acb28e65a379eb597b4f22ec60a7270a9695ce5d1"
+        "size": 17096,
+        "sha256": "b8ba14e2b90d4a7848210c246e75052fba474f548a8be73a0cc1116ee7301011"
       },
       {
         "path": "src/features/sandboxes/runtimeStatus.test.ts",
@@ -915,8 +915,8 @@
       },
       {
         "path": "src/features/sandboxes/types.ts",
-        "size": 11531,
-        "sha256": "ae44aeec0d38d8cca0ab351eea316aad776621bfbca0b4889d4858ca3992d66c"
+        "size": 11677,
+        "sha256": "15cc3d5515a2348c494753c22417e9caf96e82a433a7ff4e8f836621363b1862"
       },
       {
         "path": "src/features/sandboxes/useDesktopControlLease.test.ts",
@@ -1806,7 +1806,7 @@
     ]
   },
   "bundle": {
-    "digest": "9cd085f42faba6ad8779b2e2b4182b247b74b00acf07912cc1cfb403abd6794f",
+    "digest": "c871bfa5329590492b3bebe792efcdb2b48bf57a594e26f5a3e651a6888349c2",
     "entries": [
       {
         "path": "shell-app.css",
@@ -1820,8 +1820,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2195531,
-        "sha256": "bb3b0526fbd28a17f12989930d01607192f4c6bb84816e359e8735988abbbb96"
+        "size": 2195809,
+        "sha256": "cc78b7cfe40f0fef6a4d7e08dbf0156e914b49174824a3ab896a486e23d484ee"
       },
       {
         "path": "shell-rolldown-runtime.js",
