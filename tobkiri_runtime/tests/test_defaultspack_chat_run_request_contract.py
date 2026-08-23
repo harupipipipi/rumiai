@@ -301,16 +301,16 @@ def test_approval_followup_tool_is_explicit_only_after_signed_server_verificatio
     from domain.chat.run_request import _verified_approval_followup_tool_ids
     from domain.safety import approval
 
+    approval_request = {
+        "status": "approved",
+        "operation": "tool.repository_context_prepare",
+        "args_hash": "args-hash",
+        "details": {"tool_name": "repository_context_prepare"},
+    }
     monkeypatch.setattr(
         approval,
         "get_approval_request",
-        lambda request_id: {
-            "request_id": request_id,
-            "status": "approved",
-            "operation": "tool.repository_context_prepare",
-            "args_hash": "args-hash",
-            "details": {"tool_name": "repository_context_prepare"},
-        },
+        lambda request_id: {"request_id": request_id, **approval_request},
     )
     monkeypatch.setattr(
         approval,
@@ -318,7 +318,7 @@ def test_approval_followup_tool_is_explicit_only_after_signed_server_verificatio
         lambda token, operation, args_hash, consume=False: SimpleNamespace(
             valid=(
                 token == "signed-token"
-                and operation == "tool.repository_context_prepare"
+                and operation == approval_request["operation"]
                 and args_hash == "args-hash"
                 and consume is False
             ),
@@ -343,6 +343,20 @@ def test_approval_followup_tool_is_explicit_only_after_signed_server_verificatio
     request["message"]["metadata"]["approval_followup"]["tool_name"] = (
         "coding_terminal_exec"
     )
+    assert _verified_approval_followup_tool_ids(request) == []
+
+    approval_request.update(
+        {
+            "operation": "page.click",
+            "details": {"tool_name": "browser_companion"},
+        }
+    )
+    request["message"]["metadata"]["approval_followup"]["tool_name"] = (
+        "browser_companion"
+    )
+    assert _verified_approval_followup_tool_ids(request) == ["browser_companion"]
+
+    approval_request["details"] = {"tool_name": "computer_use"}
     assert _verified_approval_followup_tool_ids(request) == []
 
 
@@ -465,6 +479,28 @@ def test_prepare_chat_run_maps_approval_followup_tokens_for_action_operation_and
         "apps": "tok_followup",
         "computer.apps": "tok_followup",
         "apr_followup": "tok_followup",
+    }
+
+
+def test_browser_companion_page_followup_maps_only_server_verified_aliases():
+    from domain.chat.run_request import _approval_followup_tool_context
+
+    assert _approval_followup_tool_context(
+        {
+            "approval_followup": {
+                "tool_name": "browser_companion",
+                "action": "page.click",
+                "operation": "page.click",
+                "approval_token": "tok-browser-companion",
+                "request_id": "apr-browser-companion",
+            }
+        }
+    ) == {
+        "tool_approval_tokens": {
+            "browser_companion": "tok-browser-companion",
+            "page.click": "tok-browser-companion",
+            "apr-browser-companion": "tok-browser-companion",
+        }
     }
 
 
