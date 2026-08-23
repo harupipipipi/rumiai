@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b1a6a71f8570ada13835c7eb2626eb2baa2f54f79bd99199c8f5c245a08b311b",
+    "digest": "ef841af8d8a504800b5e0918b95b355cc109108554999af676f01d62c5620d9c",
     "entries": [
       {
         "path": "index.html",
@@ -1620,13 +1620,13 @@
       },
       {
         "path": "src/renderers/SettingsModalRenderer.test.tsx",
-        "size": 64043,
-        "sha256": "4f70cf8f756623ea91c136ae1e555f2493c4a62f020e34569c542a63fe4c63b0"
+        "size": 65544,
+        "sha256": "5f95ad4aa1a1dc8c7e978619beecc36ea789f60550accb24e27c44777e5c0f0d"
       },
       {
         "path": "src/renderers/SettingsModalRenderer.tsx",
-        "size": 277454,
-        "sha256": "c12a50c7f7ac1aa54d5bf30a4f0e4bc31f4f02299c8671d830edab53c7add96d"
+        "size": 277539,
+        "sha256": "08802131fd138cc5560d32a8c203f7b5185fae32710979fc746dfbe3816ef645"
       },
       {
         "path": "src/renderers/TitleBarRenderer.tsx",
@@ -1806,12 +1806,12 @@
     ]
   },
   "bundle": {
-    "digest": "9cd085f42faba6ad8779b2e2b4182b247b74b00acf07912cc1cfb403abd6794f",
+    "digest": "e5ba11df973efcc77b827ae8d581a1b9dcc8c03aa1f7d78e9da120a79456d89f",
     "entries": [
       {
         "path": "shell-app.css",
-        "size": 221221,
-        "sha256": "f01a4899a910991eb5365da18678fbe0b6d868c25036771f93f3b78a3386c9b0"
+        "size": 221167,
+        "sha256": "912cfe0ff947c9ba844ea9eb3e6f7557a78ed8fe5509396bc74610907545a178"
       },
       {
         "path": "shell-app.js",
@@ -1820,8 +1820,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2195531,
-        "sha256": "bb3b0526fbd28a17f12989930d01607192f4c6bb84816e359e8735988abbbb96"
+        "size": 2195569,
+        "sha256": "322f0c05dcc8d1721e9973ab38e7e0fc36899a3c2e4d2e7a609283ddca480e86"
       },
       {
         "path": "shell-rolldown-runtime.js",
