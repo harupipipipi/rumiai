@@ -230,16 +230,22 @@ pub fn ensure_python_env(config: &AppConfig) -> Result<()> {
 }
 
 /// Ensure the Python environment while sending long-running setup progress to
-/// the caller's splash or other UI surface.
+/// the caller's splash or other UI surface. Packaged verification is
+/// deliberately deferred to `spawn_packaged_role`: that is the authoritative
+/// fail-closed boundary which verifies the sealed environment and, on macOS,
+/// creates the snapshot retained by the child. Verifying here would construct
+/// and immediately destroy a second snapshot before the real launch.
 pub fn ensure_python_env_with_progress<F>(config: &AppConfig, progress: F) -> Result<()>
 where
     F: Fn(&str),
 {
     if !config.is_dev_workspace() {
-        progress("Verifying the packaged sealed Python environment...");
-        return crate::sealed_python::verify_packaged_environment(config).context(
-            "[PYTHON_SEALED_INVALID] packaged Python is unavailable; external uv provisioning is disabled",
-        );
+        // `spawn_packaged_role` is the single authority for the outer-runtime
+        // and sealed-environment verification immediately before execution.
+        // Do not add a packaged preflight here: it duplicates the full hash
+        // and macOS snapshot construction without shrinking the launch race.
+        progress("Packaged Python will be verified immediately before the runtime starts...");
+        return Ok(());
     }
     let options = ProvisionOptions::production();
     let lock_path = provision_lock_path(config);
@@ -3046,6 +3052,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -3063,6 +3070,41 @@ mod tests {
     #[cfg(unix)]
     fn test_config(root: &Path) -> AppConfig {
         AppConfig::detect_for_tauri(root.join("resources"), root.join("appdata")).unwrap()
+    }
+
+    #[test]
+    fn packaged_setup_defers_invalid_environment_to_authoritative_role_spawn() {
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-packaged-python-setup-{}",
+            unix_timestamp_nanos()
+        ));
+        let resource_dir = root.join("resources");
+        fs::create_dir_all(resource_dir.join("app")).unwrap();
+        let config = AppConfig::detect_for_tauri(resource_dir, root.join("appdata")).unwrap();
+        assert!(!config.is_dev_workspace());
+
+        // This deliberately invalid sealed root would make the former
+        // preflight verifier fail. Setup must leave validation to the
+        // fail-closed role spawn that owns the executable snapshot.
+        fs::write(config.app_dir.join("sealed_python"), b"tampered").unwrap();
+        let progress = RefCell::new(Vec::new());
+        ensure_python_env_with_progress(&config, |message| {
+            progress.borrow_mut().push(message.to_string());
+        })
+        .unwrap();
+        assert_eq!(
+            progress.into_inner(),
+            vec!["Packaged Python will be verified immediately before the runtime starts..."]
+        );
+
+        assert!(spawn_python_role(
+            &config,
+            PythonRole::Kernel,
+            RoleArguments::default(),
+            |_| Ok(()),
+        )
+        .is_err());
+        fs::remove_dir_all(root).ok();
     }
 
     #[cfg(unix)]

@@ -312,6 +312,11 @@ jobs:
       - name: Install locked runtime and test dependencies
         run: python .github/scripts/install_locked_python_test_dependencies.py
 
+      - name: Test macOS Launcher cold-boot verifier contract
+        run: >-
+          python -m pytest
+          tobkiri_launcher/scripts/tests/test_verify_macos_launcher_cold_boot.py -q
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -483,6 +488,25 @@ jobs:
           /usr/bin/codesign --verify --deep --strict --verbose=2 \
             "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app"
 
+      - name: Cold-boot packaged macOS CI/E2E Launcher
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app"
+          app_data_dir="$HOME/Library/Application Support/dev.tobkiri.launcher.ci-e2e"
+          diagnostics_dir="$RUNNER_TEMP/tobkiri-launcher-cold-boot-${{ matrix.target }}"
+          test -d "$app"
+          test -d "$(dirname "$app_data_dir")"
+          test ! -e "$app_data_dir"
+          /bin/mkdir -m 700 "$diagnostics_dir"
+          /usr/bin/python3 -B tobkiri_launcher/scripts/verify_macos_launcher_cold_boot.py \
+            --app-bundle "$app" \
+            --app-data-dir "$app_data_dir" \
+            --diagnostics-dir "$diagnostics_dir" \
+            --kernel-port 8765 \
+            --timeout-seconds 180
+
       - name: Build macOS DMG installer
         if: runner.os == 'macOS'
         working-directory: tobkiri_launcher
@@ -557,6 +581,7 @@ jobs:
           path: |
             ${{ runner.temp }}/tobkiri-macos-dmg-${{ matrix.target }}.log
             ${{ runner.temp }}/tobkiri-macos-dmg-${{ matrix.target }}-diagnostic.txt
+            ${{ runner.temp }}/tobkiri-launcher-cold-boot-${{ matrix.target }}/launcher-cold-boot.v1.json
           if-no-files-found: warn
 
       - name: Clean packaging Python installation

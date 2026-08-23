@@ -345,6 +345,27 @@ struct VerifiedRuntimeOverlay {
     authority: RuntimeOverlayAuthority,
 }
 
+#[cfg(target_os = "macos")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SnapshotFileIdentity {
+    path: String,
+    device: u64,
+    inode: u64,
+    size: u64,
+    mode: u32,
+    links: u64,
+    modified_seconds: i64,
+    modified_nanoseconds: i64,
+    changed_seconds: i64,
+    changed_nanoseconds: i64,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Debug)]
+struct SnapshotVerification {
+    files: Vec<SnapshotFileIdentity>,
+}
+
 struct VerifiedEnvironment {
     root: PathBuf,
     manifest_path: PathBuf,
@@ -353,6 +374,8 @@ struct VerifiedEnvironment {
     _interpreter_lease: File,
     environment_lease: Option<File>,
     snapshot_path: Option<PathBuf>,
+    #[cfg(target_os = "macos")]
+    snapshot_verification: Option<SnapshotVerification>,
     runtime_overlay: VerifiedRuntimeOverlay,
     cleanup_authority: CleanupAuthority,
 }
@@ -813,12 +836,6 @@ fn terminate_and_confirm_or_reap(
     PythonChildState::ReaperOwned { completion }
 }
 
-pub fn verify_packaged_environment(config: &AppConfig) -> Result<()> {
-    let mut environment = VerifiedEnvironment::load(config)?;
-    environment.cleanup_snapshot();
-    Ok(())
-}
-
 pub fn spawn_packaged_role<F>(
     config: &AppConfig,
     role: PythonRole,
@@ -968,7 +985,7 @@ impl VerifiedEnvironment {
         )?;
         #[cfg(target_os = "macos")]
         {
-            let (root, root_lease, snapshot_path) = create_macos_snapshot(
+            let (root, root_lease, snapshot_path, snapshot_verification) = create_macos_snapshot(
                 config,
                 &source_root,
                 &manifest,
@@ -991,6 +1008,7 @@ impl VerifiedEnvironment {
                 _interpreter_lease: interpreter_lease,
                 environment_lease: Some(environment_lease),
                 snapshot_path: Some(snapshot_path),
+                snapshot_verification: Some(snapshot_verification),
                 runtime_overlay,
                 cleanup_authority: CleanupAuthority::BeforeChildSpawn,
             })
@@ -1024,7 +1042,9 @@ impl VerifiedEnvironment {
             return verify_snapshot_anchored(
                 self._root_lease.as_raw_fd(),
                 &self.manifest,
-                option_env!("TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256").unwrap_or_default(),
+                self.snapshot_verification
+                    .as_ref()
+                    .context("sealed snapshot verification identity is unavailable")?,
                 Some(&self.runtime_overlay),
             );
         }
@@ -1122,7 +1142,7 @@ impl Drop for PendingSnapshotCleanup {
 
 #[cfg(target_os = "macos")]
 fn cleanup_macos_snapshot(path: &Path, root_handle: &File) {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::os::unix::fs::PermissionsExt;
 
     let Ok(path_metadata) = fs::symlink_metadata(path) else {
         return;
@@ -1205,7 +1225,7 @@ fn create_macos_snapshot(
     manifest_bytes: &[u8],
     runtime_resource_manifest: &crate::runtime_resource_integrity::VerifiedResourceManifest,
     runtime_overlay: &VerifiedRuntimeOverlay,
-) -> Result<(PathBuf, File, Option<PathBuf>)> {
+) -> Result<(PathBuf, File, Option<PathBuf>, SnapshotVerification)> {
     use std::os::fd::AsRawFd;
     use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 
@@ -1238,6 +1258,8 @@ fn create_macos_snapshot(
             pending.root_handle().as_raw_fd(),
             Path::new(MANIFEST_FILENAME),
             false,
+            manifest_bytes.len() as u64,
+            &sha256_bytes(manifest_bytes),
         )?;
         for entry in &manifest.files {
             copy_anchored_file(
@@ -1245,6 +1267,8 @@ fn create_macos_snapshot(
                 pending.root_handle().as_raw_fd(),
                 Path::new(&entry.path),
                 entry.executable,
+                entry.size,
+                &entry.sha256,
             )?;
         }
         write_anchored_file(
@@ -1252,18 +1276,6 @@ fn create_macos_snapshot(
             Path::new(SNAPSHOT_RUNTIME_MANIFEST),
             &runtime_overlay.bytes,
         )?;
-        let copied_runtime_manifest = read_anchored_regular(
-            pending.root_handle().as_raw_fd(),
-            Path::new(SNAPSHOT_RUNTIME_MANIFEST),
-            64 * 1024 * 1024,
-        )?;
-        if copied_runtime_manifest != runtime_overlay.bytes
-            || sha256_bytes(&copied_runtime_manifest) != runtime_overlay.sha256
-        {
-            bail!(
-                "[PYTHON_SEALED_SNAPSHOT_INVALID] runtime resource manifest changed during snapshot"
-            );
-        }
         let runtime_source_after = runtime_source.metadata()?;
         if (
             runtime_source_identity.dev(),
@@ -1286,17 +1298,10 @@ fn create_macos_snapshot(
             );
         }
         seal_snapshot_directories(pending.root_handle().as_raw_fd(), manifest)?;
-        let copied_manifest = read_anchored_regular(
-            pending.root_handle().as_raw_fd(),
-            Path::new(MANIFEST_FILENAME),
-            4 * 1024 * 1024,
-        )?;
-        if copied_manifest != manifest_bytes {
-            bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] manifest changed during snapshot");
-        }
-        verify_snapshot_anchored(
+        let snapshot_verification = authenticate_snapshot_anchored(
             pending.root_handle().as_raw_fd(),
             manifest,
+            manifest_bytes.len() as u64,
             &sha256_bytes(manifest_bytes),
             Some(runtime_overlay),
         )?;
@@ -1304,7 +1309,12 @@ fn create_macos_snapshot(
         // copied is detected before this snapshot becomes executable.
         verify_package_provenance(config, &manifest.package_provenance)?;
         let (cleanup_path, snapshot) = pending.disarm();
-        Ok((snapshot_path.clone(), snapshot, Some(cleanup_path)))
+        Ok((
+            snapshot_path.clone(),
+            snapshot,
+            Some(cleanup_path),
+            snapshot_verification,
+        ))
     })()
 }
 
@@ -1332,6 +1342,8 @@ fn copy_anchored_file(
     destination_root: std::os::fd::RawFd,
     relative: &Path,
     executable: bool,
+    expected_size: u64,
+    expected_sha256: &str,
 ) -> Result<()> {
     copy_anchored_file_as(
         source_root,
@@ -1339,6 +1351,8 @@ fn copy_anchored_file(
         relative,
         relative,
         executable,
+        expected_size,
+        expected_sha256,
     )
 }
 
@@ -1349,6 +1363,8 @@ fn copy_anchored_file_as(
     source_relative: &Path,
     destination_relative: &Path,
     executable: bool,
+    expected_size: u64,
+    expected_sha256: &str,
 ) -> Result<()> {
     use std::io::Write;
     use std::os::fd::FromRawFd;
@@ -1414,26 +1430,73 @@ fn copy_anchored_file_as(
     let mut source = unsafe { File::from_raw_fd(source_fd) };
     let mut destination = unsafe { File::from_raw_fd(destination_fd) };
     let before = source.metadata()?;
-    if !before.is_file() || before.nlink() != 1 {
+    if !before.is_file() || before.nlink() != 1 || before.len() != expected_size {
         bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] source is not a singly-linked regular file");
     }
-    std::io::copy(&mut source, &mut destination)?;
+    let mut digest = Sha256::new();
+    let mut copied = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = source.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+        destination.write_all(&buffer[..count])?;
+        copied = copied.saturating_add(count as u64);
+        if copied > expected_size {
+            bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] source grew during snapshot copy");
+        }
+    }
     destination.flush()?;
-    destination.sync_all()?;
     let after = source.metadata()?;
     if before.dev() != after.dev()
         || before.ino() != after.ino()
         || before.len() != after.len()
+        || after.nlink() != 1
         || before.mtime() != after.mtime()
         || before.mtime_nsec() != after.mtime_nsec()
     {
         bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] source changed during snapshot copy");
+    }
+    if copied != expected_size || hex::encode(digest.finalize()) != expected_sha256 {
+        bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] source digest changed during snapshot copy");
+    }
+    let destination_identity = snapshot_file_identity(destination_relative, &destination)?;
+    let expected_mode = if executable { 0o555 } else { 0o444 };
+    if destination_identity.size != expected_size
+        || destination_identity.links != 1
+        || destination_identity.mode != expected_mode
+    {
+        bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] copied file metadata rejected");
     }
     unsafe {
         libc::close(source_dir);
         libc::close(destination_dir);
     }
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn snapshot_file_identity(relative: &Path, file: &File) -> Result<SnapshotFileIdentity> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] snapshot entry is not a regular file");
+    }
+    Ok(SnapshotFileIdentity {
+        path: relative.to_string_lossy().replace('\\', "/"),
+        device: metadata.dev(),
+        inode: metadata.ino(),
+        size: metadata.len(),
+        mode: metadata.permissions().mode() & 0o777,
+        links: metadata.nlink(),
+        modified_seconds: metadata.mtime(),
+        modified_nanoseconds: metadata.mtime_nsec(),
+        changed_seconds: metadata.ctime(),
+        changed_nanoseconds: metadata.ctime_nsec(),
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -1478,7 +1541,10 @@ fn write_anchored_file(
     let mut destination = unsafe { File::from_raw_fd(fd) };
     destination.write_all(payload)?;
     destination.flush()?;
-    destination.sync_all()?;
+    let identity = snapshot_file_identity(destination_relative, &destination)?;
+    if identity.size != payload.len() as u64 || identity.links != 1 || identity.mode != 0o444 {
+        bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] runtime overlay metadata rejected");
+    }
     Ok(())
 }
 
@@ -1601,82 +1667,138 @@ fn openat_relative_regular(root: std::os::fd::RawFd, relative: &Path) -> Result<
 }
 
 #[cfg(target_os = "macos")]
-fn read_anchored_regular(root: std::os::fd::RawFd, relative: &Path, limit: u64) -> Result<Vec<u8>> {
-    use std::os::unix::fs::MetadataExt;
+fn authenticate_snapshot_file(
+    root: std::os::fd::RawFd,
+    relative: &Path,
+    expected_size: u64,
+    expected_sha256: &str,
+    expected_mode: u32,
+) -> Result<SnapshotFileIdentity> {
+    let mut file = openat_relative_regular(root, relative)?;
+    let before = snapshot_file_identity(relative, &file)?;
+    if before.size != expected_size || before.links != 1 || before.mode != expected_mode {
+        bail!(
+            "[PYTHON_SEALED_SNAPSHOT_INVALID] anchored metadata changed: {}",
+            relative.display()
+        );
+    }
+    let mut digest = Sha256::new();
+    let mut authenticated = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+        authenticated = authenticated.saturating_add(count as u64);
+        if authenticated > expected_size {
+            bail!(
+                "[PYTHON_SEALED_SNAPSHOT_INVALID] anchored file grew: {}",
+                relative.display()
+            );
+        }
+    }
+    let after = snapshot_file_identity(relative, &file)?;
+    if before != after {
+        bail!(
+            "[PYTHON_SEALED_SNAPSHOT_INVALID] anchored file changed while authenticating: {}",
+            relative.display()
+        );
+    }
+    if authenticated != expected_size || hex::encode(digest.finalize()) != expected_sha256 {
+        bail!(
+            "[PYTHON_SEALED_SNAPSHOT_INVALID] anchored digest changed: {}",
+            relative.display()
+        );
+    }
+    Ok(after)
+}
 
-    let file = openat_relative_regular(root, relative)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.nlink() != 1 || metadata.len() > limit {
-        bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] anchored file metadata rejected");
+#[cfg(target_os = "macos")]
+fn authenticate_snapshot_anchored(
+    root: std::os::fd::RawFd,
+    manifest: &SealedEnvironmentManifest,
+    expected_manifest_size: u64,
+    expected_manifest_digest: &str,
+    runtime_overlay: Option<&VerifiedRuntimeOverlay>,
+) -> Result<SnapshotVerification> {
+    let mut files = Vec::with_capacity(manifest.files.len() + 2);
+    files.push(authenticate_snapshot_file(
+        root,
+        Path::new(MANIFEST_FILENAME),
+        expected_manifest_size,
+        expected_manifest_digest,
+        0o444,
+    )?);
+    for entry in &manifest.files {
+        files.push(authenticate_snapshot_file(
+            root,
+            Path::new(&entry.path),
+            entry.size,
+            &entry.sha256,
+            if entry.executable { 0o555 } else { 0o444 },
+        )?);
     }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.take(limit.saturating_add(1)).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != metadata.len() {
-        bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] anchored file changed while reading");
+    if let Some(overlay) = runtime_overlay {
+        files.push(authenticate_snapshot_file(
+            root,
+            Path::new(SNAPSHOT_RUNTIME_MANIFEST),
+            overlay.bytes.len() as u64,
+            &overlay.sha256,
+            0o444,
+        )?);
     }
-    Ok(bytes)
+    let verification = SnapshotVerification { files };
+    verify_snapshot_anchored(root, manifest, &verification, runtime_overlay)?;
+    Ok(verification)
 }
 
 #[cfg(target_os = "macos")]
 fn verify_snapshot_anchored(
     root: std::os::fd::RawFd,
     manifest: &SealedEnvironmentManifest,
-    expected_manifest_digest: &str,
+    verification: &SnapshotVerification,
     runtime_overlay: Option<&VerifiedRuntimeOverlay>,
 ) -> Result<()> {
     use std::collections::BTreeSet;
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
-    let manifest_bytes =
-        read_anchored_regular(root, Path::new(MANIFEST_FILENAME), 4 * 1024 * 1024)?;
-    if sha256_bytes(&manifest_bytes) != expected_manifest_digest {
-        bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] anchored manifest identity changed");
+    let mut expected_identity_paths = manifest
+        .files
+        .iter()
+        .map(|entry| entry.path.clone())
+        .chain(std::iter::once(MANIFEST_FILENAME.to_owned()))
+        .collect::<Vec<_>>();
+    if runtime_overlay.is_some() {
+        expected_identity_paths.push(SNAPSHOT_RUNTIME_MANIFEST.to_owned());
+    }
+    expected_identity_paths.sort();
+    let mut identity_paths = verification
+        .files
+        .iter()
+        .map(|identity| identity.path.clone())
+        .collect::<Vec<_>>();
+    identity_paths.sort();
+    if identity_paths != expected_identity_paths {
+        bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] snapshot identity closure changed");
+    }
+    for expected in &verification.files {
+        let file = openat_relative_regular(root, Path::new(&expected.path))?;
+        let actual = snapshot_file_identity(Path::new(&expected.path), &file)?;
+        if &actual != expected {
+            bail!(
+                "[PYTHON_SEALED_SNAPSHOT_INVALID] anchored file identity changed: {}",
+                expected.path
+            );
+        }
     }
     let mut directories = BTreeSet::new();
     for entry in &manifest.files {
-        let file = openat_relative_regular(root, Path::new(&entry.path))?;
-        let metadata = file.metadata()?;
-        if !metadata.is_file()
-            || metadata.nlink() != 1
-            || metadata.len() != entry.size
-            || metadata.permissions().mode() & 0o777 != if entry.executable { 0o555 } else { 0o444 }
-            || (metadata.permissions().mode() & 0o111 != 0) != entry.executable
-        {
-            bail!(
-                "[PYTHON_SEALED_SNAPSHOT_INVALID] anchored metadata changed: {}",
-                entry.path
-            );
-        }
-        let mut payload = Vec::with_capacity(entry.size as usize);
-        file.take(entry.size.saturating_add(1))
-            .read_to_end(&mut payload)?;
-        if payload.len() as u64 != entry.size || sha256_bytes(&payload) != entry.sha256 {
-            bail!(
-                "[PYTHON_SEALED_SNAPSHOT_INVALID] anchored digest changed: {}",
-                entry.path
-            );
-        }
         let mut parent = Path::new(&entry.path).parent();
         while let Some(value) = parent.filter(|value| !value.as_os_str().is_empty()) {
             directories.insert(value.to_path_buf());
             parent = value.parent();
-        }
-    }
-    if let Some(overlay) = runtime_overlay {
-        let file = openat_relative_regular(root, Path::new(SNAPSHOT_RUNTIME_MANIFEST))?;
-        let metadata = file.metadata()?;
-        if !metadata.is_file()
-            || metadata.nlink() != 1
-            || metadata.len() != overlay.bytes.len() as u64
-            || metadata.permissions().mode() & 0o777 != 0o444
-        {
-            bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] runtime overlay metadata changed");
-        }
-        let mut payload = Vec::with_capacity(overlay.bytes.len());
-        file.take(overlay.bytes.len() as u64 + 1)
-            .read_to_end(&mut payload)?;
-        if payload != overlay.bytes || sha256_bytes(&payload) != overlay.sha256 {
-            bail!("[PYTHON_SEALED_SNAPSHOT_INVALID] runtime overlay binding changed");
         }
     }
     for directory in &directories {
@@ -3278,6 +3400,7 @@ mod tests {
             _interpreter_lease: open_regular(&fixed_interpreter(&root)).unwrap(),
             environment_lease: None,
             snapshot_path: Some(root.clone()),
+            snapshot_verification: None,
             runtime_overlay: test_runtime_overlay(),
             cleanup_authority: CleanupAuthority::BeforeChildSpawn,
             root: root.clone(),
@@ -3787,22 +3910,32 @@ mod tests {
         let mut builder = fs::DirBuilder::new();
         builder.mode(0o700).create(&destination_path).unwrap();
         let destination = open_directory_inheritable(&destination_path).unwrap();
+        let kernel_entry = manifest
+            .files
+            .iter()
+            .find(|entry| entry.path == "app/kernel_entry.py")
+            .unwrap();
         copy_anchored_file(
             source.as_raw_fd(),
             destination.as_raw_fd(),
             Path::new("app/kernel_entry.py"),
             false,
+            kernel_entry.size,
+            &kernel_entry.sha256,
         )
         .unwrap();
         assert_eq!(
             fs::read(destination_path.join("app/kernel_entry.py")).unwrap(),
             b"x"
         );
+        let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
         copy_anchored_file(
             source.as_raw_fd(),
             destination.as_raw_fd(),
             Path::new(MANIFEST_FILENAME),
             false,
+            manifest_bytes.len() as u64,
+            &sha256_bytes(&manifest_bytes),
         )
         .unwrap();
         for entry in &manifest.files {
@@ -3812,25 +3945,104 @@ mod tests {
                     destination.as_raw_fd(),
                     Path::new(&entry.path),
                     entry.executable,
+                    entry.size,
+                    &entry.sha256,
                 )
                 .unwrap();
             }
         }
         seal_snapshot_directories(destination.as_raw_fd(), &manifest).unwrap();
-        verify_snapshot_anchored(
+        fs::set_permissions(
+            destination_path.join("app/kernel_entry.py"),
+            fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        fs::write(destination_path.join("app/kernel_entry.py"), b"z").unwrap();
+        fs::set_permissions(
+            destination_path.join("app/kernel_entry.py"),
+            fs::Permissions::from_mode(0o444),
+        )
+        .unwrap();
+        assert!(authenticate_snapshot_anchored(
             destination.as_raw_fd(),
             &manifest,
-            &sha256_bytes(&serde_json::to_vec(&manifest).unwrap()),
+            manifest_bytes.len() as u64,
+            &sha256_bytes(&manifest_bytes),
+            None,
+        )
+        .is_err());
+        fs::set_permissions(
+            destination_path.join("app/kernel_entry.py"),
+            fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        fs::write(destination_path.join("app/kernel_entry.py"), b"x").unwrap();
+        fs::set_permissions(
+            destination_path.join("app/kernel_entry.py"),
+            fs::Permissions::from_mode(0o444),
+        )
+        .unwrap();
+        let snapshot_verification = authenticate_snapshot_anchored(
+            destination.as_raw_fd(),
+            &manifest,
+            manifest_bytes.len() as u64,
+            &sha256_bytes(&manifest_bytes),
             None,
         )
         .unwrap();
         verify_snapshot_anchored(
             destination.as_raw_fd(),
             &manifest,
-            &sha256_bytes(&serde_json::to_vec(&manifest).unwrap()),
+            &snapshot_verification,
+            None,
+        )
+        .unwrap();
+        verify_snapshot_anchored(
+            destination.as_raw_fd(),
+            &manifest,
+            &snapshot_verification,
             None,
         )
         .expect("anchored inventory must be repeatable on the retained root lease");
+
+        // After the one destination authentication pass, a same-size rewrite
+        // is rejected from its anchored inode timestamps without another
+        // content read.
+        fs::set_permissions(
+            destination_path.join("app/kernel_entry.py"),
+            fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        fs::write(destination_path.join("app/kernel_entry.py"), b"z").unwrap();
+        fs::set_permissions(
+            destination_path.join("app/kernel_entry.py"),
+            fs::Permissions::from_mode(0o444),
+        )
+        .unwrap();
+        assert!(verify_snapshot_anchored(
+            destination.as_raw_fd(),
+            &manifest,
+            &snapshot_verification,
+            None,
+        )
+        .is_err());
+
+        let digest_rejected_path = source_path.with_extension("digest-rejected");
+        let mut digest_rejected_builder = fs::DirBuilder::new();
+        digest_rejected_builder
+            .mode(0o700)
+            .create(&digest_rejected_path)
+            .unwrap();
+        let digest_rejected = open_directory_inheritable(&digest_rejected_path).unwrap();
+        assert!(copy_anchored_file(
+            source.as_raw_fd(),
+            digest_rejected.as_raw_fd(),
+            Path::new("app/kernel_entry.py"),
+            false,
+            kernel_entry.size,
+            &digest('0'),
+        )
+        .is_err());
 
         #[cfg(unix)]
         fs::set_permissions(moved.join("app"), fs::Permissions::from_mode(0o755)).unwrap();
@@ -3848,10 +4060,13 @@ mod tests {
             rejected.as_raw_fd(),
             Path::new("app/kernel_entry.py"),
             false,
+            kernel_entry.size,
+            &kernel_entry.sha256,
         )
         .is_err());
 
         cleanup_macos_snapshot(&destination_path, &destination);
+        fs::remove_dir_all(digest_rejected_path).ok();
         fs::remove_dir_all(rejected_path).ok();
         fs::remove_dir_all(source_path).ok();
         fs::remove_dir_all(moved).ok();
@@ -3986,6 +4201,8 @@ mod tests {
             _interpreter_lease: open_regular(&fixed_interpreter(&root)).unwrap(),
             environment_lease: None,
             snapshot_path: None,
+            #[cfg(target_os = "macos")]
+            snapshot_verification: None,
             runtime_overlay: test_runtime_overlay(),
             cleanup_authority: CleanupAuthority::BeforeChildSpawn,
             root: root.clone(),

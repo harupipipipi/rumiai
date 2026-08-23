@@ -211,6 +211,7 @@ fn main() {
     stage_runtime_bundle().expect("failed to stage runtime bundle");
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
+            "get_setup_progress",
             "debug_approval_status",
             "arm_debug_approval",
             "revoke_debug_approval",

@@ -141,10 +141,11 @@ impl KernelManager {
                 self.config.rumi_home.display()
             );
         }
-        if !self.config.is_dev_workspace() {
-            crate::runtime_resource_integrity::verify(&self.config.app_dir)
-                .context("packaged runtime integrity verification failed")?;
-        }
+        // Packaged outer-runtime and sealed-environment verification is
+        // intentionally centralized in `spawn_packaged_role`. It binds the
+        // full outer manifest to the sealed snapshot immediately before
+        // execution; hashing `app_dir` here would repeat that work without
+        // improving the fail-closed launch boundary.
 
         fs::create_dir_all(&self.config.log_dir)?;
         let log_file = fs::File::create(self.config.log_dir.join("kernel.log"))
@@ -694,6 +695,7 @@ impl Drop for KernelManager {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn test_config() -> AppConfig {
         AppConfig::detect_for_tauri(
@@ -701,6 +703,19 @@ mod tests {
             PathBuf::from("/tmp/test_appdata"),
         )
         .unwrap()
+    }
+
+    fn temporary_packaged_config(label: &str) -> (PathBuf, AppConfig) {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("tobkiri-{label}-{unique}"));
+        let resource_dir = root.join("resources");
+        fs::create_dir_all(resource_dir.join("app")).unwrap();
+        let config = AppConfig::detect_for_tauri(resource_dir, root.join("appdata")).unwrap();
+        assert!(!config.is_dev_workspace());
+        (root, config)
     }
 
     #[test]
@@ -771,6 +786,31 @@ mod tests {
         assert!(!config.is_dev_workspace());
         assert!(!config.venv_python().exists());
         require_development_venv(&config).unwrap();
+    }
+
+    #[test]
+    fn packaged_kernel_defers_outer_verification_to_authoritative_role_spawn() {
+        let (root, mut config) = temporary_packaged_config("kernel-spawn-authority");
+        config.kernel_port = 0;
+        fs::write(
+            config
+                .app_dir
+                .join(crate::runtime_resource_integrity::MANIFEST_NAME),
+            b"not a resource manifest",
+        )
+        .unwrap();
+
+        let error = KernelManager::new(&config, "test-bootstrap".into())
+            .start()
+            .unwrap_err()
+            .to_string();
+
+        // A preflight `runtime_resource_integrity::verify` would fail on the
+        // malformed outer manifest before role spawn. The only failure path is
+        // now the authoritative packaged role spawn, which still fails closed.
+        assert!(error.contains("failed to verify and spawn Kernel process"));
+        assert!(!error.contains("packaged runtime integrity verification failed"));
+        fs::remove_dir_all(root).ok();
     }
 
     #[test]
