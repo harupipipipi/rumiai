@@ -1620,6 +1620,13 @@
       "executable": false
     },
     {
+      "path": "tobkiri_protocol/schemas/surface_template_v1.schema.json",
+      "type": "regular-file",
+      "size": 6180,
+      "sha256": "8cf7cd2661e8765437c2128c25819a8e2d2297aee00264c3a522bc1afb0f7b6c",
+      "executable": false
+    },
+    {
       "path": "tobkiri_protocol/secure_persistence.py",
       "type": "regular-file",
       "size": 35315,
@@ -1636,8 +1643,8 @@
     {
       "path": "tobkiri_protocol/validation.py",
       "type": "regular-file",
-      "size": 20127,
-      "sha256": "d9359b13b939298d91114d33ccc06805f9029341f03b3316cdf12e1d2288adf7",
+      "size": 20248,
+      "sha256": "08d8710a1b80a3ded899c41cb0aede417cf6c3c2ef64c5c3f56be0fdf4fbd15b",
       "executable": false
     }
   ]
