@@ -628,10 +628,10 @@ def import_legacy(*, check: bool) -> None:
     }
     text = _json_text(payload)
     if check:
-        if not CATALOG.is_file() or CATALOG.read_text(encoding="utf-8") != text:
+        if not CATALOG.is_file() or CATALOG.read_bytes() != text.encode("utf-8"):
             raise PackV4MigrationError("canonical Pack v4 source catalog drift")
         return
-    CATALOG.write_text(text, encoding="utf-8")
+    CATALOG.write_bytes(text.encode("utf-8"))
 
 
 def _provenance(record: Mapping[str, Any], source_identity: str) -> dict[str, Any]:
@@ -1263,10 +1263,13 @@ def generate(*, check: bool) -> dict[str, int]:
         for name, text in files.items():
             path = pack_root / name
             if check:
-                if not path.is_file() or path.read_text(encoding="utf-8") != text:
+                if not path.is_file() or path.read_bytes() != text.encode("utf-8"):
                     raise PackV4MigrationError(f"generated Pack v4 artifact drift: {path}")
             else:
-                path.write_text(text, encoding="utf-8")
+                # Persist the exact canonical bytes used by cross-artifact
+                # digests.  Text-mode newline conversion breaks the digest
+                # graph on Windows immediately after generation.
+                path.write_bytes(text.encode("utf-8"))
     return {
         "packs": len(rendered),
         "valid": len(rendered),

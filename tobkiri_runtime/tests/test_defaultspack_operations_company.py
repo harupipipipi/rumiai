@@ -45,7 +45,7 @@ def test_operations_company_profile_coexists_with_default_profile():
 
 
 def test_mimo_coding_company_uses_xiaomi_mimo_models(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import (
         DEFAULT_FAST_MODEL,
         DEFAULT_MAIN_MODEL,
         DEFAULT_VISION_MODEL,
@@ -77,7 +77,7 @@ def test_mimo_coding_company_uses_xiaomi_mimo_models(tmp_path, monkeypatch):
 
 
 def test_mimo_coding_company_defaults_use_launcher_user_data(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import (
         MimoCodingCompanyRuntime,
     )
 
@@ -94,7 +94,7 @@ def test_mimo_coding_company_defaults_use_launcher_user_data(tmp_path, monkeypat
 
 
 def test_mimo_coding_company_status_supersedes_legacy_provider_conversations_idempotently(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import (
         DEFAULT_MAIN_MODEL,
         LEGACY_PROVIDER_EXPIRED_SIGNAL,
         MimoCodingCompanyRuntime,
@@ -202,7 +202,7 @@ def test_mimo_coding_company_status_supersedes_legacy_provider_conversations_ide
 
 
 def test_operations_company_bootstrap_creates_org_conversation_and_heartbeat(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.operations_company import OperationsCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.operations_company import OperationsCompanyRuntime
     from domain.agent.scheduler import Scheduler
     from domain.chat.store import ChatStore
 
@@ -255,7 +255,7 @@ def test_mimo_coding_company_bootstrap_requires_captured_operation(tmp_path, mon
 
 def test_mimo_coding_company_status_includes_runtime_workspace_counts(tmp_path, monkeypatch):
     from domain.company.runtime_store import CompanyRuntimeStore
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
 
     _reset_defaultspack_singletons()
     monkeypatch.chdir(tmp_path)
@@ -300,7 +300,7 @@ def test_mimo_coding_company_status_includes_runtime_workspace_counts(tmp_path, 
 
 
 def test_mimo_coding_company_status_uses_persisted_bootstrap_state_without_org(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
 
     _reset_defaultspack_singletons()
     monkeypatch.chdir(tmp_path)
@@ -335,7 +335,7 @@ def test_mimo_coding_company_status_uses_persisted_bootstrap_state_without_org(t
 
 
 def test_mimo_coding_company_status_block_accepts_explicit_recovery_flag(monkeypatch):
-    from ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company import status as status_block
+    from ecosystem.rumi_operations_team_pack.blocks.agent.mimo_company import status as status_block
 
     calls = []
 
@@ -378,7 +378,7 @@ def test_mimo_coding_company_status_block_accepts_explicit_recovery_flag(monkeyp
 
 
 def test_mimo_coding_company_bootstrap_can_run_without_docker_swarm(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.scheduler import Scheduler
 
     _reset_defaultspack_singletons()
@@ -449,7 +449,7 @@ def test_mimo_coding_company_bootstrap_can_run_without_docker_swarm(tmp_path, mo
 
 
 def test_mimo_coding_company_qa_schedule_uses_managed_desktop_reachable_defaultspack_url(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.scheduler import Scheduler
 
     _reset_defaultspack_singletons()
@@ -494,7 +494,7 @@ def test_mimo_coding_company_qa_schedule_uses_managed_desktop_reachable_defaults
 
 
 def test_mimo_coding_company_managed_desktop_chat_url_falls_back_to_parent_conversation(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
 
     _reset_defaultspack_singletons()
     monkeypatch.chdir(tmp_path)
@@ -515,7 +515,7 @@ def test_mimo_coding_company_managed_desktop_chat_url_falls_back_to_parent_conve
 
 
 def test_mimo_coding_company_desktop_monitor_blocks_bare_chat_target(monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from blocks.sandbox import api as sandbox_api
 
     def fake_desktops_list(payload, context):
@@ -553,7 +553,7 @@ def test_mimo_coding_company_desktop_monitor_blocks_bare_chat_target(monkeypatch
 
 
 def test_mimo_coding_company_desktop_monitor_ignores_historical_bare_chat_targets(monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from blocks.sandbox import api as sandbox_api
 
     def fake_desktops_list(payload, context):
@@ -626,7 +626,7 @@ def test_mimo_coding_company_desktop_monitor_ignores_historical_bare_chat_target
 
 
 def test_mimo_coding_company_desktop_monitor_reports_missing_running_frame_without_refresh(monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from blocks.sandbox import api as sandbox_api
 
     calls = []
@@ -671,7 +671,7 @@ def test_mimo_coding_company_desktop_monitor_reports_missing_running_frame_witho
 
 
 def test_mimo_coding_company_desktop_monitor_flags_missing_running_frame_when_refresh_fails(monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from blocks.sandbox import api as sandbox_api
 
     def fake_desktop_api(payload, context):
@@ -711,7 +711,7 @@ def test_mimo_coding_company_desktop_monitor_flags_missing_running_frame_when_re
 
 
 def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.scheduler import Scheduler
 
     _reset_defaultspack_singletons()
@@ -811,7 +811,7 @@ def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tm
 
 
 def test_mimo_coding_company_rebootstrap_pauses_state_external_duplicate_loop(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import (
         SCHEDULE_LOOP_KEYS,
         MimoCodingCompanyRuntime,
     )
@@ -919,7 +919,7 @@ def test_mimo_coding_company_rebootstrap_pauses_state_external_duplicate_loop(tm
 
 
 def test_mimo_coding_company_rebootstrap_recovers_running_qa_after_chat_target_refresh(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import (
         MimoCodingCompanyRuntime,
         QA_LOOP_SCHEDULE_TIMEOUT_SECONDS,
     )
@@ -1030,7 +1030,7 @@ def test_mimo_company_schedule_arming_requires_captured_operation(tmp_path, monk
 
 
 def test_mimo_coding_company_bootstrap_recovers_orphaned_running_loop_execution(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import (
         MimoCodingCompanyRuntime,
         QA_LOOP_SCHEDULE_TIMEOUT_SECONDS,
     )
@@ -1117,7 +1117,7 @@ def test_mimo_coding_company_bootstrap_recovers_orphaned_running_loop_execution(
 
 
 def test_mimo_coding_company_rebootstrap_replenishes_completed_stream_task(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.scheduler import Scheduler
     from domain.company.task_store import CompanyTaskStore
 
@@ -1172,7 +1172,7 @@ def test_mimo_coding_company_rebootstrap_replenishes_completed_stream_task(tmp_p
 
 
 def test_mimo_coding_company_status_aggregates_worker_runtime_status(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.scheduler import Scheduler
 
     _reset_defaultspack_singletons()
@@ -1252,7 +1252,7 @@ def test_mimo_coding_company_status_aggregates_worker_runtime_status(tmp_path, m
 
 
 def test_mimo_coding_company_status_does_not_recover_schedule_approvals_by_default(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.scheduler import Scheduler
 
     _reset_defaultspack_singletons()
@@ -1303,7 +1303,7 @@ def test_mimo_coding_company_status_does_not_recover_schedule_approvals_by_defau
 
 
 def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.schedule_store import append_history
     from domain.agent.scheduler import Scheduler
     from domain.chat.store import ChatStore
@@ -1588,7 +1588,7 @@ def test_mimo_company_workspace_channels_use_selected_state_without_schedule_syn
 
 
 def test_mimo_coding_company_observability_repairs_stale_scheduled_draft(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.scheduler import Scheduler
     from domain.chat.store import ChatStore
     from domain.company.runtime_store import CompanyRuntimeStore
@@ -1714,7 +1714,7 @@ def test_mimo_coding_company_observability_repairs_stale_scheduled_draft(tmp_pat
 
 
 def test_mimo_coding_company_observability_repairs_stale_scheduled_user_message(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.scheduler import Scheduler
     from domain.chat.store import ChatStore
     from domain.company.runtime_store import CompanyRuntimeStore
@@ -1833,7 +1833,7 @@ def test_mimo_coding_company_observability_repairs_stale_scheduled_user_message(
 
 
 def test_mimo_coding_company_scheduled_user_gaps_uses_selected_conversation_owner(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.chat.store import ChatStore
 
     _reset_defaultspack_singletons()
@@ -1901,7 +1901,7 @@ def test_mimo_coding_company_scheduled_user_gaps_uses_selected_conversation_owne
 
 
 def test_mimo_coding_company_scheduled_draft_monitor_skips_running_schedule(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.schedule_store import save_schedule
     from domain.agent.scheduler import Scheduler
     from domain.chat.store import ChatStore
@@ -1968,7 +1968,7 @@ def test_mimo_coding_company_scheduled_draft_monitor_skips_running_schedule(tmp_
 
 
 def test_mimo_coding_company_observability_discovers_mimo_schedule_outside_state(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.schedule_store import append_history
     from domain.agent.scheduler import Scheduler
     from domain.chat.store import ChatStore
@@ -2082,7 +2082,7 @@ def test_mimo_coding_company_observability_discovers_mimo_schedule_outside_state
 
 
 def test_mimo_coding_company_observability_ignores_stale_schedules_outside_state(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.schedule_store import append_history, save_schedule
     from domain.agent.scheduler import Scheduler
     from domain.chat.store import ChatStore
@@ -2359,7 +2359,7 @@ def test_mimo_company_observability_requires_captured_operation(tmp_path, monkey
 
 
 def test_mimo_coding_company_observability_suppresses_timeout_without_schedule_config():
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
 
     reason = MimoCodingCompanyRuntime._schedule_noise_suppression_reason(
         None,
@@ -2370,7 +2370,7 @@ def test_mimo_coding_company_observability_suppresses_timeout_without_schedule_c
 
 
 def test_mimo_coding_company_observability_classifies_provider_credit_blocker(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import (
         DEFAULT_MAIN_MODEL,
         DEFAULT_VISION_MODEL,
         MimoCodingCompanyRuntime,
@@ -2483,7 +2483,7 @@ def test_mimo_coding_company_observability_classifies_provider_credit_blocker(tm
 
 
 def test_mimo_coding_company_observability_resolves_stale_subagent_unanswered_message(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.chat.store import ChatStore
     from domain.company.runtime_store import CompanyRuntimeStore
 
@@ -2572,7 +2572,7 @@ def test_mimo_coding_company_observability_resolves_stale_subagent_unanswered_me
 
 
 def test_mimo_coding_company_static_knowledge_and_docker_bundles_exist():
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
 
     runtime = MimoCodingCompanyRuntime()
     manifest = runtime.manifest()
@@ -2588,7 +2588,7 @@ def test_mimo_coding_company_static_knowledge_and_docker_bundles_exist():
 
 
 def test_mimo_coding_company_manifest_uses_explicit_mimo_and_vision_model_allowlist(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_team_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
 
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
     runtime = MimoCodingCompanyRuntime()
@@ -2612,7 +2612,7 @@ def test_mimo_coding_company_manifest_uses_explicit_mimo_and_vision_model_allowl
 
 
 def test_mimo_coding_company_bootstrap_block_rejects_catalog_and_free_models(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company import bootstrap
+    from ecosystem.rumi_operations_team_pack.blocks.agent.mimo_company import bootstrap
 
     _reset_defaultspack_singletons()
     monkeypatch.chdir(tmp_path)
@@ -2646,7 +2646,7 @@ def test_mimo_coding_company_bootstrap_block_rejects_catalog_and_free_models(tmp
 
 
 def test_mimo_coding_company_bootstrap_block_accepts_non_docker_worker_mode(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company import bootstrap
+    from ecosystem.rumi_operations_team_pack.blocks.agent.mimo_company import bootstrap
     from domain.agent.scheduler import Scheduler
 
     _reset_defaultspack_singletons()

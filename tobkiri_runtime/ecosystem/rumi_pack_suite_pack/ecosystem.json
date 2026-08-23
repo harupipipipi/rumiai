@@ -40,7 +40,7 @@
         "reason": "Adds provider and model catalog data for bundles that need model choice."
       },
       {
-        "pack_id": "rumi_operations_company_pack",
+        "pack_id": "rumi_operations_team_pack",
         "reason": "Adds long-running operations company profiles for ops-heavy bundles."
       },
       {
