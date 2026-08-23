@@ -1105,7 +1105,7 @@
       "path": "scripts/migrate_pack_artifacts_v4.py",
       "type": "regular-file",
       "size": 52776,
-      "sha256": "bb6969f41e1ba3cd86226ba79dcbd7afe3d48dc62a873edcef5d0743d0e67155",
+      "sha256": "648796fcdc92626b404be858748e96a4cca59c5fd946ef51873262992c652ac8",
       "executable": false
     },
     {

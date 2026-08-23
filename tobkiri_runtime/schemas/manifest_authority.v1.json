@@ -25,6 +25,7 @@
     "rumi_browser_session_replay_pack": "v4-authoritative",
     "rumi_business_ops_pack": "v4-authoritative",
     "rumi_clipboard_host_service_pack": "v4-authoritative",
+    "rumi_cloudflare_worker_python_pack": "v4-authoritative",
     "rumi_code_ide_pack": "v4-authoritative",
     "rumi_code_migration_pack": "v4-authoritative",
     "rumi_coding_sandbox_service_pack": "v4-authoritative",

@@ -28,6 +28,7 @@
     "rumi_browser_session_replay_pack",
     "rumi_business_ops_pack",
     "rumi_clipboard_host_service_pack",
+    "rumi_cloudflare_worker_python_pack",
     "rumi_code_ide_pack",
     "rumi_code_migration_pack",
     "rumi_coding_sandbox_service_pack",
@@ -2645,6 +2646,158 @@
       },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
+    },
+    {
+      "approval_policy": "none",
+      "authority": "v4-authoritative",
+      "capabilities": [
+        "network.read",
+        "tool.definition.contribute",
+        "tool.remote.operation",
+        "worker_python.fixed_tool"
+      ],
+      "dependencies": {
+        "rumi_tool_registry_pack": ">=1.0.0,<2.0.0"
+      },
+      "description": "PackVM client for fixed Cloudflare Workers Python tools.",
+      "display_name": "Tobkiri Cloudflare Workers Python Tools",
+      "execution_boundary": "sandbox",
+      "kind": "normal_sandbox",
+      "legacy_ids": [
+        "rumi.resource.tool.definition.contribution.v1",
+        "rumi.service.tool.remote.operation.v1",
+        "rumi:ecosystem/rumi_cloudflare_worker_python_pack",
+        "rumi_cloudflare_worker_python_pack"
+      ],
+      "legacy_operations": [],
+      "migration": {
+        "removal_wave": 10,
+        "sunset_at": "2027-12-31"
+      },
+      "network": {
+        "allowed_domains": [
+          "*.workers.dev",
+          "127.0.0.1",
+          "::1",
+          "localhost"
+        ],
+        "allowed_ports": [
+          443,
+          8787
+        ]
+      },
+      "pack_id": "rumi_cloudflare_worker_python_pack",
+      "provided_contracts": [
+        {
+          "cardinality": "many",
+          "contract_id": "tobkiri.resource.tool.definition.contribution.v1",
+          "failure": "isolate",
+          "instance_key": "cloudflare-worker-python",
+          "isolation": "in_process",
+          "lifecycle": {
+            "data_owner": "rumi_tool_registry_pack",
+            "deprecated": false,
+            "introduced": "1.0.0"
+          },
+          "operations": [
+            {
+              "entrypoint_id": "cloudflare-worker-python-tool-definitions",
+              "id": "rumi_cloudflare_worker_python_pack.cloudflare-worker-python-tool-definitions",
+              "implementation_digest": "sha256:4fdfc56d8e73af099e8627f1d8805a9fbd4113143dc4aab70fac0e234bfe027a"
+            }
+          ],
+          "owner": "rumi_tool_registry_pack",
+          "provider_id": "rumi_cloudflare_worker_python_pack.tool-definitions.cloudflare-worker-python",
+          "required_capabilities": [
+            "tool.definition.contribute"
+          ],
+          "schemas": {
+            "input": {
+              "type": "object"
+            },
+            "output": {
+              "type": "object"
+            }
+          },
+          "security": "internal",
+          "version": "1.0.0"
+        },
+        {
+          "cardinality": "many",
+          "contract_id": "tobkiri.service.tool.remote.operation.v1",
+          "failure": "fail_closed",
+          "isolation": "in_process",
+          "lifecycle": {
+            "data_owner": "caller",
+            "deprecated": false,
+            "introduced": "1.0.0"
+          },
+          "operations": [
+            {
+              "entrypoint_id": "cloudflare-worker-python-invoke",
+              "id": "rumi_cloudflare_worker_python_pack.cloudflare-worker-python-invoke",
+              "implementation_digest": "sha256:4fdfc56d8e73af099e8627f1d8805a9fbd4113143dc4aab70fac0e234bfe027a"
+            }
+          ],
+          "owner": "rumi_cloudflare_worker_python_pack",
+          "provider_id": "rumi_cloudflare_worker_python_pack.cloudflare-worker-python.fixed-tools",
+          "required_capabilities": [
+            "network.read",
+            "tool.remote.operation",
+            "worker_python.fixed_tool"
+          ],
+          "routing_keys": [
+            "cloudflare_worker_python"
+          ],
+          "schemas": {
+            "input": {
+              "type": "object"
+            },
+            "output": {
+              "type": "object"
+            }
+          },
+          "security": "restricted",
+          "version": "1.0.0"
+        }
+      ],
+      "required_contracts": [],
+      "runtime_artifacts": [
+        {
+          "digest": "sha256:6dedbdd8853011c6eb93b3858db0feeb767191063a405adcb987284e6beb4efe",
+          "kind": "executable",
+          "path": "runtime/__init__.py"
+        },
+        {
+          "digest": "sha256:4fdfc56d8e73af099e8627f1d8805a9fbd4113143dc4aab70fac0e234bfe027a",
+          "kind": "executable",
+          "path": "runtime/worker.py"
+        }
+      ],
+      "secrets": [
+        "RUMI_CLOUDFLARE_WORKER_PYTHON_API_KEY",
+        "RUMI_CLOUDFLARE_WORKER_PYTHON_URL"
+      ],
+      "source_evidence": [
+        {
+          "digest": "sha256:a4efcfbf4f87b590ba9fa18e94970f926b7afa6db68d5bfb300b847aa0beddad",
+          "path": "ecosystem/rumi_cloudflare_worker_python_pack/ecosystem.json",
+          "rule_id": "pack-v4-one-way-migration-input"
+        },
+        {
+          "digest": "sha256:f8569cf5459c8b0690e56ba91baf32154844b65ec3d63ec8019e62f172561fd0",
+          "path": "ecosystem/rumi_cloudflare_worker_python_pack/rumi.pack.v3.json",
+          "rule_id": "pack-v4-one-way-migration-input"
+        }
+      ],
+      "source_provenance": {
+        "historical_classification": "v3-authoritative",
+        "mode": "offline-one-way-import",
+        "owner": "rumi_cloudflare_worker_python_pack",
+        "source_format": "rumi.pack.v3.json"
+      },
+      "version": "1.0.0",
+      "workspace_boundary": "pack_local"
     },
     {
       "approval_policy": "none",
@@ -11946,7 +12099,7 @@
               "implementation_digest": "sha256:38909d724cb9210d7c44cee848b4a4885b7b0b3ed9e484a2a716485066ec8eae"
             }
           ],
-          "owner": "rumi_scheduler_tool_adapter_pack",
+          "owner": "rumi_tool_registry_pack",
           "provider_id": "rumi_scheduler_tool_adapter_pack.tool-definitions.scheduler",
           "required_capabilities": [
             "tool.definition.contribute"

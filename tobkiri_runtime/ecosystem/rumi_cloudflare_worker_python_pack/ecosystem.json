@@ -1,0 +1,60 @@
+{
+  "connectivity": {
+    "provides": [
+      "rumi.resource.tool.definition.contribution.v1",
+      "rumi.service.tool.remote.operation.v1"
+    ],
+    "requires": []
+  },
+  "dependencies": {
+    "rumi_tool_registry_pack": ">=1.0.0,<2.0.0"
+  },
+  "description": "PackVM client for fixed Cloudflare Workers Python tools.",
+  "display_name": "Tobkiri Cloudflare Workers Python Tools",
+  "host_execution": false,
+  "metadata": {
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:941c04647c1fbc3527304de766eacaba5238d11a51701cd3b080890e5eff836b",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:93874cc1d65cb5b11de5992624bc6b47af29b288823e4546fabaecc47bc2b1ac"
+    },
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "rumi.pack.v3.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:93874cc1d65cb5b11de5992624bc6b47af29b288823e4546fabaecc47bc2b1ac"
+    },
+    "manifest_authority": "v4-authoritative",
+    "projection_owner": "scripts/migrate_manifest_authority.py",
+    "read_only_projection": true
+  },
+  "pack_id": "rumi_cloudflare_worker_python_pack",
+  "pack_identity": "rumi:ecosystem/rumi_cloudflare_worker_python_pack",
+  "provenance": {
+    "build_identity": "rumi_cloudflare_worker_python_pack:1.0.0",
+    "content_hash": "sha256:4fdfc56d8e73af099e8627f1d8805a9fbd4113143dc4aab70fac0e234bfe027a",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "network.read",
+    "tool.definition.contribute",
+    "tool.remote.operation",
+    "worker_python.fixed_tool"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
+  "resources": [],
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
+}

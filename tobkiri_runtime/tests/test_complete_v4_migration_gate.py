@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = ROOT / "tobkiri_runtime"
 ECOSYSTEM = RUNTIME / "ecosystem"
 
-EXPECTED_PRODUCTION_PACK_COUNT = 143
+EXPECTED_PRODUCTION_PACK_COUNT = 144
 V4_PROJECTION_GENERATOR = "tobkiri.scripts.migrate_manifest_authority/v2"
 PACK_ARTIFACTS = {
     "artifact-index.v4.json": "pack_artifact_index",
@@ -1609,10 +1609,10 @@ def _assert_zero(name: str, findings: list[dict[str, Any]]) -> None:
 
 
 def test_production_v4_pack_and_profile_artifacts_are_complete() -> None:
-    """The exact direct artifact set is 143 Packs x 4 compiler inputs."""
+    """The exact direct artifact set is 144 Packs x 4 compiler inputs."""
     assert len(_production_pack_dirs()) == EXPECTED_PRODUCTION_PACK_COUNT
     assert len(_v4_pack_artifacts()) == EXPECTED_PRODUCTION_PACK_COUNT
-    assert len(_v4_pack_artifacts()) * len(PACK_ARTIFACTS) == 572
+    assert len(_v4_pack_artifacts()) * len(PACK_ARTIFACTS) == 576
     _assert_zero("v4 artifact contracts", _v4_artifact_findings())
 
 
@@ -2181,5 +2181,5 @@ def test_current_sha_green_evidence_reports_no_findings() -> None:
     assert report["head_sha"] == expected_head
     assert report["gate"]["status"] == "GREEN"
     assert report["gate"]["clean"] is True
-    assert report["pack_inventory"]["production_pack_directories"] == 143
-    assert report["pack_inventory"]["v4_artifact_files"] == 572
+    assert report["pack_inventory"]["production_pack_directories"] == 144
+    assert report["pack_inventory"]["v4_artifact_files"] == 576

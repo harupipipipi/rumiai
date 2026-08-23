@@ -71,7 +71,7 @@ def test_catalog_install_approve_enable_and_restart_read_back(captured_session) 
     """The positive lifecycle survives a fresh captured session."""
     session, _state_path, user_data = captured_session
     initial = _invoke(session, "catalog.read")
-    assert initial["count"] == 143
+    assert initial["count"] == 144
     target = next(item for item in initial["packs"] if item["pack_id"] == TARGET_PACK)
     assert target["installed"] is False
     assert target["enabled"] is False

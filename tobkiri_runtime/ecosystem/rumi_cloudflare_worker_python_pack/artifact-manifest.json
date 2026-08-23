@@ -1,0 +1,10 @@
+{
+  "schema_version": "rumi.artifact-manifest.v1",
+  "artifacts": [
+    {
+      "path": "runtime/worker.py",
+      "sha256": "4fdfc56d8e73af099e8627f1d8805a9fbd4113143dc4aab70fac0e234bfe027a",
+      "role": "runtime"
+    }
+  ]
+}

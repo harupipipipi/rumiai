@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Added
+- Added an optional PackVM-only Cloudflare Workers Python pack for signed,
+  fixed `web_search`, `reddit_search`, and bounded calculator definitions,
+  plus a deployable authenticated Worker scaffold (`#645`).
 - Added Quick Start section to README.md for easier onboarding
 - Added Troubleshooting section to README.md with common issues and solutions
 - Added Contributing section to README.md with development workflow guidelines

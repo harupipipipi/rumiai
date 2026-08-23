@@ -60,7 +60,7 @@ def test_manifest_authority_catalog_classifies_all_direct_pack_roots() -> None:
         (RUNTIME / "schemas" / "manifest_authority.v1.json").read_text(encoding="utf-8")
     )["packs"]
     assert set(catalog) == roots
-    assert len(catalog) == 143
+    assert len(catalog) == 144
     assert set(catalog.values()) == {"v4-authoritative"}
     assert catalog["defaults"] == "v4-authoritative"
     assert catalog["defaultspack"] == "v4-authoritative"

@@ -75,7 +75,7 @@ def test_repository_authority_catalog_is_exact_and_has_no_loader_gaps() -> None:
     catalog = authority.load_manifest_authority_catalog()
 
     assert len(locations) == 141
-    assert len(catalog) == 143
+    assert len(catalog) == 144
     assert set(catalog) == direct_pack_ids
     assert set(catalog.values()) == {"v4-authoritative"}
     assert catalog["defaults"] == "v4-authoritative"
