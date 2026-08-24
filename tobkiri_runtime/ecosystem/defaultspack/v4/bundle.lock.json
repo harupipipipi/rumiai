@@ -369,12 +369,12 @@
     {
       "path": "packs/rumi_prompt_studio_pack.executables.v4.json",
       "kind": "executable_catalog",
-      "digest": "sha256:2b2a89f5c80be4fe21af5d64908c25bb48663a252a29f83b4178968b375bbaba"
+      "digest": "sha256:4d625b9625d16ca42f272be1663ae8d645abc243f5b22f082cced069bd53db81"
     },
     {
       "path": "packs/rumi_prompt_studio_pack.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:67f9ecac845fa1ebc4540c410bc0a6fd671fa1b99726342507a45efc5638b022"
+      "digest": "sha256:c54896a5d7ff530be66ebb8bc73e611b0149afdd1b2e58da6f6537d2a5fb6736"
     },
     {
       "path": "packs/rumi_provider_adapters_pack.executables.v4.json",
