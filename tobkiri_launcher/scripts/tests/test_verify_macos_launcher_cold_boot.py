@@ -162,7 +162,12 @@ def test_cold_boot_requires_embedded_broker_then_owned_kernel_and_panel(
             return VERIFY.HttpResponse(
                 200,
                 {"content-type": "text/html; charset=utf-8"},
-                b'<html><script src="/panel/assets/index-test.js"></script></html>',
+                b"""<!doctype html><script>
+                if(!code){document.body.textContent='Tobkiri Launcher authentication required';}
+                else fetch('/api/panel/auth/exchange').then(() => {
+                  location.replace('/panel/');
+                });
+                </script>""",
             )
         return None
 
@@ -338,3 +343,11 @@ def test_workflow_runs_cold_boot_after_host_seal_and_before_dmg() -> None:
     assert "--kernel-port 8765" in workflow
     assert "--timeout-seconds 180" in workflow
     assert "launcher-cold-boot.v1.json" in workflow
+def test_panel_probe_rejects_unauthenticated_static_assets() -> None:
+    response = VERIFY.HttpResponse(
+        200,
+        {"content-type": "text/html; charset=utf-8"},
+        b'<!doctype html><script src="/panel/assets/index-test.js"></script>',
+    )
+
+    assert VERIFY._panel_bootstrap_is_reachable(response) is False
