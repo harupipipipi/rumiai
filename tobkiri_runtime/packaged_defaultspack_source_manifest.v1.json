@@ -97,7 +97,7 @@
       "path": "ecosystem/defaultspack/v4/bundle.lock.json",
       "type": "regular-file",
       "size": 26526,
-      "sha256": "5b270efc9fb6b86d79192806905a13790515bfb92ba52f8d09b5f1520b63f76c",
+      "sha256": "622bb2bd34a2768fe3d8fcb3f2977514f129b3c2bbbf2d7725249ea4a1a7da08",
       "executable": false
     },
     {
@@ -629,14 +629,14 @@
       "path": "ecosystem/defaultspack/v4/packs/rumi_prompt_studio_pack.executables.v4.json",
       "type": "regular-file",
       "size": 6744,
-      "sha256": "2b2a89f5c80be4fe21af5d64908c25bb48663a252a29f83b4178968b375bbaba",
+      "sha256": "4d625b9625d16ca42f272be1663ae8d645abc243f5b22f082cced069bd53db81",
       "executable": false
     },
     {
       "path": "ecosystem/defaultspack/v4/packs/rumi_prompt_studio_pack.pack.v4.json",
       "type": "regular-file",
       "size": 11483,
-      "sha256": "67f9ecac845fa1ebc4540c410bc0a6fd671fa1b99726342507a45efc5638b022",
+      "sha256": "c54896a5d7ff530be66ebb8bc73e611b0149afdd1b2e58da6f6537d2a5fb6736",
       "executable": false
     },
     {
