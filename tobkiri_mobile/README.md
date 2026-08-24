@@ -1,6 +1,6 @@
-# Rumi Remote Mobile
+# Tobkiri Remote Mobile
 
-Rumi Remote Mobile is the Flutter client for managing a PC-hosted Rumi
+Tobkiri Remote Mobile is the Flutter client for managing a PC-hosted Tobkiri
 `defaultspack` from iOS and Android devices on a trusted network.
 
 The app targets the Kernel Pack API on port `8765`, not the standalone
@@ -9,7 +9,7 @@ token and is the safer surface for LAN access.
 
 ## PC Setup
 
-Start Rumi with the Kernel API bound to the trusted LAN:
+Start Tobkiri with the Kernel API bound to the trusted LAN:
 
 ```powershell
 $env:RUMI_API_BIND_ADDRESS="0.0.0.0"
@@ -27,9 +27,24 @@ In the app, set the server URL to `http://<pc-lan-ip>:8765` and paste the token.
 Keep the PC firewall limited to your private network. Do not expose this port
 directly to the public internet.
 
-When using the Tauri desktop Viewer, closing the Viewer window sends it to the
-background and keeps the Kernel API available for remote clients. Use the tray
-menu's `Quit` item when you want to stop the Kernel and exit Rumi completely.
+## Settings recovery
+
+Settings are loaded independently from secure storage for the Kernel API,
+paired device, notifications, and device identity. If one source cannot be
+read, Tobkiri shows a redacted per-source diagnostic and Retry instead of
+substituting editable defaults. Successfully loaded pairing and identity
+details remain visible, while Save stays disabled until loading succeeds or
+the user confirms safe recovery using only the loaded sections.
+
+`Reset editable settings` is a separate confirmed action. It clears only the
+Kernel API URL/token, refresh preference, and notifications. It never deletes
+the paired-device record or device identity. A durable reset marker keeps an
+interrupted reset in an explicit retry-required state instead of presenting
+partially deleted values as a fresh installation.
+
+When using Tobkiri Launcher, closing the window sends it to the background and
+keeps the Kernel API available for remote clients. Use the tray menu's `Quit`
+item when you want to stop the Kernel and exit Tobkiri completely.
 
 Android debug/profile builds allow cleartext HTTP for trusted-LAN development.
 Android release builds do not globally allow cleartext traffic; use HTTPS or an
