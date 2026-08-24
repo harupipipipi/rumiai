@@ -87,6 +87,34 @@ test("keeps the startup boundary until slash commands and mention sources are re
   await expect(page.getByTestId("composer-at-mention-candidates")).toContainText("@Web Search");
 });
 
+test("status slash command renders a visible workspace result on a new chat", async ({ page }) => {
+  test.slow();
+  await installDefaultspackApiMocks(page);
+  await page.goto("/chat");
+  await page.getByRole("button", { name: "New Chat", exact: true }).click();
+
+  const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
+  await composer.focus();
+  await page.keyboard.press("/");
+  await page.keyboard.type("status");
+  const candidates = page.getByTestId("composer-slash-command-candidates");
+  await expect(candidates).toContainText("/status");
+  await candidates.getByRole("option", { name: /\/status/ }).click();
+
+  const result = page.locator('[data-command-result-notice="status"]');
+  await expect(result).toBeVisible({ timeout: 15_000 });
+  await expect(result).toContainText("status:");
+  await expect(result).toContainText("mode=agent");
+  await expect(result).toContainText("model=Stub Default");
+  await expect(result).toContainText("tools=0 selected");
+  await expect(result).toContainText("context=0 tokens / unlimited");
+  await expect(page.locator(".rumi-chat-error")).toHaveCount(0);
+  await expect(composer).toHaveValue("");
+
+  await page.getByRole("button", { name: "ステータス結果を閉じる" }).click();
+  await expect(result).toHaveCount(0);
+});
+
 type ApiMockOptions = {
   beforeCommandCatalogResponse?: () => Promise<void> | void;
   beforeWorkspaceFileReadResponse?: (payload: Record<string, unknown>) => Promise<void> | void;
@@ -751,6 +779,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
         commands: [
           protocolCommand("coding", "Coding Mode", "low", "set_mode_coding"),
           protocolCommand("yolo", "Full Access (YOLO)", "medium", "toggle_ultra_yolo"),
+          protocolCommand("status", "Status", "low", "show_status"),
         ],
         state_snapshots: [],
         diagnostics: [],
@@ -782,6 +811,17 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
             modes: ["chat", "coding", "agent"],
             execution: { type: "frontend", action: "toggle_ultra_yolo" },
           },
+          {
+            id: "status",
+            name: "status",
+            label: "Status",
+            description: "Show model, mode, tools, and context status.",
+            category: "chat",
+            visibility: "default",
+            risk: "low",
+            modes: ["chat", "coding", "agent"],
+            execution: { type: "frontend", action: "show_status" },
+          },
         ],
       });
     }
@@ -794,7 +834,9 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
           ? "set_mode_coding"
           : payload.command === "yolo"
             ? "toggle_ultra_yolo"
-            : "",
+            : payload.command === "defaultspack:status"
+              ? "show_status"
+              : "",
       });
     }
 

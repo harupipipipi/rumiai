@@ -14,6 +14,10 @@ import { publishAmbientFinalAnswer } from "./ambient/finalAnswerBridge";
 import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
 import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { ApprovalDecisionSurface } from "./components/ApprovalDecisionSurface";
+import {
+  CommandResultNotice,
+  statusCommandResultMessage,
+} from "./components/CommandResultNotice";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
@@ -2536,6 +2540,7 @@ function ChatApp() {
     { id: "conversations", label: "会話とワークスペースを復元します", status: "pending" },
   ]);
   const [error, setError] = useState<string | null>(null);
+  const [commandResultNotice, setCommandResultNotice] = useState<string | null>(null);
   const [transientAlert, setTransientAlert] = useState<TransientAlertItem | null>(null);
   const transientAlertSequenceRef = useRef(0);
   const composerAlertAnchorRef = useRef<HTMLDivElement>(null);
@@ -4691,9 +4696,19 @@ function ChatApp() {
         return;
       }
       case "show_status":
-        setError(
-          `status: mode=${mode}, model=${activeProfile?.display_name ?? preferredModel}, thinking=${selectedThinkingLevel}, deepthink=${deepthinkEnabled ? "on" : "off"}, yolo=${yoloMode ? "on" : "off"}, ultra_yolo=${ultraYoloMode ? "on" : "off"}, tools=${selectedTools.length}`,
-        );
+        setError(null);
+        setCommandResultNotice(statusCommandResultMessage({
+          mode,
+          modelLabel: activeProfile?.display_name ?? preferredModel,
+          thinkingLevel: activeProfile?.supports_thinking
+            ? selectedThinkingLevel
+            : null,
+          deepthinkEnabled,
+          yoloMode,
+          ultraYoloMode,
+          selectedToolLabels: selectedTools.map((tool) => tool.label || tool.id),
+          contextUsage,
+        }));
         return;
       case "open_context_viewer":
       case "show_usage":
@@ -4921,6 +4936,7 @@ function ChatApp() {
     }
     try {
       setError(null);
+      setCommandResultNotice(null);
       if (isRegisteredSlashCommand(parsed.command) && !parsed.command.canonical_id) {
         const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
         runFrontendCommandAction(frontendAction, parsed.command, parsed.args);
@@ -6190,6 +6206,7 @@ function ChatApp() {
     setIsGenerating(true);
     cancelPendingMentionAttachments();
     setError(null);
+    setCommandResultNotice(null);
     if (wasNewConversation) {
       setIsNewChatLaunching(true);
     }
@@ -7175,6 +7192,13 @@ function ChatApp() {
 
             {activeConversation?.metadata?.imported_from_share === true && provenanceDismissedFor !== activeConversation.id && (
               <ImportedConversationNotice importMode={activeConversation.metadata?.shared_import_mode} onDismiss={() => setProvenanceDismissedFor(activeConversation.id)} />
+            )}
+
+            {commandResultNotice && isChatWorkspace && !isCalendarMode && !isKanbanMode && !isDesktopsWorkspace && !isCodingWorkspace && !isCanvasWorkspace && !isToolsWorkspace && (
+              <CommandResultNotice
+                message={commandResultNotice}
+                onDismiss={() => setCommandResultNotice(null)}
+              />
             )}
 
             {isDesktopsWorkspace ? (
