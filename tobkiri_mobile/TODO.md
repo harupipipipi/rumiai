@@ -1,4 +1,4 @@
-# Rumi Remote Mobile TODO
+# Tobkiri Mobile TODO
 
 ## Done in this PR
 
@@ -12,6 +12,9 @@
 - [x] Add Flutter CI for formatting, analysis, and unit tests.
 - [x] Add unit coverage for API envelope handling, auth headers, URL
       normalization, module parsing, and action routes.
+- [x] Add persisted System, Light, Dark, and high-contrast appearance themes.
+- [x] Add light/dark screenshot goldens for the current management,
+      navigation, settings, approval, dialog, and error surfaces.
 
 ## Next Hardening
 
@@ -23,4 +26,3 @@
       changes.
 - [ ] Add chat transport support only after a stable authenticated mobile
       contract exists for the `8766` defaultspack surface.
-- [ ] Add screenshot-based golden tests after Flutter SDK is available locally.
