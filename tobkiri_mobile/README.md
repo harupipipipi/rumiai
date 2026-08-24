@@ -63,11 +63,21 @@ does not run tools on the phone or fall back to legacy host execution routes.
   pixel minimum target in add, field, send, and stop order.
 - Copy controls stay hidden until long-press or keyboard focus, while a screen
   reader copy action remains available on non-empty messages.
-- HTTP(S) links have separate localized 48 logical pixel actions.
+- HTTP(S) links have separate localized 48 logical pixel actions. Activating a
+  link first shows its visible text, destination host, and full URL with Open,
+  Copy link, and Cancel actions. Internationalized/lookalike hosts receive an
+  additional warning.
+- `file:`, active-content, custom/app-launching, malformed, credential-bearing,
+  and unsupported destinations fail closed with an in-place explanation.
+  Launcher failures are also reported without leaving or scrolling the chat.
 
 For release validation, enable TalkBack and VoiceOver on real app builds. Check
 user, assistant, pending, error, and empty announcements; traverse add, field,
 and send/stop in order; then exercise copy, link, keyboard send, and stop.
+For link validation, also check a normal HTTPS URL, a visible-text mismatch, an
+IDN/punycode lookalike, a redirect-looking URL, `file:`, a custom scheme, and a
+simulated launch failure. Confirm the destination is disclosed before Open and
+that returning from the external app preserves the conversation position.
 
 ## Development
 

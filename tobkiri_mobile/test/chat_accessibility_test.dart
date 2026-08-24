@@ -228,7 +228,10 @@ void main() {
       _app(
         MessageView(
           message: message,
-          openLink: (uri) async => opened = uri,
+          openLink: (uri) async {
+            opened = uri;
+            return true;
+          },
         ),
       ),
     );
@@ -241,6 +244,11 @@ void main() {
     expect(
         tester.getSemantics(link).label, contains('https://example.com/docs'));
     await tester.tap(link);
+    await tester.pumpAndSettle();
+    expect(opened, isNull);
+    expect(find.byKey(const ValueKey('link-review-host')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('link-review-open')));
+    await tester.pumpAndSettle();
     expect(opened, Uri.parse('https://example.com/docs'));
 
     await tester.longPress(
