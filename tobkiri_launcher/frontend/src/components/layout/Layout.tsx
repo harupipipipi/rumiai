@@ -6,8 +6,20 @@ import { useAppStore } from '@/src/store';
 import { describeRuntimeBanner } from '@/src/lib/runtimeHealth';
 import { panelRoutes } from '@/src/lib/routes';
 import { RouteBoundary } from './RouteBoundary';
+import {SetupVerificationNotice} from './SetupVerificationNotice';
+import type {SetupVerificationState} from '@/src/lib/setupVerification';
 
-export function Layout() {
+interface LayoutProps {
+  setupVerification?: SetupVerificationState;
+  onRetrySetupVerification?: () => void;
+  onReauthorizeSetupVerification?: () => void;
+}
+
+export function Layout({
+  setupVerification,
+  onRetrySetupVerification = () => undefined,
+  onReauthorizeSetupVerification = () => undefined,
+}: LayoutProps = {}) {
   const location = useLocation();
   const isSetupDone = useAppStore(state => state.isSetupDone);
   const runtimeReady = useAppStore(state => state.runtimeReady);
@@ -37,6 +49,13 @@ export function Layout() {
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header />
         <main id="panel-main" tabIndex={-1} className="flex-1 flex flex-col relative overflow-hidden">
+          {setupVerification && (
+            <SetupVerificationNotice
+              state={setupVerification}
+              onRetry={onRetrySetupVerification}
+              onReauthorize={onReauthorizeSetupVerification}
+            />
+          )}
           {!runtimeReady && (
             <div
               role="alert"

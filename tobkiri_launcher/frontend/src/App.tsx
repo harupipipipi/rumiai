@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useLayoutEffect } from 'react';
+import {useCallback, useDeferredValue, useEffect, useLayoutEffect, useRef, useState} from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router';
 import {
   cancelPackMutationReconciliation,
@@ -10,12 +10,26 @@ import { Setup } from '@/src/pages/Setup';
 import { Dashboard } from '@/src/pages/Dashboard';
 import { ToastContainer } from '@/src/components/ui/ToastContainer';
 import { DialogContainer } from '@/src/components/ui/DialogContainer';
-import { bootstrapPanelSession, hasPendingPanelBootstrapCode } from '@/src/lib/api';
+import {
+  bootstrapPanelSession,
+  hasPendingPanelBootstrapCode,
+  reauthorizePanelSession,
+} from '@/src/lib/api';
 import { applyAppearanceToRoot } from '@/src/lib/appearance';
 import { runtimeMonitorDelay } from '@/src/lib/runtimeHealth';
 import { panelRoutes } from '@/src/lib/routes';
 import { RouteAnnouncer } from '@/src/components/layout/RouteAnnouncer';
 import {fetchDefaultsSetupState} from '@/src/lib/defaultsSetup';
+import {
+  failedSetupState,
+  initialSetupVerificationState,
+  loadingSetupState,
+  SETUP_VERIFICATION_TIMEOUT_MS,
+  SetupVerificationSequence,
+  type SetupVerificationState,
+  verifiedSetupState,
+  writeSetupVerificationRecord,
+} from '@/src/lib/setupVerification';
 import {
   LazyAiInput,
   LazyApiMap,
@@ -38,6 +52,55 @@ export default function App() {
   const setSetupDone = useAppStore(state => state.setSetupDone);
   const addToast = useAppStore(state => state.addToast);
   const refreshRuntimeHealth = useAppStore(state => state.refreshRuntimeHealth);
+  const [setupVerification, setSetupVerification] = useState(
+    () => initialSetupVerificationState(isSetupDone),
+  );
+  const verificationStateRef = useRef<SetupVerificationState>(setupVerification);
+  const verificationSequenceRef = useRef(new SetupVerificationSequence());
+
+  const updateSetupVerification = useCallback((next: SetupVerificationState) => {
+    verificationStateRef.current = next;
+    setSetupVerification(next);
+  }, []);
+
+  const verifyDefaultsProfile = useCallback(async () => {
+    const sequence = verificationSequenceRef.current;
+    const token = sequence.begin();
+    const previous = verificationStateRef.current;
+    updateSetupVerification(loadingSetupState(previous));
+    try {
+      const response = await fetchDefaultsSetupState({
+        timeoutMs: SETUP_VERIFICATION_TIMEOUT_MS,
+      });
+      if (!sequence.isCurrent(token)) return;
+      const next = verifiedSetupState(response, Date.now(), previous);
+      if (next.kind === 'selected' || next.kind === 'missing') {
+        writeSetupVerificationRecord(next);
+      }
+      updateSetupVerification(next);
+      if (next.kind === 'missing') {
+        setSetupDone(false);
+      }
+    } catch (error) {
+      if (!sequence.isCurrent(token)) return;
+      updateSetupVerification(failedSetupState(error, previous));
+    }
+  }, [setSetupDone, updateSetupVerification]);
+
+  const reauthorizeSetupVerification = useCallback(async () => {
+    const sequence = verificationSequenceRef.current;
+    const token = sequence.begin();
+    const previous = verificationStateRef.current;
+    updateSetupVerification(loadingSetupState(previous));
+    try {
+      await reauthorizePanelSession();
+      if (!sequence.isCurrent(token)) return;
+      await verifyDefaultsProfile();
+    } catch (error) {
+      if (!sequence.isCurrent(token)) return;
+      updateSetupVerification(failedSetupState(error, previous));
+    }
+  }, [updateSetupVerification, verifyDefaultsProfile]);
 
   useLayoutEffect(() => {
     applyAppearanceToRoot(document.documentElement, { theme, colorMode });
@@ -65,34 +128,24 @@ export default function App() {
       cancelIdleCallback?: (handle: number) => void;
     };
     const target = window as IdleWindow;
-    let cancelled = false;
-    const verifyDefaultsProfile = () => {
-      void fetchDefaultsSetupState()
-        .then((state) => {
-          if (cancelled || state.state === 'active') return;
-          addToast('The Defaults Profile activation is no longer available. Setup must be completed again.', 'error');
-          setSetupDone(false);
-        })
-        .catch((error) => {
-          if (cancelled) return;
-          addToast(error instanceof Error ? error.message : 'Defaults Profile verification failed', 'error');
-        });
+    const scheduleVerification = () => {
+      void verifyDefaultsProfile();
     };
 
     let cancelScheduled: () => void;
     if (typeof target.requestIdleCallback === 'function') {
-      const handle = target.requestIdleCallback(verifyDefaultsProfile, { timeout: 1_000 });
+      const handle = target.requestIdleCallback(scheduleVerification, { timeout: 1_000 });
       cancelScheduled = () => target.cancelIdleCallback?.(handle);
     } else {
-      const handle = window.setTimeout(verifyDefaultsProfile, 300);
+      const handle = window.setTimeout(scheduleVerification, 300);
       cancelScheduled = () => window.clearTimeout(handle);
     }
 
     return () => {
-      cancelled = true;
+      verificationSequenceRef.current.cancel();
       cancelScheduled();
     };
-  }, [isSetupDone, setSetupDone, addToast]);
+  }, [isSetupDone, verifyDefaultsProfile]);
 
   useEffect(() => {
     let cancelled = false;
@@ -141,7 +194,13 @@ export default function App() {
 
   return (
     <BrowserRouter basename="/panel">
-      <DeferredRouteTree isSetupDone={isSetupDone} runtimeStatus={runtimeStatus} />
+      <DeferredRouteTree
+        isSetupDone={isSetupDone}
+        runtimeStatus={runtimeStatus}
+        setupVerification={setupVerification}
+        onRetrySetupVerification={() => void verifyDefaultsProfile()}
+        onReauthorizeSetupVerification={() => void reauthorizeSetupVerification()}
+      />
       <ToastContainer />
       <DialogContainer />
     </BrowserRouter>
@@ -151,9 +210,15 @@ export default function App() {
 function DeferredRouteTree({
   isSetupDone,
   runtimeStatus,
+  setupVerification,
+  onRetrySetupVerification,
+  onReauthorizeSetupVerification,
 }: {
   isSetupDone: boolean;
   runtimeStatus: RuntimeStatus;
+  setupVerification: SetupVerificationState;
+  onRetrySetupVerification: () => void;
+  onReauthorizeSetupVerification: () => void;
 }) {
   const location = useLocation();
   const deferredLocation = useDeferredValue(location);
@@ -171,7 +236,11 @@ function DeferredRouteTree({
         <Route
           path={panelRoutes.home}
           element={isSetupDone && runtimeStatus !== 'profile_reconfirmation_required'
-            ? <Layout />
+            ? <Layout
+                setupVerification={setupVerification}
+                onRetrySetupVerification={onRetrySetupVerification}
+                onReauthorizeSetupVerification={onReauthorizeSetupVerification}
+              />
             : <Navigate to={panelRoutes.setup} replace />}
         >
           <Route index element={<Dashboard />} />

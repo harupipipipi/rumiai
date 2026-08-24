@@ -1,4 +1,4 @@
-import {apiFetch} from './api';
+import {apiFetch, type ApiRequestPolicy} from './api';
 import {
   DEFAULTS_BASE_KEYS,
   DEFAULTS_BINDING_DOMAIN_KINDS,
@@ -343,8 +343,12 @@ export function parseDefaultsSetupState(value: unknown): DefaultsSetupState {
   return value as DefaultsSetupState;
 }
 
-export async function fetchDefaultsSetupState(): Promise<DefaultsSetupState> {
-  return parseDefaultsSetupState(await apiFetch<unknown>('/api/setup/packs'));
+export async function fetchDefaultsSetupState(
+  requestPolicy: Pick<ApiRequestPolicy, 'timeoutMs'> = {},
+): Promise<DefaultsSetupState> {
+  return parseDefaultsSetupState(
+    await apiFetch<unknown>('/api/setup/packs', {}, requestPolicy),
+  );
 }
 
 export function parseDefaultsActivationResponse(
