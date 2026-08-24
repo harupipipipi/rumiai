@@ -96,8 +96,12 @@ type ApiMockOptions = {
   streamEvents?: (message: Record<string, unknown>) => Record<string, unknown>[];
   conversationMutator?: (conversation: ReturnType<typeof smokeConversation>) => void;
   onApprovalDecision?: (decision: "approve" | "deny", payload: Record<string, unknown>) => void;
+  onMcpConnectRequest?: (payload: Record<string, unknown>) => void;
   codingApprovalAfterTerminal?: boolean;
   codingApprovalAfterRestore?: boolean;
+  mcpApprovalStatus?: "pending" | "approved" | "denied";
+  mcpApprovalExpiresAt?: number;
+  mcpStartFailureOnce?: boolean;
   structuredComposer?: boolean;
 };
 
@@ -545,6 +549,14 @@ async function fulfill(route: Route, data: unknown) {
   });
 }
 
+async function fulfillError(route: Route, status: number, code: string, message: string) {
+  await route.fulfill({
+    status,
+    contentType: "application/json",
+    body: JSON.stringify({ status: "error", error: { code, message } }),
+  });
+}
+
 async function fulfillStream(route: Route, message: Record<string, unknown>) {
   await route.fulfill({
     status: 200,
@@ -623,6 +635,8 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
   const mcpServers = [
     { server_id: "filesystem", name: "Filesystem MCP", transport: "stdio", connected: true, permissions: { approved: true }, tools: ["mcp_fs_read_file"] },
   ];
+  let mcpApprovalSequence = 0;
+  let mcpStartFailureInjected = false;
 
   await page.route("**/api/contracts/defaultspack/**", async (route) => {
     const request = route.request();
@@ -988,7 +1002,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       return fulfill(route, {
         request_id: payload.approval_request_id,
         approved: true,
-        token: "approved-mcp-token",
+        token: `approved-mcp-token-${requestId}`,
       });
     }
 
@@ -1110,38 +1124,72 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
         permissions: { approved: false },
         tools: [],
       };
-      mcpServers.push(server);
+      const existingServer = mcpServers.find((item) => item.server_id === server.server_id);
+      if (existingServer) {
+        Object.assign(existingServer, server);
+      } else {
+        mcpServers.push(server);
+      }
       return fulfill(route, { server });
     }
 
     if (path === routeKey("api/tools/mcp/connect") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
+      options.onMcpConnectRequest?.(payload);
       const serverId = String(payload.server_id ?? payload.server_name ?? "contract_digest");
       if (!payload.approval_token) {
+        mcpApprovalSequence += 1;
+        const requestId =
+          mcpApprovalSequence === 1
+            ? "apr-mcp-contract"
+            : `apr-mcp-contract-retry-${mcpApprovalSequence}`;
         codingApprovalRequest = {
-          request_id: "apr-mcp-contract",
+          request_id: requestId,
           operation: "tool.mcp_connect",
           risk_level: "high",
-          status: "pending",
+          status: options.mcpApprovalStatus ?? "pending",
           display_summary: `Connect MCP server ${serverId}`,
           created_at: now,
           args_hash: approvalDigest,
+          ...(options.mcpApprovalExpiresAt === undefined ? {} : { expires_at: options.mcpApprovalExpiresAt }),
           details: {
             mcp_review: {
+              server_id: serverId,
               executable: String(payload.command ?? "python"),
               transport: "stdio",
               args: Array.isArray(payload.args) ? payload.args : [],
               cwd: "/repo",
               redacted_env: [],
+              headers: {},
               server_source: "Pack v4 UI contract fixture",
+              autostart: false,
+              capabilities: ["tools"],
+              tools: [`mcp__${serverId}__digest`],
+              network: { access: "process-defined", egress: false },
+              filesystem: { access: "workspace", root: "/repo" },
+              persistence: { registry: true, autostart: false },
+              consequences: [
+                "Starts the configured MCP server process.",
+                "Discovers and registers server-provided tools.",
+              ],
             },
           },
         };
         return fulfill(route, {
           approval_required: true,
-          approval_request_id: "apr-mcp-contract",
+          approval_request_id: requestId,
           server_id: serverId,
         });
+      }
+      if (options.mcpStartFailureOnce && !mcpStartFailureInjected) {
+        mcpStartFailureInjected = true;
+        await fulfillError(
+          route,
+          503,
+          "MCP_CONNECT_ERROR",
+          "MCP server failed to start or initialize",
+        );
+        return;
       }
       const server = mcpServers.find((item) => item.server_id === serverId);
       if (server) {
@@ -2617,8 +2665,15 @@ test("mocked coding cockpit renders MCP server state", async ({ page }) => {
   await expect(mcpServers).toContainText("approved");
 });
 
-test("mocked coding cockpit registers approves and connects an MCP server", async ({ page }) => {
-  await openCodingWidget(page);
+test("mocked coding cockpit renders the complete MCP review and retries exactly once after explicit approval", async ({ page }) => {
+  const mcpConnectRequests: Record<string, unknown>[] = [];
+  const approvalDecisions: Record<string, unknown>[] = [];
+  await openCodingWidget(page, {
+    onMcpConnectRequest: (payload) => mcpConnectRequests.push({ ...payload }),
+    onApprovalDecision: (decision, payload) => {
+      if (decision === "approve") approvalDecisions.push({ ...payload });
+    },
+  });
 
   await page.getByLabel("MCP server id").fill("contract_digest");
   await page.getByLabel("MCP command").fill("python");
@@ -2629,10 +2684,164 @@ test("mocked coding cockpit registers approves and connects an MCP server", asyn
   const approvals = page.getByLabel("Approval queue");
   await expect(approvals).toContainText("tool.mcp_connect");
   await expect(approvals).toContainText("contract_digest");
+  for (const label of [
+    "Server",
+    "Executable",
+    "Transport",
+    "Arguments",
+    "Working directory",
+    "Environment (redacted)",
+    "Headers (redacted)",
+    "Server source",
+    "Autostart",
+    "Capabilities",
+    "Tools",
+    "Network",
+    "Filesystem",
+    "Persistence",
+    "Consequences",
+  ]) {
+    await expect(approvals).toContainText(label);
+  }
+  await expect(approvals).toContainText("process-defined");
+  await expect(approvals).toContainText("workspace");
+  await expect(approvals).toContainText("autostart");
+  await expect(approvals).toContainText("Starts the configured MCP server process.");
+  expect(approvalDecisions).toHaveLength(0);
   await approvals.getByRole("button", { name: /許可|Approve/ }).click();
   await expect(mcpServers).toContainText("contract_digest");
   await expect(mcpServers).toContainText("approved");
   await expect(page.getByText("MCP connected: contract_digest (1 tools)")).toBeVisible();
+  expect(mcpConnectRequests).toHaveLength(2);
+  expect(mcpConnectRequests[0]).not.toHaveProperty("approval_token");
+  expect(mcpConnectRequests[0]).not.toHaveProperty("approved");
+  expect(mcpConnectRequests[1]).toMatchObject({
+    server_id: "contract_digest",
+    workspace_id: "ws-main",
+    approval_token: "approved-mcp-token-apr-mcp-contract",
+  });
+  expect(approvalDecisions).toHaveLength(1);
+  expect(approvalDecisions[0]).not.toHaveProperty("approved");
+  expect(approvalDecisions[0]).not.toHaveProperty("token");
+  const persisted = await page.evaluate(() => JSON.stringify({
+    localStorage: Object.fromEntries(Object.entries(localStorage)),
+    sessionStorage: Object.fromEntries(Object.entries(sessionStorage)),
+  }));
+  expect(persisted).not.toContain("approved-mcp-token");
+  await expect(page.locator("body")).not.toContainText("approved-mcp-token");
+});
+
+test("MCP denial settles the shared request without connecting or retrying", async ({ page }) => {
+  const mcpConnectRequests: Record<string, unknown>[] = [];
+  await openCodingWidget(page, {
+    onMcpConnectRequest: (payload) => mcpConnectRequests.push({ ...payload }),
+  });
+
+  await page.getByLabel("MCP server id").fill("denied_server");
+  await page.getByLabel("MCP command").fill("python");
+  await page.getByLabel("MCP args").fill("denied_server.py");
+  await page.getByTitle("Connect MCP server").click();
+
+  const approvals = page.getByLabel("Approval queue");
+  await expect(approvals).toContainText("Connect MCP server denied_server");
+  await approvals.getByRole("button", { name: /拒否|Deny/ }).click();
+  await expect(page.getByText("MCP connection denied. You can edit the configuration and connect again.")).toBeVisible();
+  await expect(page.getByText(/MCP connected: denied_server/)).toHaveCount(0);
+  await expect(approvals).toContainText("denied");
+  await expect(approvals.getByRole("button", { name: /許可|Approve/ })).toHaveCount(0);
+  expect(mcpConnectRequests).toHaveLength(1);
+  expect(mcpConnectRequests[0]).not.toHaveProperty("approval_token");
+});
+
+test("expired MCP approvals remain visible as history and are not actionable", async ({ page }) => {
+  await openCodingWidget(page, { mcpApprovalExpiresAt: 1 });
+
+  await page.getByLabel("MCP server id").fill("expired_server");
+  await page.getByLabel("MCP command").fill("python");
+  await page.getByLabel("MCP args").fill("expired_server.py");
+  await page.getByTitle("Connect MCP server").click();
+
+  const approvals = page.getByLabel("Approval queue");
+  await expect(approvals).toContainText("expired");
+  await expect(approvals).toContainText("No active approvals");
+  await expect(approvals.getByRole("button", { name: /許可|Approve/ })).toHaveCount(0);
+  await expect(approvals.getByRole("button", { name: /拒否|Deny/ })).toHaveCount(0);
+  await expect(page.getByText(/MCP connected: expired_server/)).toHaveCount(0);
+});
+
+test("already-settled MCP approvals are visible but cannot be replayed", async ({ page }) => {
+  const mcpConnectRequests: Record<string, unknown>[] = [];
+  await openCodingWidget(page, {
+    mcpApprovalStatus: "approved",
+    onMcpConnectRequest: (payload) => mcpConnectRequests.push({ ...payload }),
+  });
+
+  await page.getByLabel("MCP server id").fill("settled_server");
+  await page.getByLabel("MCP command").fill("python");
+  await page.getByLabel("MCP args").fill("settled_server.py");
+  await page.getByTitle("Connect MCP server").click();
+
+  const approvals = page.getByLabel("Approval queue");
+  await expect(approvals).toContainText("approved");
+  await expect(approvals.getByRole("button", { name: /許可|Approve/ })).toHaveCount(0);
+  await expect(approvals.getByRole("button", { name: /拒否|Deny/ })).toHaveCount(0);
+  await expect(page.getByText(/MCP connected: settled_server/)).toHaveCount(0);
+  expect(mcpConnectRequests).toHaveLength(1);
+  expect(mcpConnectRequests[0]).not.toHaveProperty("approval_token");
+});
+
+test("MCP configuration mutation after review prevents token retry", async ({ page }) => {
+  const mcpConnectRequests: Record<string, unknown>[] = [];
+  await openCodingWidget(page, {
+    onMcpConnectRequest: (payload) => mcpConnectRequests.push({ ...payload }),
+  });
+
+  await page.getByLabel("MCP server id").fill("mutated_server");
+  await page.getByLabel("MCP command").fill("python");
+  await page.getByLabel("MCP args").fill("original_server.py");
+  await page.getByTitle("Connect MCP server").click();
+
+  const approvals = page.getByLabel("Approval queue");
+  await expect(approvals).toContainText("Connect MCP server mutated_server");
+  await page.getByLabel("MCP args").fill("changed_after_review.py");
+  await expect(page.getByText("MCP configuration or workspace changed. The pending review is stale; connect again for a new review.")).toBeVisible();
+
+  await approvals.getByRole("button", { name: /許可|Approve/ }).click();
+  await expect(page.getByText("The MCP configuration or workspace changed after review. Connect again to create a new approval request.")).toBeVisible();
+  await expect(page.getByText(/MCP connected: mutated_server/)).toHaveCount(0);
+  expect(mcpConnectRequests).toHaveLength(1);
+  expect(mcpConnectRequests[0]).not.toHaveProperty("approval_token");
+});
+
+test("MCP start failure is recoverable only through a fresh explicit reconnect approval", async ({ page }) => {
+  const mcpConnectRequests: Record<string, unknown>[] = [];
+  await openCodingWidget(page, {
+    mcpStartFailureOnce: true,
+    onMcpConnectRequest: (payload) => mcpConnectRequests.push({ ...payload }),
+  });
+
+  await page.getByLabel("MCP server id").fill("recoverable_server");
+  await page.getByLabel("MCP command").fill("python");
+  await page.getByLabel("MCP args").fill("recoverable_server.py");
+  await page.getByTitle("Connect MCP server").click();
+
+  const approvals = page.getByLabel("Approval queue");
+  await expect(approvals).toContainText("Connect MCP server recoverable_server");
+  await approvals.getByRole("button", { name: /許可|Approve/ }).click();
+  await expect(page.getByText(/MCP start or reconnect failed\. Review the configuration and try again\./)).toBeVisible();
+  expect(mcpConnectRequests).toHaveLength(2);
+  expect(mcpConnectRequests[1]).toMatchObject({ approval_token: "approved-mcp-token-apr-mcp-contract" });
+
+  await page.getByTitle("Connect MCP server").click();
+  await expect(approvals.getByRole("button", { name: /許可|Approve/ })).toBeVisible();
+  await approvals.getByRole("button", { name: /許可|Approve/ }).click();
+  await expect(page.getByText("MCP connected: recoverable_server (1 tools)")).toBeVisible();
+  expect(mcpConnectRequests).toHaveLength(4);
+  expect(mcpConnectRequests[2]).not.toHaveProperty("approval_token");
+  expect(mcpConnectRequests[3]).toMatchObject({
+    approval_token: "approved-mcp-token-apr-mcp-contract-retry-2",
+  });
+  expect(mcpConnectRequests[1].approval_token).not.toBe(mcpConnectRequests[3].approval_token);
 });
 
 test("coding approval queue refreshes immediately after terminal requests approval", async ({ page }) => {

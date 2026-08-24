@@ -53,9 +53,7 @@ MCP サーバーの定義は `user_data/shared/tools/mcp.json` に記述する�
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
       "env": {},
-      "auto_connect": true,
-      "tool_prefix": "mcp_fs",
-      "approval_mode": "per_session"
+      "tool_prefix": "mcp_fs"
     },
     {
       "server_id": "github",
@@ -66,9 +64,7 @@ MCP サーバーの定義は `user_data/shared/tools/mcp.json` に記述する�
       "env": {
         "GITHUB_TOKEN": "${GITHUB_TOKEN}"
       },
-      "auto_connect": false,
-      "tool_prefix": "mcp_gh",
-      "approval_mode": "per_call"
+      "tool_prefix": "mcp_gh"
     },
     {
       "server_id": "remote_api",
@@ -78,15 +74,23 @@ MCP サーバーの定義は `user_data/shared/tools/mcp.json` に記述する�
       "headers": {
         "Authorization": "Bearer ${MCP_API_TOKEN}"
       },
-      "auto_connect": false,
-      "tool_prefix": "mcp_api",
-      "approval_mode": "per_session"
+      "tool_prefix": "mcp_api"
     }
   ]
 }
 ```
 
-`server_id` はシステム内で一意な識別子。`auto_connect` が true の場合、rumiai 起動時に自動接続する。`tool_prefix` は MCP ツール名に付与するプレフィックス（ネイティブツールとの名前衝突を防ぐ）。`approval_mode` は `per_call`（毎回承認）、`per_session`（セッションごと1回）、`auto`（自動承認）から選択する。
+`server_id` はシステム内で一意な識別子。`tool_prefix` は MCP
+ツール名に付与するプレフィックス（ネイティブツールとの名前衝突を防ぐ）。
+
+設定の登録だけではプロセス起動やネットワーク接続を行わない。接続と再接続は
+毎回、共有承認キューに表示された実行ファイル、引数、作業ディレクトリ、秘匿化済み
+環境、権限範囲、永続化の影響をユーザーが確認し、Tobkiri Launcher の権威ある
+承認操作で許可した後にだけ実行される。承認資格情報は設定・サーバー・workspace に
+紐づく短寿命かつ一回限りの値で、設定変更後は再利用できない。
+
+`auto_connect` / `autostart` と `approval_mode: "auto"` は安全境界を迂回するため
+サポートされず、指定すると接続要求は fail closed で拒否される。
 
 環境変数は `${VAR_NAME}` 構文で参照できる。
 
@@ -171,6 +175,10 @@ input_data:
 }
 ```
 `config` を省略すると mcp.json の定義を使用。`config` を渡すと一時的な接続設定として使用。
+
+最初の呼び出しはサーバーを起動せず、`approval_required`、
+`approval_request_id`、期限、秘匿化済みレビューを返す。共有承認キューでの明示的な
+許可から得た一回限りの資格情報を同じ設定で再送した場合だけ接続を開始する。
 
 戻り値:
 ```json

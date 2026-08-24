@@ -23,6 +23,16 @@ _SECRET_ARG_RE = re.compile(
 )
 
 
+def _requested_true(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "no", "off"}
+    return bool(value)
+
+
 def _canonical_digest(value: Any) -> str:
     encoded = json.dumps(
         value,
@@ -125,6 +135,17 @@ def build_mcp_snapshot(
     """Build the exact execution config and a secret-free review snapshot."""
     if not isinstance(config, dict):
         raise ValueError("config must be an object")
+    if _requested_true(config.get("auto_connect")) or _requested_true(
+        config.get("autostart")
+    ):
+        raise ValueError(
+            "MCP auto-connect/autostart is not supported; connect through the "
+            "shared approval queue"
+        )
+    if str(config.get("approval_mode") or "").strip().lower() == "auto":
+        raise ValueError(
+            "MCP automatic approval is not supported; use the shared approval queue"
+        )
     transport = str(config.get("transport") or "stdio").strip().lower()
     if transport not in {"stdio", "sse"}:
         raise ValueError("config.transport must be 'stdio' or 'sse'")
@@ -206,6 +227,7 @@ def build_mcp_snapshot(
         "endpoint": endpoint,
         "env": {str(key): "<redacted>" for key in configured_env},
         "headers": {str(key): "<redacted>" for key in configured_headers},
+        "autostart": False,
         "capabilities": config.get("capabilities") or [],
         "tools": config.get("tools") or [],
         "network": {
@@ -309,6 +331,7 @@ def verify_mcp_approval(token: str, snapshot: dict[str, Any]):
         MCP_CONNECT_OPERATION,
         approval.hash_arguments(snapshot["binding_args"]),
         scope_digest=str(snapshot["scope_digest"]),
+        obsolete_on_binding_mismatch=True,
     )
 
 

@@ -342,9 +342,11 @@ export type CodingApprovalRequest = {
 };
 
 export type McpApprovalReview = {
+  server_id?: string;
   executable?: string;
   normalized_executable?: string;
   transport?: string;
+  endpoint?: string | null;
   args?: unknown[];
   normalized_args?: unknown[];
   cwd?: string;
@@ -352,8 +354,10 @@ export type McpApprovalReview = {
   redacted_env?: Record<string, unknown> | unknown[];
   environment_redacted?: Record<string, unknown> | unknown[];
   env?: Record<string, unknown>;
+  headers?: Record<string, unknown>;
   server_source?: string;
   source?: string;
+  autostart?: boolean;
   capabilities?: unknown;
   tools?: unknown;
   network?: unknown;

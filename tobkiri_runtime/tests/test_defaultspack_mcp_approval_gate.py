@@ -69,6 +69,7 @@ def test_mcp_review_is_complete_and_never_persists_raw_secrets(
                 "command": sys.executable,
                 "args": ["fake_mcp.py", "--token=${FAKE_MCP_SECRET}"],
                 "env": {"MCP_TOKEN": "${FAKE_MCP_SECRET}"},
+                "headers": {"Authorization": "Bearer ${FAKE_MCP_SECRET}"},
                 "capabilities": ["tools"],
                 "tools": ["read_fixture"],
                 "filesystem": {"access": "workspace"},
@@ -85,6 +86,8 @@ def test_mcp_review_is_complete_and_never_persists_raw_secrets(
     assert review["transport"] == "stdio"
     assert review["cwd"] == str(tmp_path.resolve())
     assert review["env"] == {"MCP_TOKEN": "<redacted>"}
+    assert review["headers"] == {"Authorization": "<redacted>"}
+    assert review["autostart"] is False
     assert review["server_source"] == "inline"
     assert review["capabilities"] == ["tools"]
     assert review["tools"] == ["read_fixture"]
@@ -124,8 +127,8 @@ def test_mcp_token_rejects_mutation_cross_server_workspace_and_replay(
         "config": config,
     }
     requested = mcp_connect.run(request_args, {})
-    decision = approval.approve(requested["data"]["approval_request_id"])
-    token = decision["token"]
+    request_id = requested["data"]["approval_request_id"]
+    token = approval.approve(request_id)["token"]
 
     monkeypatch.setenv("FAKE_MCP_SECRET", "first-value")
     cross_server = mcp_connect.run(
@@ -137,16 +140,26 @@ def test_mcp_token_rejects_mutation_cross_server_workspace_and_replay(
         {},
     )
     assert cross_server["error"]["code"] == "APPROVAL_ARGUMENTS_CHANGED"
+    assert approval.get_approval_request(request_id)["status"] == "obsolete"
+    original_after_cross_server = mcp_connect.run(
+        {**request_args, "approval_token": token},
+        {},
+    )
+    assert original_after_cross_server["error"]["code"] == "APPROVAL_NOT_APPROVED"
 
+    workspace_requested = mcp_connect.run(request_args, {})
+    workspace_request_id = workspace_requested["data"]["approval_request_id"]
+    workspace_token = approval.approve(workspace_request_id)["token"]
     cross_workspace = mcp_connect.run(
         {
             **request_args,
             "workspace_root": str(workspace_b),
-            "approval_token": token,
+            "approval_token": workspace_token,
         },
         {},
     )
     assert cross_workspace["error"]["code"] == "APPROVAL_ARGUMENTS_CHANGED"
+    assert approval.get_approval_request(workspace_request_id)["status"] == "obsolete"
 
     class FakeClient:
         def connect(self, server_name, effective_config):
@@ -158,8 +171,12 @@ def test_mcp_token_rejects_mutation_cross_server_workspace_and_replay(
             return []
 
     monkeypatch.setattr(mcp_connect, "McpClient", FakeClient)
+    valid_requested = mcp_connect.run(request_args, {})
+    valid_token = approval.approve(valid_requested["data"]["approval_request_id"])[
+        "token"
+    ]
     connected = mcp_connect.run(
-        {**request_args, "approval_token": token},
+        {**request_args, "approval_token": valid_token},
         {},
     )
     assert connected["status"] == "ok"
@@ -173,7 +190,7 @@ def test_mcp_token_rejects_mutation_cross_server_workspace_and_replay(
     assert public_server["config"]["env"] == {"MCP_TOKEN": "<redacted>"}
     assert "first-value" not in json.dumps(public_server)
     replay = mcp_connect.run(
-        {**request_args, "approval_token": token},
+        {**request_args, "approval_token": valid_token},
         {},
     )
     assert replay["status"] == "error"
@@ -202,6 +219,111 @@ def test_mcp_environment_change_invalidates_approved_review(tmp_path, monkeypatc
     assert changed["status"] == "error"
     assert changed["error"]["code"] == "APPROVAL_ARGUMENTS_CHANGED"
     assert changed["error"]["details"]["recoverable"] is True
+    stored = approval.get_approval_request(requested["data"]["approval_request_id"])
+    assert stored is not None
+    assert stored["status"] == "obsolete"
+
+    monkeypatch.setenv("FAKE_MCP_SECRET", "before")
+    reverted = mcp_connect.run({**args, "approval_token": token}, {})
+    assert reverted["status"] == "error"
+    assert reverted["error"]["code"] == "APPROVAL_NOT_APPROVED"
+
+
+@pytest.mark.parametrize(
+    "unsafe_option",
+    [
+        {"auto_connect": True},
+        {"autostart": "true"},
+        {"approval_mode": "auto"},
+    ],
+)
+def test_mcp_rejects_automatic_start_and_approval_options(
+    tmp_path,
+    unsafe_option,
+):
+    from blocks.tool import mcp_connect
+    from domain.safety import approval
+
+    result = mcp_connect.run(
+        {
+            "server_id": "automatic-server",
+            "workspace_root": str(tmp_path),
+            "config": {**_stdio_config(), **unsafe_option},
+        },
+        {},
+    )
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "INVALID_PARAM"
+    assert "not supported" in result["error"]["message"]
+    assert approval.list_approval_requests(limit=10) == []
+
+
+def test_denied_mcp_request_never_connects_and_can_be_requested_again(
+    tmp_path,
+    monkeypatch,
+):
+    from blocks.tool import mcp_connect
+    from domain.safety import approval
+
+    class UnexpectedClient:
+        def __init__(self):
+            raise AssertionError("denied MCP request must not construct a client")
+
+    monkeypatch.setattr(mcp_connect, "McpClient", UnexpectedClient)
+    args = {
+        "server_id": "denied-server",
+        "workspace_root": str(tmp_path),
+        "config": _stdio_config(),
+    }
+    requested = mcp_connect.run(args, {})
+    request_id = requested["data"]["approval_request_id"]
+
+    denied = approval.deny(request_id, "fixture denial")
+    assert denied["approved"] is False
+    assert denied["status"] == "denied"
+    assert approval.approve(request_id)["status"] == "denied"
+
+    retried = mcp_connect.run(args, {})
+    assert retried["status"] == "ok"
+    assert retried["data"]["approval_required"] is True
+    assert retried["data"]["approval_request_id"] != request_id
+
+
+def test_expired_mcp_token_is_recoverable_and_never_starts_process(
+    tmp_path,
+    monkeypatch,
+):
+    from blocks.tool import mcp_connect
+    from domain.safety import approval
+
+    class UnexpectedClient:
+        def __init__(self):
+            raise AssertionError("expired MCP token must not construct a client")
+
+    monkeypatch.setattr(mcp_connect, "McpClient", UnexpectedClient)
+    args = {
+        "server_id": "expired-server",
+        "workspace_root": str(tmp_path),
+        "config": _stdio_config(),
+    }
+    requested = mcp_connect.run(args, {})
+    token = approval.approve(requested["data"]["approval_request_id"])["token"]
+    monkeypatch.setattr(
+        approval,
+        "_now",
+        lambda: int(requested["data"]["expires_at"]) + 1,
+    )
+
+    expired = mcp_connect.run({**args, "approval_token": token}, {})
+
+    assert expired["status"] == "error"
+    assert expired["error"]["code"] == "APPROVAL_EXPIRED"
+    assert expired["error"]["details"] == {
+        "recoverable": True,
+        "action": "request_new_approval",
+        "server_id": "expired-server",
+    }
 
 
 def test_registry_mutation_obsoletes_pending_mcp_review(tmp_path):

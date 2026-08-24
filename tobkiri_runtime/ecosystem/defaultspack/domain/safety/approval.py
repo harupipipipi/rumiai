@@ -4,7 +4,6 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import threading
 import time
 import uuid
@@ -682,6 +681,7 @@ def verify_execution_token(
     pack_id: str = "",
     conversation_id: str = "",
     scope_digest: str = "",
+    obsolete_on_binding_mismatch: bool = False,
 ) -> TokenVerification:
     token = str(token or "")
     if "." not in token:
@@ -704,14 +704,21 @@ def verify_execution_token(
         return TokenVerification(
             False, "APPROVAL_TOKEN_INVALID", "approval token version is invalid"
         )
+    request_id = str(payload.get("request_id") or "")
     if int(payload.get("expires_at") or 0) < _now():
-        return TokenVerification(False, "APPROVAL_EXPIRED", "approval token expired")
+        return TokenVerification(
+            False,
+            "APPROVAL_EXPIRED",
+            "approval token expired",
+            request_id,
+        )
     token_operation = str(payload.get("operation") or "")
     if token_operation and token_operation != str(operation):
         return TokenVerification(
             False,
             "APPROVAL_OPERATION_MISMATCH",
             "approval token operation mismatch",
+            request_id,
         )
     expected_pack_id = str(pack_id or "")
     token_pack_id = str(payload.get("pack_id") or "")
@@ -719,7 +726,12 @@ def verify_execution_token(
     # pack/conversation, but status probes may omit them when they only need to
     # inspect whether a one-shot token is still valid or already consumed.
     if expected_pack_id and token_pack_id != expected_pack_id:
-        return TokenVerification(False, "APPROVAL_PACK_MISMATCH", "approval token pack mismatch")
+        return TokenVerification(
+            False,
+            "APPROVAL_PACK_MISMATCH",
+            "approval token pack mismatch",
+            request_id,
+        )
     expected_conversation_id = str(conversation_id or "")
     token_conversation_id = str(payload.get("conversation_id") or "")
     if expected_conversation_id and token_conversation_id != expected_conversation_id:
@@ -727,22 +739,28 @@ def verify_execution_token(
             False,
             "APPROVAL_CONVERSATION_MISMATCH",
             "approval token conversation mismatch",
+            request_id,
         )
     if str(payload.get("args_hash") or "") != str(args_hash):
+        if obsolete_on_binding_mismatch and request_id:
+            mark_obsolete(request_id, "approval binding changed after review")
         return TokenVerification(
             False,
             "APPROVAL_ARGUMENTS_CHANGED",
             "approval token does not match request arguments",
+            request_id,
         )
     expected_scope_digest = str(scope_digest or "")
     token_scope_digest = str(payload.get("scope_digest") or "")
     if expected_scope_digest and token_scope_digest != expected_scope_digest:
+        if obsolete_on_binding_mismatch and request_id:
+            mark_obsolete(request_id, "approval scope changed after review")
         return TokenVerification(
             False,
             "APPROVAL_SCOPE_MISMATCH",
             "approval token scope mismatch",
+            request_id,
         )
-    request_id = str(payload.get("request_id") or "")
     jti = str(payload.get("jti") or "")
     debug_lease_epoch = int(payload.get("debug_lease_epoch") or 0)
     if debug_lease_epoch and consume:

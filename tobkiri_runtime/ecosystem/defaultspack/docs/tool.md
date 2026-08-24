@@ -1240,7 +1240,6 @@ mcp.json 設定例:
         "resources": true,
         "prompts": false
       },
-      "auto_connect": true,
       "max_reconnect_attempts": 3
     }
   },
@@ -1251,6 +1250,11 @@ mcp.json 設定例:
   }
 }
 ```
+
+MCP 設定の登録はサーバーを起動しない。接続と再接続は、共有承認キューで
+構成と影響を確認したユーザーによる Tobkiri Launcher の権威ある決定を毎回要求する。
+`auto_connect` / `autostart` および `approval_mode: "auto"` はサポートされず、
+指定された接続要求は fail closed で拒否される。
 
 ---
 

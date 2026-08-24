@@ -89,12 +89,16 @@ export function mcpApprovalReviewRows(request: CodingApprovalRequest): McpReview
   // `details.config.env` is deliberately unreachable here.
   const redactedEnv = review.redacted_env ?? review.environment_redacted ?? review.env;
   const fields: Array<[string, unknown]> = [
+    ["Server", review.server_id],
     ["Executable", executable],
     ["Transport", transport],
+    ["Endpoint", review.endpoint],
     ["Arguments", review.args ?? review.normalized_args],
     ["Working directory", cwd],
     ["Environment (redacted)", redactedEnv],
+    ["Headers (redacted)", review.headers],
     ["Server source", serverSource],
+    ["Autostart", review.autostart],
     ["Capabilities", review.capabilities],
     ["Tools", review.tools],
     ["Network", review.network],

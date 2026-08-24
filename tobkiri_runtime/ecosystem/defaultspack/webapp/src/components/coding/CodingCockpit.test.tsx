@@ -15,6 +15,7 @@ import {
   codingActionRequiresApproval,
   nextApprovalQueueRefreshSignal,
 } from "./approvalQueueSync";
+import { mcpApprovalReviewRows } from "./mcpApproval";
 
 test("approval-required coding results advance the queue refresh signal", () => {
   assert.equal(codingActionRequiresApproval({ approval_required: true }), true);
@@ -157,4 +158,53 @@ test("MCP requester never approves its own request", () => {
   assert.match(source, /Review the shared approval request below/);
   assert.match(source, /onApproved=\{handleApprovalApproved\}/);
   assert.match(source, /approval_token: decision\.token/);
+});
+
+test("MCP approval review renders every authority-owned security dimension", () => {
+  const rows = mcpApprovalReviewRows({
+    request_id: "apr_mcp_review",
+    operation: "tool.mcp_connect",
+    risk_level: "high",
+    status: "pending",
+    details: {
+      review: {
+        server_id: "review-server",
+        executable: "/usr/bin/python3",
+        transport: "stdio",
+        args: ["server.py"],
+        cwd: "/workspace",
+        env: { MCP_TOKEN: "<redacted>" },
+        headers: { Authorization: "<redacted>" },
+        server_source: "registered config",
+        autostart: false,
+        capabilities: ["tools"],
+        tools: ["read_fixture"],
+        network: { access: "process-defined" },
+        filesystem: { access: "workspace" },
+        persistence: { registry: true, survives_reconnect: true },
+        consequences: ["Starts the configured MCP server."],
+      },
+      config: { env: { MCP_TOKEN: "must-not-render" } },
+    },
+  });
+
+  assert.deepEqual(rows.map((row) => row.label), [
+    "Server",
+    "Executable",
+    "Transport",
+    "Arguments",
+    "Working directory",
+    "Environment (redacted)",
+    "Headers (redacted)",
+    "Server source",
+    "Autostart",
+    "Capabilities",
+    "Tools",
+    "Network",
+    "Filesystem",
+    "Persistence",
+    "Consequences",
+  ]);
+  assert.equal(rows.find((row) => row.label === "Autostart")?.value, "false");
+  assert.doesNotMatch(JSON.stringify(rows), /must-not-render/);
 });
