@@ -50,6 +50,8 @@ class MemoryStorage {
 let lastFetchUrl = '';
 let lastFetchInit: RequestInit | undefined;
 let exchangeCount = 0;
+let reauthorizeCount = 0;
+let reauthorizeFailure: Error | null = null;
 let presentationCatalogCount = 0;
 let presentationSelection: Record<string, unknown> | undefined;
 let presentationLaunchCount = 0;
@@ -61,7 +63,11 @@ function installBrowser(href = 'http://127.0.0.1:8765/panel/'): void {
     __TAURI__: {
       core: {
         invoke: async (command: string, args?: Record<string, unknown>) => {
-          if (command === 'reauthorize_panel_session') return 'desktop-refresh-code';
+          if (command === 'reauthorize_panel_session') {
+            reauthorizeCount += 1;
+            if (reauthorizeFailure) throw reauthorizeFailure;
+            return 'desktop-refresh-code';
+          }
           if (command === 'get_presentation_catalog') {
             presentationCatalogCount += 1;
             return {
@@ -176,6 +182,8 @@ beforeEach(() => {
   lastFetchUrl = '';
   lastFetchInit = undefined;
   exchangeCount = 0;
+  reauthorizeCount = 0;
+  reauthorizeFailure = null;
   presentationCatalogCount = 0;
   presentationSelection = undefined;
   presentationLaunchCount = 0;
@@ -590,6 +598,297 @@ test('panel bootstrap exchanges its session code before setup requests', async (
   assert.equal(exchangeCount, 1);
   assert.equal(lastFetchUrl, '/api/panel/auth/exchange');
   assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/setup');
+});
+
+test('panel bootstrap deduplicates concurrent exchanges for one URL code', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=one-time-code');
+  installFetchMock();
+
+  await Promise.all([bootstrapPanelSession(), bootstrapPanelSession()]);
+
+  assert.equal(exchangeCount, 1);
+  assert.equal(sessionStorage.getItem('rumi-panel-csrf'), 'csrf-from-server');
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/');
+});
+
+test('direct app bootstrap recovers a stale URL code through Launcher once', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=stale-code');
+  fetchHandler = async (input, init) => {
+    lastFetchUrl = String(input);
+    exchangeCount += 1;
+    const body = JSON.parse(String(init?.body)) as {code?: string};
+    const stale = body.code === 'stale-code';
+    return new Response(JSON.stringify(stale
+      ? {error: 'Invalid or expired code', success: false}
+      : {data: {csrf_token: 'fresh-csrf'}, success: true}), {
+      headers: {'Content-Type': 'application/json'},
+      status: stale ? 401 : 200,
+    });
+  };
+
+  const recovered = await bootstrapPanelSession();
+
+  assert.equal(recovered, true);
+  assert.equal(exchangeCount, 2);
+  assert.equal(reauthorizeCount, 1);
+  assert.equal(sessionStorage.getItem('rumi-panel-csrf'), 'fresh-csrf');
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/');
+});
+
+test('stale URL bootstrap recovers once through Launcher before the request', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=stale-code&view=packs#ready');
+  let requestCount = 0;
+  fetchHandler = async (input, init) => {
+    lastFetchUrl = String(input);
+    lastFetchInit = init;
+    if (lastFetchUrl === '/api/panel/auth/exchange') {
+      exchangeCount += 1;
+      const body = JSON.parse(String(init?.body)) as {code?: string};
+      if (body.code === 'stale-code') {
+        return new Response(
+          JSON.stringify({error: 'Invalid or expired code', success: false}),
+          {headers: {'Content-Type': 'application/json'}, status: 401},
+        );
+      }
+      assert.equal(body.code, 'desktop-refresh-code');
+      return new Response(
+        JSON.stringify({data: {csrf_token: 'fresh-csrf'}, success: true}),
+        {headers: {'Content-Type': 'application/json'}},
+      );
+    }
+    requestCount += 1;
+    return new Response(
+      JSON.stringify({data: {packs: []}, success: true}),
+      {headers: {'Content-Type': 'application/json'}},
+    );
+  };
+
+  const response = await apiFetch<{packs: unknown[]}>('/api/setup/packs');
+
+  assert.deepEqual(response, {packs: []});
+  assert.equal(requestCount, 1);
+  assert.equal(exchangeCount, 2);
+  assert.equal(reauthorizeCount, 1);
+  assert.equal(sessionStorage.getItem('rumi-panel-csrf'), 'fresh-csrf');
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/?view=packs#ready');
+});
+
+test('concurrent requests share one stale-code recovery and fresh exchange', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=stale-code');
+  let requestCount = 0;
+  const exchangeCodes: string[] = [];
+  fetchHandler = async (input, init) => {
+    lastFetchUrl = String(input);
+    lastFetchInit = init;
+    if (lastFetchUrl === '/api/panel/auth/exchange') {
+      exchangeCount += 1;
+      const body = JSON.parse(String(init?.body)) as {code?: string};
+      exchangeCodes.push(String(body.code));
+      const stale = body.code === 'stale-code';
+      return new Response(JSON.stringify(stale
+        ? {error: 'Invalid or expired code', success: false}
+        : {data: {csrf_token: 'fresh-csrf'}, success: true}), {
+        headers: {'Content-Type': 'application/json'},
+        status: stale ? 401 : 200,
+      });
+    }
+    requestCount += 1;
+    return new Response(JSON.stringify({data: {ok: true}, success: true}), {
+      headers: {'Content-Type': 'application/json'},
+    });
+  };
+
+  const [install, prepare] = await Promise.all([
+    apiFetch<{ok: boolean}>('/api/setup/packs/install', {method: 'POST', body: '{}'}),
+    apiFetch<{ok: boolean}>('/api/v4/packvm/prepare', {method: 'POST', body: '{}'}),
+  ]);
+
+  assert.deepEqual(install, {ok: true});
+  assert.deepEqual(prepare, {ok: true});
+  assert.equal(requestCount, 2);
+  assert.deepEqual(exchangeCodes, ['stale-code', 'desktop-refresh-code']);
+  assert.equal(reauthorizeCount, 1);
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/');
+});
+
+test('rejected URL bootstrap is scrubbed and redacted before surfacing', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=secret-code&view=packs');
+  fetchHandler = async () => new Response(
+    JSON.stringify({error: 'Invalid secret-code; please retry', success: false}),
+    {headers: {'Content-Type': 'application/json'}, status: 401},
+  );
+
+  await assert.rejects(
+    bootstrapPanelSession(),
+    (error: unknown) => error instanceof Error && !error.message.includes('secret-code'),
+  );
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/?view=packs');
+});
+
+test('empty URL bootstrap state is scrubbed without exchange or recovery', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=&view=packs#ready');
+
+  const recovered = await bootstrapPanelSession();
+
+  assert.equal(recovered, false);
+  assert.equal(exchangeCount, 0);
+  assert.equal(reauthorizeCount, 0);
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/?view=packs#ready');
+});
+
+test('browser-only stale bootstrap stops with a clear reopen action', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=stale-code');
+  const browserWindow = window as Window & {
+    __TAURI__?: unknown;
+    __TAURI_INTERNALS__?: unknown;
+  };
+  delete browserWindow.__TAURI__;
+  delete browserWindow.__TAURI_INTERNALS__;
+  fetchHandler = async () => {
+    exchangeCount += 1;
+    return new Response(
+      JSON.stringify({error: 'Invalid or expired code', success: false}),
+      {headers: {'Content-Type': 'application/json'}, status: 401},
+    );
+  };
+
+  await assert.rejects(
+    apiFetch('/api/setup/packs'),
+    /Reopen this panel from Tobkiri Launcher/,
+  );
+  assert.equal(exchangeCount, 1);
+  assert.equal(reauthorizeCount, 0);
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/');
+});
+
+test('failed fresh bootstrap is bounded and ends with a terminal action', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=stale-code');
+  fetchHandler = async () => {
+    exchangeCount += 1;
+    return new Response(
+      JSON.stringify({error: 'Invalid or expired code', success: false}),
+      {headers: {'Content-Type': 'application/json'}, status: 401},
+    );
+  };
+
+  await assert.rejects(
+    apiFetch('/api/setup/packs'),
+    /could not renew panel authentication/,
+  );
+  assert.equal(exchangeCount, 2);
+  assert.equal(reauthorizeCount, 1);
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/');
+});
+
+test('native reauthorization failure is terminal and hides host details', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=stale-code');
+  reauthorizeFailure = new Error('transport failed at /private/runtime.sock token=secret');
+  fetchHandler = async () => {
+    exchangeCount += 1;
+    return new Response(
+      JSON.stringify({error: 'Invalid or expired code', success: false}),
+      {headers: {'Content-Type': 'application/json'}, status: 401},
+    );
+  };
+
+  await assert.rejects(
+    apiFetch('/api/setup/packs'),
+    (error: unknown) => error instanceof Error
+      && /could not renew panel authentication/.test(error.message)
+      && !/private|runtime\.sock|token=secret/.test(error.message),
+  );
+  assert.equal(exchangeCount, 1);
+  assert.equal(reauthorizeCount, 1);
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/');
+});
+
+test('late concurrent 401 reuses the completed recovery generation', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/');
+  let firstResolve: ((response: Response) => void) | null = null;
+  let secondResolve: ((response: Response) => void) | null = null;
+  const requestCounts = new Map<string, number>();
+  fetchHandler = async (input, init) => {
+    const path = String(input);
+    if (path === '/api/panel/auth/exchange') {
+      exchangeCount += 1;
+      const body = JSON.parse(String(init?.body)) as {code?: string};
+      assert.equal(body.code, 'desktop-refresh-code');
+      return new Response(
+        JSON.stringify({data: {csrf_token: 'fresh-csrf'}, success: true}),
+        {headers: {'Content-Type': 'application/json'}},
+      );
+    }
+    const count = (requestCounts.get(path) ?? 0) + 1;
+    requestCounts.set(path, count);
+    if (count > 1) {
+      return new Response(JSON.stringify({data: {ok: true}, success: true}), {
+        headers: {'Content-Type': 'application/json'},
+      });
+    }
+    return new Promise<Response>((resolve) => {
+      if (path === '/api/setup/packs/install') firstResolve = resolve;
+      else secondResolve = resolve;
+    });
+  };
+
+  const first = apiFetch<{ok: boolean}>(
+    '/api/setup/packs/install',
+    {method: 'POST', body: '{}'},
+  );
+  const second = apiFetch<{ok: boolean}>(
+    '/api/v4/packvm/prepare',
+    {method: 'POST', body: '{}'},
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(firstResolve);
+  assert.ok(secondResolve);
+  firstResolve(new Response(
+    JSON.stringify({error: 'Unauthorized', success: false}),
+    {headers: {'Content-Type': 'application/json'}, status: 401},
+  ));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(reauthorizeCount, 1);
+  secondResolve(new Response(
+    JSON.stringify({error: 'Unauthorized', success: false}),
+    {headers: {'Content-Type': 'application/json'}, status: 401},
+  ));
+
+  assert.deepEqual(await Promise.all([first, second]), [{ok: true}, {ok: true}]);
+  assert.equal(exchangeCount, 1);
+  assert.equal(reauthorizeCount, 1);
+  assert.deepEqual([...requestCounts.values()], [2, 2]);
+});
+
+test('a request rejected after fresh bootstrap does not start a second recovery', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=stale-code');
+  let requestCount = 0;
+  fetchHandler = async (input, init) => {
+    lastFetchUrl = String(input);
+    if (lastFetchUrl === '/api/panel/auth/exchange') {
+      exchangeCount += 1;
+      const body = JSON.parse(String(init?.body)) as {code?: string};
+      const stale = body.code === 'stale-code';
+      return new Response(JSON.stringify(stale
+        ? {error: 'Invalid or expired code', success: false}
+        : {data: {csrf_token: 'fresh-csrf'}, success: true}), {
+        headers: {'Content-Type': 'application/json'},
+        status: stale ? 401 : 200,
+      });
+    }
+    requestCount += 1;
+    return new Response(
+      JSON.stringify({error: 'Unauthorized', success: false}),
+      {headers: {'Content-Type': 'application/json'}, status: 401},
+    );
+  };
+
+  await assert.rejects(
+    apiFetch('/api/setup/packs'),
+    /could not renew panel authentication/,
+  );
+  assert.equal(requestCount, 1);
+  assert.equal(exchangeCount, 2);
+  assert.equal(reauthorizeCount, 1);
 });
 
 test('setup and health requests remain separate from Pack contract dispatch', async () => {

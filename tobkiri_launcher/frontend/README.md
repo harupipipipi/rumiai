@@ -5,6 +5,12 @@ Tobkiri のコントロールパネル用フロントエンドアプリケーシ
 
 `npm run build` は Vite の成果物を `../../tobkiri_runtime/core_runtime/core_pack/core_control_panel/web` にコピーします。viewer と browser はどちらも kernel が配信する同じ `/panel/` artifact を使用します。Tauri の `splash` は kernel 起動前の viewer 専用画面で、panel frontend とは別です。
 
+Panel bootstrap code は一度だけ交換できる短命な認証情報です。期限切れまたは消費済みの
+`?code=` は URL から即時に除去され、Tobkiri Launcher 内では native proof 経路から新しい
+code を一度だけ取得します。更新後も認証できない場合や browser-only 起動の場合は再試行を
+停止し、Tobkiri Launcher から panel を開き直す案内を表示します。code の再利用、暗黙 fallback、
+または CSRF 検証の迂回は行いません。
+
 リリースまたは Tauri の CI ビルドでは `TOBKIRI_PANEL_BUILD_DIR` に隔離された出力先を指定できます。この場合、ビルド成果物は tracked runtime source を変更せず、Tauri の staging が同じ `/panel/` runtime path にコピーします。指定された出力先が存在しない場合、Tauri staging は checked-in bundle への fallback を拒否します。
 
 ## 技術スタック
