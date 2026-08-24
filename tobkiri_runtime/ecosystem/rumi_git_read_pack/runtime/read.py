@@ -47,10 +47,7 @@ class GitReadService:
                 ["show", "--no-ext-diff", "--no-color", "--stat", "--oneline", ref],
             )
         elif name == "branch":
-            output = _git(
-                repository,
-                ["branch", "--list", "--no-color", "--format=%(HEAD)%09%(refname:short)"],
-            )
+            output = _branch_listing(repository)
         elif name == "remote":
             output = _git(repository, ["remote", "-v"])
         elif name == "snapshot":
@@ -102,6 +99,50 @@ class GitReadService:
         if not root.is_dir():
             raise PermissionError("workspace root is unavailable")
         return root
+
+
+def _branch_listing(repository: Path) -> str:
+    """List local branches plus unambiguous cached remote-only names.
+
+    The write service receives local branch names and lets ``git switch`` create
+    a tracking branch only when Git can resolve exactly one cached remote ref.
+    Network fetch remains outside this read-only Pack boundary.
+    """
+    refs = _git(
+        repository,
+        [
+            "for-each-ref",
+            "--format=%(HEAD)%09%(refname)%09%(refname:short)",
+            "refs/heads",
+            "refs/remotes",
+        ],
+    )
+    local: list[tuple[str, str]] = []
+    remote_candidates: dict[str, int] = {}
+    for line in refs.splitlines():
+        marker, _, remainder = line.partition("\t")
+        full_ref, _, short_ref = remainder.partition("\t")
+        full_ref = full_ref.strip()
+        short_ref = short_ref.strip()
+        if full_ref.startswith("refs/heads/") and short_ref:
+            local.append((marker.strip(), short_ref))
+            continue
+        if not full_ref.startswith("refs/remotes/") or full_ref.endswith("/HEAD"):
+            continue
+        remote_parts = full_ref.split("/", 3)
+        if len(remote_parts) != 4 or not remote_parts[3]:
+            continue
+        branch = remote_parts[3]
+        remote_candidates[branch] = remote_candidates.get(branch, 0) + 1
+
+    local_names = {branch for _, branch in local}
+    lines = [f"{marker}\t{branch}" for marker, branch in local]
+    lines.extend(
+        f"\t{branch}"
+        for branch, count in sorted(remote_candidates.items())
+        if count == 1 and branch not in local_names
+    )
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 def create_git_read_operation(

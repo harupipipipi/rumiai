@@ -85,6 +85,7 @@ import type {
 import type { ModelCommandCandidate, ModelProfile, ModelSearchItem } from "../lib/api";
 import { CodingWorkspaceBadge } from "../components/coding/CodingWorkspaceBadge";
 import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
+import { BranchPicker } from "../components/coding/BranchPicker";
 import { RuntimeCapabilityBanner } from "../components/RuntimeCapabilityBanner";
 import { StructuredComposerPanel } from "../components/StructuredComposerPanel";
 import { WarmActionIcon } from "../components/WarmActionIcon";
@@ -2616,6 +2617,9 @@ export function ComposerRenderer({
   structuredInputValues = {},
   modelCommandCandidates = [],
   modelPickerRequestId = 0,
+  branchPickerRequestId = 0,
+  branchPickerStatus = "ready",
+  branchPickerError = null,
   modelStatusIndicators = [],
   voiceInputEnabled = true,
   voiceInputUseAi = false,
@@ -2671,6 +2675,7 @@ export function ComposerRenderer({
   onWidgetAction,
   onWidgetToggle,
   onCodingBranchSwitch,
+  onBranchPickerRefresh,
   onCodingDirectoryChange,
   onCodingWorkspaceSelect,
   onCodingWorkspaceTrust,
@@ -2686,6 +2691,7 @@ export function ComposerRenderer({
   const [openFolder, setOpenFolder] = useState<"tools" | "models" | "commands">("tools");
   const [openToolGroup, setOpenToolGroup] = useState<string | null>(null);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [branchPickerOpen, setBranchPickerOpen] = useState(branchPickerRequestId > 0);
   const [openModelStatusId, setOpenModelStatusId] = useState<string | null>(null);
   const [apiKeyPromptProfile, setApiKeyPromptProfile] = useState<ModelProfile | null>(null);
   const [locallyConfiguredProviders, setLocallyConfiguredProviders] = useState<Set<string>>(() => new Set());
@@ -2715,6 +2721,7 @@ export function ComposerRenderer({
   const chromeWidgetNodeMapRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const submissionLockRef = useRef<ComposerSubmissionLock | null>(null);
   const lastModelPickerRequestIdRef = useRef(modelPickerRequestId);
+  const lastBranchPickerRequestIdRef = useRef(branchPickerRequestId);
   const chromeButtonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const isVoiceListening = voiceStatus === "listening";
   const profileName = profileDisplayName(selectedProfile);
@@ -3127,10 +3134,20 @@ export function ComposerRenderer({
   }, [modelPickerRequestId]);
 
   useEffect(() => {
+    if (branchPickerRequestId === lastBranchPickerRequestIdRef.current) return;
+    lastBranchPickerRequestIdRef.current = branchPickerRequestId;
+    if (branchPickerRequestId <= 0) return;
+    setMenuOpen(false);
+    setModelDropdownOpen(false);
+    setBranchPickerOpen(true);
+  }, [branchPickerRequestId]);
+
+  useEffect(() => {
     if (!suppressPopovers) return;
     setMenuOpen(false);
     setAtMentionOpen(false);
     setModelDropdownOpen(false);
+    setBranchPickerOpen(false);
     setModeSelectorOpen(false);
     onModelCommandCandidatesClose?.();
   }, [onModelCommandCandidatesClose, suppressPopovers]);
@@ -3223,6 +3240,12 @@ export function ComposerRenderer({
     } else if (action === "open_tool_picker" && !rawHasArgs) {
       setOpenFolder("tools");
       setMenuOpen(true);
+    } else if (action === "open_branch_picker" && !rawHasArgs) {
+      setBranchPickerOpen(true);
+      setMenuOpen(false);
+      setModelDropdownOpen(false);
+    } else if (action === "open_branch_picker" && rawHasArgs) {
+      setBranchPickerOpen(false);
     } else if (action === "open_command_help") {
       setOpenFolder("commands");
       setMenuOpen(true);
@@ -4846,6 +4869,22 @@ export function ComposerRenderer({
                 ))}
               </div>
             </div>
+          )}
+
+          {mode === "coding" && branchPickerOpen && (
+            <BranchPicker
+              branches={branchOptions}
+              currentBranch={codingContext?.branch}
+              disabled={isGenerating}
+              status={branchPickerStatus}
+              errorMessage={branchPickerError}
+              onRefresh={onBranchPickerRefresh}
+              onSelect={(branch) => onCodingBranchSwitch?.(branch, false)}
+              onClose={() => {
+                setBranchPickerOpen(false);
+                window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
+              }}
+            />
           )}
 
           {mode === "coding" && codingContext && (

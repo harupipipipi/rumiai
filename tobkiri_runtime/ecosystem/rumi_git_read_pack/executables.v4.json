@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:310f0ca8297bebba86c89e5eefe467399e94f44f1216878457db4d3b80dcb3a8",
+  "catalog_digest": "sha256:a157e93876b6d9fd1aeae710318167158d16eba58666495fed7f432abde9af6b",
   "pack_id": "rumi_git_read_pack",
-  "source_identity": "sha256:5c8ae1efd0bfe6a847b2b3db070225fca4b0901ee80544c48d544663acb79882",
+  "source_identity": "sha256:27daa272f8c29d1ca8e86486691572e2e38becc7670058c0eb09c7a82c47bf13",
   "variants": [
     {
       "architecture": "any",
@@ -10,7 +10,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_git_read_pack.git-read.service",
-      "implementation_digest": "sha256:9f79fddc4bb747277a0623bb2ba6cab74944d20e4fdf35005f4d355c06d6f932",
+      "implementation_digest": "sha256:24f06572a8b678c92824a96f7b926d2e5c52e7bf81efa2cffad0e1d6e15c830f",
       "implementation_path": "runtime/read.py",
       "materialization_mode": "on_demand",
       "operations": [

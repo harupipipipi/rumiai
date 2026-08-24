@@ -37,7 +37,7 @@
   },
   "entrypoints": [
     {
-      "artifact_hash": "sha256:9f79fddc4bb747277a0623bb2ba6cab74944d20e4fdf35005f4d355c06d6f932",
+      "artifact_hash": "sha256:24f06572a8b678c92824a96f7b926d2e5c52e7bf81efa2cffad0e1d6e15c830f",
       "contract_id": "rumi.service.git.read.v1",
       "id": "git-read",
       "loader": "python",
@@ -91,7 +91,7 @@
         "pack_identity": "rumi:ecosystem/rumi_git_read_pack",
         "provenance": {
           "build_identity": "rumi_git_read_pack:1.0.0",
-          "content_hash": "sha256:9f79fddc4bb747277a0623bb2ba6cab74944d20e4fdf35005f4d355c06d6f932",
+          "content_hash": "sha256:24f06572a8b678c92824a96f7b926d2e5c52e7bf81efa2cffad0e1d6e15c830f",
           "signature": null,
           "trust_class": "local"
         },
@@ -157,7 +157,7 @@
   ],
   "provenance": {
     "build_identity": "rumi_git_read_pack:1.0.0",
-    "content_hash": "sha256:9f79fddc4bb747277a0623bb2ba6cab74944d20e4fdf35005f4d355c06d6f932",
+    "content_hash": "sha256:24f06572a8b678c92824a96f7b926d2e5c52e7bf81efa2cffad0e1d6e15c830f",
     "signature": null,
     "trust_class": "local"
   },
