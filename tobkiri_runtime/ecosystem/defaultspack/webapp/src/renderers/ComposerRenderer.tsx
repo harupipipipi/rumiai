@@ -87,6 +87,7 @@ import { CodingWorkspaceBadge } from "../components/coding/CodingWorkspaceBadge"
 import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
 import { RuntimeCapabilityBanner } from "../components/RuntimeCapabilityBanner";
 import { StructuredComposerPanel } from "../components/StructuredComposerPanel";
+import { StatusSurfaceHost } from "./status/StatusSurfaceHost";
 import { WarmActionIcon } from "../components/WarmActionIcon";
 import { chatComposerResources } from "../features/chat/resources/chatComposerResources";
 import {
@@ -2639,6 +2640,7 @@ export function ComposerRenderer({
   steerBusy = false,
   steerQueuedCount = 0,
   steerPreviewItems = [],
+  statusSurfaces = [],
   suppressPopovers = false,
   onOpenModelManager,
   onOpenToolSettings,
@@ -2661,6 +2663,7 @@ export function ComposerRenderer({
   onSubmit,
   onStopGenerating,
   onSteerSubmit,
+  onStatusSurfaceAction,
   onModeChange,
   onFileAttach,
   onAtFileAttach,
@@ -4519,6 +4522,31 @@ export function ComposerRenderer({
             </div>
           )}
 
+          {!isNewConversation && statusSurfaces.length > 0 && (
+            <StatusSurfaceHost
+              surfaces={statusSurfaces}
+              slot="above_composer"
+              modelOptions={modelProfiles.map((profile) => ({
+                value: profile.profile_id,
+                label: profile.display_name || profile.profile_id,
+              }))}
+              providerOptions={Array.from(new Map(modelProfiles.flatMap((profile) => {
+                const providerId = profile.provider_id?.trim();
+                return providerId
+                  ? [[providerId, {
+                      value: providerId,
+                      label: profile.provider_display_name || providerId,
+                    }] as const]
+                  : [];
+              })).values())}
+              thinkingOptions={levels.map((level) => ({
+                value: level,
+                label: THINKING_LABELS[level] ?? level,
+              }))}
+              onAction={onStatusSurfaceAction}
+            />
+          )}
+
           {!isNewConversation && visibleSteerPreviewItems.length > 0 && (
             <div className="mx-2 mt-1 overflow-hidden rounded-xl bg-zinc-900/45 px-2 py-1.5 max-[640px]:mx-1.5 max-[640px]:px-1.5">
               <div className="flex items-center justify-between gap-2 pb-1 text-[10px] leading-none text-zinc-500">
@@ -4900,6 +4928,30 @@ export function ComposerRenderer({
             </div>
           )}
         </form>
+        {!isNewConversation && statusSurfaces.length > 0 && (
+          <StatusSurfaceHost
+            surfaces={statusSurfaces}
+            slot="below_composer"
+            modelOptions={modelProfiles.map((profile) => ({
+              value: profile.profile_id,
+              label: profile.display_name || profile.profile_id,
+            }))}
+            providerOptions={Array.from(new Map(modelProfiles.flatMap((profile) => {
+              const providerId = profile.provider_id?.trim();
+              return providerId
+                ? [[providerId, {
+                    value: providerId,
+                    label: profile.provider_display_name || providerId,
+                  }] as const]
+                : [];
+            })).values())}
+            thinkingOptions={levels.map((level) => ({
+              value: level,
+              label: THINKING_LABELS[level] ?? level,
+            }))}
+            onAction={onStatusSurfaceAction}
+          />
+        )}
       </div>
     </div>
   );
