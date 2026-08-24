@@ -25,6 +25,8 @@ test('registered panel routes expose stable header title metadata', () => {
   }
 
   assert.equal(panelRouteTitleKey('/packs/defaultspack'), panelRouteMeta.packs.titleKey);
+  assert.equal(panelRouteTitleKey('/packs/defaultspack/'), panelRouteMeta.packs.titleKey);
+  assert.equal(panelRouteTitleKey('/packs/defaultspack/removed'), 'nav.unknown');
   assert.equal(panelRouteTitleKey('/unknown-route'), 'nav.unknown');
 });
 

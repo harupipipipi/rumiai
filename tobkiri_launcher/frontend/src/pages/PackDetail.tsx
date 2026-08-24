@@ -99,8 +99,8 @@ export function PackDetail() {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center">
-          <p className="text-sm font-medium text-text-main">Pack not found</p>
-          <Button className="mt-3" variant="outline" onClick={() => navigate(panelRoutes.packs)}>Back to packs</Button>
+          <p className="text-sm font-medium text-text-main">{t('pack.not_found')}</p>
+          <Button className="mt-3" variant="outline" onClick={() => navigate(panelRoutes.packs)}>{t('pack.back_to_packs')}</Button>
         </div>
       </div>
     );
