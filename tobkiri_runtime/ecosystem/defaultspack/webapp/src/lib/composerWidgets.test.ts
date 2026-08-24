@@ -8,6 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
+  activeComposerMentionMetadataForMessage,
   canExecuteComposerEndpointAction,
   composerMentionMetadataFromWidgets,
   composerFileMentionWidget,
@@ -254,6 +255,64 @@ test("semantic mention metadata keeps stable ids separate from human labels", ()
       syntax: "@GitHub",
     },
   ]);
+});
+
+test("history restores only active human mention metadata from exact visible syntax", () => {
+  const mentions = [
+    { id: "browser_computer", kind: "tool", label: "Browser Computer", syntax: "@Browser Computer" },
+    { id: "feedback/live-review", kind: "skill", label: "Live Review", syntax: "@Live Review" },
+    { id: "github", kind: "service", label: "GitHub", syntax: "@GitHub" },
+    { id: "src/App.tsx", kind: "file", label: "src/App.tsx", syntax: "@src/App.tsx" },
+  ];
+
+  assert.deepEqual(activeComposerMentionMetadataForMessage(
+    "Use @Browser Computer, @Live Review, @GitHub, and @src/App.tsx.",
+    { mentions },
+  ), mentions);
+  assert.deepEqual(activeComposerMentionMetadataForMessage(
+    "Email dev@example.com and keep \\@Browser Computer literal.",
+    { mentions },
+  ), []);
+});
+
+test("history keeps duplicate labels bound to stable ids without reparsing", () => {
+  const selectedMention = {
+    id: "browser_companion",
+    kind: "tool",
+    label: "Browser",
+    syntax: "@Browser",
+  };
+
+  assert.deepEqual(activeComposerMentionMetadataForMessage(
+    "Use @Browser",
+    { mentions: [selectedMention] },
+  ), [selectedMention]);
+  assert.deepEqual(activeComposerMentionMetadataForMessage(
+    "Use @Browser",
+    { mentions: [{ ...selectedMention, syntax: "browser_companion" }] },
+  ), []);
+});
+
+test("history fallback accepts legacy widgets only when their mention is active", () => {
+  const widget = composerSkillMentionWidget({
+    id: "feedback/live-review",
+    label: "Live Review",
+    aliases: ["reality"],
+  }, "@reality");
+
+  assert.deepEqual(activeComposerMentionMetadataForMessage(
+    "Use @reality",
+    { dropped_widgets: [widget] },
+  ), [{
+    id: "feedback/live-review",
+    kind: "skill",
+    label: "Live Review",
+    syntax: "@reality",
+  }]);
+  assert.deepEqual(activeComposerMentionMetadataForMessage(
+    "Use \\@reality",
+    { dropped_widgets: [widget] },
+  ), []);
 });
 
 test("semantic mention reconciliation removes escaped and deselected tool state", () => {

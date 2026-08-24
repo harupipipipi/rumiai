@@ -233,7 +233,7 @@ export function composerServiceMentionWidget(service: {
   id: string;
   label: string;
   toolIds: string[];
-}): DroppedWidget {
+}, syntaxOverride?: string): DroppedWidget {
   return {
     id: `mention-service:${service.id}`,
     type: "service",
@@ -248,7 +248,7 @@ export function composerServiceMentionWidget(service: {
         id: service.id,
         kind: "service",
         label: service.label,
-        syntax: `@${service.label}`,
+        syntax: syntaxOverride || `@${service.label}`,
       },
       service: {
         id: service.id,
@@ -540,6 +540,22 @@ export function normalizeComposerMentionMetadata(
     });
   }
   return result;
+}
+
+/** Restore only semantic mentions that are still active in visible message text. */
+export function activeComposerMentionMetadataForMessage(
+  text: string,
+  metadata: Record<string, unknown>,
+): ComposerMentionMetadata[] {
+  const explicitMentions = normalizeComposerMentionMetadata(metadata.mentions);
+  const fallbackMentions = explicitMentions.length === 0 && Array.isArray(metadata.dropped_widgets)
+    ? composerMentionMetadataFromWidgets(metadata.dropped_widgets as DroppedWidget[])
+    : [];
+  const mentions = explicitMentions.length > 0 ? explicitMentions : fallbackMentions;
+  return mentions.filter((mention) => {
+    const syntax = mention.syntax.trim();
+    return syntax.startsWith("@") && hasUnescapedMentionSyntax(text, syntax);
+  });
 }
 
 export function toolMentionIdsFromText(text: string, items: ComposerExtensionItem[]): string[] {

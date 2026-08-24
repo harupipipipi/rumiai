@@ -111,6 +111,31 @@ test("user messages restore human mention badges from semantic metadata", () => 
   assert.doesNotMatch(html, />@browser_computer</);
 });
 
+test("user messages keep escaped mentions and email addresses as literal text", () => {
+  const html = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: false,
+    isNewConversation: false,
+    isGenerating: false,
+    messages: [message({
+      id: "user-with-literals",
+      role: "user",
+      content: [{ type: "text", text: "Email dev@example.com; keep \\@Browser Computer literal." }],
+      rawText: "Email dev@example.com; keep \\@Browser Computer literal.",
+    })],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  }));
+
+  assert.doesNotMatch(html, /data-testid="message-mention-badge"/);
+  assert.match(html, /dev@example\.com/);
+  assert.match(html, /@Browser Computer literal/);
+});
+
 test("repository evidence widget renders trusted exact statistics", () => {
   const html = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
     error: null,

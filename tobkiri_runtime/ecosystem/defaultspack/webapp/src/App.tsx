@@ -83,6 +83,7 @@ import { loadConversationForRefresh, resolveSupersededConversationRedirect } fro
 import { cn } from "./lib/cn";
 import { deleteCalendarScheduleBeforeLocalChange } from "./lib/calendarScheduleDeletion";
 import {
+  activeComposerMentionMetadataForMessage,
   canExecuteComposerEndpointAction,
   composerMentionMetadataFromWidgets,
   composerMentionSyntaxesForToolId,
@@ -90,7 +91,6 @@ import {
   composerSkillMentionWidget,
   composerToolMentionWidget,
   isSafeLocalEndpoint,
-  normalizeComposerMentionMetadata,
   publicComposerWidgetMetadata,
   reconcileComposerSemanticDraft,
   skillMentionIdsFromText,
@@ -1488,11 +1488,10 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
     ...(authorityFollowup ? { authorityFollowup } : {}),
     ...(chatDisplay ? { chatDisplay } : {}),
   };
-  const explicitMentions = normalizeComposerMentionMetadata(metadata.mentions);
-  const fallbackMentions = explicitMentions.length === 0 && Array.isArray(metadata.dropped_widgets)
-    ? composerMentionMetadataFromWidgets(metadata.dropped_widgets as DroppedWidget[])
-    : [];
-  const mentions = explicitMentions.length > 0 ? explicitMentions : fallbackMentions;
+  const mentions = activeComposerMentionMetadataForMessage(
+    messageToText(message),
+    metadata,
+  );
   const userMetadata = Object.keys(displayMetadata).length > 0 || mentions.length > 0
     ? { ...displayMetadata, ...(mentions.length > 0 ? { mentions } : {}) }
     : undefined;

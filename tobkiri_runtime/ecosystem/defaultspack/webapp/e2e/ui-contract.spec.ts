@@ -1501,7 +1501,7 @@ test("composer at mention selects tools skills and services with semantic metada
   await expect(composer).toHaveValue("Use @Web Search ");
   await expect(page.locator(".rumi-composer-frame")).toContainText("Web Search");
 
-  await composer.pressSequentially("@live");
+  await composer.pressSequentially("@real");
   await expect(mentions).toBeVisible();
   await expect(mentions).toContainText("@Live Review");
   await expect(mentions).not.toContainText("feedback/live-review");
@@ -2254,11 +2254,37 @@ test("attachment remove and cancel actions expose 44px visible focus targets", a
 });
 
 test("history reload restores localized semantic mention badges", async ({ page }) => {
-  await openDefaultspack(page, "/chat");
-  await expect(page.getByTestId("message-mention-badge").filter({ hasText: "@Web Search" })).toBeVisible();
+  await openDefaultspack(page, "/chat", {
+    conversationMutator: (conversation) => {
+      conversation.messages.push({
+        ...conversation.messages[0],
+        id: "m-user-literal-mention",
+        content: [{
+          type: "text",
+          text: "Email dev@example.com; keep \\@Browser Computer literal.",
+        }],
+        raw_text: "Email dev@example.com; keep \\@Browser Computer literal.",
+        sequence_number: 3,
+        metadata: {
+          mentions: [{
+            id: "browser_computer",
+            kind: "tool",
+            label: "Browser Computer",
+            syntax: "@Browser Computer",
+          }],
+        },
+      });
+    },
+  });
+  const activeBadges = page.getByTestId("message-mention-badge");
+  await expect(activeBadges.filter({ hasText: "@Web Search" })).toBeVisible();
+  await expect(activeBadges).toHaveCount(1);
+  await expect(page.getByText(/dev@example\.com/)).toBeVisible();
 
   await page.reload();
-  await expect(page.getByTestId("message-mention-badge").filter({ hasText: "@Web Search" })).toBeVisible();
+  await expect(activeBadges.filter({ hasText: "@Web Search" })).toBeVisible();
+  await expect(activeBadges).toHaveCount(1);
+  await expect(page.getByText(/dev@example\.com/)).toBeVisible();
 });
 
 test("composer browser behavior covers long text popovers and mobile coding trust", async ({ page }) => {
