@@ -13,11 +13,12 @@ test('panel routes stay basename-relative', () => {
   assert.equal(panelRoutes.home, '/');
   assert.equal(panelRoutes.setup, '/setup');
   assert.equal(panelRoutes.packs, '/packs');
+  assert.equal(panelRoutes.providers, '/providers');
   assert.equal(panelRoutes.packDetail('defaultspack'), '/packs/defaultspack');
 });
 
 test('registered panel routes expose stable header title metadata', () => {
-  const registeredRoutes = ['home', 'setup', 'packs'] as const;
+  const registeredRoutes = ['home', 'setup', 'packs', 'providers'] as const;
 
   for (const route of registeredRoutes) {
     assert.equal(panelRouteTitleKey(panelRouteMeta[route].path), panelRouteMeta[route].titleKey);
@@ -31,6 +32,7 @@ test('registered panel routes expose stable header title metadata', () => {
 test('viewer navigation groups use route metadata and i18n keys', () => {
   const navRoutes = new Set<string>(viewerNavGroups.flatMap((group) => group.routes));
   assert.ok(navRoutes.has('packs'));
+  assert.ok(navRoutes.has('providers'));
   for (const route of [
     'profile',
     'settings',
@@ -64,6 +66,7 @@ test('stable advanced panel paths map to rebuilt v4 surfaces', () => {
     '/profile-workspace',
     '/flows',
     '/settings',
+    '/providers',
   ]) {
     assert.match(panelRouteTitleKey(path), /^nav\./);
   }
@@ -72,6 +75,7 @@ test('stable advanced panel paths map to rebuilt v4 surfaces', () => {
     'home',
     'setup',
     'packs',
+    'providers',
     'profile',
     'settings',
     'profileWiring',

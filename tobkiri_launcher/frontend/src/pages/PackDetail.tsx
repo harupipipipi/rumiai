@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
@@ -7,12 +7,14 @@ import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
 import { Card, CardHeader, CardTitle, CardContent } from '@/src/components/ui/Card';
 import { panelRoutes } from '@/src/lib/routes';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, PlugZap } from 'lucide-react';
 import { InlineLoadError } from '@/src/components/ui/InlineLoadError';
 import { FileInspectOperation } from '@/src/components/packs/FileInspectOperation';
 import { PackDiagnostics } from '@/src/components/packs/PackDiagnostics';
 import { PackVMLifecyclePanel } from '@/src/components/packs/PackVMLifecyclePanel';
 import { userSafePackVMError } from '@/src/lib/packvmLifecycle';
+import { useRuntimeSurface } from '@/src/hooks/useRuntimeSurface';
+import { projectProviderConnections } from '@/src/lib/providerConnections';
 
 export function PackDetail() {
   const t = useT();
@@ -42,6 +44,12 @@ export function PackDetail() {
   const addToast = useAppStore(state => state.addToast);
   const [installing, setInstalling] = useState(false);
   const [approving, setApproving] = useState(false);
+  const providerContracts = useRuntimeSurface<unknown>('contracts');
+  const providerOperations = useRuntimeSurface<unknown>('operations');
+  const providerConnections = useMemo(() => projectProviderConnections({
+    contractsData: providerContracts.data?.data,
+    operationsData: providerOperations.data?.data,
+  }), [providerContracts.data, providerOperations.data]);
 
   const pack = packs.find(p => p.id === id);
   const mutationResultUnknown = Boolean(
@@ -134,6 +142,9 @@ export function PackDetail() {
     || pack.approvalIssues.includes('approval_revoked');
 
   const operations = packVmDoctor?.ready ? (pack.operations ?? []) : [];
+  const packProviderInstances = providerConnections.filter((provider) => (
+    provider.pack.pack_id === pack.id
+  ));
   const diagnostics = (frontendCatalog?.diagnostics ?? []).filter((diagnostic) => (
     diagnostic.owner_pack_id === pack.id || diagnostic.pack_id === pack.id
   ));
@@ -247,6 +258,24 @@ export function PackDetail() {
             )}
           </div>
         </div>
+        {packProviderInstances.length > 0 ? (
+          <Card>
+            <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+              <div>
+                <p className="font-medium text-text-main">AI provider connections</p>
+                <p className="text-sm text-text-muted">This Pack declares {packProviderInstances.length} provider instance{packProviderInstances.length === 1 ? '' : 's'} through verified Contract metadata.</p>
+                <ul className="mt-2 flex flex-wrap gap-2" aria-label="Declared AI provider instances">
+                  {packProviderInstances.map((provider) => (
+                    <li key={provider.instanceId}><Badge variant="outline">{provider.displayName}</Badge></li>
+                  ))}
+                </ul>
+              </div>
+              <Button variant="outline" onClick={() => navigate(panelRoutes.providers)}>
+                <PlugZap className="mr-2 size-4" aria-hidden="true" />Open Providers
+              </Button>
+            </CardContent>
+          </Card>
+        ) : null}
         {mutationResultUnknown ? (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300/70 bg-amber-50/70 px-4 py-3 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200" role="alert">
             <span>The result of a Pack mutation is unknown. Refresh the authoritative catalog before trying again.</span>

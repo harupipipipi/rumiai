@@ -97,7 +97,7 @@
       "path": "ecosystem/defaultspack/v4/bundle.lock.json",
       "type": "regular-file",
       "size": 26526,
-      "sha256": "5b270efc9fb6b86d79192806905a13790515bfb92ba52f8d09b5f1520b63f76c",
+      "sha256": "c8607e478d0de0f8d50e58ccc405aa4a82bea36a7617ae9e3854c943c277c928",
       "executable": false
     },
     {
@@ -111,7 +111,7 @@
       "path": "ecosystem/defaultspack/v4/defaults.profile.v4.json",
       "type": "regular-file",
       "size": 42539,
-      "sha256": "daa56478ec45f5c03f5fad5c7684577b10832b6ab022db212051a61502f779cc",
+      "sha256": "22e1bc0310be533331fc4305f72ef35a1c0fee8ffdb5043ab79fb8dfd240a25f",
       "executable": false
     },
     {
@@ -643,14 +643,14 @@
       "path": "ecosystem/defaultspack/v4/packs/rumi_provider_adapters_pack.executables.v4.json",
       "type": "regular-file",
       "size": 5595,
-      "sha256": "3524642449ad337c00e0b027e23600d294b58f9d3167d7f553d7889bae3dcf0a",
+      "sha256": "7ec4ed98ad3a53c72bdf2dd1f26a00bf732a863a30b9656bee6621f983d05f63",
       "executable": false
     },
     {
       "path": "ecosystem/defaultspack/v4/packs/rumi_provider_adapters_pack.pack.v4.json",
       "type": "regular-file",
       "size": 8944,
-      "sha256": "18f4ce1eb4b7131c231d561ed626258cedc38ac12ed01f6e4cc056fadbe1007f",
+      "sha256": "5618a7a073ae593c9b4453a5feebfc9d93dd792e2f7b18fd5c589cbb18f4ea4f",
       "executable": false
     },
     {
@@ -1104,8 +1104,8 @@
     {
       "path": "scripts/migrate_pack_artifacts_v4.py",
       "type": "regular-file",
-      "size": 52776,
-      "sha256": "bb6969f41e1ba3cd86226ba79dcbd7afe3d48dc62a873edcef5d0743d0e67155",
+      "size": 52983,
+      "sha256": "75a5adac80148974200a2ff9a3f794643b8c5b96d9cc3bc569209f6553bfcff0",
       "executable": false
     },
     {
@@ -1420,7 +1420,7 @@
       "path": "tobkiri_protocol/schema_hashes.json",
       "type": "regular-file",
       "size": 3259,
-      "sha256": "f81649ac6ab0752e194db3f20e405fa01e3e34d455eeed528e3c1aab7f84e2d9",
+      "sha256": "d8ef577265bfa0013614e6777af2903ca4ea6e10665db736483d760761f6c070",
       "executable": false
     },
     {
@@ -1468,8 +1468,8 @@
     {
       "path": "tobkiri_protocol/schemas/contract_v4.schema.json",
       "type": "regular-file",
-      "size": 4217,
-      "sha256": "88762c00128d0aa861cae38cc5d6f686ac5e5c73b9d8a0ea790f8b3e529c14c8",
+      "size": 7536,
+      "sha256": "9fa986bda4734af843e11fbe264647ee57335121dc7996f345ddb7f7b26f2962",
       "executable": false
     },
     {

@@ -981,6 +981,15 @@ class RuntimeSurfaceService:
         data = {normalized: advanced[normalized]}
         if normalized == "contracts":
             data["routes"] = advanced["routes"]
+            # Provider connection presentation joins only verified Contract
+            # metadata to the exact captured Pack lifecycle projection.  Keep
+            # both in one digest-bound envelope so Launcher never consults a
+            # second provider registry or guesses trust from a Pack name.
+            data["packs"] = advanced["packs"]
+        elif normalized == "operations":
+            # Generic invocation controls must prove that their owner Pack is
+            # enabled, approved, and pinned to this same catalog revision.
+            data["packs"] = advanced["packs"]
         return self._read_envelope(snapshot, surface=normalized, data=data)
 
     def read_settings(self) -> dict[str, object]:

@@ -61,6 +61,9 @@ export function OperationInputForm({
   busy,
   canInvoke,
   onInvoke,
+  fixedValues = {},
+  submitLabel = 'Invoke declared operation',
+  submitAriaLabel = 'Invoke declared contract operation',
 }: {
   operation: RuntimeOperationDescriptor;
   descriptor: LauncherAdvancedViewDescriptor;
@@ -68,6 +71,10 @@ export function OperationInputForm({
   /** The parent descriptor/action gate must explicitly authorize invocation. */
   canInvoke: boolean;
   onInvoke: (payload: Record<string, unknown>) => Promise<void>;
+  /** Exact broker-bound values that users must not be able to alter. */
+  fixedValues?: Readonly<Record<string, unknown>>;
+  submitLabel?: string;
+  submitAriaLabel?: string;
 }) {
   const actionMetadata = advancedActionMetadata(descriptor);
   const descriptorAllowsInvocation = advancedActionAllowed(descriptor, RUNTIME_CONTRACT_INVOKE_ACTION)
@@ -77,14 +84,19 @@ export function OperationInputForm({
     && descriptorAllowsInvocation
     && operation.action === RUNTIME_CONTRACT_INVOKE_ACTION
     && operation.invokable;
-  const properties = Object.entries(operation.input_schema?.properties ?? {});
+  const declaredProperties = Object.entries(operation.input_schema?.properties ?? {});
+  const fixedEntries = Object.entries(fixedValues).filter(([name]) => (
+    operation.input_schema?.properties?.[name] !== undefined
+  ));
+  const fixedNames = new Set(fixedEntries.map(([name]) => name));
+  const properties = declaredProperties.filter(([name]) => !fixedNames.has(name));
   const required = new Set(operation.input_schema?.required ?? []);
   const [values, setValues] = useState<Record<string, InputValue>>({});
   const [validationError, setValidationError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
   const formBusy = busy || submitting;
-  const schemaSignature = JSON.stringify(operation.input_schema ?? {});
+  const schemaSignature = JSON.stringify({schema: operation.input_schema ?? {}, fixedValues});
 
   useEffect(() => {
     setValues(Object.fromEntries(properties.map(([name, schema]) => [name, initialValue(schema, required.has(name))])));
@@ -104,14 +116,15 @@ export function OperationInputForm({
       return;
     }
     for (const name of required) {
-      const schema = properties.find(([propertyName]) => propertyName === name)?.[1];
-      if (!schema || isMissing(values[name], schema)) {
+      const schema = declaredProperties.find(([propertyName]) => propertyName === name)?.[1];
+      const value = fixedNames.has(name) ? fixedValues[name] : values[name];
+      if (!schema || isMissing(value, schema)) {
         setValidationError(`Required input “${name}” is missing.`);
         return;
       }
     }
 
-    const payload: Record<string, unknown> = {};
+    const payload: Record<string, unknown> = Object.fromEntries(fixedEntries);
     for (const [name, schema] of properties) {
       const value = values[name];
       if (isMissing(value, schema)) {
@@ -166,6 +179,12 @@ export function OperationInputForm({
     try {
       await onInvoke(payload);
     } finally {
+      setValues((current) => Object.fromEntries(
+        Object.entries(current).map(([name, value]) => [
+          name,
+          operation.input_schema?.properties?.[name]?.writeOnly ? '' : value,
+        ]),
+      ));
       submittingRef.current = false;
       setSubmitting(false);
     }
@@ -248,7 +267,8 @@ export function OperationInputForm({
                 label={label}
                 helperText={helper}
                 required={required.has(name)}
-                type={schema.type === 'number' || schema.type === 'integer' ? 'number' : 'text'}
+                type={schema.writeOnly ? 'password' : schema.type === 'number' || schema.type === 'integer' ? 'number' : 'text'}
+                autoComplete={schema.writeOnly ? 'new-password' : undefined}
                 value={displayValue(value, schema)}
                 onChange={(event) => updateValue(name, event.target.value)}
                 disabled={formBusy}
@@ -263,9 +283,9 @@ export function OperationInputForm({
         className="min-h-11 self-start"
         loading={formBusy}
         disabled={formBusy || !invocationAllowed}
-        aria-label="Invoke declared contract operation"
+        aria-label={submitAriaLabel}
       >
-        Invoke declared operation
+        {submitLabel}
       </Button>
     </form>
   );

@@ -22,6 +22,7 @@ import {
   LazyFlow,
   LazyGraph,
   LazyPackDetail,
+  LazyProviders,
   LazyPacks,
   LazyNodeManager,
   LazyProfile,
@@ -177,6 +178,7 @@ function DeferredRouteTree({
           <Route index element={<Dashboard />} />
           <Route path={panelRoutes.packs.slice(1)} element={<LazyPacks />} />
           <Route path={`${panelRoutes.packs.slice(1)}/:id`} element={<LazyPackDetail />} />
+          <Route path={panelRoutes.providers.slice(1)} element={<LazyProviders />} />
           <Route path={panelRoutes.profile.slice(1)} element={<LazyProfile />} />
           <Route path={panelRoutes.settings.slice(1)} element={<LazySettings />} />
           <Route path={panelRoutes.profileWiring.slice(1)} element={<LazyProfileWiring />} />

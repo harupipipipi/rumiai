@@ -2,6 +2,7 @@ export const panelRoutes = {
   home: '/',
   setup: '/setup',
   packs: '/packs',
+  providers: '/providers',
   profile: '/profile',
   settings: '/settings',
   profileWiring: '/profile-graph',
@@ -26,6 +27,7 @@ export const panelRouteMeta: Record<PanelRouteKey, PanelRouteMeta> = {
   home: { path: panelRoutes.home, titleKey: 'nav.home', navKey: 'nav.home' },
   setup: { path: panelRoutes.setup, titleKey: 'nav.setup' },
   packs: { path: panelRoutes.packs, titleKey: 'nav.packs', navKey: 'nav.packs' },
+  providers: { path: panelRoutes.providers, titleKey: 'nav.providers', navKey: 'nav.providers' },
   profile: { path: panelRoutes.profile, titleKey: 'nav.profile', navKey: 'nav.profile' },
   settings: { path: panelRoutes.settings, titleKey: 'nav.settings', navKey: 'nav.settings' },
   profileWiring: {
@@ -53,7 +55,7 @@ export const viewerNavGroups = [
   {
     id: 'workspace',
     labelKey: 'nav.group.workspace',
-    routes: ['home', 'packs'] satisfies PanelRouteKey[],
+    routes: ['home', 'packs', 'providers'] satisfies PanelRouteKey[],
   },
   {
     id: 'advanced',

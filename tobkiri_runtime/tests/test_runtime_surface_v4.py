@@ -191,6 +191,10 @@ def test_advanced_views_have_exact_named_payload(active_runtime, view: str) -> N
     assert result["surface"] == view
     assert result["state"] == "ready"
     assert isinstance(result["data"][view], list)
+    if view in {"contracts", "operations"}:
+        assert result["data"]["packs"] == _service(active_runtime).read_advanced(
+            "packs"
+        )["data"]["packs"]
     assert set(result) == {
         "runtime_surface_api_version",
         "surface",
@@ -224,7 +228,9 @@ def test_operation_and_principal_views_are_resolved_plan_derived(active_runtime)
         for item in operations
     )
     assert all(
-        item["invokable"] is False for item in operations if item["domain_kind"] == "pack_vm"
+        item["invokable"] is False
+        for item in operations
+        if item["domain_kind"] == "pack_vm"
     )
     verified = [item for item in operations if item["schema"].get("input_schema")]
     assert verified
@@ -236,6 +242,30 @@ def test_operation_and_principal_views_are_resolved_plan_derived(active_runtime)
         and isinstance(item["schema"]["idempotency"], dict)
         for item in verified
     )
+
+
+def test_provider_connection_metadata_is_digest_pinned_and_profile_selected(
+    active_runtime,
+) -> None:
+    """Launcher receives provider metadata only from the selected v4 Contract."""
+    result = _service(active_runtime).read_advanced("contracts")
+    rows = [
+        row
+        for row in result["data"]["contracts"]
+        if row["pack_id"] == "rumi_provider_adapters_pack"
+        and row["contract_id"] == "tobkiri.service.ai.provider.generate.v1"
+    ]
+
+    assert len(rows) == 1
+    connection = rows[0]["provider_semantics"]["connection"]
+    assert connection["kind"] == "ai_provider"
+    assert connection["instance_id"] == "defaults-profile.provider"
+    assert connection["auth_modes"] == ["none", "local"]
+    assert connection["operations"] == {
+        "test": "rumi_provider_adapters_pack.provider-generate"
+    }
+    assert connection["credential_present"] is False
+    assert not any("secret" in key and key != "secret_fields" for key in connection)
 
 
 def test_contract_routes_are_exact_digest_pinned_broker_bindings(active_runtime) -> None:

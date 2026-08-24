@@ -32,6 +32,7 @@ test('measureBuild separates initial JavaScript, CSS, and lazy route chunks', as
       'src/pages/Dashboard.tsx',
       'src/pages/Packs.tsx',
       'src/pages/PackDetail.tsx',
+      'src/pages/Providers.tsx',
       'src/pages/Profile.tsx',
       'src/pages/Settings.tsx',
       'src/pages/ProfileWiring.tsx',

@@ -11,6 +11,7 @@ import {
 export type LauncherAdvancedViewId =
   | 'profile'
   | 'settings'
+  | 'providerConnections'
   | 'profileWiring'
   | 'profileFiles'
   | 'flow'
@@ -221,6 +222,15 @@ export const LAUNCHER_ADVANCED_VIEWS: Record<LauncherAdvancedViewId, LauncherAdv
     summary: 'Theme, color mode, language, and avatar are presentation settings owned by Launcher.',
     capability: 'launcher_local',
     actions: 'local',
+  },
+  providerConnections: {
+    id: 'providerConnections',
+    label: 'Providers',
+    support: 'rebuilt',
+    sources: ['contracts', 'operations'],
+    summary: 'AI provider instances and connection actions discovered from verified Pack Contract metadata.',
+    capability: 'contract_operation',
+    actions: 'contract_invoke',
   },
   profileWiring: {
     id: 'profileWiring',

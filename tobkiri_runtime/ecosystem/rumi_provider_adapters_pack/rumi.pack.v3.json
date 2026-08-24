@@ -3,6 +3,37 @@
     "provides": [
       {
         "cardinality": "many",
+        "connection": {
+          "kind": "ai_provider",
+          "instance_id": "defaults-profile.provider",
+          "display_name": "Defaults Profile AI provider",
+          "description": "The provider route selected by the active Defaults Profile and its resolved AI provider contracts.",
+          "icon_id": "sparkles",
+          "auth_modes": [
+            "none",
+            "local"
+          ],
+          "settings_schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {}
+          },
+          "ui_hints": {},
+          "secret_fields": [],
+          "endpoint_requirements": {
+            "network_required": false,
+            "local_allowed": true
+          },
+          "operations": {
+            "test": "rumi_provider_adapters_pack.provider-generate"
+          },
+          "multi_instance": false,
+          "configured": true,
+          "credential_present": false,
+          "status": "healthy",
+          "model_count": null,
+          "last_refresh_at": null
+        },
         "failure": "fail_closed",
         "id": "rumi.service.ai.provider.generate.v1",
         "isolation": "in_process",

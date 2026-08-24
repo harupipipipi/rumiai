@@ -6,7 +6,7 @@
     "cli_io_v1.schema.json": "sha256:158d24717c24b04b066acc21d5284eca322931c9ce125466a8bdd2be78c1a982",
     "common_v1.schema.json": "sha256:680b3846db12054e2099ff8e58a04b57b0cd30b66ffaefe7442549ba67b7d143",
     "composition_catalog_v4.schema.json": "sha256:bc951d53190f337fdb258cb211b0b688f3e61a1b0d79c73b5b920de1d10f6ba1",
-    "contract_v4.schema.json": "sha256:88762c00128d0aa861cae38cc5d6f686ac5e5c73b9d8a0ea790f8b3e529c14c8",
+    "contract_v4.schema.json": "sha256:9fa986bda4734af843e11fbe264647ee57335121dc7996f345ddb7f7b26f2962",
     "defaults_setup_v4.schema.json": "sha256:c3a7c3b591000397e9bcb87f5c83d629e246e703e32bb6bb0df67e80f53a14e0",
     "distribution_v1.schema.json": "sha256:be0fac251168c9454defda8a28f95a4920343db9b08a3255971fdd77b469e6da",
     "executable_catalog_v4.schema.json": "sha256:80daa4c77f30e7d5865a72d708492bfbe08eb2ef9325d020e998173bf279c01d",
