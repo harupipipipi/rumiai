@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b1a6a71f8570ada13835c7eb2626eb2baa2f54f79bd99199c8f5c245a08b311b",
+    "digest": "ac2fb530ced82c3e1717247c8037a8c42a60f0a7c7f4ac458e6005856cd55e8c",
     "entries": [
       {
         "path": "index.html",
@@ -15,8 +15,8 @@
       },
       {
         "path": "package.json",
-        "size": 5348,
-        "sha256": "45eb795fd69947b6821b7e217223bdcd64168e0bcee1b432ab9692dfb1040b40"
+        "size": 5399,
+        "sha256": "6367c1f20ca4d5ec0702d7a18d6c779034dc96af030bb49b111683ff0e54bc89"
       },
       {
         "path": "public/assets/tobkiri-startup-blade-cut.svg",
@@ -645,28 +645,28 @@
       },
       {
         "path": "src/components/desktops/DesktopGrid.test.tsx",
-        "size": 5920,
-        "sha256": "7e5417b08cf9bb70a1e54b6b53e987ffaa9c48f1ac1e02864845af9903c5ffd6"
+        "size": 9420,
+        "sha256": "b85b5e9ed972e9b1fbe0159609d49eb4c90e9f743d160a38934b8711e9ead681"
       },
       {
         "path": "src/components/desktops/DesktopGrid.tsx",
-        "size": 3836,
-        "sha256": "7737485f96706e945ab2526758e60dc8c0674198d81252dca87be02e8767aae4"
+        "size": 4358,
+        "sha256": "a9c2d5e623d0b7a6ff439e9feebe7c9c8ce93ed90cc453407574c459ea03d865"
       },
       {
         "path": "src/components/desktops/DesktopInspector.test.tsx",
-        "size": 1031,
-        "sha256": "492897414f99dc50ac5d52d4d39605bff9a6ab83c3d136f6c4fd696519e66c0f"
+        "size": 1519,
+        "sha256": "dbe9f071d3d8c6171e9ae398d21b07e3923745c1fa191404e8c6ae5c0f8d1b6e"
       },
       {
         "path": "src/components/desktops/DesktopInspector.tsx",
-        "size": 14915,
-        "sha256": "e9b719cc7f073f3070c2bc9705e9aef117b8c8c07631772fc04285ee899cb36d"
+        "size": 15485,
+        "sha256": "2acc34f3442933f4002103cae5e642f5109d2be6dbb4be44e50b49117a0ad57d"
       },
       {
         "path": "src/components/desktops/DesktopMonitorWorkspace.tsx",
-        "size": 21431,
-        "sha256": "369da53d72efe048835eafc3635ededd9568425d629240d665706c709e05e6cc"
+        "size": 22508,
+        "sha256": "ab8598f5657fa62c6addb650330f1e05cfe369f2c79f8895d93026d2e9c4d84b"
       },
       {
         "path": "src/components/desktops/DesktopProviderNotice.tsx",
@@ -680,8 +680,8 @@
       },
       {
         "path": "src/components/desktops/DesktopToolbar.tsx",
-        "size": 3995,
-        "sha256": "4016c83712df117ab9cc9cb5865da3709f90bb0fa6038f6e92ac0825932a1942"
+        "size": 4395,
+        "sha256": "387aeebe44f5b57ace436a81222ea7854fc3f0afe6fb24cf5f5b241c86b37f0b"
       },
       {
         "path": "src/components/desktops/RuntimeSetupDialog.test.tsx",
@@ -944,9 +944,14 @@
         "sha256": "84c3bf118d26b245022178cc11d07a6cdda56d6119bf2c23422fb7b3b50e57ed"
       },
       {
+        "path": "src/features/sandboxes/useSandboxInstances.test.ts",
+        "size": 2762,
+        "sha256": "2993d04ea393a026ac3a5dd2117fd6bd3e93f31589f1ad3294b70cd612dad213"
+      },
+      {
         "path": "src/features/sandboxes/useSandboxInstances.ts",
-        "size": 2973,
-        "sha256": "df42603543b4f48a46c5402e120047eeb889b71708490e00d8b3573767cc8b1f"
+        "size": 4280,
+        "sha256": "97e88b682ea91ae970206da12864f745e38a8567329a95803f2c14b5490565ee"
       },
       {
         "path": "src/features/sandboxes/useSandboxTemplates.ts",
@@ -1806,12 +1811,12 @@
     ]
   },
   "bundle": {
-    "digest": "9cd085f42faba6ad8779b2e2b4182b247b74b00acf07912cc1cfb403abd6794f",
+    "digest": "1ed0d6651d32c4c7d88086d7ff6efc275e4351ccde4d69bf49241cf974ca9767",
     "entries": [
       {
         "path": "shell-app.css",
-        "size": 221221,
-        "sha256": "f01a4899a910991eb5365da18678fbe0b6d868c25036771f93f3b78a3386c9b0"
+        "size": 222481,
+        "sha256": "08c0870563803bf5469616158506789e7ad707197838bf7f5f4bcc9112189c69"
       },
       {
         "path": "shell-app.js",
@@ -1820,8 +1825,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2195531,
-        "sha256": "bb3b0526fbd28a17f12989930d01607192f4c6bb84816e359e8735988abbbb96"
+        "size": 2197472,
+        "sha256": "35fad0d4fe8ac99f836055566d3c4289afa17d05b7eb80b3711bf83b9ace9e11"
       },
       {
         "path": "shell-rolldown-runtime.js",

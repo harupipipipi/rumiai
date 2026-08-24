@@ -8,6 +8,7 @@ export type DesktopDensity = "comfortable" | "dense";
 type DesktopToolbarProps = {
   totalCount: number;
   runningCount: number;
+  loading?: boolean;
   filter: DesktopFilter;
   density: DesktopDensity;
   doctorLoading?: boolean;
@@ -28,6 +29,7 @@ function segmentedButtonClassName(active: boolean) {
 export function DesktopToolbar({
   totalCount,
   runningCount,
+  loading = false,
   filter,
   density,
   doctorLoading = false,
@@ -37,16 +39,27 @@ export function DesktopToolbar({
   onCreate,
   onDoctor,
 }: DesktopToolbarProps) {
+  const isInitialRefresh = loading && totalCount === 0;
+  const runningLabel = isInitialRefresh ? "Refreshing" : `${runningCount} running`;
+  const seatsLabel = isInitialRefresh
+    ? "Loading seats..."
+    : `${totalCount} seats · ${loading ? "Refreshing snapshots" : "Live snapshots"}`;
+
   return (
     <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-b border-zinc-800/70 bg-[#09090b] px-4 py-3">
-      <div className="min-w-0">
+      <div
+        className="min-w-0"
+        role="status"
+        aria-live="polite"
+        aria-busy={isInitialRefresh}
+      >
         <div className="flex items-center gap-2">
           <h1 className="truncate text-[15px] font-semibold text-zinc-100">Desktops</h1>
           <span className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-200">
-            {runningCount} running
+            {runningLabel}
           </span>
         </div>
-        <p className="mt-0.5 truncate text-[11px] text-zinc-500">{totalCount} seats · Live snapshots</p>
+        <p className="mt-0.5 truncate text-[11px] text-zinc-500">{seatsLabel}</p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

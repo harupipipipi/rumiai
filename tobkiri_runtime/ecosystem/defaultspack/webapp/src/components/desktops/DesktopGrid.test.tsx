@@ -4,9 +4,15 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import type { DesktopInstance } from "../../features/sandboxes/types";
-import { resolveVisibleSelectedDesktop, resolveVisibleSelectedSeatId, shouldShowDesktopList } from "./DesktopMonitorWorkspace";
+import {
+  isDesktopBootstrapPending,
+  resolveVisibleSelectedDesktop,
+  resolveVisibleSelectedSeatId,
+  shouldShowDesktopList,
+} from "./DesktopMonitorWorkspace";
 import { DesktopGrid } from "./DesktopGrid";
 import { keyboardCaptureDecision } from "./DesktopTile";
+import { DesktopToolbar } from "./DesktopToolbar";
 
 const noop = () => undefined;
 const key = (value: string, overrides = {}) => ({ key: value, ctrlKey: false, altKey: false, metaKey: false, shiftKey: false, ...overrides });
@@ -54,6 +60,26 @@ function renderGrid(desktops: DesktopInstance[]) {
   );
 }
 
+function renderLoadingGrid(desktops: DesktopInstance[]) {
+  return renderToStaticMarkup(
+    createElement(DesktopGrid, {
+      desktops,
+      loading: true,
+      selectedSeatId: desktops[0]?.seat_id ?? null,
+      density: "comfortable",
+      leaseSeatId: null,
+      onSelect: noop,
+      onTakeOver: noop,
+      onReturnToAI: noop,
+      onInput: noop,
+      onStart: noop,
+      onRestart: noop,
+      onStop: noop,
+      onDelete: noop,
+    }),
+  );
+}
+
 test("single desktop tile uses prominent monitor sizing", () => {
   const html = renderGrid([desktop("seat-1")]);
 
@@ -68,6 +94,24 @@ test("multiple desktop grid keeps compact multi-column sizing", () => {
 
   assert.match(html, /min-\[900px\]:grid-cols-2/);
   assert.doesNotMatch(html, /min-h-\[calc\(100vh-180px\)\]/);
+});
+
+test("pending refresh preserves non-empty desktop tiles instead of replacing them with skeletons", () => {
+  const html = renderLoadingGrid([desktop("seat-1")]);
+
+  assert.match(html, /Desktop seat-1/);
+  assert.doesNotMatch(html, /animate-pulse/);
+  assert.doesNotMatch(html, /No desktop seats/);
+});
+
+test("pending refresh with no desktops shows loading skeletons instead of an empty list", () => {
+  const html = renderLoadingGrid([]);
+
+  assert.match(html, /animate-pulse/);
+  assert.match(html, /role="status"/);
+  assert.match(html, /aria-label="Loading desktop seats"/);
+  assert.match(html, /aria-busy="true"/);
+  assert.doesNotMatch(html, /No desktop seats/);
 });
 
 test("desktop grid distinguishes filter-empty from backend-empty", () => {
@@ -93,6 +137,30 @@ test("desktop grid distinguishes filter-empty from backend-empty", () => {
   assert.doesNotMatch(html, /backend returned an empty desktop list/);
 });
 
+test("desktop grid does not present a refresh failure as a confirmed empty backend", () => {
+  const html = renderToStaticMarkup(
+    createElement(DesktopGrid, {
+      desktops: [],
+      selectedSeatId: null,
+      density: "comfortable",
+      leaseSeatId: null,
+      emptyReason: "error",
+      onSelect: noop,
+      onTakeOver: noop,
+      onReturnToAI: noop,
+      onInput: noop,
+      onStart: noop,
+      onRestart: noop,
+      onStop: noop,
+      onDelete: noop,
+    }),
+  );
+
+  assert.match(html, /Desktop seats could not be refreshed/);
+  assert.match(html, /Retry to confirm the latest desktop seat state/);
+  assert.doesNotMatch(html, /backend returned an empty desktop list/);
+});
+
 test("desktop workspace keeps existing seats visible while runtime setup is degraded", () => {
   assert.equal(shouldShowDesktopList({
     runtimeReady: false,
@@ -104,6 +172,58 @@ test("desktop workspace keeps existing seats visible while runtime setup is degr
     desktopCount: 0,
     loading: false,
   }), false);
+});
+
+test("desktop workspace treats only initial empty loading as bootstrap pending", () => {
+  assert.equal(isDesktopBootstrapPending({ desktopCount: 0, loading: true }), true);
+  assert.equal(isDesktopBootstrapPending({ desktopCount: 1, loading: true }), false);
+  assert.equal(isDesktopBootstrapPending({ desktopCount: 0, loading: false }), false);
+});
+
+test("desktop toolbar avoids definitive zero counts during bootstrap", () => {
+  const html = renderToStaticMarkup(
+    createElement(DesktopToolbar, {
+      totalCount: 0,
+      runningCount: 0,
+      loading: true,
+      filter: "all",
+      density: "comfortable",
+      canCreate: false,
+      onFilterChange: noop,
+      onDensityChange: noop,
+      onCreate: noop,
+      onDoctor: noop,
+    }),
+  );
+
+  assert.match(html, /Refreshing/);
+  assert.match(html, /Loading seats\.\.\./);
+  assert.match(html, /role="status"/);
+  assert.match(html, /aria-live="polite"/);
+  assert.match(html, /aria-busy="true"/);
+  assert.doesNotMatch(html, /0 running/);
+  assert.doesNotMatch(html, /0 seats/);
+});
+
+test("desktop toolbar preserves live counts during a non-empty refresh", () => {
+  const html = renderToStaticMarkup(
+    createElement(DesktopToolbar, {
+      totalCount: 12,
+      runningCount: 1,
+      loading: true,
+      filter: "all",
+      density: "comfortable",
+      canCreate: true,
+      onFilterChange: noop,
+      onDensityChange: noop,
+      onCreate: noop,
+      onDoctor: noop,
+    }),
+  );
+
+  assert.match(html, /1 running/);
+  assert.match(html, /12 seats/);
+  assert.match(html, /Refreshing snapshots/);
 });
 
 test("desktop workspace resolves selection from visible desktops", () => {

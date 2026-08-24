@@ -34,3 +34,19 @@ test("desktop inspector exposes request-required grant controls", () => {
   assert.match(html, /placeholder="Request id"/);
   assert.match(html, /Grant/);
 });
+
+test("desktop inspector shows pending selection instead of an empty state during bootstrap", () => {
+  const html = renderToStaticMarkup(
+    createElement(DesktopInspector, {
+      desktop: null,
+      loading: true,
+      hasLease: false,
+    }),
+  );
+
+  assert.match(html, /aria-busy="true"/);
+  assert.match(html, /role="status"/);
+  assert.match(html, /aria-live="polite"/);
+  assert.match(html, /Loading desktop selection/);
+  assert.doesNotMatch(html, /No desktop selected/);
+});

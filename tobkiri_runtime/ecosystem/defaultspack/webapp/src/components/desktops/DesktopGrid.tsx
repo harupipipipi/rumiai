@@ -11,7 +11,7 @@ type DesktopGridProps = {
   selectedSeatId: string | null;
   density: DesktopDensity;
   leaseSeatId: string | null;
-  emptyReason?: "backend" | "filter";
+  emptyReason?: "backend" | "filter" | "error";
   accessKeys?: Record<string, string>;
   controlBusy?: boolean;
   onSelect: (seatId: string) => void;
@@ -60,12 +60,18 @@ export function DesktopGrid({
 }: DesktopGridProps) {
   const singleDesktop = desktops.length === 1;
 
-  if (loading) {
+  if (loading && desktops.length === 0) {
     return (
-      <div className="grid grid-cols-1 gap-3 min-[900px]:grid-cols-2 min-[1400px]:grid-cols-3">
-        <DesktopSkeleton />
-        <DesktopSkeleton />
-        <DesktopSkeleton />
+      <div
+        className="grid grid-cols-1 gap-3 min-[900px]:grid-cols-2 min-[1400px]:grid-cols-3"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+        aria-label="Loading desktop seats"
+      >
+        <div aria-hidden="true"><DesktopSkeleton /></div>
+        <div aria-hidden="true"><DesktopSkeleton /></div>
+        <div aria-hidden="true"><DesktopSkeleton /></div>
       </div>
     );
   }
@@ -76,10 +82,18 @@ export function DesktopGrid({
         <div className="max-w-sm px-5 text-center">
           <Monitor size={28} className="mx-auto text-zinc-600" />
           <p className="mt-3 text-sm font-semibold text-zinc-200">
-            {emptyReason === "filter" ? "No matching desktop seats" : "No desktop seats"}
+            {emptyReason === "filter"
+              ? "No matching desktop seats"
+              : emptyReason === "error"
+                ? "Desktop seats could not be refreshed"
+                : "No desktop seats"}
           </p>
           <p className="mt-1 text-xs text-zinc-500">
-            {emptyReason === "filter" ? "Desktop seats exist outside the current filter." : "The backend returned an empty desktop list."}
+            {emptyReason === "filter"
+              ? "Desktop seats exist outside the current filter."
+              : emptyReason === "error"
+                ? "Retry to confirm the latest desktop seat state."
+                : "The backend returned an empty desktop list."}
           </p>
         </div>
       </div>
