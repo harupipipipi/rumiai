@@ -3,13 +3,28 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'canonical_conversation_client.dart';
+import 'chat_draft_store.dart';
 import 'chat_models.dart';
 import 'composer_bar.dart';
 import 'message_view.dart';
 
 typedef ConversationClientFactory = ConversationTransport Function(
-  MobileChatConnection connection,
-);
+    MobileChatConnection connection);
+
+final class _ChatSubmission {
+  _ChatSubmission({
+    required this.text,
+    required this.userId,
+    required this.assistantId,
+  });
+
+  final String text;
+  final String userId;
+  final String assistantId;
+  String? conversationId;
+  int? expectedRevision;
+  bool accepted = false;
+}
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -17,37 +32,50 @@ class ChatScreen extends StatefulWidget {
     this.connectionStore,
     this.clientFactory,
     this.transport,
+    this.draftStore,
+    this.draftScope,
   });
 
   final ChatConnectionStore? connectionStore;
   final ConversationClientFactory? clientFactory;
   final ConversationTransport? transport;
+  final ChatDraftStore? draftStore;
+  final String? draftScope;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final _messages = <ChatMessage>[];
   final _scrollController = ScrollController();
   late final ChatConnectionStore _connectionStore;
+  late final ChatDraftStore _draftStore;
   ConversationTransport? _transport;
   String? _conversationId;
   String? _connectionError;
+  String? _deliveryWarning;
   bool _busy = false;
   bool _ownsTransport = false;
   int _sequence = 0;
+  String _draftScope = 'unpaired';
+  String _draftText = '';
+  Timer? _draftSaveTimer;
+  _ChatSubmission? _retrySubmission;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _connectionStore = widget.connectionStore ?? MobileChatConnectionStore();
+    _draftStore = widget.draftStore ?? MobileChatDraftStore();
     unawaited(_initialize());
   }
 
   Future<void> _initialize() async {
     if (widget.transport != null) {
       _transport = widget.transport;
+      await _switchDraftScope(widget.draftScope ?? 'local');
       if (mounted) setState(() {});
       return;
     }
@@ -55,11 +83,13 @@ class _ChatScreenState extends State<ChatScreen> {
       final connection = await _connectionStore.load();
       if (connection == null) {
         _connectionError = 'ペアリング済みのチャット接続がありません。';
+        await _switchDraftScope('unpaired');
       } else {
         final factory = widget.clientFactory ??
             (value) => CanonicalConversationClient(connection: value);
         _transport = factory(connection);
         _ownsTransport = true;
+        await _switchDraftScope('pc:${connection.deviceId}');
       }
     } catch (_) {
       _connectionError = 'チャット接続を安全に読み込めませんでした。';
@@ -72,42 +102,71 @@ class _ChatScreenState extends State<ChatScreen> {
     return '$prefix-${DateTime.now().microsecondsSinceEpoch}-$_sequence';
   }
 
-  Future<void> _send(String text) async {
+  Future<ComposerSendResult> _send(String text) async {
     final transport = _transport;
-    if (transport == null || _busy) return;
-    final userId = _id('user');
-    final assistantId = _id('assistant');
+    if (transport == null) {
+      unawaited(_showOptions());
+      return const ComposerSendResult.rejected('チャット接続を設定してから再試行してください。');
+    }
+    if (_busy) {
+      return const ComposerSendResult.queued('前の送信が完了するまでお待ちください。');
+    }
+    final retry = _retrySubmission;
+    final submission =
+        retry != null && !retry.accepted && retry.text.trim() == text.trim()
+            ? retry
+            : _ChatSubmission(
+                text: text,
+                userId: _id('user'),
+                assistantId: _id('assistant'),
+              );
+    final acceptance = Completer<ComposerSendResult>();
+    unawaited(_runSubmission(transport, submission, acceptance));
+    return acceptance.future;
+  }
+
+  Future<void> _runSubmission(
+    ConversationTransport transport,
+    _ChatSubmission submission,
+    Completer<ComposerSendResult> acceptance,
+  ) async {
     setState(() {
       _busy = true;
       _connectionError = null;
-      _messages.addAll([
-        ChatMessage(id: userId, role: ChatRole.user, content: text),
-        ChatMessage(
-          id: assistantId,
-          role: ChatRole.assistant,
-          content: '',
-          pending: true,
-        ),
-      ]);
+      _deliveryWarning = null;
     });
-    _scrollToEnd();
 
+    var sendStarted = false;
     try {
-      final conversationId =
-          _conversationId ?? await transport.createConversation();
+      final conversationId = submission.conversationId ??
+          _conversationId ??
+          await transport.createConversation();
+      submission.conversationId = conversationId;
       _conversationId = conversationId;
-      final revision = await transport.revision(conversationId);
+      final revision = submission.expectedRevision ??
+          await transport.revision(conversationId);
+      submission.expectedRevision = revision;
+      sendStarted = true;
       await for (final update in transport.send(
         conversationId: conversationId,
-        text: text,
-        clientMessageId: userId,
+        text: submission.text,
+        clientMessageId: submission.userId,
         expectedRevision: revision,
       )) {
         if (!mounted) return;
         switch (update.kind) {
+          case CanonicalChatUpdateKind.accepted:
+            _commitSubmission(submission);
+            submission.accepted = true;
+            _retrySubmission = null;
+            if (!acceptance.isCompleted) {
+              acceptance.complete(const ComposerSendResult.accepted());
+            }
+            break;
           case CanonicalChatUpdateKind.delta:
+            if (!submission.accepted) continue;
             _updateAssistant(
-              assistantId,
+              submission.assistantId,
               (current) => current.copyWith(
                 content: update.replace
                     ? update.content
@@ -116,43 +175,116 @@ class _ChatScreenState extends State<ChatScreen> {
             );
             break;
           case CanonicalChatUpdateKind.attention:
+            if (!submission.accepted) continue;
             _updateAssistant(
-              assistantId,
+              submission.assistantId,
               (current) => current.copyWith(content: update.content),
             );
             break;
           case CanonicalChatUpdateKind.error:
-            _updateAssistant(
-              assistantId,
-              (current) => current.copyWith(
-                content: update.content,
-                pending: false,
-                error: true,
-              ),
-            );
+            if (submission.accepted) {
+              _markCommittedRetry(
+                submission,
+                update.content.isEmpty ? '応答を完了できませんでした。' : update.content,
+              );
+            } else if (!acceptance.isCompleted) {
+              _retrySubmission = submission;
+              acceptance.complete(
+                ComposerSendResult.rejected(
+                  update.content.isEmpty
+                      ? '送信が拒否されました。内容を確認して再試行してください。'
+                      : update.content,
+                ),
+              );
+            }
             break;
           case CanonicalChatUpdateKind.done:
+            if (!submission.accepted) continue;
             _updateAssistant(
-              assistantId,
+              submission.assistantId,
               (current) => current.copyWith(pending: false),
             );
             break;
         }
         _scrollToEnd();
       }
-    } catch (_) {
+      if (!submission.accepted && !acceptance.isCompleted) {
+        _retrySubmission = submission;
+        acceptance.complete(
+          const ComposerSendResult.queued('送信結果を確認できませんでした。同じ内容を安全に再試行できます。'),
+        );
+      }
+    } catch (error) {
       if (!mounted) return;
-      _updateAssistant(
-        assistantId,
-        (current) => current.copyWith(
-          content: current.content,
-          pending: false,
-          error: true,
-        ),
-      );
+      final ambiguous = sendStarted &&
+          (error is! ConversationSendException || error.ambiguous);
+      _retrySubmission = submission;
+      if (submission.accepted) {
+        _markCommittedRetry(submission, '応答状態を確認できませんでした。');
+      } else if (!acceptance.isCompleted) {
+        acceptance.complete(
+          ambiguous
+              ? const ComposerSendResult.queued(
+                  '送信結果を確認できませんでした。同じ内容を安全に再試行できます。',
+                )
+              : const ComposerSendResult.rejected(
+                  '送信を開始できませんでした。接続を確認して再試行してください。',
+                ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
+      if (!acceptance.isCompleted) {
+        acceptance.complete(
+          const ComposerSendResult.rejected('送信を開始できませんでした。内容は保存されています。'),
+        );
+      }
     }
+  }
+
+  void _commitSubmission(_ChatSubmission submission) {
+    if (_messages.any((message) => message.id == submission.userId)) return;
+    setState(() {
+      _messages.addAll([
+        ChatMessage(
+          id: submission.userId,
+          role: ChatRole.user,
+          content: submission.text,
+        ),
+        ChatMessage(
+          id: submission.assistantId,
+          role: ChatRole.assistant,
+          content: '',
+          pending: true,
+        ),
+      ]);
+    });
+    _scrollToEnd();
+  }
+
+  void _markCommittedRetry(_ChatSubmission submission, String message) {
+    _retrySubmission = submission;
+    _deliveryWarning = '応答状態を確認できませんでした。同じ送信 ID で再試行できます。';
+    _updateAssistant(
+      submission.assistantId,
+      (current) => current.copyWith(
+        content: current.content.isEmpty ? message : current.content,
+        pending: false,
+        error: true,
+      ),
+    );
+  }
+
+  void _retryCommittedSubmission() {
+    final transport = _transport;
+    final submission = _retrySubmission;
+    if (transport == null || submission == null || _busy) return;
+    _updateAssistant(
+      submission.assistantId,
+      (current) => current.copyWith(content: '', pending: true, error: false),
+    );
+    final acceptance = Completer<ComposerSendResult>();
+    unawaited(_runSubmission(transport, submission, acceptance));
   }
 
   void _updateAssistant(
@@ -199,6 +331,10 @@ class _ChatScreenState extends State<ChatScreen> {
       if (_ownsTransport) _transport?.close();
       final factory = widget.clientFactory ??
           (value) => CanonicalConversationClient(connection: value);
+      await _switchDraftScope(
+        'pc:${connection.deviceId}',
+        preserveCurrent: true,
+      );
       setState(() {
         _transport = factory(connection);
         _ownsTransport = true;
@@ -222,8 +358,75 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  Future<void> _switchDraftScope(
+    String scope, {
+    bool preserveCurrent = false,
+  }) async {
+    _draftSaveTimer?.cancel();
+    final previousScope = _draftScope;
+    final previousText = _draftText;
+    if (previousScope.isNotEmpty && previousText.isNotEmpty) {
+      await _persistDraft(previousScope, previousText);
+    }
+    var nextText = '';
+    try {
+      nextText = await _draftStore.load(scope);
+    } catch (_) {
+      // Keep the in-memory draft usable when protected storage is unavailable.
+    }
+    if (scope == previousScope && _draftText != previousText) {
+      nextText = _draftText;
+      await _persistDraft(scope, nextText);
+    }
+    if (preserveCurrent && nextText.isEmpty && previousText.isNotEmpty) {
+      nextText = previousText;
+      await _persistDraft(scope, nextText);
+    }
+    _draftScope = scope;
+    _draftText = nextText;
+  }
+
+  void _onDraftChanged(String value) {
+    _draftText = value;
+    if (_retrySubmission != null &&
+        !_retrySubmission!.accepted &&
+        _retrySubmission!.text.trim() != value.trim()) {
+      _retrySubmission = null;
+    }
+    _draftSaveTimer?.cancel();
+    if (value.isEmpty) {
+      unawaited(_persistDraft(_draftScope, value));
+      return;
+    }
+    _draftSaveTimer = Timer(const Duration(milliseconds: 250), () {
+      unawaited(_persistDraft(_draftScope, _draftText));
+    });
+  }
+
+  Future<void> _persistDraft(String scope, String text) async {
+    try {
+      await _draftStore.save(scope, text);
+    } catch (_) {
+      // Persistence must never make the live composer unusable or clear text.
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      _draftSaveTimer?.cancel();
+      unawaited(_persistDraft(_draftScope, _draftText));
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _draftSaveTimer?.cancel();
+    unawaited(_persistDraft(_draftScope, _draftText));
     _scrollController.dispose();
     if (_ownsTransport) _transport?.close();
     super.dispose();
@@ -247,6 +450,22 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ],
             ),
+          if (_deliveryWarning != null)
+            MaterialBanner(
+              content: Text(_deliveryWarning!),
+              leading: const Icon(Icons.sync_problem_outlined),
+              actions: [
+                TextButton(
+                  key: const ValueKey('chat-retry-committed'),
+                  onPressed: _busy ? null : _retryCommittedSubmission,
+                  child: const Text('安全に再試行'),
+                ),
+                TextButton(
+                  onPressed: () => setState(() => _deliveryWarning = null),
+                  child: const Text('閉じる'),
+                ),
+              ],
+            ),
           Expanded(
             child: _messages.isEmpty
                 ? Center(
@@ -262,9 +481,12 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
           ),
           ComposerBar(
+            key: ValueKey('composer:$_draftScope'),
             busy: _busy,
-            enabled: connected,
-            onSend: (text) => unawaited(_send(text)),
+            enabled: true,
+            initialText: _draftText,
+            onChanged: _onDraftChanged,
+            onSend: _send,
             onStop: () => unawaited(_stop()),
             onAdd: () => unawaited(_showOptions()),
           ),
