@@ -55,6 +55,7 @@ import {
   readSafeStorageValue,
   writeSafeStorageValue,
 } from './lib/safeStorage';
+import type {DialogConfig} from './lib/dialogConfirmation';
 
 export type {ColorMode, Theme} from './lib/appearance';
 export {AVATAR_OPTIONS} from './lib/avatar';
@@ -73,14 +74,7 @@ export interface Toast {
   type: 'success' | 'error';
 }
 
-export interface DialogConfig {
-  title: string;
-  message: string;
-  onConfirm: () => void | Promise<void>;
-  confirmText?: string;
-  confirmPendingText?: string;
-  cancelText?: string;
-}
+export type {DialogConfig} from './lib/dialogConfirmation';
 
 export interface PackOperation {
   operationId: string;
@@ -89,6 +83,10 @@ export interface PackOperation {
   capabilities: string[];
   inputSchema: Record<string, unknown>;
   invokable: boolean;
+}
+
+export interface MutationFeedbackOptions {
+  errorSurface?: 'toast' | 'dialog';
 }
 
 export interface Pack {
@@ -196,9 +194,15 @@ interface AppState {
   packVmError: string | null;
   loadPacks: (
     force?: boolean,
-    options?: {skipMutationReconciliation?: boolean},
+    options?: {
+      skipMutationReconciliation?: boolean;
+      errorSurface?: 'toast' | 'dialog';
+    },
   ) => Promise<void>;
-  loadFrontendCatalog: (force?: boolean) => Promise<void>;
+  loadFrontendCatalog: (
+    force?: boolean,
+    options?: {errorSurface?: 'toast' | 'dialog'},
+  ) => Promise<void>;
   refreshPackVMDoctor: (
     options?: PackVMDoctorRefreshOptions,
   ) => Promise<ApiPackVMDoctor | null>;
@@ -210,7 +214,7 @@ interface AppState {
   ) => Promise<unknown>;
   installPack: (id: string) => Promise<void>;
   approvePack: (id: string) => Promise<void>;
-  revokePackApproval: (id: string) => Promise<void>;
+  revokePackApproval: (id: string, options?: MutationFeedbackOptions) => Promise<void>;
   togglePack: (id: string) => Promise<boolean>;
   profile: Profile;
   updateLocalProfile: (profile: Partial<Pick<Profile, 'avatar' | 'username' | 'language' | 'job'>>) => void;
@@ -341,8 +345,11 @@ async function invalidatePackMutationSurfaces(get: () => AppState): Promise<void
         // start a second hydrated-journal reconciliation from that refresh;
         // it would outlive the caller and could issue a later request against
         // a replaced/closed UI context.
-        get().loadPacks(true, {skipMutationReconciliation: true}),
-        get().loadFrontendCatalog(true),
+        get().loadPacks(true, {
+          skipMutationReconciliation: true,
+          errorSurface: 'dialog',
+        }),
+        get().loadFrontendCatalog(true, {errorSurface: 'dialog'}),
       ]);
       const refreshedState = get();
       if (refreshedState.packsError || refreshedState.frontendCatalogError) {
@@ -733,6 +740,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to load packs';
+        if (options.errorSurface === 'dialog') throw error;
         set({packsError: message});
         get().addToast(message, 'error');
       }
@@ -743,7 +751,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     return packsLoadPromise;
   },
 
-  loadFrontendCatalog: (force = false) => {
+  loadFrontendCatalog: (force = false, options = {}) => {
     if (!get().packVmDoctor?.ready) {
       set({
         frontendCatalog: null,
@@ -754,7 +762,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (frontendCatalogLoadPromise) {
       if (!force) return frontendCatalogLoadPromise;
       const inFlight = frontendCatalogLoadPromise;
-      return inFlight.then(() => get().loadFrontendCatalog(true));
+      return inFlight.then(() => get().loadFrontendCatalog(true, options));
     }
     const mutationEpochAtStart = packMutationEpoch;
     set({
@@ -786,6 +794,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const message = error instanceof Error
           ? error.message
           : 'Tobkiri dynamic frontend catalog is unavailable.';
+        if (options.errorSurface === 'dialog') throw error;
         set({frontendCatalog: null, frontendCatalogError: message});
       }
     })().finally(() => {
@@ -1207,7 +1216,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  revokePackApproval: async (id) => {
+  revokePackApproval: async (id, options = {}) => {
     const state = get();
     const pack = state.packs.find((candidate) => candidate.id === id);
     if (
@@ -1307,15 +1316,15 @@ export const useAppStore = create<AppState>((set, get) => ({
           });
           const code = reconciled.status.safe_error_code ?? 'PACK_REVOKE_FAILED';
           const failure = new Error(`Pack approval revocation was denied or failed (${code}).`);
-          get().addToast(failure.message, 'error');
+          if (options.errorSurface !== 'dialog') get().addToast(failure.message, 'error');
           throw failure;
         }
-        get().addToast(MUTATION_UNKNOWN_MESSAGE, 'error');
+        if (options.errorSurface !== 'dialog') get().addToast(MUTATION_UNKNOWN_MESSAGE, 'error');
         throw new MutationResultUnknownError(mutationKey, mutation.requestId);
       }
       completeMutation(mutationKey, mutation.requestId);
       const message = error instanceof Error ? error.message : 'Failed to revoke Pack approval';
-      get().addToast(message, 'error');
+      if (options.errorSurface !== 'dialog') get().addToast(message, 'error');
       throw error;
     } finally {
       set((current) => {
