@@ -36,8 +36,10 @@ import {
   WORKSPACE_TAB_CREATE_OPTIONS,
   WorkspaceLaunchpad,
   WorkspaceTabBar,
+  WorkspaceTabPanels,
   createWorkspaceTab,
   workspaceTabDisplayTitle,
+  workspaceTabIdAfterClose,
   type WorkspaceTab,
   type WorkspaceTabKind,
 } from "./components/WorkspaceTabs";
@@ -5151,7 +5153,7 @@ function ChatApp() {
     const option = WORKSPACE_TAB_CREATE_OPTIONS.find((candidate) => candidate.kind === kind);
     if (option?.disabled) return;
     const tab = createWorkspaceTab(kind, {
-      title: kind === "chat" ? "New Conversation" : option?.label,
+      title: kind === "chat" ? "新しい会話" : option?.label,
     });
     setWorkspaceTabs((current) => [...current, tab]);
     activateWorkspaceTab(tab);
@@ -5159,11 +5161,15 @@ function ChatApp() {
 
   const handleWorkspaceTabClose = (tabId: string) => {
     if (workspaceTabs.length <= 1) return;
-    const closedIndex = workspaceTabs.findIndex((tab) => tab.id === tabId);
+    const nextActiveTabId = workspaceTabIdAfterClose(
+      workspaceTabs,
+      activeWorkspaceTabId,
+      tabId,
+    );
     const nextTabs = workspaceTabs.filter((tab) => tab.id !== tabId);
     setWorkspaceTabs(nextTabs);
     if (activeWorkspaceTabId === tabId) {
-      const nextTab = nextTabs[Math.max(0, closedIndex - 1)] ?? nextTabs[0];
+      const nextTab = nextTabs.find((tab) => tab.id === nextActiveTabId) ?? nextTabs[0];
       if (nextTab) activateWorkspaceTab(nextTab);
     }
   };
@@ -7128,6 +7134,11 @@ function ChatApp() {
               onCreate={handleWorkspaceTabCreate}
             />
 
+            <WorkspaceTabPanels
+              tabs={workspaceTabs}
+              activeTabId={activeWorkspaceTabId}
+            >
+
             {showRegion("chat_header") && isChatWorkspace && !isCalendarMode && !isKanbanMode && (
               <Renderers.chatHeader
                 title={activeWorkspaceTab ? workspaceTabDisplayTitle(activeWorkspaceTab) : activeChatTitle}
@@ -7379,6 +7390,7 @@ function ChatApp() {
                 </div>
               </div>
             )}
+            </WorkspaceTabPanels>
           </div>
 
           {isActivityPreviewVisible && (
