@@ -55,8 +55,17 @@ import {
   readSafeStorageValue,
   writeSafeStorageValue,
 } from './lib/safeStorage';
+import {
+  enqueueToast,
+  updateQueuedToast,
+  type Toast,
+  type ToastOptions,
+  type ToastType,
+  type ToastUpdate,
+} from './lib/toastQueue';
 
 export type {ColorMode, Theme} from './lib/appearance';
+export type {Toast, ToastAction, ToastOptions, ToastType} from './lib/toastQueue';
 export {AVATAR_OPTIONS} from './lib/avatar';
 
 function readLocalStorage(key: string): string | null {
@@ -65,12 +74,6 @@ function readLocalStorage(key: string): string | null {
 
 function writeLocalStorage(key: string, value: string): void {
   writeSafeStorageValue(getBrowserStorage('local'), key, value);
-}
-
-export interface Toast {
-  id: string;
-  message: string;
-  type: 'success' | 'error';
 }
 
 export interface DialogConfig {
@@ -165,7 +168,8 @@ interface AppState {
   isSidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
   toasts: Toast[];
-  addToast: (message: string, type: 'success' | 'error') => void;
+  addToast: (message: string, type: ToastType, options?: ToastOptions) => void;
+  updateToast: (id: string, update: ToastUpdate) => void;
   removeToast: (id: string) => void;
   dialog: DialogConfig | null;
   showDialog: (config: DialogConfig) => void;
@@ -613,13 +617,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   toasts: [],
-  addToast: (message, type) => {
-    const id = Math.random().toString(36).substring(2, 9);
-    set((state) => ({toasts: [...state.toasts, {id, message, type}]}));
-    setTimeout(() => {
-      set((state) => ({toasts: state.toasts.filter((toast) => toast.id !== id)}));
-    }, 3000);
+  addToast: (message, type, options = {}) => {
+    set((state) => ({
+      toasts: enqueueToast(state.toasts, message, type, options, () => (
+        globalThis.crypto?.randomUUID?.()
+        ?? Math.random().toString(36).substring(2, 9)
+      )),
+    }));
   },
+  updateToast: (id, update) => set((state) => ({
+    toasts: updateQueuedToast(state.toasts, id, update),
+  })),
   removeToast: (id) => set((state) => ({toasts: state.toasts.filter((toast) => toast.id !== id)})),
 
   dialog: null,
