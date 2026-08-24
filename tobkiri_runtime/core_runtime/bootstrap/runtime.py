@@ -8,6 +8,8 @@ Launcher-captured Pack v4 activation.
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -43,6 +45,51 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
 logger = logging.getLogger(__name__)
 
 
+def _persist_desktop_api_token_cache(user_data: Path, api_token: str) -> Path:
+    """Atomically publish the active local API token for the desktop Launcher."""
+
+    if not api_token or api_token != api_token.strip():
+        raise RuntimeError("active local API token is unavailable")
+
+    destination = user_data.parent / ".desktop_api_token"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=str(destination.parent),
+        prefix=f"{destination.name}.",
+        suffix=".tmp",
+    )
+    temporary = Path(temporary_name)
+    try:
+        if os.name != "nt":
+            os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            descriptor = -1
+            output.write(api_token)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, destination)
+        if os.name != "nt":
+            destination.chmod(0o600)
+        return destination
+    except Exception:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _prepare_desktop_api_token(user_data: Path) -> Path:
+    """Initialize the canonical HMAC store and publish its active token cache."""
+
+    from ..hmac_key_manager import initialize_hmac_key_manager
+
+    manager = initialize_hmac_key_manager(keys_path=str(user_data / "hmac_keys.json"))
+    return _persist_desktop_api_token_cache(user_data, manager.get_active_key())
+
+
 class Kernel:
     """Start and stop the canonical packaged Pack v4 Host surface.
 
@@ -72,6 +119,7 @@ class Kernel:
 
             runtime_root = Path(__file__).resolve().parents[2]
             user_data = runtime_user_data_root()
+            _prepare_desktop_api_token(user_data)
             dispatch_session = None
             contract_bindings: tuple[FrontendContractBinding, ...] = ()
             reconfirmation_error: str | None = None

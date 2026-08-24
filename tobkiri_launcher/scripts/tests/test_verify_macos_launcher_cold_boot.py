@@ -161,8 +161,16 @@ def test_cold_boot_requires_embedded_broker_then_owned_kernel_and_panel(
         if port == config.kernel_port and path == VERIFY.PANEL_BOOTSTRAP_PATH:
             return VERIFY.HttpResponse(
                 200,
-                {"content-type": "text/html; charset=utf-8"},
-                b'<html><script src="/panel/assets/index-test.js"></script></html>',
+                {
+                    "content-type": "text/html; charset=utf-8",
+                    "cache-control": "no-store",
+                },
+                (
+                    b"<!doctype html><script>"
+                    b"document.body.textContent='Tobkiri Launcher authentication required';"
+                    b"fetch('/api/panel/auth/exchange');"
+                    b"</script>"
+                ),
             )
         return None
 
@@ -208,6 +216,47 @@ def test_cold_boot_requires_embedded_broker_then_owned_kernel_and_panel(
         (4242, signal.SIGTERM),
         (4242, signal.SIGKILL),
     ]
+
+
+def test_panel_bootstrap_probe_rejects_unauthenticated_static_panel() -> None:
+    response = VERIFY.HttpResponse(
+        200,
+        {
+            "content-type": "text/html; charset=utf-8",
+            "cache-control": "no-store",
+        },
+        b'<html><script src="/panel/assets/index-test.js"></script></html>',
+    )
+
+    assert VERIFY._panel_bootstrap_is_reachable(response) is False
+
+
+@pytest.mark.parametrize(
+    ("headers", "body"),
+    [
+        (
+            {"content-type": "text/html; charset=utf-8"},
+            (
+                b"<!doctype html>Tobkiri Launcher authentication required"
+                b"/api/panel/auth/exchange"
+            ),
+        ),
+        (
+            {
+                "content-type": "text/html; charset=utf-8",
+                "cache-control": "no-store",
+            },
+            b"<!doctype html>Tobkiri Launcher authentication required",
+        ),
+    ],
+)
+def test_panel_bootstrap_probe_requires_fail_closed_auth_markers(
+    headers: dict[str, str],
+    body: bytes,
+) -> None:
+    response = VERIFY.HttpResponse(200, headers, body)
+
+    assert VERIFY._panel_bootstrap_is_reachable(response) is False
 
 
 def test_cold_boot_rejects_healthy_kernel_not_owned_by_launched_app(
