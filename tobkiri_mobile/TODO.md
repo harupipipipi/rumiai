@@ -12,6 +12,9 @@
 - [x] Add Flutter CI for formatting, analysis, and unit tests.
 - [x] Add unit coverage for API envelope handling, auth headers, URL
       normalization, module parsing, and action routes.
+- [x] Add adaptive conversation navigation over the scoped mobile chat
+      contract, including phone, tablet, desktop, large-text, landscape, and
+      foldable widget coverage.
 
 ## Next Hardening
 
@@ -21,6 +24,4 @@
 - [ ] Add read-only mode that hides mutation buttons unless explicitly enabled.
 - [ ] Add push/local notifications for defaultspack migration and pack request
       changes.
-- [ ] Add chat transport support only after a stable authenticated mobile
-      contract exists for the `8766` defaultspack surface.
 - [ ] Add screenshot-based golden tests after Flutter SDK is available locally.

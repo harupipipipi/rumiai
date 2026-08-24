@@ -1,6 +1,6 @@
-# Rumi Remote Mobile
+# Tobkiri Mobile
 
-Rumi Remote Mobile is the Flutter client for managing a PC-hosted Rumi
+Tobkiri Mobile is the Flutter client for managing a PC-hosted Tobkiri
 `defaultspack` from iOS and Android devices on a trusted network.
 
 The app targets the Kernel Pack API on port `8765`, not the standalone
@@ -48,6 +48,26 @@ explicit release network policy if distributing a LAN-only build.
 | Roll back module | `POST` | `/api/defaultspack/modules/{id}/rollback` |
 | Migration status | `GET` | `/api/defaultspack/migration/status` |
 | Pack requests | `GET` | `/api/defaultspack/pack-requests` |
+
+## Conversation navigation
+
+The Conversations tab connects with paired-device tokens restricted to exactly
+`chat.read` and `chat.write`. Connection details are kept in platform secure
+storage and requests use only the canonical `/api/mobile/v1/conversations`
+routes.
+
+Navigation adapts to the available window instead of the physical device type:
+
+- compact widths use a bounded temporary drawer and one app-bar New
+  conversation action;
+- medium widths keep spaces and conversations in a persistent navigation pane;
+- expanded widths show spaces beside the conversation list and reserve a gap
+  for a separating foldable hinge.
+
+Space choices are standard radio controls with explicit selected and
+online/offline semantics, keyboard focus, hover behavior, and scrollable
+vertical layout. This keeps space switching next to the conversation list and
+avoids hidden horizontal overflow at large text sizes or in split-screen.
 
 ## Development
 
