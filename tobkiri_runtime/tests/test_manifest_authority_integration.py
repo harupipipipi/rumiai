@@ -44,7 +44,7 @@ def test_every_repository_pack_has_one_explicit_authority() -> None:
         direct_pack_ids,
         require_complete_catalog=True,
     )
-    assert len(catalog) == 143
+    assert len(catalog) == 144
     assert set(catalog.values()) == {"v4-authoritative"}
     assert catalog["defaults"] == "v4-authoritative"
     assert catalog["defaultspack"] == "v4-authoritative"

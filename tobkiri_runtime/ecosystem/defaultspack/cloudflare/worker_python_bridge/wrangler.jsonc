@@ -1,0 +1,7 @@
+{
+  "name": "tobkiri-cloudflare-worker-python-bridge",
+  "main": "src/entry.py",
+  "compatibility_date": "2026-08-23",
+  "compatibility_flags": ["python_workers"],
+  "observability": {"enabled": true}
+}

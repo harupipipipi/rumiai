@@ -7,14 +7,20 @@
       "operations": [
         {
           "effect_ceiling": [
-            "capability:tool.definition.contribute"
+            "capability:tool.definition.contribute",
+            "network:*.workers.dev",
+            "network:127.0.0.1",
+            "network:::1",
+            "network:localhost",
+            "secret:RUMI_CLOUDFLARE_WORKER_PYTHON_API_KEY",
+            "secret:RUMI_CLOUDFLARE_WORKER_PYTHON_URL"
           ],
           "error_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
           "idempotency": {
             "mode": "none"
           },
           "input_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
-          "operation_id": "rumi_scheduler_tool_adapter_pack.scheduler-tool-definitions",
+          "operation_id": "rumi_cloudflare_worker_python_pack.cloudflare-worker-python-tool-definitions",
           "output_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
           "scope_semantics": "declarative"
         }
@@ -23,7 +29,7 @@
       "provenance": {
         "evidence": [
           {
-            "digest": "sha256:1f26e11fd51811e23ce180d4322fd4b776a47e0faa37dddb352ea903f803feec",
+            "digest": "sha256:93874cc1d65cb5b11de5992624bc6b47af29b288823e4546fabaecc47bc2b1ac",
             "path": "schemas/pack_v4_catalog.v1.json",
             "rule_id": "canonical-pack-v4-source-record"
           }
@@ -34,27 +40,27 @@
         "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
         "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
         "schema": "io.tobkiri.provenance.v1",
-        "source_digest": "sha256:1f26e11fd51811e23ce180d4322fd4b776a47e0faa37dddb352ea903f803feec",
+        "source_digest": "sha256:93874cc1d65cb5b11de5992624bc6b47af29b288823e4546fabaecc47bc2b1ac",
         "source_kind": "migration",
-        "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_scheduler_tool_adapter_pack"
+        "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_cloudflare_worker_python_pack"
       },
       "provider_semantics": {
         "cardinality": "many",
         "failure": "isolate",
-        "instance_key": "scheduler",
+        "instance_key": "cloudflare-worker-python",
         "isolation": "in_process",
         "lifecycle": {
           "data_owner": "rumi_tool_registry_pack",
           "deprecated": false,
           "introduced": "1.0.0"
         },
-        "provider_id": "rumi_scheduler_tool_adapter_pack.tool-definitions.scheduler",
+        "provider_id": "rumi_cloudflare_worker_python_pack.tool-definitions.cloudflare-worker-python",
         "required_capabilities": [
           "tool.definition.contribute"
         ],
         "security": "internal"
       },
-      "revision_digest": "sha256:5c1865d89f76de2d006965b9b8914d4115cfab020914de2c4f8769a36b031699",
+      "revision_digest": "sha256:94f47032a1de6c50c737c18b3e0f042741cc433d977c7471711b531e65757bd8",
       "schema_catalog": {
         "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0": {
           "type": "object"
@@ -65,27 +71,35 @@
     },
     {
       "contract_api_version": "io.tobkiri.contract.v4",
-      "contract_id": "tobkiri.service.tool.local.operation.v1",
+      "contract_id": "tobkiri.service.tool.remote.operation.v1",
       "operations": [
         {
           "effect_ceiling": [
-            "capability:tool.local.operation"
+            "capability:network.read",
+            "capability:tool.remote.operation",
+            "capability:worker_python.fixed_tool",
+            "network:*.workers.dev",
+            "network:127.0.0.1",
+            "network:::1",
+            "network:localhost",
+            "secret:RUMI_CLOUDFLARE_WORKER_PYTHON_API_KEY",
+            "secret:RUMI_CLOUDFLARE_WORKER_PYTHON_URL"
           ],
           "error_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
           "idempotency": {
             "mode": "none"
           },
           "input_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
-          "operation_id": "rumi_scheduler_tool_adapter_pack.scheduler-tool-operation",
+          "operation_id": "rumi_cloudflare_worker_python_pack.cloudflare-worker-python-invoke",
           "output_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
           "scope_semantics": "declarative"
         }
       ],
-      "owner": "rumi_default_tool_projection_pack",
+      "owner": "rumi_cloudflare_worker_python_pack",
       "provenance": {
         "evidence": [
           {
-            "digest": "sha256:1f26e11fd51811e23ce180d4322fd4b776a47e0faa37dddb352ea903f803feec",
+            "digest": "sha256:93874cc1d65cb5b11de5992624bc6b47af29b288823e4546fabaecc47bc2b1ac",
             "path": "schemas/pack_v4_catalog.v1.json",
             "rule_id": "canonical-pack-v4-source-record"
           }
@@ -96,29 +110,31 @@
         "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
         "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
         "schema": "io.tobkiri.provenance.v1",
-        "source_digest": "sha256:1f26e11fd51811e23ce180d4322fd4b776a47e0faa37dddb352ea903f803feec",
+        "source_digest": "sha256:93874cc1d65cb5b11de5992624bc6b47af29b288823e4546fabaecc47bc2b1ac",
         "source_kind": "migration",
-        "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_scheduler_tool_adapter_pack"
+        "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_cloudflare_worker_python_pack"
       },
       "provider_semantics": {
         "cardinality": "many",
         "failure": "fail_closed",
         "isolation": "in_process",
         "lifecycle": {
-          "data_owner": "scheduler-contract-owners",
+          "data_owner": "caller",
           "deprecated": false,
           "introduced": "1.0.0"
         },
-        "provider_id": "rumi_scheduler_tool_adapter_pack.tool-adapter.scheduler",
+        "provider_id": "rumi_cloudflare_worker_python_pack.cloudflare-worker-python.fixed-tools",
         "required_capabilities": [
-          "tool.local.operation"
+          "network.read",
+          "tool.remote.operation",
+          "worker_python.fixed_tool"
         ],
         "routing_keys": [
-          "scheduler_*"
+          "cloudflare_worker_python"
         ],
         "security": "restricted"
       },
-      "revision_digest": "sha256:d753fb22387c558033f78166130ea196ba979072a220af7a2ab25da279531e7e",
+      "revision_digest": "sha256:04d0eb5c008e7d6126231b2491b1d0ff9aca211bce80de6fa5f07b5d3f9ec4b6",
       "schema_catalog": {
         "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0": {
           "type": "object"
@@ -128,6 +144,6 @@
       "version": "1.0.0"
     }
   ],
-  "pack_id": "rumi_scheduler_tool_adapter_pack",
-  "source_identity": "sha256:1f26e11fd51811e23ce180d4322fd4b776a47e0faa37dddb352ea903f803feec"
+  "pack_id": "rumi_cloudflare_worker_python_pack",
+  "source_identity": "sha256:93874cc1d65cb5b11de5992624bc6b47af29b288823e4546fabaecc47bc2b1ac"
 }

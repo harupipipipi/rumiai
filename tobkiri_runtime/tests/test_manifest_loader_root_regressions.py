@@ -74,8 +74,8 @@ def test_repository_authority_catalog_is_exact_and_has_no_loader_gaps() -> None:
     )
     catalog = authority.load_manifest_authority_catalog()
 
-    assert len(locations) == 141
-    assert len(catalog) == 143
+    assert len(locations) == 142
+    assert len(catalog) == 144
     assert set(catalog) == direct_pack_ids
     assert set(catalog.values()) == {"v4-authoritative"}
     assert catalog["defaults"] == "v4-authoritative"
@@ -103,7 +103,7 @@ def test_repository_authority_catalog_is_exact_and_has_no_loader_gaps() -> None:
 
 
 def test_all_repository_legacy_manifests_validate_without_silent_exclusion() -> None:
-    """The legacy projection audit must accept all 141 repository manifests."""
+    """The legacy projection audit must accept all 142 repository manifests."""
     paths = sorted(ECOSYSTEM.glob("*/ecosystem.json"))
     errors: list[str] = []
     for path in paths:
@@ -112,7 +112,7 @@ def test_all_repository_legacy_manifests_validate_without_silent_exclusion() -> 
         except (OSError, json.JSONDecodeError, SchemaValidationError) as exc:
             errors.append(f"{path.parent.name}: {exc}")
 
-    assert len(paths) == 141
+    assert len(paths) == 142
     assert not errors, "legacy manifest diagnostics: " + " | ".join(errors[:8])
 
 
@@ -125,7 +125,7 @@ def test_all_repository_v3_manifests_validate_with_actionable_diagnostics() -> N
         if not result.ok:
             errors.append(f"{path.parent.name}: {'; '.join(result.diagnostics)}")
 
-    assert len(paths) == 95
+    assert len(paths) == 96
     assert not errors, "v3 manifest diagnostics: " + " | ".join(errors[:8])
 
 

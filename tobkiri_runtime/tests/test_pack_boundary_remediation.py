@@ -26,7 +26,7 @@ def test_v4_catalog_resolves_only_explicit_pack_ids() -> None:
     """The catalog owns all Pack roots and rejects injected or missing IDs."""
 
     catalog = load_pack_catalog()
-    assert len(catalog) == 143
+    assert len(catalog) == 144
     assert set(resolve_selected_pack_roots(["defaults", "defaultspack"])) == {
         "defaults",
         "defaultspack",

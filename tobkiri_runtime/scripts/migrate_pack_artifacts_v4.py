@@ -1182,8 +1182,8 @@ def _validate_catalog_payload(payload: Mapping[str, Any]) -> list[Mapping[str, A
         raise PackV4MigrationError("canonical catalog contains duplicate Pack IDs")
     if pack_ids != sorted(pack_ids) or record_ids != pack_ids:
         raise PackV4MigrationError("canonical catalog has missing or unknown Pack IDs")
-    if len(records) != 143:
-        raise PackV4MigrationError("canonical catalog must contain exactly 143 Packs")
+    if len(records) != 144:
+        raise PackV4MigrationError("canonical catalog must contain exactly 144 Packs")
     required = {
         "version",
         "kind",

@@ -3687,6 +3687,27 @@
       },
       {
         "evidence": "host_execution",
+        "line": 14,
+        "message": "legacy execution or authority path is present",
+        "path": "tobkiri_runtime/ecosystem/rumi_cloudflare_worker_python_pack/ecosystem.json",
+        "rule_id": "legacy_host_execution"
+      },
+      {
+        "evidence": "host_execution",
+        "line": 86,
+        "message": "legacy execution or authority path is present",
+        "path": "tobkiri_runtime/ecosystem/rumi_cloudflare_worker_python_pack/rumi.pack.v3.json",
+        "rule_id": "legacy_host_execution"
+      },
+      {
+        "evidence": "host_execution",
+        "line": 100,
+        "message": "legacy execution or authority path is present",
+        "path": "tobkiri_runtime/ecosystem/rumi_cloudflare_worker_python_pack/rumi.pack.v3.json",
+        "rule_id": "legacy_host_execution"
+      },
+      {
+        "evidence": "host_execution",
         "line": 17,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/ecosystem/rumi_code_migration_pack/ecosystem.json",
@@ -6564,6 +6585,20 @@
       },
       {
         "evidence": "rumi.pack.v3",
+        "line": 26,
+        "message": "legacy execution or authority path is present",
+        "path": "tobkiri_runtime/ecosystem/rumi_cloudflare_worker_python_pack/ecosystem.json",
+        "rule_id": "legacy_v3_manifest"
+      },
+      {
+        "evidence": "rumi.pack.v3",
+        "line": 169,
+        "message": "legacy execution or authority path is present",
+        "path": "tobkiri_runtime/ecosystem/rumi_cloudflare_worker_python_pack/rumi.pack.v3.json",
+        "rule_id": "legacy_v3_manifest"
+      },
+      {
+        "evidence": "rumi.pack.v3",
         "line": 40,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/ecosystem/rumi_coding_sandbox_service_pack/ecosystem.json",
@@ -7786,6 +7821,8 @@
       "tobkiri_runtime/ecosystem/rumi_business_ops_pack/ecosystem.json",
       "tobkiri_runtime/ecosystem/rumi_clipboard_host_service_pack/ecosystem.json",
       "tobkiri_runtime/ecosystem/rumi_clipboard_host_service_pack/rumi.pack.v3.json",
+      "tobkiri_runtime/ecosystem/rumi_cloudflare_worker_python_pack/ecosystem.json",
+      "tobkiri_runtime/ecosystem/rumi_cloudflare_worker_python_pack/rumi.pack.v3.json",
       "tobkiri_runtime/ecosystem/rumi_code_ide_pack/ecosystem.json",
       "tobkiri_runtime/ecosystem/rumi_code_migration_pack/ecosystem.json",
       "tobkiri_runtime/ecosystem/rumi_coding_sandbox_service_pack/ecosystem.json",
@@ -8346,6 +8383,22 @@
         "kind": "manifest",
         "legacy": true,
         "path": "tobkiri_runtime/ecosystem/rumi_clipboard_host_service_pack/rumi.pack.v3.json",
+        "version": "1.0.0"
+      },
+      {
+        "digest": "sha256:050af8304db13e5a39626ba3d316d5a0e569528a04d4aacbc48ca02368d14967",
+        "identity": "rumi_cloudflare_worker_python_pack",
+        "kind": "manifest",
+        "legacy": true,
+        "path": "tobkiri_runtime/ecosystem/rumi_cloudflare_worker_python_pack/ecosystem.json",
+        "version": "1.0.0"
+      },
+      {
+        "digest": "sha256:0b6bde5b3bf8d486903c819e41c97ac7807e1923db7424892b39749ab9b7e99f",
+        "identity": "rumi.cloudflare_worker_python",
+        "kind": "manifest",
+        "legacy": true,
+        "path": "tobkiri_runtime/ecosystem/rumi_cloudflare_worker_python_pack/rumi.pack.v3.json",
         "version": "1.0.0"
       },
       {
@@ -9501,7 +9554,7 @@
         "version": "1.0.0"
       },
       {
-        "digest": "sha256:e7c1712eb10f4189283b2beed1437180fe94353d44ea291d28ce0c93fe10491c",
+        "digest": "sha256:efa351893215110cc864e308ea114f13c43edb0436615f71c60b6c7d7d0a445f",
         "identity": "rumi_scheduler_tool_adapter_pack",
         "kind": "manifest",
         "legacy": true,
@@ -9509,7 +9562,7 @@
         "version": "1.0.0"
       },
       {
-        "digest": "sha256:50313d9b6961d3a93723db1e568447c09c6c5602ec3f44010ba47d9009afd229",
+        "digest": "sha256:2264c49517d703648a4b82f86b50c203f3d9e1cbf0017231aef2751dbc8adcd5",
         "identity": "rumi.scheduler_tool_adapter",
         "kind": "manifest",
         "legacy": true,
@@ -13115,6 +13168,24 @@
         "rule_id": "legacy_host_execution"
       },
       {
+        "evidence_digest": "sha256:050af8304db13e5a39626ba3d316d5a0e569528a04d4aacbc48ca02368d14967",
+        "line": 14,
+        "path": "tobkiri_runtime/ecosystem/rumi_cloudflare_worker_python_pack/ecosystem.json",
+        "rule_id": "legacy_host_execution"
+      },
+      {
+        "evidence_digest": "sha256:0b6bde5b3bf8d486903c819e41c97ac7807e1923db7424892b39749ab9b7e99f",
+        "line": 86,
+        "path": "tobkiri_runtime/ecosystem/rumi_cloudflare_worker_python_pack/rumi.pack.v3.json",
+        "rule_id": "legacy_host_execution"
+      },
+      {
+        "evidence_digest": "sha256:0b6bde5b3bf8d486903c819e41c97ac7807e1923db7424892b39749ab9b7e99f",
+        "line": 100,
+        "path": "tobkiri_runtime/ecosystem/rumi_cloudflare_worker_python_pack/rumi.pack.v3.json",
+        "rule_id": "legacy_host_execution"
+      },
+      {
         "evidence_digest": "sha256:15512b7bdaabc11b8c4618ea5fedade9d6f7b27b931dc7c6e6cc60403e30a13e",
         "line": 17,
         "path": "tobkiri_runtime/ecosystem/rumi_code_migration_pack/ecosystem.json",
@@ -14357,19 +14428,19 @@
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:e7c1712eb10f4189283b2beed1437180fe94353d44ea291d28ce0c93fe10491c",
+        "evidence_digest": "sha256:efa351893215110cc864e308ea114f13c43edb0436615f71c60b6c7d7d0a445f",
         "line": 23,
         "path": "tobkiri_runtime/ecosystem/rumi_scheduler_tool_adapter_pack/ecosystem.json",
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:50313d9b6961d3a93723db1e568447c09c6c5602ec3f44010ba47d9009afd229",
+        "evidence_digest": "sha256:2264c49517d703648a4b82f86b50c203f3d9e1cbf0017231aef2751dbc8adcd5",
         "line": 113,
         "path": "tobkiri_runtime/ecosystem/rumi_scheduler_tool_adapter_pack/rumi.pack.v3.json",
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:50313d9b6961d3a93723db1e568447c09c6c5602ec3f44010ba47d9009afd229",
+        "evidence_digest": "sha256:2264c49517d703648a4b82f86b50c203f3d9e1cbf0017231aef2751dbc8adcd5",
         "line": 136,
         "path": "tobkiri_runtime/ecosystem/rumi_scheduler_tool_adapter_pack/rumi.pack.v3.json",
         "rule_id": "legacy_host_execution"
@@ -15581,6 +15652,18 @@
         "rule_id": "legacy_v3_manifest"
       },
       {
+        "evidence_digest": "sha256:050af8304db13e5a39626ba3d316d5a0e569528a04d4aacbc48ca02368d14967",
+        "line": 26,
+        "path": "tobkiri_runtime/ecosystem/rumi_cloudflare_worker_python_pack/ecosystem.json",
+        "rule_id": "legacy_v3_manifest"
+      },
+      {
+        "evidence_digest": "sha256:0b6bde5b3bf8d486903c819e41c97ac7807e1923db7424892b39749ab9b7e99f",
+        "line": 169,
+        "path": "tobkiri_runtime/ecosystem/rumi_cloudflare_worker_python_pack/rumi.pack.v3.json",
+        "rule_id": "legacy_v3_manifest"
+      },
+      {
         "evidence_digest": "sha256:c39cf13bd8315121670af62aeca46443e2bad7ff91751168659d5c0b3293dc2e",
         "line": 40,
         "path": "tobkiri_runtime/ecosystem/rumi_coding_sandbox_service_pack/ecosystem.json",
@@ -16301,13 +16384,13 @@
         "rule_id": "legacy_v3_manifest"
       },
       {
-        "evidence_digest": "sha256:e7c1712eb10f4189283b2beed1437180fe94353d44ea291d28ce0c93fe10491c",
+        "evidence_digest": "sha256:efa351893215110cc864e308ea114f13c43edb0436615f71c60b6c7d7d0a445f",
         "line": 36,
         "path": "tobkiri_runtime/ecosystem/rumi_scheduler_tool_adapter_pack/ecosystem.json",
         "rule_id": "legacy_v3_manifest"
       },
       {
-        "evidence_digest": "sha256:50313d9b6961d3a93723db1e568447c09c6c5602ec3f44010ba47d9009afd229",
+        "evidence_digest": "sha256:2264c49517d703648a4b82f86b50c203f3d9e1cbf0017231aef2751dbc8adcd5",
         "line": 219,
         "path": "tobkiri_runtime/ecosystem/rumi_scheduler_tool_adapter_pack/rumi.pack.v3.json",
         "rule_id": "legacy_v3_manifest"
@@ -16821,6 +16904,20 @@
         "manifest_digest": "sha256:33e0387fb7d3fdad1c1941b16a68e18ac0ec3ee84c159bf8ec994a03874eb996",
         "pack_id": "rumi.clipboard_host_service",
         "path": "tobkiri_runtime/ecosystem/rumi_clipboard_host_service_pack/rumi.pack.v3.json",
+        "version": "1.0.0"
+      },
+      {
+        "legacy": true,
+        "manifest_digest": "sha256:050af8304db13e5a39626ba3d316d5a0e569528a04d4aacbc48ca02368d14967",
+        "pack_id": "rumi_cloudflare_worker_python_pack",
+        "path": "tobkiri_runtime/ecosystem/rumi_cloudflare_worker_python_pack/ecosystem.json",
+        "version": "1.0.0"
+      },
+      {
+        "legacy": true,
+        "manifest_digest": "sha256:0b6bde5b3bf8d486903c819e41c97ac7807e1923db7424892b39749ab9b7e99f",
+        "pack_id": "rumi.cloudflare_worker_python",
+        "path": "tobkiri_runtime/ecosystem/rumi_cloudflare_worker_python_pack/rumi.pack.v3.json",
         "version": "1.0.0"
       },
       {
@@ -17833,14 +17930,14 @@
       },
       {
         "legacy": true,
-        "manifest_digest": "sha256:e7c1712eb10f4189283b2beed1437180fe94353d44ea291d28ce0c93fe10491c",
+        "manifest_digest": "sha256:efa351893215110cc864e308ea114f13c43edb0436615f71c60b6c7d7d0a445f",
         "pack_id": "rumi_scheduler_tool_adapter_pack",
         "path": "tobkiri_runtime/ecosystem/rumi_scheduler_tool_adapter_pack/ecosystem.json",
         "version": "1.0.0"
       },
       {
         "legacy": true,
-        "manifest_digest": "sha256:50313d9b6961d3a93723db1e568447c09c6c5602ec3f44010ba47d9009afd229",
+        "manifest_digest": "sha256:2264c49517d703648a4b82f86b50c203f3d9e1cbf0017231aef2751dbc8adcd5",
         "pack_id": "rumi.scheduler_tool_adapter",
         "path": "tobkiri_runtime/ecosystem/rumi_scheduler_tool_adapter_pack/rumi.pack.v3.json",
         "version": "1.0.0"
@@ -18397,8 +18494,8 @@
     ]
   },
   "repository": {
-    "commit": "36c098d01ca9d1ebdf253faf2b5dd74690b4124e",
-    "tree_digest": "e8f35bb6c3e32eb80c0325ad05c077df937ee1a8e679b93c1b94c86bc87b701f"
+    "commit": "b6a0784f943d48589df749ca3284ced38ce61fcf",
+    "tree_digest": "183c2576a911223146d8fe18bf4358c975940ea7d9a858a2b3fdfb3e36a16f11"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
   "schema": "io.tobkiri.architecture.inventory.v1"

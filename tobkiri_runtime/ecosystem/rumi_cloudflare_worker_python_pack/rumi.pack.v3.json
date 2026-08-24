@@ -1,0 +1,200 @@
+{
+  "contracts": {
+    "provides": [
+      {
+        "cardinality": "many",
+        "failure": "isolate",
+        "id": "rumi.resource.tool.definition.contribution.v1",
+        "instance_key": "cloudflare-worker-python",
+        "isolation": "in_process",
+        "lifecycle": {
+          "data_owner": "rumi_tool_registry_pack",
+          "deprecated": false,
+          "introduced": "1.0.0"
+        },
+        "provider_instance_id": "tool-definitions.cloudflare-worker-python",
+        "required_capabilities": [
+          "tool.definition.contribute"
+        ],
+        "schemas": {
+          "input": {
+            "type": "object"
+          },
+          "output": {
+            "type": "object"
+          }
+        },
+        "security": "internal",
+        "version": "1.0.0"
+      },
+      {
+        "cardinality": "many",
+        "failure": "fail_closed",
+        "id": "rumi.service.tool.remote.operation.v1",
+        "isolation": "in_process",
+        "lifecycle": {
+          "data_owner": "caller",
+          "deprecated": false,
+          "introduced": "1.0.0"
+        },
+        "provider_instance_id": "cloudflare-worker-python.fixed-tools",
+        "required_capabilities": [
+          "network.read",
+          "tool.remote.operation",
+          "worker_python.fixed_tool"
+        ],
+        "routing_keys": [
+          "cloudflare_worker_python"
+        ],
+        "schemas": {
+          "input": {
+            "type": "object"
+          },
+          "output": {
+            "type": "object"
+          }
+        },
+        "security": "restricted",
+        "version": "1.0.0"
+      }
+    ],
+    "requires": []
+  },
+  "entrypoints": [
+    {
+      "artifact_hash": "sha256:4fdfc56d8e73af099e8627f1d8805a9fbd4113143dc4aab70fac0e234bfe027a",
+      "contract_id": "rumi.resource.tool.definition.contribution.v1",
+      "id": "cloudflare-worker-python-tool-definitions",
+      "loader": "python",
+      "module": "ecosystem.rumi_cloudflare_worker_python_pack.runtime.worker",
+      "symbol": "create_definition_contribution"
+    },
+    {
+      "artifact_hash": "sha256:4fdfc56d8e73af099e8627f1d8805a9fbd4113143dc4aab70fac0e234bfe027a",
+      "contract_id": "rumi.service.tool.remote.operation.v1",
+      "id": "cloudflare-worker-python-invoke",
+      "loader": "python",
+      "module": "ecosystem.rumi_cloudflare_worker_python_pack.runtime.worker",
+      "symbol": "create_invoke_operation"
+    }
+  ],
+  "extensions": {
+    "rumi.legacy_projection": {
+      "dependencies": {
+        "rumi_tool_registry_pack": ">=1.0.0,<2.0.0"
+      },
+      "host_execution": false,
+      "manifest": {
+        "connectivity": {
+          "provides": [
+            "rumi.resource.tool.definition.contribution.v1",
+            "rumi.service.tool.remote.operation.v1"
+          ],
+          "requires": []
+        },
+        "dependencies": {
+          "rumi_tool_registry_pack": ">=1.0.0,<2.0.0"
+        },
+        "description": "PackVM client for fixed Cloudflare Workers Python tools.",
+        "display_name": "Tobkiri Cloudflare Workers Python Tools",
+        "host_execution": false,
+        "metadata": {
+          "canonical_v4": {
+            "artifact": "pack.v4.json",
+            "artifact_digest": "sha256:941c04647c1fbc3527304de766eacaba5238d11a51701cd3b080890e5eff836b",
+            "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+            "source_identity": "sha256:93874cc1d65cb5b11de5992624bc6b47af29b288823e4546fabaecc47bc2b1ac"
+          },
+          "projection_owner": "scripts/migrate_manifest_authority.py"
+        },
+        "pack_id": "rumi_cloudflare_worker_python_pack",
+        "pack_identity": "rumi:ecosystem/rumi_cloudflare_worker_python_pack",
+        "provenance": {
+          "build_identity": "rumi_cloudflare_worker_python_pack:1.0.0",
+          "content_hash": "sha256:4fdfc56d8e73af099e8627f1d8805a9fbd4113143dc4aab70fac0e234bfe027a",
+          "signature": null,
+          "trust_class": "local"
+        },
+        "required_capabilities": [
+          "network.read",
+          "tool.definition.contribute",
+          "tool.remote.operation",
+          "worker_python.fixed_tool"
+        ],
+        "required_network": {
+          "allowed_domains": [],
+          "allowed_ports": []
+        },
+        "required_secrets": [],
+        "resources": [],
+        "version": "1.0.0",
+        "vocabulary": {
+          "types": [
+            "service"
+          ]
+        }
+      },
+      "pack_id": "rumi_cloudflare_worker_python_pack"
+    },
+    "rumi.worker_python.boundary": {
+      "arbitrary_code": false,
+      "fixed_tool_allowlist": true,
+      "host_fallback": false,
+      "oauth_connector_promotion": false,
+      "packvm_only": true
+    },
+    "tobkiri.offline_projection": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "owner": "rumi_cloudflare_worker_python_pack",
+      "runtime_executable": false,
+      "source": "pack.v4.json",
+      "source_identity": "sha256:93874cc1d65cb5b11de5992624bc6b47af29b288823e4546fabaecc47bc2b1ac"
+    }
+  },
+  "migration": {
+    "compatibility_aliases": [],
+    "compatibility_projection": "legacy_to_v3_read_only",
+    "from": [],
+    "removal_wave": 10,
+    "rollback": "Remove the explicit Worker definition and provider Pack.",
+    "sunset_at": "2027-12-31"
+  },
+  "pack": {
+    "description": "PackVM client for fixed Cloudflare Workers Python tools.",
+    "display_name": "Tobkiri Cloudflare Workers Python Tools",
+    "id": "rumi.cloudflare_worker_python",
+    "kind": "adapter",
+    "version": "1.0.0"
+  },
+  "pack_api_version": "rumi.pack.v3",
+  "permissions": [
+    {
+      "access": "execute",
+      "approval_required": false,
+      "capability": "tool.definition.contribute"
+    },
+    {
+      "access": "read",
+      "approval_required": false,
+      "capability": "network.read"
+    },
+    {
+      "access": "execute",
+      "approval_required": false,
+      "capability": "tool.remote.operation"
+    },
+    {
+      "access": "execute",
+      "approval_required": false,
+      "capability": "worker_python.fixed_tool"
+    }
+  ],
+  "provenance": {
+    "build_identity": "rumi_cloudflare_worker_python_pack:1.0.0",
+    "content_hash": "sha256:4fdfc56d8e73af099e8627f1d8805a9fbd4113143dc4aab70fac0e234bfe027a",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "resources": [],
+  "storage": []
+}
