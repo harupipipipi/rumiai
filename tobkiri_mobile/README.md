@@ -1,6 +1,6 @@
-# Rumi Remote Mobile
+# Tobkiri Mobile
 
-Rumi Remote Mobile is the Flutter client for managing a PC-hosted Rumi
+Tobkiri Mobile is the Flutter client for managing a PC-hosted Tobkiri
 `defaultspack` from iOS and Android devices on a trusted network.
 
 The app targets the Kernel Pack API on port `8765`, not the standalone
@@ -9,7 +9,7 @@ token and is the safer surface for LAN access.
 
 ## PC Setup
 
-Start Rumi with the Kernel API bound to the trusted LAN:
+Start Tobkiri with the Kernel API bound to the trusted LAN:
 
 ```powershell
 $env:RUMI_API_BIND_ADDRESS="0.0.0.0"
@@ -29,11 +29,24 @@ directly to the public internet.
 
 When using the Tauri desktop Viewer, closing the Viewer window sends it to the
 background and keeps the Kernel API available for remote clients. Use the tray
-menu's `Quit` item when you want to stop the Kernel and exit Rumi completely.
+menu's `Quit` item when you want to stop the Kernel and exit Tobkiri completely.
 
 Android debug/profile builds allow cleartext HTTP for trusted-LAN development.
 Android release builds do not globally allow cleartext traffic; use HTTPS or an
 explicit release network policy if distributing a LAN-only build.
+
+## Appearance
+
+Tobkiri Mobile follows the device appearance by default. Open **Settings** and
+choose **System**, **Light**, or **Dark** to change it. An explicit choice is
+saved locally and loaded before the first application frame, so startup does
+not briefly render a different theme. System mode also follows supported
+platform high-contrast settings.
+
+The light, dark, and high-contrast themes cover system bars, dialogs, sheets,
+the software keyboard, approval and error states, module status indicators,
+and the raw-data code surface. The semantic `RumiColors` identifier is retained
+as an internal compatibility contract while all user-facing copy uses Tobkiri.
 
 ## API Coverage
 

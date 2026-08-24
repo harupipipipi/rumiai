@@ -13,11 +13,13 @@ dependencies:
   cryptography: ^2.7.0
   flutter_secure_storage: ^9.2.4
   http: ^1.2.2
+  shared_preferences: ^2.5.3
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_secure_storage_platform_interface: ^1.1.2
 
 flutter:
   uses-material-design: true
