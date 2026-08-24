@@ -3260,6 +3260,13 @@ def test_explicit_scope_selects_custom_named_snapshot_for_defaultspack(
     old_native_webview = sys.modules.get("defaultspack.native_webview")
     old_domain = sys.modules.get("domain")
     old_domain_probe = sys.modules.get("domain.sealed_probe")
+    for module_name in (
+        "defaultspack.native_webview",
+        "defaultspack",
+        "domain.sealed_probe",
+        "domain",
+    ):
+        sys.modules.pop(module_name, None)
     module = types.ModuleType("custom_snapshot_desktop_test")
     module.__file__ = str(desktop_path)
     module.__package__ = ""
