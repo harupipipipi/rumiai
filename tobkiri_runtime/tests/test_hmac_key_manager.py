@@ -230,6 +230,10 @@ class TestGenerateOrLoadSigningKey:
 
         key_path = tmp_path / "signing.key"
         monkeypatch.setattr(hmac_key_manager_module.os, "name", "nt")
+        monkeypatch.setenv(
+            hmac_key_manager_module._WINDOWS_SIGNING_KEY_ACL_TARGET_ENV,
+            "untrusted-parent-value",
+        )
         monkeypatch.setattr(hmac_key_manager_module.subprocess, "run", _run)
         hmac_key_manager_module._secure_windows_signing_key(key_path)
 
@@ -247,13 +251,42 @@ class TestGenerateOrLoadSigningKey:
         assert "SetAccessRuleProtection($true, $false)" in argv[-1]
         assert "$rules.Count -ne 1" in argv[-1]
         assert "$rule.IsInherited" in argv[-1]
+        assert "[Console]::In.ReadToEnd()" not in argv[-1]
+        assert "$env:TOBKIRI_SIGNING_KEY_ACL_TARGET_B64" in argv[-1]
+        environment = kwargs.pop("env")
+        assert environment[
+            hmac_key_manager_module._WINDOWS_SIGNING_KEY_ACL_TARGET_ENV
+        ] == base64.b64encode(str(key_path).encode("utf-8")).decode("ascii")
         assert kwargs == {
             "check": True,
             "capture_output": True,
             "text": True,
-            "timeout": 15,
-            "input": base64.b64encode(str(key_path).encode("utf-8")).decode("ascii"),
+            "timeout": hmac_key_manager_module._WINDOWS_SIGNING_KEY_ACL_TIMEOUT_SECONDS,
         }
+
+    @pytest.mark.parametrize(
+        ("harden", "expected_message"),
+        (
+            (True, "could not be secured"),
+            (False, "is unsafe"),
+        ),
+    )
+    def test_windows_acl_timeout_fails_closed(
+        self, tmp_path, monkeypatch, harden, expected_message
+    ):
+        """A bounded Windows ACL timeout must never permit an unsafe key."""
+        key_path = tmp_path / "signing.key"
+
+        def _run(argv: list[str], **kwargs: object) -> None:
+            assert kwargs["timeout"] == (
+                hmac_key_manager_module._WINDOWS_SIGNING_KEY_ACL_TIMEOUT_SECONDS
+            )
+            raise hmac_key_manager_module.subprocess.TimeoutExpired(argv, 60)
+
+        monkeypatch.setattr(hmac_key_manager_module.subprocess, "run", _run)
+
+        with pytest.raises(SigningKeyError, match=expected_message):
+            hmac_key_manager_module._run_windows_signing_key_acl(key_path, harden=harden)
 
     @pytest.mark.parametrize(
         "filename",
@@ -283,14 +316,18 @@ class TestGenerateOrLoadSigningKey:
         hmac_key_manager_module._verify_windows_signing_key_acl(key_path)
 
         assert len(calls) == 2
-        assert calls[0][1]["input"] == calls[1][1]["input"]
+        assert "input" not in calls[0][1]
+        assert "input" not in calls[1][1]
+        target_env = hmac_key_manager_module._WINDOWS_SIGNING_KEY_ACL_TARGET_ENV
+        assert calls[0][1]["env"][target_env] == calls[1][1]["env"][target_env]
         for argv, kwargs in calls:
             command = argv[-1]
             assert expected_path not in command
             assert ".Trim()" not in command
+            assert "[Console]::In.ReadToEnd()" not in command
             assert "[Convert]::FromBase64String($encodedTarget)" in command
             assert "[System.Text.UTF8Encoding]::new($false, $true)" in command
-            payload = kwargs["input"]
+            payload = kwargs["env"][target_env]
             assert isinstance(payload, str)
             decoded_path = base64.b64decode(payload, validate=True).decode("utf-8")
             assert tuple(map(ord, decoded_path)) == expected_code_points
