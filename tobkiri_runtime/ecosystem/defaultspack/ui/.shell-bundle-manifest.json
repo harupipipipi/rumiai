@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b1a6a71f8570ada13835c7eb2626eb2baa2f54f79bd99199c8f5c245a08b311b",
+    "digest": "337096c6edc10ef14b6db330ab8808519f103aa8c813c62f2c0e204e847b1eda",
     "entries": [
       {
         "path": "index.html",
@@ -115,8 +115,8 @@
       },
       {
         "path": "src/App.tsx",
-        "size": 340052,
-        "sha256": "1529c4349429da1ced99275ed3ebb7bc2add26deb900711adde7cb26f7f098ba"
+        "size": 340325,
+        "sha256": "dc289294a880e926e8d899e13630de7a02e004d499f7a8b63140a2c0d3b46606"
       },
       {
         "path": "src/adaptive/ActivityCenter.tsx",
@@ -490,13 +490,13 @@
       },
       {
         "path": "src/components/WorkspaceTabs.test.tsx",
-        "size": 2027,
-        "sha256": "70624b1dcabc30546e2a06b2c9a3172283637d73da6562e706b12ac3ada3562b"
+        "size": 7439,
+        "sha256": "3511cf09f3bd177ffa9ebb34ccadeda386da4dbae49664ae46b2b6c774c8fb83"
       },
       {
         "path": "src/components/WorkspaceTabs.tsx",
-        "size": 16459,
-        "sha256": "cb073f28e03efe5d9a6e642688e3dbb18fac1a283990b8f989495e406f064107"
+        "size": 24797,
+        "sha256": "9345bcc9d097dbffc1dd4fb53d490a9741d7038ad3c28f4f727d35cdd9ec0316"
       },
       {
         "path": "src/components/coding/ApprovalQueue.tsx",
@@ -1806,12 +1806,12 @@
     ]
   },
   "bundle": {
-    "digest": "9cd085f42faba6ad8779b2e2b4182b247b74b00acf07912cc1cfb403abd6794f",
+    "digest": "f802f71755c887f151ebe52b05df59ab7ec6d251286b80a22a0a67fb7ad96be6",
     "entries": [
       {
         "path": "shell-app.css",
-        "size": 221221,
-        "sha256": "f01a4899a910991eb5365da18678fbe0b6d868c25036771f93f3b78a3386c9b0"
+        "size": 221324,
+        "sha256": "a682a3446fd6e9089dbd6eba96ca571316fd99c84d7e91dedee2a79d6b1f04b6"
       },
       {
         "path": "shell-app.js",
@@ -1820,8 +1820,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2195531,
-        "sha256": "bb3b0526fbd28a17f12989930d01607192f4c6bb84816e359e8735988abbbb96"
+        "size": 2198804,
+        "sha256": "910e83852a0c1f99b0a0713e6cf41cd20f3c15b27522c7becefa176ee3d4ff96"
       },
       {
         "path": "shell-rolldown-runtime.js",
