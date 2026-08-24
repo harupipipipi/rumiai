@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b1a6a71f8570ada13835c7eb2626eb2baa2f54f79bd99199c8f5c245a08b311b",
+    "digest": "e17465c150c4fac2c4084bd1bf6b388d5e54e8c9d7f135a71a7cc2f0da2888e7",
     "entries": [
       {
         "path": "index.html",
@@ -115,8 +115,8 @@
       },
       {
         "path": "src/App.tsx",
-        "size": 340052,
-        "sha256": "1529c4349429da1ced99275ed3ebb7bc2add26deb900711adde7cb26f7f098ba"
+        "size": 340728,
+        "sha256": "a7f47b82ce55d5b0138982719e6dcb049a17e5e261e99a2dc944f0ebe4a344fd"
       },
       {
         "path": "src/adaptive/ActivityCenter.tsx",
@@ -954,6 +954,11 @@
         "sha256": "9dddd270a22f90ea937b38d62428b5f2e6c928219b0223def35d7bd3f2b24b96"
       },
       {
+        "path": "src/features/settings/externalInputPresentation.ts",
+        "size": 3344,
+        "sha256": "f1fb2f3db7637655d97582abcf01dbf8cae877aaac084d213507a838f2d970a7"
+      },
+      {
         "path": "src/features/settings/resources/settingsApiResources.ts",
         "size": 3449,
         "sha256": "de6d59903f019d92718fa7bc8a9caebfeb348f4efd2ecb005d1ddb5e95a83970"
@@ -1620,13 +1625,13 @@
       },
       {
         "path": "src/renderers/SettingsModalRenderer.test.tsx",
-        "size": 64043,
-        "sha256": "4f70cf8f756623ea91c136ae1e555f2493c4a62f020e34569c542a63fe4c63b0"
+        "size": 64786,
+        "sha256": "341da5f1315692213fd09a1cb089f2c118baa19e7d1672216a0ceb1ae5aa3a79"
       },
       {
         "path": "src/renderers/SettingsModalRenderer.tsx",
-        "size": 277454,
-        "sha256": "c12a50c7f7ac1aa54d5bf30a4f0e4bc31f4f02299c8671d830edab53c7add96d"
+        "size": 277526,
+        "sha256": "23e1cea50f421d5c7f2c5651ee56d33506fee5a64491166c013b9f91eabf38bb"
       },
       {
         "path": "src/renderers/TitleBarRenderer.tsx",
@@ -1730,8 +1735,8 @@
       },
       {
         "path": "src/settings/controlCenter.test.ts",
-        "size": 21032,
-        "sha256": "2279b890de64fbb254fe3a134ce40d415c26aa0c9b26c96c8035db788126a65d"
+        "size": 22191,
+        "sha256": "d9a0238f318c177f0b00bd935a7d23683dc1f160c0fa367812d184e56f88000b"
       },
       {
         "path": "src/settings/controlCenter.ts",
@@ -1806,7 +1811,7 @@
     ]
   },
   "bundle": {
-    "digest": "9cd085f42faba6ad8779b2e2b4182b247b74b00acf07912cc1cfb403abd6794f",
+    "digest": "cb6dce25eac66b3f28ffc9916f1138683d89dc29aed871e531be92290dc342ca",
     "entries": [
       {
         "path": "shell-app.css",
@@ -1820,8 +1825,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2195531,
-        "sha256": "bb3b0526fbd28a17f12989930d01607192f4c6bb84816e359e8735988abbbb96"
+        "size": 2197951,
+        "sha256": "f60e87fdca5962c5cf2209c098dcca00412c742ea2766a25fca98fc6c5362625"
       },
       {
         "path": "shell-rolldown-runtime.js",
