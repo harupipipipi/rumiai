@@ -1,11 +1,12 @@
 import { AlertCircle, CheckCircle2, CloudOff, Loader2, Wifi, WifiOff } from "lucide-react";
 
 import { cn } from "../../lib/cn";
-import { normalizeLocale, type LocaleSetting } from "../../lib/i18n";
+import type { BackendConnectionState } from "../../lib/backendConnection";
+import { normalizeLocale, t, type LocaleSetting } from "../../lib/i18n";
 import type { SettingsLoadState, SettingsSaveState } from "../types";
 
 type SettingsStatusBarProps = {
-  backendState?: "online" | "degraded" | "offline";
+  backendState?: BackendConnectionState;
   backendNote?: string | null;
   saveState?: SettingsSaveState;
   loadState?: SettingsLoadState;
@@ -18,7 +19,7 @@ type SettingsStatusBarProps = {
 function formatSavedTime(value: number | null | undefined, locale: LocaleSetting): string {
   if (!value) return "";
   try {
-    return new Intl.DateTimeFormat(normalizeLocale(locale) === "ja" ? "ja-JP" : "en-US", {
+    return new Intl.DateTimeFormat(normalizeLocale(locale), {
       hour: "2-digit",
       minute: "2-digit",
     }).format(value);
@@ -42,10 +43,10 @@ export function SettingsStatusBar({
   const dirtyCount = saveState.dirtyKeys?.length ?? 0;
   const savedTime = formatSavedTime(saveState.lastSavedAt, locale);
   const connectionLabel = backendState === "online"
-    ? copy("Backend connected", "Backend接続済み")
+    ? t(locale, "connection.online.title")
     : backendState === "degraded"
-      ? copy("Connection unstable", "接続が不安定")
-      : copy("Offline protection", "オフライン保護中");
+      ? t(locale, "connection.degraded.title")
+      : t(locale, "connection.offline.title");
   const saveLabel = saveState.status === "saving"
     ? copy("Saving…", "保存中…")
     : saveState.status === "error"
@@ -108,8 +109,8 @@ export function SettingsStatusBar({
         >
           <span>
             {backendNote || (backendState === "offline"
-              ? copy("Changes remain visible locally, but they are not confirmed on the backend until reconnection.", "変更は画面上に保持されますが、再接続するまでBackendへの保存は確認されません。")
-              : copy("The backend is responding intermittently. Verify the save indicator before closing Settings.", "Backendの応答が不安定です。Settingsを閉じる前に保存状態を確認してください。"))}
+              ? copy("Changes remain visible locally, but the server has not confirmed them. Verify the save status after reconnection.", "変更は画面上に残りますが、サーバーでは未確認です。再接続後に保存状態を確認してください。")
+              : copy("The server connection is recovering. Verify the save indicator before closing Settings.", "再接続中です。設定を閉じる前に保存状態を確認してください。"))}
           </span>
         </div>
       ) : null}
@@ -119,7 +120,7 @@ export function SettingsStatusBar({
           <div className="min-w-0">
             <p>
               {saveState.message || (dirtyCount > 0
-                ? copy("Some changes remain local and have not been confirmed by the backend.", "一部の変更は画面上に保持されていますが、Backendでは未確定です。")
+                ? copy("Some changes remain local and have not been confirmed by the server.", "一部の変更は画面上に残っていますが、サーバーでは未確認です。")
                 : copy("The last change could not be saved and was not retained as a retryable edit.", "直前の変更を保存できず、再試行可能な編集内容としては保持されていません。"))}
             </p>
             {dirtyCount > 0 && onOpenDirtyKey ? (
