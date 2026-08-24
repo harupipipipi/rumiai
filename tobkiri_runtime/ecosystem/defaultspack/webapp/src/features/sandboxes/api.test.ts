@@ -444,7 +444,7 @@ test("desktop lifecycle calls reuse a caller-provided operation id", async () =>
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({
-      url: String(input),
+      url: requestTarget(input),
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     });
     const deleted = String(input).includes("confirm_destructive");

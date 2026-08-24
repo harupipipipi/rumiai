@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import platform
+import secrets
 import threading
 import uuid
 from dataclasses import fields, is_dataclass
@@ -123,11 +124,11 @@ def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None
         if handler == "runtime_uninstall":
             return _runtime_operation_response(_runtime_uninstall(service, payload))
         if handler == "runtime_operations":
-            return ok({"operations": _operation_store(service).list()})
+            return ok({"operations": _runtime_operations_list(service, context_payload)})
         if handler in {"runtime_operation", "runtime_operation_get"}:
-            return _runtime_operation_get(service, payload)
+            return _runtime_operation_get(service, payload, context_payload)
         if handler in {"runtime_cancel", "runtime_operation_cancel"}:
-            return _runtime_operation_cancel(service, payload)
+            return _runtime_operation_cancel(service, payload, context_payload)
         if handler == "sandbox_templates":
             return ok({"templates": _template_summaries()})
         if handler == "sandboxes_list":
@@ -402,16 +403,51 @@ def _runtime_uninstall(service: _SandboxApiService, payload: dict[str, Any]) -> 
     )
 
 
-def _runtime_operation_get(service: _SandboxApiService, payload: dict[str, Any]):
+def _desktop_operation_authorized(operation: dict[str, Any], context: dict[str, Any]) -> bool:
+    expected = str(operation.get("authority_principal_id") or "").strip()
+    principal = _desktop_principal_id(context)
+    return bool(expected and principal and secrets.compare_digest(expected, principal))
+
+
+def _public_runtime_operation(operation: dict[str, Any]) -> dict[str, Any]:
+    public = dict(operation)
+    public.pop("authority_principal_id", None)
+    return public
+
+
+def _runtime_operations_list(service: _SandboxApiService, context: dict[str, Any]) -> list[dict[str, Any]]:
+    operations: list[dict[str, Any]] = []
+    for operation in _operation_store(service).list():
+        if operation.get("operation_kind") == "desktop_lifecycle" and not _desktop_operation_authorized(operation, context):
+            continue
+        operations.append(_public_runtime_operation(operation))
+    return operations
+
+
+def _runtime_operation_get(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
     operation_id = str(payload.get("operation_id") or "").strip()
     operation = _operation_store(service).get(operation_id)
     if operation is None:
         return _api_error(f"Runtime operation not found: {operation_id}", "RUNTIME_OPERATION_NOT_FOUND", 404)
-    return ok(operation)
+    if operation.get("operation_kind") == "desktop_lifecycle" and not _desktop_operation_authorized(operation, context):
+        return _api_error("Desktop operation status is not available to this principal.", "DESKTOP_OPERATION_STATUS_FORBIDDEN", 403)
+    return ok(_public_runtime_operation(operation))
 
 
-def _runtime_operation_cancel(service: _SandboxApiService, payload: dict[str, Any]):
+def _runtime_operation_cancel(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
     operation_id = str(payload.get("operation_id") or "").strip()
+    existing = _operation_store(service).get(operation_id)
+    if existing is None:
+        return _api_error(f"Runtime operation not found: {operation_id}", "RUNTIME_OPERATION_NOT_FOUND", 404)
+    if existing.get("operation_kind") == "desktop_lifecycle":
+        if not _desktop_operation_authorized(existing, context):
+            return _api_error("Desktop operation status is not available to this principal.", "DESKTOP_OPERATION_STATUS_FORBIDDEN", 403)
+        return _api_error(
+            "Desktop lifecycle operations cannot be cancelled after submission.",
+            "DESKTOP_OPERATION_NOT_CANCELLABLE",
+            409,
+            details={"operation_id": operation_id},
+        )
     operation = _operation_store(service).cancel(operation_id, updated_at=timestamp())
     if operation is None:
         return _api_error(f"Runtime operation not found: {operation_id}", "RUNTIME_OPERATION_NOT_FOUND", 404)
@@ -751,13 +787,18 @@ def _desktop_get(service: _SandboxApiService, payload: dict[str, Any], context: 
 
 def _desktop_delete(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
     seat_id = str(payload.get("seat_id") or "")
+    replay = _authorized_desktop_operation_replay(service, payload, context, seat_id=seat_id, action="delete")
+    if replay is not None:
+        return replay
     access_error = _desktop_access_error(service, seat_id, "desktop.delete", payload, context)
     if access_error is not None:
         return access_error
     confirmation_error = _destructive_confirmation_error(payload, action="delete", resource="desktop")
     if confirmation_error is not None:
         return confirmation_error
-    operation, reservation_error, replayed = _reserve_desktop_lifecycle_operation(service, payload, seat_id=seat_id, action="delete")
+    operation, reservation_error, replayed = _reserve_desktop_lifecycle_operation(
+        service, payload, context, seat_id=seat_id, action="delete"
+    )
     if reservation_error is not None:
         return reservation_error
     if replayed:
@@ -777,6 +818,9 @@ def _desktop_delete(service: _SandboxApiService, payload: dict[str, Any], contex
 
 def _desktop_lifecycle(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any], *, action: str):
     seat_id = str(payload.get("seat_id") or "")
+    replay = _authorized_desktop_operation_replay(service, payload, context, seat_id=seat_id, action=action)
+    if replay is not None:
+        return replay
     access_error = _desktop_access_error(service, seat_id, f"desktop.{action}", payload, context)
     if access_error is not None:
         return access_error
@@ -784,7 +828,9 @@ def _desktop_lifecycle(service: _SandboxApiService, payload: dict[str, Any], con
         confirmation_error = _destructive_confirmation_error(payload, action="stop", resource="desktop")
         if confirmation_error is not None:
             return confirmation_error
-    operation, reservation_error, replayed = _reserve_desktop_lifecycle_operation(service, payload, seat_id=seat_id, action=action)
+    operation, reservation_error, replayed = _reserve_desktop_lifecycle_operation(
+        service, payload, context, seat_id=seat_id, action=action
+    )
     if reservation_error is not None:
         return reservation_error
     if replayed:
@@ -813,11 +859,19 @@ def _desktop_lifecycle(service: _SandboxApiService, payload: dict[str, Any], con
 def _reserve_desktop_lifecycle_operation(
     service: _SandboxApiService,
     payload: dict[str, Any],
+    context: dict[str, Any],
     *,
     seat_id: str,
     action: str,
 ) -> tuple[dict[str, Any], dict[str, Any] | None, bool]:
     operation_id = _runtime_operation_id(payload, provider_id="desktop", action=action)
+    principal_id = _desktop_principal_id(context)
+    if principal_id is None:
+        return {}, _api_error(
+            "Desktop lifecycle operations require a server-derived principal.",
+            "DESKTOP_PRINCIPAL_REQUIRED",
+            403,
+        ), False
     operation, state = _operation_store(service).reserve_desktop_operation({
         "operation_id": operation_id,
         "operation_kind": "desktop_lifecycle",
@@ -830,6 +884,7 @@ def _reserve_desktop_lifecycle_operation(
         "progress_events": [],
         "reboot_required": False,
         "provider_id": "desktop",
+        "authority_principal_id": principal_id,
         "updated_at": timestamp(),
         "error": None,
     })
@@ -850,12 +905,35 @@ def _reserve_desktop_lifecycle_operation(
     return operation, None, state == "replay"
 
 
+def _authorized_desktop_operation_replay(
+    service: _SandboxApiService,
+    payload: dict[str, Any],
+    context: dict[str, Any],
+    *,
+    seat_id: str,
+    action: str,
+) -> dict[str, Any] | None:
+    if not str(payload.get("request_id") or "").strip():
+        return None
+    operation_id = _runtime_operation_id(payload, provider_id="desktop", action=action)
+    operation = _operation_store(service).get(operation_id)
+    if operation is None or operation.get("operation_kind") != "desktop_lifecycle":
+        return None
+    same_request = str(operation.get("seat_id") or "") == seat_id and str(operation.get("action") or "") == action
+    if not same_request:
+        return None
+    if not _desktop_operation_authorized(operation, context):
+        return _api_error("Desktop operation replay is not available to this principal.", "DESKTOP_OPERATION_STATUS_FORBIDDEN", 403)
+    return _desktop_operation_replay(operation)
+
+
 def _desktop_operation_replay(operation: dict[str, Any]) -> dict[str, Any] | None:
     status = str(operation.get("status") or "")
     if status == "completed" and isinstance(operation.get("result"), dict):
         return ok(dict(operation["result"]))
     if status in {"failed", "cancelled"}:
-        failure = operation.get("error") if isinstance(operation.get("error"), dict) else {}
+        raw_failure = operation.get("error")
+        failure: dict[str, Any] = raw_failure if isinstance(raw_failure, dict) else {}
         return _api_error(
             str(failure.get("message") or operation.get("message") or "Desktop lifecycle operation failed."),
             str(failure.get("code") or "DESKTOP_LIFECYCLE_FAILED"),
@@ -897,9 +975,13 @@ def _fail_desktop_lifecycle_operation(
     fallback_code: str,
     fallback_message: str,
 ) -> dict[str, Any]:
-    message = str(result.get("error") or fallback_message)
     code = str(result.get("code") or fallback_code)
     status_code = int(result.get("status_code") or 400)
+    message = _safe_desktop_lifecycle_failure_message(
+        action=str(operation.get("action") or "action"),
+        code=code,
+        fallback=fallback_message,
+    )
     _record_operation(service, {
         **operation,
         "status": "failed",
@@ -909,7 +991,28 @@ def _fail_desktop_lifecycle_operation(
         "updated_at": timestamp(),
         "error": {"code": code, "message": message, "status_code": status_code},
     })
-    return _api_error(message, code, status_code, details={"operation_id": operation.get("operation_id")})
+    return _api_error(
+        message,
+        code,
+        status_code,
+        details={
+            "operation_id": operation.get("operation_id"),
+            "seat_id": operation.get("seat_id"),
+            "action": operation.get("action"),
+        },
+    )
+
+
+def _safe_desktop_lifecycle_failure_message(*, action: str, code: str, fallback: str) -> str:
+    if code == "SANDBOX_NOT_FOUND":
+        return "The desktop no longer exists. Refresh the workspace before retrying."
+    if code == "SANDBOX_NOT_RUNNING":
+        return f"The desktop state changed before {action} could run. Refresh and retry."
+    if "ACCESS" in code or "OWNER" in code or "FORBIDDEN" in code:
+        return f"Tobkiri could not verify permission for desktop {action}."
+    if code.startswith("SANDBOX_PROVIDER_") or code.startswith("SANDBOX_BACKEND_"):
+        return f"The runtime could not complete desktop {action}. Check diagnostics before retrying."
+    return fallback
 
 
 def _desktop_frame(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):

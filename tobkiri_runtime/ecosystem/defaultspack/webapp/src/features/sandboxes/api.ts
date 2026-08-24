@@ -29,6 +29,18 @@ type ApiEnvelope<T> =
 
 type DesktopListPayload = { desktops: unknown[] };
 
+export class SandboxApiError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(status: number, code: string | undefined, message: string) {
+    super(message);
+    this.name = "SandboxApiError";
+    this.code = code || "SANDBOX_API_ERROR";
+    this.status = status;
+  }
+}
+
 function encodeId(value: string): string {
   return encodeURIComponent(value);
 }
@@ -49,9 +61,10 @@ async function request<T>(path: DefaultspackContractRoute, init?: RequestInit): 
     throw new Error(explainDefaultspackApiError(response.status, undefined, response.statusText));
   }
   if (!response.ok || payload.status === "error") {
-    throw new Error(explainDefaultspackApiError(
+    const error = payload.status === "error" ? payload.error : undefined;
+    throw new SandboxApiError(response.status, error?.code, explainDefaultspackApiError(
       response.status,
-      payload.status === "error" ? payload.error : undefined,
+      error,
       response.statusText,
     ));
   }
