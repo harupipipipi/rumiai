@@ -87,6 +87,40 @@ test("keeps the startup boundary until slash commands and mention sources are re
   await expect(page.getByTestId("composer-at-mention-candidates")).toContainText("@Web Search");
 });
 
+test("advanced files command keeps visible guidance for an empty query", async ({ page }) => {
+  await installDefaultspackApiMocks(page, {
+    initialSettingsValues: { commands: { show_advanced_commands: true } },
+  });
+  await page.goto("/chat");
+  await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible({ timeout: 20_000 });
+
+  const composer = page.locator("textarea.rumi-composer-textarea");
+  await composer.fill("/coding");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/coding(?:\?|$)/);
+
+  await composer.fill("/files");
+  const candidates = page.getByTestId("composer-slash-command-candidates");
+  await expect(candidates).toBeVisible();
+  await expect(candidates).toHaveAttribute("role", "listbox");
+  await expect(candidates).toContainText("/files");
+
+  await page.keyboard.press("Enter");
+  await expect(composer).toHaveValue(
+    "Find workspace files. Type a file name or path after /files, for example /files README.",
+  );
+  const guidance = page.getByText(
+    "Type a file name or path after /files, for example /files README.",
+    { exact: true },
+  );
+  await expect(guidance).toBeVisible();
+
+  await composer.fill("/files README");
+  await page.keyboard.press("Enter");
+  await expect(composer).toHaveValue("Find workspace files matching README.");
+  await expect(guidance).toBeHidden();
+});
+
 type ApiMockOptions = {
   beforeCommandCatalogResponse?: () => Promise<void> | void;
   beforeWorkspaceFileReadResponse?: (payload: Record<string, unknown>) => Promise<void> | void;
@@ -751,6 +785,21 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
         commands: [
           protocolCommand("coding", "Coding Mode", "low", "set_mode_coding"),
           protocolCommand("yolo", "Full Access (YOLO)", "medium", "toggle_ultra_yolo"),
+          {
+            ...protocolCommand("files", "Files", "low", "open_file_search"),
+            presentation: {
+              label: { fallback: "Files" },
+              description: { fallback: "Search workspace files." },
+              category: "coding",
+              visibility: "advanced",
+              input: {
+                kind: "form",
+                fields: [{ argument: "query", control: "text", required: false }],
+              },
+              mounts: [],
+            },
+            constraints: { modes: ["coding"] },
+          },
         ],
         state_snapshots: [],
         diagnostics: [],
@@ -782,6 +831,18 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
             modes: ["chat", "coding", "agent"],
             execution: { type: "frontend", action: "toggle_ultra_yolo" },
           },
+          {
+            id: "files",
+            name: "files",
+            label: "Files",
+            description: "Search workspace files.",
+            category: "coding",
+            visibility: "advanced",
+            risk: "low",
+            modes: ["coding"],
+            args: [{ name: "query", type: "string", required: false }],
+            execution: { type: "frontend", action: "open_file_search" },
+          },
         ],
       });
     }
@@ -794,7 +855,10 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
           ? "set_mode_coding"
           : payload.command === "yolo"
             ? "toggle_ultra_yolo"
-            : "",
+            : payload.command === "files"
+              ? "open_file_search"
+              : "",
+        args: payload.args,
       });
     }
 
