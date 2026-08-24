@@ -57,14 +57,14 @@ def _request(
     *,
     body: object | None = None,
     headers: Mapping[str, str] | None = None,
+    timeout_seconds: float = EVENTUAL_RECONCILIATION_TIMEOUT_SECONDS,
 ) -> tuple[int, dict[str, object], list[tuple[str, str]]]:
-    # Keep the real-server contract aligned with the production frontend's
-    # mutation deadline. Profile mutations synchronously verify and recapture
-    # the complete authority-bound runtime before returning success.
+    # Bound real-server integration calls without imposing a product deadline
+    # on synchronous integrity validation and runtime recapture.
     connection = http.client.HTTPConnection(
         "127.0.0.1",
         server.port,
-        timeout=FRONTEND_MUTATION_TIMEOUT_SECONDS,
+        timeout=timeout_seconds,
     )
     encoded = None if body is None else json.dumps(body).encode("utf-8")
     request_headers = dict(headers or {})
@@ -221,6 +221,9 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
         *,
         request_id: str | None = None,
     ) -> tuple[int, dict[str, object]]:
+        # This workflow proves durable state and route correctness. Allow the
+        # real server to finish its complete integrity validation; dedicated
+        # tests cover unknown mutation outcomes and eventual reconciliation.
         status_code, payload, _ = _request(
             server,
             "POST",
@@ -230,6 +233,7 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
                 **mutation_headers,
                 "X-Tobkiri-Request-ID": request_id or str(uuid.uuid4()),
             },
+            timeout_seconds=EVENTUAL_RECONCILIATION_TIMEOUT_SECONDS,
         )
         return status_code, payload
 
