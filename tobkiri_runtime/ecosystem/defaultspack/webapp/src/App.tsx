@@ -14,6 +14,7 @@ import { publishAmbientFinalAnswer } from "./ambient/finalAnswerBridge";
 import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
 import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { ApprovalDecisionSurface } from "./components/ApprovalDecisionSurface";
+import { BackendConnectionBanner } from "./components/BackendConnectionBanner";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
@@ -76,6 +77,10 @@ import {
 import { subscribeAuthorityApprovalSettlements } from "./lib/authorityApprovalEvents";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { browserApprovalViewModel, runtimeApprovalViewModel, type ApprovalViewModel } from "./lib/approvalPresentation";
+import {
+  backendConnectionStateAfterHealthCheck,
+  type BackendConnectionState,
+} from "./lib/backendConnection";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
 import { isMessageScrollerNearBottom } from "./lib/chatScroll";
@@ -108,7 +113,7 @@ import { openAuthorityApprovalWindow, openFingerRecordingWindow } from "./lib/de
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
 import { normalizeLocale } from "./lib/i18n";
 import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
-import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, shouldForgetPendingAfterPollError, type PendingChatRequest } from "./lib/pendingChat";
+import { PENDING_CHAT_REQUEST_TTL_MS, activePendingChatOperation, shouldClearPendingAfterConversationRefresh, shouldForgetPendingAfterPollError, type PendingChatRequest } from "./lib/pendingChat";
 import { normalizePinnedPlacements, withPinnedPlacements } from "./lib/placement";
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
 import {
@@ -138,8 +143,6 @@ type ComposerCandidateMenuState = {
   query: string;
   candidates: ModelCommandCandidate[];
 } | null;
-
-type BackendConnectionState = "online" | "degraded" | "offline";
 
 type CatalogRefreshResult = {
   catalog: UICatalog | null;
@@ -307,41 +310,6 @@ type CalendarDragState = {
   startKey: string;
   startedAt: number;
 };
-
-function formatLastHealthyLabel(timestamp: number | null): string | null {
-  if (!timestamp) return null;
-  return new Intl.DateTimeFormat("ja-JP", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(timestamp);
-}
-
-function backendConnectionCopy(
-  state: BackendConnectionState,
-  lastHealthyAt: number | null,
-  note: string | null,
-): { title: string; detail: string } {
-  if (state === "offline") {
-    return {
-      title: "backend との接続が切れても、ここまでの表示は守ります。",
-      detail: note || "再接続を試しながら、いま見えている会話と操作面を保持しています。",
-    };
-  }
-  if (state === "degraded") {
-    const lastHealthy = formatLastHealthyLabel(lastHealthyAt);
-    return {
-      title: "接続は揺れていますが、画面は崩さず受け止めます。",
-      detail: lastHealthy
-        ? `最後に backend を確認できたのは ${lastHealthy} です。いまは再接続を試しながら静かに保護運転へ切り替えています。`
-        : "いまは再接続を試しながら静かに保護運転へ切り替えています。",
-    };
-  }
-  return {
-    title: "",
-    detail: "",
-  };
-}
 
 const calendarSettingsDefaults: CalendarSettings = {
   agentCurrentChat: false,
@@ -2530,7 +2498,7 @@ function ChatApp() {
   const [isLoading, setIsLoading] = useState(true);
   const [startupError, setStartupError] = useState<string | null>(null);
   const [startupSteps, setStartupSteps] = useState<TobkiriLoadingStep[]>([
-    { id: "backend", label: "バックエンドとの接続を確認しています…", status: "loading" },
+    { id: "backend", label: "サーバーとの接続を確認しています…", status: "loading" },
     { id: "capabilities", label: "ツール・スキル・@候補を読み込みます", status: "pending" },
     { id: "commands", label: "/コマンド・モデル・設定を準備します", status: "pending" },
     { id: "conversations", label: "会話とワークスペースを復元します", status: "pending" },
@@ -2568,7 +2536,6 @@ function ChatApp() {
   const [commandProgressEvents, setCommandProgressEvents] = useState<Array<Record<string, unknown>>>([]);
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
   const [backendConnectionState, setBackendConnectionState] = useState<BackendConnectionState>("online");
-  const [backendConnectionNote, setBackendConnectionNote] = useState<string | null>(null);
   const [operationsStatus, setOperationsStatus] = useState<OperationsCompanyStatus | null>(null);
   const [operationsBusy, setOperationsBusy] = useState(false);
   const [mimoCodingStatus, setMimoCodingStatus] = useState<MimoCodingCompanyStatus | null>(null);
@@ -2605,6 +2572,7 @@ function ChatApp() {
   const activeBrowserApprovalActionRef = useRef<string | null>(null);
   const lastHealthyAtRef = useRef<number | null>(null);
   const consecutiveHealthFailuresRef = useRef(0);
+  const healthRequestGenerationRef = useRef(0);
   const authorityApprovalWindowRequestRef = useRef<string | null>(null);
   const dismissedComposerMentionToolsRef = useRef<Map<string, string[]>>(
     new Map(),
@@ -2719,11 +2687,6 @@ function ChatApp() {
     ? `${latestActiveMessage.id}:${latestActiveMessage.role}:${latestActiveMessage.finish_reason ?? ""}:${String(latestActiveThinking.state ?? "")}`
     : "";
   const messages = orderedMessages.map((message) => toUiMessage(message, activeProfile));
-  const backendConnectionBanner = backendConnectionCopy(
-    backendConnectionState,
-    lastHealthyAtRef.current,
-    backendConnectionNote,
-  );
   const activeChatTitle = activeConversation?.title ?? "New Conversation";
   const activeWorkspaceTab = workspaceTabs.find((tab) => tab.id === activeWorkspaceTabId) ?? workspaceTabs[0] ?? null;
   const activeWorkspaceKind = activeWorkspaceTab?.kind ?? "chat";
@@ -2752,6 +2715,10 @@ function ChatApp() {
   const activePromptProfileId = String(activeConversation?.metadata?.profile_id ?? activePromptUsage?.profile_id ?? "").trim() || undefined;
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
   const locale = normalizeLocale(settingsValues.general?.language);
+  const activePendingRequest = activeConversationId
+    ? pendingRequests[activeConversationId]
+    : null;
+  const pendingConnectionOperation = activePendingChatOperation(activePendingRequest);
   const keyboardButtonNavigation = parseCommandBoolean(settingsValues.general?.keyboard_button_navigation, true);
   const spotlightShortcut = String(settingsValues.general?.spotlight_shortcut ?? "Ctrl+K").trim() || "Ctrl+K";
   const spotlightShortcutEnabled = parseCommandBoolean(settingsValues.general?.spotlight_shortcut_enabled, true);
@@ -2927,10 +2894,8 @@ function ChatApp() {
       setStoredSelectedToolIds(reconciled.selectedToolIds);
     }
   }, [droppedWidgets, input, isGenerating, selectedToolIds, setStoredSelectedToolIds]);
-  const pendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
-  const isConversationPending = Boolean(
-    pendingRequest && Date.now() - pendingRequest.startedAt < PENDING_CHAT_REQUEST_TTL_MS,
-  );
+  const pendingRequest = activePendingRequest;
+  const isConversationPending = pendingConnectionOperation !== null;
   const rawBrowserApproval = pendingBrowserApproval(messages);
   const rawAuthorityApproval = pendingAuthorityApproval(messages);
   const rawRuntimeApproval = pendingRuntimeApproval(messages);
@@ -3387,27 +3352,32 @@ function ChatApp() {
   }, [isSettingsOpen]);
 
   const refreshHealth = useCallback(async (reason: "bootstrap" | "poll" | "focus" = "poll") => {
+    const requestGeneration = healthRequestGenerationRef.current + 1;
+    healthRequestGenerationRef.current = requestGeneration;
     try {
       const nextHealth = await api.health();
+      if (requestGeneration !== healthRequestGenerationRef.current) return;
       consecutiveHealthFailuresRef.current = 0;
       lastHealthyAtRef.current = Date.now();
       setHealth(nextHealth);
-      setBackendConnectionState("online");
-      setBackendConnectionNote(null);
+      setBackendConnectionState(
+        backendConnectionStateAfterHealthCheck(
+          true,
+          lastHealthyAtRef.current,
+          consecutiveHealthFailuresRef.current,
+        ),
+      );
     } catch (healthError) {
+      if (requestGeneration !== healthRequestGenerationRef.current) return;
       console.error(healthError);
       consecutiveHealthFailuresRef.current += 1;
-      const hadHealthyConnection = lastHealthyAtRef.current !== null;
-      const nextState: BackendConnectionState = hadHealthyConnection && consecutiveHealthFailuresRef.current < 3
-        ? "degraded"
-        : "offline";
+      const nextState = backendConnectionStateAfterHealthCheck(
+        false,
+        lastHealthyAtRef.current,
+        consecutiveHealthFailuresRef.current,
+      );
       const message = healthError instanceof Error ? healthError.message : "backend connection lost";
       setBackendConnectionState(nextState);
-      setBackendConnectionNote(
-        hadHealthyConnection
-          ? `最後に安定していた backend から切れました。再接続を試しています。${message}`
-          : `backend の応答をまだ確認できていません。${message}`,
-      );
       if (reason !== "poll" || nextState === "offline") {
         void reportClientDiagnostic({
           source: "webapp",
@@ -3669,7 +3639,7 @@ function ChatApp() {
       setIsLoading(true);
       setStartupError(null);
       setStartupSteps([
-        { id: "backend", label: "バックエンドとの接続を確認しています…", status: "loading" },
+        { id: "backend", label: "サーバーとの接続を確認しています…", status: "loading" },
         { id: "capabilities", label: "ツール・スキル・@候補を読み込みます", status: "pending" },
         { id: "commands", label: "/コマンド・モデル・設定を準備します", status: "pending" },
         { id: "conversations", label: "会話とワークスペースを復元します", status: "pending" },
@@ -3695,6 +3665,7 @@ function ChatApp() {
         rememberPendingRequest({
           ...storedPending,
           conversationId: pendingConversationId,
+          kind: storedPending?.kind ?? "send",
           startedAt: storedPending?.startedAt ?? Date.now(),
           status: storedPending?.status ?? "Processing...",
           toolNames: storedPending?.toolNames ?? [],
@@ -3702,7 +3673,7 @@ function ChatApp() {
         });
       }
       const backendBootstrap = refreshHealth("bootstrap").then(() => {
-        updateStartupStep("backend", "ready", "バックエンドの接続状態を確認しました");
+        updateStartupStep("backend", "ready", "サーバーの接続状態を確認しました");
       });
       updateStartupStep("capabilities", "loading", "ツール・スキル・@候補を読み込んでいます…");
       updateStartupStep("commands", "loading", "/コマンド・モデル・設定を読み込んでいます…");
@@ -3714,7 +3685,7 @@ function ChatApp() {
             updateStartupStep("commands", "error", "/コマンド・モデル・設定を準備できませんでした");
             throw new Error(
               result?.errorMessage
-              ?? "インターフェース情報を取得できませんでした。バックエンド接続を確認してください。",
+              ?? "インターフェース情報を取得できませんでした。サーバー接続を確認してください。",
             );
           }
           updateStartupStep("capabilities", "ready", "ツール・スキル・@候補を準備しました");
@@ -3909,7 +3880,6 @@ function ChatApp() {
           } : current;
         });
         setBackendConnectionState("degraded");
-        setBackendConnectionNote("送信結果を確認できません。operation IDを保持して接続回復を待っています。");
       });
     };
     pollPendingConversation();
@@ -5516,6 +5486,7 @@ function ChatApp() {
       : [currentApproval.toolName].filter(Boolean);
     rememberPendingRequest({
       conversationId: activeConversationId,
+      kind: "approval",
       startedAt: Date.now(),
       status: "ユーザー承認をAIへ伝えています",
       toolNames: approvalToolIds,
@@ -5622,6 +5593,7 @@ function ChatApp() {
     setIsGenerating(true);
     rememberPendingRequest({
       conversationId: activeConversationId,
+      kind: "approval",
       startedAt: Date.now(),
       status: "承認済みの操作を続行しています",
       toolNames: [runtimeApproval.toolName],
@@ -6292,6 +6264,7 @@ function ChatApp() {
           : `chat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
       rememberPendingRequest({
         conversationId: conversation.id,
+        kind: "send",
         operationId,
         requestFingerprint,
         startedAt: requestStartedAt,
@@ -6706,7 +6679,6 @@ function ChatApp() {
           });
         }
         setBackendConnectionState("degraded");
-        setBackendConnectionNote("応答 stream が途中で閉じました。ここまで届いた内容を保持しつつ、backend の回復を待っています。");
         void reportClientDiagnostic({
           source: "webapp",
           category: "stream_interrupted",
@@ -7141,37 +7113,13 @@ function ChatApp() {
               />
             )}
 
-            {backendConnectionState !== "online" && (
-              <div
-                role="status"
-                className={cn(
-                  "mx-3 mt-3 rounded-2xl border px-4 py-3",
-                  backendConnectionState === "offline"
-                    ? "border-red-500/20 bg-red-500/10 text-red-100"
-                    : "border-amber-500/20 bg-amber-500/10 text-amber-100",
-                )}
-              >
-                <div className="flex items-start gap-3">
-                  <div
-                    className={cn(
-                      "mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full",
-                      backendConnectionState === "offline" ? "bg-red-400" : "bg-amber-300 animate-pulse",
-                    )}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{backendConnectionBanner.title}</p>
-                    <p className="mt-1 text-xs leading-5 opacity-90">{backendConnectionBanner.detail}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void refreshHealth("focus")}
-                    className="shrink-0 rounded-xl border border-current/20 px-3 py-1.5 text-[11px] font-semibold text-current transition hover:bg-white/5"
-                  >
-                    いま確認
-                  </button>
-                </div>
-              </div>
-            )}
+            <BackendConnectionBanner
+              state={backendConnectionState}
+              lastHealthyAt={lastHealthyAtRef.current}
+              pendingOperation={pendingConnectionOperation}
+              locale={locale}
+              onCheckConnection={() => void refreshHealth("focus")}
+            />
 
             {activeConversation?.metadata?.imported_from_share === true && provenanceDismissedFor !== activeConversation.id && (
               <ImportedConversationNotice importMode={activeConversation.metadata?.shared_import_mode} onDismiss={() => setProvenanceDismissedFor(activeConversation.id)} />
@@ -7492,7 +7440,7 @@ function ChatApp() {
           modelProfiles={settingsModelProfiles}
           activeModelProfileId={activeProfile?.profile_id ?? activeModelId}
           backendConnectionState={backendConnectionState}
-          backendConnectionNote={backendConnectionNote}
+          backendConnectionNote={null}
           saveState={settingsSaveState}
           loadState={settingsLoadState}
           modelProfilesLoadState={modelProfilesLoadState}
