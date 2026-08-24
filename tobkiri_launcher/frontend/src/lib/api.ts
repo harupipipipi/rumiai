@@ -93,11 +93,13 @@ export class ApiRequestTimeoutError extends Error {
 
 export class ApiContractError extends Error {
   readonly data: unknown;
+  readonly status: number | null;
 
-  constructor(message: string, data: unknown) {
+  constructor(message: string, data: unknown, status: number | null = null) {
     super(message);
     this.name = 'ApiContractError';
     this.data = data;
+    this.status = status;
   }
 }
 
@@ -678,7 +680,7 @@ export async function apiFetch<T>(
       ) {
         return fetchRequest(false, signal);
       }
-      throw new ApiContractError(errorMessage, errorData);
+      throw new ApiContractError(errorMessage, errorData, response.status);
     }
 
     const envelope: ApiResponse<T> = await response.json();
@@ -692,7 +694,7 @@ export async function apiFetch<T>(
       ) {
         return fetchRequest(false, signal);
       }
-      throw new ApiContractError(errorMessage, envelope.data);
+      throw new ApiContractError(errorMessage, envelope.data, response.status);
     }
     return envelope.data as T;
   };
