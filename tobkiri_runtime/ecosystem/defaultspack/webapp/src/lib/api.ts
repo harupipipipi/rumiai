@@ -3268,6 +3268,13 @@ export const api = {
     });
   },
 
+  forkConversation(id: string, messageId?: string | null) {
+    return request<Conversation>(defaultspackContractRoute(`api/chat/conversations/${encodeURIComponent(id)}/fork`), {
+      method: "POST",
+      body: JSON.stringify(messageId ? { message_id: messageId } : {}),
+    });
+  },
+
   getPromptActive(params?: { profile_id?: string; conversation_id?: string; include_text?: boolean; model_profile_id?: string; model?: string }) {
     return request<{
       profile_id: string;
@@ -4148,7 +4155,7 @@ export const api = {
   },
 
   exportConversation(conversationId: string, format = "markdown") {
-    return request<{ conversation_id: string; content: string; format: "markdown" | "json" }>(
+    return request<{ conversation_id: string; content: string; format: "markdown" | "json" | "text" }>(
       defaultspackContractRoute(`api/chat/conversations/${conversationId}/export`),
       {
         method: "POST",

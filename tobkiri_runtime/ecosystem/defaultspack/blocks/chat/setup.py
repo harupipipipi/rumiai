@@ -43,6 +43,7 @@ def run(context):
         ("POST", "/api/chat/conversations/{id}/stream", _lazy("blocks.chat.stream"), {"id": "conversation_id"}),
         ("POST", "/api/chat/conversations/{id}/stop", _lazy("blocks.chat.stop"), {"id": "conversation_id"}),
         ("POST", "/api/chat/conversations/{id}/export", _lazy("blocks.chat.export_conversation"), {"id": "conversation_id"}),
+        ("POST", "/api/chat/conversations/{id}/fork", _lazy("blocks.chat.fork_conversation"), {"id": "conversation_id"}),
         ("POST", "/api/chat/conversations/{id}/summarize", _lazy("blocks.chat.summarize_and_trim"), {"id": "conversation_id"}),
         ("POST", "/api/chat/conversations/{id}/auto-trim", _lazy("blocks.chat.auto_trim"), {"id": "conversation_id"}),
         ("GET", "/api/chat/conversations/{id}/tool-preferences", _lazy("blocks.chat.tool_preferences", "run_get"), {"id": "conversation_id"}),

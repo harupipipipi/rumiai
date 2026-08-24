@@ -154,6 +154,44 @@ test("conversation share API exports redacted history and revokes through token-
   ]);
 });
 
+test("conversation slash APIs use owner-scoped fork and text export routes", async () => {
+  const requests: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push({
+      url: requestTarget(input),
+      method: String(init?.method ?? "GET"),
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    const data = requests.length === 1
+      ? { id: "fork-id", title: "Source (fork)", messages: [] }
+      : { conversation_id: "source-id", content: "plain export", format: "text" };
+    return new Response(JSON.stringify({ status: "ok", data }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+  try {
+    await api.forkConversation("source-id", "message-id");
+    const exported = await api.exportConversation("source-id", "text");
+    assert.equal(exported.format, "text");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.deepEqual(requests, [
+    {
+      url: routeKey("api/chat/conversations/source-id/fork"),
+      method: "POST",
+      body: { message_id: "message-id" },
+    },
+    {
+      url: routeKey("api/chat/conversations/source-id/export"),
+      method: "POST",
+      body: { format: "text" },
+    },
+  ]);
+});
+
 test("mobile pairing review methods use authoritative encoded routes and explicit decisions", async () => {
   const requests: Array<{ url: string; method: string; body?: unknown }> = [];
   const originalFetch = globalThis.fetch;

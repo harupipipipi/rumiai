@@ -1,6 +1,6 @@
 import { api, type Conversation } from "./api";
 
-export type ConversationExportFormat = "markdown" | "json";
+export type ConversationExportFormat = "markdown" | "json" | "text";
 
 export type ConversationExport = {
   conversation_id: string;

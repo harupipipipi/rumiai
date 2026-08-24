@@ -330,9 +330,19 @@ hold raw provider tokens or construct provider API calls directly.
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
 | `conversation_id` | `string` | Yes | 会話 ID |
-| `format` | `string` | No | `"markdown"` または `"json"`。デフォルト `"markdown"` |
+| `format` | `string` | No | `"markdown"` / `"md"`、`"json"`、`"text"` / `"txt"`。デフォルト `"markdown"` |
 
-**戻り値**: `ok({"content": "..."})`。`domain/chat/exporter.py` の `export_markdown()` または `export_json()` が呼ばれます。
+**戻り値**: `ok({"content": "...", "format": "..."})`。format alias は canonical 値へ正規化され、`domain/chat/exporter.py` の対応する exporter が呼ばれます。
+
+## 会話の fork
+
+**handler**: `blocks/chat/fork_conversation.py`
+
+**HTTP**: `POST /api/chat/conversations/{id}/fork`
+
+`message_id` を省略すると、会話 owner が保持する `current_node_id`（旧データでは最後のメッセージ）までの chain を新しい ID へ再マッピングしてコピーします。model、system prompt、agent、tags、conversation kind、group、workspace context は継承しますが、approval token、Grant、credential などの ambient authority metadata は継承しません。
+
+Composer では `/history`、`/export [markdown|json|text]`、`/fork`、`/resume`、`/rename <title>` が slash palette に表示されます。未登録の `/command` は AI へ送信されず、literal text として送信する場合は `//command` を使用します。
 
 ## 会話履歴の AI 要約（summarize_and_trim）
 
@@ -418,5 +428,6 @@ hold raw provider tokens or construct provider API calls directly.
 | `POST` | `/api/chat/conversations/{id}/messages` | `blocks/chat/send.py` |
 | `POST` | `/api/chat/conversations/{id}/stream` | `blocks/chat/stream.py` |
 | `POST` | `/api/chat/conversations/{id}/export` | `blocks/chat/export_conversation.py` |
+| `POST` | `/api/chat/conversations/{id}/fork` | `blocks/chat/fork_conversation.py` |
 | `POST` | `/api/chat/conversations/{id}/summarize` | `blocks/chat/summarize_and_trim.py` |
 | `POST` | `/api/chat/conversations/{id}/auto-trim` | `blocks/chat/auto_trim.py` |

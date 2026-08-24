@@ -365,7 +365,7 @@
     "label": "History",
     "description": "Open conversation history.",
     "category": "chat",
-    "visibility": "hidden",
+    "visibility": "default",
     "risk": "low",
     "modes": ["chat", "coding", "agent"],
     "execution": { "type": "frontend", "action": "open_history" }
@@ -376,9 +376,10 @@
     "label": "Export",
     "description": "Export the current conversation.",
     "category": "chat",
-    "visibility": "hidden",
+    "visibility": "default",
     "risk": "low",
     "modes": ["chat", "coding", "agent"],
+    "args": [{ "name": "format", "type": "string", "required": false }],
     "execution": { "type": "frontend", "action": "export_conversation" }
   },
   {
@@ -387,7 +388,7 @@
     "label": "Fork",
     "description": "Fork the current conversation.",
     "category": "chat",
-    "visibility": "hidden",
+    "visibility": "default",
     "risk": "medium",
     "modes": ["chat", "coding", "agent"],
     "execution": { "type": "frontend", "action": "fork_conversation" }
@@ -398,7 +399,7 @@
     "label": "Resume",
     "description": "Resume a prior run.",
     "category": "chat",
-    "visibility": "hidden",
+    "visibility": "default",
     "risk": "medium",
     "modes": ["chat", "coding", "agent"],
     "execution": { "type": "frontend", "action": "resume_conversation" }
@@ -409,10 +410,10 @@
     "label": "Rename",
     "description": "Rename the current conversation.",
     "category": "chat",
-    "visibility": "advanced",
+    "visibility": "default",
     "risk": "low",
     "modes": ["chat", "coding", "agent"],
-    "args": [{ "name": "title", "type": "string", "required": false }],
+    "args": [{ "name": "title", "type": "string", "required": false, "greedy": true }],
     "execution": { "type": "frontend", "action": "rename_conversation" }
   },
   {
