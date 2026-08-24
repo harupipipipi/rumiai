@@ -2342,7 +2342,7 @@ fn validate_attestation(
     {
         bail!("[PYTHON_SEALED_ATTESTATION_INVALID] startup identity mismatch");
     }
-    let expected_sys_path = expected_attested_sys_path(verified)?;
+    let expected_sys_path = expected_attested_sys_path(verified, role)?;
     let mut actual_sys_path = HashSet::new();
     for path in &value.sys_path {
         let Ok(path) = fs::canonicalize(path) else {
@@ -2358,14 +2358,17 @@ fn validate_attestation(
     Ok(())
 }
 
-fn expected_attested_sys_path(verified: &VerifiedEnvironment) -> Result<HashSet<PathBuf>> {
+fn expected_attested_sys_path(
+    verified: &VerifiedEnvironment,
+    role: PythonRole,
+) -> Result<HashSet<PathBuf>> {
     let mut version = verified.manifest.python_version.split('.');
     let major = version.next().unwrap_or_default();
     let minor = version.next().unwrap_or_default();
     if major.is_empty() || minor.is_empty() {
         bail!("[PYTHON_SEALED_ATTESTATION_INVALID] Python version is invalid");
     }
-    let (zip, directories) = if cfg!(windows) {
+    let (zip, mut directories) = if cfg!(windows) {
         (
             format!("runtime/python{major}{minor}.zip"),
             vec![
@@ -2387,6 +2390,9 @@ fn expected_attested_sys_path(verified: &VerifiedEnvironment) -> Result<HashSet<
             ],
         )
     };
+    if role == PythonRole::Defaultspack {
+        directories.push("app/ecosystem/defaultspack".to_string());
+    }
     let file_paths = verified
         .manifest
         .files
@@ -4177,6 +4183,7 @@ mod tests {
         #[cfg(unix)]
         make_test_tree_writable(&root);
         let import_files = [
+            "app/ecosystem/defaultspack/__init__.py",
             "runtime/lib/python3.13/os.py",
             "runtime/lib/python3.13/lib-dynload/_ssl.so",
             "venv/lib/python3.13/site-packages/fixture.py",
@@ -4251,6 +4258,20 @@ mod tests {
             lifetime_lease: true,
         };
         validate_attestation(&attestation, "nonce", PythonRole::Kernel, &verified).unwrap();
+        attestation.role = protocol::ROLE_DEFAULTSPACK.into();
+        attestation.sys_path.push(
+            fs::canonicalize(root.join("app/ecosystem/defaultspack"))
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+        );
+        validate_attestation(&attestation, "nonce", PythonRole::Defaultspack, &verified).unwrap();
+        attestation.sys_path.pop();
+        assert!(
+            validate_attestation(&attestation, "nonce", PythonRole::Defaultspack, &verified)
+                .is_err()
+        );
+        attestation.role = protocol::ROLE_TYPED.into();
         attestation.sys_path.push(attestation.sys_path[0].clone());
         assert!(
             validate_attestation(&attestation, "nonce", PythonRole::Kernel, &verified).is_err()

@@ -147,9 +147,15 @@ def _fixture_sources(base: Path, target: str) -> tuple[Path, Path, Path]:
         encoding="utf-8",
     )
     (application / "ecosystem/defaultspack/defaultspack/desktop_app.py").write_text(
-        "import json, os\n"
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
         "def prepare_for_sealed_dispatch(scope):\n"
-        "    scope.app_root_for(__file__)\n"
+        "    app_root = scope.app_root_for(__file__)\n"
+        "    pack_root = Path(__file__).resolve().parents[1]\n"
+        "    if str(pack_root) not in sys.path:\n"
+        "        sys.path.insert(0, str(pack_root))\n"
+        "    if str(app_root) not in sys.path:\n"
+        "        sys.path.insert(0, str(app_root))\n"
         "def main(argv=None):\n"
         "    with open(os.environ['ROLE_MARKER'], 'a') as handle:\n"
         "        handle.write(json.dumps(['defaultspack', list(argv or [])]) + '\\n')\n"
@@ -1815,6 +1821,31 @@ def test_bootstrap_sys_path_is_exact_manifest_bound_import_set(tmp_path: Path) -
             )
         ) == set(sys.path)
 
+        defaultspack_import_root = "app/ecosystem/defaultspack"
+        sys.path = [
+            str(output / defaultspack_import_root),
+            str(output / "app"),
+            *expected,
+        ]
+        assert set(
+            bootstrap._normalize_sys_path(
+                output,
+                document,
+                include_application=True,
+                application_import_roots=(defaultspack_import_root,),
+            )
+        ) == set(sys.path)
+        with pytest.raises(
+            bootstrap.SealedBootstrapError,
+            match="role import roots require",
+        ):
+            bootstrap._normalize_sys_path(
+                output,
+                document,
+                include_application=False,
+                application_import_roots=(defaultspack_import_root,),
+            )
+
         external = tmp_path / "external"
         external.mkdir()
         external_zip = external / "python313.zip"
@@ -3201,6 +3232,18 @@ def test_explicit_scope_selects_custom_named_snapshot_for_defaultspack(
         ),
         encoding="utf-8",
     )
+    (desktop_path.parent / "__init__.py").write_text("", encoding="utf-8")
+    (desktop_path.parent / "native_webview.py").write_text(
+        "SEALED_IMPORT_MARKER = True\n",
+        encoding="utf-8",
+    )
+    domain_root = desktop_path.parents[1] / "domain"
+    domain_root.mkdir()
+    (domain_root / "__init__.py").write_text("", encoding="utf-8")
+    (domain_root / "sealed_probe.py").write_text(
+        "SEALED_IMPORT_MARKER = True\n",
+        encoding="utf-8",
+    )
     manifest_path = sealed_root / "sealed-environment.v1.json"
     manifest_path.write_text("{}\n", encoding="utf-8")
     (sealed_root / "lease.v1").write_text("lease\n", encoding="utf-8")
@@ -3213,6 +3256,10 @@ def test_explicit_scope_selects_custom_named_snapshot_for_defaultspack(
     old_defaultspack = sys.modules.get("ecosystem.defaultspack")
     old_bootstrap = sys.modules.get("tobkiri_sealed.bootstrap")
     old_package = sys.modules.get("tobkiri_sealed")
+    old_top_level_defaultspack = sys.modules.get("defaultspack")
+    old_native_webview = sys.modules.get("defaultspack.native_webview")
+    old_domain = sys.modules.get("domain")
+    old_domain_probe = sys.modules.get("domain.sealed_probe")
     module = types.ModuleType("custom_snapshot_desktop_test")
     module.__file__ = str(desktop_path)
     module.__package__ = ""
@@ -3238,8 +3285,12 @@ def test_explicit_scope_selects_custom_named_snapshot_for_defaultspack(
         )
         module.prepare_for_sealed_dispatch(scope)
         assert module._sealed_app_root() == app_root
-        assert sys.path == [str(app_root)]
+        assert sys.path == [str(app_root), str(desktop_path.parents[1])]
         assert str(external) not in sys.path
+        native_webview = importlib.import_module("defaultspack.native_webview")
+        assert native_webview.SEALED_IMPORT_MARKER is True
+        domain_probe = importlib.import_module("domain.sealed_probe")
+        assert domain_probe.SEALED_IMPORT_MARKER is True
     finally:
         sys.path = old_path
         if old_ecosystem is None:
@@ -3258,6 +3309,22 @@ def test_explicit_scope_selects_custom_named_snapshot_for_defaultspack(
             sys.modules.pop("tobkiri_sealed", None)
         else:
             sys.modules["tobkiri_sealed"] = old_package
+        if old_top_level_defaultspack is None:
+            sys.modules.pop("defaultspack", None)
+        else:
+            sys.modules["defaultspack"] = old_top_level_defaultspack
+        if old_native_webview is None:
+            sys.modules.pop("defaultspack.native_webview", None)
+        else:
+            sys.modules["defaultspack.native_webview"] = old_native_webview
+        if old_domain is None:
+            sys.modules.pop("domain", None)
+        else:
+            sys.modules["domain"] = old_domain
+        if old_domain_probe is None:
+            sys.modules.pop("domain.sealed_probe", None)
+        else:
+            sys.modules["domain.sealed_probe"] = old_domain_probe
 
 
 def test_bootstrap_rejects_unknown_parent_arguments(

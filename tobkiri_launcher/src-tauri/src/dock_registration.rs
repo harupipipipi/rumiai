@@ -313,11 +313,21 @@ pub(crate) fn register_defaultspack_dock_impl(config: &AppConfig) -> AnyResult<S
 }
 
 #[tauri::command]
-pub fn launch_defaultspack_desktop(
+pub async fn launch_defaultspack_desktop(
     app: AppHandle,
     config: tauri::State<'_, AppConfig>,
 ) -> Result<String, String> {
-    launch_defaultspack_desktop_window_impl(&app, config.inner()).map_err(|e| {
+    let app_handle = app.clone();
+    let app_config = config.inner().clone();
+    let launch_result = tauri::async_runtime::spawn_blocking(move || {
+        launch_defaultspack_desktop_window_impl(&app_handle, &app_config)
+    })
+    .await
+    .map_err(|error| {
+        error!("launch_defaultspack_desktop task failed: {error}");
+        "Defaultspack desktop could not be launched".to_string()
+    })?;
+    launch_result.map_err(|e| {
         error!("launch_defaultspack_desktop failed: {e:#}");
         format!("{e:#}")
     })

@@ -408,13 +408,23 @@ pub fn select_presentation(
 }
 
 #[tauri::command]
-pub fn launch_selected_presentation(
+pub async fn launch_selected_presentation(
     window: WebviewWindow,
     app: AppHandle,
     config: State<'_, AppConfig>,
 ) -> Result<PresentationLaunchResponse, String> {
     validate_presentation_caller(&window, config.inner())?;
-    launch_selected_presentation_impl(&app, config.inner()).map_err(|error| {
+    let app_handle = app.clone();
+    let app_config = config.inner().clone();
+    let launch_result = tauri::async_runtime::spawn_blocking(move || {
+        launch_selected_presentation_impl(&app_handle, &app_config)
+    })
+    .await
+    .map_err(|error| {
+        error!("selected presentation launch task failed: {error}");
+        "selected presentation could not be launched".to_string()
+    })?;
+    launch_result.map_err(|error| {
         error!("selected presentation launch blocked: {error:#}");
         "selected presentation could not be launched".to_string()
     })

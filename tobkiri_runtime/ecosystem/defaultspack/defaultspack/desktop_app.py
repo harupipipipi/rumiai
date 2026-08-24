@@ -76,10 +76,13 @@ def _ensure_import_path() -> None:
     global _IMPORT_PATH_READY
     sealed_app_root = _sealed_app_root()
     if sealed_app_root is not None:
-        if str(sealed_app_root) not in sys.path:
-            sys.path.insert(0, str(sealed_app_root))
+        pack_root = _pack_root()
+        for authorized_root in reversed((sealed_app_root, pack_root)):
+            root = str(authorized_root)
+            if root not in sys.path:
+                sys.path.insert(0, root)
         _install_ecosystem_defaultspack_alias(
-            _pack_root(),
+            pack_root,
             ecosystem_dirs=[sealed_app_root / "ecosystem"],
         )
         _IMPORT_PATH_READY = True

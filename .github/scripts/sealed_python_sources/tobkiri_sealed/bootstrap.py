@@ -42,6 +42,11 @@ ROLE_TARGETS = {
         "computer_host_helper.py",
     ),
 }
+ROLE_APPLICATION_IMPORT_ROOTS = {
+    "typed": (),
+    "defaultspack": ("app/ecosystem/defaultspack",),
+    "host_helper": (),
+}
 MANIFEST_NAME = "sealed-environment.v1.json"
 RUNTIME_OVERLAY_NAME = "app/runtime-resource-manifest.v1.json"
 RUNTIME_OVERLAY_SCHEMA = "io.tobkiri.sealed-runtime-overlay.v1"
@@ -886,6 +891,7 @@ def _sys_path_contract(
     document: dict[str, Any],
     *,
     include_application: bool,
+    application_import_roots: Sequence[str] = (),
 ) -> tuple[list[str], str | None]:
     """Return exact manifest-bound import roots and the optional zip spelling."""
     major, minor, *_ = str(document["python_version"]).split(".")
@@ -906,7 +912,11 @@ def _sys_path_contract(
             f"venv/lib/python{major}.{minor}/site-packages",
         )
     if include_application:
-        directories = (*directories, "app")
+        directories = (*directories, "app", *application_import_roots)
+    elif application_import_roots:
+        raise SealedBootstrapError(
+            "role import roots require the sealed application import domain"
+        )
 
     manifest_files = {str(entry["path"]) for entry in document["files"]}
     manifest_directories = set(_expected_directories(document["files"]))
@@ -955,12 +965,14 @@ def _normalize_sys_path(
     document: dict[str, Any],
     *,
     include_application: bool,
+    application_import_roots: Sequence[str] = (),
 ) -> list[str]:
     """Require exactly the manifest-bound import roots in their isolated order."""
     expected, absent_zip = _sys_path_contract(
         root,
         document,
         include_application=include_application,
+        application_import_roots=application_import_roots,
     )
     snapshot: list[str] = []
     for item in sys.path:
@@ -1092,6 +1104,7 @@ def _validate_runtime_state(
     document: dict[str, Any],
     *,
     include_application: bool,
+    application_import_roots: Sequence[str] = (),
 ) -> list[str]:
     """Validate prefixes, native import roots, and canonical sys.path."""
     _validate_python_identity(root)
@@ -1099,6 +1112,7 @@ def _validate_runtime_state(
         root,
         document,
         include_application=include_application,
+        application_import_roots=application_import_roots,
     )
 
 
@@ -1278,7 +1292,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         scope = _new_dispatch_scope(root, manifest, args.role)
         role_module, target = _load_role(root, args.role)
         role_main = _prepare_role(role_module, scope)
-        sys_path = _validate_runtime_state(root, manifest, include_application=True)
+        sys_path = _validate_runtime_state(
+            root,
+            manifest,
+            include_application=True,
+            application_import_roots=ROLE_APPLICATION_IMPORT_ROOTS[args.role],
+        )
         sealed_sys_path = _SealedSysPath(root, sys_path)
         sys.path = sealed_sys_path
         if _verify_runtime_overlay(
