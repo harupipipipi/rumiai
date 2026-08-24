@@ -94,7 +94,7 @@ function ToastCard({toast}: {toast: Toast}) {
       }}
       onBlurCapture={handleBlur}
     >
-      <ToastIcon className="h-5 w-5 shrink-0" aria-hidden="true" />
+      <ToastIcon size={20} className="shrink-0" aria-hidden="true" />
       <div
         className="min-w-0 flex-1"
         role={isUrgent ? 'alert' : 'status'}
