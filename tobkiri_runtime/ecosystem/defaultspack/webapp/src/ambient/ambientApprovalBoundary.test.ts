@@ -317,7 +317,8 @@ test("Viewer authenticates every dedicated Defaultspack window and rejects unsaf
   assert.match(viewerSource, /authenticated_defaultspack_window_url\(config, finger_recording_url/);
   assert.match(viewerSource, /authenticated_defaultspack_window_url\(config, defaults_console_url/);
   assert.match(viewerSource, /authenticated_defaultspack_window_url\(config, host_permissions_url/);
-  assert.match(dockSource, /active HMAC store is encrypted; using the Kernel-managed desktop token cache/);
+  assert.match(dockSource, /active HMAC store is encrypted; using the Launcher-owned guardian token/);
+  assert.match(dockSource, /This credential does not authorize or revive the Kernel API/);
   assert.match(dockSource, /Viewer did not stop it\. Close that process or free port/);
   assert.match(dockSource, /identify_defaultspack_listener\(&listener, metadata\)/);
 });

@@ -124,6 +124,7 @@ import { initialComposerFieldValues, normalizeComposerFields, structuredComposer
 import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
+import { useLocalStorage, writeJsonLocalStorage } from "./lib/useLocalStorage";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
 import { createWidgetConversationContext } from "./lib/widgetContext";
 import { promptResources } from "./features/prompts/resources/promptResources";
@@ -1306,23 +1307,6 @@ function CalendarComposerPanel({
   );
 }
 
-function useLocalStorage<T>(key: string, defaultValue: T): [T, (v: T | ((prev: T) => T)) => void] {
-  const [value, setValue] = useState<T>(() => {
-    try {
-      const saved = localStorage.getItem(key);
-      return saved ? JSON.parse(saved) : defaultValue;
-    } catch {
-      return defaultValue;
-    }
-  });
-
-  useEffect(() => {
-    localStorage.setItem(key, JSON.stringify(value));
-  }, [key, value]);
-
-  return [value, setValue];
-}
-
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
   const numeric = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(numeric)) return fallback;
@@ -1331,14 +1315,6 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
 
 export function shouldAutoCompactHistory(width: number): boolean {
   return width < 760;
-}
-
-function writeJsonLocalStorage<T>(key: string, value: T) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Storage may be unavailable in restricted browser contexts.
-  }
 }
 
 function cleanOptionalString(value: unknown): string | null {

@@ -87,6 +87,33 @@ test("keeps the startup boundary until slash commands and mention sources are re
   await expect(page.getByTestId("composer-at-mention-candidates")).toContainText("@Web Search");
 });
 
+test("restricted localStorage writes do not destabilize the UI", async ({ page }) => {
+  test.setTimeout(60_000);
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.addInitScript(() => {
+    const nativeSetItem = Storage.prototype.setItem;
+    Object.defineProperty(Storage.prototype, "setItem", {
+      configurable: true,
+      value(key: string, value: string) {
+        if (key === "rumi-input") {
+          throw new DOMException("Storage quota exceeded.", "QuotaExceededError");
+        }
+        return nativeSetItem.call(this, key, value);
+      },
+    });
+  });
+
+  await page.goto("/e2e/fixtures/useLocalStorage.html");
+
+  const probe = page.getByRole("textbox", { name: "Storage persistence probe" });
+  await expect(probe).toBeVisible({ timeout: 30_000 });
+  await probe.fill("storage remains non-fatal");
+  await expect(probe).toHaveValue("storage remains non-fatal");
+  await expect(page.getByRole("heading", { name: "Tobkiri storage probe" })).toBeVisible();
+  expect(pageErrors).toEqual([]);
+});
+
 type ApiMockOptions = {
   beforeCommandCatalogResponse?: () => Promise<void> | void;
   beforeWorkspaceFileReadResponse?: (payload: Record<string, unknown>) => Promise<void> | void;
