@@ -795,6 +795,7 @@ function SortableChatItem({ chat, activeChatId, selectedChatId = null, selection
           </span>
         )}
         <ConversationPinStarMenu
+          chatId={chat.id}
           isPinned={chat.isPinned}
           isStarred={chat.isStarred}
           onTogglePinned={onTogglePinned ? () => onTogglePinned(chat) : undefined}
