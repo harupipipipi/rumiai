@@ -14,12 +14,14 @@ import {
   MIMO_CODING_DEFAULT_VISION_MODEL,
   frontendCommandArgs,
   keepSelectedToolsAfterSend,
+  modelProfileForDisplay,
   parseCommandBoolean,
   parseSlashCommandInput,
   resolveMimoCodingModel,
   resolveMimoFastModel,
   resolveMimoVisionModel,
   resolveUltraYoloModeState,
+  resolvedChatComposerMode,
   resolvedFrontendCommandArgs,
 } from "../App";
 import { shouldAutoCompactHistory } from "../App";
@@ -463,6 +465,97 @@ test("frontend boolean command parsing handles explicit false strings", () => {
   assert.equal(parseCommandBoolean("0", true), false);
   assert.equal(parseCommandBoolean("off", true), false);
   assert.equal(parseCommandBoolean(undefined, true), true);
+});
+
+test("plain chat composer ignores stale coding storage and preserves explicit plain modes", () => {
+  const plainConversation = {
+    conversation_kind: "chat",
+    metadata: { mode: "agent" },
+    tags: [],
+  };
+
+  assert.equal(resolvedChatComposerMode({
+    pathname: "/chat",
+    storedMode: "coding",
+    activeConversation: plainConversation,
+  }), "agent");
+  assert.equal(resolvedChatComposerMode({
+    pathname: "/chat",
+    storedMode: "chat",
+    activeConversation: plainConversation,
+  }), "chat");
+  assert.equal(resolvedChatComposerMode({
+    pathname: "/chat",
+    storedMode: "agent",
+    activeConversation: plainConversation,
+  }), "agent");
+  assert.equal(resolvedChatComposerMode({
+    pathname: "/chat",
+    storedMode: "legacy-coding-mode",
+    activeConversation: plainConversation,
+  }), "agent");
+});
+
+test("composer restores coding only from the route, matched conversation, or workspace surface", () => {
+  const codingByKind = { conversation_kind: "coding", metadata: {}, tags: [] };
+  const codingByMetadata = { conversation_kind: "chat", metadata: { mode: " CODING " }, tags: [] };
+  const codingByTag = { conversation_kind: "chat", metadata: {}, tags: ["Coding"] };
+
+  for (const activeConversation of [codingByKind, codingByMetadata, codingByTag]) {
+    assert.equal(resolvedChatComposerMode({
+      pathname: "/chat",
+      storedMode: "agent",
+      activeConversation,
+    }), "coding");
+  }
+  assert.equal(resolvedChatComposerMode({
+    pathname: "/coding",
+    storedMode: "chat",
+    activeConversation: null,
+  }), "coding");
+  assert.equal(resolvedChatComposerMode({
+    pathname: "/chat",
+    storedMode: "chat",
+    activeConversation: null,
+    hasCodingWorkspaceSurface: true,
+  }), "coding");
+});
+
+test("conversation transitions and load failures cannot project stale coding chrome", () => {
+  const previousCodingConversation = {
+    conversation_kind: "coding",
+    metadata: { mode: "coding" },
+    tags: ["coding"],
+  };
+
+  assert.equal(resolvedChatComposerMode({
+    pathname: "/chat",
+    storedMode: "coding",
+    activeConversation: previousCodingConversation,
+    activeConversationMatchesRouteTarget: false,
+  }), "agent");
+  assert.equal(resolvedChatComposerMode({
+    pathname: "/chat",
+    storedMode: "coding",
+    activeConversation: null,
+    activeConversationMatchesRouteTarget: false,
+  }), "agent");
+  assert.equal(resolvedChatComposerMode({
+    pathname: "/chat",
+    storedMode: "agent",
+    activeConversation: previousCodingConversation,
+    activeConversationMatchesRouteTarget: true,
+  }), "coding");
+});
+
+test("missing model profiles keep the selected provider and model understandable", () => {
+  const missing = modelProfileForDisplay([], "opencode-zen/mimo-v2.5-free");
+
+  assert.equal(missing.profile_id, "opencode-zen/mimo-v2.5-free");
+  assert.equal(missing.display_name, "opencode-zen/mimo-v2.5-free");
+  assert.equal(missing.provider_id, "opencode-zen");
+  assert.equal(missing.model_id, "mimo-v2.5-free");
+  assert.equal(missing.availability?.status, "unavailable");
 });
 
 test("slash command parsing supports multi-word aliases without treating them as args", () => {

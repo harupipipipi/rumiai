@@ -1696,6 +1696,63 @@ test("coding workspace picker renders selected workspace and trust affordance", 
   assert.match(html, /aria-label="Main Repo を信頼"/);
 });
 
+test("composer scopes workspace and branch controls to coding mode", () => {
+  const baseProps = {
+    input: "",
+    placeholder: "メッセージを入力...",
+    isGenerating: false,
+    selectedProfile: {
+      profile_id: "stub/default",
+      display_name: "Stub Default",
+      provider_id: "stub",
+      model_id: "default",
+    },
+    favoriteProfiles: [],
+    inlineExtensions: [],
+    belowExtensions: [],
+    thinkingLevel: null,
+    contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+    onInputChange: () => undefined,
+    onSubmit: () => undefined,
+    onModelProfileSelect: () => undefined,
+    onThinkingLevelChange: () => undefined,
+  };
+  const codingProps = {
+    codingContext: {
+      branch: "feature/chat-composer",
+      rootFolder: "/repo",
+      workspaceId: "ws1",
+      directory: ".",
+      branches: ["main", "feature/chat-composer"],
+      files: ["src/App.tsx"],
+      entries: [],
+      git: null,
+    },
+    codingWorkspaces: [
+      { workspace_id: "ws1", label: "Main Repo", root_path: "/repo", trusted: true },
+    ],
+    selectedCodingWorkspaceId: "ws1",
+  };
+
+  const plainHtml = renderToStaticMarkup(createElement(ComposerRenderer, {
+    ...baseProps,
+    ...codingProps,
+    mode: "agent",
+  }));
+  const codingHtml = renderToStaticMarkup(createElement(ComposerRenderer, {
+    ...baseProps,
+    ...codingProps,
+    mode: "coding",
+  }));
+
+  assert.match(plainHtml, /Stub Default/);
+  assert.doesNotMatch(plainHtml, /rumi-workspace-picker/);
+  assert.doesNotMatch(plainHtml, /feature\/chat-composer/);
+  assert.match(codingHtml, /rumi-workspace-picker/);
+  assert.match(codingHtml, /Main Repo/);
+  assert.match(codingHtml, /feature\/chat-composer/);
+});
+
 test("composer copy resolver suppresses internal template implementation copy", () => {
   assert.equal(composerPlaceholderCopy({
     isSteerMode: false,

@@ -1793,6 +1793,43 @@ function isMimoCodingConversation(conversation: Conversation | null): boolean {
   );
 }
 
+export function isCodingConversation(
+  conversation: Pick<Conversation, "conversation_kind" | "metadata" | "tags"> | null | undefined,
+): boolean {
+  if (!conversation) return false;
+  const metadataMode = typeof conversation.metadata?.mode === "string"
+    ? conversation.metadata.mode.trim().toLowerCase()
+    : "";
+  return (
+    conversation.conversation_kind === "coding"
+    || metadataMode === "coding"
+    || conversation.tags?.some((tag) => tag.trim().toLowerCase() === "coding") === true
+  );
+}
+
+export function resolvedChatComposerMode({
+  pathname,
+  storedMode,
+  activeConversation,
+  activeConversationMatchesRouteTarget = true,
+  hasCodingWorkspaceSurface = false,
+}: {
+  pathname: string;
+  storedMode: unknown;
+  activeConversation?: Pick<Conversation, "conversation_kind" | "metadata" | "tags"> | null;
+  activeConversationMatchesRouteTarget?: boolean;
+  hasCodingWorkspaceSurface?: boolean;
+}): AppMode {
+  if (
+    pathname === "/coding"
+    || hasCodingWorkspaceSurface
+    || (activeConversationMatchesRouteTarget && isCodingConversation(activeConversation))
+  ) {
+    return "coding";
+  }
+  return storedMode === "chat" || storedMode === "agent" ? storedMode : "agent";
+}
+
 function settingList(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.map((item) => String(item).trim()).filter(Boolean);
@@ -1944,6 +1981,26 @@ function findProfile(profiles: ModelProfile[], modelId: string): ModelProfile | 
     || profile.qualified_model_id === modelId
     || `${profile.provider_id}/${profile.model_id}` === modelId
   )) ?? null;
+}
+
+export function modelProfileForDisplay(
+  profiles: ModelProfile[],
+  modelId: string,
+): ModelProfile {
+  const existing = findProfile(profiles, modelId);
+  if (existing) return existing;
+  const separator = modelId.indexOf("/");
+  const providerId = separator > 0 ? modelId.slice(0, separator) : "unknown";
+  const bareModelId = separator > 0 ? modelId.slice(separator + 1) : modelId;
+  return {
+    profile_id: modelId,
+    qualified_model_id: modelId,
+    provider_id: providerId,
+    provider_display_name: providerId,
+    model_id: bareModelId,
+    display_name: modelId || "Unavailable model",
+    availability: { configured: false, status: "unavailable" },
+  };
 }
 
 const LOCAL_MODEL_PROVIDER_IDS = new Set(["stub", "ollama", "lmstudio", "vllm", "llamacpp", "llama_cpp"]);
@@ -2509,6 +2566,11 @@ function ChatApp() {
     [activeConversationId],
   );
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
+  const [requestedConversationId, setRequestedConversationId] = useState<string | null>(
+    () => chatIdFromLocation(),
+  );
+  const [isConversationTransitioning, setIsConversationTransitioning] = useState(false);
+  const conversationLoadGenerationRef = useRef(0);
   const [activeHistoryCompanyId, setActiveHistoryCompanyId] = useState<string | null>(null);
   const [input, setInput] = useLocalStorage("rumi-input", "");
   const [customHomeTitle, setCustomHomeTitle] = useLocalStorage(
@@ -2680,7 +2742,7 @@ function ChatApp() {
   );
   const visibleSpotlightResults = spotlightQuery.trim() ? spotlightResults : recentSpotlightResults;
   const activeModelId = activeConversation?.model ?? String(settingsValues.models?.preferred_model ?? "stub/default").trim();
-  const activeProfile = findProfile(modelProfiles, activeModelId);
+  const activeProfile = modelProfileForDisplay(modelProfiles, activeModelId);
   const orderedMessages = useMemo(
     () => activeConversation ? orderConversationMessages(activeConversation.messages) : [],
     [activeConversation?.messages],
@@ -2734,6 +2796,21 @@ function ChatApp() {
   const isDesktopsWorkspace = activeWorkspaceKind === "desktops";
   const isToolsWorkspace = activeWorkspaceKind === "tools";
   const isNewConversation = activeConversation === null || activeConversation.messages.length === 0;
+  const hasCodingWorkspaceSurface = activeWorkspaceKind === "coding" || Boolean(
+    pendingNewTaskContext?.workspaceId
+    || pendingNewTaskContext?.workspaceRoot
+    || pendingNewTaskContext?.rumiDataPath,
+  );
+  const effectiveComposerMode = resolvedChatComposerMode({
+    pathname: window.location.pathname,
+    storedMode: mode,
+    activeConversation,
+    activeConversationMatchesRouteTarget: Boolean(
+      activeConversation && activeConversation.id === requestedConversationId,
+    ),
+    hasCodingWorkspaceSurface,
+  });
+  const isCodingComposerMode = effectiveComposerMode === "coding";
   useEffect(() => {
     setWorkspaceTabs((current) => current.map((tab) => {
       if (tab.id !== activeWorkspaceTabId || tab.kind !== "chat") return tab;
@@ -2757,7 +2834,7 @@ function ChatApp() {
   const spotlightShortcutEnabled = parseCommandBoolean(settingsValues.general?.spotlight_shortcut_enabled, true);
   const spotlightShortcutTextInput = parseCommandBoolean(settingsValues.general?.spotlight_shortcut_text_input, true);
   const spotlightShortcutLabel = spotlightShortcutEnabled ? shortcutLabel(spotlightShortcut) : "Off";
-  const composerMode = mode as ComposerCommandMode;
+  const composerMode = effectiveComposerMode as ComposerCommandMode;
   const templateAiInputMetadata = useMemo(
     () => selectTemplateAiInput(catalog, composerMode),
     [catalog, composerMode],
@@ -3052,7 +3129,7 @@ function ChatApp() {
             : null,
           mode: restoredMode === "chat" || restoredMode === "coding" || restoredMode === "agent"
             ? restoredMode
-            : mode as ComposerCommandMode,
+            : effectiveComposerMode as ComposerCommandMode,
           approvalKind: result?.approval?.kind === "authority"
             ? "authority"
             : "coding",
@@ -3064,7 +3141,7 @@ function ChatApp() {
     return () => {
       cancelled = true;
     };
-  }, [effectiveCommandCatalog, mode, pendingCommandApproval, usesResolvedCommandProtocol]);
+  }, [effectiveCommandCatalog, effectiveComposerMode, pendingCommandApproval, usesResolvedCommandProtocol]);
 
   useEffect(() => {
     const preview = canvasPreviews.find(isHumanOperatorCanvasPreview);
@@ -3087,7 +3164,7 @@ function ChatApp() {
     return effectiveCommandCatalog
       .filter((command) => command.visibility !== "hidden")
       .filter((command) => showAdvanced || command.visibility === "default")
-      .filter((command) => !command.modes?.length || command.modes.includes(mode as ComposerCommandMode))
+      .filter((command) => !command.modes?.length || command.modes.includes(effectiveComposerMode as ComposerCommandMode))
       .filter((command) => command.id !== "fast" || Boolean(fastCandidate))
       .filter((command) => command.id !== "price" || Boolean(priceLowCandidate || priceHighCandidate))
       .filter((command) => command.id !== "think" || profileSupportsThinking(activeProfile))
@@ -3102,11 +3179,11 @@ function ChatApp() {
           ? ultraYoloMode
           : command.id === "deepthink"
             ? deepthinkEnabled
-            : command.id === mode;
+            : command.id === effectiveComposerMode;
         const active = protocolState ?? legacyState;
         return { ...command, active, enabled: active };
       });
-  }, [activeProfile, deepthinkEnabled, effectiveCommandCatalog, mode, selectableModelProfiles, settingsValues, slashCommandsEnabled, ultraYoloMode]);
+  }, [activeProfile, deepthinkEnabled, effectiveCommandCatalog, effectiveComposerMode, selectableModelProfiles, settingsValues, slashCommandsEnabled, ultraYoloMode]);
   const modelCommandCandidates = composerCandidateMenu?.mode === "model" ? composerCandidateMenu.candidates : [];
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "placeholder");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
@@ -3334,10 +3411,10 @@ function ChatApp() {
   }, [activeConversationId]);
 
   useEffect(() => {
-    if (mode === "coding") {
+    if (isCodingComposerMode) {
       void loadCodingWorkspaces().then((result) => loadCodingContext(result.selected_workspace_id ?? null));
     }
-  }, [mode, loadCodingContext, loadCodingWorkspaces]);
+  }, [isCodingComposerMode, loadCodingContext, loadCodingWorkspaces]);
 
   useEffect(() => {
     if (window.location.pathname !== "/coding") return;
@@ -3622,14 +3699,33 @@ function ChatApp() {
   }
 
   async function loadConversation(conversationId: string | null, updateUrl = true) {
+    const loadGeneration = conversationLoadGenerationRef.current + 1;
+    conversationLoadGenerationRef.current = loadGeneration;
+    setRequestedConversationId(conversationId);
     if (!conversationId) {
       setActiveConversationId(null);
       setActiveConversation(null);
+      setIsConversationTransitioning(false);
       void refreshPreview(null);
       if (updateUrl) replaceChatIdInUrl(null, false);
       return;
     }
-    const conversation = await api.getConversation(conversationId);
+    const isConversationChange = conversationId !== activeConversationId;
+    if (isConversationChange) {
+      setActiveConversationId(null);
+      setActiveConversation(null);
+      setIsConversationTransitioning(true);
+    }
+    let conversation: Conversation;
+    try {
+      conversation = await api.getConversation(conversationId);
+    } catch (loadError) {
+      if (loadGeneration === conversationLoadGenerationRef.current) {
+        setIsConversationTransitioning(false);
+      }
+      throw loadError;
+    }
+    if (loadGeneration !== conversationLoadGenerationRef.current) return;
     const supersededTargetId = resolveSupersededConversationRedirect(conversation, conversationId);
     if (supersededTargetId) {
       await loadConversation(supersededTargetId, updateUrl);
@@ -3637,6 +3733,7 @@ function ChatApp() {
     }
     setActiveConversationId(conversationId);
     setActiveConversation(conversation);
+    setIsConversationTransitioning(false);
     if (updateUrl) replaceChatIdInUrl(conversationId);
     void refreshPreview(conversationId);
   }
@@ -4663,7 +4760,7 @@ function ChatApp() {
         return;
       }
       case "set_mode_coding":
-        handleModeChange(mode === "coding" ? "agent" : "coding");
+        handleModeChange(window.location.pathname === "/coding" ? "agent" : "coding");
         return;
       case "set_mode_chat":
         handleModeChange("agent");
@@ -4692,7 +4789,7 @@ function ChatApp() {
       }
       case "show_status":
         setError(
-          `status: mode=${mode}, model=${activeProfile?.display_name ?? preferredModel}, thinking=${selectedThinkingLevel}, deepthink=${deepthinkEnabled ? "on" : "off"}, yolo=${yoloMode ? "on" : "off"}, ultra_yolo=${ultraYoloMode ? "on" : "off"}, tools=${selectedTools.length}`,
+          `status: mode=${effectiveComposerMode}, model=${activeProfile.display_name}, thinking=${selectedThinkingLevel}, deepthink=${deepthinkEnabled ? "on" : "off"}, yolo=${yoloMode ? "on" : "off"}, ultra_yolo=${ultraYoloMode ? "on" : "off"}, tools=${selectedTools.length}`,
         );
         return;
       case "open_context_viewer":
@@ -4954,7 +5051,7 @@ function ChatApp() {
             command: resolvedCommandName,
             args: commandArgs,
             conversation_id: activeConversationId,
-            mode: mode as ComposerCommandMode,
+            mode: effectiveComposerMode as ComposerCommandMode,
             invocation_id: invocationId,
             idempotency_key: invocationId,
             client_sequence: clientSequence,
@@ -4977,7 +5074,7 @@ function ChatApp() {
           command: resolvedCommandName,
           args: commandArgs,
           conversation_id: activeConversationId,
-          mode: mode as ComposerCommandMode,
+          mode: effectiveComposerMode as ComposerCommandMode,
           invocation_id: invocationId,
         });
       }
@@ -4992,7 +5089,7 @@ function ChatApp() {
             command: parsed.command,
             args: commandArgs,
             conversationId: activeConversationId,
-            mode: mode as ComposerCommandMode,
+            mode: effectiveComposerMode as ComposerCommandMode,
             approvalKind: result.approval_kind === "authority"
               ? "authority"
               : "coding",
@@ -5215,7 +5312,7 @@ function ChatApp() {
 
   const handleAtFileAttach = (path: string) => {
     const normalizedPath = path.trim();
-    if (mode !== "coding" || !normalizedPath) return;
+    if (!isCodingComposerMode || !normalizedPath) return;
     if (hasWorkspaceAttachment(attachedFiles, normalizedPath)) return;
     if (pendingMentionAttachmentRequestsRef.current.has(normalizedPath)) return;
 
@@ -5545,7 +5642,7 @@ function ChatApp() {
         },
         tools: approvalToolIds.length ? approvalToolIds : undefined,
         metadata: {
-          mode,
+          mode: effectiveComposerMode,
           ...(approvalWorkspace.workspaceId ? {
             workspace_id: approvalWorkspace.workspaceId,
             workspace_label: approvalWorkspace.workspaceLabel,
@@ -5649,7 +5746,7 @@ function ChatApp() {
         },
         tools: [runtimeApproval.toolName],
         metadata: {
-          mode,
+          mode: effectiveComposerMode,
           ...(approvalWorkspace.workspaceId ? {
             workspace_id: approvalWorkspace.workspaceId,
             workspace_label: approvalWorkspace.workspaceLabel,
@@ -6224,20 +6321,22 @@ function ChatApp() {
     const submittedMentions = composerMentionMetadataFromWidgets(submittedDroppedWidgets);
     const selectedToolLabels = submittedToolIds.map((toolId) => composerToolById.get(toolId)?.label || toolId);
     const activeContextForSubmit = workspaceContextFromConversation(activeConversation);
+    const activeConversationCanAttachWorkspace = isCodingComposerMode
+      || isMimoCodingConversation(activeConversation);
     const groupIdForSubmit = pendingNewTaskContext?.groupId ?? activeContextForSubmit.groupId;
     const workspaceIdForSubmit = pendingNewTaskContext?.workspaceId
-      ?? activeContextForSubmit.workspaceId
-      ?? (mode === "coding" ? selectedCodingWorkspaceId : null);
+      ?? (activeConversationCanAttachWorkspace ? activeContextForSubmit.workspaceId : null)
+      ?? (isCodingComposerMode ? selectedCodingWorkspaceId : null);
     const workspaceLabelForSubmit = pendingNewTaskContext?.workspaceLabel
-      ?? activeContextForSubmit.workspaceLabel
+      ?? (activeConversationCanAttachWorkspace ? activeContextForSubmit.workspaceLabel : null)
       ?? codingWorkspaces.find((workspace) => workspace.workspace_id === workspaceIdForSubmit)?.label
       ?? null;
     const workspaceRootForSubmit = pendingNewTaskContext?.workspaceRoot
-      ?? activeContextForSubmit.workspaceRoot
+      ?? (activeConversationCanAttachWorkspace ? activeContextForSubmit.workspaceRoot : null)
       ?? codingWorkspaces.find((workspace) => workspace.workspace_id === workspaceIdForSubmit)?.root_path
       ?? null;
     const rumiDataPathForSubmit = pendingNewTaskContext?.rumiDataPath ?? activeContextForSubmit.rumiDataPath ?? null;
-    const isCodingWorkspaceSubmit = mode === "coding" || Boolean(workspaceIdForSubmit);
+    const isCodingWorkspaceSubmit = isCodingComposerMode || Boolean(workspaceIdForSubmit);
     let submittedConversationRuntimeId: string | null = null;
     let markInterruptedAssistant: ((streamError: ChatStreamInterruptedError) => void) | null = null;
 
@@ -6616,7 +6715,7 @@ function ChatApp() {
         attachments: submittedAttachments,
         tools: shouldSendExplicitToolSelection ? submittedToolIds : undefined,
         metadata: {
-          mode: isOperationsMode ? "operations_company" : isMimoCodingMode ? "mimo_coding_company" : isCodingWorkspaceSubmit ? "coding" : mode,
+          mode: isOperationsMode ? "operations_company" : isMimoCodingMode ? "mimo_coding_company" : isCodingWorkspaceSubmit ? "coding" : effectiveComposerMode,
           ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),
           ...(rumiDataPathForSubmit ? { rumi_data_path: rumiDataPathForSubmit } : {}),
           ...(isOperationsMode ? {
@@ -6732,6 +6831,9 @@ function ChatApp() {
           skipReview: true,
           errorMessage: interruptionMessage,
         });
+        setInput(inputForSubmit);
+        setAttachedFiles(submittedAttachments);
+        setDroppedWidgets(droppedWidgetsForSubmit);
         setError(interruptionMessage);
         dismissedComposerMentionToolsRef.current.clear();
         setIsNewChatLaunching(false);
@@ -6842,7 +6944,7 @@ function ChatApp() {
   };
 
   const Renderers = useMemo(() => resolveDefaultspackRenderers(catalog), [catalog]);
-  const codingSidebarPanel = mode === "coding" ? (
+  const codingSidebarPanel = isCodingComposerMode ? (
     <CodingCockpit
       variant="sidebar"
       workspaces={codingWorkspaces}
@@ -6937,7 +7039,7 @@ function ChatApp() {
       input={input}
       placeholder={isCentered ? getNewConversationPlaceholder() : placeholder}
       isNewConversation={isCentered}
-      isGenerating={isGenerating || isConversationPending}
+      isGenerating={isGenerating || isConversationPending || isConversationTransitioning}
       selectedProfile={activeProfile}
       favoriteProfiles={favoriteProfiles}
       modelProfiles={selectableModelProfiles}
@@ -6956,7 +7058,7 @@ function ChatApp() {
       voiceInputEnabled={settingsValues.general?.voice_input_enabled !== false}
       voiceInputUseAi={settingsValues.general?.voice_input_use_ai === true}
       manualRuntimeModeSelectionEnabled={allowManualRuntimeModeSelection}
-      mode={mode}
+      mode={effectiveComposerMode}
       codingContext={codingContext}
       codingWorkspaces={codingWorkspaces}
       selectedCodingWorkspaceId={effectiveWorkspaceId}
