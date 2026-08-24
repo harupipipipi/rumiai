@@ -470,8 +470,10 @@ def _panel_bootstrap_is_reachable(response: Optional[HttpResponse]) -> bool:
     body = response.body.lower()
     return (
         "text/html" in content_type
-        and b"<html" in body
-        and b"/panel/assets/" in body
+        and b"<!doctype html" in body
+        and b"tobkiri launcher authentication required" in body
+        and b"/api/panel/auth/exchange" in body
+        and b"location.replace('/panel/')" in body
     )
 
 

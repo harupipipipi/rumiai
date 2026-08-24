@@ -202,6 +202,25 @@ defaults Pack のエージェント機能の全 API リファレンスです。h
 }
 ```
 
+## スケジュール実行の永続状態
+
+`POST /api/agent/schedules/{id}/trigger` は、モデルや会話を開始する前に
+defaultspack ローカルの SQLite WAL ledger へ実行を予約します。状態は
+`queued`、`running`、`waiting_approval`、`completed`、`failed`、
+`cancelled`、`timed_out` のいずれかです。`queued`、`running`、
+`waiting_approval` は schedule ごとに最大 1 件です。
+
+schedule JSON の `running_execution` は互換表示用の projection であり、
+実行可否の authority は ledger の active record です。重複する manual/timer
+trigger は同じ active record を上書きせず拒否されます。startup failure と
+timeout は同じ execution record を terminal state へ settle し、history と
+明確なエラーを残します。approval は実行を終了せず `waiting_approval` に保ち、
+承認後は同じ execution ID を `running` へ戻します。
+
+ledger は Pack 内の `user_data/shared/schedules/schedule_executions.sqlite3`
+（または既存の defaultspack schedule directory override）に保存されます。
+Core、Host、legacy lookup への実行 fallback はありません。
+
 ## 全 API エンドポイント一覧
 
 | メソッド | パス | handler ファイル |
@@ -212,4 +231,5 @@ defaults Pack のエージェント機能の全 API リファレンスです。h
 | `POST` | `/api/agent/{id}/cancel` | `blocks/agent/cancel.py` |
 | `GET` | `/api/agent/{id}/status` | `blocks/agent/status.py` |
 | `POST` | `/api/agent/{id}/instruct` | `blocks/agent/add_instruction.py` |
+| `POST` | `/api/agent/schedules/{id}/trigger` | `blocks/agent/scheduler/trigger.py` |
 | — | — (`call_handler` 経由のみ) | `blocks/agent/plan.py` |
