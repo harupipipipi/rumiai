@@ -171,9 +171,12 @@ $file.SetAccessControl($acl)
     + _WINDOWS_SIGNING_KEY_ACL_VALIDATION
 )
 
+_WINDOWS_SIGNING_KEY_ACL_TARGET_ENV = "TOBKIRI_SIGNING_KEY_ACL_TARGET_B64"
+_WINDOWS_SIGNING_KEY_ACL_TIMEOUT_SECONDS = 60
+
 
 def _run_windows_signing_key_acl(key_path: Path, *, harden: bool) -> None:
-    """Harden or validate one Windows signing-key ACL without leaking its path."""
+    """Harden or validate one Windows signing-key ACL without exposing its path."""
     encoded_path = base64.b64encode(str(key_path).encode("utf-8")).decode("ascii")
     script = (
         _WINDOWS_SIGNING_KEY_ACL_HARDEN
@@ -182,7 +185,7 @@ def _run_windows_signing_key_acl(key_path: Path, *, harden: bool) -> None:
     )
     script = (
         "$ErrorActionPreference = 'Stop'\n"
-        "$encodedTarget = [Console]::In.ReadToEnd()\n"
+        f"$encodedTarget = $env:{_WINDOWS_SIGNING_KEY_ACL_TARGET_ENV}\n"
         "if ([string]::IsNullOrEmpty($encodedTarget)) { "
         "throw 'signing-key ACL target missing' }\n"
         "$strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)\n"
@@ -192,6 +195,8 @@ def _run_windows_signing_key_acl(key_path: Path, *, harden: bool) -> None:
         "throw 'signing-key ACL target missing' }\n"
         + script
     )
+    environment = os.environ.copy()
+    environment[_WINDOWS_SIGNING_KEY_ACL_TARGET_ENV] = encoded_path
     try:
         subprocess.run(
             [
@@ -205,8 +210,8 @@ def _run_windows_signing_key_acl(key_path: Path, *, harden: bool) -> None:
             check=True,
             capture_output=True,
             text=True,
-            timeout=15,
-            input=encoded_path,
+            timeout=_WINDOWS_SIGNING_KEY_ACL_TIMEOUT_SECONDS,
+            env=environment,
         )
     except (OSError, subprocess.SubprocessError) as error:
         message = (
