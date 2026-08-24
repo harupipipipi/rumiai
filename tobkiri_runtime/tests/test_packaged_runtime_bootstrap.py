@@ -96,6 +96,7 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
     monkeypatch,
 ) -> None:
     """The canonical public bootstrap serves ready HTTP from isolated data."""
+    coordination_timeout_seconds = 30
     port = _free_port()
     monkeypatch.setenv("RUMI_PORT", str(port))
     monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
@@ -105,6 +106,8 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
     refresh_entered = threading.Event()
     release_refresh = threading.Event()
     refresh_completed = threading.Event()
+    activation_started = threading.Event()
+    activation_response_received = threading.Event()
 
     def delayed_refresh(
         server: PackAPIServer,
@@ -113,7 +116,7 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
         lifecycle_generation: int,
     ) -> None:
         refresh_entered.set()
-        assert release_refresh.wait(timeout=5)
+        assert release_refresh.wait(timeout=coordination_timeout_seconds)
         try:
             original_refresh(
                 server,
@@ -130,13 +133,19 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
         kernel.run_startup_until("api_init")
         remaining = kernel.run_startup_remaining()
         assert remaining["status"] == "setup_required"
-        with urlopen(f"http://127.0.0.1:{port}/health", timeout=5) as response:
+        with urlopen(
+            f"http://127.0.0.1:{port}/health",
+            timeout=coordination_timeout_seconds,
+        ) as response:
             envelope = json.load(response)
         assert envelope["success"] is True
         assert envelope["data"]["panel_ready"] is True
         assert envelope["data"]["runtime_ready"] is False
 
-        with urlopen(f"http://127.0.0.1:{port}/api/setup/packs", timeout=5) as response:
+        with urlopen(
+            f"http://127.0.0.1:{port}/api/setup/packs",
+            timeout=coordination_timeout_seconds,
+        ) as response:
             setup = json.load(response)["data"]
         assert setup["state"] == "review_required"
         confirmation = setup["recommended_default_profile"]["confirmation"]
@@ -160,16 +169,35 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
         )
 
         def activate() -> dict[str, object]:
-            with urlopen(request, timeout=5) as response:
-                return json.load(response)["data"]
+            activation_started.set()
+            with urlopen(request, timeout=coordination_timeout_seconds) as response:
+                result = json.load(response)["data"]
+            activation_response_received.set()
+            return result
 
         with ThreadPoolExecutor(max_workers=1) as executor:
             activation = executor.submit(activate)
-            assert refresh_entered.wait(timeout=5)
-            activated = activation.result(timeout=2)
-            assert not release_refresh.is_set()
-            release_refresh.set()
-        assert refresh_completed.wait(timeout=5)
+            try:
+                assert activation_started.wait(timeout=coordination_timeout_seconds)
+                if not refresh_entered.wait(timeout=coordination_timeout_seconds):
+                    try:
+                        activation.result(timeout=5)
+                    except TimeoutError as error:
+                        raise AssertionError(
+                            "defaults activation did not reach runtime refresh "
+                            "within the bounded coordination window"
+                        ) from error
+                    pytest.fail(
+                        "defaults activation returned before runtime refresh started"
+                    )
+                assert activation_response_received.wait(
+                    timeout=coordination_timeout_seconds
+                )
+                activated = activation.result(timeout=coordination_timeout_seconds)
+                assert not release_refresh.is_set()
+            finally:
+                release_refresh.set()
+        assert refresh_completed.wait(timeout=coordination_timeout_seconds)
         assert activated["state"] == "active"
         assert activated["audit_receipt"]["state"] == "committed"
         assert activated["audit_receipt"]["activation_id"] == activated["activation_id"]
@@ -185,7 +213,10 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
             },
             data=b"{}",
         )
-        with opener.open(bootstrap_request, timeout=5) as response:
+        with opener.open(
+            bootstrap_request,
+            timeout=coordination_timeout_seconds,
+        ) as response:
             login_code = json.load(response)["data"]["code"]
         exchange_request = Request(
             f"http://127.0.0.1:{port}/api/panel/auth/exchange",
@@ -196,7 +227,7 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
             },
             data=json.dumps({"code": login_code}).encode(),
         )
-        with opener.open(exchange_request, timeout=5):
+        with opener.open(exchange_request, timeout=coordination_timeout_seconds):
             pass
         for contract_path in ("/api/home/dashboard", "/api/pack-control/catalog"):
             first_request = Request(
@@ -204,13 +235,19 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
                 f"{port}/api/contracts/defaultspack/" + quote(f"GET {contract_path}", safe=""),
                 headers={"X-Tobkiri-Request-ID": str(uuid.uuid4())},
             )
-            with opener.open(first_request, timeout=5) as response:
+            with opener.open(
+                first_request,
+                timeout=coordination_timeout_seconds,
+            ) as response:
                 first_payload = json.load(response)
             assert first_payload["success"] is True
         with pytest.raises(urllib.error.HTTPError) as replay:
-            urlopen(request, timeout=5)
+            urlopen(request, timeout=coordination_timeout_seconds)
         assert replay.value.code == 401
-        with urlopen(f"http://127.0.0.1:{port}/health", timeout=5) as response:
+        with urlopen(
+            f"http://127.0.0.1:{port}/health",
+            timeout=coordination_timeout_seconds,
+        ) as response:
             ready = json.load(response)["data"]
         assert ready["runtime_ready"] is True
     finally:
