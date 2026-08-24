@@ -35,6 +35,11 @@ from .control_reconciliation_v4 import (
     ControlReconciliationStore,
     ControlReconciliationUnavailableError,
 )
+from .entity_picker_contract_v4 import (
+    ENTITY_PICKER_CONTRACTS,
+    ENTITY_PICKER_DATA_SOURCE_CONTRACT,
+    normalize_entity_picker_input,
+)
 from .frontend_contract_routes import (
     ContractRouteError,
     FrontendContractBinding,
@@ -1563,7 +1568,11 @@ class PackAPIHandler(
                 "contributions": [
                     {
                         "contribution_id": target.contribution_id,
-                        "kind": "action",
+                        "kind": (
+                            "data_source"
+                            if target.contract_id == ENTITY_PICKER_DATA_SOURCE_CONTRACT
+                            else "action"
+                        ),
                         "mode": "same_origin_builtin",
                         "label": target.operation_id,
                         "priority": index,
@@ -1582,7 +1591,11 @@ class PackAPIHandler(
                             }
                         ),
                         "route": "/packs",
-                        "action_contract": target.contract_id,
+                        **(
+                            {"data_source_contract": target.contract_id}
+                            if target.contract_id == ENTITY_PICKER_DATA_SOURCE_CONTRACT
+                            else {"action_contract": target.contract_id}
+                        ),
                         "operation_id": target.operation_id,
                         "provider_id": target.provider_id,
                         "function_id": target.function_id,
@@ -1609,6 +1622,12 @@ class PackAPIHandler(
     ) -> dict[str, object]:
         """Bind dynamic Pack requests to Host identity and safe path semantics."""
 
+        if target.contract_id in ENTITY_PICKER_CONTRACTS:
+            return normalize_entity_picker_input(
+                target.contract_id,
+                payload,
+                profile_id=session.profile_id,
+            )
         if not target.contribution_id.startswith("pack."):
             return dict(payload)
         if target.contract_id != "tobkiri.service.media.inspect.v1":

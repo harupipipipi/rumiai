@@ -18,6 +18,7 @@ import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import { DesktopMonitorWorkspace } from "./components/desktops/DesktopMonitorWorkspace";
+import { EntityPickerHost } from "./components/EntityPickerHost";
 import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
 import {
   alertPlacementForComposerPosition,
@@ -104,6 +105,16 @@ import { toolGroupFor } from "./lib/toolUi";
 import type { ComposerEntityReference } from "./lib/composerReferences";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
+import {
+  entityPickerForCommand,
+  entityPickerPageFromCapabilityResult,
+  entityPickersForPresentation,
+  normalizeEntityPickerItems,
+  resolveEntityPickers,
+  type EntityPickerPage,
+  type EntityPickerPageRequest,
+  type EntityPickerSelectionRequest,
+} from "./lib/entityPicker";
 import { openAuthorityApprovalWindow, openFingerRecordingWindow } from "./lib/desktopApproval";
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
 import { normalizeLocale } from "./lib/i18n";
@@ -2524,6 +2535,11 @@ function ChatApp() {
   const [spotlightSelectedIndex, setSpotlightSelectedIndex] = useState(0);
   const [spotlightLoading, setSpotlightLoading] = useState(false);
   const [modelPickerRequestId, setModelPickerRequestId] = useState(0);
+  const [activeEntityPickerRequest, setActiveEntityPickerRequest] = useState<{
+    pickerId: string;
+    query: string;
+  } | null>(null);
+  const [entityPickerSelections, setEntityPickerSelections] = useState<Record<string, string[]>>({});
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [requestedSettingsSectionId, setRequestedSettingsSectionId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -3021,6 +3037,22 @@ function ChatApp() {
           registeredSlashCommandsFromSettings(settingsValues.commands?.registered_slash_commands),
         )
   ), [commandCatalog, settingsValues.commands?.registered_slash_commands, usesResolvedCommandProtocol]);
+  const entityPickers = useMemo(() => resolveEntityPickers(catalog), [catalog]);
+  const entityPickerStatusSurfaces = useMemo(
+    () => entityPickersForPresentation(entityPickers, "status_surface"),
+    [entityPickers],
+  );
+  const entityPickerInlineSurfaces = useMemo(
+    () => entityPickersForPresentation(entityPickers, "inline"),
+    [entityPickers],
+  );
+  const entityPickerSettingsSurfaces = useMemo(
+    () => entityPickersForPresentation(entityPickers, "settings"),
+    [entityPickers],
+  );
+  const activeEntityPicker = activeEntityPickerRequest
+    ? entityPickers.find((picker) => picker.id === activeEntityPickerRequest.pickerId) ?? null
+    : null;
 
   useEffect(() => {
     if (!usesResolvedCommandProtocol || pendingCommandApproval || effectiveCommandCatalog.length === 0) return;
@@ -4565,6 +4597,19 @@ function ChatApp() {
     args: Record<string, unknown>,
   ) => {
     switch (action) {
+      case "open_entity_picker": {
+        const picker = entityPickerForCommand(entityPickers, command);
+        if (!picker) {
+          setError(`/${command.name} does not reference an available entity picker.`);
+          return;
+        }
+        setActiveEntityPickerRequest({
+          pickerId: picker.id,
+          query: String(args.query ?? "").trim(),
+        });
+        if (picker.presentation === "settings") setIsSettingsOpen(true);
+        return;
+      }
       case "open_model_picker": {
         const query = String(args.query ?? "").trim().toLowerCase();
         setComposerCandidateMenu(null);
@@ -6928,11 +6973,125 @@ function ChatApp() {
     openKanbanScope({ type: "group", id: group.id }, group.title);
   };
 
+  const entityPickerSelectionKey = (
+    pickerId: string,
+    valueScope: EntityPickerSelectionRequest["valueScope"],
+  ) => {
+    if (valueScope === "draft" || valueScope === "conversation" || valueScope === "run") {
+      return `${valueScope}:${activeConversationId ?? "new"}:${pickerId}`;
+    }
+    if (valueScope === "workspace") {
+      return `${valueScope}:${effectiveWorkspaceId ?? "default"}:${pickerId}`;
+    }
+    return `${valueScope}:${pickerId}`;
+  };
+
+  const executeEntityPickerAction = async (
+    request: EntityPickerSelectionRequest,
+    actionId: string | undefined,
+  ) => {
+    if (!actionId) throw new Error("This picker does not declare a registered action.");
+    const picker = entityPickers.find((candidate) => candidate.id === request.pickerId);
+    const capability = actionId === picker?.selectActionId
+      ? picker.selectActionCapability
+      : actionId === picker?.createActionId ? picker.createActionCapability : undefined;
+    if (!picker || !capability) {
+      throw new Error("The picker action is not bound to the active ProfileLock/ResolvedPlan.");
+    }
+    await api.invokeFrontendCapability({
+      profile_id: capability.profileId,
+      plan_hash: capability.planHash,
+      catalog_hash: capability.catalogHash,
+      contribution_id: capability.contributionId,
+      owner_pack_id: capability.ownerPackId,
+      contract_id: capability.contractId,
+      input: {
+        picker_id: request.pickerId,
+        selected_ids: request.selectedIds,
+        data_source_id: request.dataSourceId,
+        source_revision: request.sourceRevision,
+        value_scope: request.valueScope,
+      },
+    });
+    const key = entityPickerSelectionKey(request.pickerId, request.valueScope);
+    setEntityPickerSelections((current) => ({ ...current, [key]: request.selectedIds }));
+    await refreshCatalog();
+  };
+
+  const handleEntityPickerSelect = async (request: EntityPickerSelectionRequest) => {
+    if (request.valueScope === "draft" || request.valueScope === "conversation" || request.valueScope === "run") {
+      const key = entityPickerSelectionKey(request.pickerId, request.valueScope);
+      setEntityPickerSelections((current) => ({ ...current, [key]: request.selectedIds }));
+      return;
+    }
+    await executeEntityPickerAction(request, request.actionId);
+  };
+
+  const handleEntityPickerCreate = async (request: EntityPickerSelectionRequest) => {
+    await executeEntityPickerAction(request, request.actionId);
+  };
+
+  const handleEntityPickerLoadPage = async (
+    request: EntityPickerPageRequest,
+  ): Promise<EntityPickerPage> => {
+    const picker = entityPickers.find((candidate) => candidate.id === request.pickerId);
+    const capability = picker?.dataSourceCapability;
+    if (!picker || !capability) {
+      throw new Error("The entity picker is no longer available.");
+    }
+    const result = await api.invokeFrontendCapability({
+      profile_id: capability.profileId,
+      plan_hash: capability.planHash,
+      catalog_hash: capability.catalogHash,
+      contribution_id: capability.contributionId,
+      owner_pack_id: capability.ownerPackId,
+      contract_id: capability.contractId,
+      input: {
+        picker_id: request.pickerId,
+        query: request.query,
+        cursor: request.cursor,
+        data_source_id: request.dataSourceId,
+        source_revision: request.sourceRevision,
+      },
+    });
+    return entityPickerPageFromCapabilityResult(picker, result);
+  };
+  const activeEntityPickerSelectedIds = activeEntityPicker
+    ? entityPickerSelections[
+        entityPickerSelectionKey(activeEntityPicker.id, activeEntityPicker.valueScope)
+      ] ?? activeEntityPicker.selectedIds
+    : undefined;
+  const selectedIdsForEntityPicker = (picker: typeof entityPickers[number]) => (
+    entityPickerSelections[entityPickerSelectionKey(picker.id, picker.valueScope)]
+      ?? picker.selectedIds
+  );
+
   const renderComposer = (isCentered = false) => {
     if (!isCentered && activeConversation?.metadata?.shared_read_only === true) {
       return <div role="status" className="mx-3 mb-3 flex min-h-14 items-center justify-center border border-zinc-800 bg-zinc-950 px-4 text-center text-sm text-zinc-400">Read-only imported copy. Import the share again with continue mode to send messages.</div>;
     }
-    return <Renderers.composer
+    return <>
+      {entityPickerInlineSurfaces.length > 0 && (
+        <section
+          aria-label="Composer entity pickers"
+          className="mx-3 mb-2 grid max-h-72 gap-2 overflow-y-auto"
+        >
+          {entityPickerInlineSurfaces.map((picker) => (
+            <EntityPickerHost
+              key={picker.id}
+              picker={picker}
+              initialQuery={activeEntityPickerRequest?.pickerId === picker.id
+                ? activeEntityPickerRequest.query
+                : undefined}
+              selectedIds={selectedIdsForEntityPicker(picker)}
+              onSelect={handleEntityPickerSelect}
+              onCreate={handleEntityPickerCreate}
+              onLoadPage={handleEntityPickerLoadPage}
+            />
+          ))}
+        </section>
+      )}
+      <Renderers.composer
       widgetContext={widgetContext}
       input={input}
       placeholder={isCentered ? getNewConversationPlaceholder() : placeholder}
@@ -7016,7 +7175,8 @@ function ChatApp() {
       onProjectSelect={handleComposerProjectSelect}
       onProjectDirectorySelect={handleDirectorySelect}
       onProjectStoragePrepare={handlePrepareChatGroupStorage}
-    />;
+      />
+    </>;
   };
 
   if (isLoading) {
@@ -7033,6 +7193,38 @@ function ChatApp() {
     <RendererBoundary>
     <div className="rumi-app-shell flex h-screen min-h-0 w-full flex-col overflow-hidden bg-[#09090b] font-sans text-zinc-300 selection:bg-zinc-800">
       {showRegion("title_bar") && <Renderers.titleBar appName={composerHomeTitle || catalog?.app?.name} appIcon={catalog?.app?.icon} />}
+
+      {activeEntityPicker && (
+        activeEntityPicker.presentation === "popup" || activeEntityPicker.presentation === "palette"
+          ? <LayerPortal layer="globalOverlay"><EntityPickerHost
+              picker={activeEntityPicker}
+              initialQuery={activeEntityPickerRequest?.query}
+              selectedIds={activeEntityPickerSelectedIds}
+              onClose={() => setActiveEntityPickerRequest(null)}
+              onSelect={handleEntityPickerSelect}
+              onCreate={handleEntityPickerCreate}
+              onLoadPage={handleEntityPickerLoadPage}
+            /></LayerPortal>
+          : null
+      )}
+
+      {entityPickerStatusSurfaces.length > 0 && (
+        <aside
+          aria-label="Entity picker status controls"
+          className="rumi-entity-picker-status-surfaces grid max-h-[45vh] gap-2 overflow-y-auto border-b border-zinc-800/70 bg-zinc-950/95 p-2"
+        >
+          {entityPickerStatusSurfaces.map((picker) => (
+            <EntityPickerHost
+              key={picker.id}
+              picker={picker}
+              selectedIds={selectedIdsForEntityPicker(picker)}
+              onSelect={handleEntityPickerSelect}
+              onCreate={handleEntityPickerCreate}
+              onLoadPage={handleEntityPickerLoadPage}
+            />
+          ))}
+        </aside>
+      )}
 
       <div className="rumi-shell-body flex min-h-0 flex-1">
         {showRegion("history") && !isHistoryMinimized && (
@@ -7497,6 +7689,23 @@ function ChatApp() {
           loadState={settingsLoadState}
           modelProfilesLoadState={modelProfilesLoadState}
           locale={locale}
+          extensionSurfaces={entityPickerSettingsSurfaces.length > 0 ? (
+            <div className="grid gap-3">
+              {entityPickerSettingsSurfaces.map((picker) => (
+                <EntityPickerHost
+                  key={picker.id}
+                  picker={picker}
+                  initialQuery={activeEntityPickerRequest?.pickerId === picker.id
+                    ? activeEntityPickerRequest.query
+                    : undefined}
+                  selectedIds={selectedIdsForEntityPicker(picker)}
+                  onSelect={handleEntityPickerSelect}
+                  onCreate={handleEntityPickerCreate}
+                  onLoadPage={handleEntityPickerLoadPage}
+                />
+              ))}
+            </div>
+          ) : undefined}
           onClose={() => setIsSettingsOpen(false)}
           onStartSettingsChat={startSettingsChat}
           onOpenSection={openSettingsSection}

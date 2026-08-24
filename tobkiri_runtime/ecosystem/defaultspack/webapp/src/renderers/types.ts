@@ -326,6 +326,7 @@ export type SettingsModalRendererProps = {
   loadState?: SettingsLoadState;
   modelProfilesLoadState?: SettingsLoadState;
   locale?: LocaleSetting;
+  extensionSurfaces?: ReactNode;
   onClose: () => void;
   onStartSettingsChat?: () => void;
   onOpenSection?: (sectionId: string) => void;

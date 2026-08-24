@@ -40,6 +40,7 @@ LEGACY_FRONTEND_HANDLERS = {
     "open_context_viewer",
     "open_debug",
     "open_diff_preview",
+    "open_entity_picker",
     "open_file_search",
     "open_history",
     "open_hooks",

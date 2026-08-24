@@ -2103,6 +2103,7 @@ export type UICatalog = {
   tool_policies?: TemplateToolPolicy[];
   context_policies?: TemplateContextPolicy[];
   composer_widgets?: TemplateCatalogMetadataItem[];
+  entity_pickers?: TemplateCatalogMetadataItem[];
   external_io_templates?: TemplateCatalogMetadataItem[];
   templates?: TemplateCatalogMetadataItem[];
   actions?: TemplateCatalogMetadataItem[];
@@ -3561,6 +3562,32 @@ export const api = {
       defaultspackContractRoute("api/command-protocol/v1/datasources/query"),
       { method: "POST", body: JSON.stringify(payload), signal: options.signal },
     );
+  },
+
+  invokeFrontendCapability(payload: {
+    profile_id: string;
+    plan_hash: string;
+    catalog_hash: string;
+    contribution_id: string;
+    owner_pack_id: string;
+    contract_id: string;
+    input: Record<string, unknown>;
+  }) {
+    return request<unknown>(defaultspackContractRoute("api/ui/capability/invoke"), {
+      method: "POST",
+      cache: "no-store",
+      body: JSON.stringify({
+        request_id: crypto.randomUUID(),
+        expires_at: Date.now() / 1000 + 30,
+        profile_id: payload.profile_id,
+        plan_hash: payload.plan_hash,
+        catalog_hash: payload.catalog_hash,
+        contribution_id: payload.contribution_id,
+        owner_pack_id: payload.owner_pack_id,
+        contract_id: payload.contract_id,
+        payload: payload.input,
+      }),
+    });
   },
 
   toolCatalog() {

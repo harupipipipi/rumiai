@@ -3468,6 +3468,7 @@ export function SettingsModalRenderer({
   loadState = { status: "ready" },
   modelProfilesLoadState = { status: "ready" },
   locale = "ja",
+  extensionSurfaces,
   onClose,
   onStartSettingsChat,
   onOpenSection,
@@ -4963,6 +4964,11 @@ export function SettingsModalRenderer({
               </nav>
 
               <main className="min-w-0 space-y-7 overflow-y-auto p-4 sm:p-6" id="settings-content">
+                {extensionSurfaces ? (
+                  <section aria-label="Pack entity picker settings" className="space-y-3">
+                    {extensionSurfaces}
+                  </section>
+                ) : null}
                 {normalizedSearch ? (
                   <section className="border border-white/[0.08] bg-black/15" aria-labelledby="settings-search-results-title">
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-3">
