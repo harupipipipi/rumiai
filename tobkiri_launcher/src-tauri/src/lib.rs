@@ -3,17 +3,28 @@
 //! V2: Full implementation with setup hook, commands, tray menu, and navigation guard.
 
 mod app_data_migration;
+mod artifact_integrity;
 mod config;
 mod debug_approval;
+mod defaultspack_authority;
 mod defaultspack_manager;
 mod desktop_system_info;
 mod health_check;
 mod host_audit;
 mod host_broker;
 mod host_broker_types;
+mod host_contract;
 mod kernel_manager;
+mod presentation;
 mod process_utils;
 mod python_env;
+mod runtime_resource_integrity;
+mod runtime_resource_paths;
+mod sealed_python;
+#[allow(dead_code)]
+mod sealed_python_protocol;
+mod shell_handoff;
+mod shell_runtime;
 mod tray;
 mod updater;
 
@@ -1740,7 +1751,7 @@ fn run_delayed_update_check() {
 fn startup_failure_message(stage: &str, error: &anyhow::Error, config: &AppConfig) -> String {
     let log_path = config.log_dir.join("kernel.log");
     format!(
-        "Error: {stage} failed — {error}. See {}",
+        "Error: {stage} failed — {error:#}. See {}",
         log_path.display()
     )
 }
@@ -1962,60 +1973,65 @@ fn valid_launch_nonce(value: &str) -> bool {
 }
 
 #[cfg(any(debug_assertions, test))]
-fn debug_parallel_instance_policy_from_values(
+struct DebugParallelInstanceEnvironment<'a> {
     debug_build: bool,
-    instance_id: Option<&str>,
-    user_data_root: Option<&str>,
-    connection_path: Option<&str>,
-    broker_port: Option<&str>,
-    nonce: Option<&str>,
-    defaultspack_isolation: Option<&str>,
-    defaultspack_run_id: Option<&str>,
-    defaultspack_nonce: Option<&str>,
-    defaultspack_state_root: Option<&str>,
-    defaultspack_http_port: Option<&str>,
-    defaultspack_kernel_port: Option<&str>,
+    instance_id: Option<&'a str>,
+    user_data_root: Option<&'a str>,
+    connection_path: Option<&'a str>,
+    broker_port: Option<&'a str>,
+    nonce: Option<&'a str>,
+    defaultspack_isolation: Option<&'a str>,
+    defaultspack_run_id: Option<&'a str>,
+    defaultspack_nonce: Option<&'a str>,
+    defaultspack_state_root: Option<&'a str>,
+    defaultspack_http_port: Option<&'a str>,
+    defaultspack_kernel_port: Option<&'a str>,
+}
+
+#[cfg(any(debug_assertions, test))]
+fn debug_parallel_instance_policy_from_values(
+    environment: DebugParallelInstanceEnvironment<'_>,
 ) -> Option<DebugParallelInstancePolicy> {
-    if !debug_build {
+    if !environment.debug_build {
         return None;
     }
 
-    let instance_id = instance_id?;
-    if !valid_debug_instance_id(&instance_id) {
+    let instance_id = environment.instance_id?;
+    if !valid_debug_instance_id(instance_id) {
         return None;
     }
 
-    let user_data_root = PathBuf::from(user_data_root?);
+    let user_data_root = PathBuf::from(environment.user_data_root?);
     if !is_clean_absolute_path(&user_data_root)
         || user_data_root.file_name()?.to_str()? != "viewer_user_data"
     {
         return None;
     }
 
-    let connection_path = PathBuf::from(connection_path?);
+    let connection_path = PathBuf::from(environment.connection_path?);
     let expected_connection_path = user_data_root.join("host_broker").join("connection.json");
     if !is_clean_absolute_path(&connection_path) || connection_path != expected_connection_path {
         return None;
     }
 
-    let broker_port = ascii_decimal_port(broker_port?)?;
+    let broker_port = ascii_decimal_port(environment.broker_port?)?;
     if broker_port == DEFAULT_HOST_BROKER_PORT {
         return None;
     }
 
-    let nonce = nonce?;
-    if !valid_launch_nonce(&nonce) {
+    let nonce = environment.nonce?;
+    if !valid_launch_nonce(nonce) {
         return None;
     }
 
-    if defaultspack_isolation? != "1"
-        || defaultspack_run_id? != instance_id
-        || defaultspack_nonce? != nonce
+    if environment.defaultspack_isolation? != "1"
+        || environment.defaultspack_run_id? != instance_id
+        || environment.defaultspack_nonce? != nonce
     {
         return None;
     }
     let supervisor_root = user_data_root.parent()?.to_path_buf();
-    let defaultspack_state_root = PathBuf::from(defaultspack_state_root?);
+    let defaultspack_state_root = PathBuf::from(environment.defaultspack_state_root?);
     let expected_state_root = supervisor_root.join("defaultspack_state");
     if !is_clean_absolute_path(&defaultspack_state_root)
         || defaultspack_state_root != expected_state_root
@@ -2030,8 +2046,8 @@ fn debug_parallel_instance_policy_from_values(
     {
         return None;
     }
-    let defaultspack_http_port = ascii_decimal_port(defaultspack_http_port?)?;
-    let kernel_port = ascii_decimal_port(defaultspack_kernel_port?)?;
+    let defaultspack_http_port = ascii_decimal_port(environment.defaultspack_http_port?)?;
+    let kernel_port = ascii_decimal_port(environment.defaultspack_kernel_port?)?;
     if defaultspack_http_port == DEFAULTSPACK_RESERVED_PORT
         || kernel_port == 8765
         || defaultspack_http_port == kernel_port
@@ -2053,32 +2069,32 @@ fn debug_parallel_instance_policy_from_values(
 
 #[cfg(debug_assertions)]
 fn debug_parallel_instance_policy_from_env() -> Option<DebugParallelInstancePolicy> {
-    debug_parallel_instance_policy_from_values(
-        true,
-        std::env::var(DEBUG_INSTANCE_ID_ENV).ok().as_deref(),
-        std::env::var(DEBUG_USER_DATA_ROOT_ENV).ok().as_deref(),
-        std::env::var(HOST_BROKER_CONNECTION_ENV).ok().as_deref(),
-        std::env::var(HOST_BROKER_PORT_ENV).ok().as_deref(),
-        std::env::var(HOST_BROKER_INSTANCE_NONCE_ENV)
+    debug_parallel_instance_policy_from_values(DebugParallelInstanceEnvironment {
+        debug_build: true,
+        instance_id: std::env::var(DEBUG_INSTANCE_ID_ENV).ok().as_deref(),
+        user_data_root: std::env::var(DEBUG_USER_DATA_ROOT_ENV).ok().as_deref(),
+        connection_path: std::env::var(HOST_BROKER_CONNECTION_ENV).ok().as_deref(),
+        broker_port: std::env::var(HOST_BROKER_PORT_ENV).ok().as_deref(),
+        nonce: std::env::var(HOST_BROKER_INSTANCE_NONCE_ENV)
             .ok()
             .as_deref(),
-        std::env::var(DEFAULTSPACK_DEBUG_ISOLATION_ENV)
+        defaultspack_isolation: std::env::var(DEFAULTSPACK_DEBUG_ISOLATION_ENV)
             .ok()
             .as_deref(),
-        std::env::var(DEFAULTSPACK_DEBUG_RUN_ID_ENV).ok().as_deref(),
-        std::env::var(DEFAULTSPACK_DEBUG_LAUNCH_NONCE_ENV)
+        defaultspack_run_id: std::env::var(DEFAULTSPACK_DEBUG_RUN_ID_ENV).ok().as_deref(),
+        defaultspack_nonce: std::env::var(DEFAULTSPACK_DEBUG_LAUNCH_NONCE_ENV)
             .ok()
             .as_deref(),
-        std::env::var(DEFAULTSPACK_DEBUG_STATE_ROOT_ENV)
+        defaultspack_state_root: std::env::var(DEFAULTSPACK_DEBUG_STATE_ROOT_ENV)
             .ok()
             .as_deref(),
-        std::env::var(DEFAULTSPACK_DEBUG_HTTP_PORT_ENV)
+        defaultspack_http_port: std::env::var(DEFAULTSPACK_DEBUG_HTTP_PORT_ENV)
             .ok()
             .as_deref(),
-        std::env::var(DEFAULTSPACK_DEBUG_KERNEL_PORT_ENV)
+        defaultspack_kernel_port: std::env::var(DEFAULTSPACK_DEBUG_KERNEL_PORT_ENV)
             .ok()
             .as_deref(),
-    )
+    })
 }
 
 #[cfg(debug_assertions)]
@@ -2108,6 +2124,15 @@ pub(crate) fn debug_defaultspack_ports_from_env() -> Option<(u16, u16)> {
 }
 
 pub fn run() {
+    let context = tauri::generate_context!();
+    if context.config().identifier == shell_handoff::SHELL_BUNDLE_IDENTIFIER {
+        shell_runtime::run(context);
+        return;
+    }
+    run_launcher(context);
+}
+
+fn run_launcher(context: tauri::Context<tauri::Wry>) {
     env_logger::init();
 
     #[cfg(debug_assertions)]
@@ -2349,7 +2374,9 @@ pub fn run() {
 
                 // --- Normal startup sequence ---
                 update_setup_progress(Some(&handle), &progress_arc, "Checking Python environment...");
-                if let Err(e) = python_env::ensure_python_env(&config) {
+                if let Err(e) = python_env::ensure_python_env_with_progress(&config, |message| {
+                    update_setup_progress(Some(&handle), &progress_arc, message);
+                }) {
                     let msg = startup_failure_message("Python setup", &e, &config);
                     error!("{msg}");
                     update_setup_progress(Some(&handle), &progress_arc, &msg);
@@ -2396,11 +2423,11 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if should_send_to_background_on_close(window.label()) {
                     api.prevent_close();
-                    if let Err(error) = send_app_to_background(&window.app_handle()) {
+                    if let Err(error) = send_app_to_background(window.app_handle()) {
                         error!("Failed to send app to background: {error}");
                     }
                 } else if should_restore_primary_on_close(window.label()) {
-                    if let Err(error) = restore_primary_window(&window.app_handle(), true) {
+                    if let Err(error) = restore_primary_window(window.app_handle(), true) {
                         error!("Failed to restore launcher after closing Tobkiri: {error}");
                     }
                 }
@@ -2430,9 +2457,12 @@ pub fn run() {
             desktop_system_info::get_host_permission_status,
             desktop_system_info::open_host_permission_settings,
             dock_registration::register_defaultspack_dock,
-            dock_registration::launch_defaultspack_desktop
+            dock_registration::launch_defaultspack_desktop,
+            presentation::get_presentation_catalog,
+            presentation::select_presentation,
+            presentation::launch_selected_presentation
         ])
-        .build(tauri::generate_context!());
+        .build(context);
 
     let app = match app {
         Ok(app) => app,
@@ -2495,13 +2525,8 @@ pub fn run() {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn env_lock() -> &'static Mutex<()> {
-        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        ENV_LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     fn test_config() -> AppConfig {
         AppConfig::detect_for_tauri(
@@ -2610,13 +2635,38 @@ mod tests {
         fixture.defaultspack_values()
     }
 
+    macro_rules! debug_policy {
+        (
+            $debug_build:expr, $instance_id:expr, $user_data_root:expr,
+            $connection_path:expr, $broker_port:expr, $nonce:expr,
+            $defaultspack_isolation:expr, $defaultspack_run_id:expr,
+            $defaultspack_nonce:expr, $defaultspack_state_root:expr,
+            $defaultspack_http_port:expr, $defaultspack_kernel_port:expr $(,)?
+        ) => {
+            debug_parallel_instance_policy_from_values(DebugParallelInstanceEnvironment {
+                debug_build: $debug_build,
+                instance_id: $instance_id,
+                user_data_root: $user_data_root,
+                connection_path: $connection_path,
+                broker_port: $broker_port,
+                nonce: $nonce,
+                defaultspack_isolation: $defaultspack_isolation,
+                defaultspack_run_id: $defaultspack_run_id,
+                defaultspack_nonce: $defaultspack_nonce,
+                defaultspack_state_root: $defaultspack_state_root,
+                defaultspack_http_port: $defaultspack_http_port,
+                defaultspack_kernel_port: $defaultspack_kernel_port,
+            })
+        };
+    }
+
     #[test]
     fn debug_parallel_instance_requires_every_isolation_precondition() {
         let fixture = DebugPolicyFixture::new();
         let (id, root, connection, port, nonce) = valid_debug_parallel_policy_values(&fixture);
         let (isolation, run_id, defaultspack_nonce, state_root, http_port, kernel_port) =
             valid_debug_defaultspack_policy_values(&fixture);
-        let policy = debug_parallel_instance_policy_from_values(
+        let policy = debug_policy!(
             true,
             Some(id),
             Some(root),
@@ -2653,7 +2703,7 @@ mod tests {
             ];
             values[missing] = None;
             assert!(
-                debug_parallel_instance_policy_from_values(
+                debug_policy!(
                     true, values[0], values[1], values[2], values[3], values[4], values[5],
                     values[6], values[7], values[8], values[9], values[10]
                 )
@@ -2670,7 +2720,7 @@ mod tests {
         let (isolation, run_id, defaultspack_nonce, state_root, http_port, kernel_port) =
             valid_debug_defaultspack_policy_values(&fixture);
         for bad_id in ["viewer-smoke", "debug-x", "debug-has space"] {
-            assert!(debug_parallel_instance_policy_from_values(
+            assert!(debug_policy!(
                 true,
                 Some(bad_id),
                 Some(root),
@@ -2688,7 +2738,7 @@ mod tests {
         }
         for bad_port in ["8770", "0", " 18770", "18770 ", "65536"] {
             assert!(
-                debug_parallel_instance_policy_from_values(
+                debug_policy!(
                     true,
                     Some(id),
                     Some(root),
@@ -2706,7 +2756,7 @@ mod tests {
                 "{bad_port:?} must retain single-instance"
             );
         }
-        assert!(debug_parallel_instance_policy_from_values(
+        assert!(debug_policy!(
             true,
             Some(id),
             Some(root),
@@ -2721,7 +2771,7 @@ mod tests {
             Some(kernel_port),
         )
         .is_none());
-        assert!(debug_parallel_instance_policy_from_values(
+        assert!(debug_policy!(
             true,
             Some(id),
             Some("relative-root"),
@@ -2752,7 +2802,7 @@ mod tests {
         let alias_user_data = alias.join("viewer_user_data");
         let alias_connection = alias_user_data.join("host_broker").join("connection.json");
         let alias_state = alias.join("defaultspack_state");
-        assert!(debug_parallel_instance_policy_from_values(
+        assert!(debug_policy!(
             true,
             Some("debug-viewer-smoke-12345"),
             alias_user_data.to_str(),
@@ -2773,7 +2823,7 @@ mod tests {
         let (id, root, connection, port, nonce) = fixture.viewer_values();
         let (isolation, run_id, defaultspack_nonce, state_root, http_port, kernel_port) =
             fixture.defaultspack_values();
-        assert!(debug_parallel_instance_policy_from_values(
+        assert!(debug_policy!(
             true,
             Some(id),
             Some(root),
@@ -2795,7 +2845,7 @@ mod tests {
         let fixture = DebugPolicyFixture::new();
         let wrong_user_data = fixture.supervisor.join("user_data");
         let wrong_connection = wrong_user_data.join("host_broker").join("connection.json");
-        assert!(debug_parallel_instance_policy_from_values(
+        assert!(debug_policy!(
             true,
             Some("debug-viewer-smoke-12345"),
             wrong_user_data.to_str(),
@@ -2813,7 +2863,7 @@ mod tests {
 
         let wrong_state = fixture.supervisor.join("state");
         let (id, root, connection, port, nonce) = fixture.viewer_values();
-        assert!(debug_parallel_instance_policy_from_values(
+        assert!(debug_policy!(
             true,
             Some(id),
             Some(root),
@@ -2836,7 +2886,7 @@ mod tests {
         let (id, root, connection, port, nonce) = fixture.viewer_values();
         let (isolation, run_id, defaultspack_nonce, state_root, http_port, kernel_port) =
             fixture.defaultspack_values();
-        let policy = debug_parallel_instance_policy_from_values(
+        let policy = debug_policy!(
             true,
             Some(id),
             Some(root),
@@ -2877,7 +2927,7 @@ mod tests {
         let (id, root, connection, port, nonce) = fixture.viewer_values();
         let (isolation, run_id, defaultspack_nonce, state_root, http_port, kernel_port) =
             fixture.defaultspack_values();
-        let policy = debug_parallel_instance_policy_from_values(
+        let policy = debug_policy!(
             true,
             Some(id),
             Some(root),
@@ -2912,7 +2962,7 @@ mod tests {
         let (id, root, connection, port, nonce) = valid_debug_parallel_policy_values(&fixture);
         let (isolation, run_id, defaultspack_nonce, state_root, http_port, kernel_port) =
             valid_debug_defaultspack_policy_values(&fixture);
-        assert!(debug_parallel_instance_policy_from_values(
+        assert!(debug_policy!(
             false,
             Some(id),
             Some(root),
@@ -3300,40 +3350,6 @@ mod tests {
         let mut km = KernelManager::new(&config, "test-bootstrap".into());
         let result = km.wait_and_handle_restart().unwrap();
         assert!(!result);
-    }
-
-    #[test]
-    fn explicit_auto_approve_opt_in_is_required() {
-        let _guard = env_lock().lock().unwrap();
-        std::env::remove_var("RUMI_AUTO_APPROVE_LOCAL");
-
-        let dev_environment = true;
-        let auto_approve_local = dev_environment
-            && std::env::var("RUMI_AUTO_APPROVE_LOCAL")
-                .map(|value| value.eq_ignore_ascii_case("true"))
-                .unwrap_or(false);
-
-        assert!(!auto_approve_local);
-    }
-
-    #[test]
-    fn explicit_auto_approve_opt_in_only_applies_in_dev() {
-        let _guard = env_lock().lock().unwrap();
-        std::env::set_var("RUMI_AUTO_APPROVE_LOCAL", "true");
-
-        let production_auto_approve = false
-            && std::env::var("RUMI_AUTO_APPROVE_LOCAL")
-                .map(|value| value.eq_ignore_ascii_case("true"))
-                .unwrap_or(false);
-        let development_auto_approve = true
-            && std::env::var("RUMI_AUTO_APPROVE_LOCAL")
-                .map(|value| value.eq_ignore_ascii_case("true"))
-                .unwrap_or(false);
-
-        assert!(!production_auto_approve);
-        assert!(development_auto_approve);
-
-        std::env::remove_var("RUMI_AUTO_APPROVE_LOCAL");
     }
 
     #[test]

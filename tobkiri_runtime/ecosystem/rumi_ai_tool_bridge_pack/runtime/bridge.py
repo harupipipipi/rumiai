@@ -18,7 +18,12 @@ def create_tool_intent_operation(
     del client
 
     def operation(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-        if name not in {"normalize", "validate"}:
+        if name not in {
+            "normalize",
+            "validate",
+            "rumi_ai_tool_bridge_pack.ai-tool-intent-normalize.generate",
+            "rumi_ai_tool_bridge_pack.ai-tool-intent-normalize.stream",
+        }:
             raise ValueError(f"unknown AI tool bridge operation: {name}")
         values = payload.get("intents")
         values = values if isinstance(values, list) else []
@@ -68,4 +73,3 @@ def _normalize(
 
 def _invalid(message: str) -> GlobalContractInvocationError:
     return GlobalContractInvocationError("invalid_response", message)
-

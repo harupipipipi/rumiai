@@ -294,6 +294,9 @@ domains:
   runtime_config:
     may_import: []
     path: domain/runtime_config.py
+  runtime_v4:
+    may_import: []
+    path: domain/runtime_v4
   safety:
     may_import:
     - domain/host_bridge

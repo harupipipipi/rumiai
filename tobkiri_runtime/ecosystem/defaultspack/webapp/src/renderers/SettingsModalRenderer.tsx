@@ -1565,7 +1565,7 @@ function PublicUrlField({
   const config = publicUrlConfig(value, field.default);
   const [providerId, setProviderId] = useState(String(config.provider_id ?? "cloudflare_quick_tunnel"));
   const [localUrl, setLocalUrl] = useState(String(config.local_url ?? "http://127.0.0.1:8766"));
-  const [routePath, setRoutePath] = useState(String(config.route_path ?? "/api/integrations/line/webhook"));
+  const [routePath, setRoutePath] = useState(String(config.route_path ?? settingsApiResources.canonicalRouteKey("api/integrations/line/webhook")));
   const [result, setResult] = useState<Record<string, unknown> | null>(
     config.result && typeof config.result === "object" ? config.result as Record<string, unknown> : null,
   );
@@ -1576,16 +1576,16 @@ function PublicUrlField({
     const next = publicUrlConfig(value, field.default);
     setProviderId(String(next.provider_id ?? "cloudflare_quick_tunnel"));
     setLocalUrl(String(next.local_url ?? "http://127.0.0.1:8766"));
-    setRoutePath(String(next.route_path ?? "/api/integrations/line/webhook"));
+    setRoutePath(String(next.route_path ?? settingsApiResources.canonicalRouteKey("api/integrations/line/webhook")));
     setResult(next.result && typeof next.result === "object" ? next.result as Record<string, unknown> : null);
   }, [field.default, value]);
 
   const routeOptions = [
-    { value: "/api/integrations/line/webhook", label: "LINE webhook" },
-    { value: "/api/integrations/discord/interactions", label: "Discord interactions" },
-    { value: "/api/integrations/discord/events", label: "Discord events" },
-    { value: "/api/integrations/slack/events", label: "Slack events" },
-    { value: "/api/webhooks/inbound/{webhook_id}", label: "Generic webhook" },
+    { value: settingsApiResources.canonicalRouteKey("api/integrations/line/webhook"), label: "LINE webhook" },
+    { value: settingsApiResources.canonicalRouteKey("api/integrations/discord/interactions"), label: "Discord interactions" },
+    { value: settingsApiResources.canonicalRouteKey("api/integrations/discord/events"), label: "Discord events" },
+    { value: settingsApiResources.canonicalRouteKey("api/integrations/slack/events"), label: "Slack events" },
+    { value: settingsApiResources.canonicalRouteKey("api/webhooks/inbound/{webhook_id}"), label: "Generic webhook" },
   ];
   const providerOptions = [
     { value: "cloudflare_quick_tunnel", label: "Cloudflare Quick Tunnel" },
@@ -4813,7 +4813,7 @@ export function SettingsModalRenderer({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={prefersReducedMotion ? { opacity: 1 } : { opacity: 0, scale: 0.98, y: 8 }}
             transition={prefersReducedMotion ? { duration: 0 } : { type: "spring", stiffness: 360, damping: 34 }}
-            className="relative flex h-[min(920px,calc(100dvh-20px))] w-[min(1480px,calc(100vw-16px))] min-w-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-[#0d0f11] shadow-2xl shadow-black/60 max-sm:h-dvh max-sm:w-screen max-sm:rounded-none max-sm:border-x-0"
+            className="relative flex h-[min(920px,calc(100dvh-20px))] w-[min(1480px,calc(100vw-16px))] min-w-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-[#0d0f11] shadow-2xl shadow-black/60 max-sm:h-[calc(100dvh-4px)] max-sm:w-screen max-sm:rounded-none max-sm:border-x-0"
           >
             <header
               className="flex min-w-0 items-center justify-between gap-4 border-b border-zinc-800 px-4 py-2 sm:px-5"

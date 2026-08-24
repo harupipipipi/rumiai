@@ -1614,19 +1614,29 @@ def test_ambient_permission_function_requires_signed_viewer_operator(monkeypatch
 
     from blocks.ambient import permissions
     from core_runtime.authority.ui_operator import sign_ui_operator
+    from core_runtime.host_contract import bind_host_contract
 
     unsigned = permissions.run({"action": "grant", "permission_id": MIC_PERMISSION})
 
     assert unsigned["status"] == "error"
     assert unsigned["error"]["code"] == "AMBIENT_PERMISSION_UI_OPERATOR_REQUIRED"
 
-    signed = permissions.run(
+    with bind_host_contract(
         {
-            "action": "grant",
-            "permission_id": MIC_PERMISSION,
-            "ui_operator": sign_ui_operator("rumi_ambient_trigger_pack", nonce="ambient-grant"),
+            "schema_version": "tobkiri.host-contract.v1",
+            "profile_id": "profile:test",
+            "values": {"panel_bootstrap_secret": "test-ambient-secret"},
         }
-    )
+    ):
+        signed = permissions.run(
+            {
+                "action": "grant",
+                "permission_id": MIC_PERMISSION,
+                "ui_operator": sign_ui_operator(
+                    "rumi_ambient_trigger_pack", nonce="ambient-grant"
+                ),
+            }
+        )
 
     assert signed["status"] == "ok"
     assert signed["data"]["permissions"]["rumi"][MIC_PERMISSION]["granted"] is True
@@ -1641,14 +1651,24 @@ def test_ambient_permission_function_rejects_wrong_operator_request(monkeypatch,
 
     from blocks.ambient import permissions
     from core_runtime.authority.ui_operator import sign_ui_operator
+    from core_runtime.host_contract import bind_host_contract
 
-    result = permissions.run(
+    with bind_host_contract(
         {
-            "action": "grant",
-            "permission_id": MIC_PERMISSION,
-            "ui_operator": sign_ui_operator("different-request", nonce="ambient-wrong"),
+            "schema_version": "tobkiri.host-contract.v1",
+            "profile_id": "profile:test",
+            "values": {"panel_bootstrap_secret": "test-ambient-secret"},
         }
-    )
+    ):
+        result = permissions.run(
+            {
+                "action": "grant",
+                "permission_id": MIC_PERMISSION,
+                "ui_operator": sign_ui_operator(
+                    "different-request", nonce="ambient-wrong"
+                ),
+            }
+        )
 
     assert result["status"] == "error"
     assert result["error"]["code"] == "AMBIENT_PERMISSION_UI_OPERATOR_REQUIRED"
@@ -1683,22 +1703,42 @@ def test_ambient_permission_revoke_function_requires_signed_viewer_operator(monk
 
     from blocks.ambient import permissions
     from core_runtime.authority.ui_operator import sign_ui_operator
+    from core_runtime.host_contract import bind_host_contract
 
-    grant_operator = sign_ui_operator("rumi_ambient_trigger_pack", nonce="ambient-grant")
-    assert permissions.run({"action": "grant", "permission_id": MIC_PERMISSION, "ui_operator": grant_operator})["status"] == "ok"
-
-    unsigned = permissions.run({"action": "revoke", "permission_id": MIC_PERMISSION})
-
-    assert unsigned["status"] == "error"
-    assert unsigned["error"]["code"] == "AMBIENT_PERMISSION_UI_OPERATOR_REQUIRED"
-
-    revoked = permissions.run(
+    with bind_host_contract(
         {
-            "action": "revoke",
-            "permission_id": MIC_PERMISSION,
-            "ui_operator": sign_ui_operator("rumi_ambient_trigger_pack", nonce="ambient-revoke"),
+            "schema_version": "tobkiri.host-contract.v1",
+            "profile_id": "profile:test",
+            "values": {"panel_bootstrap_secret": "test-ambient-secret"},
         }
-    )
+    ):
+        grant_operator = sign_ui_operator(
+            "rumi_ambient_trigger_pack", nonce="ambient-grant"
+        )
+        assert permissions.run(
+            {
+                "action": "grant",
+                "permission_id": MIC_PERMISSION,
+                "ui_operator": grant_operator,
+            }
+        )["status"] == "ok"
+
+        unsigned = permissions.run(
+            {"action": "revoke", "permission_id": MIC_PERMISSION}
+        )
+
+        assert unsigned["status"] == "error"
+        assert unsigned["error"]["code"] == "AMBIENT_PERMISSION_UI_OPERATOR_REQUIRED"
+
+        revoked = permissions.run(
+            {
+                "action": "revoke",
+                "permission_id": MIC_PERMISSION,
+                "ui_operator": sign_ui_operator(
+                    "rumi_ambient_trigger_pack", nonce="ambient-revoke"
+                ),
+            }
+        )
 
     assert revoked["status"] == "ok"
     assert revoked["data"]["permissions"]["rumi"][MIC_PERMISSION]["granted"] is False
@@ -1731,25 +1771,25 @@ def test_ambient_routes_and_functions_are_registered():
     from domain.function_runtime.registry import block_module_for, default_args_for, get_spec
     from transport.registry import canonical_http_route_specs, load_legacy_http_route_allowlist
 
-    routes = {(route.method, route.pattern, route.block_module) for route in canonical_http_route_specs()}
+    routes = canonical_http_route_specs()
     legacy_routes = load_legacy_http_route_allowlist()
-    assert ("GET", "/api/ambient/status", "blocks.ambient.status") in routes
-    assert ("POST", "/api/ambient/monitor/start", "blocks.ambient.monitor") in routes
-    assert ("POST", "/api/ambient/config", "blocks.ambient.config") in routes
-    assert ("POST", "/api/ambient/events", "blocks.ambient.event_submit") in routes
-    assert ("POST", "/api/ambient/transcriptions", "blocks.ambient.transcription") in routes
-    transcription_route = next(
-        route
-        for route in canonical_http_route_specs()
-        if route.method == "POST" and route.pattern == "/api/ambient/transcriptions"
-    )
-    assert transcription_route.local_only is True
-    assert ("POST", "/api/ambient/approval/approve", "blocks.ambient.approval") in routes
-    assert ("POST", "/api/ambient/approval/deny", "blocks.ambient.approval") in routes
-    assert ("POST", "/api/ambient/approval/approve", "blocks.ambient.approval") in legacy_routes
-    assert ("POST", "/api/ambient/approval/deny", "blocks.ambient.approval") in legacy_routes
-    assert ("POST", "/api/ambient/permissions/check", "blocks.ambient.permissions") in routes
-    assert ("GET", "/host-permissions", "") in routes
+    assert not any(route.pattern.startswith("/api/ambient/") for route in routes)
+    assert not any("/api/ambient/" in key[1] for key in legacy_routes)
+    assert ("GET", "/host-permissions") in {
+        (route.method, route.pattern) for route in routes
+    }
+
+    function_ids = {
+        "ambient_status",
+        "ambient_monitor_start",
+        "ambient_monitor_stop",
+        "ambient_configure",
+        "ambient_event_submit",
+        "ambient_permission_grant",
+        "ambient_permission_revoke",
+        "ambient_permission_check",
+    }
+    assert all(get_spec(function_id) is not None for function_id in function_ids)
     assert block_module_for("ambient_event_submit") == "blocks.ambient.event_submit"
     assert block_module_for("ambient_configure") == "blocks.ambient.config"
     assert default_args_for("ambient_monitor_stop") == {"action": "stop"}
@@ -1914,25 +1954,31 @@ def test_composer_transcription_rejects_invalid_or_mismatched_audio_mime(monkeyp
     assert mismatched["error"]["code"] == "AUDIO_PAYLOAD_INVALID"
 
 
-def test_ambient_events_viewer_token_satisfies_local_ui_context(monkeypatch):
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_LOCAL_TOKEN", "viewer-local-token")
-
+def test_ambient_events_viewer_token_satisfies_local_ui_context():
     from transport import http
+    from core_runtime.host_contract import bind_host_contract
 
-    assert http._local_ui_approval_route_authorized(
-        "POST",
-        "/api/ambient/events",
-        {"Authorization": "Bearer viewer-local-token"},
-    )
-    assert not http._local_ui_approval_route_authorized(
-        "POST",
-        "/api/ambient/events",
-        {},
-    )
-    assert http._requires_sensitive_http_auth(
-        "POST",
-        "/api/ambient/transcriptions",
-    ) is False
+    with bind_host_contract(
+        {
+            "schema_version": "tobkiri.host-contract.v1",
+            "profile_id": "profile:test",
+            "values": {"desktop_api_token": "viewer-local-token"},
+        }
+    ):
+        assert http._local_ui_approval_route_authorized(
+            "POST",
+            "/api/ambient/events",
+            {"Authorization": "Bearer viewer-local-token"},
+        )
+        assert not http._local_ui_approval_route_authorized(
+            "POST",
+            "/api/ambient/events",
+            {},
+        )
+        assert http._requires_sensitive_http_auth(
+            "POST",
+            "/api/ambient/transcriptions",
+        ) is False
 
 
 def test_ambient_monitor_start_function_returns_browser_owned_contract(monkeypatch):

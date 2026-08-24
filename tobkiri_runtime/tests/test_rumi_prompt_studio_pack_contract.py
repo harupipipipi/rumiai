@@ -67,10 +67,23 @@ def test_pack_required_assets_and_metadata() -> None:
     assert [path for path in required if not (PACK_DIR / path).is_file()] == []
 
     ecosystem = read_json(PACK_DIR / "ecosystem.json")
+    manifest = read_json(PACK_DIR / "pack.v4.json")
     assert validate_ecosystem(ecosystem, raise_on_error=False) == []
     assert ecosystem["pack_identity"] == f"rumi:ecosystem/{PACK_ID}"
     assert ecosystem["dependencies"] == {}
-    assert ecosystem["connectivity"]["requires"] == []
+    assert set(ecosystem["connectivity"]["requires"]) == {
+        "rumi.event.audit.recorded.v1",
+        "rumi.resource.profile.workspace.v1",
+    }
+    assert manifest["requirements"]["pack_dependencies"] == {}
+    contract_dependencies = manifest["requirements"]["contract_dependencies"]
+    assert {
+        item["contract_id"] for item in contract_dependencies
+    } == {
+        "tobkiri.event.audit.recorded.v1",
+        "tobkiri.resource.profile.workspace.v1",
+    }
+    assert all(item["optional"] is True for item in contract_dependencies)
     assert "rumi.resource.prompt.studio.v1" in ecosystem["connectivity"]["provides"]
     assert ecosystem["required_secrets"] == []
     assert ecosystem["required_network"] == {

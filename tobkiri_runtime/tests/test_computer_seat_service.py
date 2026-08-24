@@ -457,10 +457,10 @@ def test_mac_accessibility_chromium_detection_uses_exact_names_and_bundles():
 
 
 def test_mac_accessibility_candidate_diagnostics_use_real_ax_readiness_and_redact_target(monkeypatch):
-    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.drivers.mac_accessibility import (
+    from tobkiri_runtime.ecosystem.rumi_default_tools_pack.domain.computer.drivers.mac_accessibility import (
         MacAccessibilityDriver,
     )
-    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.mac import ax
+    from tobkiri_runtime.ecosystem.rumi_default_tools_pack.domain.computer.mac import ax
 
     monkeypatch.setattr(ax, "ax_import_available", lambda: True)
     monkeypatch.setattr(ax, "ax_is_trusted", lambda: True)

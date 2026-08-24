@@ -25,8 +25,8 @@ def test_coding_contract_recovers_persisted_profile_for_request_workers(
     registry = object()
     monkeypatch.setattr(
         contract_adapter,
-        "persisted_resolved_profile",
-        lambda: SimpleNamespace(profile_id="profile-1"),
+        "captured_profile_id",
+        lambda current_registry: "profile-1",
     )
     monkeypatch.setattr(
         contract_adapter,
@@ -163,4 +163,159 @@ def test_every_legacy_mutation_entrypoint_uses_canonical_guard() -> None:
     for relative_path, expected_calls in callers.items():
         source = (block_root / relative_path).read_text(encoding="utf-8")
         assert source.count("authorize_legacy_coding_operation(") == expected_calls
-        assert source.count("mutation_guard=canonical_mutation_guard") == expected_calls
+        if relative_path == "git_commit.py":
+            assert source.count("preflight_legacy_coding_operation(") == 1
+            assert source.count("mutation_guard=canonical_mutation_guard") == 2
+            assert source.index("preflight_legacy_coding_operation(") < source.index(
+                "git_snapshot("
+            )
+            assert source.index("git_snapshot(") < source.index(
+                "authorize_legacy_coding_operation("
+            )
+        else:
+            assert source.count("mutation_guard=canonical_mutation_guard") == expected_calls
+
+
+def test_git_commit_has_distinct_preflight_snapshot_and_one_shot_authorize_phases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from blocks.coding import git_commit
+    from blocks.coding._approval import approval_required
+    from domain.coding import contract_adapter
+    from domain.safety import approval
+
+    approval.reset_approval_state_for_tests()
+    base_input = {
+        "workspace_id": "workspace-1",
+        "message": "commit once",
+        "paths": ["src/app.py"],
+    }
+    approval_request = approval_required(
+        "git.commit",
+        "high",
+        args=base_input,
+        message=base_input["message"],
+        tool_name="coding_git_commit",
+    )
+    decision = approval.approve(approval_request["approval_request_id"])
+    assert decision["approved"] is True
+    input_data = {**base_input, "approval_token": decision["token"]}
+    context = {"principal_id": "agent-1", "session_id": "session-1"}
+    snapshot = {
+        "expected_head": "head-1",
+        "expected_tree": "tree-1",
+        "expected_status_hash": "status-1",
+        "expected_mount_revision": 7,
+    }
+    events: list[str] = []
+    guard_calls: list[dict[str, Any]] = []
+    preflight_calls: list[dict[str, Any]] = []
+    authorize_calls: list[dict[str, Any]] = []
+    snapshot_calls: list[str] = []
+    provider_calls: list[str] = []
+
+    real_preflight = git_commit.preflight_legacy_coding_operation
+    real_authorize = git_commit.authorize_legacy_coding_operation
+
+    def preflight(**kwargs: Any) -> dict[str, Any]:
+        events.append("preflight")
+        preflight_calls.append(dict(kwargs))
+        return real_preflight(**kwargs)
+
+    def authorize(**kwargs: Any) -> dict[str, Any]:
+        events.append("final_authorize")
+        authorize_calls.append(dict(kwargs))
+        return real_authorize(**kwargs)
+
+    def mutation_guard(
+        selected_workspace_id: str,
+        request: dict[str, Any],
+        seen_context: dict[str, Any] | None,
+        operation: str,
+    ) -> None:
+        events.append("lease_guard")
+        guard_calls.append(
+            {
+                "workspace_id": selected_workspace_id,
+                "request": dict(request),
+                "context": dict(seen_context or {}),
+                "operation": operation,
+            }
+        )
+
+    def invoke(contract_id: str, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if contract_id == contract_adapter.HOST_AUTHORITY:
+            events.append("host_authorize")
+            provider_calls.append("host_authorize")
+            assert operation == "authorize"
+            assert payload["workspace_id"] == "workspace-1"
+            assert payload["arguments"] == {
+                "message": "commit once",
+                "paths": ["src/app.py"],
+                "all_tracked": False,
+                **snapshot,
+            }
+            return {"authorized": True, "receipt": "receipt-1"}
+        if contract_id == contract_adapter.GIT_WRITE:
+            events.append("git_write")
+            provider_calls.append("git_write")
+            return {"commit_hash": "commit-1"}
+        raise AssertionError(f"unexpected coding contract: {contract_id} {operation}")
+
+    def read_snapshot(selected_workspace_id: str) -> dict[str, Any]:
+        events.append("snapshot")
+        snapshot_calls.append(selected_workspace_id)
+        return dict(snapshot)
+
+    monkeypatch.setattr(git_commit, "preflight_legacy_coding_operation", preflight)
+    monkeypatch.setattr(git_commit, "authorize_legacy_coding_operation", authorize)
+    monkeypatch.setattr(git_commit, "canonical_mutation_guard", mutation_guard)
+    monkeypatch.setattr(git_commit, "git_snapshot", read_snapshot)
+    monkeypatch.setattr(git_commit, "invoke_coding_contract", invoke)
+    monkeypatch.setattr("domain.coding.contract_adapter._profile_id", lambda: "profile-1")
+    monkeypatch.setattr("domain.coding.contract_adapter.invoke_coding_contract", invoke)
+    monkeypatch.setattr(git_commit, "record_attempt", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(git_commit, "record_execution", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(git_commit, "record_failure", lambda *_args, **_kwargs: None)
+
+    first = git_commit.run(input_data, context)
+
+    assert first["status"] == "ok"
+    assert events == [
+        "preflight",
+        "lease_guard",
+        "snapshot",
+        "final_authorize",
+        "lease_guard",
+        "host_authorize",
+        "git_write",
+    ]
+    assert len(preflight_calls) == 1
+    assert len(authorize_calls) == 1
+    assert len(guard_calls) == 2
+    assert guard_calls[0] == guard_calls[1]
+    assert guard_calls[0]["workspace_id"] == "workspace-1"
+    assert guard_calls[0]["context"] == context
+    assert guard_calls[0]["operation"] == "git.commit"
+    assert snapshot_calls == ["workspace-1"]
+    assert authorize_calls[0]["selected_workspace_id"] == "workspace-1"
+    assert authorize_calls[0]["context"] == context
+    assert authorize_calls[0]["arguments"] == {
+        "message": "commit once",
+        "paths": ["src/app.py"],
+        "all_tracked": False,
+        **snapshot,
+    }
+    assert provider_calls == ["host_authorize", "git_write"]
+
+    events.clear()
+    second = git_commit.run(input_data, context)
+
+    assert second["status"] == "error"
+    assert second["error"]["code"] == "APPROVAL_TOKEN_USED"
+    assert events == ["preflight"]
+    assert len(preflight_calls) == 2
+    assert len(authorize_calls) == 1
+    assert len(guard_calls) == 2
+    assert snapshot_calls == ["workspace-1"]
+    assert provider_calls == ["host_authorize", "git_write"]

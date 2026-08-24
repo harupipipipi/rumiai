@@ -6,7 +6,7 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
-use std::process::{Child, ExitStatus};
+use std::process::ExitStatus;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -41,8 +41,9 @@ pub(crate) struct DefaultspackManager {
     state: Mutex<DefaultspackState>,
 }
 
+#[derive(Default)]
 struct DefaultspackState {
-    child: Option<Child>,
+    child: Option<crate::python_env::PythonChild>,
     /// Process groups created by this Launcher. Keep the ids even after the
     /// direct pack-shell child exits because its Python descendant may still
     /// be serving 8766 as an orphan.
@@ -55,23 +56,6 @@ struct DefaultspackState {
     started_at: Option<Instant>,
     active_run_id: Option<String>,
     active_guardian_pid: Option<u32>,
-}
-
-impl Default for DefaultspackState {
-    fn default() -> Self {
-        Self {
-            child: None,
-            owned_process_groups: Vec::new(),
-            launch_metadata: None,
-            restart_in_progress: false,
-            stop_requested: false,
-            consecutive_failures: 0,
-            next_restart_at: None,
-            started_at: None,
-            active_run_id: None,
-            active_guardian_pid: None,
-        }
-    }
 }
 
 impl DefaultspackManager {
@@ -178,7 +162,7 @@ impl DefaultspackManager {
 
     pub(crate) fn managed_child_pid(&self) -> Result<Option<u32>> {
         let state = self.lock_state()?;
-        Ok(state.child.as_ref().map(Child::id))
+        Ok(state.child.as_ref().map(|child| child.id()))
     }
 
     /// Stop the managed child and disable all automatic restart paths.
@@ -420,7 +404,7 @@ impl DefaultspackManager {
         Ok(state.record_restart_failure())
     }
 
-    fn drain_child_output(&self, child: &mut Child, pid: u32) {
+    fn drain_child_output(&self, child: &mut crate::python_env::PythonChild, pid: u32) {
         let log_path = self.config.log_dir.join("defaultspack.log");
         if let Some(stdout) = child.stdout.take() {
             spawn_output_drain(stdout, log_path.clone(), pid, "stdout");
@@ -530,7 +514,7 @@ fn spawn_output_drain<R>(
     });
 }
 
-fn stop_child(child: &mut Child) -> Result<()> {
+fn stop_child(child: &mut crate::python_env::PythonChild) -> Result<()> {
     #[cfg(unix)]
     return stop_unix_process_group(child);
 
@@ -539,7 +523,7 @@ fn stop_child(child: &mut Child) -> Result<()> {
 }
 
 #[cfg(unix)]
-fn stop_unix_process_group(child: &mut Child) -> Result<()> {
+fn stop_unix_process_group(child: &mut crate::python_env::PythonChild) -> Result<()> {
     let pid = child.id();
     let _ = child
         .try_wait()
@@ -611,7 +595,7 @@ fn stop_unix_process_group_id(process_group: u32) -> Result<()> {
 }
 
 #[cfg(not(unix))]
-fn stop_non_unix_child(child: &mut Child) -> Result<()> {
+fn stop_non_unix_child(child: &mut crate::python_env::PythonChild) -> Result<()> {
     if child
         .try_wait()
         .context("failed to inspect Defaultspack process before stopping")?
@@ -864,7 +848,7 @@ mod tests {
         {
             let mut state = manager.lock_state().unwrap();
             state.owned_process_groups.push(child.id());
-            state.child = Some(child);
+            state.child = Some(crate::python_env::PythonChild::development(child));
             state.restart_in_progress = true;
         }
 

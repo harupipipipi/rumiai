@@ -336,7 +336,7 @@ def _approval_data(data: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _invoke(contract_id: str, operation: str, payload: Mapping[str, Any]) -> Any:
-    registry = get_container().get_or_none("interface_registry")
+    registry = get_container().get_or_none("v4_dispatch_session")
     if registry is None:
         raise RuntimeError("interface registry is unavailable")
     return invoke_global_contract(registry, contract_id, operation, dict(payload))

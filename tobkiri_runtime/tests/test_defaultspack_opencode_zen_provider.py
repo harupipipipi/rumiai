@@ -55,10 +55,12 @@ class _FakeJsonResponse:
 
 
 def _provider(monkeypatch):
-    monkeypatch.setenv("OPENCODE_ZEN_API_KEY", "test-opencode-zen-key")
+    del monkeypatch
     from domain.ai_client.providers.opencode_zen_provider import OpencodeZenProvider
 
-    return OpencodeZenProvider()
+    provider = OpencodeZenProvider()
+    provider._api_key = "test-opencode-zen-key"
+    return provider
 
 
 def test_opencode_zen_model_inventory_prefers_live_endpoint(monkeypatch):
@@ -123,7 +125,9 @@ def test_opencode_zen_model_inventory_falls_back_on_network_failure(monkeypatch)
     assert models == []
 
 
-def test_opencode_zen_model_inventory_uses_last_known_good_after_refresh_failure(monkeypatch):
+def test_opencode_zen_model_inventory_uses_last_known_good_after_refresh_failure(
+    monkeypatch,
+):
     provider = _provider(monkeypatch)
     provider.MODEL_INVENTORY_TTL_SECONDS = 0
 
@@ -748,14 +752,19 @@ def test_opencode_zen_stream_recovers_missing_tool_payload_with_complete_call(
     ]
 
 
-def test_opencode_zen_secret_keys_and_detection(monkeypatch):
+def test_opencode_zen_secret_keys_and_detection(tmp_path, monkeypatch):
     from domain.ai_client.api_key_store import provider_secret_keys
-    from domain.ai_client.providers import detect_available_providers
-    from domain.ai_client.providers.opencode_zen_provider import OpencodeZenProvider
+    from tests.v4_provider_runtime_support import exercise_captured_provider_send
 
     assert provider_secret_keys("opencode-zen") == ["OPENCODE_ZEN_API_KEY"]
-    monkeypatch.setenv("OPENCODE_ZEN_API_KEY", "test-opencode-zen-key")
-    assert isinstance(detect_available_providers()["opencode-zen"], OpencodeZenProvider)
+    sent = exercise_captured_provider_send(
+        tmp_path,
+        monkeypatch,
+        "opencode-zen",
+        endpoint="https://opencode.ai/zen/v1",
+    )
+    assert sent["credential_bound"] is True
+    assert sent["provider_id"] == "opencode-zen"
 
 
 def test_opencode_zen_rejects_unknown_model(monkeypatch):

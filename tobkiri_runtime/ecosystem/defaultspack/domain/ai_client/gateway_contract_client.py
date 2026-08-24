@@ -121,7 +121,7 @@ def stream(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def _invoke(contract_id: str, operation: str, payload: Mapping[str, Any]) -> Any:
-    registry = get_container().get_or_none("interface_registry")
+    registry = get_container().get_or_none("v4_dispatch_session")
     if registry is None:
         raise GlobalContractUnavailable("interface registry is unavailable")
     request = dict(payload)
@@ -150,17 +150,25 @@ class ContractLLMGateway:
 
     def complete(self, request: Mapping[str, Any]) -> dict[str, Any]:
         """Project one legacy gateway request through the selected owner."""
-        model = str(request.get("model") or "")
+        model = str(request.get("model") or request.get("model_reference") or "")
+        parameters = request.get("params")
+        if not isinstance(parameters, Mapping):
+            parameters = request.get("parameters")
+        parameters = dict(parameters or {}) if isinstance(parameters, Mapping) else {}
         try:
             return generate(
                 {
+                    "request_id": request.get("request_id"),
                     "messages": list(request.get("messages") or []),
                     "tools": list(request.get("tools") or []),
-                    "parameters": dict(request.get("params") or {}),
+                    "parameters": parameters,
                     "model_reference": model,
                     "conversation_id": request.get("conversation_id"),
                     "profile_id": request.get("profile_id"),
                     "idempotency_key": request.get("idempotency_key"),
+                    "authority_context": dict(request.get("authority_context") or {})
+                    if isinstance(request.get("authority_context"), Mapping)
+                    else {},
                     "requirements": {
                         "preferred_model_id": model,
                         "tool_calling": bool(request.get("tools")),
@@ -168,32 +176,31 @@ class ContractLLMGateway:
                     },
                 }
             )
-        except (GlobalContractInvocationError, GlobalContractUnavailable) as exc:
-            if not _legacy_provider_fallback_allowed(exc):
-                raise
-            from domain.ai_client.client import AIClient
-
-            return AIClient().complete(
-                model,
-                list(request.get("messages") or []),
-                list(request.get("tools") or []),
-                dict(request.get("params") or {}),
-            )
+        except (GlobalContractInvocationError, GlobalContractUnavailable):
+            raise
 
     def stream(self, request: Mapping[str, Any]) -> Iterator[dict[str, Any]]:
         """Project one legacy stream request through the selected owner."""
-        model = str(request.get("model") or "")
+        model = str(request.get("model") or request.get("model_reference") or "")
+        parameters = request.get("params")
+        if not isinstance(parameters, Mapping):
+            parameters = request.get("parameters")
+        parameters = dict(parameters or {}) if isinstance(parameters, Mapping) else {}
         try:
             return iter(
                 stream(
                     {
+                        "request_id": request.get("request_id"),
                         "messages": list(request.get("messages") or []),
                         "tools": list(request.get("tools") or []),
-                        "parameters": dict(request.get("params") or {}),
+                        "parameters": parameters,
                         "model_reference": model,
                         "conversation_id": request.get("conversation_id"),
                         "profile_id": request.get("profile_id"),
                         "idempotency_key": request.get("idempotency_key"),
+                        "authority_context": dict(request.get("authority_context") or {})
+                        if isinstance(request.get("authority_context"), Mapping)
+                        else {},
                         "requirements": {
                             "preferred_model_id": model,
                             "tool_calling": bool(request.get("tools")),
@@ -202,26 +209,5 @@ class ContractLLMGateway:
                     }
                 )
             )
-        except (GlobalContractInvocationError, GlobalContractUnavailable) as exc:
-            if not _legacy_provider_fallback_allowed(exc):
-                raise
-            from domain.ai_client.client import AIClient
-
-            return iter(
-                AIClient().stream(
-                    model,
-                    list(request.get("messages") or []),
-                    list(request.get("tools") or []),
-                    dict(request.get("params") or {}),
-                )
-            )
-
-
-def _legacy_provider_fallback_allowed(exc: Exception) -> bool:
-    """Allow the legacy provider only when no contract connection exists."""
-    if isinstance(exc, GlobalContractUnavailable):
-        return True
-    return (
-        isinstance(exc, GlobalContractInvocationError)
-        and str(getattr(exc, "code", "") or "") == "not_configured"
-    )
+        except (GlobalContractInvocationError, GlobalContractUnavailable):
+            raise

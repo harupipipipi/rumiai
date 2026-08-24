@@ -326,8 +326,8 @@ def create_file_inspect_operation(
 
 def _jailed(root: Path, value: Any, *, must_exist: bool) -> Path:
     raw = Path(str(value or "").strip() or ".")
-    if raw.is_absolute():
-        raise PermissionError("absolute paths are not accepted")
+    if raw.is_absolute() or ".." in raw.parts:
+        raise PermissionError("absolute or traversing paths are not accepted")
     _deny_restricted_path(raw)
     candidate = root / raw
     if must_exist:

@@ -47,6 +47,7 @@ MAX_CODING_WORKSPACE_EXPORT_FILE_BYTES = 4 * 1024 * 1024
 GUEST_TIMEOUT_EXIT_CODE = 124
 SANDBOX_ROOT_MARKER = ".rumi-sandbox-root"
 PACK_DATA_MIGRATION_MARKER = ".rumi-host-pack-data-migration-v1"
+CHILD_PROCESS_POLICY_ENV = "RUMI_SANDBOX_DENY_CHILD_PROCESS"
 
 
 def _run_bounded_process(
@@ -66,13 +67,14 @@ def _run_bounded_process(
         raise ValueError("sandbox transport command is empty")
     executable = argv[0]
     if not Path(executable).is_absolute():
-        executable = (
+        resolved_executable = (
             shutil.which(executable, path=environment.get("PATH"))
             if environment is not None
             else shutil.which(executable)
         )
-        if executable is None:
+        if resolved_executable is None:
             raise FileNotFoundError(argv[0])
+        executable = resolved_executable
     executable = str(Path(executable).resolve())
     argv = (executable, *argv[1:])
     process_cwd = Path(cwd or Path.cwd()).resolve()
@@ -139,9 +141,10 @@ def _run_bounded_process_to_file(
         raise ValueError("sandbox transport command is empty")
     executable = argv[0]
     if not Path(executable).is_absolute():
-        executable = shutil.which(executable)
-        if executable is None:
+        resolved_executable = shutil.which(executable)
+        if resolved_executable is None:
             raise FileNotFoundError(argv[0])
+        executable = resolved_executable
     executable = str(Path(executable).resolve())
     argv = (executable, *argv[1:])
     cwd = Path.cwd().resolve()
@@ -264,6 +267,7 @@ class ManagedSandboxSupervisor:
                     argv=("python3", f"/workspace/{runner_path.name}", "--input-file", "/workspace/input.json"),
                     env={
                         "RUMI_PROFILE_RUNTIME": str(request.get("profile_runtime") or ""),
+                        CHILD_PROCESS_POLICY_ENV: "1",
                     },
                     network_enabled=False,
                 )
@@ -363,6 +367,7 @@ class ManagedSandboxSupervisor:
                         "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
                         "PYTHONDONTWRITEBYTECODE": "1",
                         "PYTHONNOUSERSITE": "1",
+                        CHILD_PROCESS_POLICY_ENV: "1",
                         "RUMI_PROFILE_RUNTIME": str(request.get("profile_runtime") or ""),
                         "RUMI_SANDBOX_ID": sandbox_id,
                     },
@@ -417,7 +422,7 @@ class ManagedSandboxSupervisor:
         active_profile_id = _validated_profile_context(
             request.get("active_profile_id")
         )
-        data_scope = f"{active_profile_id or 'legacy'}--{pack_id}"
+        data_scope = f"{active_profile_id or 'unbound'}--{pack_id}"
         with tempfile.TemporaryDirectory(prefix="rumi-pack-process-") as tmp:
             workspace = Path(tmp)
             target = workspace / "ecosystem" / pack_id
@@ -502,11 +507,6 @@ class ManagedSandboxSupervisor:
                     read_only=False,
                 )
                 sandbox_env["RUMI_USER_DATA"] = "/data"
-            active_profile = _validated_profile_context(
-                request.get("active_profile_id")
-            )
-            if active_profile:
-                sandbox_env["RUMI_ACTIVE_PROFILE_ID"] = active_profile
             spec = BubblewrapSandboxSpec(
                 sandbox_id=sandbox_id,
                 profile_id=str(request.get("profile_runtime") or request.get("principal_id") or "coding"),
@@ -626,11 +626,6 @@ class ManagedSandboxSupervisor:
             sandbox_env = _coding_sandbox_env(sandbox_id)
             if guest_data_dir is not None:
                 sandbox_env["RUMI_USER_DATA"] = "/data"
-            active_profile = _validated_profile_context(
-                request.get("active_profile_id")
-            )
-            if active_profile:
-                sandbox_env["RUMI_ACTIVE_PROFILE_ID"] = active_profile
             guest_argv = build_guest_bwrap_argv(
                 workspace=remote_root,
                 cwd=remote_cwd,
@@ -1158,7 +1153,7 @@ def _lima_import_workspace(
     remote_root: str,
     archive: bytes,
     timeout: float,
-) -> subprocess.CompletedProcess[bytes]:
+) -> subprocess.CompletedProcess[str]:
     if not _is_lima_workspace_path(remote_root):
         raise ValueError("invalid Lima sandbox workspace path")
     import_script = (

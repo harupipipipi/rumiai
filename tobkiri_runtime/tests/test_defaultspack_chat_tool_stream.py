@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import pytest
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -9,6 +10,10 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+pytestmark = pytest.mark.usefixtures(
+    "defaultspack_conversation_owner", "defaultspack_v4_tool_dispatch"
+)
 
 
 def test_chat_run_engine_streams_tool_call_events_and_final_message(tmp_path, monkeypatch):
@@ -62,17 +67,15 @@ def test_chat_run_engine_streams_tool_call_events_and_final_message(tmp_path, mo
             {
                 "conversation_id": conversation["id"],
                 "message": {"role": "user", "content": "use a tool"},
-                "tools": [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "calculator",
-                            "parameters": {"type": "object", "properties": {}, "required": []},
-                        },
+                "tools": [{"kind": "tool", "id": "calculator"}],
+                "params": {
+                    "tool_selection": {
+                        "mode": "manual",
+                        "include": ["calculator"],
                     }
-                ],
+                },
             },
-            {},
+            {"principal_capabilities": ["developer"]},
             stream_mode=True,
         )
     )
@@ -144,23 +147,21 @@ def test_chat_run_engine_provider_tool_stream_support_uses_injected_client(tmp_p
 
     client = FakeClient()
     store = ChatStore()
-    conversation = store.create_conversation(model="google/gemini-test")
+    conversation = store.create_conversation(model="openai/gpt-5.5")
     events = list(
         ChatRunEngine(client=client).stream(
             {
                 "conversation_id": conversation["id"],
                 "message": {"role": "user", "content": "use a tool"},
-                "tools": [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "calculator",
-                            "parameters": {"type": "object", "properties": {}, "required": []},
-                        },
+                "tools": [{"kind": "tool", "id": "calculator"}],
+                "params": {
+                    "tool_selection": {
+                        "mode": "manual",
+                        "include": ["calculator"],
                     }
-                ],
+                },
             },
-            {},
+            {"principal_capabilities": ["developer"]},
             stream_mode=True,
         )
     )
@@ -216,9 +217,15 @@ def test_stream_with_selected_tools_uses_chat_run_engine_not_legacy_fallback(tmp
         raise AssertionError("legacy _fallback_send should not be used for selected tools")
 
     monkeypatch.setattr(stream_module, "_fallback_send", fail_legacy_fallback)
-    monkeypatch.setattr(stream_module, "AIClient", FakeClient)
     monkeypatch.setattr(ToolExecutor, "execute", fake_execute)
     monkeypatch.setattr(ChatRunEngine, "_provider_supports_stream_tool_calls", staticmethod(lambda _model: True))
+    from domain.ai_client.gateway import LLMGateway
+
+    monkeypatch.setattr(
+        stream_module,
+        "ContractLLMGateway",
+        lambda: LLMGateway(client=FakeClient()),
+    )
 
     store = ChatStore()
     conversation = store.create_conversation(model="openai/gpt-5.5")
@@ -226,17 +233,15 @@ def test_stream_with_selected_tools_uses_chat_run_engine_not_legacy_fallback(tmp
         {
             "conversation_id": conversation["id"],
             "message": {"role": "user", "content": "use a tool"},
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "calculator",
-                        "parameters": {"type": "object", "properties": {}, "required": []},
-                    },
+            "tools": [{"kind": "tool", "id": "calculator"}],
+            "params": {
+                "tool_selection": {
+                    "mode": "manual",
+                    "include": ["calculator"],
                 }
-            ],
+            },
         },
-        {},
+        {"principal_capabilities": ["developer"]},
     )
 
     events = list(result["events"])
@@ -328,7 +333,7 @@ def test_chat_run_engine_streams_browser_state_events_with_timestamped_tool_resu
                     }
                 ],
             },
-            {},
+            {"principal_capabilities": ["developer"]},
             stream_mode=True,
         )
     )
@@ -413,7 +418,7 @@ def test_chat_run_engine_stops_for_permission_required_tool_result(tmp_path, mon
                     }
                 ],
             },
-            {},
+            {"principal_capabilities": ["developer"]},
             stream_mode=True,
         )
     )
@@ -480,19 +485,30 @@ def test_chat_run_engine_browser_approval_followup_resumes_one_computer_tool_cal
 
     monkeypatch.setattr(computer_router, "run_computer_action", fake_router)
     monkeypatch.setattr(ChatRunEngine, "_provider_supports_stream_tool_calls", staticmethod(lambda _model: True))
+
+    def fake_capability_executor(context):
+        def execute(_principal_id, request):
+            arguments = dict(request.get("args") or {})
+            result = fake_router(
+                str(arguments.get("action") or "apps"),
+                arguments,
+                context,
+                tool_name="computer_use",
+                tool_arguments=arguments,
+            )
+            return SimpleNamespace(
+                success=True,
+                output=result,
+                error=None,
+                error_type="",
+            )
+
+        return SimpleNamespace(execute=execute)
+
     monkeypatch.setattr(
         ToolExecutor,
         "_capability_executor",
-        staticmethod(
-            lambda _context: SimpleNamespace(
-                execute=lambda _principal_id, _request: SimpleNamespace(
-                    success=False,
-                    output=None,
-                    error="approval required",
-                    error_type="caller_requires_denied",
-                )
-            )
-        ),
+        staticmethod(fake_capability_executor),
     )
 
     class ApprovalClient:
@@ -544,13 +560,7 @@ def test_chat_run_engine_browser_approval_followup_resumes_one_computer_tool_cal
 
     store = ChatStore()
     conversation = store.create_conversation(model="openai/gpt-5.5")
-    tool_schema = {
-        "type": "function",
-        "function": {
-            "name": "computer_use",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    }
+    tool_schema = {"kind": "tool", "id": "computer_use"}
 
     first_events = list(
         ChatRunEngine(client=ApprovalClient()).stream(
@@ -558,8 +568,14 @@ def test_chat_run_engine_browser_approval_followup_resumes_one_computer_tool_cal
                 "conversation_id": conversation["id"],
                 "message": {"role": "user", "content": "show apps"},
                 "tools": [tool_schema],
+                "params": {
+                    "tool_selection": {
+                        "mode": "manual",
+                        "include": ["computer_use"],
+                    }
+                },
             },
-            {},
+            {"principal_capabilities": ["developer"]},
             stream_mode=True,
         )
     )
@@ -596,12 +612,22 @@ def test_chat_run_engine_browser_approval_followup_resumes_one_computer_tool_cal
                     },
                 },
                 "tools": [tool_schema],
+                "params": {
+                    "tool_selection": {
+                        "mode": "manual",
+                        "include": ["computer_use"],
+                    }
+                },
             },
-            {},
+            {"principal_capabilities": ["developer"]},
             stream_mode=True,
         )
     )
 
+    # The canonical v4 replay executes the approved host action once.  The
+    # provider's repeated tool call is retained as an activity event but is
+    # suppressed by the replay guard instead of invoking the host a second
+    # time.
     assert len(router_calls) == 1
     assert router_calls[0]["context"]["_tool_server_approved"] is True
     assert router_calls[0]["payload"]["approval_token"] == decision["token"]
@@ -610,6 +636,13 @@ def test_chat_run_engine_browser_approval_followup_resumes_one_computer_tool_cal
         "approval_token": decision["token"],
     }
     assert resume_client.calls == 2
+    duplicate_event = next(
+        event
+        for event in resumed_events
+        if event["type"] == "tool_call_completed"
+        and event.get("tool_call_id") == "call_browser_resume"
+    )
+    assert "Skipped duplicate approval-followup" in duplicate_event["message"]
     final_message = [event["data"]["message"] for event in resumed_events if event["type"] == "done"][-1]
     assert final_message["raw_text"] == "resumed"
     ChatStore._instance = None
@@ -667,12 +700,21 @@ def test_approval_followup_replay_unwraps_controller_shaped_computer_payload(tmp
     decision = approval.approve(request["request_id"])
     assert decision["approved"] is True
 
-    captured: dict[str, object] = {}
+    captured_calls: list[tuple[str, dict[str, object]]] = []
 
     def call_handler(name, payload):
-        captured["name"] = name
-        captured["payload"] = dict(payload)
-        return {"status": "ok", "data": {"result": "shown", "is_error": False}}
+        captured_calls.append((name, dict(payload)))
+        if name == "defaults.tool.invoke":
+            return {"status": "ok", "data": {"result": "shown", "is_error": False}}
+        if name == "defaults.ai.complete":
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [{"type": "text", "text": "resumed"}],
+                    "finish_reason": "stop",
+                },
+            }
+        raise AssertionError(name)
 
     class SummaryClient:
         def supports_stream(self, model):
@@ -683,7 +725,7 @@ def test_approval_followup_replay_unwraps_controller_shaped_computer_payload(tmp
             yield {"type": "stream_end", "finish_reason": "stop"}
 
         def complete(self, model, messages, tools=None, params=None):
-            raise AssertionError("complete should not be called")
+            raise AssertionError("complete should remain behind the v4 call handler")
 
     tool_schema = {
         "type": "function",
@@ -717,8 +759,9 @@ def test_approval_followup_replay_unwraps_controller_shaped_computer_payload(tmp
         )
     )
 
-    assert captured["name"] == "defaults.tool.invoke"
-    invoked = captured["payload"]
+    invoked = next(
+        payload for name, payload in captured_calls if name == "defaults.tool.invoke"
+    )
     assert invoked["tool_name"] == "computer_use"
     assert invoked["arguments"] == {
         "action": "computer.show_app",

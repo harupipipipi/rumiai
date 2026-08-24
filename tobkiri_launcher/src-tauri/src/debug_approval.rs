@@ -1353,7 +1353,7 @@ fn process_fingerprint(process_id: u32) -> Result<String, String> {
         if facts.is_empty() {
             return Err("debug guardian process identity is unavailable".into());
         }
-        return Ok(sha256_text(facts));
+        Ok(sha256_text(facts))
     }
     #[cfg(not(unix))]
     {

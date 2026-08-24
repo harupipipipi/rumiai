@@ -1,0 +1,185 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:f77e0b896168433c28ce91294f79bb39822883b19a0555091379aae9473cf472",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
+      "digest": "sha256:f41072c1a9718a4fa16f5c71fef9bbc36e334bc497fbca81fa1ee3d47ef4792a",
+      "kind": "executable",
+      "path": "runtime/__init__.py"
+    },
+    {
+      "digest": "sha256:9124ba766b36d979c6a00e707b406c55754d57645d7b890824c4bfdfad64d9e6",
+      "kind": "executable",
+      "path": "runtime/usage.py"
+    }
+  ],
+  "contracts": [
+    {
+      "contract_id": "tobkiri.service.ai.tokenize.v1",
+      "operations": [
+        "rumi_ai_usage_pack.ai-tokenize"
+      ],
+      "revision_digest": "sha256:1b29b0e7a0b47690bf1dcc5656dd5cb968efcac2e35ef7713f5411fa45a7cdfd"
+    },
+    {
+      "contract_id": "tobkiri.service.ai.usage.cost.v1",
+      "operations": [
+        "rumi_ai_usage_pack.ai-usage-cost",
+        "rumi_ai_usage_pack.ai-usage-cost.generate",
+        "rumi_ai_usage_pack.ai-usage-cost.stream"
+      ],
+      "revision_digest": "sha256:04a8f126370dafe88c38fe8b465b97e666097e515823d55921d98f0c588d68fc"
+    }
+  ],
+  "functions": [
+    {
+      "contract_revision_digest": "sha256:04a8f126370dafe88c38fe8b465b97e666097e515823d55921d98f0c588d68fc",
+      "id": "rumi_ai_usage_pack.ai-usage.cost",
+      "implementation_digest": "sha256:9124ba766b36d979c6a00e707b406c55754d57645d7b890824c4bfdfad64d9e6",
+      "isolation": "dedicated_process",
+      "operations": [
+        "rumi_ai_usage_pack.ai-usage-cost",
+        "rumi_ai_usage_pack.ai-usage-cost.generate",
+        "rumi_ai_usage_pack.ai-usage-cost.stream"
+      ],
+      "role": "host_capability_provider"
+    },
+    {
+      "contract_revision_digest": "sha256:1b29b0e7a0b47690bf1dcc5656dd5cb968efcac2e35ef7713f5411fa45a7cdfd",
+      "id": "rumi_ai_usage_pack.ai-usage.tokenize",
+      "implementation_digest": "sha256:9124ba766b36d979c6a00e707b406c55754d57645d7b890824c4bfdfad64d9e6",
+      "isolation": "dedicated_process",
+      "operations": [
+        "rumi_ai_usage_pack.ai-tokenize"
+      ],
+      "role": "host_capability_provider"
+    }
+  ],
+  "integrity": {
+    "artifact_set_digest": "sha256:c698c4a7419fb6f5b9177574984a6bb6d2d84f68c6a8883b585f30eeca986fbe",
+    "contract_catalog_digest": "sha256:9c4c58becea7987971ddf9a62deb6e85f88a015186e941c295cead2d92b5dd48",
+    "source_identity": "sha256:a50e6c29cb7c199355e14207261db0c505b34254b9b573a479dcc859c12e7af4"
+  },
+  "migration": {
+    "compatibility": "read_only",
+    "legacy_ids": [
+      "rumi.service.ai.tokenize.v1",
+      "rumi.service.ai.usage.cost.v1",
+      "rumi:ecosystem/rumi_ai_usage_pack",
+      "rumi_ai_usage_pack"
+    ],
+    "removal_wave": 10,
+    "sunset_at": "2027-12-31"
+  },
+  "operation_catalog": [
+    {
+      "contract_reference": "tobkiri.service.ai.tokenize.v1",
+      "effect_ceiling": [
+        "capability:ai.tokenize",
+        "host:brokered-execution"
+      ],
+      "operation_id": "rumi_ai_usage_pack.ai-tokenize",
+      "owner": "rumi_ai_usage_pack",
+      "provider_id": "rumi_ai_usage_pack.ai-usage.tokenize",
+      "source_kind": "canonical_v4_contract"
+    },
+    {
+      "contract_reference": "tobkiri.service.ai.usage.cost.v1",
+      "effect_ceiling": [
+        "capability:ai.usage.cost",
+        "host:brokered-execution"
+      ],
+      "operation_id": "rumi_ai_usage_pack.ai-usage-cost",
+      "owner": "rumi_ai_usage_pack",
+      "provider_id": "rumi_ai_usage_pack.ai-usage.cost",
+      "source_kind": "canonical_v4_contract"
+    },
+    {
+      "contract_reference": "tobkiri.service.ai.usage.cost.v1",
+      "effect_ceiling": [
+        "capability:ai.usage.cost",
+        "host:brokered-execution"
+      ],
+      "operation_id": "rumi_ai_usage_pack.ai-usage-cost.generate",
+      "owner": "rumi_ai_usage_pack",
+      "provider_id": "rumi_ai_usage_pack.ai-usage.cost",
+      "source_kind": "canonical_v4_contract"
+    },
+    {
+      "contract_reference": "tobkiri.service.ai.usage.cost.v1",
+      "effect_ceiling": [
+        "capability:ai.usage.cost",
+        "host:brokered-execution"
+      ],
+      "operation_id": "rumi_ai_usage_pack.ai-usage-cost.stream",
+      "owner": "rumi_ai_usage_pack",
+      "provider_id": "rumi_ai_usage_pack.ai-usage.cost",
+      "source_kind": "canonical_v4_contract"
+    }
+  ],
+  "pack": {
+    "artifact_digest": "sha256:c698c4a7419fb6f5b9177574984a6bb6d2d84f68c6a8883b585f30eeca986fbe",
+    "display_name": "Rumi AI Usage",
+    "id": "rumi_ai_usage_pack",
+    "kind": "host_extension",
+    "version": "1.0.0"
+  },
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "provenance": {
+    "evidence": [
+      {
+        "digest": "sha256:a50e6c29cb7c199355e14207261db0c505b34254b9b573a479dcc859c12e7af4",
+        "path": "schemas/pack_v4_catalog.v1.json",
+        "rule_id": "canonical-pack-v4-source-record"
+      }
+    ],
+    "generator": "tobkiri.scripts.migrate_pack_artifacts_v4",
+    "generator_version": "1.0.0",
+    "normative": true,
+    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
+    "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
+    "schema": "io.tobkiri.provenance.v1",
+    "source_digest": "sha256:a50e6c29cb7c199355e14207261db0c505b34254b9b573a479dcc859c12e7af4",
+    "source_kind": "migration",
+    "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_ai_usage_pack"
+  },
+  "provider_catalog": [
+    {
+      "contract_reference": "tobkiri.service.ai.usage.cost.v1",
+      "operations": [
+        "rumi_ai_usage_pack.ai-usage-cost",
+        "rumi_ai_usage_pack.ai-usage-cost.generate",
+        "rumi_ai_usage_pack.ai-usage-cost.stream"
+      ],
+      "owner": "rumi_ai_usage_pack",
+      "provider_id": "rumi_ai_usage_pack.ai-usage.cost"
+    },
+    {
+      "contract_reference": "tobkiri.service.ai.tokenize.v1",
+      "operations": [
+        "rumi_ai_usage_pack.ai-tokenize"
+      ],
+      "owner": "rumi_ai_usage_pack",
+      "provider_id": "rumi_ai_usage_pack.ai-usage.tokenize"
+    }
+  ],
+  "requirements": {
+    "approval_policy": "none",
+    "capabilities": [
+      "ai.tokenize",
+      "ai.usage.cost"
+    ],
+    "contract_dependencies": [],
+    "execution_boundary": "host_brokered",
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "pack_dependencies": {},
+    "secrets": [],
+    "workspace_boundary": "host_brokered"
+  }
+}

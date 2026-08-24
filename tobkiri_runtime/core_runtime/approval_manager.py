@@ -369,7 +369,7 @@ class ApprovalManager:
         
         対象: ecosystem/flows/**/*.flow.yaml, ecosystem/flows/**/*.modifier.yaml
         """
-        hashes = {}
+        hashes: Dict[str, str] = {}
         local_dir = self._get_local_pack_dir()
         
         if not local_dir.exists():
@@ -592,79 +592,6 @@ class ApprovalManager:
                 verified[pack_id] = "verified"
         return verified
     
-    # ------------------------------------------------------------------ #
-    # Wave 1-2: 開発モード自動承認
-    # ------------------------------------------------------------------ #
-
-    def auto_approve_if_dev(self, pack_id: str) -> bool:
-        """開発環境で未承認Packを自動承認する。
-
-        発動条件:
-          - RUMI_ENVIRONMENT が 'development' または 'dev'
-          - RUMI_AUTO_APPROVE_LOCAL が 'true'
-
-        BLOCKED 状態のPackは自動承認しない。
-        既に APPROVED なら True を返す。
-
-        Returns:
-            True: 自動承認成功（または既に APPROVED）
-            False: 自動承認しなかった
-        """
-        # 環境変数の2重ガード
-        rumi_env = os.environ.get("RUMI_ENVIRONMENT", "").lower()
-        if rumi_env not in ("development", "dev"):
-            return False
-
-        auto_approve = os.environ.get("RUMI_AUTO_APPROVE_LOCAL", "").lower()
-        if auto_approve != "true":
-            return False
-
-        # 現在の状態を確認
-        with self._lock:
-            approval = self._approvals.get(pack_id)
-            if not approval:
-                return False
-            current_status = approval.status
-
-        # 既に APPROVED なら True
-        if current_status == PackStatus.APPROVED:
-            return True
-
-        # BLOCKED は自動承認しない
-        if current_status == PackStatus.BLOCKED:
-            return False
-
-        # approve() を呼び出す
-        result = self.approve(pack_id)
-
-        if result.success:
-            logger.info(
-                "DEV_AUTO_APPROVE: Pack '%s' auto-approved in development mode.",
-                pack_id,
-            )
-            # 監査ログに記録
-            try:
-                from .audit_logger import get_audit_logger
-                get_audit_logger().log_security_event(
-                    event_type="dev_auto_approve",
-                    severity="warning",
-                    description=f"Pack '{pack_id}' auto-approved in development mode",
-                    pack_id=pack_id,
-                    details={
-                        "rumi_environment": rumi_env,
-                        "auto_approve_local": auto_approve,
-                    },
-                )
-            except Exception:
-                pass
-            return True
-
-        logger.warning(
-            "DEV_AUTO_APPROVE: Failed to auto-approve pack '%s': %s",
-            pack_id, result.error,
-        )
-        return False
-
     def approve(self, pack_id: str) -> ApprovalResult:
         """Packを承認"""
         with self._lock:

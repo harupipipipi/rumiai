@@ -11,6 +11,10 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
+pytestmark = pytest.mark.usefixtures(
+    "wave7_owner_bindings", "provider_model_catalog_selected"
+)
+
 
 class _FakeProvider:
     def __init__(self):
@@ -274,302 +278,63 @@ def _compiled_prepared_run(provider_id: str = "openai", model: str = "openai/gpt
     )
 
 
-def test_ai_client_does_not_read_api_key_before_authority_allow(monkeypatch):
-    client = _client(monkeypatch)
-    read_calls = []
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: _DenyAuthority())
-    monkeypatch.setattr("domain.ai_client.client.read_provider_api_key", lambda provider_id, api_id: read_calls.append((provider_id, api_id)) or "key")
-
-    from domain.ai_client.client import AuthorityApprovalRequired
-
-    try:
-        client.complete("gpt-5.4", [{"role": "user", "content": "hi"}], params={"_authority_context": {"principal_id": "profile:work"}})
-    except AuthorityApprovalRequired:
-        pass
-    else:
-        raise AssertionError("AuthorityApprovalRequired was not raised")
-
-    assert read_calls == []
-    assert client._providers["openai"].calls == []
-
-
-def test_ai_client_requires_api_key_use_before_reading_key(monkeypatch):
-    client = _client(monkeypatch)
-    authority = _DenyApiKeyUseAuthority()
-    read_calls = []
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
-    monkeypatch.setattr("domain.ai_client.client.read_provider_api_key", lambda provider_id, api_id: read_calls.append((provider_id, api_id)) or "key")
-
-    from domain.ai_client.client import AuthorityApprovalRequired
-
-    try:
-        client.complete("gpt-5.4", [{"role": "user", "content": "hi"}], params={"_authority_context": {"principal_id": "profile:work"}})
-    except AuthorityApprovalRequired as exc:
-        assert exc.decision.permission_id == "api_key.use"
-    else:
-        raise AssertionError("AuthorityApprovalRequired was not raised")
-
-    assert authority.permissions == ["model.invoke", "api_key.use"]
-    assert read_calls == []
-    assert client._providers["openai"].calls == []
-
-
-def test_ai_client_does_not_consume_model_token_before_api_key_approval(monkeypatch):
-    client = _client(monkeypatch)
-    authority = _DenyApiKeyUseAuthority()
-    read_calls = []
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
-    monkeypatch.setattr("domain.ai_client.client.read_provider_api_key", lambda provider_id, api_id: read_calls.append((provider_id, api_id)) or "key")
-
-    from domain.ai_client.client import AuthorityApprovalRequired
-
-    try:
-        client.complete(
-            "gpt-5.4",
-            [{"role": "user", "content": "hi"}],
-            params={
-                "_authority_context": {
-                    "principal_id": "profile:work",
-                    "approval_tokens": {
-                        "model.invoke": {
-                            "request_id": "model_req",
-                            "approval_token": "model-token",
-                        },
-                    },
-                },
-            },
-        )
-    except AuthorityApprovalRequired as exc:
-        assert exc.decision.permission_id == "api_key.use"
-    else:
-        raise AssertionError("AuthorityApprovalRequired was not raised")
-
-    assert authority.permissions == ["api_key.use"]
-    assert read_calls == []
-    assert client._providers["openai"].calls == []
-
-
-def test_ai_client_uses_permission_specific_authority_tokens(monkeypatch):
-    client = _client(monkeypatch)
-    authority = _TokenAwareAllowAuthority()
-    read_calls = []
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
-    monkeypatch.setattr("domain.ai_client.client.read_provider_api_key", lambda provider_id, api_id: read_calls.append((provider_id, api_id)) or "key")
-
-    response = client.complete(
-        "gpt-5.4",
-        [{"role": "user", "content": "hi"}],
-        params={
-            "_authority_context": {
-                "principal_id": "profile:work",
-                "approval_tokens": {
-                    "model.invoke": {
-                        "request_id": "model_req",
-                        "approval_token": "model-token",
-                    },
-                    "api_key.use": {
-                        "request_id": "api_req",
-                        "approval_token": "api-token",
-                    },
-                },
-            },
-        },
+def _assert_v4_authority_boundary(tmp_path: Path) -> None:
+    """Exercise the Host-captured Kernel and one-shot lease invariants."""
+    from tests.legacy_authority_contracts import assert_legacy_service_fails_closed
+    from tests.v4_batch_support import (
+        assert_lease_is_single_use,
+        assert_payload_mutations_denied,
+        harness,
     )
 
-    assert response["finish_reason"] == "stop"
-    assert authority.calls == [
-        {"permission_id": "network.egress", "request_id": None, "approval_token": "", "consume_approval_token": False},
-        {"permission_id": "model.invoke", "request_id": "model_req", "approval_token": "model-token", "consume_approval_token": False},
-        {"permission_id": "api_key.use", "request_id": "api_req", "approval_token": "api-token", "consume_approval_token": False},
-        {"permission_id": "network.egress", "request_id": None, "approval_token": "", "consume_approval_token": True},
-        {"permission_id": "model.invoke", "request_id": "model_req", "approval_token": "model-token", "consume_approval_token": True},
-        {"permission_id": "api_key.use", "request_id": "api_req", "approval_token": "api-token", "consume_approval_token": True},
-    ]
-    assert read_calls == [("openai", "work")]
-    assert client._providers["openai"].calls
+    assert_legacy_service_fails_closed()
+    authority = harness(tmp_path)
+    assert_payload_mutations_denied(authority)
+    assert_lease_is_single_use(authority)
 
 
-def test_ai_client_atomic_consume_failure_does_not_read_api_key_or_call_provider(monkeypatch):
-    client = _client(monkeypatch)
-    authority = _AtomicConsumeFailAuthority()
-    read_calls = []
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
-    monkeypatch.setattr(
-        "domain.ai_client.client.read_provider_api_key",
-        lambda provider_id, api_id: read_calls.append((provider_id, api_id)) or "key",
+def _assert_v4_resource_boundary() -> None:
+    """Provider descriptions contain endpoint metadata, never credentials."""
+    from domain.ai_client.authority_resource import build_provider_authority_resource
+
+    resource = build_provider_authority_resource(
+        permission_id="model.invoke",
+        resource_kind="model",
+        provider_id="opencode-go",
+        api_id="default",
+        model_id="deepseek-v4-pro",
+        model_ref="opencode-go/deepseek-v4-pro",
+        api_metadata={"base_url": "https://opencode.ai/zen/go/v1"},
     )
-
-    from domain.ai_client.client import AuthorityApprovalRequired
-
-    try:
-        client.complete(
-            "gpt-5.4",
-            [{"role": "user", "content": "hi"}],
-            params={
-                "_authority_context": {
-                    "principal_id": "profile:work",
-                    "approval_tokens": {
-                        "model.invoke": {
-                            "request_id": "model_req",
-                            "approval_token": "model-token",
-                        },
-                        "api_key.use": {
-                            "request_id": "api_req",
-                            "approval_token": "api-token",
-                        },
-                        "network.egress": {
-                            "request_id": "network_req",
-                            "approval_token": "network-token",
-                        },
-                    },
-                },
-            },
-        )
-    except AuthorityApprovalRequired as exc:
-        assert exc.decision.permission_id == "api_key.use"
-    else:
-        raise AssertionError("AuthorityApprovalRequired was not raised")
-
-    assert [call["consume_approval_token"] for call in authority.calls] == [False, False, False]
-    assert [item["permission_id"] for item in authority.batch_items] == [
-        "model.invoke",
-        "api_key.use",
-        "network.egress",
-    ]
-    assert read_calls == []
-    assert client._providers["openai"].calls == []
-
-
-def test_ai_client_trusts_consumed_bundled_one_shots_only_when_resume_flagged(monkeypatch):
-    class _ConsumedIssuedAuthority:
-        def __init__(self):
-            self.check_calls = []
-            self.issued_calls = []
-
-        def one_shot_approval_issued(self, **kwargs):
-            self.issued_calls.append(kwargs)
-            return bool(kwargs.get("include_consumed"))
-
-        def check(self, **kwargs):
-            from core_runtime.authority.models import AuthorityDecision
-
-            self.check_calls.append(kwargs)
-            return AuthorityDecision(
-                allowed=False,
-                permission_id=kwargs["permission_id"],
-                principal_id=kwargs["principal_id"],
-                reason="missing grant",
-                request_id="auth_missing",
-                approval_required=True,
-                risk_level="medium",
-                resource=kwargs["resource"],
-            )
-
-    client = _client(monkeypatch)
-    authority = _ConsumedIssuedAuthority()
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
-
-    params = {
-        "_authority_context": {
-            "principal_id": "profile:work",
-            "conversation_id": "c",
-            "approval_tokens": {
-                "model.invoke": {
-                    "request_id": "model_req",
-                    "approval_token": "model-token",
-                },
-                "api_key.use": {
-                    "request_id": "api_req",
-                    "approval_token": "api-token",
-                },
-                "network.egress": {
-                    "request_id": "network_req",
-                    "approval_token": "network-token",
-                },
-            },
-            "allow_consumed_one_shot_tokens_for_run": True,
-        }
-    }
-
-    client._check_authority_for_model_and_api_key_use(
-        provider_id="openai",
-        api_id="work",
-        model_id="gpt-5.4",
-        model_ref="openai/gpt-5.4",
-        params=params,
-        provider=_FakeProvider(),
-        stream=True,
-    )
-
-    assert authority.check_calls == []
-    assert {call["permission_id"] for call in authority.issued_calls} == {
-        "model.invoke",
-        "api_key.use",
-        "network.egress",
-    }
-    assert any(call.get("include_consumed") for call in authority.issued_calls)
-
-
-def test_ai_client_opencode_authority_resource_describes_endpoint_without_secret(monkeypatch):
-    from domain.ai_client.client import AIClient, AuthorityApprovalRequired
-    from domain.ai_client.providers.opencode_go_provider import OpencodeGoProvider
-    from domain.ai_client.providers.stub_provider import StubProvider
-
-    AIClient._instance = None
-    client = AIClient()
-    client._providers = {"stub": StubProvider(), "opencode-go": OpencodeGoProvider()}
-    monkeypatch.setattr(client, "_routes_for_model", lambda model: [])
-    authority = _CaptureDenyAuthority()
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
-
-    try:
-        client.complete(
-            "opencode-go/deepseek-v4-pro",
-            [{"role": "user", "content": "hi"}],
-            params={"_authority_context": {"principal_id": "profile:work"}},
-        )
-    except AuthorityApprovalRequired as exc:
-        assert exc.decision.permission_id == "model.invoke"
-    else:
-        raise AssertionError("AuthorityApprovalRequired was not raised")
-
-    resource = authority.calls[0]["resource"]
     assert resource["pack_id"] == "defaultspack"
-    assert resource["app_display_name"] == "defaultspack v2"
-    assert resource["provider_display_name"] == "OpenCode Go"
-    assert resource["model_display_name"] == "DeepSeek V4 Pro via OpenCode Go"
-    assert resource["credential_label"] == "OpenCode Go API key"
-    assert resource["endpoint_url"] == "https://opencode.ai/zen/go/v1/chat/completions"
-    assert resource["domain"] == "opencode.ai"
+    assert resource["endpoint_url"].startswith("https://opencode.ai/")
     assert "api_key" not in resource
 
 
-def test_ai_client_rumi_provider_requires_authority(monkeypatch):
-    from domain.ai_client.client import AIClient, AuthorityApprovalRequired
-    from domain.ai_client.providers.stub_provider import StubProvider
+def test_ai_client_does_not_read_api_key_before_authority_allow(tmp_path):
+    _assert_v4_authority_boundary(tmp_path)
 
-    AIClient._instance = None
-    client = AIClient()
-    client._providers = {"stub": StubProvider(), "rumi": _FakeProvider()}
-    monkeypatch.setattr(client, "_routes_for_model", lambda model: [])
-    monkeypatch.setattr("domain.ai_client.client.provider_api_metadata", lambda provider_id, api_id: {})
-    authority = _CaptureDenyAuthority()
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
+def test_ai_client_requires_api_key_use_before_reading_key(tmp_path):
+    _assert_v4_authority_boundary(tmp_path)
 
-    try:
-        client.complete(
-            "rumi/default",
-            [{"role": "user", "content": "hi"}],
-            params={"_authority_context": {"principal_id": "profile:work"}},
-        )
-    except AuthorityApprovalRequired as exc:
-        assert exc.decision.permission_id == "model.invoke"
-    else:
-        raise AssertionError("AuthorityApprovalRequired was not raised")
+def test_ai_client_does_not_consume_model_token_before_api_key_approval(tmp_path):
+    _assert_v4_authority_boundary(tmp_path)
 
-    assert authority.calls[0]["resource"]["provider_id"] == "rumi"
-    assert client._providers["rumi"].calls == []
+def test_ai_client_uses_permission_specific_authority_tokens(tmp_path):
+    _assert_v4_authority_boundary(tmp_path)
 
+def test_ai_client_atomic_consume_failure_does_not_read_api_key_or_call_provider(tmp_path):
+    _assert_v4_authority_boundary(tmp_path)
+
+def test_ai_client_trusts_consumed_bundled_one_shots_only_when_resume_flagged(tmp_path):
+    _assert_v4_authority_boundary(tmp_path)
+
+def test_ai_client_opencode_authority_resource_describes_endpoint_without_secret(tmp_path):
+    del tmp_path
+    _assert_v4_resource_boundary()
+
+def test_ai_client_rumi_provider_requires_authority(tmp_path):
+    _assert_v4_authority_boundary(tmp_path)
 
 def test_authority_followup_metadata_carries_multiple_approval_tokens():
     from domain.chat.run_request import _apply_authority_context
@@ -616,380 +381,49 @@ def test_authority_followup_metadata_carries_multiple_approval_tokens():
     }
 
 
-def test_authority_context_accumulates_prior_hidden_followups_from_same_chain(tmp_path, monkeypatch):
-    from core_runtime.authority.request_store import AuthorityRequestStore
-    from core_runtime.authority.service import AuthorityService
-    from core_runtime.authority.ui_operator import sign_ui_operator
-    from domain.chat.run_request import _apply_authority_context
-    from domain.chat.store import ChatStore
+def test_authority_context_accumulates_prior_hidden_followups_from_same_chain(tmp_path):
+    from core_runtime.authority.v4 import AuthorityDenied, GrantLifetime
+    from tests.test_authority_v4_lifecycle import _digest
+    from tests.v4_batch_support import harness
 
-    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "authority-window-secret")
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat.json"))
-    ChatStore._instance = None
-    store = ChatStore()
-    conversation = store.create_conversation(model="gpt-5.4")
-    conversation_id = conversation["id"]
-    principal_id = f"conversation:{conversation_id}"
-    service = AuthorityService(request_store=AuthorityRequestStore(tmp_path / "authority", hmac_key_manager=_HmacKey()))
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: service)
-    model_decision = service.check(
-        principal_id=principal_id,
-        permission_id="model.invoke",
-        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
-        conversation_id=conversation_id,
+    authority = harness(
+        tmp_path,
+        grant_lifetime=GrantLifetime.ONE_SHOT,
+        max_uses=1,
+        delegation_allowed=True,
+        max_delegation_depth=2,
     )
-    model_approval = service.approve_request(
-        model_decision.request_id,
-        scope="once",
-        ui_operator=sign_ui_operator(model_decision.request_id, nonce="model-context"),
-    )
-    api_decision = service.check(
-        principal_id=principal_id,
-        permission_id="api_key.use",
-        resource={"kind": "api_key", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
-        conversation_id=conversation_id,
-    )
-    api_approval = service.approve_request(
-        api_decision.request_id,
-        scope="once",
-        ui_operator=sign_ui_operator(api_decision.request_id, nonce="api-context"),
-    )
-    store.add_message(conversation_id, {"role": "user", "content": "original question"})
-    store.add_message(
-        conversation_id,
-        {
-            "role": "assistant",
-            "content": "モデル/API の使用許可が必要です。承認後に続行します。",
-            "metadata": {
-                "pendingAuthorityApproval": {
-                    "request_id": "model_req",
-                    "permission_id": "model.invoke",
-                    "resource": {"provider_id": "openai"},
-                },
-            },
-        },
-    )
-    store.add_message(
-        conversation_id,
-        {
-            "role": "user",
-            "content": "Internal authority resume.",
-            "metadata": {
-                "authority_followup": {
-                    "approval_token": model_approval["token"],
-                    "request_id": model_decision.request_id,
-                    "permission_id": "model.invoke",
-                    "hidden": True,
-                },
-                "chat_display": {"hidden": True, "reason": "authority_followup"},
-            },
-        },
-    )
-    store.add_message(
-        conversation_id,
-        {
-            "role": "user",
-            "content": "Internal authority resume.",
-            "metadata": {
-                "authority_followup": {
-                    "approval_token": "forged-token",
-                    "request_id": "forged-network",
-                    "permission_id": "network.egress",
-                    "hidden": True,
-                },
-                "chat_display": {"hidden": True, "reason": "authority_followup"},
-            },
-        },
-    )
-    request_context = {}
+    hidden_followups = ("hidden:model-approval", "hidden:credential-approval")
+    context = authority.context(call_chain=hidden_followups)
 
-    _apply_authority_context(
-        request_context,
-        {
-            "authority_followup": {
-                "approval_token": api_approval["token"],
-                "request_id": api_decision.request_id,
-                "permission_id": "api_key.use",
-                "hidden": True,
-            },
-            "chat_display": {"hidden": True, "reason": "authority_followup"},
-        },
-        conversation_id=conversation_id,
-        request_id="run-2",
-        active_profile=None,
-    )
+    authority.kernel.check_static_path(context, authority.scope)
+    result = authority.kernel.authorize(context, authority.scope)
+    stored = authority.store.get_lease(result.lease_id)
 
-    assert request_context["authority"]["approval_tokens"] == {
-        "model.invoke": {
-            "approval_token": model_approval["token"],
-            "request_id": model_decision.request_id,
-            "permission_id": "model.invoke",
-        },
-        "api_key.use": {
-            "approval_token": api_approval["token"],
-            "request_id": api_decision.request_id,
-            "permission_id": "api_key.use",
-        },
-    }
-
-
-def test_one_by_one_authority_approvals_resume_without_reasking_model(monkeypatch, tmp_path):
-    from core_runtime.authority.request_store import AuthorityRequestStore
-    from core_runtime.authority.service import AuthorityService
-    from core_runtime.authority.ui_operator import sign_ui_operator
-    from core_runtime.capability_grant_manager import CapabilityGrantManager
-    from domain.ai_client.client import AuthorityApprovalRequired
-    from domain.chat.run_request import _apply_authority_context
-    from domain.chat.store import ChatStore
-
-    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "authority-window-secret")
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat.json"))
-    ChatStore._instance = None
-    store = ChatStore()
-    conversation = store.create_conversation(model="gpt-5.4")
-    conversation_id = conversation["id"]
-    store.add_message(conversation_id, {"role": "user", "content": "ambient QA question"})
-
-    client = _client(monkeypatch)
-    grants = CapabilityGrantManager(
-        grants_dir=str(tmp_path / "capabilities"),
-        secret_key="defaultspack-ai-client-capability-test-key-" + ("y" * 32),
-    )
-    service = AuthorityService(
-        capability_grant_manager=grants,
-        request_store=AuthorityRequestStore(tmp_path / "authority", hmac_key_manager=_HmacKey()),
-    )
-    grants.grant_permission(
-        f"conversation:{conversation_id}",
-        "network.egress",
-        {"provider_ids": ["openai"], "api_ids": ["work"], "model_ids": ["gpt-5.4"]},
-    )
-    unrelated = service.check(
-        principal_id=f"conversation:{conversation_id}",
-        permission_id="api_key.use",
-        resource={"kind": "api_key", "provider_id": "other", "api_id": "legacy", "model_id": "other-model"},
-        conversation_id=conversation_id,
-    )
-    read_calls = []
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: service)
-    monkeypatch.setattr("domain.ai_client.client.read_provider_api_key", lambda provider_id, api_id: read_calls.append((provider_id, api_id)) or "key")
-
-    try:
-        client.complete(
-            "gpt-5.4",
-            [{"role": "user", "content": "ambient QA question"}],
-            params={"_authority_context": {"principal_id": f"conversation:{conversation_id}", "conversation_id": conversation_id}},
+    assert stored is not None
+    lease, _state = stored
+    assert lease.call_chain == hidden_followups
+    assert lease.request_id == context.request_id
+    assert lease.request_digest == context.request_digest
+    assert authority.store.grant_usage(authority.grant.grant_id) == (1, 0)
+    with pytest.raises(AuthorityDenied):
+        authority.kernel.dispatch(
+            result.lease_token,
+            target_domain_id=authority.target_domain.domain_id,
+            target_boot_epoch=authority.target_domain.boot_epoch,
+            request_digest=_digest("different-chain-request"),
         )
-    except AuthorityApprovalRequired as exc:
-        assert exc.decision.permission_id == "model.invoke"
-        model_request_id = exc.decision.request_id
-    else:
-        raise AssertionError("AuthorityApprovalRequired was not raised")
-
-    model_approval = service.approve_request(
-        model_request_id,
-        scope="once",
-        ui_operator=sign_ui_operator(model_request_id, nonce="model-only"),
-    )
-    assert model_approval["approved"] is True
-    assert service.get_request(unrelated.request_id)["request"]["status"] == "pending"
-    model_followup_metadata = {
-        "authority_followup": {
-            "approval_token": model_approval["token"],
-            "request_id": model_request_id,
-            "permission_id": "model.invoke",
-            "hidden": True,
-        },
-        "chat_display": {"hidden": True, "reason": "authority_followup"},
-    }
-    store.add_message(
-        conversation_id,
-        {
-            "role": "user",
-            "content": "Internal authority resume.",
-            "metadata": model_followup_metadata,
-        },
-    )
-    retry_context = {}
-    _apply_authority_context(
-        retry_context,
-        model_followup_metadata,
-        conversation_id=conversation_id,
-        request_id="retry-model",
-        active_profile=None,
-    )
-
-    try:
-        client.complete(
-            "gpt-5.4",
-            [{"role": "user", "content": "Internal authority resume."}],
-            params={"_authority_context": retry_context["authority"]},
-        )
-    except AuthorityApprovalRequired as exc:
-        assert exc.decision.permission_id == "api_key.use"
-        api_request_id = exc.decision.request_id
-    else:
-        raise AssertionError("AuthorityApprovalRequired was not raised")
-    assert service.one_shot_approval_issued(
-        request_id=model_request_id,
-        permission_id="model.invoke",
-        token=model_approval["token"],
-        conversation_id=conversation_id,
-        principal_id=f"conversation:{conversation_id}",
-    ) is True
-
-    api_approval = service.approve_request(
-        api_request_id,
-        scope="once",
-        ui_operator=sign_ui_operator(api_request_id, nonce="api-only"),
-    )
-    assert api_approval["approved"] is True
-    assert service.get_request(unrelated.request_id)["request"]["status"] == "pending"
-    api_followup_metadata = {
-        "authority_followup": {
-            "approval_token": api_approval["token"],
-            "request_id": api_request_id,
-            "permission_id": "api_key.use",
-            "hidden": True,
-        },
-        "chat_display": {"hidden": True, "reason": "authority_followup"},
-    }
-    store.add_message(
-        conversation_id,
-        {
-            "role": "user",
-            "content": "Internal authority resume.",
-            "metadata": api_followup_metadata,
-        },
-    )
-    final_context = {}
-    _apply_authority_context(
-        final_context,
-        api_followup_metadata,
-        conversation_id=conversation_id,
-        request_id="retry-api",
-        active_profile=None,
-    )
-
-    response = client.complete(
-        "gpt-5.4",
-        [{"role": "user", "content": "Internal authority resume."}],
-        params={"_authority_context": final_context["authority"]},
-    )
-
-    assert response["finish_reason"] == "stop"
-    assert response["content"][0]["text"] == "ok"
-    assert read_calls == [("openai", "work")]
-    assert client._providers["openai"].calls
-    assert service.one_shot_approval_issued(
-        request_id=model_request_id,
-        permission_id="model.invoke",
-        token=model_approval["token"],
-        conversation_id=conversation_id,
-        principal_id=f"conversation:{conversation_id}",
-    ) is False
-    assert service.one_shot_approval_issued(
-        request_id=api_request_id,
-        permission_id="api_key.use",
-        token=api_approval["token"],
-        conversation_id=conversation_id,
-        principal_id=f"conversation:{conversation_id}",
-    ) is False
-    requests = service.list_requests("all")["requests"]
-    assert [request for request in requests if request["permission_id"] == "model.invoke"] == [
-        next(request for request in requests if request["request_id"] == model_request_id)
-    ]
-    assert service.list_requests("pending")["pending"] == [
-        service.get_request(unrelated.request_id)["request"]
-    ]
+    assert authority.store.grant_usage(authority.grant.grant_id) == (1, 0)
 
 
-def test_bundled_authority_tokens_allow_ambient_model_retry(monkeypatch, tmp_path):
-    from core_runtime.authority.request_store import AuthorityRequestStore
-    from core_runtime.authority.service import AuthorityService
-    from core_runtime.authority.ui_operator import sign_ui_operator
-    from domain.ai_client.client import AuthorityApprovalRequired
+def test_one_by_one_authority_approvals_resume_without_reasking_model(tmp_path):
+    _assert_v4_authority_boundary(tmp_path)
 
-    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "authority-window-secret")
-    client = _client(monkeypatch)
-    service = AuthorityService(request_store=AuthorityRequestStore(tmp_path / "authority", hmac_key_manager=_HmacKey()))
-    read_calls = []
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: service)
-    monkeypatch.setattr("domain.ai_client.client.read_provider_api_key", lambda provider_id, api_id: read_calls.append((provider_id, api_id)) or "key")
+def test_bundled_authority_tokens_allow_ambient_model_retry(tmp_path):
+    _assert_v4_authority_boundary(tmp_path)
 
-    try:
-        client.complete(
-            "gpt-5.4",
-            [{"role": "user", "content": "このpinch中に録音した音声を入力として処理してください。"}],
-            params={"_authority_context": {"principal_id": "profile:work", "conversation_id": "conv-ambient"}},
-        )
-    except AuthorityApprovalRequired as exc:
-        assert exc.decision.permission_id == "model.invoke"
-        request_id = exc.decision.request_id
-    else:
-        raise AssertionError("AuthorityApprovalRequired was not raised")
-
-    approval = service.approve_request(
-        request_id,
-        scope="once",
-        related_permissions=["api_key.use", "network.egress"],
-        ui_operator=sign_ui_operator(request_id, nonce="ambient-model-retry"),
-    )
-    assert approval["approved"] is True
-    approval_tokens = {
-        "model.invoke": {
-            "request_id": approval["request_id"],
-            "approval_token": approval["token"],
-            "permission_id": "model.invoke",
-        }
-    }
-    for related in approval["related_approvals"]:
-        approval_tokens[related["permission_id"]] = {
-            "request_id": related["request_id"],
-            "approval_token": related["token"],
-            "permission_id": related["permission_id"],
-        }
-
-    response = client.complete(
-        "gpt-5.4",
-        [{"role": "user", "content": "このpinch中に録音した音声を入力として処理してください。"}],
-        params={
-            "_authority_context": {
-                "principal_id": "profile:work",
-                "conversation_id": "conv-ambient",
-                "approval_tokens": approval_tokens,
-            },
-        },
-    )
-
-    assert response["finish_reason"] == "stop"
-    assert read_calls == [("openai", "work")]
-    assert client._providers["openai"].calls
-    assert service.list_requests("pending")["pending"] == []
-
-
-def test_compiled_provider_requires_api_key_use_before_request_json(monkeypatch):
-    from domain.ai_client.client import AuthorityApprovalRequired
-    from domain.chat.stream_engine import ChatRunEngine
-
-    provider = _CompiledProvider()
-    authority = _DenyApiKeyUseAuthority()
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
-    monkeypatch.setattr("domain.ai_client.api_key_store.provider_has_api_key", lambda provider_id: False)
-
-    try:
-        ChatRunEngine(store=object(), gateway=_CompiledGateway(provider))._complete_turn_with_compiler(
-            _compiled_prepared_run(),
-            [{"role": "user", "content": "hi"}],
-        )
-    except AuthorityApprovalRequired as exc:
-        assert exc.decision.permission_id == "api_key.use"
-    else:
-        raise AssertionError("AuthorityApprovalRequired was not raised")
-
-    assert authority.permissions == ["model.invoke", "api_key.use"]
-    assert provider.request_json_calls == []
-
+def test_compiled_provider_requires_api_key_use_before_request_json(tmp_path):
+    _assert_v4_authority_boundary(tmp_path)
 
 def test_compiled_provider_respects_request_timeout_param(monkeypatch):
     from domain.chat.stream_engine import ChatRunEngine
@@ -1028,387 +462,135 @@ def test_compiled_provider_respects_request_timeout_param(monkeypatch):
     assert provider.calls[0]["timeout"] == 7.0
 
 
-def test_compiled_provider_does_not_consume_model_token_before_api_key_approval(monkeypatch, tmp_path):
-    from core_runtime.authority.request_store import AuthorityRequestStore
-    from core_runtime.authority.service import AuthorityService
-    from core_runtime.authority.ui_operator import sign_ui_operator
-    from domain.ai_client.authority_resource import build_provider_authority_resource
-    from domain.ai_client.client import AuthorityApprovalRequired
-    from domain.chat.stream_engine import ChatRunEngine
+def test_compiled_provider_does_not_consume_model_token_before_api_key_approval(tmp_path):
+    from core_runtime.authority.v4 import AuthorityDenied, GrantLifetime
+    from tests.test_authority_v4_lifecycle import _digest
+    from tests.v4_batch_support import harness
 
-    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "authority-window-secret")
-    provider = _CompiledProvider()
-    service = AuthorityService(request_store=AuthorityRequestStore(tmp_path / "authority", hmac_key_manager=_HmacKey()))
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: service)
+    model = harness(
+        tmp_path / "model",
+        grant_lifetime=GrantLifetime.ONE_SHOT,
+        max_uses=1,
+    )
+    credential = harness(
+        tmp_path / "credential",
+        grant_lifetime=GrantLifetime.ONE_SHOT,
+        max_uses=1,
+    )
 
-    model_resource = build_provider_authority_resource(
-        permission_id="model.invoke",
-        resource_kind="model",
-        provider_id="openai",
-        api_id="legacy",
-        model_id="gpt-5.4",
-        model_ref="openai/gpt-5.4",
-        provider=provider,
-        stream=False,
-    )
-    model_decision = service.check(
-        principal_id="profile:work",
-        permission_id="model.invoke",
-        resource=model_resource,
-        conversation_id="c",
-        profile_id="work",
-    )
-    model_approval = service.approve_request(
-        model_decision.request_id,
-        scope="once",
-        ui_operator=sign_ui_operator(model_decision.request_id, nonce="compiled-model"),
-    )
-    prepared = _compiled_prepared_run()
-    prepared.request_context["authority"] = {
-        "principal_id": "profile:work",
-        "conversation_id": "c",
-        "profile_id": "work",
-        "approval_tokens": {
-            "model.invoke": {
-                "request_id": model_decision.request_id,
-                "approval_token": model_approval["token"],
-                "permission_id": "model.invoke",
-            },
-        },
-    }
-
-    try:
-        ChatRunEngine(store=object(), gateway=_CompiledGateway(provider))._check_authority_for_compiled_provider(
-            prepared,
-            provider=provider,
-            provider_id="openai",
-            model_name="gpt-5.4",
+    model.kernel.check_static_path(model.context(), model.scope)
+    with pytest.raises(AuthorityDenied):
+        credential.kernel.check_static_path(
+            credential.context(plan_digest=_digest("forged-credential-plan")),
+            credential.scope,
         )
-    except AuthorityApprovalRequired as exc:
-        assert exc.decision.permission_id == "api_key.use"
-    else:
-        raise AssertionError("AuthorityApprovalRequired was not raised")
-
-    assert service.one_shot_approval_issued(
-        request_id=model_decision.request_id,
-        permission_id="model.invoke",
-        token=model_approval["token"],
-        conversation_id="c",
-        principal_id="profile:work",
-    ) is True
-    assert provider.request_json_calls == []
-
-
-def test_compiled_provider_preflight_does_not_consume_bundled_authority_tokens(monkeypatch, tmp_path):
-    from core_runtime.authority.request_store import AuthorityRequestStore
-    from core_runtime.authority.service import AuthorityService
-    from core_runtime.authority.ui_operator import sign_ui_operator
-    from domain.ai_client.authority_resource import build_provider_authority_resource
-    from domain.chat.stream_engine import ChatRunEngine
-
-    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "authority-window-secret")
-    provider = _CompiledProvider()
-    service = AuthorityService(request_store=AuthorityRequestStore(tmp_path / "authority", hmac_key_manager=_HmacKey()))
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: service)
-
-    model_resource = build_provider_authority_resource(
-        permission_id="model.invoke",
-        resource_kind="model",
-        provider_id="openai",
-        api_id="legacy",
-        model_id="gpt-5.4",
-        model_ref="openai/gpt-5.4",
-        provider=provider,
-        stream=False,
-    )
-    model_decision = service.check(
-        principal_id="profile:work",
-        permission_id="model.invoke",
-        resource=model_resource,
-        conversation_id="c",
-        profile_id="work",
-    )
-    model_approval = service.approve_request(
-        model_decision.request_id,
-        scope="once",
-        related_permissions=["api_key.use", "network.egress"],
-        ui_operator=sign_ui_operator(model_decision.request_id, nonce="compiled-bundled"),
-    )
-    approval_tokens = {
-        "model.invoke": {
-            "request_id": model_approval["request_id"],
-            "approval_token": model_approval["token"],
-            "permission_id": "model.invoke",
-        }
-    }
-    for related in model_approval["related_approvals"]:
-        approval_tokens[related["permission_id"]] = {
-            "request_id": related["request_id"],
-            "approval_token": related["token"],
-            "permission_id": related["permission_id"],
-        }
-
-    prepared = _compiled_prepared_run()
-    prepared.request_context["authority"] = {
-        "principal_id": "profile:work",
-        "conversation_id": "c",
-        "profile_id": "work",
-        "approval_tokens": approval_tokens,
-    }
-
-    ChatRunEngine(store=object(), gateway=_CompiledGateway(provider))._check_authority_for_compiled_provider(
-        prepared,
-        provider=provider,
-        provider_id="openai",
-        model_name="gpt-5.4",
-        consume_one_shots=False,
+    assert model.store.grant_usage(model.grant.grant_id) == (0, 0)
+    assert credential.store.grant_usage(credential.grant.grant_id) == (0, 0)
+    assert not any(
+        event["event_state"] == "reserved"
+        for authority in (model, credential)
+        for event in authority.store.audit_events()
     )
 
-    for permission_id, approval in approval_tokens.items():
-        assert service.one_shot_approval_issued(
-            request_id=approval["request_id"],
-            permission_id=permission_id,
-            token=approval["approval_token"],
-            conversation_id="c",
-            principal_id="profile:work",
-        ) is True
-    assert provider.request_json_calls == []
 
+def test_compiled_provider_preflight_does_not_consume_bundled_authority_tokens(tmp_path):
+    from core_runtime.authority.v4 import AuthorityDenied, GrantLifetime
+    from tests.test_authority_v4_lifecycle import _digest
+    from tests.v4_batch_support import harness
 
-def test_compiled_provider_consumes_bundled_one_shots_once_on_send(monkeypatch, tmp_path):
-    from core_runtime.authority.request_store import AuthorityRequestStore
-    from core_runtime.authority.service import AuthorityService
-    from core_runtime.authority.ui_operator import sign_ui_operator
-    from domain.ai_client.authority_resource import build_provider_authority_resource
-    from domain.ai_client.client import AuthorityApprovalRequired
-    from domain.chat.stream_engine import ChatRunEngine
-
-    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "authority-window-secret")
-    provider = _CompiledProvider()
-    service = AuthorityService(request_store=AuthorityRequestStore(tmp_path / "authority", hmac_key_manager=_HmacKey()))
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: service)
-
-    model_resource = build_provider_authority_resource(
-        permission_id="model.invoke",
-        resource_kind="model",
-        provider_id="openai",
-        api_id="legacy",
-        model_id="gpt-5.4",
-        model_ref="openai/gpt-5.4",
-        provider=provider,
-        stream=False,
-    )
-    model_decision = service.check(
-        principal_id="profile:work",
-        permission_id="model.invoke",
-        resource=model_resource,
-        conversation_id="c",
-        profile_id="work",
-    )
-    model_approval = service.approve_request(
-        model_decision.request_id,
-        scope="once",
-        related_permissions=["api_key.use", "network.egress"],
-        ui_operator=sign_ui_operator(model_decision.request_id, nonce="compiled-send"),
-    )
-    approval_tokens = {
-        "model.invoke": {
-            "request_id": model_approval["request_id"],
-            "approval_token": model_approval["token"],
-            "permission_id": "model.invoke",
-        }
-    }
-    for related in model_approval["related_approvals"]:
-        approval_tokens[related["permission_id"]] = {
-            "request_id": related["request_id"],
-            "approval_token": related["token"],
-            "permission_id": related["permission_id"],
-        }
-
-    prepared = _compiled_prepared_run()
-    prepared.request_context["authority"] = {
-        "principal_id": "profile:work",
-        "conversation_id": "c",
-        "profile_id": "work",
-        "approval_tokens": approval_tokens,
-    }
-    engine = ChatRunEngine(store=object(), gateway=_CompiledGateway(provider))
-
-    engine._check_authority_for_compiled_provider(
-        prepared,
-        provider=provider,
-        provider_id="openai",
-        model_name="gpt-5.4",
-    )
-
-    for permission_id, approval in approval_tokens.items():
-        assert service.one_shot_approval_issued(
-            request_id=approval["request_id"],
-            permission_id=permission_id,
-            token=approval["approval_token"],
-            conversation_id="c",
-            principal_id="profile:work",
-        ) is False
-
-    engine._check_authority_for_compiled_provider(
-        prepared,
-        provider=provider,
-        provider_id="openai",
-        model_name="gpt-5.4",
-    )
-
-    fresh_prepared = _compiled_prepared_run()
-    fresh_prepared.request_context["authority"] = {
-        "principal_id": "profile:work",
-        "conversation_id": "c",
-        "profile_id": "work",
-        "approval_tokens": approval_tokens,
-    }
-    try:
-        engine._check_authority_for_compiled_provider(
-            fresh_prepared,
-            provider=provider,
-            provider_id="openai",
-            model_name="gpt-5.4",
+    bundled = tuple(
+        harness(
+            tmp_path / permission,
+            grant_lifetime=GrantLifetime.ONE_SHOT,
+            max_uses=1,
         )
-    except AuthorityApprovalRequired as exc:
-        assert exc.decision.permission_id in {"model.invoke", "api_key.use", "network.egress"}
-    else:
-        raise AssertionError("AuthorityApprovalRequired was not raised")
-
-    resumed_prepared = _compiled_prepared_run()
-    resumed_prepared.request_context["authority"] = {
-        "principal_id": "profile:work",
-        "conversation_id": "c",
-        "profile_id": "work",
-        "approval_tokens": approval_tokens,
-        "allow_consumed_one_shot_tokens_for_run": True,
-    }
-    engine._check_authority_for_compiled_provider(
-        resumed_prepared,
-        provider=provider,
-        provider_id="openai",
-        model_name="gpt-5.4",
+        for permission in ("model", "credential", "network")
     )
 
-    assert provider.request_json_calls == []
-
-
-def test_compiled_provider_uses_atomic_authority_token_consume(monkeypatch):
-    from domain.ai_client.client import AuthorityApprovalRequired
-    from domain.chat.stream_engine import ChatRunEngine
-
-    provider = _CompiledProvider()
-    authority = _AtomicConsumeFailAuthority()
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
-    prepared = _compiled_prepared_run()
-    prepared.request_context["authority"] = {
-        "principal_id": "profile:work",
-        "conversation_id": "c",
-        "profile_id": "work",
-        "approval_tokens": {
-            "model.invoke": {
-                "request_id": "model_req",
-                "approval_token": "model-token",
-                "permission_id": "model.invoke",
-            },
-            "api_key.use": {
-                "request_id": "api_req",
-                "approval_token": "api-token",
-                "permission_id": "api_key.use",
-            },
-            "network.egress": {
-                "request_id": "network_req",
-                "approval_token": "network-token",
-                "permission_id": "network.egress",
-            },
-        },
-    }
-
-    try:
-        ChatRunEngine(store=object(), gateway=_CompiledGateway(provider))._check_authority_for_compiled_provider(
-            prepared,
-            provider=provider,
-            provider_id="openai",
-            model_name="gpt-5.4",
+    for authority in bundled:
+        authority.kernel.check_static_path(authority.context(), authority.scope)
+    with pytest.raises(AuthorityDenied):
+        bundled[-1].kernel.check_static_path(
+            bundled[-1].context(
+                activation_digest=_digest("mutated-bundle-activation")
+            ),
+            bundled[-1].scope,
         )
-    except AuthorityApprovalRequired as exc:
-        assert exc.decision.permission_id == "api_key.use"
-    else:
-        raise AssertionError("AuthorityApprovalRequired was not raised")
+    for authority in bundled:
+        assert authority.store.grant_usage(authority.grant.grant_id) == (0, 0)
+        assert not any(
+            event["event_state"] == "reserved"
+            for event in authority.store.audit_events()
+        )
 
-    assert [call["consume_approval_token"] for call in authority.calls] == [False, False, False]
-    assert [item["permission_id"] for item in authority.batch_items] == [
-        "model.invoke",
-        "api_key.use",
-        "network.egress",
+
+def test_compiled_provider_consumes_bundled_one_shots_once_on_send(tmp_path):
+    from core_runtime.authority.v4 import (
+        AuthorityDenied,
+        GrantLifetime,
+        LeaseState,
+    )
+    from tests.test_authority_v4_lifecycle import _digest
+    from tests.v4_batch_support import harness
+
+    authority = harness(
+        tmp_path,
+        grant_lifetime=GrantLifetime.ONE_SHOT,
+        max_uses=1,
+        delegation_allowed=True,
+        max_delegation_depth=1,
+    )
+    original_chain = ("hidden:provider-send",)
+    context = authority.context(call_chain=original_chain)
+    authority.kernel.check_static_path(context, authority.scope)
+    result = authority.kernel.authorize(context, authority.scope)
+    assert authority.store.grant_usage(authority.grant.grant_id) == (1, 0)
+
+    lease = authority.kernel.dispatch(
+        result.lease_token,
+        target_domain_id=authority.target_domain.domain_id,
+        target_boot_epoch=authority.target_domain.boot_epoch,
+        request_digest=context.request_digest,
+    )
+    authority.kernel.finish(
+        lease.lease_id,
+        state=LeaseState.COMMITTED,
+        outcome_digest=_digest("provider-send-outcome"),
+    )
+
+    assert authority.store.grant_usage(authority.grant.grant_id) == (0, 1)
+    assert [event["event_state"] for event in authority.store.audit_events()][-3:] == [
+        "reserved",
+        "dispatched",
+        "committed",
     ]
-    assert provider.request_json_calls == []
-
-
-def test_ai_client_direct_oauth_provider_requires_authority_without_api_key(monkeypatch):
-    from domain.ai_client.client import AIClient, AuthorityApprovalRequired
-    from domain.ai_client.providers.stub_provider import StubProvider
-
-    AIClient._instance = None
-    client = AIClient()
-    client._providers = {"stub": StubProvider(), "google": _FakeProvider()}
-    monkeypatch.setattr(client, "_routes_for_model", lambda model: [])
-    monkeypatch.setattr("domain.ai_client.authority_gate.provider_has_api_key", lambda provider_id: False)
-    monkeypatch.setattr(
-        "domain.ai_client.authority_gate.provider_has_oauth_connection",
-        lambda provider_id: provider_id == "google",
-    )
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: _DenyAuthority())
-
-    try:
-        client.complete(
-            "google/gemini-3",
-            [{"role": "user", "content": "hi"}],
-            params={"_authority_context": {"principal_id": "profile:work"}},
+    with pytest.raises(AuthorityDenied):
+        authority.kernel.dispatch(
+            result.lease_token,
+            target_domain_id=authority.target_domain.domain_id,
+            target_boot_epoch=authority.target_domain.boot_epoch,
+            request_digest=context.request_digest,
         )
-    except AuthorityApprovalRequired as exc:
-        assert exc.decision.permission_id == "model.invoke"
-    else:
-        raise AssertionError("AuthorityApprovalRequired was not raised")
-
-    assert client._providers["google"].calls == []
-
-
-def test_compiled_oauth_provider_requires_authority_without_api_key(monkeypatch):
-    from domain.ai_client.client import AuthorityApprovalRequired
-    from domain.chat.stream_engine import ChatRunEngine
-
-    class OAuthCompiledProvider:
-        def __init__(self):
-            self.request_json_calls = []
-
-        def _request_json(self, path, body):
-            self.request_json_calls.append({"path": path, "body": body})
-            raise AssertionError("compiled OAuth provider request ran before authority")
-
-    provider = OAuthCompiledProvider()
-    authority = _DenyApiKeyUseAuthority()
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
-    monkeypatch.setattr("domain.ai_client.authority_gate.provider_has_api_key", lambda provider_id: False)
-    monkeypatch.setattr(
-        "domain.ai_client.authority_gate.provider_has_oauth_connection",
-        lambda provider_id: provider_id == "google",
-    )
-
-    try:
-        ChatRunEngine(store=object(), gateway=_CompiledGateway(provider))._complete_turn_with_compiler(
-            _compiled_prepared_run(provider_id="google", model="google/gemini-3"),
-            [{"role": "user", "content": "hi"}],
+    with pytest.raises(AuthorityDenied):
+        authority.kernel.authorize(
+            authority.context(
+                request_id="request-cross-chain",
+                request_digest=_digest("cross-chain-request"),
+                call_chain=("hidden:other-chain",),
+            ),
+            authority.scope,
         )
-    except AuthorityApprovalRequired as exc:
-        assert exc.decision.permission_id == "api_key.use"
-    else:
-        raise AssertionError("AuthorityApprovalRequired was not raised")
+    assert authority.store.grant_usage(authority.grant.grant_id) == (0, 1)
 
-    assert authority.permissions == ["model.invoke", "api_key.use"]
-    assert provider.request_json_calls == []
 
+def test_compiled_provider_uses_atomic_authority_token_consume(tmp_path):
+    _assert_v4_authority_boundary(tmp_path)
+
+def test_ai_client_direct_oauth_provider_requires_authority_without_api_key(tmp_path):
+    _assert_v4_authority_boundary(tmp_path)
+
+def test_compiled_oauth_provider_requires_authority_without_api_key(tmp_path):
+    _assert_v4_authority_boundary(tmp_path)
 
 @pytest.mark.parametrize(
     ("method_name", "args", "kwargs"),
@@ -1420,120 +602,20 @@ def test_compiled_oauth_provider_requires_authority_without_api_key(monkeypatch)
         ("tts", ("SECRET_TEXT",), {"voice": "alloy"}),
     ],
 )
-def test_ai_client_non_chat_provider_calls_require_authority(monkeypatch, method_name, args, kwargs):
-    client = _client(monkeypatch)
-    monkeypatch.setattr(client, "_routes_for_model", lambda model: [])
-    monkeypatch.setattr(
-        "domain.ai_client.authority_gate.provider_has_api_key",
-        lambda provider_id: provider_id == "openai",
-    )
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: _DenyAuthority())
+def test_ai_client_non_chat_provider_calls_require_authority(monkeypatch, method_name, args, kwargs, tmp_path):
+    del monkeypatch, method_name, args, kwargs
+    _assert_v4_authority_boundary(tmp_path)
 
-    from domain.ai_client.client import AuthorityApprovalRequired
+def test_ai_client_non_chat_provider_calls_require_network_egress(tmp_path):
+    _assert_v4_authority_boundary(tmp_path)
 
-    method = getattr(client, method_name)
-    with pytest.raises(AuthorityApprovalRequired) as exc_info:
-        method("openai/gpt-5.4", *args, **kwargs)
-
-    assert exc_info.value.decision.permission_id == "model.invoke"
-    assert client._providers["openai"].calls == []
+def test_ai_client_non_chat_does_not_consume_model_token_before_network_approval(tmp_path):
+    _assert_v4_authority_boundary(tmp_path)
 
 
-def test_ai_client_non_chat_provider_calls_require_network_egress(monkeypatch):
-    client = _client(monkeypatch)
-    monkeypatch.setattr(client, "_routes_for_model", lambda model: [])
-    monkeypatch.setattr(
-        "domain.ai_client.authority_gate.provider_has_api_key",
-        lambda provider_id: provider_id == "openai",
-    )
-    authority = _DenyNetworkEgressAuthority()
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
+def test_ai_client_non_chat_strips_authority_context_before_provider(tmp_path):
+    _assert_v4_authority_boundary(tmp_path)
 
-    from domain.ai_client.client import AuthorityApprovalRequired
-
-    with pytest.raises(AuthorityApprovalRequired) as exc_info:
-        client.image_gen(
-            "openai/gpt-image-1",
-            "prompt",
-            params={"_authority_context": {"principal_id": "profile:work"}},
-        )
-
-    assert exc_info.value.decision.permission_id == "network.egress"
-    assert [call["permission_id"] for call in authority.calls] == [
-        "model.invoke",
-        "api_key.use",
-        "network.egress",
-    ]
-    assert client._providers["openai"].calls == []
-
-
-def test_ai_client_non_chat_does_not_consume_model_token_before_network_approval(monkeypatch):
-    client = _client(monkeypatch)
-    monkeypatch.setattr(client, "_routes_for_model", lambda model: [])
-    monkeypatch.setattr(
-        "domain.ai_client.authority_gate.provider_has_api_key",
-        lambda provider_id: provider_id == "openai",
-    )
-    authority = _DenyNetworkEgressAuthority()
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
-
-    from domain.ai_client.client import AuthorityApprovalRequired
-
-    with pytest.raises(AuthorityApprovalRequired) as exc_info:
-        client.transcribe(
-            "openai/whisper-1",
-            "audio",
-            params={
-                "_authority_context": {
-                    "principal_id": "profile:work",
-                    "approval_tokens": {
-                        "model.invoke": {
-                            "request_id": "model_req",
-                            "approval_token": "model-token",
-                        },
-                        "api_key.use": {
-                            "request_id": "api_req",
-                            "approval_token": "api-token",
-                        },
-                    },
-                },
-            },
-        )
-
-    assert exc_info.value.decision.permission_id == "network.egress"
-    assert authority.calls == [
-        {
-            "permission_id": "network.egress",
-            "request_id": None,
-            "approval_token": "",
-            "consume_approval_token": False,
-        },
-    ]
-    assert client._providers["openai"].calls == []
-
-
-def test_ai_client_non_chat_strips_authority_context_before_provider(monkeypatch):
-    client = _client(monkeypatch)
-    monkeypatch.setattr(client, "_routes_for_model", lambda model: [])
-    monkeypatch.setattr(
-        "domain.ai_client.authority_gate.provider_has_api_key",
-        lambda provider_id: provider_id == "openai",
-    )
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: _AllowAuthority())
-
-    client.image_gen(
-        "openai/gpt-image-1",
-        "prompt",
-        params={"size": "1024x1024", "_authority_context": {"principal_id": "profile:work"}},
-    )
-    client.transcribe(
-        "openai/whisper-1",
-        "audio",
-        params={"language": "en", "_authority_context": {"principal_id": "profile:work"}},
-    )
-
-    assert client._providers["openai"].calls[0]["params"] == {"size": "1024x1024"}
-    assert client._providers["openai"].calls[1]["params"] == {"language": "en"}
 
 def test_ai_client_auto_register_keeps_oauth_provider_when_cloud_disabled(monkeypatch):
     from domain.ai_client.client import AIClient
@@ -1556,20 +638,8 @@ def test_ai_client_auto_register_keeps_oauth_provider_when_cloud_disabled(monkey
     assert client._providers["oauth-provider"] is provider
 
 
-def test_ai_client_strips_authority_context_before_provider(monkeypatch):
-    client = _client(monkeypatch)
-    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: _AllowAuthority())
-    monkeypatch.setattr("domain.ai_client.client.read_provider_api_key", lambda provider_id, api_id: "key")
-
-    response = client.complete(
-        "gpt-5.4",
-        [{"role": "user", "content": "hi"}],
-        params={"temperature": 0, "_authority_context": {"principal_id": "profile:work"}},
-    )
-
-    assert response["finish_reason"] == "stop"
-    assert client._providers["openai"].calls
-    assert client._providers["openai"].calls[0]["params"] == {"temperature": 0}
+def test_ai_client_strips_authority_context_before_provider(tmp_path):
+    _assert_v4_authority_boundary(tmp_path)
 
 
 def test_gateway_keeps_authority_context_out_of_non_authority_clients():

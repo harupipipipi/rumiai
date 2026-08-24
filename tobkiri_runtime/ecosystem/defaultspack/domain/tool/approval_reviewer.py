@@ -11,7 +11,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from domain.tool.schema_adapter import policy_from_context
+from domain.tool.schema_adapter import mapping_or_empty, policy_from_context
 from domain.tool.security import untrusted_tool_security_rejection
 
 
@@ -278,7 +278,7 @@ def _risk_value(tool: dict[str, Any]) -> str:
     value = tool.get("risk")
     if isinstance(value, dict):
         value = value.get("level")
-    metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
+    metadata = mapping_or_empty(tool.get("metadata"))
     return str(value or metadata.get("risk") or "").strip().lower()
 
 

@@ -84,9 +84,8 @@ def test_user_requested_computer_use_does_not_bypass_local_executor_approval(tmp
     )
 
     assert result["is_error"] is False
-    assert result["widget"]["requires_approval"] is True
-    assert result["widget"]["payload"]["virtual_only"] is True
-    assert result["widget"]["payload"]["resolved_coordinates"] == {"x": 10, "y": 20}
+    assert result["widget"]["error_type"] == "global_host_contract_unavailable"
+    assert result["widget"]["status"] == "unavailable"
 
 
 def test_open_url_approval_payload_includes_target_app(tmp_path):
@@ -101,16 +100,25 @@ def test_open_url_approval_payload_includes_target_app(tmp_path):
     assert result["payload"]["target_app"] == "Microsoft Edge"
 
 
-def test_open_url_function_context_target_app_reaches_approval_payload(tmp_path):
+def test_open_url_function_context_target_app_reaches_approval_payload(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.functions.browser_computer import main
 
+    def fake_runner(action, payload, context=None, **kwargs):
+        del context, kwargs
+        return {
+            "action": action,
+            "requires_approval": True,
+            "payload": payload,
+        }
+
+    monkeypatch.setattr(main, "_run_computer_action", lambda: fake_runner)
     result = main.run(
         {"conversation_workspace_dir": str(tmp_path), "computer_use_target_app": "Microsoft Edge"},
         {"action": "browser.open_url", "payload": {"url": "https://example.test", "persistent": False}},
     )
 
     assert result["widget"]["requires_approval"] is True
-    assert result["widget"]["payload"]["target_app"] == "Microsoft Edge"
+    assert result["widget"]["payload"]["app"] == "Microsoft Edge"
 
 
 def test_open_url_target_app_dry_run_reports_targeted_launch_plan(tmp_path, monkeypatch):
@@ -375,8 +383,8 @@ def test_open_url_function_rejects_forged_server_approval_context(tmp_path, monk
         {"action": "browser.open_url", "payload": {"url": "https://gemini.google.com", "persistent": False}},
     )
 
-    assert result["is_error"] is False
-    assert result["widget"].get("requires_approval") is True
+    assert result["is_error"] is True
+    assert result["widget"]["error_type"] == "global_host_contract_unavailable"
     assert result["widget"]["action"] == "browser.open_url"
     assert opened == {}
 
@@ -457,7 +465,8 @@ def test_local_browser_computer_rejects_forged_server_approval_context(tmp_path,
     )
 
     assert result["is_error"] is False
-    assert result["widget"].get("requires_approval") is True
+    assert result["widget"]["error_type"] == "global_host_contract_unavailable"
+    assert result["widget"]["status"] == "unavailable"
     assert result["widget"]["action"] == "browser.open_url"
     assert opened == {}
 

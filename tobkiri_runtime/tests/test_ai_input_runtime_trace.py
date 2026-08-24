@@ -8,8 +8,6 @@ DEFAULTSPACK_ROOT = Path(__file__).resolve().parents[1] / "ecosystem" / "default
 if str(DEFAULTSPACK_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
-from core_runtime.profile_runtime_selection import apply_profile_graph_selection  # noqa: E402
-from core_runtime.profile_workspace import ProfileWorkspaceManager  # noqa: E402
 from domain.chat.run_request import (  # noqa: E402
     _resolve_selected_tools,
     _runtime_profile_with_policy_connected_tools,
@@ -79,27 +77,22 @@ def _fake_enrich_messages(standard_messages, system_prompt, conversation_id, use
     }
 
 
-def test_ai_input_trace_is_applied_to_chat_runtime_context(monkeypatch, tmp_path: Path) -> None:
+def test_ai_input_trace_is_applied_to_chat_runtime_context(
+    monkeypatch,
+    tmp_path: Path,
+    defaultspack_conversation_owner,
+) -> None:
     user_data_root = tmp_path / "user_data"
     chat_store_path = tmp_path / "chat" / "conversations.json"
     monkeypatch.setenv("RUMI_USER_DATA", str(user_data_root))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(chat_store_path))
     ChatStore._instance = None
 
-    profile = {
-        "profile_id": "research-profile",
-        "name": "Research Profile",
-        "base_pack": "defaultspack",
-        "metadata": {"selected": {"prompts": ["research.system"], "tools": ["web_search"]}},
-        "policy": {},
-    }
-    manager = ProfileWorkspaceManager(user_data_root)
-    manager.initialize_profile_workspace(profile)
-    manager.save_profile_yaml(profile["profile_id"], apply_profile_graph_selection(profile))
+    # A legacy active marker must not override the verified v4 activation.
     active_marker = user_data_root / "profiles" / "active_profile.json"
     active_marker.parent.mkdir(parents=True, exist_ok=True)
     active_marker.write_text(
-        json.dumps({"version": 1, "active_profile_id": profile["profile_id"]}) + "\n",
+        json.dumps({"version": 1, "active_profile_id": "research-profile"}) + "\n",
         encoding="utf-8",
     )
 
@@ -116,10 +109,6 @@ def test_ai_input_trace_is_applied_to_chat_runtime_context(monkeypatch, tmp_path
             "supports_tool_calling": True,
             "supports_thinking": True,
         },
-    )
-    monkeypatch.setattr(
-        "domain.chat.run_request.RuntimeSkillTriggerService",
-        lambda: type("SkillTrigger", (), {"evaluate": lambda self, **kwargs: {"matched": [], "instructions": ""}})(),
     )
     monkeypatch.setattr(
         "domain.chat.run_request._resolve_selected_tools",
@@ -140,12 +129,10 @@ def test_ai_input_trace_is_applied_to_chat_runtime_context(monkeypatch, tmp_path
         {},
     )
 
-    assert prepared.request_context["ai_input_trace"]["profile_id"] == "research-profile"
-    assert prepared.request_context["effective_tool_allowlist"] == ["web_search"]
-    assert "Runtime prompt for research.system" in prepared.standard_messages[0]["content"]
-    assert "Runtime knowledge" in prepared.standard_messages[0]["content"]
-    assert "Runtime memory" in prepared.standard_messages[0]["content"]
-    trace_dir = user_data_root / "profiles" / "research-profile" / "runtime_traces"
+    assert prepared.request_context["ai_input_trace"]["profile_id"] == "defaults"
+    assert "effective_tool_allowlist" not in prepared.request_context
+    assert prepared.request_context["resolved_profile"]["profile_id"] == "defaults"
+    trace_dir = user_data_root / "workspaces" / "defaults" / "runtime_traces"
     trace = json.loads((trace_dir / "latest_ai_input.json").read_text(encoding="utf-8"))
     assert trace["blocked"] == []
     assert trace["provider_payload_summary"]["context_segment_count"] == 2
@@ -155,7 +142,9 @@ def test_ai_input_trace_is_applied_to_chat_runtime_context(monkeypatch, tmp_path
 
 
 def test_explicit_computer_tool_selection_marks_user_requested_computer_use(
-    monkeypatch, tmp_path: Path
+    monkeypatch,
+    tmp_path: Path,
+    defaultspack_conversation_owner,
 ) -> None:
     user_data_root = tmp_path / "user_data"
     chat_store_path = tmp_path / "chat" / "conversations.json"
@@ -175,23 +164,23 @@ def test_explicit_computer_tool_selection_marks_user_requested_computer_use(
             "supports_thinking": True,
         },
     )
+    computer_tool = {
+        "tool_id": "computer_use",
+        "name": "computer_use",
+        "schema": {"parameters": {"type": "object"}},
+        "requires_runtime_capabilities": ["runtime.user_requested_computer_use"],
+    }
+    from domain.chat import run_request as run_request_module
+
     monkeypatch.setattr(
-        "domain.chat.run_request.RuntimeSkillTriggerService",
-        lambda: type("SkillTrigger", (), {"evaluate": lambda self, **kwargs: {"matched": [], "instructions": ""}})(),
+        run_request_module.ToolRegistry,
+        "list_tools",
+        lambda self: [computer_tool],
     )
     monkeypatch.setattr(
-        "domain.chat.run_request._resolve_selected_tools",
-        lambda raw_tools, **kwargs: (
-            [
-                {
-                    "tool_id": "computer_use",
-                    "name": "computer_use",
-                    "schema": {"parameters": {"type": "object"}},
-                    "requires_runtime_capabilities": ["runtime.user_requested_computer_use"],
-                },
-            ],
-            [],
-        ),
+        run_request_module.ToolRegistry,
+        "get",
+        lambda self, tool_name: computer_tool if tool_name == "computer_use" else None,
     )
 
     prepared = prepare_chat_run(
@@ -216,10 +205,11 @@ def test_explicit_computer_tool_selection_marks_user_requested_computer_use(
                 },
             },
         },
-        {"profile_id": "default-profile"},
+        {"profile_id": "default-profile", "developer_mode": True},
     )
 
-    assert prepared.request_context["profile_id"] == "defaultspack.operations_company"
+    assert prepared.request_context["profile_id"] == "defaults"
+    assert prepared.request_context["ignored_requested_profile_id"] == "defaultspack.operations_company"
     assert prepared.request_context["user_text"] == "Use the selected desktop tool."
     assert "Use the selected desktop tool." in prepared.request_context["conversation_user_text"]
     assert prepared.request_context["user_requested_computer_use"] is True
@@ -230,7 +220,18 @@ def test_explicit_computer_tool_selection_marks_user_requested_computer_use(
     ChatStore._instance = None
 
 
-def test_requested_profile_replaces_existing_runtime_profile_for_connected_tools() -> None:
+def test_requested_legacy_profile_does_not_expand_connected_tools(
+    monkeypatch,
+) -> None:
+    from domain.capability import catalog as capability_catalog
+    from domain.chat import run_request as run_request_module
+
+    monkeypatch.setattr(
+        capability_catalog,
+        "effective_pack_ids",
+        lambda: frozenset({"defaultspack", "rumi_operations_company_pack"}),
+    )
+    run_request_module._profile_snapshot.cache_clear()
     stale_runtime_profile = {
         "profile_id": "default-profile",
         "defaultspack": {
@@ -252,4 +253,7 @@ def test_requested_profile_replaces_existing_runtime_profile_for_connected_tools
 
     assert runtime_profile["profile_id"] == "defaultspack.operations_company"
     assert agent_id == "client_manager"
-    assert "computer_use" in runtime_profile["defaultspack"]["agents"]["client_manager"]["tools"]
+    assert runtime_profile["defaultspack"]["agents"]["client_manager"]["tools"] == [
+        "web_search"
+    ]
+    run_request_module._profile_snapshot.cache_clear()

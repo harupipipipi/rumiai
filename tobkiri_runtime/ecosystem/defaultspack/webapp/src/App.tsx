@@ -52,7 +52,7 @@ import { ConversationShareLanding, ImportedConversationNotice } from "./pages/Co
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { ChatStreamInterruptedError, api, composerCommandFeedbackTone, composerCommandResultMessage, defaultspackApiFetch, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type ResolvedCommandCatalog, type SettingsSection, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
+import { ChatStreamInterruptedError, api, composerCommandFeedbackTone, composerCommandResultMessage, defaultspackApiFetch, defaultspackCanonicalRouteKey, defaultspackContractRoute, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type ResolvedCommandCatalog, type SettingsSection, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
 import { applyCommandStateSnapshots, createCommandInvocationId } from "./lib/commandState";
 import type { ActionApprovalMode } from "./features/tools/ActionApprovalControl";
 import {
@@ -391,14 +391,14 @@ const fallbackExternalIoTemplates: ExternalIoTemplateRecord[] = [
     direction: "input",
     provider: "line",
     input_profile_id: "line.default",
-    endpoint: { id: "line-main", route: "/api/integrations/line/webhook" },
+    endpoint: { id: "line-main", route: defaultspackCanonicalRouteKey("api/integrations/line/webhook") },
   },
   {
     id: "line.input.computer_use",
     direction: "input",
     provider: "line",
     input_profile_id: "line.computer_use",
-    endpoint: { id: "line-main", route: "/api/integrations/line/webhook" },
+    endpoint: { id: "line-main", route: defaultspackCanonicalRouteKey("api/integrations/line/webhook") },
     response: { mode: "computer_use_line_biz" },
     response_prompt: { preset: "computer_use_line_biz" },
   },
@@ -407,21 +407,21 @@ const fallbackExternalIoTemplates: ExternalIoTemplateRecord[] = [
     direction: "input",
     provider: "discord",
     input_profile_id: "discord.default",
-    endpoint: { id: "discord-main", route: "/api/integrations/discord/interactions" },
+    endpoint: { id: "discord-main", route: defaultspackCanonicalRouteKey("api/integrations/discord/interactions") },
   },
   {
     id: "slack.input.default",
     direction: "input",
     provider: "slack",
     input_profile_id: "slack.default",
-    endpoint: { id: "slack-main", route: "/api/integrations/slack/events" },
+    endpoint: { id: "slack-main", route: defaultspackCanonicalRouteKey("api/integrations/slack/events") },
   },
   {
     id: "generic.input.default",
     direction: "input",
     provider: "generic",
     input_profile_id: "generic.webhook.default",
-    endpoint: { id: "generic-main", route: "/api/webhooks/inbound/{webhook_id}" },
+    endpoint: { id: "generic-main", route: defaultspackCanonicalRouteKey("api/webhooks/inbound/{webhook_id}") },
   },
   {
     id: "line.output.default",
@@ -5440,7 +5440,7 @@ function ChatApp() {
     }
 
     const method = (action.method ?? "GET").toUpperCase();
-    const result = await defaultspackApiFetch(action.endpoint, {
+    const result = await defaultspackApiFetch(defaultspackContractRoute(action.endpoint), {
       method,
       body: method === "GET" ? undefined : JSON.stringify(action.payload ?? {}),
     }).then((response) => response.json());
@@ -6068,7 +6068,7 @@ function ChatApp() {
         if (!isSafeLocalEndpoint(action.endpoint) || action.requires_approval) {
           throw new Error("この action は安全な /api/ endpoint ではないか、承認が必要なため直接実行できません。");
         }
-        result = await defaultspackApiFetch(action.endpoint, { method: action.method ?? "GET" }).then((response) => response.json());
+        result = await defaultspackApiFetch(defaultspackContractRoute(action.endpoint), { method: action.method ?? "GET" }).then((response) => response.json());
       } else {
         result = { item: item.id, action: action.id, status: "ready" };
       }

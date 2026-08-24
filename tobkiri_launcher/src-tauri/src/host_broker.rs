@@ -31,7 +31,6 @@ use crate::host_broker_types::{
     HostBrokerIntentRequest, HostBrokerIntentResponse, HostBrokerStatus,
     HostBrokerStreamStopRequest,
 };
-use crate::process_utils;
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 pub(crate) const DEFAULT_PORT: u16 = 8770;
@@ -61,6 +60,7 @@ const REQUEST_READ_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const HELPER_TIMEOUT: Duration = Duration::from_secs(45);
 const APPROVAL_TOKEN_VERSION: &str = "v1";
+#[cfg(any(test, not(any(target_os = "macos", target_os = "windows"))))]
 const HOST_BROKER_DISABLED_REASON: &str =
     "Viewer host broker is only enabled on macOS and Windows.";
 const IMPLEMENTED_HOST_OPERATIONS: &[&str] =
@@ -376,7 +376,7 @@ fn write_connection_file_with_temporary(
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
-        let mut handle = options.open(&temporary).with_context(|| {
+        let mut handle = options.open(temporary).with_context(|| {
             format!(
                 "failed to create secure host broker temporary file at {}",
                 temporary.display()
@@ -392,7 +392,7 @@ fn write_connection_file_with_temporary(
         handle
             .sync_all()
             .context("failed to sync host broker temporary file")?;
-        atomic_replace_file(&temporary, path).with_context(|| {
+        atomic_replace_file(temporary, path).with_context(|| {
             format!(
                 "failed to atomically replace host broker connection file at {}",
                 path.display()
@@ -953,14 +953,16 @@ fn validate_host_intent_approval_token_with_consume(
         .unwrap_or(&intent.operation);
     validate_approval_token(
         shared,
-        token,
-        raw_function_id,
-        &intent.operation,
-        &binding,
-        &binding,
-        intent.caller_pack_id.as_deref().unwrap_or_default(),
-        intent.conversation_id.as_deref().unwrap_or_default(),
-        consume,
+        ApprovalValidationRequest {
+            token,
+            raw_function_id,
+            function_id: &intent.operation,
+            raw_args: &binding,
+            helper_args: &binding,
+            pack_id: intent.caller_pack_id.as_deref().unwrap_or_default(),
+            conversation_id: intent.conversation_id.as_deref().unwrap_or_default(),
+            consume,
+        },
     )
 }
 
@@ -1261,13 +1263,14 @@ fn execute_host_stream_stop(
         Err(_) => {
             return serialize_stream_stop_response(
                 &shared.config,
-                audit_id,
-                stream_id,
-                None,
-                false,
-                "HOST_STREAM_STATE_UNAVAILABLE",
-                "Host stream state is unavailable.",
-                Some("state_unavailable".to_string()),
+                StreamStopFailure {
+                    audit_id,
+                    stream_id,
+                    conversation_id: None,
+                    code: "HOST_STREAM_STATE_UNAVAILABLE",
+                    message: "Host stream state is unavailable.",
+                    approval_result: "state_unavailable",
+                },
             )
         }
     };
@@ -1275,25 +1278,27 @@ fn execute_host_stream_stop(
     let Some(session) = streams.get(&stream_id).cloned() else {
         return serialize_stream_stop_response(
             &shared.config,
-            audit_id,
-            stream_id,
-            request.conversation_id.clone(),
-            false,
-            "HOST_STREAM_NOT_FOUND",
-            "Host stream session was not found.",
-            Some("stream_not_found".to_string()),
+            StreamStopFailure {
+                audit_id,
+                stream_id,
+                conversation_id: request.conversation_id.clone(),
+                code: "HOST_STREAM_NOT_FOUND",
+                message: "Host stream session was not found.",
+                approval_result: "stream_not_found",
+            },
         );
     };
     if stop_token.is_empty() || stop_token != session.stop_token {
         return serialize_stream_stop_response(
             &shared.config,
-            audit_id,
-            stream_id,
-            session.conversation_id.clone(),
-            false,
-            "HOST_STREAM_STOP_TOKEN_INVALID",
-            "Host stream stop token is invalid.",
-            Some("stop_token_invalid".to_string()),
+            StreamStopFailure {
+                audit_id,
+                stream_id,
+                conversation_id: session.conversation_id.clone(),
+                code: "HOST_STREAM_STOP_TOKEN_INVALID",
+                message: "Host stream stop token is invalid.",
+                approval_result: "stop_token_invalid",
+            },
         );
     }
     streams.remove(&stream_id);
@@ -1423,16 +1428,24 @@ fn host_intent_approval_error_response(
     )
 }
 
-fn serialize_stream_stop_response(
-    config: &AppConfig,
+struct StreamStopFailure<'a> {
     audit_id: String,
     stream_id: String,
     conversation_id: Option<String>,
-    result_ok: bool,
-    code: &str,
-    message: &str,
-    approval_result: Option<String>,
-) -> Value {
+    code: &'a str,
+    message: &'a str,
+    approval_result: &'a str,
+}
+
+fn serialize_stream_stop_response(config: &AppConfig, failure: StreamStopFailure<'_>) -> Value {
+    let StreamStopFailure {
+        audit_id,
+        stream_id,
+        conversation_id,
+        code,
+        message,
+        approval_result,
+    } = failure;
     serialize_intent_response(
         config,
         HostAuditEntry {
@@ -1443,9 +1456,9 @@ fn serialize_stream_stop_response(
             pack_id: None,
             conversation_id,
             allowed: false,
-            result_ok,
+            result_ok: false,
             approval_token_present: Some(false),
-            approval_result,
+            approval_result: Some(approval_result.to_string()),
             args_summary: summarize_args(&json!({"stream_id": stream_id})),
         },
         HostBrokerIntentResponse {
@@ -1663,14 +1676,16 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
     if high_risk_function(&function_id) || approval_token_present {
         let validation = validate_approval_token(
             shared,
-            approval_token.as_deref().unwrap_or_default(),
-            &raw_function_id,
-            &function_id,
-            &request.args,
-            &helper_args,
-            request.pack_id.as_deref().unwrap_or_default(),
-            request.conversation_id.as_deref().unwrap_or_default(),
-            true,
+            ApprovalValidationRequest {
+                token: approval_token.as_deref().unwrap_or_default(),
+                raw_function_id: &raw_function_id,
+                function_id: &function_id,
+                raw_args: &request.args,
+                helper_args: &helper_args,
+                pack_id: request.pack_id.as_deref().unwrap_or_default(),
+                conversation_id: request.conversation_id.as_deref().unwrap_or_default(),
+                consume: true,
+            },
         );
         if let Err(error) = validation {
             return serialize_run_response(
@@ -2049,18 +2064,22 @@ struct ApprovalTokenPayload {
     conversation_id: String,
 }
 
+struct ApprovalValidationRequest<'a> {
+    token: &'a str,
+    raw_function_id: &'a str,
+    function_id: &'a str,
+    raw_args: &'a Value,
+    helper_args: &'a Value,
+    pack_id: &'a str,
+    conversation_id: &'a str,
+    consume: bool,
+}
+
 fn validate_approval_token(
     shared: &HostBrokerShared,
-    token: &str,
-    raw_function_id: &str,
-    function_id: &str,
-    raw_args: &Value,
-    helper_args: &Value,
-    pack_id: &str,
-    conversation_id: &str,
-    consume: bool,
+    request: ApprovalValidationRequest<'_>,
 ) -> std::result::Result<(), ApprovalValidationError> {
-    let payload = decode_approval_token(&shared.config, token)?;
+    let payload = decode_approval_token(&shared.config, request.token)?;
     if payload.version != APPROVAL_TOKEN_VERSION {
         return Err(approval_error(
             "APPROVAL_TOKEN_INVALID",
@@ -2082,8 +2101,8 @@ fn validate_approval_token(
     } else {
         &payload.function_id
     });
-    let raw_request_function = normalize_function_id(raw_function_id);
-    if token_function != function_id && token_function != raw_request_function {
+    let raw_request_function = normalize_function_id(request.raw_function_id);
+    if token_function != request.function_id && token_function != raw_request_function {
         return Err(approval_error(
             "APPROVAL_OPERATION_MISMATCH",
             "approval token operation mismatch",
@@ -2092,11 +2111,11 @@ fn validate_approval_token(
     }
 
     let mut acceptable_hashes = HashSet::new();
-    acceptable_hashes.insert(hash_arguments_value(raw_args));
-    acceptable_hashes.insert(hash_arguments_value(helper_args));
+    acceptable_hashes.insert(hash_arguments_value(request.raw_args));
+    acceptable_hashes.insert(hash_arguments_value(request.helper_args));
     acceptable_hashes.insert(hash_arguments_value(&controller_shaped_args(
-        function_id,
-        helper_args,
+        request.function_id,
+        request.helper_args,
     )));
     if !acceptable_hashes.contains(&payload.args_hash) {
         return Err(approval_error(
@@ -2106,14 +2125,14 @@ fn validate_approval_token(
         ));
     }
 
-    if payload.pack_id != pack_id {
+    if payload.pack_id != request.pack_id {
         return Err(approval_error(
             "APPROVAL_PACK_MISMATCH",
             "approval token pack mismatch",
             "pack_mismatch",
         ));
     }
-    if payload.conversation_id != conversation_id {
+    if payload.conversation_id != request.conversation_id {
         return Err(approval_error(
             "APPROVAL_CONVERSATION_MISMATCH",
             "approval token conversation mismatch",
@@ -2136,7 +2155,7 @@ fn validate_approval_token(
             "token_used",
         ));
     }
-    if consume {
+    if request.consume {
         used.insert(payload.jti, payload.expires_at);
     }
     Ok(())
@@ -2189,11 +2208,8 @@ fn decode_approval_token(
 fn approval_runtime_secret(
     config: &AppConfig,
 ) -> std::result::Result<String, ApprovalValidationError> {
-    if let Ok(value) = std::env::var("RUMI_DEFAULTSPACK_APPROVAL_SECRET") {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_string());
-        }
+    if let Some(value) = crate::host_contract::read_value(config, "approval_runtime_secret") {
+        return Ok(value);
     }
     let path = approval_runtime_secret_path(config)?;
     fs::read_to_string(&path)
@@ -2215,9 +2231,7 @@ fn approval_runtime_secret_path(
     approval_runtime_secret_path_for_values(
         config,
         crate::debug_defaultspack_approval_secret_path_from_env(),
-        std::env::var("RUMI_DEFAULTSPACK_APPROVAL_SECRET_PATH")
-            .ok()
-            .map(PathBuf::from),
+        None,
     )
 }
 
@@ -2359,38 +2373,42 @@ fn run_computer_helper(
         .join("core_runtime")
         .join("host_broker")
         .join("computer_host_helper.py");
-    if !helper_path.exists() {
+    if config.is_dev_workspace() && !helper_path.exists() {
         return Err(ComputerHelperError::Failed(anyhow!(
             "Viewer host helper is missing at {}",
             helper_path.display()
         )));
     }
 
-    let mut command = process_utils::command(config.venv_python());
-    command
-        .arg(helper_path)
-        .current_dir(&config.app_dir)
-        .env("RUMI_HOME", &config.rumi_home)
-        .env("RUMI_USER_DATA", &config.user_data_dir)
-        .env("RUMI_LOG_DIR", &config.log_dir)
-        .env("PYTHONDONTWRITEBYTECODE", "1")
-        .env_remove("RUMI_DEFAULTSPACK_CHAT_STORE_PATH");
-    if let Some(path) = trusted_helper_chat_store_path(
-        std::env::var_os("RUMI_VIEWER_TRUSTED_DEFAULTSPACK_CHAT_STORE_PATH").as_deref(),
-    ) {
-        command.env("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", path);
-    }
-
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| {
-            ComputerHelperError::Failed(
-                anyhow!(error).context("failed to start Viewer host helper"),
-            )
-        })?;
+    let mut child = crate::python_env::spawn_python_role(
+        config,
+        crate::python_env::PythonRole::HostHelper,
+        crate::python_env::RoleArguments::default(),
+        |command| {
+            command
+                .current_dir(&config.app_dir)
+                .env("RUMI_HOME", &config.rumi_home)
+                .env("RUMI_USER_DATA", &config.user_data_dir)
+                .env("RUMI_LOG_DIR", &config.log_dir)
+                .env("PYTHONDONTWRITEBYTECODE", "1")
+                .env_remove("RUMI_DEFAULTSPACK_CHAT_STORE_PATH");
+            if let Some(path) = trusted_helper_chat_store_path(
+                std::env::var_os("RUMI_VIEWER_TRUSTED_DEFAULTSPACK_CHAT_STORE_PATH").as_deref(),
+            ) {
+                command.env("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", path);
+            }
+            command
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            Ok(())
+        },
+    )
+    .map_err(|error| {
+        ComputerHelperError::Failed(
+            anyhow!(error).context("failed to verify and start Viewer host helper"),
+        )
+    })?;
 
     let body = json!({
         "function_id": function_id,
@@ -2895,16 +2913,19 @@ mod tests {
     fn broker_rejects_fake_approval_token_for_high_risk_action() {
         let (config, temp_dir) = test_config_with_approval_secret("secret");
         let shared = test_shared(config);
+        let args = json!({"x": 10, "y": 10});
         let result = validate_approval_token(
             &shared,
-            "fake-token",
-            "computer.click",
-            "computer.click",
-            &json!({"x": 10, "y": 10}),
-            &json!({"x": 10, "y": 10}),
-            "defaultspack",
-            "conv-1",
-            true,
+            ApprovalValidationRequest {
+                token: "fake-token",
+                raw_function_id: "computer.click",
+                function_id: "computer.click",
+                raw_args: &args,
+                helper_args: &args,
+                pack_id: "defaultspack",
+                conversation_id: "conv-1",
+                consume: true,
+            },
         );
 
         let error = result.expect_err("fake token should be rejected");
@@ -2933,14 +2954,16 @@ mod tests {
 
         let result = validate_approval_token(
             &shared,
-            &token,
-            "computer.type",
-            "computer.type",
-            &args,
-            &args,
-            "defaultspack",
-            "conv-1",
-            true,
+            ApprovalValidationRequest {
+                token: &token,
+                raw_function_id: "computer.type",
+                function_id: "computer.type",
+                raw_args: &args,
+                helper_args: &args,
+                pack_id: "defaultspack",
+                conversation_id: "conv-1",
+                consume: true,
+            },
         );
 
         let error = result.expect_err("wrong action should be rejected");
@@ -2970,14 +2993,16 @@ mod tests {
 
         let result = validate_approval_token(
             &shared,
-            &token,
-            "computer.click",
-            "computer.click",
-            &changed_args,
-            &changed_args,
-            "defaultspack",
-            "conv-1",
-            true,
+            ApprovalValidationRequest {
+                token: &token,
+                raw_function_id: "computer.click",
+                function_id: "computer.click",
+                raw_args: &changed_args,
+                helper_args: &changed_args,
+                pack_id: "defaultspack",
+                conversation_id: "conv-1",
+                consume: true,
+            },
         );
 
         let error = result.expect_err("changed args should be rejected");
@@ -3007,14 +3032,16 @@ mod tests {
 
         let result = validate_approval_token(
             &shared,
-            &token,
-            "computer.key",
-            "computer.key",
-            &args,
-            &args,
-            "defaultspack",
-            "conv-1",
-            true,
+            ApprovalValidationRequest {
+                token: &token,
+                raw_function_id: "computer.key",
+                function_id: "computer.key",
+                raw_args: &args,
+                helper_args: &args,
+                pack_id: "defaultspack",
+                conversation_id: "conv-1",
+                consume: true,
+            },
         );
 
         assert!(result.is_ok());
@@ -3042,14 +3069,16 @@ mod tests {
 
         let result = validate_approval_token(
             &shared,
-            &token,
-            "computer.click",
-            "computer.click",
-            &args,
-            &args,
-            "defaultspack",
-            "conv-1",
-            true,
+            ApprovalValidationRequest {
+                token: &token,
+                raw_function_id: "computer.click",
+                function_id: "computer.click",
+                raw_args: &args,
+                helper_args: &args,
+                pack_id: "defaultspack",
+                conversation_id: "conv-1",
+                consume: true,
+            },
         );
 
         let error = result.expect_err("expired token should be rejected");
@@ -3082,14 +3111,16 @@ mod tests {
 
         let result = validate_approval_token(
             &shared,
-            &token,
-            "computer.click",
-            "computer.click",
-            &args,
-            &args,
-            "defaultspack",
-            "conv-1",
-            true,
+            ApprovalValidationRequest {
+                token: &token,
+                raw_function_id: "computer.click",
+                function_id: "computer.click",
+                raw_args: &args,
+                helper_args: &args,
+                pack_id: "defaultspack",
+                conversation_id: "conv-1",
+                consume: true,
+            },
         );
 
         assert!(result.is_ok());
@@ -3273,13 +3304,15 @@ mod tests {
         let stream = json!({});
         let token = signed_host_intent_operation_token(
             "secret",
-            "tok-host-screen-unimplemented",
-            "host.screen.capture",
-            "host_screen_capture",
-            "defaultspack",
-            "conv-1",
-            &args,
-            &stream,
+            HostIntentApprovalClaims {
+                jti: "tok-host-screen-unimplemented",
+                operation: "host.screen.capture",
+                function_id: "host_screen_capture",
+                pack_id: "defaultspack",
+                conversation_id: "conv-1",
+                args: &args,
+                stream: &stream,
+            },
         );
 
         let response = execute_host_intent(
@@ -3359,36 +3392,44 @@ mod tests {
     fn signed_host_intent_token(secret: &str, jti: &str, args: &Value, stream: &Value) -> String {
         signed_host_intent_operation_token(
             secret,
-            jti,
-            "host.microphone.capture",
-            "host_microphone_capture",
-            "rumi_ambient_trigger_pack",
-            "conv-1",
-            args,
-            stream,
+            HostIntentApprovalClaims {
+                jti,
+                operation: "host.microphone.capture",
+                function_id: "host_microphone_capture",
+                pack_id: "rumi_ambient_trigger_pack",
+                conversation_id: "conv-1",
+                args,
+                stream,
+            },
         )
+    }
+
+    struct HostIntentApprovalClaims<'a> {
+        jti: &'a str,
+        operation: &'a str,
+        function_id: &'a str,
+        pack_id: &'a str,
+        conversation_id: &'a str,
+        args: &'a Value,
+        stream: &'a Value,
     }
 
     fn signed_host_intent_operation_token(
         secret: &str,
-        jti: &str,
-        operation: &str,
-        function_id: &str,
-        pack_id: &str,
-        conversation_id: &str,
-        args: &Value,
-        stream: &Value,
+        claims: HostIntentApprovalClaims<'_>,
     ) -> String {
         signed_test_approval_token(
             secret,
             json!({
                 "version": APPROVAL_TOKEN_VERSION,
-                "jti": jti,
-                "operation": operation,
-                "function_id": function_id,
-                "args_hash": hash_arguments_value(&json!({"args": args, "stream": stream})),
-                "pack_id": pack_id,
-                "conversation_id": conversation_id,
+                "jti": claims.jti,
+                "operation": claims.operation,
+                "function_id": claims.function_id,
+                "args_hash": hash_arguments_value(
+                    &json!({"args": claims.args, "stream": claims.stream}),
+                ),
+                "pack_id": claims.pack_id,
+                "conversation_id": claims.conversation_id,
                 "expires_at": now_epoch_seconds() + 60,
             }),
         )

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -164,7 +163,9 @@ class AuthorityService:
 
     @property
     def mode(self) -> str:
-        value = str(os.environ.get("RUMI_AUTHORITY_MODE") or "enforce").strip().lower()
+        from ..host_contract import host_contract_value
+
+        value = host_contract_value("authority_mode").strip().lower() or "enforce"
         return value if value in {"off", "observe", "enforce"} else "enforce"
 
     def check(
@@ -232,8 +233,9 @@ class AuthorityService:
         for item in items or []:
             permission_id = str(item.get("permission_id") or "").strip()
             principal_id = str(item.get("principal_id") or "").strip()
+            raw_resource = item.get("resource")
             resource = self._normalize_resource(
-                item.get("resource") if isinstance(item.get("resource"), dict) else {}
+                raw_resource if isinstance(raw_resource, dict) else {}
             )
             risk_level = self._risk_level(permission_id, resource)
             if permission_id not in AUTHORITY_PERMISSION_IDS:
@@ -524,11 +526,18 @@ class AuthorityService:
                 )
                 return {"success": False, "error": operator_error, "status_code": 403}
             operator_audit = ui_operator_audit_record(operator_payload)
-        expires = int(
+        raw_expires = (
             mobile_attestation_audit.get("approval_expires_in_seconds")
             if mobile_approver
             else (expires_in_seconds or 86400)
         )
+        if not isinstance(raw_expires, (str, int, float, bytes)):
+            return {
+                "success": False,
+                "error": "Authority approval expiration is invalid",
+                "status_code": 403 if mobile_approver else 400,
+            }
+        expires = int(raw_expires)
         if scope == "once":
             def settle_once(settled_request: AuthorityRequest) -> dict[str, Any]:
                 issued_token_ids: list[str] = []
@@ -584,29 +593,29 @@ class AuthorityService:
                 }
             if not settlement.get("settled"):
                 return self._settlement_failure_response(settlement)
-            request = settlement["request"]
+            once_request = settlement["request"]
             settled_result = settlement.get("result") or {}
             token = settled_result["token"]
             related = settled_result["related"]
             self._audit_best_effort(
                 "authority_request_approved",
                 {
-                    "request_id": request.request_id,
+                    "request_id": once_request.request_id,
                     "scope": "once",
-                    "principal_id": request.principal_id,
-                    "permission_id": request.permission_id,
-                    "resource_hash": self._request_store.resource_hash(request.resource),
+                    "principal_id": once_request.principal_id,
+                    "permission_id": once_request.permission_id,
+                    "resource_hash": self._request_store.resource_hash(once_request.resource),
                     **operator_audit,
                 },
             )
             return {
                 "success": True,
-                "request_id": request.request_id,
+                "request_id": once_request.request_id,
                 "approved": True,
                 "scope": "once",
                 "token": token["token"],
                 "expires_at": token["expires_at"],
-                "permission_id": request.permission_id,
+                "permission_id": once_request.permission_id,
                 "related_approvals": related,
             }
 
@@ -699,26 +708,28 @@ class AuthorityService:
             }
         if not settlement.get("settled"):
             return self._settlement_failure_response(settlement)
-        request = settlement["request"]
+        persistent_request = settlement["request"]
         related = (settlement.get("result") or {})["related"]
         self._audit_best_effort(
             "authority_request_approved",
             {
-                "request_id": request.request_id,
+                "request_id": persistent_request.request_id,
                 "scope": scope,
                 "principal_id": grant_principal,
-                "permission_id": request.permission_id,
-                "resource_hash": self._request_store.resource_hash(request.resource),
+                "permission_id": persistent_request.permission_id,
+                "resource_hash": self._request_store.resource_hash(
+                    persistent_request.resource
+                ),
                 **operator_audit,
             },
         )
         return {
             "success": True,
-            "request_id": request.request_id,
+            "request_id": persistent_request.request_id,
             "approved": True,
             "scope": scope,
             "principal_id": grant_principal,
-            "permission_id": request.permission_id,
+            "permission_id": persistent_request.permission_id,
             "config": grant_config,
             "related_approvals": related,
         }
@@ -1441,8 +1452,11 @@ class AuthorityService:
             allowed_ports = set(AuthorityService._port_values(config.get("ports")))
             if not allowed_ports:
                 return False
+            raw_port = resource.get("port")
+            if not isinstance(raw_port, (str, int, float, bytes)):
+                return False
             try:
-                resource_port = int(resource.get("port"))
+                resource_port = int(raw_port)
             except (TypeError, ValueError):
                 return False
             if resource_port not in allowed_ports:
@@ -1450,8 +1464,11 @@ class AuthorityService:
         if "allow_stream" in config and resource.get("stream") and not bool(config.get("allow_stream")):
             return False
         if "max_input_tokens" in config and resource.get("input_tokens") is not None:
+            raw_max_tokens = config.get("max_input_tokens")
+            if not isinstance(raw_max_tokens, (str, int, float, bytes)):
+                return False
             try:
-                if int(resource.get("input_tokens") or 0) > int(config.get("max_input_tokens")):
+                if int(resource.get("input_tokens") or 0) > int(raw_max_tokens):
                     return False
             except (TypeError, ValueError):
                 return False

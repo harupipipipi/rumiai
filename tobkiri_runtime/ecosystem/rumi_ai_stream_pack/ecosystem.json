@@ -1,16 +1,67 @@
 {
+  "connectivity": {
+    "provides": [
+      "rumi.service.ai.stream.normalize.v1"
+    ],
+    "requires": []
+  },
+  "dependencies": {},
+  "description": "Replaceable typed stream validation and normalization.",
+  "display_name": "Rumi AI Stream",
+  "host_execution": true,
+  "metadata": {
+    "authoritative_owner": true,
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:455fbb01c6367013cd4b8fb18e99ddbbcf7521679ec1964b73cee33dac5de23a",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:4e9d5f841be5dbac042b2e1f93be49b1477c17eb1001882181cd7c788e86fa65"
+    },
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "rumi.pack.v3.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:4e9d5f841be5dbac042b2e1f93be49b1477c17eb1001882181cd7c788e86fa65"
+    },
+    "integrity": {
+      "artifact_manifest": "artifact-manifest.json"
+    },
+    "manifest_authority": "v4-authoritative",
+    "owner_surfaces": [
+      "stream_event_schema",
+      "stream_normalization"
+    ],
+    "projection_owner": "scripts/migrate_manifest_authority.py",
+    "read_only_projection": true,
+    "security": {
+      "network": false,
+      "provider_branches": false,
+      "terminal_event_required": true
+    }
+  },
   "pack_id": "rumi_ai_stream_pack",
   "pack_identity": "rumi:ecosystem/rumi_ai_stream_pack",
-  "display_name": "Rumi AI Stream Pack",
-  "version": "1.0.0",
-  "description": "Typed provider-neutral stream event validation and normalization.",
-  "dependencies": {},
-  "connectivity": {"requires": [], "provides": ["rumi.service.ai.stream.normalize.v1"]},
+  "provenance": {
+    "build_identity": "rumi_ai_stream_pack:1.0.0",
+    "content_hash": "sha256:7f07947e6eebb3aa817bcd03836811e658d0e4b1e9acf086892c66da64a1cd65",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "ai.stream.normalize"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
   "required_secrets": [],
-  "required_capabilities": ["ai.stream.normalize"],
-  "required_network": {"allowed_domains": [], "allowed_ports": []},
-  "host_execution": true,
   "resources": [],
-  "provenance": {"content_hash": "sha256:bc5733265ef1124aca07b062d73a5a47a8169dcfc92bf1f9602f5bf1f4c4f98d", "build_identity": "rumi-ai-stream-pack:1.0.0", "trust_class": "local", "signature": null},
-  "metadata": {"authoritative_owner": true, "owner_surfaces": ["stream_event_schema", "stream_normalization"], "integrity": {"artifact_manifest": "artifact-manifest.json"}, "security": {"network": false, "provider_branches": false, "terminal_event_required": true}}
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
+  }
 }

@@ -13,6 +13,7 @@ import base64
 import ssl
 
 from ..base_provider import BaseProvider
+from ..api_key_store import read_provider_api_key
 
 
 class OpenAIProvider(BaseProvider):
@@ -22,16 +23,17 @@ class OpenAIProvider(BaseProvider):
 
     # Never seed availability from a release snapshot. /models is scoped to
     # the API key and is the only authority for what this account may use.
-    KNOWN_MODELS = []
-    _MODEL_INVENTORY_CACHE = {}
+    KNOWN_MODELS: list[dict[str, object]] = []
+    _MODEL_INVENTORY_CACHE: dict[str, tuple[float, list[dict[str, object]]]] = {}
     _MODEL_INVENTORY_CACHE_TTL_SECONDS = 300
 
-    def __init__(self):
-        self._api_key = os.environ.get("OPENAI_API_KEY", "")
+    def __init__(self, api_key: str | None = None):
+        self._api_key = str(api_key or read_provider_api_key("openai", "legacy") or "").strip()
         # Provider discovery must not disappear merely because a minimal host
         # environment lacks Windows certificate-location variables.  Requests
         # still use urllib's verified default context when this construction is
         # deferred; no insecure TLS fallback is introduced.
+        self._ssl_ctx: ssl.SSLContext | None
         try:
             self._ssl_ctx = ssl.create_default_context()
         except ssl.SSLError:
@@ -147,7 +149,7 @@ class OpenAIProvider(BaseProvider):
         now = time.monotonic()
         if cached and cached[0] > now:
             return [dict(model) for model in cached[1]]
-        models = []
+        models: list[dict[str, object]] = []
         for raw in self._fetch_live_models():
             model = self._live_model_record(raw)
             if model and all(item["model_id"] != model["model_id"] for item in models):
@@ -389,7 +391,7 @@ class OpenAIProvider(BaseProvider):
                         "input": tc.get("function", {}).get("arguments", "{}"),
                     }
                 )
-        metadata = {}
+        metadata: dict[str, object] = {}
         if reasoning_content:
             metadata["reasoning_content"] = reasoning_content
             metadata["thinking"] = {"transcript": reasoning_content}
@@ -419,9 +421,14 @@ class OpenAIProvider(BaseProvider):
     def _request_timeout(params):
         raw = dict(params or {})
         value = raw.get("request_timeout", raw.get("timeout", 120))
-        try:
+        if isinstance(value, bool):
             timeout = float(value)
-        except (TypeError, ValueError):
+        elif isinstance(value, (int, float, str)):
+            try:
+                timeout = float(value)
+            except (TypeError, ValueError):
+                timeout = 120.0
+        else:
             timeout = 120.0
         return max(2.0, min(timeout, 120.0))
 
@@ -468,8 +475,11 @@ class OpenAIProvider(BaseProvider):
             )
             if tool_call.get("id"):
                 current["id"] = str(tool_call.get("id"))
-            function_delta = (
-                tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
+            function_delta_value = tool_call.get("function")
+            function_delta: dict[str, object] = (
+                {str(key): value for key, value in function_delta_value.items()}
+                if isinstance(function_delta_value, dict)
+                else {}
             )
             if function_delta.get("name"):
                 current["name"] = str(function_delta.get("name"))
@@ -511,7 +521,7 @@ class OpenAIProvider(BaseProvider):
         resp = self._request_stream(
             "/chat/completions", body, **self._request_timeout_kwargs(params)
         )
-        tool_call_state = {}
+        tool_call_state: dict[str, dict[str, object]] = {}
         try:
             for payload in self._parse_sse_lines(resp):
                 try:

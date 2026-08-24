@@ -7,7 +7,7 @@ import {
 } from "react";
 
 import { TobkiriLoadingScreen } from "../components/TobkiriLoadingScreen";
-import { defaultspackApiFetch } from "../lib/api";
+import { defaultspackApiFetch, defaultspackContractRoute } from "../lib/api";
 import {
   DynamicFrontendHost,
   contributionsForRoute,
@@ -39,7 +39,7 @@ class FrontendCapabilityError extends Error {
 }
 
 async function fetchDynamicCatalog(): Promise<FrontendCatalog> {
-  const response = await defaultspackApiFetch("/api/ui/catalog", {
+  const response = await defaultspackApiFetch(defaultspackContractRoute("api/ui/catalog"), {
     cache: "no-store",
   });
   const envelope = await response.json() as ApiEnvelope<UiCatalogEnvelope>;
@@ -54,7 +54,7 @@ async function invokeCapability(
   profileId: string,
   request: CapabilityInvocation,
 ): Promise<unknown> {
-  const response = await defaultspackApiFetch("/api/ui/capability/invoke", {
+  const response = await defaultspackApiFetch(defaultspackContractRoute("api/ui/capability/invoke"), {
     method: "POST",
     cache: "no-store",
     body: JSON.stringify({

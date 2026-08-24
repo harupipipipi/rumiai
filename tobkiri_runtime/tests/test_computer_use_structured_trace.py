@@ -227,11 +227,24 @@ def test_helper_trace_exposes_executed_but_unverified_background_type(monkeypatc
     path = tmp_path / "helper.jsonl"
     monkeypatch.setenv("RUMI_COMPUTER_USE_TRACE_PATH", str(path))
     monkeypatch.setenv("RUMI_COMPUTER_HOST_INTERNAL", "test-restore-marker")
+    class FakeSession:
+        profile_id = "profile-1"
+
+    class FakeContainer:
+        def get_or_none(self, name):
+            assert name == "v4_dispatch_session"
+            return FakeSession()
+
     monkeypatch.setattr(
         computer_host_helper,
-        "_run_desktop_action",
-        lambda service, action, payload, viewer_host_approved: {
-            "action": action,
+        "get_container",
+        lambda: FakeContainer(),
+    )
+    monkeypatch.setattr(
+        computer_host_helper,
+        "invoke_global_contract",
+        lambda _session, _contract_id, _operation, _request: {
+            "action": "computer.type",
             "executed": True,
             "background": True,
             "driver": "mac_accessibility",

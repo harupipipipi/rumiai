@@ -15,7 +15,19 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
-pytestmark = pytest.mark.contract
+_APPROVAL_MODULE_NAMES = (
+    "domain.safety.approval",
+    "domain.safety.approval_state_json",
+    "domain.safety.approval_store",
+)
+
+pytestmark = [
+    pytest.mark.contract,
+    pytest.mark.usefixtures(
+        "defaultspack_conversation_owner",
+        "defaultspack_v4_tool_dispatch",
+    ),
+]
 
 
 class _Manager:
@@ -30,7 +42,6 @@ class _Manager:
 
 
 def _setup_store(tmp_path, monkeypatch):
-    import core_runtime.resolved_profile_scope as profile_scope
     from domain.chat import store as facade
     from domain.chat import run_request
     from domain.chat.store import ChatStore
@@ -46,18 +57,6 @@ def _setup_store(tmp_path, monkeypatch):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "user_data" / "shared" / "chat" / "conversations.json"))
     ChatStore._instance = None
     ToolRegistry._instance = None
-    verified_plan = SimpleNamespace(
-        effective_pack_set=(
-            "defaultspack",
-            "rumi_default_tools_pack",
-            "rumi_operations_company_pack",
-        )
-    )
-    monkeypatch.setattr(
-        profile_scope,
-        "persisted_resolved_profile",
-        lambda: verified_plan,
-    )
     run_request._profile_snapshot.cache_clear()
     resolve_runtime_profile_context = run_request.resolve_runtime_profile_context
 
@@ -73,7 +72,7 @@ def _setup_store(tmp_path, monkeypatch):
         "resolve_runtime_profile_context",
         resolve_verified_developer_context,
     )
-    owner = ConversationStore("default", user_data_root=tmp_path / "user_data")
+    owner = ConversationStore("defaults", user_data_root=tmp_path / "user_data")
 
     def invoke(contract_id: str, operation: str, payload: dict[str, Any]) -> Any:
         if contract_id == facade.CONVERSATION:
@@ -163,6 +162,37 @@ def _external_provider_tool_names(prepared) -> set[str]:
     }
 
 
+def _reload_approval_modules_for_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Load fresh approval modules without leaking split module identities.
+
+    This test intentionally exercises approval state against a temporary
+    SQLite database. Restoring both ``sys.modules`` and the parent package
+    attributes keeps already-imported production aliases (for example the
+    coding contract adapter) bound to the same module objects after teardown.
+    """
+
+    safety_package = sys.modules.get("domain.safety")
+    for module_name in _APPROVAL_MODULE_NAMES:
+        if module_name in sys.modules:
+            monkeypatch.setitem(sys.modules, module_name, sys.modules[module_name])
+        else:
+            monkeypatch.delitem(sys.modules, module_name, raising=False)
+        sys.modules.pop(module_name, None)
+
+        if safety_package is None:
+            continue
+        attribute = module_name.rsplit(".", 1)[-1]
+        if hasattr(safety_package, attribute):
+            monkeypatch.setattr(
+                safety_package,
+                attribute,
+                getattr(safety_package, attribute),
+                raising=False,
+            )
+        else:
+            monkeypatch.delattr(safety_package, attribute, raising=False)
+
+
 def _provider_tool_action_enum(prepared, tool_name: str) -> list[str]:
     for tool in prepared.provider_tools:
         function_def = tool.get("function") if isinstance(tool, dict) else {}
@@ -177,8 +207,10 @@ def _provider_tool_action_enum(prepared, tool_name: str) -> list[str]:
 
 def test_prepare_chat_run_creates_message_chain_ir_and_context(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
+    from domain.ai_client.model_search import get_model_capabilities
     from domain.chat.store import ChatStore
 
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
     store = _setup_store(tmp_path, monkeypatch)
     conv = store.create_conversation(model="stub/default")
     store.add_message(conv["id"], {"role": "user", "content": [{"type": "text", "text": "old"}]})
@@ -192,7 +224,10 @@ def test_prepare_chat_run_creates_message_chain_ir_and_context(tmp_path, monkeyp
     assert "Current date/time:" in prepared.standard_messages[1]["content"]
     assert prepared.standard_messages[-1] == {"role": "user", "content": "new"}
     assert prepared.chat_ir.schema_version == "rumi.chat.ir.v2"
-    assert prepared.provider_planning["model"] == "stub/default"
+    assert prepared.provider_planning["model"] == "cerebras/gpt-oss-120b"
+    selected_capabilities = get_model_capabilities(prepared.model)
+    assert selected_capabilities is not None
+    assert selected_capabilities["availability"]["status"] == "unconfigured"
     assert prepared.request_context["current_date"]
     assert prepared.request_context["conversation_workspace_dir"]
     assert prepared.tool_context["history_json_path"].endswith("history.json")
@@ -652,10 +687,9 @@ def test_prepare_chat_run_propagates_conversation_workspace_to_tool_context(tmp_
     ChatStore._instance = None
 
 
-def test_prepare_chat_run_loads_profile_policy_from_conversation_profile_id(tmp_path, monkeypatch):
+def test_prepare_chat_run_ignores_conversation_legacy_profile_policy(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore
-    from domain.tool.schema_adapter import max_tool_calls
 
     store = _setup_store(tmp_path, monkeypatch)
     conv = store.create_conversation(
@@ -668,10 +702,9 @@ def test_prepare_chat_run_loads_profile_policy_from_conversation_profile_id(tmp_
         {},
     )
 
-    assert prepared.request_context.get("profile_id") == "defaultspack.mimo_coding_company"
-    assert prepared.request_context.get("profile_policy", {}).get("max_tool_calls") == 18
-    assert prepared.tool_context.get("profile_policy", {}).get("max_tool_calls") == 18
-    assert max_tool_calls(prepared.tool_context) == 18
+    assert prepared.request_context.get("profile_id") == "defaults"
+    assert prepared.request_context.get("ignored_requested_profile_id") == "defaultspack.mimo_coding_company"
+    assert "profile_policy" not in prepared.request_context
     ChatStore._instance = None
 
 
@@ -682,12 +715,7 @@ def test_prepare_chat_run_does_not_trust_client_tool_policy_approval_bypass(
         "RUMI_DEFAULTSPACK_APPROVAL_DB_PATH",
         str(tmp_path / "approval.sqlite3"),
     )
-    for name in (
-        "domain.safety.approval",
-        "domain.safety.approval_state_json",
-        "domain.safety.approval_store",
-    ):
-        sys.modules.pop(name, None)
+    _reload_approval_modules_for_probe(monkeypatch)
 
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore
@@ -777,7 +805,16 @@ def test_prepare_chat_run_does_not_trust_client_tool_policy_approval_bypass(
     ChatStore._instance = None
 
 
-def test_prepare_chat_run_merges_workspace_profile_with_catalog_profile(tmp_path, monkeypatch):
+def test_approval_probe_restores_canonical_module_aliases() -> None:
+    """A fresh approval probe must not split aliases used by coding blocks."""
+
+    from domain.coding import contract_adapter
+    import domain.safety.approval as approval
+
+    assert contract_adapter.approval is approval
+
+
+def test_prepare_chat_run_does_not_merge_legacy_workspace_profile(tmp_path, monkeypatch):
     from domain.chat.run_request import _profile_snapshot, prepare_chat_run
     from domain.chat.store import ChatStore
 
@@ -806,11 +843,11 @@ def test_prepare_chat_run_merges_workspace_profile_with_catalog_profile(tmp_path
         {},
     )
 
-    assert prepared.request_context.get("profile_policy", {}).get("max_tool_calls") == 18
-    assert "coding_file_read" in prepared.request_context.get("profile_policy", {}).get("tool_allowlist", [])
+    assert prepared.request_context.get("profile_id") == "defaults"
+    assert "profile_policy" not in prepared.request_context
     tool_names = _external_provider_tool_names(prepared)
     assert "coding_file_read" in tool_names
-    assert "artifact_export" not in tool_names
+    assert "artifact_export" in tool_names
     _profile_snapshot.cache_clear()
     ChatStore._instance = None
 
@@ -866,7 +903,7 @@ def test_prepare_chat_run_marks_selected_terminal_unattached_when_profile_exclud
     ChatStore._instance = None
 
 
-def test_prepare_chat_run_connects_tools_from_profile_policy_runtime_yaml(tmp_path, monkeypatch):
+def test_prepare_chat_run_does_not_trust_runtime_yaml_as_profile_authority(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore
 
@@ -913,21 +950,19 @@ def test_prepare_chat_run_connects_tools_from_profile_policy_runtime_yaml(tmp_pa
         {"runtime_profile": runtime_profile},
     )
 
-    assert prepared.tool_context["agent_id"] == "client_manager"
-    assert prepared.tool_context["runtime_profile"]["defaultspack"]["agents"]["client_manager"]["tools"] == [
-        "coding_file_read",
-        "coding_terminal_exec",
-        "coding_file_write",
-    ]
+    assert prepared.tool_context["agent_id"] == "agent"
+    assert prepared.tool_context["runtime_profile"]["profile_id"] == "defaults"
     assert "unselected_requested_tools" not in prepared.tool_context
     assert _external_provider_tool_names(prepared) == {
         "coding_file_read",
         "coding_terminal_exec",
         "coding_file_write",
     }
-    assert {"coding_file_read", "coding_terminal_exec", "coding_file_write"}.issubset(
-        prepared.connected_tool_names
-    )
+    filter_entries = {
+        entry["tool_name"]: entry
+        for entry in prepared.metadata["tool_filter_result"]
+    }
+    assert filter_entries["coding_terminal_exec"]["status"] == "approval_required"
     ChatStore._instance = None
 
 
@@ -963,11 +998,15 @@ def test_prepare_chat_run_infers_raw_tool_mentions_as_turn_tools(tmp_path, monke
 
     assert prepared.input_data["tools"] == ["coding_terminal_exec"]
     assert prepared.tool_context["requested_tool_ids"] == ["coding_terminal_exec"]
-    assert prepared.tool_context["agent_id"] == "client_manager"
+    assert prepared.tool_context["agent_id"] == "agent"
     assert "unselected_requested_tools" not in prepared.tool_context
     assert not prepared.request_context.get("user_requested_computer_use")
+    assert prepared.request_context.get("user_requested_shell_tool") is True
     assert _external_provider_tool_names(prepared) == {"coding_terminal_exec"}
     assert "coding_terminal_exec" in prepared.connected_tool_names
+    [filter_entry] = prepared.metadata["tool_filter_result"]
+    assert filter_entry["tool_name"] == "coding_terminal_exec"
+    assert filter_entry["status"] == "approval_required"
     ChatStore._instance = None
 
 
@@ -991,10 +1030,13 @@ def test_prepare_chat_run_allows_explicit_shell_tool_request_to_attach(tmp_path,
     assert prepared.input_data["tools"] == ["coding_terminal_exec"]
     assert prepared.request_context.get("profile_policy", {}).get("allow_shell") is not True
     assert prepared.request_context.get("user_requested_shell_tool") is True
-    assert prepared.tool_context["unselected_requested_tools"][0]["tool_name"] == "coding_terminal_exec"
+    assert "unselected_requested_tools" not in prepared.tool_context
     tool_names = _external_provider_tool_names(prepared)
-    assert "coding_terminal_exec" not in tool_names
-    assert "coding_terminal_exec" not in prepared.connected_tool_names
+    assert "coding_terminal_exec" in tool_names
+    assert "coding_terminal_exec" in prepared.connected_tool_names
+    [filter_entry] = prepared.metadata["tool_filter_result"]
+    assert filter_entry["tool_name"] == "coding_terminal_exec"
+    assert filter_entry["status"] == "approval_required"
     ChatStore._instance = None
 
 
@@ -1040,10 +1082,15 @@ def test_prepare_chat_run_infers_coding_pr_tools_from_broad_request(tmp_path, mo
         entry["tool_name"]
         for entry in prepared.tool_context.get("unselected_requested_tools", [])
     }
-    assert "coding_terminal_exec" in unselected_names
+    assert "coding_terminal_exec" not in unselected_names
     tool_names = _external_provider_tool_names(prepared)
-    assert (expected_tools - {"coding_terminal_exec"}).issubset(tool_names)
-    assert "coding_terminal_exec" not in prepared.connected_tool_names
+    assert expected_tools.issubset(tool_names)
+    assert "coding_terminal_exec" in prepared.connected_tool_names
+    filter_entries = {
+        entry["tool_name"]: entry
+        for entry in prepared.metadata["tool_filter_result"]
+    }
+    assert filter_entries["coding_terminal_exec"]["status"] == "approval_required"
     ChatStore._instance = None
 
 
@@ -1096,10 +1143,16 @@ def test_prepare_chat_run_keeps_inferred_pr_tools_with_auto_tool_selection(tmp_p
         entry["tool_name"]
         for entry in prepared.tool_context.get("unselected_requested_tools", [])
     }
-    assert "coding_terminal_exec" in unselected_names
+    assert "coding_terminal_exec" not in unselected_names
     tool_names = _external_provider_tool_names(prepared)
     assert "coding_file_read" in tool_names
-    assert "coding_terminal_exec" not in tool_names
+    assert "coding_terminal_exec" in tool_names
+    assert "coding_terminal_exec" in prepared.connected_tool_names
+    filter_entries = {
+        entry["tool_name"]: entry
+        for entry in prepared.metadata["tool_filter_result"]
+    }
+    assert filter_entries["coding_terminal_exec"]["status"] == "approval_required"
     ChatStore._instance = None
 
 

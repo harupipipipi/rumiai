@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 import threading
 import time
@@ -88,6 +90,158 @@ def test_runner_accepts_bounded_binary_stdin(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert result.stdout.strip() == payload.hex()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX descriptor inheritance")
+def test_runner_inherits_only_explicit_readonly_regular_descriptor(
+    tmp_path: Path,
+) -> None:
+    payload = b"pinned-packvm-image"
+    source = tmp_path / "image.img"
+    source.write_bytes(payload)
+    descriptor = os.open(source, os.O_RDONLY)
+    argv = (
+        sys.executable,
+        "-c",
+        "import os,sys; fd=int(sys.stdin.read()); print(os.read(fd, 4096).hex())",
+    )
+    token = "__TOBKIRI_TEST_IMAGE_FD__"
+    try:
+        result = HostBoundedProcessRunner().run_local(
+            argv=argv,
+            cwd=tmp_path,
+            stdin=token,
+            timeout_seconds=1,
+            environment={},
+            policy=_policy(
+                argv,
+                tmp_path,
+                allow_inherited_readonly_fds=True,
+            ),
+            inherited_fds=(descriptor,),
+            inherited_fd_tokens=(token,),
+        )
+    finally:
+        os.close(descriptor)
+    assert result.exit_code == 0
+    assert result.stdout.strip() == payload.hex()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX descriptor inheritance")
+def test_runner_rejects_writable_inherited_descriptor(tmp_path: Path) -> None:
+    target = tmp_path / "writable.img"
+    descriptor = os.open(target, os.O_CREAT | os.O_RDWR, 0o600)
+    argv = (sys.executable, "-c", "pass")
+    try:
+        with pytest.raises(PermissionError, match="read-only"):
+            HostBoundedProcessRunner().run_local(
+                argv=argv,
+                cwd=tmp_path,
+                stdin=None,
+                timeout_seconds=1,
+                environment={},
+                policy=_policy(
+                    argv,
+                    tmp_path,
+                    allow_inherited_readonly_fds=True,
+                ),
+                inherited_fds=(descriptor,),
+                inherited_fd_tokens=("__TOBKIRI_TEST_WRITABLE_FD__",),
+            )
+    finally:
+        os.close(descriptor)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX descriptor inheritance")
+def test_runner_pins_fd_before_caller_number_is_closed_and_reused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = tmp_path / "original.img"
+    replacement = tmp_path / "replacement.img"
+    original.write_bytes(b"verified-original")
+    replacement.write_bytes(b"untrusted-replacement")
+    caller_fd = os.open(original, os.O_RDONLY)
+    token = "__TOBKIRI_RACE_IMAGE_FD__"
+    argv = (
+        sys.executable,
+        "-c",
+        "import os,sys; fd=int(sys.stdin.read()); print(os.read(fd,4096).decode())",
+    )
+    real_popen = subprocess.Popen
+    reused_fd = -1
+    inherited_duplicate = -1
+
+    def reuse_before_spawn(**kwargs):
+        nonlocal reused_fd, inherited_duplicate
+        inherited_duplicate = int(kwargs["pass_fds"][0])
+        os.close(caller_fd)
+        reused_fd = os.open(replacement, os.O_RDONLY)
+        assert reused_fd == caller_fd
+        return real_popen(**kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", reuse_before_spawn)
+    try:
+        result = HostBoundedProcessRunner().run_local(
+            argv=argv,
+            cwd=tmp_path,
+            stdin=token,
+            timeout_seconds=1,
+            environment={},
+            policy=_policy(
+                argv,
+                tmp_path,
+                max_stdin_bytes=len(token),
+                allow_inherited_readonly_fds=True,
+            ),
+            inherited_fds=(caller_fd,),
+            inherited_fd_tokens=(token,),
+        )
+        assert result.stdout.strip() == "verified-original"
+        with pytest.raises(OSError):
+            os.fstat(inherited_duplicate)
+    finally:
+        if reused_fd >= 0:
+            os.close(reused_fd)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX descriptor inheritance")
+def test_runner_closes_pinned_fd_when_spawn_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "image.img"
+    source.write_bytes(b"verified")
+    caller_fd = os.open(source, os.O_RDONLY)
+    token = "__TOBKIRI_FAILED_SPAWN_FD__"
+    argv = (sys.executable, "-c", "pass")
+    pinned = -1
+
+    def fail_spawn(**kwargs):
+        nonlocal pinned
+        pinned = int(kwargs["pass_fds"][0])
+        raise OSError("synthetic spawn failure")
+
+    monkeypatch.setattr(subprocess, "Popen", fail_spawn)
+    try:
+        with pytest.raises(OSError, match="synthetic spawn failure"):
+            HostBoundedProcessRunner().run_local(
+                argv=argv,
+                cwd=tmp_path,
+                stdin=token,
+                timeout_seconds=1,
+                environment={},
+                policy=_policy(
+                    argv,
+                    tmp_path,
+                    max_stdin_bytes=len(token),
+                    allow_inherited_readonly_fds=True,
+                ),
+                inherited_fds=(caller_fd,),
+                inherited_fd_tokens=(token,),
+            )
+        with pytest.raises(OSError):
+            os.fstat(pinned)
+    finally:
+        os.close(caller_fd)
 
 
 def test_runner_allows_exactly_allowlisted_empty_argument(tmp_path: Path) -> None:

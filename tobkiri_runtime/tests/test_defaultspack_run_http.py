@@ -1,55 +1,127 @@
-from types import SimpleNamespace
+from __future__ import annotations
+
+from typing import Any, Mapping
 
 import pytest
 
-from ecosystem.defaultspack import run_http
+from core_runtime.di_container import DIContainer
+from core_runtime.global_contract_dispatch import GlobalContractUnavailable
+from ecosystem.defaultspack.runtime import conversation
+from tobkiri_host.runtime import V4DispatchSession
 
 
-def test_run_http_requires_launcher_owned_user_data(monkeypatch):
-    monkeypatch.delenv("RUMI_USER_DATA", raising=False)
-
-    with pytest.raises(RuntimeError, match="Tobkiri Launcher"):
-        run_http._require_active_chat_profile()
+_REQUEST = {"messages": [{"role": "user", "content": "hello"}]}
 
 
-def test_run_http_requires_one_provider_for_every_chat_contract(
-    monkeypatch,
-):
-    monkeypatch.setenv("RUMI_USER_DATA", "/tmp/tobkiri-test-user-data")
-    monkeypatch.setattr(
-        "core_runtime.resolved_profile_scope.persisted_resolved_profile",
-        lambda: SimpleNamespace(profile_id="test-profile"),
+class _CapturedBroker:
+    """Host Broker fixture used by the canonical conversation entrypoint."""
+
+    def __init__(self, response: Mapping[str, Any]) -> None:
+        self.response = dict(response)
+        self.calls: list[tuple[Any, Any, Mapping[str, Any]]] = []
+
+    def invoke(
+        self,
+        frame: Any,
+        context: Any,
+        *,
+        effect_scope: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        self.calls.append((frame, context, effect_scope))
+        return self.response
+
+
+def _bind_session(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    profile_id: str,
+    providers: Mapping[str, tuple[Mapping[str, Any], ...]],
+) -> _CapturedBroker:
+    broker = _CapturedBroker({"output": "hello", "tool_intents": []})
+    session = V4DispatchSession(
+        broker=broker,  # type: ignore[arg-type]
+        context_for=lambda _contract, _operation: {"source": "captured-host"},
+        effect_scope_for=lambda _contract, _operation, _payload: {
+            "effect": "conversation.complete"
+        },
+        providers=providers,
+        profile_id=profile_id,
+        plan_digest="sha256:" + "1" * 64,
     )
-    monkeypatch.setattr(
-        "core_runtime.di_container.get_container",
-        lambda: SimpleNamespace(get_or_none=lambda _key: object()),
-    )
-    monkeypatch.setattr(
-        "core_runtime.global_contract_dispatch.selected_global_providers",
-        lambda _registry, contract_id: (
-            ({"contract_id": contract_id},)
-            if contract_id != "rumi.resource.message.v1"
-            else ()
+    container = DIContainer()
+    container.set_instance("v4_dispatch_session", session)
+    monkeypatch.setattr(conversation, "get_container", lambda: container)
+    return broker
+
+
+def test_conversation_requires_a_captured_v4_dispatch_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The canonical entrypoint refuses to start without Host composition."""
+    monkeypatch.setattr(conversation, "get_container", DIContainer)
+
+    with pytest.raises(
+        GlobalContractUnavailable,
+        match="Pack v4 dispatch session is required for conversation",
+    ):
+        conversation.invoke(_REQUEST)
+
+
+def test_conversation_rejects_a_session_without_broker_profile_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A malformed captured session cannot become a legacy registry fallback."""
+    container = DIContainer()
+    container.set_instance("v4_dispatch_session", object())
+    monkeypatch.setattr(conversation, "get_container", lambda: container)
+
+    with pytest.raises(
+        GlobalContractUnavailable,
+        match="live registry lookup is disabled",
+    ):
+        conversation.invoke(_REQUEST)
+
+
+def test_conversation_dispatches_through_complete_captured_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A verified profile reaches the pinned GlobalContractClient/Broker path."""
+    providers = {
+        conversation.AI_GENERATE_CONTRACT: (
+            {
+                "provider_id": conversation.AI_GENERATE_OPERATION,
+                "operation_id": conversation.AI_GENERATE_OPERATION,
+                "profile_id": "profile:test-v4",
+                "plan_digest": "sha256:" + "1" * 64,
+            },
         ),
+        conversation.AI_STREAM_CONTRACT: (
+            {
+                "provider_id": conversation.AI_STREAM_OPERATION,
+                "operation_id": conversation.AI_STREAM_OPERATION,
+                "profile_id": "profile:test-v4",
+                "plan_digest": "sha256:" + "1" * 64,
+            },
+        ),
+    }
+    broker = _bind_session(
+        monkeypatch,
+        profile_id="profile:test-v4",
+        providers=providers,
     )
 
-    with pytest.raises(RuntimeError, match="no verified conversation owner"):
-        run_http._require_active_chat_profile()
+    result = conversation.invoke(_REQUEST)
 
-
-def test_run_http_accepts_a_complete_verified_chat_profile(monkeypatch):
-    monkeypatch.setenv("RUMI_USER_DATA", "/tmp/tobkiri-test-user-data")
-    monkeypatch.setattr(
-        "core_runtime.resolved_profile_scope.persisted_resolved_profile",
-        lambda: SimpleNamespace(profile_id="test-profile"),
-    )
-    monkeypatch.setattr(
-        "core_runtime.di_container.get_container",
-        lambda: SimpleNamespace(get_or_none=lambda _key: object()),
-    )
-    monkeypatch.setattr(
-        "core_runtime.global_contract_dispatch.selected_global_providers",
-        lambda _registry, contract_id: ({"contract_id": contract_id},),
-    )
-
-    run_http._require_active_chat_profile()
+    assert result["content"] == [{"type": "text", "text": "hello"}]
+    assert result["tool_calls"] == []
+    assert len(broker.calls) == 1
+    frame, context, effect_scope = broker.calls[0]
+    assert frame.contract_id == conversation.AI_GENERATE_CONTRACT
+    assert frame.operation_id == conversation.AI_GENERATE_OPERATION
+    assert frame.payload == {
+        "messages": _REQUEST["messages"],
+        "profile_id": "profile:test-v4",
+        "requirements": {"request_surface": "defaultspack.conversation"},
+    }
+    assert context == {"source": "captured-host"}
+    assert effect_scope == {"effect": "conversation.complete"}

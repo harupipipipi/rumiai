@@ -164,13 +164,13 @@ def test_dispatch_persists_unconfigured_agent_model_error(monkeypatch, tmp_path)
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_RUNTIME_DIR", str(tmp_path / "agent_runtime"))
     monkeypatch.setattr("domain.agent.engine.get_model_capabilities", lambda _model: {})
 
-    def fake_complete(_request):
+    def fake_complete(_gateway, _request):
         raise RuntimeError(
             "stub: provider is not configured. "
             "Configure a real or local AI provider before sending a message."
         )
 
-    monkeypatch.setattr("blocks.ai.complete.generate", fake_complete)
+    monkeypatch.setattr("blocks.ai.complete.LLMGateway.complete", fake_complete)
     monkeypatch.setattr(
         "blocks.ai.complete.ModelRuntimeSettingsService.get_effective_thinking_level",
         lambda *_args, **_kwargs: {"level": "none"},

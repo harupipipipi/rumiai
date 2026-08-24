@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -11,8 +13,8 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
-for _name in [name for name in sys.modules if name == "domain" or name.startswith("domain.")]:
-    sys.modules.pop(_name, None)
+
+pytestmark = pytest.mark.usefixtures("defaultspack_component_catalog_selected")
 
 
 @pytest.fixture(autouse=True)
@@ -41,6 +43,46 @@ def _computer_control_tool_def(tool_name: str) -> dict[str, object]:
             "qualified_name": f"rumi_default_tools_pack:{tool_name}",
         },
     }
+
+
+def _attached_plan_context(tool_name: str, **context: object) -> dict[str, object]:
+    from core_runtime.capability_plan import canonical_capability_plan_digest
+    from domain.tool.registry import ToolRegistry
+
+    tool = ToolRegistry().get(tool_name)
+    assert isinstance(tool, dict), tool_name
+    schema = tool.get("schema")
+    if not isinstance(schema, dict):
+        contract = tool.get("contract")
+        schema = (
+            contract.get("input_schema")
+            if isinstance(contract, dict)
+            and isinstance(contract.get("input_schema"), dict)
+            else {}
+        )
+    plan = {
+        "schema_version": "tobkiri.capability-plan/v1",
+        "plan_id": f"plan_computer_router_{tool_name}",
+        "registry_revision": "registry_test",
+        "effective_capabilities": [],
+        "provider_selections": {},
+        "tools": {
+            "attached": [tool_name],
+            "schema_hashes": {
+                tool_name: hashlib.sha256(
+                    json.dumps(
+                        schema,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        default=str,
+                    ).encode("utf-8")
+                ).hexdigest()
+            },
+        },
+    }
+    plan["digest"] = canonical_capability_plan_digest(plan)
+    return {"principal_id": "defaultspack", "capability_plan": plan, **context}
 
 
 def _computer_router_module():
@@ -378,15 +420,8 @@ def test_rumi_function_computer_use_does_not_double_consume_forwarded_approval_t
         def execute(self, principal_id, request_payload):
             forwarded_context = request_payload.get("context") or {}
             token = forwarded_context["_tool_server_approval_token"]
-            verification = approval.verify_execution_token(
-                token,
-                "browser.open_url",
-                approval.hash_arguments({"action": "browser.open_url", "payload": payload}),
-                pack_id="defaultspack",
-                conversation_id="conv_1",
-                consume=True,
-            )
-            assert verification.valid
+            assert token == decision["token"]
+            assert forwarded_context["_tool_server_approval_token_valid"] is True
             return SimpleNamespace(
                 success=True,
                 output={
@@ -1015,6 +1050,7 @@ def test_tool_executor_permission_preflight_stores_replayable_browser_open_url()
             "profile_id": "defaultspack.operations_company",
             "user_requested_computer_use": True,
             "user_text": "Vivaldiで https://www.youtube.com/watch?v=jNQXAC9IVRw を開いて。",
+            **_attached_plan_context("computer_use"),
         },
     )
 
@@ -1033,19 +1069,33 @@ def test_tool_executor_permission_preflight_stores_replayable_browser_open_url()
 
 
 def test_computer_use_pack_function_routes_original_arguments(monkeypatch) -> None:
+    from ecosystem.rumi_default_tools_pack.functions.computer_use import main as computer_main
     from ecosystem.rumi_default_tools_pack.functions.computer_use.main import run
 
     captured: dict[str, object] = {}
 
-    def fake_router(action, payload, context=None, *, tool_name="computer_use", tool_arguments=None, artifact_root=None, yolo_mode=False):
+    def fake_router(action, payload, context=None, **kwargs):
         captured["action"] = action
         captured["payload"] = dict(payload)
         captured["context"] = dict(context or {})
-        captured["tool_name"] = tool_name
-        captured["tool_arguments"] = dict(tool_arguments or {})
-        return {"action": action, "tool_name": tool_name, "apps": [{"name": "Google Chrome"}]}
+        captured.update(kwargs)
+        return {"action": action, "tool_name": kwargs.get("tool_name", "computer_use"), "apps": [{"name": "Google Chrome"}]}
 
-    monkeypatch.setattr(_computer_router_module(), "run_computer_action", fake_router)
+    def fake_browser(context, browser_args):
+        routed = fake_router(
+            browser_args["action"],
+            browser_args["payload"],
+            context,
+            tool_name=browser_args["tool_name"],
+            tool_arguments=browser_args["tool_arguments"],
+        )
+        return {
+            "result": "computer_use computer.apps completed",
+            "is_error": False,
+            "widget": {"type": "computer_use", **routed},
+        }
+
+    monkeypatch.setattr(computer_main, "_run_browser_computer", fake_browser)
 
     result = run(
         {"conversation_workspace_dir": "/tmp/conversation/workspace"},

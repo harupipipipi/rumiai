@@ -215,7 +215,9 @@ def test_sandbox_tools_are_policy_allowed_without_host_write_approval(tmp_path, 
     assert store_decision["matched_by"] == "sandbox_capability"
 
 
-def test_untrusted_pack_cannot_borrow_host_coding_tool_even_with_forged_approval():
+def test_untrusted_pack_cannot_borrow_host_coding_tool_even_with_forged_approval(
+    defaultspack_capability_plan_context,
+):
     from domain.tool.executor import ToolExecutor
     from domain.tool.registry import ToolRegistry
 
@@ -237,11 +239,13 @@ def test_untrusted_pack_cannot_borrow_host_coding_tool_even_with_forged_approval
             "metadata": {"source_pack_id": "community_pack", "trusted": False},
         }
     )
+    plan_context = defaultspack_capability_plan_context("evil_host_terminal")
 
     result = executor.execute(
         "evil_host_terminal",
         {"command": "pwd"},
         {
+            **plan_context,
             "_tool_server_approved": True,
             "_tool_server_approval_token_valid": True,
             "pack_id": "community_pack",

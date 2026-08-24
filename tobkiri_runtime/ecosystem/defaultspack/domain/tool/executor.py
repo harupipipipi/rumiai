@@ -1,12 +1,22 @@
+from collections.abc import Callable, Mapping
+from typing import Any, Protocol
+
 from .registry import ToolRegistry
 from .mcp_client import McpClient
 from .mcp_registry import McpRegistry
 from .autonomy import autonomous_tool_execution_allowed
 from .eligibility import rejection_result
 from .permission_resolver import ToolPermissionResolver
-from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
+from .schema_adapter import (
+    is_tool_rejected_by_policy,
+    list_or_empty,
+    mapping_or_empty,
+    policy_from_context,
+)
 from .service_catalog import infer_action_class
 from .security import (
+    appears_write_or_execute_capable,
+    execution_type,
     is_sandbox_capability_tool,
     is_safe_first_party_memo_tool,
     is_trusted_pack_id,
@@ -38,6 +48,20 @@ import re
 import time
 
 logger = logging.getLogger(__name__)
+
+
+class SubagentRunner(Protocol):
+    """Typed boundary for the pack-owned nested-agent runner."""
+
+    def run(
+        self,
+        arguments: dict[str, Any],
+        context: dict[str, Any],
+    ) -> Mapping[str, Any]:
+        """Run a nested-agent request and return its structured result."""
+
+
+SubagentFactory = Callable[[], SubagentRunner]
 
 
 # P1-2: サンドボックス用の安全なビルトイン一覧
@@ -130,24 +154,49 @@ def json_dumps(value):
     return json.dumps(value, ensure_ascii=False)
 
 
-def _capability_plan_tool_rejection(tool_name, tool_def, context):
-    """Fail closed when a compiled plan does not attach this exact Tool."""
+def _capability_plan_tool_rejection(
+    tool_name,
+    tool_def,
+    context,
+    *,
+    require_plan=False,
+):
+    """Fail closed unless a canonical plan attaches this exact Tool.
+
+    The public Capability API owns persisted approval and owner binding.  The
+    executor still validates the detached plan at the last non-core boundary,
+    so a direct adapter call cannot use a legacy alias or an unsigned plan to
+    reach a reviewed pack function.
+    """
 
     if not isinstance(context, dict):
-        return None
+        if not require_plan:
+            return None
+        return {
+            "result": "CapabilityPlan is required for tool execution",
+            "is_error": True,
+            "widget": None,
+            "error_type": "capability_plan_required",
+        }
     plan = context.get("capability_plan")
     if not isinstance(plan, dict):
-        return None
-    if plan.get("schema_version"):
-        try:
-            plan = validate_capability_plan(plan)
-        except CapabilityPlanValidationError:
-            return {
-                "result": "CapabilityPlan authority is invalid",
-                "is_error": True,
-                "widget": None,
-                "error_type": "capability_plan_invalid",
-            }
+        if not require_plan:
+            return None
+        return {
+            "result": "CapabilityPlan is required for tool execution",
+            "is_error": True,
+            "widget": None,
+            "error_type": "capability_plan_required",
+        }
+    try:
+        plan = validate_capability_plan(plan)
+    except (CapabilityPlanValidationError, TypeError, ValueError):
+        return {
+            "result": "CapabilityPlan authority is invalid",
+            "is_error": True,
+            "widget": None,
+            "error_type": "capability_plan_invalid",
+        }
     tools = plan.get("tools")
     if not isinstance(tools, dict):
         return {
@@ -167,7 +216,15 @@ def _capability_plan_tool_rejection(tool_name, tool_def, context):
         or tool_name
         or ""
     ).strip()
-    if canonical_name not in attached and str(tool_name) not in attached:
+    requested_name = str(tool_name or "").strip()
+    if requested_name != canonical_name:
+        return {
+            "result": "Legacy Tool aliases cannot authorize execution",
+            "is_error": True,
+            "widget": None,
+            "error_type": "legacy_tool_alias",
+        }
+    if canonical_name not in attached:
         return {
             "result": "Tool is not attached by the active CapabilityPlan",
             "is_error": True,
@@ -205,7 +262,47 @@ def _capability_plan_tool_rejection(tool_name, tool_def, context):
             "widget": None,
             "error_type": "tool_schema_revision_mismatch",
         }
+    plan_owner = plan.get("owner") or plan.get("authority_owner")
+    if plan_owner is not None:
+        if not isinstance(plan_owner, dict):
+            return {
+                "result": "CapabilityPlan owner binding is invalid",
+                "is_error": True,
+                "widget": None,
+                "error_type": "capability_plan_owner_mismatch",
+            }
+        context_owner = context.get("capability_plan_owner")
+        if not isinstance(context_owner, dict):
+            context_owner = context
+        for field in ("principal_id", "workspace_id", "conversation_id", "profile_id"):
+            expected = str(plan_owner.get(field) or "").strip()
+            actual = str(context_owner.get(field) or "").strip()
+            if expected and actual != expected:
+                return {
+                    "result": "CapabilityPlan owner does not match execution scope",
+                    "is_error": True,
+                    "widget": None,
+                    "error_type": "capability_plan_owner_mismatch",
+                }
     return None
+
+
+def _tool_requires_capability_plan(tool_def):
+    """Return whether this executor path is an authority-bearing action."""
+
+    if not isinstance(tool_def, dict):
+        return True
+    exec_type = execution_type(tool_def)
+    if exec_type in {
+        "capability",
+        "global_contract",
+        "handler",
+        "mcp",
+        "rumi_function",
+        "dynamic",
+    }:
+        return True
+    return appears_write_or_execute_capable(tool_def)
 
 
 def _approval_module():
@@ -217,7 +314,7 @@ def _approval_module():
 class ToolExecutor:
     """ツール実行エンジン"""
 
-    def __init__(self):
+    def __init__(self, *, subagent_factory: SubagentFactory | None = None):
         try:
             from domain.integrations.secrets import load_integration_secrets_into_env
 
@@ -226,6 +323,7 @@ class ToolExecutor:
             pass
         self._registry = ToolRegistry()
         self._mcp_client = McpClient()
+        self._subagent_factory = subagent_factory
 
     def execute(self, tool_name, arguments, context):
         """
@@ -253,6 +351,7 @@ class ToolExecutor:
             tool_name,
             tool_def,
             context,
+            require_plan=_tool_requires_capability_plan(tool_def),
         )
         if plan_rejection is not None:
             return plan_rejection
@@ -419,7 +518,6 @@ class ToolExecutor:
         forwarded_context = _function_call_context(approved_context, tool_def)
         if forwarded_context:
             request["context"] = forwarded_context
-        self._ensure_shared_function_registered(qualified_name)
         return self._execute_capability_request(tool_def, request, approved_context)
 
     def _execute_capability(self, tool_def, arguments, context):
@@ -452,10 +550,10 @@ class ToolExecutor:
         from core_runtime.global_contract_dispatch import (
             GlobalContractInvocationError,
             GlobalContractUnavailable,
+            captured_profile_id,
             invoke_global_contract,
             invoke_selected_global_provider,
         )
-        from core_runtime.resolved_profile_scope import persisted_resolved_profile
 
         execution = (
             tool_def.get("execution", {})
@@ -489,12 +587,11 @@ class ToolExecutor:
                 "widget": None,
             }
         registry = (
-            context.get("interface_registry")
+            context.get("v4_dispatch_session")
             if isinstance(context, dict)
             else None
-        ) or get_container().get_or_none("interface_registry")
-        plan = persisted_resolved_profile()
-        if registry is None or plan is None:
+        ) or get_container().get_or_none("v4_dispatch_session")
+        if registry is None:
             return {
                 "result": "Global contract runtime is unavailable",
                 "is_error": True,
@@ -502,7 +599,8 @@ class ToolExecutor:
             }
         arguments = dict(arguments or {})
         requested_profile = str(arguments.get("profile_id") or "").strip()
-        if requested_profile and requested_profile != plan.profile_id:
+        profile_id = captured_profile_id(registry)
+        if requested_profile and requested_profile != profile_id:
             return {
                 "result": "Tool requested an inactive profile",
                 "is_error": True,
@@ -551,7 +649,7 @@ class ToolExecutor:
                     registry,
                     "rumi.resource.workspace.v1",
                     "list",
-                    {"profile_id": plan.profile_id},
+                    {"profile_id": profile_id},
                 )
                 selected_workspace_id = (
                     str(workspace_snapshot.get("selected_workspace_id") or "").strip()
@@ -572,7 +670,7 @@ class ToolExecutor:
                     "rumi.resource.workspace.v1",
                     "get",
                     {
-                        "profile_id": plan.profile_id,
+                        "profile_id": profile_id,
                         "workspace_id": context_workspace_id,
                     },
                 )
@@ -618,7 +716,7 @@ class ToolExecutor:
                     }
         payload = {
             **arguments,
-            "profile_id": plan.profile_id,
+            "profile_id": profile_id,
             "_contract_consumer_pack_id": source_pack_id,
             "_contract_consumer_function_id": str(
                 tool_def.get("tool_id") or tool_def.get("name") or ""
@@ -636,8 +734,7 @@ class ToolExecutor:
                     if isinstance(capability_plan, dict)
                     else ""
                 )
-                or getattr(plan, "catalog_revision", "")
-                or getattr(plan, "registry_revision", "")
+                or getattr(registry, "plan_digest", "")
                 or ""
             )
             if not payload["registry_revision"]:
@@ -760,7 +857,7 @@ class ToolExecutor:
             payload["_invocation_key"] = hashlib.sha256(
                 json.dumps(
                     {
-                        "profile_id": plan.profile_id,
+                        "profile_id": profile_id,
                         "tool_id": tool_def.get("tool_id")
                         or tool_def.get("name"),
                         "arguments": arguments,
@@ -862,14 +959,14 @@ class ToolExecutor:
                     "service_pack_id": source_pack_id,
                     "operation": "repository.context.prepare",
                     "authority": "repository.content.external_share",
-                    "caller_id": f"tool-executor:{plan.profile_id}",
+                    "caller_id": f"tool-executor:{profile_id}",
                     "caller_pack_id": source_pack_id,
                     "caller_function_id": str(
                         tool_def.get("tool_id")
                         or tool_def.get("name")
                         or ""
                     ),
-                    "profile_id": plan.profile_id,
+                    "profile_id": profile_id,
                     "workspace_id": context_workspace_id,
                     "session_id": str(
                         context.get("conversation_id")
@@ -896,12 +993,12 @@ class ToolExecutor:
                 "service_pack_id": source_pack_id,
                 "operation": "repository.context.prepare",
                 "authority": "repository.content.external_share",
-                "caller_id": f"tool-executor:{plan.profile_id}",
+                "caller_id": f"tool-executor:{profile_id}",
                 "caller_pack_id": source_pack_id,
                 "caller_function_id": str(
                     tool_def.get("tool_id") or tool_def.get("name") or ""
                 ),
-                "profile_id": plan.profile_id,
+                "profile_id": profile_id,
                 "workspace_id": context_workspace_id,
                 "session_id": str(
                     context.get("conversation_id")
@@ -986,16 +1083,6 @@ class ToolExecutor:
                     str((context or {}).get("approval_id") or "") if isinstance(context, dict) else "",
                     sorted(str(key) for key in (context or {}).keys())[:40] if isinstance(context, dict) else [],
                 )
-            if (
-                isinstance(context, dict)
-                and tool_server_approval_context_is_internal(context)
-                and getattr(response, "error_type", "") == "pack_not_approved"
-                and str(request.get("type") or "").strip() == "function.call"
-            ):
-                qualified_name = str(request.get("qualified_name") or "").strip()
-                pack_id, _, _ = qualified_name.partition(":")
-                if pack_id and self._dev_auto_approve_pack(pack_id):
-                    response = executor.execute(principal_id, request)
         except Exception as exc:
             return {
                 "result": "Capability execution failed: {}".format(exc),
@@ -1020,34 +1107,11 @@ class ToolExecutor:
             except Exception:
                 manager = None
         if manager is None:
-            return True, None
+            return False, "approval_manager_unavailable"
         approved = manager.is_pack_approved_and_verified(pack_id)
         if isinstance(approved, tuple):
             return bool(approved[0]), approved[1]
         return bool(approved), None
-
-    def _dev_auto_approve_pack(self, pack_id, capability_executor=None):
-        rumi_env = os.environ.get("RUMI_ENVIRONMENT", "").lower()
-        auto_approve = os.environ.get("RUMI_AUTO_APPROVE_LOCAL", "").lower()
-        if rumi_env not in {"development", "dev"} or auto_approve != "true":
-            return False
-        manager = getattr(capability_executor, "_approval_manager", None)
-        if manager is None:
-            try:
-                from core_runtime.approval_manager import get_approval_manager
-
-                manager = get_approval_manager()
-            except Exception:
-                manager = None
-        if manager is None:
-            return False
-        try:
-            if hasattr(manager, "scan_packs"):
-                manager.scan_packs()
-            result = manager.approve(pack_id)
-            return bool(getattr(result, "success", False))
-        except Exception:
-            return False
 
     def _consume_deferred_tool_approval(self, context):
         if not isinstance(context, dict):
@@ -1094,9 +1158,9 @@ class ToolExecutor:
                 if is_trusted_pack_id(pack_id) and not _requires_approval(tool_def):
                     context["_tool_server_approved"] = True
                     return None
-                approved, reason = self._function_call_pack_approval_status(capability_executor, pack_id)
-                if not approved and self._dev_auto_approve_pack(pack_id, capability_executor):
-                    approved, reason = self._function_call_pack_approval_status(capability_executor, pack_id)
+                approved, reason = self._function_call_pack_approval_status(
+                    capability_executor, pack_id
+                )
                 if not approved:
                     return {
                         "result": "Pack not approved: {}".format(pack_id),
@@ -1221,60 +1285,6 @@ class ToolExecutor:
         raise RuntimeError(
             "CapabilityExecutor is not bound; implicit executor creation is forbidden"
         )
-
-    @staticmethod
-    def _ensure_shared_function_registered(qualified_name):
-        try:
-            from core_runtime.di_container import get_container
-
-            registry = get_container().get("function_registry")
-        except Exception:
-            return
-        try:
-            if registry.get(qualified_name) is not None:
-                return
-        except Exception:
-            return
-        ToolExecutor._load_pack_functions_into_registry(registry)
-
-    @staticmethod
-    def _load_pack_functions_into_registry(registry):
-        from core_runtime.resolved_profile_scope import effective_pack_ids
-
-        ecosystem_dir = Path(__file__).resolve().parents[3]
-        effective = effective_pack_ids()
-        for pack_id in sorted(effective):
-            pack_root = ecosystem_dir / pack_id
-            if not pack_root.is_dir() or not (pack_root / "ecosystem.json").exists():
-                continue
-            try:
-                pack_manifest = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
-            except Exception:
-                pack_manifest = {}
-            pack_id = str(pack_manifest.get("pack_id") or pack_root.name).strip() or pack_root.name
-            functions_root = pack_root / "functions"
-            if not functions_root.exists():
-                continue
-            for function_dir in sorted(path for path in functions_root.iterdir() if path.is_dir()):
-                manifest_path = function_dir / "manifest.json"
-                if not manifest_path.is_file():
-                    continue
-                try:
-                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
-                function_id = str(manifest.get("function_id") or function_dir.name).strip()
-                if not function_id:
-                    continue
-                try:
-                    registry.register(
-                        pack_id=pack_id,
-                        function_id=function_id,
-                        manifest=manifest,
-                        function_dir=function_dir,
-                    )
-                except Exception:
-                    continue
 
     @staticmethod
     def _principal_id(tool_def, context):
@@ -1645,6 +1655,33 @@ class ToolExecutor:
                 "is_error": False,
                 "widget": None
             }
+        elif tool_name == "subagent":
+            if self._subagent_factory is None:
+                return {
+                    "result": "Subagent runner is not configured",
+                    "is_error": True,
+                    "widget": {
+                        "type": "subagent",
+                        "error_type": "subagent_runner_unavailable",
+                    },
+                }
+            delegated = self._subagent_factory().run(
+                arguments if isinstance(arguments, dict) else {},
+                context if isinstance(context, dict) else {},
+            )
+            delegated = dict(delegated)
+            failed = bool(
+                delegated.get("is_error")
+                or delegated.get("status") == "error"
+            )
+            return {
+                "result": str(
+                    delegated.get("summary")
+                    or ("Subagent failed" if failed else "Subagent completed")
+                ),
+                "is_error": failed,
+                "widget": {"type": "subagent", **delegated},
+            }
         elif tool_name == "file_reader":
             from blocks.coding.file_read import run as file_read_run
 
@@ -1736,8 +1773,8 @@ def _filtered_tool_rejection(tool_name, context):
                 continue
             if str(entry.get("status") or "") in {"blocked", "hidden"}:
                 return rejection_result(str(tool_name or ""), entry)
-    capability_graph = context.get("capability_graph") if isinstance(context.get("capability_graph"), dict) else {}
-    connected = capability_graph.get("connected_tools") if isinstance(capability_graph.get("connected_tools"), list) else []
+    capability_graph = mapping_or_empty(context.get("capability_graph"))
+    connected = list_or_empty(capability_graph.get("connected_tools"))
     if connected and str(tool_name or "") not in {str(item) for item in connected if str(item or "").strip()}:
         return rejection_result(
             str(tool_name or ""),
@@ -1756,7 +1793,7 @@ def _safe_calculate(expression):
     import ast
     import operator
 
-    operators = {
+    operators: dict[type[ast.AST], Callable[..., Any]] = {
         ast.Add: operator.add,
         ast.Sub: operator.sub,
         ast.Mult: operator.mul,
@@ -2993,7 +3030,7 @@ def _attach_tool_approval_token(context, tool_def, token_result):
         return context
     next_context = dict(context or {}) if isinstance(context, dict) else {}
     operation = str(token_result.get("operation") or _tool_approval_operation(tool_def))
-    tokens = dict(next_context.get("tool_approval_tokens") if isinstance(next_context.get("tool_approval_tokens"), dict) else {})
+    tokens = mapping_or_empty(next_context.get("tool_approval_tokens"))
     for key in _dedupe_approval_token_keys(tool_def, operation):
         tokens.setdefault(key, token)
     next_context["tool_approval_tokens"] = tokens
@@ -3149,7 +3186,7 @@ def _invalid_user_requested_computer_approval_response(tool_name, approval_argum
     if not isinstance(approval_arguments, dict):
         return None
     action = str(approval_arguments.get("action") or "").strip()
-    payload = approval_arguments.get("payload") if isinstance(approval_arguments.get("payload"), dict) else {}
+    payload = mapping_or_empty(approval_arguments.get("payload"))
     if action == "browser.open_url" and not str(payload.get("url") or "").strip():
         return _computer_use_invalid_arguments_result(
             tool_name,
@@ -3341,6 +3378,12 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
             break
         if verification is None:
             verification = candidate_verification
+    if verification is None:
+        return next_context, {
+            "result": "approval token could not be verified",
+            "is_error": True,
+            "widget": None,
+        }
     if verification.valid:
         mark_tool_server_approval_context(next_context)
         next_context["_tool_server_approval_token"] = token
