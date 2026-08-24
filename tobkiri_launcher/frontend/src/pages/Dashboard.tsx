@@ -157,7 +157,13 @@ export function Dashboard() {
             <Button onClick={() => navigate(panelRoutes.packs)}>
               <Package className="h-4 w-4" /> Manage Packs
             </Button>
-            <Button variant="outline" size="icon" title="Refresh" onClick={() => void refreshDashboard()}>
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label="Refresh dashboard"
+              title="Refresh dashboard"
+              onClick={() => void refreshDashboard()}
+            >
               <Route className="h-4 w-4" />
             </Button>
           </div>
