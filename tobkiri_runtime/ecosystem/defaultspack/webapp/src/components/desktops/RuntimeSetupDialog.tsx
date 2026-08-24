@@ -14,11 +14,17 @@ export function RuntimeSetupDialog({ operation, cancelLoading = false, onCancel 
   const completed = operation.status === "completed";
   const failed = operation.status === "failed";
   const cancelled = operation.status === "cancelled";
+  const cancelRequested = operation.status === "cancel_requested";
   const running = !completed && !failed && !cancelled;
   const progress = typeof operation.progress === "number" ? Math.max(0, Math.min(100, Math.round(operation.progress))) : null;
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+    <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3"
+    >
       <div className="flex items-start gap-2">
         <div className={cn(
           "mt-0.5 flex h-7 w-7 items-center justify-center rounded-md border",
@@ -43,18 +49,26 @@ export function RuntimeSetupDialog({ operation, cancelLoading = false, onCancel 
               <button
                 type="button"
                 onClick={onCancel}
-                disabled={cancelLoading}
+                disabled={cancelLoading || cancelRequested}
                 className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/70 px-2 text-[11px] font-medium text-zinc-400 transition-colors hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-100 disabled:cursor-wait disabled:opacity-60"
               >
                 <XCircle size={13} />
-                <span>{cancelLoading ? "Cancelling" : "Cancel"}</span>
+                <span>{cancelLoading || cancelRequested ? "Cancelling" : "Cancel"}</span>
               </button>
             )}
           </div>
           {operation.message && <p className="mt-1 text-xs text-zinc-400">{operation.message}</p>}
           {progress !== null && (
             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-900">
-              <div className="h-full rounded-full bg-emerald-400" style={{ width: `${progress}%` }} />
+              <div
+                role="progressbar"
+                aria-label="Runtime setup progress"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={progress}
+                className="h-full rounded-full bg-emerald-400"
+                style={{ width: `${progress}%` }}
+              />
             </div>
           )}
           {operation.reboot_required && (
@@ -63,7 +77,7 @@ export function RuntimeSetupDialog({ operation, cancelLoading = false, onCancel 
             </p>
           )}
           {operation.error && (
-            <p className="mt-2 rounded-md border border-red-500/25 bg-red-500/10 px-2 py-1.5 text-xs text-red-100">
+            <p role="alert" className="mt-2 rounded-md border border-red-500/25 bg-red-500/10 px-2 py-1.5 text-xs text-red-100">
               {typeof operation.error === "string" ? operation.error : operation.error.message}
             </p>
           )}
