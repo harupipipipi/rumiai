@@ -400,12 +400,43 @@ fn identify_authenticated_stale_defaultspack_listener(
     normalized_process_value(&listener.command).contains("defaultspack")
 }
 
+fn listener_matches_launcher_owned_defaultspack(
+    listener: &PortListener,
+    metadata: &DefaultspackDesktopMetadata,
+    retained_manager_process: bool,
+) -> bool {
+    retained_manager_process || identify_defaultspack_listener(listener, metadata)
+}
+
+fn is_launcher_owned_defaultspack_listener(
+    manager: &DefaultspackManager,
+    listener: &PortListener,
+    metadata: &DefaultspackDesktopMetadata,
+) -> AnyResult<bool> {
+    if !process_is_descendant_of(listener.pid, std::process::id())? {
+        return Ok(false);
+    }
+    let retained_manager_process = match manager.managed_child_pid()? {
+        Some(managed_pid) => process_is_descendant_of(listener.pid, managed_pid)?,
+        None => false,
+    };
+    Ok(listener_matches_launcher_owned_defaultspack(
+        listener,
+        metadata,
+        retained_manager_process,
+    ))
+}
+
 fn recover_authenticated_stale_defaultspack_listener(
+    manager: &DefaultspackManager,
     metadata: &DefaultspackDesktopMetadata,
 ) -> AnyResult<bool> {
     let Some(listener) = detect_port_listener(metadata.port)? else {
         return Ok(false);
     };
+    if is_launcher_owned_defaultspack_listener(manager, &listener, metadata)? {
+        return Ok(false);
+    }
     if !identify_authenticated_stale_defaultspack_listener(&listener, metadata) {
         return Ok(false);
     }
@@ -489,16 +520,14 @@ fn ensure_defaultspack_desktop_ready(
         .has_managed_process()
         .context("failed to inspect managed Defaultspack process")?;
     let mut server_ready = is_defaultspack_http_ready(metadata.port, &panel_bootstrap_secret);
-    if server_ready && recover_authenticated_stale_defaultspack_listener(&metadata)? {
+    if server_ready && recover_authenticated_stale_defaultspack_listener(&manager, &metadata)? {
         server_ready = false;
     }
     if server_ready {
         let listener = detect_port_listener(metadata.port)?.ok_or_else(|| {
             anyhow!("authenticated Defaultspack listener identity is unavailable")
         })?;
-        if !identify_defaultspack_listener(&listener, &metadata)
-            || !process_is_descendant_of(listener.pid, std::process::id())?
-        {
+        if !is_launcher_owned_defaultspack_listener(&manager, &listener, &metadata)? {
             warn!(
                 "Stopping authenticated Defaultspack listener that is not descended from this Launcher: pid {}",
                 listener.pid
@@ -543,9 +572,7 @@ fn ensure_defaultspack_desktop_ready(
 
     let mut listener = detect_port_listener(metadata.port)?
         .ok_or_else(|| anyhow!("authenticated Defaultspack listener identity is unavailable"))?;
-    if !identify_defaultspack_listener(&listener, &metadata)
-        || !process_is_descendant_of(listener.pid, std::process::id())?
-    {
+    if !is_launcher_owned_defaultspack_listener(&manager, &listener, &metadata)? {
         // The Kernel can finish restoring an old startup profile while the
         // supervised pack-shell is starting. Resolve that race once: stop the
         // authenticated but unowned winner, then launch a fresh owned child.
@@ -560,9 +587,7 @@ fn ensure_defaultspack_desktop_ready(
         listener = detect_port_listener(metadata.port)?
             .ok_or_else(|| anyhow!("replacement Defaultspack listener identity is unavailable"))?;
     }
-    if !identify_defaultspack_listener(&listener, &metadata)
-        || !process_is_descendant_of(listener.pid, std::process::id())?
-    {
+    if !is_launcher_owned_defaultspack_listener(&manager, &listener, &metadata)? {
         bail!("replacement Defaultspack listener is not owned by this Launcher");
     }
     if let Some(wrapper_pid) = manager.managed_child_pid()? {
@@ -1253,9 +1278,28 @@ mod tests {
             command: "python -m http.server 8766".into(),
             cwd: Some("/tmp/rumi/defaultspack".into()),
         };
+        let managed_sealed = PortListener {
+            pid: 303,
+            command: "python -m tobkiri_sealed.bootstrap --role defaultspack".into(),
+            cwd: Some("/private/tmp/.tobkiri-sealed-python-snapshot".into()),
+        };
 
         assert!(identify_defaultspack_listener(&owned, &metadata));
         assert!(!identify_defaultspack_listener(&foreign, &metadata));
+        assert!(!identify_defaultspack_listener(&managed_sealed, &metadata));
+        assert!(listener_matches_launcher_owned_defaultspack(
+            &managed_sealed,
+            &metadata,
+            true,
+        ));
+        assert!(!listener_matches_launcher_owned_defaultspack(
+            &managed_sealed,
+            &metadata,
+            false,
+        ));
+        assert!(!listener_matches_launcher_owned_defaultspack(
+            &foreign, &metadata, false,
+        ));
     }
 
     #[test]
