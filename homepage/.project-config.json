@@ -1,0 +1,34 @@
+{
+  "build_command": "pnpm run build",
+  "capabilities": [],
+  "dev_command": "pnpm run dev",
+  "env_vars": {},
+  "experiments": null,
+  "git_remote": {
+    "repo_url": "https://7f0548f6b28a1758d9bf7be630d36cb4.artifacts.cloudflare.net/git/prod/PC9kUhgrEHwk3K8M8jBfjM.git",
+    "expiration": "2026-08-26T11:46:53.072Z",
+    "token": "art_v2_x_a890a6ca5a9ae48729e84a464e458652c2277d3c?expires=1787744813",
+    "backend": "GIT_BACKEND_ARTIFACTS"
+  },
+  "name": "tobkiri-home",
+  "path": "/home/ubuntu/tobkiri-home",
+  "port": 3000,
+  "secrets": {
+    "BUILT_IN_FORGE_API_KEY": "P5MBRVcByAzVxffYetPzoG",
+    "BUILT_IN_FORGE_API_URL": "https://forge.manus.ai",
+    "JWT_SECRET": "EyBu4NTdNPpc9vKuydPSR2",
+    "OAUTH_SERVER_URL": "https://api.manus.im",
+    "OWNER_NAME": "はるさん",
+    "OWNER_OPEN_ID": "h8dfXNJLgzXE6How92F3w4",
+    "VITE_ANALYTICS_ENDPOINT": "https://manus-analytics.com",
+    "VITE_ANALYTICS_WEBSITE_ID": "d4fe2bd6-18ee-4eae-b5cc-661f1539eb45",
+    "VITE_APP_ID": "PC9kUhgrEHwk3K8M8jBfjM",
+    "VITE_APP_LOGO": "",
+    "VITE_APP_TITLE": "tobkiri — Beyond the ordinary",
+    "VITE_FRONTEND_FORGE_API_KEY": "nDcdKa6Rj7PqW4RuTGiW8q",
+    "VITE_FRONTEND_FORGE_API_URL": "https://forge.manus.ai",
+    "VITE_OAUTH_PORTAL_URL": "https://manus.im"
+  },
+  "template_id": "web-static",
+  "test_command": "pnpm test"
+}
