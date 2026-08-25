@@ -215,6 +215,26 @@ _RETIRED_API_ROOTS = frozenset(
     }
 )
 
+_CONVERSATION_CAPABILITY_TARGET = (
+    "defaults.conversation.complete",
+    "conversation.turn.v1",
+    "complete",
+    "defaultspack.conversation",
+    "defaultspack.conversation",
+)
+
+
+def _is_conversation_capability_target(target: FrontendContractTarget) -> bool:
+    """Return whether a target is the exact host-rendered Conversation binding."""
+
+    return (
+        target.contribution_id,
+        target.contract_id,
+        target.operation_id,
+        target.provider_id,
+        target.function_id,
+    ) == _CONVERSATION_CAPABILITY_TARGET
+
 
 class DispatchSession(Protocol):
     """Captured Broker session exposed to the HTTP adapter."""
@@ -1561,37 +1581,7 @@ class PackAPIHandler(
                 "profile_revision": session.plan_digest if session is not None else "",
                 "plan_hash": session.plan_digest if session is not None else "",
                 "contributions": [
-                    {
-                        "contribution_id": target.contribution_id,
-                        "kind": "action",
-                        "mode": "same_origin_builtin",
-                        "label": target.operation_id,
-                        "priority": index,
-                        "owner_pack_id": target.owner_pack_id,
-                        "owner_pack_hash": target.artifact_digest
-                        or (session.plan_digest if session is not None else ""),
-                        "build_identity": target.function_id,
-                        "resolved_profile_revision": session.plan_digest
-                        if session is not None
-                        else "",
-                        "resolved_plan_hash": session.plan_digest if session is not None else "",
-                        "descriptor_hash": canonical_digest(
-                            {
-                                "contribution_id": target.contribution_id,
-                                "operation_id": target.operation_id,
-                            }
-                        ),
-                        "route": "/packs",
-                        "action_contract": target.contract_id,
-                        "operation_id": target.operation_id,
-                        "provider_id": target.provider_id,
-                        "function_id": target.function_id,
-                        "localization": {},
-                        "accessibility": {
-                            "name": target.operation_id,
-                            "keyboard": True,
-                        },
-                    }
+                    self._capability_contribution(target, index, session)
                     for index, target in enumerate(contributions)
                 ],
                 "diagnostics": diagnostics,
@@ -1599,6 +1589,56 @@ class PackAPIHandler(
                 "catalog_hash": catalog_hash,
             },
         }
+
+    @staticmethod
+    def _capability_contribution(
+        target: FrontendContractTarget,
+        priority: int,
+        session: DispatchSession | None,
+    ) -> dict[str, object]:
+        """Project one capture-verified capability as a frontend contribution."""
+
+        is_conversation = _is_conversation_capability_target(target)
+        contribution: dict[str, object] = {
+            "contribution_id": target.contribution_id,
+            "kind": "route" if is_conversation else "action",
+            "mode": "declarative" if is_conversation else "same_origin_builtin",
+            "label": (
+                "Tobkiri Conversation" if is_conversation else target.operation_id
+            ),
+            "priority": priority,
+            "owner_pack_id": target.owner_pack_id,
+            "owner_pack_hash": target.artifact_digest
+            or (session.plan_digest if session is not None else ""),
+            "build_identity": target.function_id,
+            "resolved_profile_revision": session.plan_digest if session is not None else "",
+            "resolved_plan_hash": session.plan_digest if session is not None else "",
+            "descriptor_hash": canonical_digest(
+                {
+                    "contribution_id": target.contribution_id,
+                    "operation_id": target.operation_id,
+                }
+            ),
+            "route": "/chat" if is_conversation else "/packs",
+            "action_contract": target.contract_id,
+            "operation_id": target.operation_id,
+            "provider_id": target.provider_id,
+            "function_id": target.function_id,
+            "localization": {},
+            "accessibility": {
+                "name": (
+                    "Tobkiri Conversation" if is_conversation else target.operation_id
+                ),
+                "keyboard": True,
+            },
+        }
+        if is_conversation:
+            contribution["view"] = {
+                "type": "conversation_v4",
+                "title": "Tobkiri Conversation",
+                "body": "Start a conversation with your active Tobkiri Profile.",
+            }
+        return contribution
 
     @classmethod
     def _normalize_dynamic_payload(
@@ -2160,10 +2200,11 @@ class PackAPIServer:
                 )
                 if len(exact) != 1 or target.function_id != target.provider_id:
                     raise RuntimeError("frontend contract Provider identity is unavailable")
-                session.assert_operation_ready(
-                    target.contract_id,
-                    target.operation_id,
-                )
+                if not _is_conversation_capability_target(target):
+                    session.assert_operation_ready(
+                        target.contract_id,
+                        target.operation_id,
+                    )
         if self._web_mounts is not None:
             for mount in self._web_mounts:
                 root = mount["web_root"]

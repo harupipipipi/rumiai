@@ -1,7 +1,7 @@
 /* eslint-disable */
 // GENERATED FILE. Do not edit by hand.
 // Source: defaultspack/frontend_contract_map.v4.json
-// Raw source digest: sha256:dbcab518d649644dad62218147eac7d99c3c2b071250ef7bfcd9ba4c9a069d15
+// Raw source digest: sha256:d216b97849485033b226f28b9eee0989f6db232034bb87f634b1818f792182d4
 import type {FrontendContractMethod} from './api';
 
 export interface GeneratedFrontendContractTarget {
@@ -28,13 +28,13 @@ export interface GeneratedFrontendContractMap {
   routes: GeneratedFrontendContractRoute[];
 }
 
-export const PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST = "sha256:dbcab518d649644dad62218147eac7d99c3c2b071250ef7bfcd9ba4c9a069d15" as const;
+export const PINNED_FRONTEND_CONTRACT_MAP_ARTIFACT_DIGEST = "sha256:d216b97849485033b226f28b9eee0989f6db232034bb87f634b1818f792182d4" as const;
 
 export const GENERATED_FRONTEND_CONTRACT_MAP: GeneratedFrontendContractMap = {
   "schema": "io.tobkiri.frontend-contract-map.v4",
   "pack_id": "defaultspack",
   "artifact_path": "defaultspack/frontend_contract_map.v4.json",
-  "artifact_digest": "sha256:dbcab518d649644dad62218147eac7d99c3c2b071250ef7bfcd9ba4c9a069d15",
+  "artifact_digest": "sha256:d216b97849485033b226f28b9eee0989f6db232034bb87f634b1818f792182d4",
   "routes": [
     {
       "method": "GET",
@@ -418,6 +418,16 @@ export const GENERATED_FRONTEND_CONTRACT_MAP: GeneratedFrontendContractMap = {
       "path": "/api/ui/capability/invoke",
       "presentation": "capability_result",
       "targets": [
+        {
+          "contribution_id": "defaults.conversation.complete",
+          "contract_id": "conversation.turn.v1",
+          "operation_id": "complete",
+          "provider_id": "defaultspack.conversation",
+          "function_id": "defaultspack.conversation",
+          "allowed_payload_keys": [
+            "messages"
+          ]
+        },
         {
           "contribution_id": "defaults.pack.install",
           "contract_id": "tobkiri.host.pack-control.v4",
@@ -847,6 +857,16 @@ const EXPECTED_ROUTES = {
   "POST /api/ui/capability/invoke": {
     "presentation": "capability_result",
     "targets": [
+      {
+        "contribution_id": "defaults.conversation.complete",
+        "contract_id": "conversation.turn.v1",
+        "operation_id": "complete",
+        "provider_id": "defaultspack.conversation",
+        "function_id": "defaultspack.conversation",
+        "allowed_payload_keys": [
+          "messages"
+        ]
+      },
       {
         "contribution_id": "defaults.pack.install",
         "contract_id": "tobkiri.host.pack-control.v4",
