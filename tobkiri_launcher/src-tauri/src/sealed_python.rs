@@ -2792,16 +2792,27 @@ struct MacosCiAttestedFile {
 }
 
 #[cfg(target_os = "macos")]
+const MACOS_CI_ATTESTED_PATHS: &[&str] = &[
+    "Contents/MacOS/tobkiri-launcher",
+    "Contents/MacOS/tobkiri-packvm-vz-helper",
+    "Contents/Resources/app/python-runtime/sealed-environment.v1.json",
+    "Contents/Resources/app/runtime-resource-manifest.v1.json",
+    "Contents/Resources/ci-e2e-artifact-policy.v1.json",
+    "Contents/Resources/packvm-vz-provisioning.v1.json",
+    "Contents/Resources/packvm-vz-helper.manifest.v1.json",
+    "Contents/Resources/ci-e2e-signing-certificate.der",
+];
+
+#[cfg(target_os = "macos")]
+const MACOS_CI_MACHO_ATTESTED_PATHS: &[&str] = &[
+    "Contents/MacOS/tobkiri-launcher",
+    "Contents/MacOS/tobkiri-packvm-vz-helper",
+];
+
+#[cfg(target_os = "macos")]
 fn verify_macos_ci_attestation(bundle: &Path, certificate_sha256: &str) -> Result<()> {
     const CERTIFICATE_NAME: &str = "ci-e2e-signing-certificate.der";
     const ATTESTATION_NAME: &str = "ci-e2e-startup-attestation.v1.json";
-    const SIGNED_PATHS: &[&str] = &[
-        "Contents/MacOS/tobkiri-launcher",
-        "Contents/Resources/app/python-runtime/sealed-environment.v1.json",
-        "Contents/Resources/app/runtime-resource-manifest.v1.json",
-        "Contents/Resources/ci-e2e-artifact-policy.v1.json",
-        "Contents/Resources/ci-e2e-signing-certificate.der",
-    ];
 
     require_sha256(certificate_sha256)?;
     let resources = bundle.join("Contents/Resources");
@@ -2821,7 +2832,7 @@ fn verify_macos_ci_attestation(bundle: &Path, certificate_sha256: &str) -> Resul
     {
         bail!("[PYTHON_SEALED_PROVENANCE_INVALID] CI attestation domain is invalid");
     }
-    let expected_files = SIGNED_PATHS
+    let expected_files = MACOS_CI_ATTESTED_PATHS
         .iter()
         .map(|relative| {
             let bytes = read_bounded_regular(&bundle.join(relative), 32 * 1024 * 1024)
@@ -2832,7 +2843,7 @@ fn verify_macos_ci_attestation(bundle: &Path, certificate_sha256: &str) -> Resul
                 })?;
             Ok(MacosCiAttestedFile {
                 path: (*relative).to_owned(),
-                sha256: if *relative == SIGNED_PATHS[0] {
+                sha256: if MACOS_CI_MACHO_ATTESTED_PATHS.contains(relative) {
                     macho_code_sha256(&bytes)?
                 } else {
                     sha256_bytes(&bytes)
@@ -4118,6 +4129,31 @@ mod tests {
         ] {
             assert!(macos_code_requirement(policy, identity).is_err());
         }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn ci_attestation_binds_the_packvm_helper_and_manifests() {
+        assert_eq!(
+            MACOS_CI_ATTESTED_PATHS,
+            [
+                "Contents/MacOS/tobkiri-launcher",
+                "Contents/MacOS/tobkiri-packvm-vz-helper",
+                "Contents/Resources/app/python-runtime/sealed-environment.v1.json",
+                "Contents/Resources/app/runtime-resource-manifest.v1.json",
+                "Contents/Resources/ci-e2e-artifact-policy.v1.json",
+                "Contents/Resources/packvm-vz-provisioning.v1.json",
+                "Contents/Resources/packvm-vz-helper.manifest.v1.json",
+                "Contents/Resources/ci-e2e-signing-certificate.der",
+            ]
+        );
+        assert_eq!(
+            MACOS_CI_MACHO_ATTESTED_PATHS,
+            [
+                "Contents/MacOS/tobkiri-launcher",
+                "Contents/MacOS/tobkiri-packvm-vz-helper",
+            ]
+        );
     }
 
     #[test]

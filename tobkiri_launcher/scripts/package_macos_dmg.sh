@@ -459,6 +459,37 @@ publish_verified_dmg() {
     --expected-identity "$expected_id"
 }
 
+packvm_helper_relative='Contents/MacOS/tobkiri-packvm-vz-helper'
+packvm_helper_identifier='dev.tobkiri.launcher.packvm-vz-helper'
+
+verify_packvm_helper_signature() {
+  local bundle_path=$1
+  local helper_path="$bundle_path/$packvm_helper_relative"
+  local helper_details=''
+
+  [[ -f "$helper_path" && ! -L "$helper_path" ]] || {
+    printf '%s\n' 'PackVM VZ helper is missing or unsafe' >&2
+    return 1
+  }
+  codesign --verify --strict --all-architectures --verbose=2 "$helper_path"
+  helper_details=$(codesign -d -r- --verbose=4 "$helper_path" 2>&1)
+  grep -Fqx "Identifier=$packvm_helper_identifier" <<<"$helper_details" || {
+    printf '%s\n' 'PackVM VZ helper has an unexpected identifier' >&2
+    return 1
+  }
+  grep -Fq "designated => identifier \"$packvm_helper_identifier\"" \
+    <<<"$helper_details" || {
+    printf '%s\n' 'PackVM VZ helper has an unexpected designated requirement' >&2
+    return 1
+  }
+  codesign -d --entitlements :- "$helper_path" 2>/dev/null \
+    | plutil -extract com.apple.security.virtualization raw -o - - \
+    | grep -qx true || {
+      printf '%s\n' 'PackVM VZ helper lacks the virtualization entitlement' >&2
+      return 1
+    }
+}
+
 app_bundle=$(cd "$app_bundle" && pwd -P)
 mkdir -p "$output_dir"
 output_dir=$(cd "$output_dir" && pwd -P)
@@ -535,7 +566,10 @@ trap 'exit 131' QUIT
 trap 'exit 143' TERM
 
 printf 'Verifying signed app bundle: %s\n' "$app_bundle"
-codesign --verify --deep --strict --verbose=2 "$app_bundle"
+verify_packvm_helper_signature "$app_bundle"
+run_formal_python "$script_dir/../../.github/scripts/macos_ci_artifact.py" \
+  verify-packvm-bundle --app-bundle "$app_bundle"
+codesign --verify --strict --all-architectures --verbose=2 "$app_bundle"
 if [[ -n "$signing_identity" ]]; then
   signing_details=$(codesign --display --verbose=4 "$app_bundle" 2>&1)
   grep -Fqx "Authority=$signing_identity" <<<"$signing_details" || {
@@ -565,7 +599,10 @@ fi
 
 printf 'Staging signed app bundle for DMG: %s\n' "$app_name"
 ditto "$app_bundle" "$staging_dir/$app_name"
-codesign --verify --deep --strict --verbose=2 "$staging_dir/$app_name"
+verify_packvm_helper_signature "$staging_dir/$app_name"
+run_formal_python "$script_dir/../../.github/scripts/macos_ci_artifact.py" \
+  verify-packvm-bundle --app-bundle "$staging_dir/$app_name"
+codesign --verify --strict --all-architectures --verbose=2 "$staging_dir/$app_name"
 ln -s /Applications "$staging_dir/Applications"
 
 temporary_dmg_path="$image_dir/${app_stem}_${version}_${architecture_suffix}.dmg"

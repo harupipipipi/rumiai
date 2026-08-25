@@ -7,6 +7,7 @@ import os
 import plistlib
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +17,9 @@ import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "package_macos_dmg.sh"
 PUBLISHER_PATH = Path(__file__).resolve().parents[1] / "publish_macos_dmg.py"
+CI_ARTIFACT_PATH = (
+    Path(__file__).resolve().parents[3] / ".github/scripts/macos_ci_artifact.py"
+)
 FINAL_NAME = "Tobkiri Launcher_1.2.3_x64.dmg"
 
 
@@ -29,6 +33,32 @@ def _load_publisher():
 
 
 PUBLISHER = _load_publisher()
+
+
+def _load_ci_artifact():
+    spec = importlib.util.spec_from_file_location("macos_ci_artifact", CI_ARTIFACT_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+CI_ARTIFACT = _load_ci_artifact()
+
+
+@pytest.fixture(autouse=True)
+def _fixture_helper_is_ad_hoc(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Synthetic bundle fixtures have no host codesign provenance."""
+    monkeypatch.setattr(
+        CI_ARTIFACT,
+        "_inspect_packvm_helper_signing",
+        lambda _path: {
+            "signing_mode": "ad-hoc",
+            "team_id": None,
+            "authority": None,
+        },
+    )
 
 
 def _write_executable(path: Path, contents: str) -> None:
@@ -59,9 +89,20 @@ def _create_fake_tools(root: Path, mode: str) -> tuple[Path, Path]:
     _write_executable(
         bin_dir / "codesign",
         """#!/bin/sh
-if [ "${1:-}" = "--display" ]; then
-  printf '%s\\n' 'Authority=Developer ID Application: Test'
-fi
+set -eu
+case "${1:-}" in
+  --display)
+    printf '%s\\n' 'Authority=Developer ID Application: Test'
+    ;;
+  -d)
+    if [ "${2:-}" = "--entitlements" ]; then
+      printf '%s\\n' '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>com.apple.security.virtualization</key><true/></dict></plist>'
+    else
+      printf '%s\\n' 'Identifier=dev.tobkiri.launcher.packvm-vz-helper' >&2
+      printf '%s\\n' 'designated => identifier "dev.tobkiri.launcher.packvm-vz-helper"' >&2
+    fi
+    ;;
+esac
 exit 0
 """,
     )
@@ -75,7 +116,15 @@ cp -R "$1" "$2"
     _write_executable(
         bin_dir / "plutil",
         """#!/bin/sh
-printf '%s\\n' '1.2.3'
+if [ "${1:-}" = "-extract" ]; then
+  if [ "${2:-}" = "com.apple.security.virtualization" ]; then
+    printf '%s\\n' 'true'
+  else
+    printf '%s\\n' '1.2.3'
+  fi
+else
+  printf '%s\\n' '1.2.3'
+fi
 """,
     )
     _write_executable(
@@ -194,6 +243,66 @@ def _fixture_app(root: Path) -> Path:
     (contents / "Resources" / "app" / "python-runtime").mkdir(parents=True)
     (contents / "Info.plist").write_text("fixture", encoding="utf-8")
     (contents / "MacOS" / "launcher").write_text("fixture", encoding="utf-8")
+    helper = contents / "MacOS" / "tobkiri-packvm-vz-helper"
+    header = bytearray(32)
+    header[:4] = b"\xcf\xfa\xed\xfe"
+    struct.pack_into("<II", header, 16, 2, 88)
+    linkedit = bytearray(72)
+    struct.pack_into("<II16s", linkedit, 0, 0x19, 72, b"__LINKEDIT")
+    struct.pack_into("<QQ", linkedit, 32, 4, 120)
+    struct.pack_into("<Q", linkedit, 48, 4)
+    signature = struct.pack("<IIII", 0x1D, 16, 120, 4)
+    helper.write_bytes(header + linkedit + signature + b"SIGN")
+    inputs = []
+    bubblewrap_package = b"b" * CI_ARTIFACT.PACKVM_BUBBLEWRAP_PACKAGE_BYTES
+    for name in sorted(CI_ARTIFACT.PACKVM_REQUIRED_PROVISIONING_NAMES):
+        relative = f"packvm-vz-provisioning/{name}.fixture"
+        if name == "bubblewrap_package":
+            relative = "packvm-vz-provisioning/bubblewrap_arm64.deb"
+        provisioning_input = contents / "Resources" / relative
+        provisioning_input.parent.mkdir(parents=True, exist_ok=True)
+        if name == "bubblewrap_package":
+            payload = bubblewrap_package
+        elif name == "bubblewrap_descriptor":
+            payload = json.dumps(
+                {
+                    "schema": CI_ARTIFACT.PACKVM_BUBBLEWRAP_DESCRIPTOR_SCHEMA,
+                    "package": "bubblewrap",
+                    "version": "fixture",
+                    "architecture": "arm64",
+                    "source": {
+                        "url": "https://example.test/bubblewrap.deb",
+                        "size_bytes": len(bubblewrap_package),
+                        "sha256": "sha256:"
+                        + hashlib.sha256(bubblewrap_package).hexdigest(),
+                    },
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+        else:
+            payload = f"fixture:{name}".encode("utf-8")
+        provisioning_input.write_bytes(payload)
+        inputs.append(
+            {
+                "name": name,
+                "path": relative,
+                "sha256": "sha256:" + hashlib.sha256(payload).hexdigest(),
+            }
+        )
+    provisioning_manifest = contents / "Resources" / "packvm-vz-provisioning.v1.json"
+    provisioning_manifest.write_text(
+        json.dumps(
+            {
+                "schema": CI_ARTIFACT.PACKVM_PROVISIONING_SCHEMA,
+                "target": "aarch64-apple-darwin",
+                "boot_mode": "efi",
+                "inputs": inputs,
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    CI_ARTIFACT.write_packvm_bundle_manifest(app)
     return app
 
 
@@ -475,6 +584,56 @@ def test_output_publication_never_clobbers_existing_trusted_file(
     assert final_path.read_bytes() == b"trusted-existing-output"
     assert "Refusing to overwrite" in result.stderr
     assert _temporary_workspaces(output_dir) == []
+
+
+@pytest.mark.parametrize(
+    ("relative", "expected"),
+    [
+        (
+            "Contents/MacOS/tobkiri-packvm-vz-helper",
+            "PackVM VZ helper is missing or unsafe",
+        ),
+        (
+            "Contents/Resources/packvm-vz-provisioning/guest_runner.fixture",
+            "PackVM provisioning identity changed",
+        ),
+        (
+            "Contents/Resources/packvm-vz-provisioning/bubblewrap_arm64.deb",
+            "PackVM provisioning identity changed",
+        ),
+    ],
+)
+def test_packager_rejects_missing_or_tampered_packvm_material_before_dmg_creation(
+    tmp_path: Path, relative: str, expected: str
+) -> None:
+    """The installer path never accepts an app lacking its authenticated sidecar."""
+    app, output_dir, state_path, environment = _prepare(tmp_path, "success")
+    target = app / relative
+    if target.name == "tobkiri-packvm-vz-helper":
+        target.unlink()
+    else:
+        target.write_bytes(b"tampered")
+    result = subprocess.run(
+        _command(app, output_dir),
+        capture_output=True,
+        check=False,
+        env=environment,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert expected in result.stderr
+    assert _state(state_path)["create_count"] == 0
+
+
+def test_packager_uses_explicit_sidecar_and_outer_verification_not_deep_resigning() -> (
+    None
+):
+    """Nested helper signing is explicit so its entitlement cannot be erased."""
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "verify_packvm_helper_signature" in source
+    assert "codesign --verify --strict --all-architectures" in source
+    assert "codesign --verify --deep" not in source
+    assert "codesign --force --deep" not in source
 
 
 def test_primary_package_error_wins_when_cleanup_rejects_external_link(

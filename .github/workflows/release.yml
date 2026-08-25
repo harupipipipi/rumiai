@@ -462,6 +462,43 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: cargo tauri build --target ${{ matrix.target }} --bundles app --ci
 
+      - name: Stage and sign macOS PackVM VZ helper
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          app="$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher.app"
+          helper="$app/Contents/MacOS/tobkiri-packvm-vz-helper"
+          test -d "$app"
+          bash tobkiri_launcher/scripts/build_packvm_vz_helper.sh \
+            --target '${{ matrix.target }}' --app-bundle "$app"
+          test -f "$helper"
+          test ! -L "$helper"
+          test -f "$app/Contents/Resources/packvm-vz-provisioning.v1.json"
+          test ! -L "$app/Contents/Resources/packvm-vz-provisioning.v1.json"
+          /usr/bin/codesign --force --sign "$APPLE_SIGNING_IDENTITY" \
+            --identifier dev.tobkiri.launcher.packvm-vz-helper \
+            --options runtime --timestamp \
+            --entitlements tobkiri_launcher/packvm-vz-helper/Entitlements/tobkiri-packvm-vz-helper.entitlements \
+            "$helper"
+          /usr/bin/codesign --verify --strict --all-architectures --verbose=2 "$helper"
+          helper_details=$(/usr/bin/codesign -d -r- --verbose=4 "$helper" 2>&1)
+          /usr/bin/grep -Fqx 'Identifier=dev.tobkiri.launcher.packvm-vz-helper' <<<"$helper_details"
+          /usr/bin/grep -Fq 'designated => identifier "dev.tobkiri.launcher.packvm-vz-helper"' <<<"$helper_details"
+          /usr/bin/codesign -d --entitlements :- "$helper" 2>/dev/null \
+            | /usr/bin/plutil -extract com.apple.security.virtualization raw -o - - \
+            | /usr/bin/grep -qx true
+          python .github/scripts/macos_ci_artifact.py write-packvm-bundle-manifest \
+            --app-bundle "$app" \
+            --expected-signing-mode developer-id \
+            --expected-team-id "$APPLE_TEAM_ID"
+          /usr/bin/codesign --force --sign "$APPLE_SIGNING_IDENTITY" \
+            --options runtime --timestamp "$app"
+          /usr/bin/codesign --verify --strict --all-architectures --verbose=2 "$app"
+
       - name: Host-seal and launch-test packaged Python application resources
         if: runner.os == 'macOS'
         run: |
