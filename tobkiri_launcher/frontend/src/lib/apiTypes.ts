@@ -68,7 +68,16 @@ export interface ApiFrontendContribution {
   action_contract?: string | null;
   operation_id?: string | null;
   provider_id?: string | null;
+  function_id?: string | null;
   kind?: string;
+  mode?: string;
+  route?: string;
+  owner_pack_hash?: string;
+  build_identity?: string;
+  resolved_profile_revision?: string;
+  resolved_plan_hash?: string;
+  descriptor_hash?: string;
+  view?: {type?: string} | null;
 }
 
 export interface ApiFrontendDiagnostic {

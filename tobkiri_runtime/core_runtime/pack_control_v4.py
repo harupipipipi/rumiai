@@ -755,11 +755,20 @@ def _catalog_payload(
         is_installed = pack_id in installed or pack_id in active
         if pack_id in installed:
             _require_install_binding(pack_id, record, installed[pack_id], binding)
-        approved, reason = _approval_status(
-            pack_id,
-            record,
-            binding,
-        )
+        # Packs committed to the immutable active Profile are baseline
+        # capabilities, not optional installs.  Their trust is established by
+        # the captured Profile and bundle validation; requiring a mutable
+        # optional-pack approval would make the baseline unavailable after a
+        # fresh installation.  Optional packs keep the normal approval path.
+        is_committed_baseline = pack_id in required_pack_ids and pack_id in active
+        if is_committed_baseline:
+            approved, reason = True, None
+        else:
+            approved, reason = _approval_status(
+                pack_id,
+                record,
+                binding,
+            )
         status = "approved" if approved else "installed"
         declared_operations = _declared_operations(record)
         invokable_operation_keys = {
