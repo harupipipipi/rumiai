@@ -1146,8 +1146,8 @@
     {
       "path": "scripts/quality/evidence/complete_v4_migration_red_64b2240e.json",
       "type": "regular-file",
-      "size": 72746,
-      "sha256": "ed1cab766acc01b9a466919f909bc144f4fbc870f0b1d9932585940bec3618c9",
+      "size": 72744,
+      "sha256": "0279ac4ecae1257176415e4b1d64d0de4ebab9c047631a6f3b02aa710e804308",
       "executable": false
     },
     {
