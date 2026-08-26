@@ -1,0 +1,70 @@
+{
+  "id": "research_summary_site",
+  "description": "Build a browsable local HTML summary site from research findings and sources.",
+  "config": {
+    "tool_id": "research_summary_site",
+    "name": "Research Summary Site",
+    "summary": "Build a browsable local HTML summary site from research findings and sources.",
+    "tool_category": "research",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": false,
+    "risk": "medium",
+    "tags": [
+      "research",
+      "artifact_workspace",
+      "summary_site"
+    ],
+    "ui": {
+      "group_id": "research",
+      "group_label": "Research",
+      "group_icon": "search",
+      "item_icon": "search",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Research Summary Site",
+      "composer_description": "Create a local browsable summary page from findings and sources.",
+      "composer_icon": "search"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "output_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.research_tools:research_summary_site"
+    }
+  }
+}

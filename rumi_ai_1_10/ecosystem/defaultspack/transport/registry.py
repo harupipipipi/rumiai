@@ -1861,6 +1861,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         "POST", "/api/research/reddit-search", block_module="blocks.research.reddit_search"
     ),
     HttpRouteSpec("POST", "/api/research/report", block_module="blocks.research.report"),
+    HttpRouteSpec("POST", "/api/research/summary-site", block_module="blocks.research.summary_site"),
     HttpRouteSpec("POST", "/api/consent/check", block_module="blocks.tool.consent_check"),
     HttpRouteSpec(
         "POST",

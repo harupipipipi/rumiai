@@ -1757,6 +1757,13 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: POST
+  pattern: /api/research/summary-site
+  legacy_block_module: blocks.research.summary_site
+  replacement_function_id: research_summary_site
+  owner: research
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
   pattern: /api/consent/check
   legacy_block_module: blocks.tool.consent_check
   replacement_function_id: tool_consent_check

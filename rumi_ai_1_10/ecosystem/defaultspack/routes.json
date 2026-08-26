@@ -404,6 +404,12 @@
     },
     {
       "method": "POST",
+      "path": "/api/research/summary-site",
+      "flow_id": "transport_direct",
+      "description": "Generate a browsable local research summary site artifact"
+    },
+    {
+      "method": "POST",
       "path": "/api/tools/browser-computer",
       "flow_id": "transport_direct",
       "description": "Run browser/computer capability actions with server approval"

@@ -32,6 +32,7 @@ def run(context):
         ("POST", "/api/research/web-search", _lazy("blocks.research.web_search"), {}),
         ("POST", "/api/research/reddit-search", _lazy("blocks.research.reddit_search"), {}),
         ("POST", "/api/research/report", _lazy("blocks.research.report"), {}),
+        ("POST", "/api/research/summary-site", _lazy("blocks.research.summary_site"), {}),
     ]
 
     for method, pattern, handler, path_inject in routes:

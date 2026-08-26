@@ -3918,6 +3918,7 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     assert ("POST", "/api/research/local-search", "blocks.research.local_search") in routes
     assert ("POST", "/api/research/web-search", "blocks.research.web_search") in routes
     assert ("POST", "/api/research/reddit-search", "blocks.research.reddit_search") in routes
+    assert ("POST", "/api/research/summary-site", "blocks.research.summary_site") in routes
     assert ("POST", "/api/chat/conversations/{id}/stop", "blocks.chat.stop") in routes
     assert ("POST", "/api/tools/browser-computer", "blocks.tool.browser_computer") in routes
     assert ("GET", "/api/ai/profiles", "blocks.ai.profiles") in routes
@@ -4098,6 +4099,7 @@ def test_frontend_sidebar_api_routes_match_in_registry_mode():
         ("POST", "/api/tools/browser-computer"),
         ("POST", "/api/research/web-search"),
         ("POST", "/api/research/reddit-search"),
+        ("POST", "/api/research/summary-site"),
         ("GET", "/api/coding/context"),
         ("GET", "/api/coding/files"),
         ("GET", "/api/coding/git/branch"),

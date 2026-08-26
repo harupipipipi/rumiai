@@ -743,6 +743,7 @@ RESEARCH_MEDIA_UI_DEV_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("research_web_search", "Run web research search.", ("research",), "medium", "blocks.research.web_search"),
         ("research_reddit_search", "Run reddit research search.", ("research",), "medium", "blocks.research.reddit_search"),
         ("research_report", "Create a research report.", ("research",), "medium", "blocks.research.report"),
+        ("research_summary_site", "Create a browsable local research summary site.", ("research", "artifact"), "medium", "blocks.research.summary_site"),
         ("research_search_sources", "Search research sources.", ("research",), "low", None),
         ("research_summarize_sources", "Summarize research sources.", ("research",), "medium", None),
         ("research_build_report", "Build a research report.", ("research",), "medium", None),
