@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
+from .runtime_audit_helpers import redact_sensitive
+
 
 _BASE_DIR = Path(__file__).resolve().parents[1]
 _DEFAULTSPACK_IMPORT_ROOT = _BASE_DIR / "ecosystem" / "defaultspack"
@@ -153,15 +155,17 @@ EVENT_SCHEMA: list[dict[str, str]] = [
     {"type": "run.finished", "description": "Run lifecycle terminal state."},
 ]
 
+SUPERVISOR_CAPABILITY_FLAGS = {
+    "snapshot": True,
+    "live_screen": False,
+    "takeover": False,
+    "replay": False,
+}
+
+# Passive snapshot affordances only. Live controls need real endpoints before
+# they can be advertised by this contract.
 ACTION_BUTTONS = [
-    "pause",
-    "resume",
-    "take_over",
-    "approve_once",
-    "approve_rule",
-    "kill_session",
-    "open_live_screen",
-    "open_replay",
+    "inspect_snapshot",
     "view_diff",
     "export_artifact",
 ]
@@ -173,7 +177,7 @@ SECURITY_GUARDRAILS = [
     "clipboard_download_upload_monitored",
     "external_side_effects_require_approval",
     "sandbox_destroyed_at_session_end",
-    "replay_evidence_is_recorded",
+    "snapshot_evidence_is_recorded",
 ]
 
 STORAGE_TARGETS = {
@@ -184,6 +188,23 @@ STORAGE_TARGETS = {
     "llm_trace": "langfuse_optional",
 }
 
+EVENT_PAYLOAD_ALLOWED_KEYS = {
+    "action",
+    "agent_id",
+    "artifact_id",
+    "code",
+    "exit_code",
+    "path",
+    "reason",
+    "risk",
+    "risk_level",
+    "status",
+    "tool",
+    "tool_name",
+}
+MAX_EVENT_PAYLOAD_FIELDS = 8
+MAX_EVENT_PAYLOAD_VALUE_CHARS = 160
+
 
 def build_supervisor_dashboard_snapshot(
     *,
@@ -193,12 +214,15 @@ def build_supervisor_dashboard_snapshot(
 ) -> dict[str, Any]:
     """Return a dashboard-safe snapshot of routing, sandbox, and run state."""
 
+    capabilities = dict(SUPERVISOR_CAPABILITY_FLAGS)
     metrics, sessions, selected_session, recent_events = _runtime_metrics(
         run_store=run_store,
         stale_after_seconds=stale_after_seconds,
         event_limit=event_limit,
+        capabilities=capabilities,
     )
     return {
+        "capabilities": capabilities,
         "router": build_runtime_router_contract(),
         "sandbox_providers": [dict(provider) for provider in SANDBOX_PROVIDERS],
         "runtime_templates": [dict(template) for template in RUNTIME_TEMPLATES],
@@ -235,6 +259,7 @@ def _runtime_metrics(
     run_store: Any | None,
     stale_after_seconds: int,
     event_limit: int,
+    capabilities: dict[str, bool],
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any] | None, list[dict[str, Any]]]:
     store = run_store if run_store is not None else _default_agent_run_store()
     base_metrics: dict[str, Any] = {
@@ -245,7 +270,7 @@ def _runtime_metrics(
         "failed_runs": 0,
         "screen_sessions": 0,
         "replay_ready": 0,
-        "artifact_streams": ["screenshots", "recordings", "traces", "diffs", "logs"],
+        "artifact_streams": ["screenshots", "traces", "diffs", "logs"],
     }
     if store is None:
         return base_metrics, [], None, []
@@ -259,7 +284,10 @@ def _runtime_metrics(
         base_metrics["available"] = False
         return base_metrics, [], None, []
 
-    sessions = _session_grid(_unique_runs([*waiting_runs, *stale_runs, *active_runs, *failed_runs]))
+    sessions = _session_grid(
+        _unique_runs([*waiting_runs, *stale_runs, *active_runs, *failed_runs]),
+        capabilities=capabilities,
+    )
     selected_session = sessions[0] if sessions else None
     recent_events = _recent_events(store, sessions, limit=event_limit)
     metrics = {
@@ -268,8 +296,16 @@ def _runtime_metrics(
         "waiting_approvals": len(waiting_runs),
         "stale_runs": len(stale_runs),
         "failed_runs": len(failed_runs),
-        "screen_sessions": sum(1 for session in sessions if session.get("screen", {}).get("available")),
-        "replay_ready": sum(1 for session in sessions if session.get("replay", {}).get("available")),
+        "screen_sessions": (
+            sum(1 for session in sessions if session.get("screen", {}).get("available"))
+            if capabilities.get("live_screen")
+            else 0
+        ),
+        "replay_ready": (
+            sum(1 for session in sessions if session.get("replay", {}).get("available"))
+            if capabilities.get("replay")
+            else 0
+        ),
     }
     return metrics, sessions, selected_session, recent_events
 
@@ -320,13 +356,21 @@ def _unique_runs(runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
-def _session_grid(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _session_grid(runs: list[dict[str, Any]], *, capabilities: dict[str, bool]) -> list[dict[str, Any]]:
     sessions: list[dict[str, Any]] = []
     for run in runs[:12]:
         execution = run.get("execution_json") if isinstance(run.get("execution_json"), dict) else {}
         artifacts = execution.get("artifacts") if isinstance(execution.get("artifacts"), dict) else {}
         screen = execution.get("screen") if isinstance(execution.get("screen"), dict) else {}
         replay = execution.get("replay") if isinstance(execution.get("replay"), dict) else {}
+        live_screen_available = bool(
+            capabilities.get("live_screen")
+            and (screen.get("available") or screen.get("url") or screen.get("stream_url"))
+        )
+        replay_available = bool(
+            capabilities.get("replay")
+            and (replay.get("available") or replay.get("url") or replay.get("recording_url"))
+        )
         sessions.append(
             {
                 "run_id": run.get("run_id"),
@@ -337,14 +381,14 @@ def _session_grid(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "heartbeat_at": run.get("heartbeat_at"),
                 "risk": _runtime_risk(run),
                 "screen": {
-                    "available": bool(screen.get("available") or screen.get("url") or screen.get("screenshot_url")),
+                    "available": live_screen_available,
                     "provider": screen.get("provider") or _provider_from_runtime(run),
-                    "url": screen.get("url") or screen.get("stream_url"),
+                    "url": (screen.get("url") or screen.get("stream_url")) if live_screen_available else None,
                     "screenshot_url": screen.get("screenshot_url"),
                 },
                 "replay": {
-                    "available": bool(replay.get("available") or replay.get("url") or replay.get("recording_url")),
-                    "url": replay.get("url") or replay.get("recording_url"),
+                    "available": replay_available,
+                    "url": (replay.get("url") or replay.get("recording_url")) if replay_available else None,
                 },
                 "artifacts": {
                     "screenshots": _artifact_count(artifacts, "screenshots"),
@@ -407,7 +451,7 @@ def _recent_events(store: Any, sessions: list[dict[str, Any]], *, limit: int) ->
                     "run_id": run_id,
                     "event_type": row.get("event_type"),
                     "created_at": row.get("created_at"),
-                    "payload": row.get("payload_json") if isinstance(row.get("payload_json"), dict) else {},
+                    "payload": _dashboard_event_payload(row.get("payload_json")),
                 }
             )
     events.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
@@ -448,4 +492,41 @@ def _computer_driver_order() -> dict[str, list[str]]:
 def _truncate(value: str, max_length: int) -> str:
     if len(value) <= max_length:
         return value
-    return value[: max(0, max_length - 1)].rstrip() + "..."
+    if max_length <= 3:
+        return value[: max(0, max_length)]
+    return value[: max(0, max_length - 3)].rstrip() + "..."
+
+
+def _dashboard_event_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    redacted = redact_sensitive(payload)
+    allowed_items: list[tuple[str, Any]] = []
+    for key, value in redacted.items():
+        key_text = str(key)
+        if key_text not in EVENT_PAYLOAD_ALLOWED_KEYS:
+            continue
+        allowed_items.append((key_text, _dashboard_payload_value(value)))
+        if len(allowed_items) >= MAX_EVENT_PAYLOAD_FIELDS:
+            break
+    result = {key: value for key, value in allowed_items}
+    omitted = max(0, len(redacted) - len(result))
+    if omitted:
+        result["_omitted_fields"] = omitted
+    return result
+
+
+def _dashboard_payload_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return _truncate(value, MAX_EVENT_PAYLOAD_VALUE_CHARS)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, dict):
+        return {
+            "type": "object",
+            "field_count": len(value),
+            "keys": sorted(str(key) for key in value.keys())[:MAX_EVENT_PAYLOAD_FIELDS],
+        }
+    if isinstance(value, (list, tuple, set)):
+        return {"type": "list", "count": len(value)}
+    return _truncate(str(value), MAX_EVENT_PAYLOAD_VALUE_CHARS)
