@@ -1,62 +1,62 @@
 {
-  "_Card-D8LVVkGd.js": {
+  "_Card--hSRkT3V.js": {
     "dynamicImports": [
       "node_modules/@tauri-apps/api/core.js"
     ],
-    "file": "assets/Card-D8LVVkGd.js",
+    "file": "assets/Card--hSRkT3V.js",
     "name": "Card"
   },
-  "_InlineLoadError-knPyNN94.js": {
-    "file": "assets/InlineLoadError-knPyNN94.js",
+  "_InlineLoadError-CRGBA2nY.js": {
+    "file": "assets/InlineLoadError-CRGBA2nY.js",
     "imports": [
-      "_Card-D8LVVkGd.js",
-      "_triangle-alert-C7sYjL7P.js"
+      "_Card--hSRkT3V.js",
+      "_triangle-alert-CvOrdNbD.js"
     ],
     "name": "InlineLoadError"
   },
-  "_Input-BysftBY1.js": {
-    "file": "assets/Input-BysftBY1.js",
+  "_Input-lj0mK8OB.js": {
+    "file": "assets/Input-lj0mK8OB.js",
     "imports": [
-      "_Card-D8LVVkGd.js"
+      "_Card--hSRkT3V.js"
     ],
     "name": "Input"
   },
-  "_arrow-right-sJqXNJG3.js": {
-    "file": "assets/arrow-right-sJqXNJG3.js",
+  "_arrow-right-CuHeJNvs.js": {
+    "file": "assets/arrow-right-CuHeJNvs.js",
     "imports": [
-      "_Card-D8LVVkGd.js"
+      "_Card--hSRkT3V.js"
     ],
     "name": "arrow-right"
   },
-  "_check-DMkqTUC4.js": {
-    "file": "assets/check-DMkqTUC4.js",
+  "_check-BqEWTTCz.js": {
+    "file": "assets/check-BqEWTTCz.js",
     "imports": [
-      "_Card-D8LVVkGd.js"
+      "_Card--hSRkT3V.js"
     ],
     "name": "check"
   },
-  "_triangle-alert-C7sYjL7P.js": {
-    "file": "assets/triangle-alert-C7sYjL7P.js",
+  "_triangle-alert-CvOrdNbD.js": {
+    "file": "assets/triangle-alert-CvOrdNbD.js",
     "imports": [
-      "_Card-D8LVVkGd.js"
+      "_Card--hSRkT3V.js"
     ],
     "name": "triangle-alert"
   },
-  "_useRuntimeOperationInvocation-CkVi3Y3-.js": {
-    "file": "assets/useRuntimeOperationInvocation-CkVi3Y3-.js",
+  "_useRuntimeOperationInvocation-nkFTb9EC.js": {
+    "file": "assets/useRuntimeOperationInvocation-nkFTb9EC.js",
     "imports": [
-      "_Card-D8LVVkGd.js",
-      "_useRuntimeSurface-CwtUfhsr.js",
-      "_Input-BysftBY1.js"
+      "_Card--hSRkT3V.js",
+      "_useRuntimeSurface-C0lxZjjb.js",
+      "_Input-lj0mK8OB.js"
     ],
     "name": "useRuntimeOperationInvocation"
   },
-  "_useRuntimeSurface-CwtUfhsr.js": {
-    "file": "assets/useRuntimeSurface-CwtUfhsr.js",
+  "_useRuntimeSurface-C0lxZjjb.js": {
+    "file": "assets/useRuntimeSurface-C0lxZjjb.js",
     "imports": [
-      "_Card-D8LVVkGd.js",
+      "_Card--hSRkT3V.js",
       "index.html",
-      "_triangle-alert-C7sYjL7P.js"
+      "_triangle-alert-CvOrdNbD.js"
     ],
     "name": "useRuntimeSurface"
   },
@@ -77,9 +77,9 @@
       "src/pages/ApiMap.tsx",
       "src/pages/NodeManager.tsx"
     ],
-    "file": "assets/index-4D4GRh5g.js",
+    "file": "assets/index-Cu4fxll6.js",
     "imports": [
-      "_Card-D8LVVkGd.js"
+      "_Card--hSRkT3V.js"
     ],
     "isEntry": true,
     "name": "index",
@@ -92,130 +92,130 @@
     "src": "node_modules/@tauri-apps/api/core.js"
   },
   "src/pages/AiInput.tsx": {
-    "file": "assets/AiInput--nV5F3-4.js",
+    "file": "assets/AiInput-CfvePujc.js",
     "imports": [
-      "_Card-D8LVVkGd.js",
+      "_Card--hSRkT3V.js",
       "index.html",
-      "_useRuntimeSurface-CwtUfhsr.js",
-      "_useRuntimeOperationInvocation-CkVi3Y3-.js"
+      "_useRuntimeSurface-C0lxZjjb.js",
+      "_useRuntimeOperationInvocation-nkFTb9EC.js"
     ],
     "isDynamicEntry": true,
     "name": "AiInput",
     "src": "src/pages/AiInput.tsx"
   },
   "src/pages/ApiMap.tsx": {
-    "file": "assets/ApiMap-oUSKmv-u.js",
+    "file": "assets/ApiMap-h704B6AI.js",
     "imports": [
-      "_Card-D8LVVkGd.js",
+      "_Card--hSRkT3V.js",
       "index.html",
-      "_useRuntimeSurface-CwtUfhsr.js"
+      "_useRuntimeSurface-C0lxZjjb.js"
     ],
     "isDynamicEntry": true,
     "name": "ApiMap",
     "src": "src/pages/ApiMap.tsx"
   },
   "src/pages/Flow.tsx": {
-    "file": "assets/Flow-DgRQgGYl.js",
+    "file": "assets/Flow-DUKxiVcE.js",
     "imports": [
-      "_Card-D8LVVkGd.js",
+      "_Card--hSRkT3V.js",
       "index.html",
-      "_useRuntimeSurface-CwtUfhsr.js",
-      "_useRuntimeOperationInvocation-CkVi3Y3-.js"
+      "_useRuntimeSurface-C0lxZjjb.js",
+      "_useRuntimeOperationInvocation-nkFTb9EC.js"
     ],
     "isDynamicEntry": true,
     "name": "Flow",
     "src": "src/pages/Flow.tsx"
   },
   "src/pages/Graph.tsx": {
-    "file": "assets/Graph-Cwn5Ma7V.js",
+    "file": "assets/Graph-DF4D2rkU.js",
     "imports": [
-      "_Card-D8LVVkGd.js",
+      "_Card--hSRkT3V.js",
       "index.html",
-      "_arrow-right-sJqXNJG3.js",
-      "_useRuntimeSurface-CwtUfhsr.js"
+      "_arrow-right-CuHeJNvs.js",
+      "_useRuntimeSurface-C0lxZjjb.js"
     ],
     "isDynamicEntry": true,
     "name": "Graph",
     "src": "src/pages/Graph.tsx"
   },
   "src/pages/NodeManager.tsx": {
-    "file": "assets/NodeManager-Bq8Aj8qW.js",
+    "file": "assets/NodeManager-CgrZgebR.js",
     "imports": [
-      "_Card-D8LVVkGd.js",
+      "_Card--hSRkT3V.js",
       "index.html",
-      "_useRuntimeSurface-CwtUfhsr.js"
+      "_useRuntimeSurface-C0lxZjjb.js"
     ],
     "isDynamicEntry": true,
     "name": "NodeManager",
     "src": "src/pages/NodeManager.tsx"
   },
   "src/pages/PackDetail.tsx": {
-    "file": "assets/PackDetail-CB4Vvgwh.js",
+    "file": "assets/PackDetail-Zr_Ndnc9.js",
     "imports": [
-      "_Card-D8LVVkGd.js",
+      "_Card--hSRkT3V.js",
       "index.html",
-      "_InlineLoadError-knPyNN94.js",
-      "_Input-BysftBY1.js"
+      "_InlineLoadError-CRGBA2nY.js",
+      "_Input-lj0mK8OB.js"
     ],
     "isDynamicEntry": true,
     "name": "PackDetail",
     "src": "src/pages/PackDetail.tsx"
   },
   "src/pages/Packs.tsx": {
-    "file": "assets/Packs-C9Kbu_L8.js",
+    "file": "assets/Packs-D6-b359Y.js",
     "imports": [
-      "_Card-D8LVVkGd.js",
+      "_Card--hSRkT3V.js",
       "index.html",
-      "_triangle-alert-C7sYjL7P.js",
-      "_InlineLoadError-knPyNN94.js",
-      "_Input-BysftBY1.js"
+      "_triangle-alert-CvOrdNbD.js",
+      "_InlineLoadError-CRGBA2nY.js",
+      "_Input-lj0mK8OB.js"
     ],
     "isDynamicEntry": true,
     "name": "Packs",
     "src": "src/pages/Packs.tsx"
   },
   "src/pages/Profile.tsx": {
-    "file": "assets/Profile-DwEAwmur.js",
+    "file": "assets/Profile-Df7lv3ld.js",
     "imports": [
-      "_Card-D8LVVkGd.js",
+      "_Card--hSRkT3V.js",
       "index.html",
-      "_arrow-right-sJqXNJG3.js",
-      "_check-DMkqTUC4.js",
-      "_useRuntimeSurface-CwtUfhsr.js",
-      "_triangle-alert-C7sYjL7P.js",
-      "_Input-BysftBY1.js"
+      "_arrow-right-CuHeJNvs.js",
+      "_check-BqEWTTCz.js",
+      "_useRuntimeSurface-C0lxZjjb.js",
+      "_triangle-alert-CvOrdNbD.js",
+      "_Input-lj0mK8OB.js"
     ],
     "isDynamicEntry": true,
     "name": "Profile",
     "src": "src/pages/Profile.tsx"
   },
   "src/pages/ProfileFiles.tsx": {
-    "file": "assets/ProfileFiles-tBh82kgN.js",
+    "file": "assets/ProfileFiles-CMjiAzvO.js",
     "imports": [
-      "_Card-D8LVVkGd.js",
-      "_useRuntimeSurface-CwtUfhsr.js"
+      "_Card--hSRkT3V.js",
+      "_useRuntimeSurface-C0lxZjjb.js"
     ],
     "isDynamicEntry": true,
     "name": "ProfileFiles",
     "src": "src/pages/ProfileFiles.tsx"
   },
   "src/pages/ProfileWiring.tsx": {
-    "file": "assets/ProfileWiring-dbTxrDrz.js",
+    "file": "assets/ProfileWiring-Bz2qqUea.js",
     "imports": [
-      "_Card-D8LVVkGd.js",
+      "_Card--hSRkT3V.js",
       "index.html",
-      "_useRuntimeSurface-CwtUfhsr.js"
+      "_useRuntimeSurface-C0lxZjjb.js"
     ],
     "isDynamicEntry": true,
     "name": "ProfileWiring",
     "src": "src/pages/ProfileWiring.tsx"
   },
   "src/pages/Settings.tsx": {
-    "file": "assets/Settings-BrnndFBR.js",
+    "file": "assets/Settings-CWpnX5m1.js",
     "imports": [
-      "_Card-D8LVVkGd.js",
-      "_check-DMkqTUC4.js",
-      "_useRuntimeSurface-CwtUfhsr.js"
+      "_Card--hSRkT3V.js",
+      "_check-BqEWTTCz.js",
+      "_useRuntimeSurface-C0lxZjjb.js"
     ],
     "isDynamicEntry": true,
     "name": "Settings",

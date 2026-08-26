@@ -121,6 +121,7 @@ export interface ApiPackVMProvisioningPlan {
   backend_id: string;
   instance: string;
   launcher_reason: string | null;
+  runtime_path_status: 'ready' | 'unsafe';
   architecture: string;
   image_source: string;
   image_digest: string;

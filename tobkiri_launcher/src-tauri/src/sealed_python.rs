@@ -850,6 +850,7 @@ where
     let attestation_path = prepare_attestation_path(config, &nonce)?;
     let interpreter = fixed_interpreter(&verified.root);
     let mut command = process_utils::isolated_python(&interpreter);
+    let packvm_bundle = packaged_packvm_bundle_binding(config)?;
     append_launch_wire(
         &mut command,
         role,
@@ -859,6 +860,7 @@ where
         &verified.root,
         &verified.runtime_overlay.sha256,
         &verified.runtime_overlay.authority.outer_manifest_sha256,
+        packvm_bundle.as_ref(),
         role_arguments,
     )?;
     {
@@ -933,6 +935,7 @@ fn append_launch_wire(
     environment_root: &Path,
     runtime_overlay_sha256: &str,
     outer_runtime_manifest_sha256: &str,
+    packvm_bundle: Option<&PackVMBundleBinding>,
     role_arguments: RoleArguments,
 ) -> Result<()> {
     if role != PythonRole::Defaultspack && !role_arguments.0.is_empty() {
@@ -947,10 +950,89 @@ fn append_launch_wire(
             environment_root.as_os_str(),
             runtime_overlay_sha256,
             outer_runtime_manifest_sha256,
+            packvm_bundle
+                .map(|binding| binding.root.as_os_str())
+                .unwrap_or_else(|| OsStr::new("")),
+            packvm_bundle
+                .map(|binding| binding.provisioning_sha256.as_str())
+                .unwrap_or(""),
+            packvm_bundle
+                .map(|binding| binding.helper_manifest_sha256.as_str())
+                .unwrap_or(""),
+            packvm_bundle
+                .map(|binding| binding.helper_team_id.as_str())
+                .unwrap_or(""),
         ))
         .arg(protocol::ARG_SEPARATOR)
         .args(role_arguments.0);
     Ok(())
+}
+
+#[derive(Debug)]
+struct PackVMBundleBinding {
+    root: PathBuf,
+    provisioning_sha256: String,
+    helper_manifest_sha256: String,
+    helper_team_id: String,
+}
+
+fn packaged_packvm_bundle_binding(config: &AppConfig) -> Result<Option<PackVMBundleBinding>> {
+    let binding = packaged_packvm_bundle_binding_from_app_dir(&config.app_dir)?;
+    #[cfg(target_os = "macos")]
+    if let Some(binding) = binding.as_ref() {
+        verify_macos_static_code(&binding.root)
+            .context("packaged application binding failed final static-code validation")?;
+    }
+    Ok(binding)
+}
+
+fn packaged_packvm_bundle_binding_from_app_dir(
+    configured_app_dir: &Path,
+) -> Result<Option<PackVMBundleBinding>> {
+    let app_dir = configured_app_dir
+        .canonicalize()
+        .context("packaged application resource root is unavailable")?;
+    let Some(resources) = app_dir.parent() else {
+        return Ok(None);
+    };
+    let Some(contents) = resources.parent() else {
+        return Ok(None);
+    };
+    let Some(bundle) = contents.parent() else {
+        return Ok(None);
+    };
+    if app_dir.file_name() != Some(OsStr::new("app"))
+        || resources.file_name() != Some(OsStr::new("Resources"))
+        || contents.file_name() != Some(OsStr::new("Contents"))
+        || bundle.extension() != Some(OsStr::new("app"))
+    {
+        return Ok(None);
+    }
+    let resources = bundle.join("Contents/Resources");
+    let provisioning = read_bounded_regular(
+        &resources.join("packvm-vz-provisioning.v1.json"),
+        2 * 1024 * 1024,
+    )
+    .context("packaged PackVM provisioning manifest is unavailable")?;
+    let helper_manifest = read_bounded_regular(
+        &resources.join("packvm-vz-helper.manifest.v1.json"),
+        256 * 1024,
+    )
+    .context("packaged PackVM helper manifest is unavailable")?;
+    let policy = option_env!("TOBKIRI_MACOS_ARTIFACT_POLICY").unwrap_or("production-v1");
+    let helper_team_id = if policy == "production-v1" {
+        option_env!("TOBKIRI_MACOS_ARTIFACT_IDENTITY")
+            .unwrap_or_default()
+            .to_owned()
+    } else {
+        String::new()
+    };
+    Ok(Some(PackVMBundleBinding {
+        root: bundle.to_path_buf(),
+        provisioning_sha256: sha256_bytes(&provisioning),
+        helper_manifest_sha256: sha256_bytes(&helper_manifest),
+        helper_team_id,
+    }))
 }
 
 impl VerifiedEnvironment {
@@ -2564,17 +2646,32 @@ fn validate_relative_path(value: &str) -> Result<()> {
 }
 
 fn read_bounded_regular(path: &Path, limit: u64) -> Result<Vec<u8>> {
-    let file = open_regular(path)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > limit || has_multiple_links(path, &metadata)? {
+    let before = fs::symlink_metadata(path)?;
+    if before.file_type().is_symlink()
+        || !before.is_file()
+        || before.len() > limit
+        || has_multiple_links(path, &before)?
+    {
         bail!(
             "refusing unsafe or oversized sealed file {}",
             path.display()
         );
     }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.take(limit.saturating_add(1)).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != metadata.len() {
+    let mut file = open_regular(path)?;
+    let opened = file.metadata()?;
+    if !same_attestation_identity(&before, &opened) {
+        bail!("sealed file changed while opened {}", path.display());
+    }
+    let mut bytes = Vec::with_capacity(opened.len() as usize);
+    (&mut file)
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    let after_handle = file.metadata()?;
+    let after_path = fs::symlink_metadata(path)?;
+    if bytes.len() as u64 != opened.len()
+        || !same_attestation_identity(&opened, &after_handle)
+        || !same_attestation_identity(&opened, &after_path)
+    {
         bail!("sealed file changed while reading {}", path.display());
     }
     Ok(bytes)
@@ -3558,6 +3655,58 @@ mod tests {
     }
 
     #[test]
+    fn packaged_packvm_binding_is_derived_from_exact_outer_bundle_bytes() {
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-packvm-bundle-binding-{}-{}",
+            std::process::id(),
+            random_nonce()
+        ));
+        let app_dir = root.join("Tobkiri Launcher.app/Contents/Resources/app");
+        fs::create_dir_all(&app_dir).unwrap();
+        let resources = app_dir.parent().unwrap();
+        let provisioning = br#"{"schema":"io.tobkiri.packvm-vz-provisioning.v1"}"#;
+        let helper = br#"{"schema":"io.tobkiri.packvm-vz-helper-manifest.v1"}"#;
+        fs::write(
+            resources.join("packvm-vz-provisioning.v1.json"),
+            provisioning,
+        )
+        .unwrap();
+        fs::write(resources.join("packvm-vz-helper.manifest.v1.json"), helper).unwrap();
+
+        let binding = packaged_packvm_bundle_binding_from_app_dir(&app_dir)
+            .unwrap()
+            .unwrap();
+        assert_eq!(binding.root, root.join("Tobkiri Launcher.app"));
+        assert_eq!(binding.provisioning_sha256, sha256_bytes(provisioning));
+        assert_eq!(binding.helper_manifest_sha256, sha256_bytes(helper));
+
+        fs::write(
+            resources.join("packvm-vz-provisioning.v1.json"),
+            b"substituted",
+        )
+        .unwrap();
+        let substituted = packaged_packvm_bundle_binding_from_app_dir(&app_dir)
+            .unwrap()
+            .unwrap();
+        assert_ne!(substituted.provisioning_sha256, binding.provisioning_sha256);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn non_bundle_runtime_has_no_packvm_binding() {
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-packvm-unbundled-{}-{}",
+            std::process::id(),
+            random_nonce()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        assert!(packaged_packvm_bundle_binding_from_app_dir(&root)
+            .unwrap()
+            .is_none());
+        fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
     fn all_roles_use_one_wire_and_only_defaultspack_receives_role_arguments() {
         let mut command = Command::new("python");
         append_launch_wire(
@@ -3569,6 +3718,7 @@ mod tests {
             Path::new("environment"),
             &digest('a'),
             &digest('b'),
+            None,
             RoleArguments::defaultspack([OsString::from("--port=8766")]).unwrap(),
         )
         .unwrap();
@@ -3591,6 +3741,7 @@ mod tests {
             Path::new("environment"),
             &digest('a'),
             &digest('b'),
+            None,
             RoleArguments(vec![OsString::from("unexpected")]),
         )
         .is_err());

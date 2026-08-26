@@ -39,7 +39,12 @@ import time
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Protocol, TypedDict
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    NoEncryption,
+    PrivateFormat,
+    PublicFormat,
+)
 
 from core_runtime.hmac_key_manager import generate_or_load_signing_key
 from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
@@ -86,9 +91,7 @@ _DIRECT_IMAGE_URL = (
     "https://gemmei.ftp.acc.umu.se/images/cloud/trixie/20260819-2575/"
     "debian-13-generic-arm64-20260819-2575.raw"
 )
-_DIRECT_IMAGE_SHA256 = (
-    "sha256:9440bc19285b9e0ccb217fd5ac818a253a3c0bfd46c9ac83241959c78f90ad71"
-)
+_DIRECT_IMAGE_SHA256 = "sha256:9440bc19285b9e0ccb217fd5ac818a253a3c0bfd46c9ac83241959c78f90ad71"
 _DIRECT_IMAGE_SHA512 = (
     "f21843e29eade9747b1b7bb7d9622c30613eb3d875fbb6a7f9bd76acaadfdbfe"
     "0ef68137da4eb7520e440a6cd3bbb248db41aa322f58d11e71fea667eb569a2c"
@@ -103,9 +106,7 @@ class MacOSVZTransportFactory(Protocol):
     status bit, or an adapter that fabricates those values, is never enough.
     """
 
-    def __call__(
-        self, allocation: MacOSVZDomainAllocation
-    ) -> MacOSVZSupervisorTransport | None:
+    def __call__(self, allocation: MacOSVZDomainAllocation) -> MacOSVZSupervisorTransport | None:
         """Return the one live helper transport for an exact allocation."""
 
 
@@ -116,6 +117,23 @@ class _ImageDescriptorFacts(TypedDict):
     size_bytes: int
     sha256: str
     sha512: str
+
+
+@dataclass(frozen=True)
+class _AuthenticatedPackVMBundleBinding:
+    """Launcher-attested immutable resource identities for a packaged app.
+
+    This is deliberately a private, normalized copy of the sealed launch
+    binding.  The runtime-facing object is supplied by
+    ``core_runtime.packaged_application_bundle``; retaining only its exact
+    values here prevents a mutable resource manifest from becoming the source
+    of helper identity or Team-ID expectations.
+    """
+
+    root: Path
+    provisioning_sha256: str
+    helper_manifest_sha256: str
+    helper_team_id: str
 
 
 @dataclass(frozen=True)
@@ -275,8 +293,7 @@ class _MacOSVZHelperProcess:
             if (
                 self._domain_id is None
                 or envelope.get("domain_id") != self._domain_id
-                or envelope.get("launch_binding_digest")
-                != self._launch_binding_digest
+                or envelope.get("launch_binding_digest") != self._launch_binding_digest
             ):
                 raise ValueError("PackVM VZ helper transport binding is invalid")
             return self._exchange_line(dict(envelope))
@@ -300,9 +317,7 @@ class _MacOSVZHelperProcess:
                     pass
             self._key[:] = b"\0" * len(self._key)
 
-    def _legacy_request(
-        self, operation: str, extra: Mapping[str, object]
-    ) -> Mapping[str, object]:
+    def _legacy_request(self, operation: str, extra: Mapping[str, object]) -> Mapping[str, object]:
         """Use the helper's prelaunch HMAC envelope on the retained process."""
 
         request_id = "efi-" + secrets.token_hex(16)
@@ -371,26 +386,74 @@ class MacOSVZProvisioner:
         state_dir: Path | None = None,
         bundle_root: Path | None = None,
         asset_manifest_path: Path | None = None,
+        bundle_binding: object | None = None,
         image_cache: PackVMImageCache | None = None,
         disk_usage: Callable[[Path], Any] | None = None,
         platform_system: str | None = None,
         machine: str | None = None,
         transport_factory: MacOSVZTransportFactory | None = None,
-        helper_identity_verifier: Callable[[MacOSVZAssetManifest], tuple[bool, str | None]] | None = None,
+        helper_identity_verifier: Callable[[MacOSVZAssetManifest], tuple[bool, str | None]]
+        | None = None,
         clone_file: Callable[[Path, Path], None] | None = None,
         efi_store_preparer: Callable[[Path, str, Path, bytes], Mapping[str, object]] | None = None,
     ) -> None:
         requested_state_dir = state_dir or _default_state_dir()
         self._requested_state_dir = Path(requested_state_dir)
         self._state_dir = self._requested_state_dir.resolve()
-        self._bundle_root = (
-            Path(bundle_root).resolve() if bundle_root is not None else _discover_bundle_root()
+        self._bundle_root: Path | None
+        self._asset_manifest_path: Path | None
+        self._bundle_binding_error: str | None = None
+        explicit_bundle_inputs = (
+            bundle_root is not None or asset_manifest_path is not None or bundle_binding is not None
         )
-        self._asset_manifest_path = (
-            Path(asset_manifest_path).resolve()
-            if asset_manifest_path is not None
-            else _default_assets_manifest_path(self._bundle_root)
-        )
+        binding_value = bundle_binding
+        if not explicit_bundle_inputs:
+            try:
+                binding_value = _packaged_packvm_bundle_binding()
+            except Exception:
+                self._bundle_binding_error = "packaged macOS VZ bundle binding is unavailable"
+        try:
+            self._bundle_binding = (
+                None if binding_value is None else _normalise_packvm_bundle_binding(binding_value)
+            )
+        except ValueError:
+            self._bundle_binding = None
+            self._bundle_binding_error = "packaged macOS VZ bundle binding is invalid"
+        if not explicit_bundle_inputs and self._bundle_binding is None:
+            self._bundle_binding_error = (
+                self._bundle_binding_error or "packaged macOS VZ bundle binding is unavailable"
+            )
+        if self._bundle_binding is not None:
+            bound_root = self._bundle_binding.root
+            bound_manifest = _default_assets_manifest_path(bound_root)
+            if bound_manifest is None:
+                self._bundle_binding_error = "packaged macOS VZ bundle binding is invalid"
+            elif (
+                asset_manifest_path is not None
+                and Path(asset_manifest_path).resolve() != bound_manifest
+            ):
+                self._bundle_binding_error = (
+                    "packaged macOS VZ bundle binding does not match manifest path"
+                )
+            elif bundle_root is not None and Path(bundle_root).resolve() != bound_root:
+                self._bundle_binding_error = (
+                    "packaged macOS VZ bundle binding does not match bundle root"
+                )
+            self._bundle_root = bound_root
+            self._asset_manifest_path = bound_manifest
+        else:
+            self._bundle_root = (
+                Path(bundle_root).resolve() if bundle_root is not None else _discover_bundle_root()
+            )
+            self._asset_manifest_path = (
+                Path(asset_manifest_path).resolve()
+                if asset_manifest_path is not None
+                else (
+                    None
+                    if not explicit_bundle_inputs
+                    else _default_assets_manifest_path(self._bundle_root)
+                )
+            )
         self._platform_system = (platform_system or host_platform.system()).casefold()
         self._machine = _normalise_machine(machine or host_platform.machine())
         self._disk_usage = disk_usage or shutil.disk_usage
@@ -618,9 +681,7 @@ class MacOSVZProvisioner:
         with self._image_cache.provisioning_image(
             authority, progress=progress, cancelled=cancelled
         ) as image:
-            with self.operation_gate(
-                "provision", binding, preserve_claim_on_error=True
-            ):
+            with self.operation_gate("provision", binding, preserve_claim_on_error=True):
                 return self._provision_verified_image(request, plan, manifest, image, cancelled)
 
     def doctor(self) -> PackVMDoctor:
@@ -656,9 +717,7 @@ class MacOSVZProvisioner:
                 attestation_digest=str(state["attestation_digest"]),
             )
         except (OSError, ValueError) as exc:
-            return PackVMDoctor(
-                False, PACKVM_BACKEND_ID, VZ_PLATFORM, VZ_INSTANCE, reason=str(exc)
-            )
+            return PackVMDoctor(False, PACKVM_BACKEND_ID, VZ_PLATFORM, VZ_INSTANCE, reason=str(exc))
 
     def readiness_snapshot(self) -> dict[str, Any]:
         """Project authenticated readiness without revealing private host paths."""
@@ -725,9 +784,7 @@ class MacOSVZProvisioner:
                 ),
                 domain_allocator=self,
                 instance_root=instance_root,
-                transport_factory=(
-                    self._transport_factory or self._transport_for_allocation
-                ),
+                transport_factory=(self._transport_factory or self._transport_for_allocation),
                 protocol_ready=True,
                 reason=None,
             )
@@ -774,9 +831,7 @@ class MacOSVZProvisioner:
         state = self._load_state()
         manifest = self._require_manifest()
         self._verify_state_bindings(state, manifest)
-        allocation_name = _digest_text(
-            f"{domain_id}\0{reservation_id}\0{lease_id}"
-        )[7:]
+        allocation_name = _digest_text(f"{domain_id}\0{reservation_id}\0{lease_id}")[7:]
         root = self._state_dir / "domains" / allocation_name
         binding = {
             "domain_digest": _digest_text(domain_id),
@@ -805,9 +860,7 @@ class MacOSVZProvisioner:
                         raise ValueError(
                             "PackVM VZ allocation requires a private per-domain channel key"
                         )
-                    helper_process = _MacOSVZHelperProcess(
-                        manifest.helper_path, root, channel_key
-                    )
+                    helper_process = _MacOSVZHelperProcess(manifest.helper_path, root, channel_key)
                 self._prepare_efi_store(
                     root,
                     domain_id,
@@ -861,9 +914,7 @@ class MacOSVZProvisioner:
             agent_seed_digest=seed_facts["agent_seed_digest"],
             config_seed_path=seed_facts["config_seed_path"],
             config_seed_digest=seed_facts["config_seed_digest"],
-            guest_public_key=_decode_domain_public_key(
-                seed_facts["guest_public_key_b64"]
-            ),
+            guest_public_key=_decode_domain_public_key(seed_facts["guest_public_key_b64"]),
         )
 
     def release(self, allocation: MacOSVZDomainAllocation) -> None:
@@ -904,9 +955,10 @@ class MacOSVZProvisioner:
                     supplied = base64.urlsafe_b64encode(raw_key).decode("ascii").rstrip("=")
             if supplied is not None and record.get(key) != supplied:
                 raise ValueError("PackVM VZ allocation dynamic binding changed")
-        if Path(str(values["cow_disk_path"])).parent != root or Path(
-            str(values["efi_store_path"])
-        ).parent != root:
+        if (
+            Path(str(values["cow_disk_path"])).parent != root
+            or Path(str(values["efi_store_path"])).parent != root
+        ):
             raise ValueError("PackVM VZ allocation resource is outside the managed root")
         with self.operation_gate(
             "release",
@@ -978,9 +1030,7 @@ class MacOSVZProvisioner:
         cow_digest = _file_digest(cow_path)
         efi_digest = _file_digest(efi_path)
         private_key = Ed25519PrivateKey.generate()
-        private_pem = private_key.private_bytes(
-            Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()
-        )
+        private_pem = private_key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption())
         public_key = private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
         public_key_b64 = base64.urlsafe_b64encode(public_key).decode("ascii").rstrip("=")
         public_key_digest = _digest_bytes(public_key)
@@ -1015,9 +1065,9 @@ class MacOSVZProvisioner:
             "cidata",
             {
                 "user-data": cloud_template,
-                "meta-data": (
-                    f"instance-id: {domain_id}\nlocal-hostname: tobkiri-packvm\n"
-                ).encode("utf-8"),
+                "meta-data": (f"instance-id: {domain_id}\nlocal-hostname: tobkiri-packvm\n").encode(
+                    "utf-8"
+                ),
                 "network-config": b"version: 2\nethernets: {}\n",
                 "agent-ed25519.pem": private_pem,
                 "agent-config.json": _canonical_bytes(agent_config),
@@ -1127,9 +1177,7 @@ class MacOSVZProvisioner:
         try:
             domains_root.rmdir()
         except OSError as exc:
-            raise ValueError(
-                "PackVM VZ has active or residual domain allocations"
-            ) from exc
+            raise ValueError("PackVM VZ has active or residual domain allocations") from exc
 
     def cleanup(self, confirmation: str) -> None:
         """Delete exactly the authenticated private VZ instance and verify zero residue."""
@@ -1138,7 +1186,9 @@ class MacOSVZProvisioner:
         if not hmac.compare_digest(confirmation, expected):
             raise ValueError(f"PackVM cleanup requires exact confirmation: {expected}")
         state = self._load_state()
-        with self.operation_gate("cleanup", {"attestation_digest": str(state["attestation_digest"])}):
+        with self.operation_gate(
+            "cleanup", {"attestation_digest": str(state["attestation_digest"])}
+        ):
             self._verify_state_bindings(state, self._require_manifest())
             self._remove_empty_domains_root()
             self._remove_exact_instance(Path(str(state["instance_root"])), state)
@@ -1166,9 +1216,7 @@ class MacOSVZProvisioner:
             self._audit("failed_provision_deleted", None)
         return {"missing": False}
 
-    def recover_provision_operation(
-        self, expected_proof: Mapping[str, Any]
-    ) -> PackVMDoctor:
+    def recover_provision_operation(self, expected_proof: Mapping[str, Any]) -> PackVMDoctor:
         """Reconcile a restart only when the exact state proof still verifies."""
 
         state = self._load_state()
@@ -1191,7 +1239,9 @@ class MacOSVZProvisioner:
         if self.state_path.exists():
             raise ValueError("PackVM VZ is already provisioned; use explicit cleanup")
         if cancelled is not None and cancelled():
-            raise PackVMImageCancelled("packvm_image_cancelled", "PackVM VZ provisioning was cancelled")
+            raise PackVMImageCancelled(
+                "packvm_image_cancelled", "PackVM VZ provisioning was cancelled"
+            )
         self._ensure_state_root()
         root = self._state_dir / "instances" / VZ_INSTANCE
         recovery = self._recovery_record(request, plan, manifest, root)
@@ -1250,9 +1300,10 @@ class MacOSVZProvisioner:
             source = verified.path
             if _file_digest(source) != manifest.image_digest:
                 raise ValueError("PackVM VZ verified raw EFI image digest changed")
-            if manifest.image_sha512 is not None and _file_digest_algorithm(
-                source, "sha512"
-            ) != manifest.image_sha512:
+            if (
+                manifest.image_sha512 is not None
+                and _file_digest_algorithm(source, "sha512") != manifest.image_sha512
+            ):
                 raise ValueError("PackVM VZ verified raw EFI image SHA-512 changed")
             # The cache owns the immutable base.  The per-instance metadata only
             # records a digest/path and never copies a 3 GiB base image.
@@ -1263,7 +1314,9 @@ class MacOSVZProvisioner:
             }
             _atomic_private_json(root / "base-image.json", base_reference)
             if cancelled is not None and cancelled():
-                raise PackVMImageCancelled("packvm_image_cancelled", "PackVM VZ provisioning was cancelled")
+                raise PackVMImageCancelled(
+                    "packvm_image_cancelled", "PackVM VZ provisioning was cancelled"
+                )
             self._verify_instance_files(root, manifest)
         except Exception:
             # Do not erase a potentially partially-created root here: the
@@ -1296,9 +1349,12 @@ class MacOSVZProvisioner:
     def _require_manifest(self) -> MacOSVZAssetManifest:
         if self._platform_system != "darwin" or self._machine != "arm64":
             raise ValueError("direct PackVM VZ production requires macOS on Apple Silicon")
+        if self._bundle_binding_error is not None:
+            raise ValueError(self._bundle_binding_error)
         path = self._asset_manifest_path
         if path is None:
             raise ValueError("packaged macOS VZ asset manifest is unavailable")
+        self._verify_authenticated_bundle_binding(path)
         raw = _read_private_or_bundle_file(path, _MAX_MANIFEST_BYTES)
         try:
             payload = json.loads(raw)
@@ -1313,6 +1369,31 @@ class MacOSVZProvisioner:
         if not verified:
             raise ValueError(reason or "macOS VZ native helper identity verification failed")
         return manifest
+
+    def _verify_authenticated_bundle_binding(self, manifest_path: Path) -> None:
+        """Re-read and match launcher-attested PackVM resource identities.
+
+        The signed Launcher supplies this binding only over the sealed launch
+        wire.  It is never reconstructed from an ambient path or the mutable
+        resource manifests.  We nevertheless hash both manifest files for
+        every readiness path, so replacing either after Python starts fails
+        closed before helper metadata is consumed.
+        """
+
+        binding = self._bundle_binding
+        if binding is None:
+            return
+        resource_root = binding.root / "Contents" / "Resources"
+        expected_manifest = resource_root / "packvm-vz-provisioning.v1.json"
+        expected_helper_manifest = resource_root / "packvm-vz-helper.manifest.v1.json"
+        if (
+            manifest_path != expected_manifest
+            or not _safe_relative_file(binding.root, expected_manifest)
+            or not _safe_relative_file(binding.root, expected_helper_manifest)
+            or _file_digest(expected_manifest) != binding.provisioning_sha256
+            or _file_digest(expected_helper_manifest) != binding.helper_manifest_sha256
+        ):
+            raise ValueError("packaged macOS VZ bundle binding changed")
 
     def _parse_provisioning_manifest(
         self, manifest_path: Path, payload: Mapping[str, Any]
@@ -1351,7 +1432,10 @@ class MacOSVZProvisioner:
             if not relative.startswith("packvm-vz-provisioning/"):
                 raise ValueError("packaged macOS VZ provisioning input path is unsafe")
             candidate = resource_root / relative
-            if not _safe_relative_file(resource_root, candidate) or _file_digest(candidate) != entry["sha256"]:
+            if (
+                not _safe_relative_file(resource_root, candidate)
+                or _file_digest(candidate) != entry["sha256"]
+            ):
                 raise ValueError("packaged macOS VZ provisioning input changed")
             inputs[str(entry["name"])] = candidate
         if set(inputs) != expected_names:
@@ -1376,7 +1460,7 @@ class MacOSVZProvisioner:
             expected_digest=_input_digest(payload["inputs"], "guest_service_template"),
             guest_runner_digest=_input_digest(payload["inputs"], "guest_runner"),
         )
-        bundle = self._parse_bundle_helper_manifest(resource_root)
+        bundle = self._parse_bundle_helper_manifest(resource_root, manifest_path)
         helper_path = bundle["helper_path"]
         helper_digest = bundle["helper_digest"]
         if not isinstance(helper_path, Path) or not isinstance(helper_digest, str):
@@ -1394,9 +1478,7 @@ class MacOSVZProvisioner:
             bubblewrap_path=inputs["bubblewrap_package"],
             bubblewrap_digest=bubblewrap_digest,
             bubblewrap_descriptor_path=inputs["bubblewrap_descriptor"],
-            bubblewrap_descriptor_digest=_input_digest(
-                payload["inputs"], "bubblewrap_descriptor"
-            ),
+            bubblewrap_descriptor_digest=_input_digest(payload["inputs"], "bubblewrap_descriptor"),
             config_path=inputs["cloud_init_template"],
             config_digest=_file_digest(inputs["cloud_init_template"]),
             image_source=image["source"],
@@ -1407,7 +1489,9 @@ class MacOSVZProvisioner:
             manifest_digest=_file_digest(manifest_path),
         )
 
-    def _parse_bundle_helper_manifest(self, resource_root: Path) -> dict[str, object]:
+    def _parse_bundle_helper_manifest(
+        self, resource_root: Path, provisioning_manifest_path: Path
+    ) -> dict[str, object]:
         path = resource_root / "packvm-vz-helper.manifest.v1.json"
         try:
             bundle = json.loads(_read_private_or_bundle_file(path, _MAX_MANIFEST_BYTES))
@@ -1420,12 +1504,11 @@ class MacOSVZProvisioner:
         if (
             bundle.get("schema") != VZ_BUNDLE_MANIFEST_SCHEMA
             or not isinstance(helper, Mapping)
-            or set(helper)
-            != {"path", "code_sha256", "identifier", "entitlements", "signing"}
+            or set(helper) != {"path", "code_sha256", "identifier", "entitlements", "signing"}
             or not isinstance(provisioning, Mapping)
             or set(provisioning) != {"path", "sha256"}
             or provisioning.get("path") != "Contents/Resources/packvm-vz-provisioning.v1.json"
-            or provisioning.get("sha256") != _file_digest(self._asset_manifest_path or resource_root)
+            or provisioning.get("sha256") != _file_digest(provisioning_manifest_path)
         ):
             raise ValueError("packaged macOS VZ helper manifest binding is invalid")
         signing = helper.get("signing")
@@ -1453,6 +1536,11 @@ class MacOSVZProvisioner:
             or len(authority) > 512
         ):
             raise ValueError("packaged macOS VZ helper production identity is invalid")
+        binding = self._bundle_binding
+        if binding is not None and (
+            not binding.helper_team_id or not hmac.compare_digest(team_id, binding.helper_team_id)
+        ):
+            raise ValueError("packaged macOS VZ helper Team ID binding changed")
         bundle_root = resource_root.parent.parent
         helper_path = bundle_root / str(helper["path"])
         if not _safe_relative_file(bundle_root, helper_path):
@@ -1469,9 +1557,7 @@ class MacOSVZProvisioner:
             "helper_signing_identity": authority,
         }
 
-    def _verify_helper_identity(
-        self, manifest: MacOSVZAssetManifest
-    ) -> tuple[bool, str | None]:
+    def _verify_helper_identity(self, manifest: MacOSVZAssetManifest) -> tuple[bool, str | None]:
         if self._helper_identity_verifier is not None:
             return self._helper_identity_verifier(manifest)
         try:
@@ -1493,7 +1579,11 @@ class MacOSVZProvisioner:
             return False, "macOS VZ native helper identity verification failed"
 
     def _image_authority(
-        self, manifest: MacOSVZAssetManifest, plan_digest: str, session_digest: str, operation_id: str
+        self,
+        manifest: MacOSVZAssetManifest,
+        plan_digest: str,
+        session_digest: str,
+        operation_id: str,
     ) -> PackVMImageAuthority:
         return PackVMImageAuthority(
             source_url=manifest.image_source,
@@ -1530,7 +1620,10 @@ class MacOSVZProvisioner:
             raise ValueError(reason)
 
     def _ensure_state_root(self) -> None:
-        if not self._requested_state_dir.is_absolute() or self._requested_state_dir != self._state_dir:
+        if (
+            not self._requested_state_dir.is_absolute()
+            or self._requested_state_dir != self._state_dir
+        ):
             raise ValueError("PackVM VZ state root must be absolute and contain no symlinks")
         _ensure_private_directory(self._state_dir)
         _ensure_private_directory(self._state_dir / "instances")
@@ -1559,14 +1652,20 @@ class MacOSVZProvisioner:
             raise ValueError("PackVM VZ attestation authentication is missing")
         key = _read_private_file(self._state_dir / "packvm-vz-attestation.key", 256)
         unsigned = {key: value for key, value in state.items() if key != "authentication"}
-        if not hmac.compare_digest(authentication, hmac.new(key, _canonical_bytes(unsigned), hashlib.sha256).hexdigest()):
+        if not hmac.compare_digest(
+            authentication, hmac.new(key, _canonical_bytes(unsigned), hashlib.sha256).hexdigest()
+        ):
             raise ValueError("PackVM VZ attestation authentication failed")
         attestation = unsigned.pop("attestation_digest", None)
-        if not isinstance(attestation, str) or not hmac.compare_digest(attestation, _canonical_digest(unsigned)):
+        if not isinstance(attestation, str) or not hmac.compare_digest(
+            attestation, _canonical_digest(unsigned)
+        ):
             raise ValueError("PackVM VZ attestation digest failed")
         return state
 
-    def _verify_state_bindings(self, state: Mapping[str, Any], manifest: MacOSVZAssetManifest) -> None:
+    def _verify_state_bindings(
+        self, state: Mapping[str, Any], manifest: MacOSVZAssetManifest
+    ) -> None:
         if state.get("stopped") is True:
             raise ValueError("PackVM VZ is stopped")
         expected = {
@@ -1666,6 +1765,53 @@ def default_packvm_provisioner() -> MacOSVZProvisioner:
     """Return direct VZ on supported macOS and no Lima default elsewhere."""
 
     return MacOSVZProvisioner()
+
+
+def _packaged_packvm_bundle_binding() -> object | None:
+    """Read the sealed Launcher PackVM binding without an env fallback."""
+
+    from core_runtime.packaged_application_bundle import packvm_bundle_binding
+
+    return packvm_bundle_binding()
+
+
+def _normalise_packvm_bundle_binding(value: object) -> _AuthenticatedPackVMBundleBinding:
+    """Validate the immutable binding shape before any resource is opened."""
+
+    root = getattr(value, "root", None)
+    provisioning_sha256 = getattr(value, "provisioning_sha256", None)
+    helper_manifest_sha256 = getattr(value, "helper_manifest_sha256", None)
+    helper_team_id = getattr(value, "helper_team_id", None)
+    if (
+        not isinstance(root, Path)
+        or not root.is_absolute()
+        or root.suffix != ".app"
+        or root.is_symlink()
+        or not root.is_dir()
+        or not _is_digest(provisioning_sha256)
+        or not _is_digest(helper_manifest_sha256)
+        or not isinstance(helper_team_id, str)
+    ):
+        raise ValueError("packaged macOS VZ bundle binding is invalid")
+    try:
+        canonical_root = root.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("packaged macOS VZ bundle binding is invalid") from exc
+    if canonical_root != root:
+        raise ValueError("packaged macOS VZ bundle binding is invalid")
+    if helper_team_id and (
+        len(helper_team_id) != 10
+        or not helper_team_id.isascii()
+        or not helper_team_id.isalnum()
+        or helper_team_id != helper_team_id.upper()
+    ):
+        raise ValueError("packaged macOS VZ bundle binding is invalid")
+    return _AuthenticatedPackVMBundleBinding(
+        root=canonical_root,
+        provisioning_sha256=str(provisioning_sha256),
+        helper_manifest_sha256=str(helper_manifest_sha256),
+        helper_team_id=helper_team_id,
+    )
 
 
 def _default_state_dir() -> Path:
@@ -1790,10 +1936,8 @@ def _parse_bubblewrap_descriptor(
     source = descriptor.get("source") if isinstance(descriptor, Mapping) else None
     if (
         not isinstance(descriptor, Mapping)
-        or set(descriptor)
-        != {"schema", "package", "version", "architecture", "source"}
-        or descriptor.get("schema")
-        != "io.tobkiri.packvm-vz-bubblewrap-descriptor.v1"
+        or set(descriptor) != {"schema", "package", "version", "architecture", "source"}
+        or descriptor.get("schema") != "io.tobkiri.packvm-vz-bubblewrap-descriptor.v1"
         or descriptor.get("package") != "bubblewrap"
         or descriptor.get("version") != "0.11.0-2+deb13u1"
         or descriptor.get("architecture") != "arm64"
@@ -1827,8 +1971,7 @@ def _parse_guest_service_template(
         raise ValueError("PackVM VZ guest service template is invalid") from exc
     if (
         not isinstance(template, Mapping)
-        or set(template)
-        != {"schema", "protocol", "guest_runner_sha256", "service_unit"}
+        or set(template) != {"schema", "protocol", "guest_runner_sha256", "service_unit"}
         or template.get("schema") != "io.tobkiri.packvm-vz-guest-service-template.v1"
         or template.get("protocol") != "io.tobkiri.macos-vz-supervisor.v1"
         or not _is_digest(template.get("guest_runner_sha256"))
@@ -1914,11 +2057,7 @@ def _read_private_or_bundle_file(path: Path, maximum: int) -> bytes:
     descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     try:
         before = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(before.st_mode)
-            or before.st_nlink != 1
-            or before.st_size > maximum
-        ):
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_size > maximum:
             raise ValueError("packaged macOS VZ asset manifest is unsafe")
         chunks: list[bytes] = []
         remaining = maximum + 1
@@ -1930,11 +2069,12 @@ def _read_private_or_bundle_file(path: Path, maximum: int) -> bytes:
             remaining -= len(chunk)
         data = b"".join(chunks)
         after = os.fstat(descriptor)
-        if (
-            len(data) > maximum
-            or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
-            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
-        ):
+        if len(data) > maximum or (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+        ) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
             raise ValueError("packaged macOS VZ asset changed during read")
         return data
     finally:
@@ -2073,16 +2213,20 @@ def _write_iso_seed(path: Path, volume_label: str, files: Mapping[str, bytes]) -
     exact VM ceremony.
     """
 
-    if not files or len(files) > 16 or any(
-        not isinstance(name, str)
-        or not name
-        or len(name.encode("ascii", errors="ignore")) != len(name)
-        or len(name) > 96
-        or "/" in name
-        or "\x00" in name
-        or not isinstance(data, bytes)
-        or len(data) > 512 * 1024
-        for name, data in files.items()
+    if (
+        not files
+        or len(files) > 16
+        or any(
+            not isinstance(name, str)
+            or not name
+            or len(name.encode("ascii", errors="ignore")) != len(name)
+            or len(name) > 96
+            or "/" in name
+            or "\x00" in name
+            or not isinstance(data, bytes)
+            or len(data) > 512 * 1024
+            for name, data in files.items()
+        )
     ):
         raise ValueError("PackVM VZ ISO seed content is invalid")
     block = 2048
@@ -2138,7 +2282,10 @@ def _write_iso_seed(path: Path, volume_label: str, files: Mapping[str, bytes]) -
     image[terminator + 1 : terminator + 6] = b"CD001"
     image[terminator + 6] = 1
     root_offset = root_sector * block
-    entries = [record(b"\x00", root_sector, root_blocks * block, 2), record(b"\x01", root_sector, root_blocks * block, 2)]
+    entries = [
+        record(b"\x00", root_sector, root_blocks * block, 2),
+        record(b"\x01", root_sector, root_blocks * block, 2),
+    ]
     for name, data in sorted(files.items()):
         sector, _sectors = file_sectors[name]
         entries.append(record((name + ";1").encode("ascii"), sector, len(data), 0))
@@ -2174,9 +2321,7 @@ def _clone_file_apfs(source: Path, target: Path) -> None:
     clonefile = library.clonefile
     clonefile.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint32)
     clonefile.restype = ctypes.c_int
-    result = clonefile(
-        os.fsencode(source), os.fsencode(target), ctypes.c_uint32(0)
-    )
+    result = clonefile(os.fsencode(source), os.fsencode(target), ctypes.c_uint32(0))
     if result != 0:
         code = ctypes.get_errno()
         raise OSError(code, "PackVM VZ APFS clonefile failed")
@@ -2234,7 +2379,10 @@ def _file_digest_algorithm(path: Path, algorithm: str) -> str:
             digest.update(chunk)
         after = os.fstat(descriptor)
         if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
-            after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
         ):
             raise ValueError("PackVM VZ asset changed during verification")
         return f"{algorithm}:" + digest.hexdigest()
@@ -2335,14 +2483,20 @@ def _canonical_digest(value: object) -> str:
 
 
 def _is_digest(value: object) -> bool:
-    return isinstance(value, str) and len(value) == 71 and value.startswith(_DIGEST_PREFIX) and all(
-        character in "0123456789abcdef" for character in value[7:]
+    return (
+        isinstance(value, str)
+        and len(value) == 71
+        and value.startswith(_DIGEST_PREFIX)
+        and all(character in "0123456789abcdef" for character in value[7:])
     )
 
 
 def _is_sha512(value: object) -> bool:
-    return isinstance(value, str) and len(value) == 135 and value.startswith("sha512:") and all(
-        character in "0123456789abcdef" for character in value[7:]
+    return (
+        isinstance(value, str)
+        and len(value) == 135
+        and value.startswith("sha512:")
+        and all(character in "0123456789abcdef" for character in value[7:])
     )
 
 

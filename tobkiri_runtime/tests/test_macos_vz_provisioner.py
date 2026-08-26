@@ -12,9 +12,12 @@ from types import SimpleNamespace
 
 import pytest
 
+import ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner as macos_vz_provisioner
 from ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner import (
     MacOSVZAssetManifest,
     MacOSVZProvisioner,
+    VZ_ASSET_MANIFEST_SCHEMA,
+    VZ_BUNDLE_MANIFEST_SCHEMA,
     VZ_RAW_EFI_IMAGE_DECLARED_BYTES,
     _MacOSVZHelperProcess,
     _file_digest,
@@ -99,9 +102,7 @@ def provisioner_fixture(tmp_path: Path) -> tuple[MacOSVZProvisioner, MacOSVZAsse
         manifest_digest=_digest(b"fixture"),
     )
 
-    def prepare_efi(
-        _root: Path, domain: str, path: Path, _key: bytes
-    ) -> dict[str, object]:
+    def prepare_efi(_root: Path, domain: str, path: Path, _key: bytes) -> dict[str, object]:
         _private_file(path, b"efi-store")
         metadata = path.stat()
         return {
@@ -271,6 +272,123 @@ def test_image_descriptor_rejects_redirecting_debian_origin(tmp_path: Path) -> N
 
     with pytest.raises(ValueError, match="image descriptor"):
         _parse_image_descriptor(descriptor)
+
+
+def test_authenticated_bundle_binding_rehashes_both_resource_manifests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each manifest load rejects a post-launch resource-manifest replacement."""
+
+    provisioner, provisioning_path, _resources, binding = _bound_bundle_fixture(tmp_path)
+    sentinel = object()
+    monkeypatch.setattr(provisioner, "_parse_provisioning_manifest", lambda *_args: sentinel)
+    monkeypatch.setattr(provisioner, "_verify_helper_identity", lambda _manifest: (True, None))
+
+    assert provisioner._require_manifest() is sentinel
+    provisioning_path.chmod(0o600)
+    _private_file(provisioning_path, b'{"replaced":true}', 0o444)
+
+    with pytest.raises(ValueError, match="bundle binding changed"):
+        provisioner._require_manifest()
+
+    assert binding.provisioning_sha256 != _file_digest(provisioning_path)
+
+
+def test_authenticated_bundle_binding_is_the_expected_helper_team_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A mutable helper manifest cannot select a different Developer ID team."""
+
+    provisioner, provisioning_path, resources, binding = _bound_bundle_fixture(tmp_path)
+    monkeypatch.setattr(
+        macos_vz_provisioner,
+        "_macho_code_digest",
+        lambda _path: _digest(b"helper-code"),
+    )
+
+    parsed = provisioner._parse_bundle_helper_manifest(resources, provisioning_path)
+    assert parsed["helper_team_id"] == binding.helper_team_id
+
+    mismatched_binding = SimpleNamespace(
+        root=binding.root,
+        provisioning_sha256=binding.provisioning_sha256,
+        helper_manifest_sha256=binding.helper_manifest_sha256,
+        helper_team_id="KLMNOPQRST",
+    )
+    mismatched = MacOSVZProvisioner(
+        state_dir=(tmp_path / "mismatched-state").resolve(),
+        bundle_binding=mismatched_binding,
+        platform_system="darwin",
+        machine="arm64",
+    )
+    with pytest.raises(ValueError, match="Team ID binding changed"):
+        mismatched._parse_bundle_helper_manifest(resources, provisioning_path)
+
+
+def _bound_bundle_fixture(
+    tmp_path: Path,
+) -> tuple[MacOSVZProvisioner, Path, Path, SimpleNamespace]:
+    """Build only the two Launcher-attested resource manifests for a unit test."""
+
+    root = tmp_path / "Tobkiri Launcher.app"
+    resources = root / "Contents" / "Resources"
+    helper_path = root / "Contents" / "MacOS" / "tobkiri-packvm-vz-helper"
+    resources.mkdir(parents=True)
+    helper_path.parent.mkdir()
+    _private_file(helper_path, b"helper", 0o700)
+    provisioning_path = _private_file(
+        resources / "packvm-vz-provisioning.v1.json",
+        json.dumps(
+            {
+                "schema": VZ_ASSET_MANIFEST_SCHEMA,
+                "target": "aarch64-apple-darwin",
+                "boot_mode": "efi",
+                "inputs": [],
+            }
+        ).encode("utf-8"),
+        0o444,
+    )
+    team_id = "ABCDEFGHIJ"
+    helper_manifest = {
+        "schema": VZ_BUNDLE_MANIFEST_SCHEMA,
+        "helper": {
+            "path": "Contents/MacOS/tobkiri-packvm-vz-helper",
+            "code_sha256": _digest(b"helper-code"),
+            "identifier": "dev.tobkiri.launcher.packvm-vz-helper",
+            "entitlements": ["com.apple.security.virtualization"],
+            "signing": {
+                "signing_mode": "developer-id",
+                "team_id": team_id,
+                "authority": f"Developer ID Application: Tobkiri ({team_id})",
+            },
+        },
+        "provisioning": {
+            "path": "Contents/Resources/packvm-vz-provisioning.v1.json",
+            "sha256": _file_digest(provisioning_path),
+        },
+    }
+    helper_manifest_path = _private_file(
+        resources / "packvm-vz-helper.manifest.v1.json",
+        json.dumps(helper_manifest, sort_keys=True).encode("utf-8"),
+        0o444,
+    )
+    binding = SimpleNamespace(
+        root=root,
+        provisioning_sha256=_file_digest(provisioning_path),
+        helper_manifest_sha256=_file_digest(helper_manifest_path),
+        helper_team_id=team_id,
+    )
+    return (
+        MacOSVZProvisioner(
+            state_dir=(tmp_path / "state").resolve(),
+            bundle_binding=binding,
+            platform_system="darwin",
+            machine="arm64",
+        ),
+        provisioning_path,
+        resources,
+        binding,
+    )
 
 
 def test_transport_requires_explicit_fd_key_binding_before_exchange() -> None:

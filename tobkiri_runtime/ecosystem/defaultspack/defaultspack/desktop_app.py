@@ -183,15 +183,23 @@ def _candidate_ecosystem_dirs(pack_root: Path) -> list[Path]:
 
 
 def prepare_for_sealed_dispatch(scope: object) -> None:
-    """Bind import roots to the bootstrap-issued sealed dispatch scope."""
+    """Bind sealed imports and the Launcher-issued PackVM bundle identity."""
     global _SEALED_SCOPE
     if _SEALED_SCOPE is not None and _SEALED_SCOPE is not scope:
         raise RuntimeError("Defaultspack sealed scope was already initialized")
-    sealed_app_root = scope.app_root_for(__file__)
+    app_root_for = getattr(scope, "app_root_for", None)
+    if not callable(app_root_for):
+        raise RuntimeError("Defaultspack sealed scope lacks an application root")
+    sealed_app_root = app_root_for(__file__)
     if not isinstance(sealed_app_root, Path):
         raise RuntimeError("Defaultspack sealed scope returned an invalid app root")
     _SEALED_SCOPE = scope
     _ensure_import_path()
+    from core_runtime.packaged_application_bundle import (
+        install_packvm_bundle_binding_from_sealed_scope,
+    )
+
+    install_packvm_bundle_binding_from_sealed_scope(scope, __file__)
 
 
 def _url() -> str:
@@ -325,9 +333,7 @@ def _validate_mutable_diagnostic_path(path: Path) -> Path:
     if sealed_app_root is not None:
         protected = sealed_app_root.resolve(strict=True)
         if candidate == protected or candidate.is_relative_to(protected):
-            raise ValueError(
-                "Defaultspack launch log path must be outside sealed app resources"
-            )
+            raise ValueError("Defaultspack launch log path must be outside sealed app resources")
     return candidate
 
 
@@ -473,9 +479,7 @@ def main(argv: list[str] | None = None) -> int:
     lifecycle = AppLifecycleManager(packvm_lifecycle=packvm_lifecycle)
     reconfirmation_error: str | None = None
     try:
-        dispatch_session, contract_bindings = _restore_active_profile_contracts(
-            packvm_lifecycle
-        )
+        dispatch_session, contract_bindings = _restore_active_profile_contracts(packvm_lifecycle)
     except ProfileReconfirmationRequired as error:
         dispatch_session, contract_bindings = None, ()
         reconfirmation_error = str(error)

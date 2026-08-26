@@ -5,7 +5,7 @@
 
 use std::ffi::{OsStr, OsString};
 
-pub const PROTOCOL_SCHEMA: &str = "io.tobkiri.sealed-python-launch.v2";
+pub const PROTOCOL_SCHEMA: &str = "io.tobkiri.sealed-python-launch.v3";
 pub const ATTESTATION_SCHEMA: &str = "io.tobkiri.sealed-python-attestation.v2";
 pub const ATTESTATION_FILE_SCHEMA: &str = "io.tobkiri.sealed-python-attestation-file.v1";
 pub const BOOTSTRAP_MODULE: &str = "tobkiri_sealed.bootstrap";
@@ -19,6 +19,10 @@ pub const ARG_MANIFEST: &str = "--manifest";
 pub const ARG_ENVIRONMENT_ROOT: &str = "--environment-root";
 pub const ARG_RUNTIME_OVERLAY_SHA256: &str = "--runtime-overlay-sha256";
 pub const ARG_OUTER_RUNTIME_MANIFEST_SHA256: &str = "--outer-runtime-manifest-sha256";
+pub const ARG_APPLICATION_BUNDLE_ROOT: &str = "--application-bundle-root";
+pub const ARG_PACKVM_PROVISIONING_SHA256: &str = "--packvm-provisioning-sha256";
+pub const ARG_PACKVM_HELPER_MANIFEST_SHA256: &str = "--packvm-helper-manifest-sha256";
+pub const ARG_PACKVM_HELPER_TEAM_ID: &str = "--packvm-helper-team-id";
 pub const ARG_SEPARATOR: &str = "--";
 
 pub const REQUIRED_TEMPLATE_FRAGMENTS: &[&str] = &[
@@ -34,13 +38,17 @@ pub const REQUIRED_TEMPLATE_FRAGMENTS: &[&str] = &[
     ARG_ENVIRONMENT_ROOT,
     ARG_RUNTIME_OVERLAY_SHA256,
     ARG_OUTER_RUNTIME_MANIFEST_SHA256,
+    ARG_APPLICATION_BUNDLE_ROOT,
+    ARG_PACKVM_PROVISIONING_SHA256,
+    ARG_PACKVM_HELPER_MANIFEST_SHA256,
+    ARG_PACKVM_HELPER_TEAM_ID,
     "O_EXCL",
     "os.link",
     "st_nlink",
     "fsync",
 ];
 
-/// The sole accepted argument ordering for the bootstrap v2 boundary.
+/// The sole accepted argument ordering for the bootstrap v3 boundary.
 pub fn launch_arguments(
     role: &str,
     nonce: &str,
@@ -49,6 +57,10 @@ pub fn launch_arguments(
     environment_root: &OsStr,
     runtime_overlay_sha256: &str,
     outer_runtime_manifest_sha256: &str,
+    application_bundle_root: &OsStr,
+    packvm_provisioning_sha256: &str,
+    packvm_helper_manifest_sha256: &str,
+    packvm_helper_team_id: &str,
 ) -> Vec<OsString> {
     [
         OsString::from("-m"),
@@ -67,11 +79,19 @@ pub fn launch_arguments(
         OsString::from(runtime_overlay_sha256),
         OsString::from(ARG_OUTER_RUNTIME_MANIFEST_SHA256),
         OsString::from(outer_runtime_manifest_sha256),
+        OsString::from(ARG_APPLICATION_BUNDLE_ROOT),
+        application_bundle_root.to_os_string(),
+        OsString::from(ARG_PACKVM_PROVISIONING_SHA256),
+        OsString::from(packvm_provisioning_sha256),
+        OsString::from(ARG_PACKVM_HELPER_MANIFEST_SHA256),
+        OsString::from(packvm_helper_manifest_sha256),
+        OsString::from(ARG_PACKVM_HELPER_TEAM_ID),
+        OsString::from(packvm_helper_team_id),
     ]
     .into()
 }
 
-/// Reject a packaging bootstrap that does not implement the complete v1 wire.
+/// Reject a packaging bootstrap that does not implement the complete v3 wire.
 pub fn validate_bootstrap_template(template: &str) -> Result<(), String> {
     let missing = REQUIRED_TEMPLATE_FRAGMENTS
         .iter()
@@ -126,6 +146,10 @@ mod tests {
             OsStr::new("root"),
             "overlay-digest",
             "outer-digest",
+            OsStr::new("/Applications/Tobkiri Launcher.app"),
+            "provisioning-digest",
+            "helper-manifest-digest",
+            "ABC1234567",
         );
         let strings = arguments
             .iter()
@@ -149,7 +173,15 @@ mod tests {
                 ARG_RUNTIME_OVERLAY_SHA256,
                 "overlay-digest",
                 ARG_OUTER_RUNTIME_MANIFEST_SHA256,
-                "outer-digest"
+                "outer-digest",
+                ARG_APPLICATION_BUNDLE_ROOT,
+                "/Applications/Tobkiri Launcher.app",
+                ARG_PACKVM_PROVISIONING_SHA256,
+                "provisioning-digest",
+                ARG_PACKVM_HELPER_MANIFEST_SHA256,
+                "helper-manifest-digest",
+                ARG_PACKVM_HELPER_TEAM_ID,
+                "ABC1234567"
             ]
         );
     }

@@ -227,7 +227,10 @@ def test_packvm_bundle_manifest_matches_production_runtime_digest_contract(
             bundle_root=bundle,
             platform_system="Darwin",
             machine="arm64",
-        )._parse_bundle_helper_manifest(bundle / "Contents/Resources")
+        )._parse_bundle_helper_manifest(
+            bundle / "Contents/Resources",
+            bundle / "Contents/Resources/packvm-vz-provisioning.v1.json",
+        )
     finally:
         sys.path.remove(os.fspath(runtime_root))
 

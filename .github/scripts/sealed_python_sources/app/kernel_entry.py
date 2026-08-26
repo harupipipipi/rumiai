@@ -35,9 +35,14 @@ def _load_application_main():
     return _load_application_module().main
 
 
-def prepare_for_dispatch(_scope: object):
-    """Load the role target before the sealed Launcher attestation."""
-    return _load_application_main()
+def prepare_for_dispatch(scope: object):
+    """Bind the verified sealed scope before exposing the Host entrypoint."""
+    module = _load_application_module()
+    prepare = getattr(module, "prepare_for_sealed_dispatch", None)
+    if not callable(prepare):
+        raise RuntimeError("Kernel target lacks sealed dispatch preparation")
+    prepare(scope)
+    return module.main
 
 
 def main(argv: Sequence[str] | None = None) -> int:

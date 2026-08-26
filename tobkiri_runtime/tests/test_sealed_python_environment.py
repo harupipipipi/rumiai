@@ -140,6 +140,11 @@ def _fixture_sources(base: Path, target: str) -> tuple[Path, Path, Path]:
     (application / "empty-application-package").mkdir()
     (application / "app.py").write_text(
         "import json, os\n"
+        "def prepare_for_sealed_dispatch(scope):\n"
+        "    if scope.app_root_for(__file__).name != 'app':\n"
+        "        raise RuntimeError('invalid sealed app root')\n"
+        "    if scope.packvm_bundle_binding_for(__file__) is not None:\n"
+        "        raise RuntimeError('unexpected PackVM bundle binding')\n"
         "def main(argv=None):\n"
         "    with open(os.environ['ROLE_MARKER'], 'a') as handle:\n"
         "        handle.write(json.dumps(['typed', list(argv or [])]) + '\\n')\n"
@@ -238,7 +243,45 @@ def _runtime_overlay_arguments(output: Path) -> list[str]:
         overlay_digest,
         "--outer-runtime-manifest-sha256",
         outer_digest,
+        "--application-bundle-root",
+        "",
+        "--packvm-provisioning-sha256",
+        "",
+        "--packvm-helper-manifest-sha256",
+        "",
+        "--packvm-helper-team-id",
+        "",
     ]
+
+
+def _packvm_bundle_fixture(root: Path) -> tuple[Path, dict[str, str]]:
+    """Create a signed-app-mode macOS resource domain for v3 binding tests."""
+
+    bundle = root / "Tobkiri Launcher.app"
+    resources = bundle / "Contents" / "Resources"
+    application = resources / "app"
+    application.mkdir(parents=True)
+    files = {
+        resources / "packvm-vz-provisioning.v1.json": b'{"kind":"provisioning"}\n',
+        resources / "packvm-vz-helper.manifest.v1.json": b'{"kind":"helper"}\n',
+        application / "runtime-resource-manifest.v1.json": b'{"kind":"runtime"}\n',
+    }
+    for path, payload in files.items():
+        path.write_bytes(payload)
+        path.chmod(0o644)
+    for directory in (application, resources, resources.parent, bundle):
+        directory.chmod(0o755)
+    return bundle, {
+        "provisioning": hashlib.sha256(
+            files[resources / "packvm-vz-provisioning.v1.json"]
+        ).hexdigest(),
+        "helper": hashlib.sha256(
+            files[resources / "packvm-vz-helper.manifest.v1.json"]
+        ).hexdigest(),
+        "outer": hashlib.sha256(
+            files[application / "runtime-resource-manifest.v1.json"]
+        ).hexdigest(),
+    }
 
 
 def _writable_staged_fixture(base: Path, target: str) -> Path:
@@ -482,10 +525,7 @@ def test_formal_packaging_lock_selection_is_target_bound() -> None:
         BUILDER.packaging_requirements_relative(intel)
 
     linux = BUILDER.target_spec("x86_64-unknown-linux-gnu")
-    assert (
-        BUILDER.packaging_requirements_relative(linux)
-        == BUILDER.DEFAULT_REQUIREMENTS_RELATIVE
-    )
+    assert BUILDER.packaging_requirements_relative(linux) == BUILDER.DEFAULT_REQUIREMENTS_RELATIVE
 
 
 def test_formal_builder_rejects_external_requirements_path(tmp_path: Path) -> None:
@@ -666,9 +706,7 @@ def test_pinned_python_archive_omits_safe_archive_bytecode(
 
     extracted = BUILDER._extract_pinned_python_archive(archive, tmp_path / "output")
     assert (extracted / "bin/python3").read_bytes() == b"exact executable bytes\n"
-    assert (extracted / "lib/python3.13/encodings.py").read_bytes() == (
-        b"exact module bytes\n"
-    )
+    assert (extracted / "lib/python3.13/encodings.py").read_bytes() == (b"exact module bytes\n")
     assert not (extracted / "lib/python3.13/encodings.pyc").exists()
     assert not (extracted / "lib/python3.13/__pycache__").exists()
     assert not any(
@@ -932,9 +970,7 @@ def test_committed_source_inventory_copies_exact_bytes_and_rejects_tamper(
         "tobkiri_runtime/docs/managed-sandbox-runtime-implementation-plan.md": (
             b"implementation plan\n"
         ),
-        "tobkiri_runtime/docs/managed-sandbox-runtime/01-overview.md": (
-            b"overview\n"
-        ),
+        "tobkiri_runtime/docs/managed-sandbox-runtime/01-overview.md": (b"overview\n"),
         "tobkiri_runtime/module.py": b"VALUE = 1\n",
         "tobkiri_runtime/packaged_defaultspack_source_manifest.v1.json": b"{}\n",
     }
@@ -956,8 +992,7 @@ def test_committed_source_inventory_copies_exact_bytes_and_rejects_tamper(
     manifest_digest = next(
         entry["sha256"]
         for entry in entries
-        if entry["path"]
-        == "tobkiri_runtime/packaged_defaultspack_source_manifest.v1.json"
+        if entry["path"] == "tobkiri_runtime/packaged_defaultspack_source_manifest.v1.json"
     )
     document = {
         "schema": BUILDER.SOURCE_SNAPSHOT_SCHEMA,
@@ -1139,14 +1174,9 @@ def test_manifest_contains_fixed_entrypoints_and_bootstrap_paths(tmp_path: Path)
 def test_directory_inventory_is_exact_file_parent_closure(tmp_path: Path) -> None:
     """Producer prunes empty inputs and both verifiers reject every extra dir."""
     output = _fixture_sources(tmp_path / "canonical", "x86_64-unknown-linux-gnu")[2]
-    document = json.loads(
-        (output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8")
-    )
+    document = json.loads((output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8"))
     assert not (output / "app/empty-application-package").exists()
-    assert not (
-        output
-        / "venv/lib/python3.13/site-packages/empty-installed-package"
-    ).exists()
+    assert not (output / "venv/lib/python3.13/site-packages/empty-installed-package").exists()
     expected = BUILDER._expected_directories(document["files"])
     assert BUILDER._actual_directories(output) == expected
 
@@ -1204,9 +1234,7 @@ def test_directory_inventory_is_exact_file_parent_closure(tmp_path: Path) -> Non
 
         omitted = json.loads(json.dumps(document))
         omitted["files"] = [
-            entry
-            for entry in omitted["files"]
-            if entry["path"] != "app/kernel_entry.py"
+            entry for entry in omitted["files"] if entry["path"] != "app/kernel_entry.py"
         ]
         with pytest.raises(bootstrap.SealedBootstrapError, match="missing or extra files"):
             bootstrap._verify_tree(output, omitted)
@@ -1218,6 +1246,8 @@ def test_directory_inventory_is_exact_file_parent_closure(tmp_path: Path) -> Non
             sys.modules["tobkiri_sealed"] = old_package
         if old_bootstrap is not None:
             sys.modules["tobkiri_sealed.bootstrap"] = old_bootstrap
+
+
 def test_assembly_materializes_links_and_freezes_the_complete_snapshot(
     tmp_path: Path,
 ) -> None:
@@ -1241,12 +1271,8 @@ def test_assembly_materializes_links_and_freezes_the_complete_snapshot(
         for path in output.rglob("*")
     )
 
-    evidence = json.loads(
-        (output / BUILDER.DIRECTORY_MODES_FILENAME).read_text(encoding="utf-8")
-    )
-    manifest = json.loads(
-        (output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8")
-    )
+    evidence = json.loads((output / BUILDER.DIRECTORY_MODES_FILENAME).read_text(encoding="utf-8"))
+    manifest = json.loads((output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8"))
     assert evidence == BUILDER._directory_mode_document(manifest["files"])
 
 
@@ -1281,14 +1307,10 @@ def test_relocated_native_runtime_imports_encodings_and_installed_package(
     tmp_path: Path,
 ) -> None:
     """A moved regular executable finds PBS stdlib, native modules, and venv packages."""
-    interpreter = Path(os.environ["TOBKIRI_SEALED_NATIVE_SMOKE_PYTHON"]).resolve(
-        strict=True
-    )
+    interpreter = Path(os.environ["TOBKIRI_SEALED_NATIVE_SMOKE_PYTHON"]).resolve(strict=True)
     source_lib = interpreter.parent.parent / "lib"
     stdlib_candidates = sorted(
-        path
-        for path in source_lib.iterdir()
-        if path.is_dir() and path.name.startswith("python")
+        path for path in source_lib.iterdir() if path.is_dir() and path.name.startswith("python")
     )
     if len(stdlib_candidates) != 1:
         pytest.skip("standalone CPython stdlib layout is unavailable")
@@ -1304,9 +1326,7 @@ def test_relocated_native_runtime_imports_encodings_and_installed_package(
     shutil.copy2(runtime / "bin/python3", venv / "bin/python3")
     (venv / "bin/python3").chmod(0o755)
     (venv / "pyvenv.cfg").write_text(
-        "home = runtime/bin\n"
-        "include-system-site-packages = false\n"
-        "relocatable = true\n",
+        "home = runtime/bin\ninclude-system-site-packages = false\nrelocatable = true\n",
         encoding="utf-8",
     )
     site_packages = venv / f"lib/python{minor}/site-packages"
@@ -1661,9 +1681,7 @@ def test_builder_rejects_attestation_replacement_after_read(
             if case == "replace":
                 displaced = directory / "displaced.json"
                 attestation.rename(displaced)
-                attestation.write_text(
-                    '{"schema":"replacement"}', encoding="utf-8"
-                )
+                attestation.write_text('{"schema":"replacement"}', encoding="utf-8")
                 attestation.chmod(0o600)
             else:
                 attestation.write_text('{"schema":"tampered"}', encoding="utf-8")
@@ -1726,9 +1744,7 @@ def test_bootstrap_rejects_runtime_overlay_drift(tmp_path: Path, case: str) -> N
     """The Host overlay remains one exact, separately bound digest domain."""
     output = _fixture_sources(tmp_path / "sealed", "x86_64-unknown-linux-gnu")[2]
     overlay_digest, outer_digest = _install_runtime_overlay(output)
-    manifest = json.loads(
-        (output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8")
-    )
+    manifest = json.loads((output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8"))
     source_root = ROOT / ".github" / "scripts" / "sealed_python_sources"
     old_path = sys.path[:]
     old_bootstrap = sys.modules.pop("tobkiri_sealed.bootstrap", None)
@@ -1737,9 +1753,7 @@ def test_bootstrap_rejects_runtime_overlay_drift(tmp_path: Path, case: str) -> N
         sys.path.insert(0, str(source_root))
         import tobkiri_sealed.bootstrap as bootstrap
 
-        binding = bootstrap._verify_runtime_overlay(
-            output, manifest, overlay_digest, outer_digest
-        )
+        binding = bootstrap._verify_runtime_overlay(output, manifest, overlay_digest, outer_digest)
         assert binding["runtime_overlay_sha256"] == overlay_digest
         app = output / "app"
         overlay = app / "runtime-resource-manifest.v1.json"
@@ -1774,9 +1788,7 @@ def test_bootstrap_rejects_runtime_overlay_drift(tmp_path: Path, case: str) -> N
             if case == "second-overlay":
                 bootstrap._verify_tree(output, manifest)
             else:
-                bootstrap._verify_runtime_overlay(
-                    output, manifest, overlay_digest, outer_digest
-                )
+                bootstrap._verify_runtime_overlay(output, manifest, overlay_digest, outer_digest)
     finally:
         sys.path = old_path
         sys.modules.pop("tobkiri_sealed.bootstrap", None)
@@ -1792,9 +1804,7 @@ def test_bootstrap_rejects_runtime_overlay_drift(tmp_path: Path, case: str) -> N
 def test_bootstrap_sys_path_is_exact_manifest_bound_import_set(tmp_path: Path) -> None:
     """Only fixed inventory roots enter the attested isolated import set."""
     output = _fixture_sources(tmp_path / "sealed", "x86_64-unknown-linux-gnu")[2]
-    document = json.loads(
-        (output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8")
-    )
+    document = json.loads((output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8"))
     source_root = ROOT / ".github" / "scripts" / "sealed_python_sources"
     old_path = sys.path[:]
     old_package = sys.modules.pop("tobkiri_sealed", None)
@@ -1805,11 +1815,14 @@ def test_bootstrap_sys_path_is_exact_manifest_bound_import_set(tmp_path: Path) -
 
         expected = _fixture_sys_path(output)
         sys.path = _fixture_sys_path(output, include_missing_zip=True)
-        assert bootstrap._normalize_sys_path(
-            output,
-            document,
-            include_application=False,
-        ) == expected
+        assert (
+            bootstrap._normalize_sys_path(
+                output,
+                document,
+                include_application=False,
+            )
+            == expected
+        )
         assert sys.path == expected
 
         sys.path = [str(output / "app"), *expected]
@@ -1906,11 +1919,14 @@ def test_bootstrap_sys_path_is_exact_manifest_bound_import_set(tmp_path: Path) -
             *_fixture_sys_path(manifested),
         ]
         sys.path = manifested_expected[:]
-        assert bootstrap._normalize_sys_path(
-            manifested,
-            manifested_document,
-            include_application=False,
-        ) == manifested_expected
+        assert (
+            bootstrap._normalize_sys_path(
+                manifested,
+                manifested_document,
+                include_application=False,
+            )
+            == manifested_expected
+        )
 
         for directory in (output, output / "runtime", output / "runtime/lib"):
             _make_test_mutable(directory)
@@ -2116,6 +2132,14 @@ result = bootstrap.main(
         os.environ["RUNTIME_OVERLAY_SHA256"],
         "--outer-runtime-manifest-sha256",
         os.environ["OUTER_RUNTIME_MANIFEST_SHA256"],
+        "--application-bundle-root",
+        "",
+        "--packvm-provisioning-sha256",
+        "",
+        "--packvm-helper-manifest-sha256",
+        "",
+        "--packvm-helper-team-id",
+        "",
         "--",
         "--subprocess",
     ]
@@ -2334,9 +2358,7 @@ def test_extracted_python_identity_forces_no_bytecode_environment(
     def fake_run(command: list[str], **kwargs: object) -> types.SimpleNamespace:
         calls.append((command, kwargs))
         return types.SimpleNamespace(
-            stdout=json.dumps(
-                {"version": BUILDER.PYTHON_VERSION, "machine": "x86_64"}
-            )
+            stdout=json.dumps({"version": BUILDER.PYTHON_VERSION, "machine": "x86_64"})
         )
 
     monkeypatch.setenv(BUILDER.PYTHON_BYTECODE_ENVIRONMENT, "0")
@@ -2394,10 +2416,7 @@ def test_uv_venv_python_alias_is_materialized_to_required_path(
     assert result.is_file() and not result.is_symlink()
     assert result.stat().st_nlink == 1
     assert all(command[1:3] == ["-I", "-B"] for command, _ in calls)
-    assert all(
-        kwargs["env"][BUILDER.PYTHON_BYTECODE_ENVIRONMENT] == "1"
-        for _, kwargs in calls
-    )
+    assert all(kwargs["env"][BUILDER.PYTHON_BYTECODE_ENVIRONMENT] == "1" for _, kwargs in calls)
 
 
 def test_uv_venv_python_alias_rejects_ambiguous_regular_candidates(
@@ -2416,9 +2435,7 @@ def test_uv_venv_python_alias_rejects_ambiguous_regular_candidates(
     monkeypatch.setattr(
         BUILDER.subprocess,
         "run",
-        lambda *_args, **_kwargs: pytest.fail(
-            "ambiguous candidates must fail before execution"
-        ),
+        lambda *_args, **_kwargs: pytest.fail("ambiguous candidates must fail before execution"),
     )
 
     with pytest.raises(
@@ -2729,12 +2746,15 @@ def test_native_smoke_environment_excludes_host_secrets(
             BUILDER.target_spec("aarch64-apple-darwin"),
             workspace,
         )
-        assert all(key not in environment for key in (
-            "GITHUB_TOKEN",
-            "TOBKIRI_PACKAGING_TRANSACTION_TOKEN",
-            "AWS_SECRET_ACCESS_KEY",
-            "PYTHONPATH",
-        ))
+        assert all(
+            key not in environment
+            for key in (
+                "GITHUB_TOKEN",
+                "TOBKIRI_PACKAGING_TRANSACTION_TOKEN",
+                "AWS_SECRET_ACCESS_KEY",
+                "PYTHONPATH",
+            )
+        )
         for key in ("HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP"):
             assert Path(environment[key]).is_relative_to(workspace.path)
 
@@ -2743,19 +2763,15 @@ def test_native_smoke_uses_separate_single_file_runtime_overlay(tmp_path: Path) 
     """The build-script smoke path copies a valid base before adding its overlay."""
     target = "x86_64-unknown-linux-gnu"
     output = _fixture_sources(tmp_path / "sealed", target)[2]
-    document = json.loads(
-        (output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8")
-    )
+    document = json.loads((output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8"))
     assert not (output / "app/runtime-resource-manifest.v1.json").exists()
     BUILDER.validate_environment(output, target, run_native_smoke=False)
     with BUILDER._native_smoke_workspace(output) as workspace:
-        snapshot, overlay_digest, outer_digest = (
-            BUILDER._create_native_smoke_runtime_snapshot(
-                output,
-                BUILDER.target_spec(target),
-                workspace,
-                document,
-            )
+        snapshot, overlay_digest, outer_digest = BUILDER._create_native_smoke_runtime_snapshot(
+            output,
+            BUILDER.target_spec(target),
+            workspace,
+            document,
         )
         overlay = snapshot / "app/runtime-resource-manifest.v1.json"
         payload = overlay.read_bytes()
@@ -2824,9 +2840,7 @@ def test_native_smoke_rejects_overlapping_runtime_and_host_workspaces(
     """A caller cannot collapse the typed runtime and Host-state domains."""
     target = "x86_64-unknown-linux-gnu"
     output = _fixture_sources(tmp_path / "sealed", target)[2]
-    document = json.loads(
-        (output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8")
-    )
+    document = json.loads((output / BUILDER.MANIFEST_FILENAME).read_text(encoding="utf-8"))
     temp_parent = tmp_path / "host-temp"
     temp_parent.mkdir(mode=0o700)
     monkeypatch.setenv("TMPDIR", str(temp_parent))
@@ -3244,6 +3258,14 @@ def test_explicit_scope_selects_custom_named_snapshot_for_defaultspack(
         "SEALED_IMPORT_MARKER = True\n",
         encoding="utf-8",
     )
+    bundle_binding_module = app_root / "core_runtime" / "packaged_application_bundle.py"
+    bundle_binding_module.parent.mkdir()
+    (bundle_binding_module.parent / "__init__.py").write_text("", encoding="utf-8")
+    bundle_binding_module.write_text(
+        "def install_packvm_bundle_binding_from_sealed_scope(scope, module_file):\n"
+        "    assert scope.packvm_bundle_binding_for(module_file) is None\n",
+        encoding="utf-8",
+    )
     manifest_path = sealed_root / "sealed-environment.v1.json"
     manifest_path.write_text("{}\n", encoding="utf-8")
     (sealed_root / "lease.v1").write_text("lease\n", encoding="utf-8")
@@ -3260,16 +3282,30 @@ def test_explicit_scope_selects_custom_named_snapshot_for_defaultspack(
     old_native_webview = sys.modules.get("defaultspack.native_webview")
     old_domain = sys.modules.get("domain")
     old_domain_probe = sys.modules.get("domain.sealed_probe")
+    old_core_runtime = sys.modules.get("core_runtime")
+    old_bundle_binding = sys.modules.get("core_runtime.packaged_application_bundle")
     for module_name in (
         "defaultspack.native_webview",
         "defaultspack",
         "domain.sealed_probe",
         "domain",
+        "core_runtime.packaged_application_bundle",
+        "core_runtime",
     ):
         sys.modules.pop(module_name, None)
     module = types.ModuleType("custom_snapshot_desktop_test")
     module.__file__ = str(desktop_path)
     module.__package__ = ""
+    core_runtime = types.ModuleType("core_runtime")
+    core_runtime.__path__ = [str(app_root / "core_runtime")]  # type: ignore[attr-defined]
+    bundle_binding = types.ModuleType("core_runtime.packaged_application_bundle")
+
+    def install_packvm_bundle_binding_from_sealed_scope(scope: object, module_file: object) -> None:
+        assert scope.packvm_bundle_binding_for(module_file) is None
+
+    bundle_binding.install_packvm_bundle_binding_from_sealed_scope = (
+        install_packvm_bundle_binding_from_sealed_scope
+    )
     try:
         sys.path = old_path[:]
         sys.modules.pop("tobkiri_sealed.bootstrap", None)
@@ -3280,6 +3316,8 @@ def test_explicit_scope_selects_custom_named_snapshot_for_defaultspack(
         source = desktop_path.read_text(encoding="utf-8")
         exec(compile(source, str(desktop_path), "exec"), module.__dict__)
         sys.path = []
+        sys.modules["core_runtime"] = core_runtime
+        sys.modules["core_runtime.packaged_application_bundle"] = bundle_binding
         for key in ("REPO", "RUMI_CORE_DIR", "RUMI_APP_DIR"):
             monkeypatch.setenv(key, str(external))
         scope = bootstrap._SealedDispatchScope(
@@ -3289,6 +3327,7 @@ def test_explicit_scope_selects_custom_named_snapshot_for_defaultspack(
             BUILDER._sha256_file(manifest_path),
             "a" * 64,
             bootstrap.ROLE_TARGETS["defaultspack"],
+            None,
         )
         module.prepare_for_sealed_dispatch(scope)
         assert module._sealed_app_root() == app_root
@@ -3332,6 +3371,90 @@ def test_explicit_scope_selects_custom_named_snapshot_for_defaultspack(
             sys.modules.pop("domain.sealed_probe", None)
         else:
             sys.modules["domain.sealed_probe"] = old_domain_probe
+        if old_core_runtime is None:
+            sys.modules.pop("core_runtime", None)
+        else:
+            sys.modules["core_runtime"] = old_core_runtime
+        if old_bundle_binding is None:
+            sys.modules.pop("core_runtime.packaged_application_bundle", None)
+        else:
+            sys.modules["core_runtime.packaged_application_bundle"] = old_bundle_binding
+
+
+def test_packvm_bundle_binding_is_scope_only_immutable_and_raw_bound(
+    tmp_path: Path,
+) -> None:
+    """v3 accepts only exact immutable app resources and exposes no fallback."""
+
+    output = _fixture_sources(tmp_path / "sealed", "x86_64-unknown-linux-gnu")[2]
+    bundle, digests = _packvm_bundle_fixture(tmp_path / "bundle")
+    source_root = ROOT / ".github" / "scripts" / "sealed_python_sources"
+    old_path = sys.path[:]
+    old_bootstrap = sys.modules.pop("tobkiri_sealed.bootstrap", None)
+    old_package = sys.modules.pop("tobkiri_sealed", None)
+    try:
+        sys.path.insert(0, str(source_root))
+        import tobkiri_sealed.bootstrap as bootstrap
+
+        binding = bootstrap._verify_packvm_bundle_binding(
+            str(bundle),
+            digests["provisioning"],
+            digests["helper"],
+            "ABC1234567",
+            digests["outer"],
+        )
+        assert binding is not None
+        assert dict(binding) == {
+            "root": str(bundle),
+            "provisioning_sha256": "sha256:" + digests["provisioning"],
+            "helper_manifest_sha256": "sha256:" + digests["helper"],
+            "helper_team_id": "ABC1234567",
+        }
+        with pytest.raises(TypeError):
+            binding["root"] = "forged"  # type: ignore[index]
+
+        manifest = output / BUILDER.MANIFEST_FILENAME
+        scope = bootstrap._SealedDispatchScope(
+            bootstrap._SCOPE_CONSTRUCTOR_TOKEN,
+            output,
+            manifest,
+            BUILDER._sha256_file(manifest),
+            "a" * 64,
+            bootstrap.ROLE_TARGETS["typed"],
+            binding,
+        )
+        assert scope.packvm_bundle_binding_for(output / "app" / "app.py") == binding
+        with pytest.raises(bootstrap.SealedBootstrapError, match="manifest-bound"):
+            scope.packvm_bundle_binding_for(output / "app" / "kernel_entry.py")
+
+        provisioning = bundle / "Contents/Resources/packvm-vz-provisioning.v1.json"
+        _make_test_mutable(provisioning)
+        provisioning.write_bytes(b"tampered\n")
+        provisioning.chmod(0o444)
+        with pytest.raises(bootstrap.SealedBootstrapError, match="bundle binding changed"):
+            bootstrap._verify_packvm_bundle_binding(
+                str(bundle),
+                digests["provisioning"],
+                digests["helper"],
+                "ABC1234567",
+                digests["outer"],
+            )
+        with pytest.raises(bootstrap.SealedBootstrapError, match="launch binding"):
+            bootstrap._verify_packvm_bundle_binding(
+                str(bundle),
+                "",
+                digests["helper"],
+                "ABC1234567",
+                digests["outer"],
+            )
+    finally:
+        sys.path = old_path
+        sys.modules.pop("tobkiri_sealed.bootstrap", None)
+        sys.modules.pop("tobkiri_sealed", None)
+        if old_bootstrap is not None:
+            sys.modules["tobkiri_sealed.bootstrap"] = old_bootstrap
+        if old_package is not None:
+            sys.modules["tobkiri_sealed"] = old_package
 
 
 def test_bootstrap_rejects_unknown_parent_arguments(
@@ -3478,32 +3601,28 @@ def test_bootstrap_and_resource_wiring_match_the_fixed_contract() -> None:
     assert "lease.v1" in bootstrap
     assert "LOCK_SH" in bootstrap and "LK_RLCK" in bootstrap
     assert 'values.index("--")' in bootstrap
-    assert "io.tobkiri.sealed-python-launch.v2" in bootstrap
+    assert "io.tobkiri.sealed-python-launch.v3" in bootstrap
     assert BUILDER.ATTESTATION_SCHEMA == "io.tobkiri.sealed-python-attestation.v2"
     assert BUILDER.ATTESTATION_SCHEMA in bootstrap
     assert BUILDER.ATTESTATION_SCHEMA in rust_contract
-    assert (
-        BUILDER.ATTESTATION_FILE_SCHEMA
-        == "io.tobkiri.sealed-python-attestation-file.v1"
-    )
+    assert BUILDER.ATTESTATION_FILE_SCHEMA == "io.tobkiri.sealed-python-attestation-file.v1"
     assert BUILDER.ATTESTATION_FILE_SCHEMA in bootstrap
     assert BUILDER.ATTESTATION_FILE_SCHEMA in rust_contract
     assert "os.replace" in bootstrap
     assert "fsync" in bootstrap and "O_EXCL" in bootstrap
     assert "os.link" in bootstrap and "st_nlink" in bootstrap
     assert all(f'"{role}"' in bootstrap for role in ("typed", "defaultspack", "host_helper"))
-    bootstrap_strings = {
-        node.value
-        for node in ast.walk(ast.parse(bootstrap))
-        if isinstance(node, ast.Constant) and isinstance(node.value, str)
-    }
     builder_strings = {
         node.value
         for node in ast.walk(ast.parse(builder))
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     }
-    assert not any(value.startswith("sha256:") for value in bootstrap_strings)
     assert not any(value.startswith("sha256:") for value in builder_strings)
+    # The v3 parent wire supplies raw digests.  Bootstrap projects exactly the
+    # two PackVM resource identities into the runtime's canonical prefixed
+    # form after it has independently re-read and verified those resources.
+    assert 'f"sha256:{provisioning_sha256}"' in bootstrap
+    assert 'f"sha256:{helper_manifest_sha256}"' in bootstrap
     assert "sha256:" not in json.dumps(environment_schema)
     for field in (
         "schema",
@@ -3560,6 +3679,10 @@ def test_bootstrap_and_resource_wiring_match_the_fixed_contract() -> None:
         '"--environment-root"',
         '"--runtime-overlay-sha256"',
         '"--outer-runtime-manifest-sha256"',
+        '"--application-bundle-root"',
+        '"--packvm-provisioning-sha256"',
+        '"--packvm-helper-manifest-sha256"',
+        '"--packvm-helper-team-id"',
         '"--"',
         '"venv/bin/python3"',
         '"app/kernel_entry.py"',
