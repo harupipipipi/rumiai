@@ -990,6 +990,22 @@ interface ToolPreviewPanelProps {
   onMemoChange?: (value: string) => void;
 }
 
+export const CANVAS_CLOSE_LABEL = 'Canvasを閉じる';
+
+export function CanvasCloseButton({ onClose }: { onClose: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClose}
+      className="p-1 text-zinc-600 hover:text-zinc-300 transition-colors"
+      title={CANVAS_CLOSE_LABEL}
+      aria-label={CANVAS_CLOSE_LABEL}
+    >
+      <X size={14} />
+    </button>
+  );
+}
+
 export function ToolPreviewPanel({
   previews,
   isVisible,
@@ -1182,12 +1198,7 @@ export function ToolPreviewPanel({
           >
             <Maximize2 size={13} />
           </button>
-          <button
-            onClick={onClose}
-            className="p-1 text-zinc-600 hover:text-zinc-300 transition-colors"
-          >
-            <X size={14} />
-          </button>
+          <CanvasCloseButton onClose={onClose} />
         </div>
       </div>
 
