@@ -371,6 +371,8 @@ class ModelRuntimeSettingsService:
         }
 
     def _runtime_rumi_base_model(self, settings: dict[str, Any] | None = None) -> str:
+        settings = settings if isinstance(settings, dict) else self.get_settings()
+        preferred_model = str(settings.get("preferred_model") or "").strip()
         base_profiles = self._base_profile_catalog(settings)
         available_models: list[str] = []
         available_providers: set[str] = set()
@@ -406,6 +408,13 @@ class ModelRuntimeSettingsService:
                     available_models.append(model_id)
         except Exception:
             pass
+        if (
+            preferred_model
+            and preferred_model != DEFAULT_MODEL
+            and not preferred_model.startswith("modelpack/")
+            and preferred_model in available_models
+        ):
+            return preferred_model
         return resolve_rumi_base_model(
             available_models,
             available_providers=available_providers,

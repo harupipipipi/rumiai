@@ -100,6 +100,15 @@ class RumiProvider(BaseProvider):
         ("google", "gemini-2.5-flash"),
     ]
 
+    @staticmethod
+    def _runtime_rumi_base_model():
+        try:
+            from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+
+            return ModelRuntimeSettingsService()._runtime_rumi_base_model()
+        except Exception:
+            return RUMI_BASE_MODEL
+
     def __init__(self, client):
         self._client = client
         self._pipeline = None
@@ -176,14 +185,13 @@ class RumiProvider(BaseProvider):
             model_id = model_id.split("/", 1)[1]
         return model_id in {"rumi", "auto", "mimo", "rumi-mimo-v2.5-pro"}
 
-    @staticmethod
-    def _process_params(model, params):
+    def _process_params(self, model, params):
         next_params = dict(params or {})
         model_id = str(model or "").strip()
         if "/" in model_id:
             model_id = model_id.split("/", 1)[1]
         if model_id in {"mimo", "rumi-mimo-v2.5-pro"}:
-            next_params["rumi_base_model_override"] = RUMI_BASE_MODEL
+            next_params["rumi_base_model_override"] = self._runtime_rumi_base_model()
             next_params["rumi_require_intended_base_model"] = True
         return next_params
 

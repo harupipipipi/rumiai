@@ -1855,6 +1855,7 @@ export function ComposerRenderer({
     const command = commands.find((item) => item.id === commandId);
     const action = command?.execution.type === "frontend" ? command.execution.action : "";
     const rawHasArgs = rawInput.trim().includes(" ");
+    setModelDropdownOpen(false);
     if (command?.id === "think") {
       onInputChange("/think ");
       window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
@@ -1918,7 +1919,7 @@ export function ComposerRenderer({
       onInputChange(value);
       updateAtMentionStateFromInput(value);
 
-      if (!templateAllowsSlashCommands || !value.startsWith("/") || value.startsWith("//")) {
+      if (templateAllowsSlashCommands) {
         setSelectedCommandIndex(0);
       }
     },
@@ -2109,9 +2110,14 @@ export function ComposerRenderer({
           setSelectedAtMentionIndex((current) => nextModelCandidateIndex(current, atMentionCandidates.length, direction));
           return;
         }
-        if (atMentionCandidates.length > 0 && (event.key === "Tab" || event.key === "Enter")) {
+        if (event.key === "Tab" || event.key === "Enter") {
           event.preventDefault();
-          handleAtMentionSelect(atMentionCandidates[Math.min(selectedAtMentionIndex, atMentionCandidates.length - 1)]);
+          if (atMentionCandidates.length > 0) {
+            handleAtMentionSelect(atMentionCandidates[Math.min(selectedAtMentionIndex, atMentionCandidates.length - 1)]);
+          } else {
+            setAtMentionOpen(false);
+            setAtMentionQuery("");
+          }
           return;
         }
       }
@@ -2618,6 +2624,7 @@ export function ComposerRenderer({
               onActiveIndexChange={setSelectedAtMentionIndex}
               onSelect={handleAtMentionSelect}
               onClose={() => setAtMentionOpen(false)}
+              style={composerPopoverStyle}
             />
           )}
 

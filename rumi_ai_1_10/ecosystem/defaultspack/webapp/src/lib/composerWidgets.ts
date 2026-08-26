@@ -73,12 +73,21 @@ export function resolveComposerWidgetDrop(widget: DroppedWidget, toolItems: Comp
 }
 
 function composerToolSearchText(item: ComposerExtensionItem): string {
+  const uiText = (() => {
+    if (!item.ui || typeof item.ui !== "object") return "";
+    try {
+      return JSON.stringify(item.ui);
+    } catch {
+      return "";
+    }
+  })();
   return [
     item.id,
     item.label,
     item.description,
     item.ui?.composer_label,
     item.ui?.composer_description,
+    uiText,
     ...(item.tags ?? []),
   ].filter(Boolean).join(" ").toLowerCase();
 }

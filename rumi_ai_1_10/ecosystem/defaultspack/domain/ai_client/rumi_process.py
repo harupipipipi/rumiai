@@ -10,6 +10,8 @@ from typing import Any
 
 RUMI_MODEL_PACK_ID = "rumi"
 RUMI_MODEL_PACK_REF = "modelpack/rumi"
+# Legacy intended MiMo base-model identifier. Runtime settings may resolve a
+# different active defaults/profile base before falling back to this value.
 RUMI_BASE_MODEL = "xiaomi-token-plan-sgp/mimo-v2.5-pro"
 RUMI_DISPLAY_NAME = "Rumi"
 RUMI_PROCESS_VERSION = "2026-06-04"

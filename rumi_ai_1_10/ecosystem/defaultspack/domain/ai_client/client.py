@@ -1340,24 +1340,23 @@ class AIClient:
         index = min(max(0, int(default_index or 0)), len(members) - 1)
         return members[index]
 
+    @staticmethod
+    def _runtime_rumi_base_model():
+        try:
+            from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+
+            return ModelRuntimeSettingsService()._runtime_rumi_base_model()
+        except Exception:
+            return rumi_process.RUMI_BASE_MODEL
+
     def _resolve_rumi_member_model(self, model, params=None):
         model_id = str(model or "").strip()
-        if model_id != rumi_process.RUMI_BASE_MODEL:
+        runtime_base_model = self._runtime_rumi_base_model()
+        if model_id not in {rumi_process.RUMI_BASE_MODEL, runtime_base_model}:
             return model
         if isinstance(params, dict) and params.get("rumi_require_intended_base_model"):
             return model
-        available_models: list[str] = []
-        for profile in self.list_models():
-            if not isinstance(profile, dict):
-                continue
-            for key in ("id", "profile_id", "qualified_model_id", "model_ref"):
-                value = str(profile.get(key) or "").strip()
-                if value:
-                    available_models.append(value)
-        return rumi_process.resolve_rumi_base_model(
-            available_models,
-            available_providers=set(self._providers.keys()),
-        )
+        return runtime_base_model
 
     @staticmethod
     def _response_text(response):

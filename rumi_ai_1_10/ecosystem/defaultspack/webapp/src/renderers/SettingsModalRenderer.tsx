@@ -2350,6 +2350,7 @@ function SettingsField({
                 const isMenuOpen = openApiMenuKey === key;
                 const apiProviderOption = providerOptions.find((option) => option.provider_id === String(api.provider_id ?? ""));
                 const apiKind = normalizeProviderKind(api.kind ?? apiProviderOption?.kind);
+                const isReadonly = Boolean(api.readonly || api.source === "env" || api.source === "oauth");
                 return (
                   <div
                     key={key}
@@ -2417,64 +2418,77 @@ function SettingsField({
                               non-llm
                             </span>
                           )}
+                          {isReadonly && (
+                            <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[10px] uppercase tracking-wide text-zinc-500">
+                              read-only
+                            </span>
+                          )}
                           <MaskedApiLabel api={api} />
                         </div>
                       )}
                     </div>
                     <div className="relative flex justify-end">
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setOpenApiMenuKey(isMenuOpen ? "" : key);
-                        }}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 text-zinc-500 transition-colors hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200"
-                        title="Actions"
-                      >
-                        <MoreVertical size={15} />
-                      </button>
-                      {isMenuOpen && (
+                      {isReadonly ? (
+                        <div className="flex h-8 items-center rounded-lg border border-zinc-800 bg-zinc-950 px-2 text-[11px] text-zinc-500">
+                          read-only
+                        </div>
+                      ) : (
                         <>
                           <button
                             type="button"
-                            aria-label="close api menu"
-                            className="fixed inset-0 rumi-layer-panel cursor-default"
                             onClick={(event) => {
                               event.stopPropagation();
-                              setOpenApiMenuKey("");
+                              setOpenApiMenuKey(isMenuOpen ? "" : key);
                             }}
-                          />
-                          <div className="absolute right-0 top-[calc(100%+6px)] rumi-layer-local-popover w-32 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 py-1 shadow-2xl">
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setRenamingKey(key);
-                                setRenameDraft(String(api.name ?? api.api_id ?? ""));
-                                setOpenApiMenuKey("");
-                              }}
-                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
-                            >
-                              <Pencil size={13} />
-                              Rename
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setOpenApiMenuKey("");
-                                onChange(sectionId, field.id, {
-                                  action: "delete",
-                                  provider_id: api.provider_id,
-                                  api_id: api.api_id,
-                                });
-                              }}
-                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-rose-300 hover:bg-rose-950/30"
-                            >
-                              <Trash2 size={13} />
-                              Delete
-                            </button>
-                          </div>
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 text-zinc-500 transition-colors hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200"
+                            title="Actions"
+                          >
+                            <MoreVertical size={15} />
+                          </button>
+                          {isMenuOpen && (
+                            <>
+                              <button
+                                type="button"
+                                aria-label="close api menu"
+                                className="fixed inset-0 rumi-layer-panel cursor-default"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setOpenApiMenuKey("");
+                                }}
+                              />
+                              <div className="absolute right-0 top-[calc(100%+6px)] rumi-layer-local-popover w-32 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 py-1 shadow-2xl">
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setRenamingKey(key);
+                                    setRenameDraft(String(api.name ?? api.api_id ?? ""));
+                                    setOpenApiMenuKey("");
+                                  }}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+                                >
+                                  <Pencil size={13} />
+                                  Rename
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setOpenApiMenuKey("");
+                                    onChange(sectionId, field.id, {
+                                      action: "delete",
+                                      provider_id: api.provider_id,
+                                      api_id: api.api_id,
+                                    });
+                                  }}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-rose-300 hover:bg-rose-950/30"
+                                >
+                                  <Trash2 size={13} />
+                                  Delete
+                                </button>
+                              </div>
+                            </>
+                          )}
                         </>
                       )}
                     </div>

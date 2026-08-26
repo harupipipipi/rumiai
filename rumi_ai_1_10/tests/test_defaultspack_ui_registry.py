@@ -866,6 +866,31 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(google["oauth"]["connected"])
         self.assertEqual(google["oauth"]["email"], "user@example.test")
 
+    def test_settings_api_keys_expose_env_backed_opencode_zen_status(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            secrets_dir = pack_root / "user_data" / "secrets"
+            secrets_dir.mkdir(parents=True, exist_ok=True)
+            env = {
+                "RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir),
+                "OPENCODE_ZEN_API_KEY": "zen-secret",
+            }
+            with patch.dict(os.environ, env, clear=True):
+                with patch("domain.frontend.registry.AIClient") as mock_client:
+                    mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                    settings = FrontendRegistry(pack_root=pack_root).get_settings()
+
+        api_rows = settings["values"]["apis"]["api_keys"]
+        opencode = next(item for item in api_rows if item["provider_id"] == "opencode-zen")
+        self.assertTrue(opencode["configured"])
+        self.assertEqual(len(opencode["apis"]), 1)
+        api = opencode["apis"][0]
+        self.assertTrue(api["readonly"])
+        self.assertEqual(api["source"], "env")
+        self.assertEqual(api["api_id"], "environment")
+
     def test_external_settings_are_split_into_input_output_and_custom_sections(self):
         from domain.frontend.registry import FrontendRegistry
 

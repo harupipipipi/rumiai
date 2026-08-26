@@ -689,6 +689,37 @@ def provider_named_api_keys(provider_id: str = "", *, pack_root: Path | None = N
     return sorted(items, key=lambda item: (str(item.get("provider_id")), str(item.get("api_id"))))
 
 
+def _provider_env_api_rows(provider_id: str, *, pack_root: Path | None = None) -> list[dict[str, Any]]:
+    provider_id = str(provider_id or "").strip()
+    if not provider_id:
+        return []
+    for secret_key in provider_secret_keys(provider_id):
+        if not _read_secret_value(secret_key, f"defaultspack.ai_client:{provider_id}:env", pack_root=pack_root):
+            continue
+        api_id = "environment"
+        return [
+            {
+                "api_id": api_id,
+                "name": "Environment",
+                "provider_id": provider_id,
+                "key": secret_key,
+                "label": f"{provider_id}:{api_id}:***",
+                "configured": True,
+                "created_at": None,
+                "updated_at": None,
+                "kind": _KIND_LLM,
+                "base_url": "",
+                "allowed_models": [],
+                "default_model": "",
+                "notes": "",
+                "quota_label": "",
+                "readonly": True,
+                "source": "env",
+            }
+        ]
+    return []
+
+
 def provider_api_metadata(provider_id: str, api_id: str, *, pack_root: Path | None = None) -> dict[str, Any]:
     provider_id = str(provider_id or "").strip()
     api_id = str(api_id or "").strip()
@@ -737,7 +768,7 @@ def provider_key_status(*, pack_root: Path | None = None) -> list[dict[str, Any]
                 provider_has_api_key(provider_id, pack_root=pack_root)
                 or provider_has_oauth_connection(provider_id, pack_root=pack_root)
             ),
-            "apis": provider_named_api_keys(provider_id, pack_root=pack_root),
+            "apis": provider_named_api_keys(provider_id, pack_root=pack_root) or _provider_env_api_rows(provider_id, pack_root=pack_root),
             "oauth": provider_oauth_status(provider_id, pack_root=pack_root),
         }
         for provider_id, keys in sorted(PROVIDER_SECRET_KEYS.items())

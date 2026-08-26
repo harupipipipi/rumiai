@@ -1233,7 +1233,7 @@ function useLocalStorage<T>(key: string, defaultValue: T): [T, (v: T | ((prev: T
   });
 
   useEffect(() => {
-    localStorage.setItem(key, JSON.stringify(value));
+    writeJsonLocalStorage(key, value);
   }, [key, value]);
 
   return [value, setValue];
@@ -2315,12 +2315,6 @@ function ChatApp() {
   const lastHealthyAtRef = useRef<number | null>(null);
   const consecutiveHealthFailuresRef = useRef(0);
   const authorityApprovalWindowRequestRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (mode === "chat") {
-      setMode("agent");
-    }
-  }, [mode, setMode]);
 
   const rawSidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
@@ -3831,7 +3825,7 @@ function ChatApp() {
         handleModeChange(mode === "coding" ? "agent" : "coding");
         return;
       case "set_mode_chat":
-        handleModeChange("agent");
+        handleModeChange("chat");
         return;
       case "set_mode_agent":
         handleModeChange("agent");
@@ -3906,6 +3900,7 @@ function ChatApp() {
       case "open_branch_picker":
         handleModeChange("coding");
         if (args.name) setInput(`Create or switch to branch ${String(args.name)}.`);
+        else setInput("Create or switch to branch.");
         return;
       case "prepare_test_run":
         handleModeChange("coding");
@@ -3918,6 +3913,7 @@ function ChatApp() {
       case "open_file_search":
         handleModeChange("coding");
         if (args.query) setInput(`Find workspace files matching ${String(args.query)}.`);
+        else setInput("Find workspace files.");
         return;
       default:
         if (command.risk === "high") {

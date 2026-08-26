@@ -943,10 +943,16 @@ def test_rumi_provider_default_is_not_process_model():
     assert seen["model"] == "openai/gpt-4o"
 
 
-def test_rumi_provider_mimo_requires_intended_base_model():
+def test_rumi_provider_mimo_uses_runtime_base_model(monkeypatch):
     from domain.ai_client.providers.rumi_provider import RumiProvider
 
     seen = {}
+
+    monkeypatch.setattr(
+        ModelRuntimeSettingsService,
+        "_runtime_rumi_base_model",
+        lambda self, settings=None: "google/gemini-2.5-flash",
+    )
 
     class FakeClient:
         def __init__(self):
@@ -963,8 +969,28 @@ def test_rumi_provider_mimo_requires_intended_base_model():
 
     assert response["content"][0]["text"] == "process"
     assert seen["model"] == "modelpack/rumi"
-    assert seen["params"]["rumi_base_model_override"] == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+    assert seen["params"]["rumi_base_model_override"] == "google/gemini-2.5-flash"
     assert seen["params"]["rumi_require_intended_base_model"] is True
+
+
+def test_ai_client_resolves_rumi_member_model_from_runtime_base(monkeypatch):
+    monkeypatch.setattr(
+        ModelRuntimeSettingsService,
+        "_runtime_rumi_base_model",
+        lambda self, settings=None: "google/gemini-2.5-flash",
+    )
+
+    client = AIClient()
+
+    assert client._resolve_rumi_member_model("xiaomi-token-plan-sgp/mimo-v2.5-pro", {}) == "google/gemini-2.5-flash"
+    assert client._resolve_rumi_member_model("google/gemini-2.5-flash", {}) == "google/gemini-2.5-flash"
+    assert (
+        client._resolve_rumi_member_model(
+            "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+            {"rumi_require_intended_base_model": True},
+        )
+        == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+    )
 
 
 def test_model_call_uses_required_capabilities(monkeypatch):
