@@ -116,6 +116,15 @@ cp -R "$1" "$2"
     _write_executable(
         bin_dir / "plutil",
         """#!/bin/sh
+last_argument=''
+for argument in "$@"; do
+  last_argument=$argument
+done
+if [ "$last_argument" = "-" ]; then
+  # Consume the codesign plist before exiting. Otherwise Linux can deliver
+  # SIGPIPE to the producer and fail the packager's pipefail pipeline.
+  cat >/dev/null
+fi
 if [ "${1:-}" = "-extract" ]; then
   if [ "${2:-}" = "com.apple.security.virtualization" ]; then
     printf '%s\\n' 'true'
