@@ -296,6 +296,166 @@ test('install confirms the exact Pack response and reconciles every affected sur
   assert.deepEqual(successes, ['Pack installed.']);
 });
 
+test('install remains confirmed when the PackVM-owned frontend catalog is intentionally unavailable', async () => {
+  const availablePack: Pack = {
+    ...samplePack,
+    installed: false,
+    enabled: false,
+    approved: false,
+    approvalStatus: 'available',
+    approvalReason: 'install_required',
+    approvalIssues: ['install_required'],
+  };
+  const routes = installFetch(async (route, init) => {
+    if (route === 'POST /api/pack-control/install') {
+      assert.deepEqual(JSON.parse(String(init?.body)), {pack_id: samplePack.id});
+      return new Response(JSON.stringify({
+        success: true,
+        data: {...binding(), pack_id: samplePack.id, installed: true},
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
+    assert.equal(route, 'GET /api/pack-control/catalog');
+    return new Response(JSON.stringify({
+      success: true,
+      data: {...binding(), packs: [catalogPack(false)], count: 1},
+    }), {headers: {'Content-Type': 'application/json'}});
+  });
+  const successes: string[] = [];
+  useAppStore.setState({
+    packs: [availablePack],
+    packInstallPending: {},
+    packMutationUnknown: {},
+    packVmDoctor: {
+      ...healthyDoctor,
+      ready: false,
+      reason: 'packaged macOS VZ helper production identity is unavailable',
+      attestation_digest: null,
+    },
+    frontendCatalog: null,
+    frontendCatalogError: 'packaged macOS VZ helper production identity is unavailable',
+    addToast: (message, type) => {
+      if (type === 'success') successes.push(message);
+    },
+  });
+
+  await useAppStore.getState().installPack(samplePack.id);
+
+  assert.deepEqual(routes, [
+    'POST /api/pack-control/install',
+    'GET /api/pack-control/catalog',
+  ]);
+  assert.equal(useAppStore.getState().packs[0].installed, true);
+  assert.deepEqual(useAppStore.getState().packMutationUnknown, {});
+  assert.deepEqual(successes, ['Pack installed.']);
+});
+
+test('install remains indeterminate while PackVM doctor readiness is unknown', async () => {
+  const availablePack: Pack = {
+    ...samplePack,
+    installed: false,
+    enabled: false,
+    approved: false,
+    approvalStatus: 'available',
+    approvalReason: 'install_required',
+    approvalIssues: ['install_required'],
+  };
+  const routes = installFetch(async (route) => {
+    if (route === 'POST /api/pack-control/install') {
+      return new Response(JSON.stringify({
+        success: true,
+        data: {...binding(), pack_id: samplePack.id, installed: true},
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
+    if (route === 'GET /api/pack-control/catalog') {
+      return new Response(JSON.stringify({
+        success: true,
+        data: {...binding(), packs: [catalogPack(false)], count: 1},
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
+    if (route.startsWith('GET /api/runtime-surface/operation-status?')) {
+      return operationStatusResponse(route, 'pack.install');
+    }
+    assert.equal(route, 'GET /api/ui/catalog');
+    return new Response(JSON.stringify({success: true, data: {dynamic_host: dynamicCatalog()}}), {
+      headers: {'Content-Type': 'application/json'},
+    });
+  });
+  useAppStore.setState({
+    packs: [availablePack],
+    packInstallPending: {},
+    packMutationUnknown: {},
+    packVmDoctor: null,
+    frontendCatalog: null,
+    frontendCatalogError: null,
+  });
+
+  await assert.rejects(
+    useAppStore.getState().installPack(samplePack.id),
+    /mutation result is unknown/i,
+  );
+
+  assert.deepEqual(routes.map(normalizeOperationStatusRoute), [
+    'POST /api/pack-control/install',
+    'GET /api/pack-control/catalog',
+    'GET /api/runtime-surface/operation-status',
+    'GET /api/pack-control/catalog',
+  ]);
+  assert.equal(Object.keys(useAppStore.getState().packMutationUnknown).length, 1);
+});
+
+test('install refreshes the PackVM catalog when readiness becomes available in flight', async () => {
+  const availablePack: Pack = {
+    ...samplePack,
+    installed: false,
+    enabled: false,
+    approved: false,
+    approvalStatus: 'available',
+    approvalReason: 'install_required',
+    approvalIssues: ['install_required'],
+  };
+  const routes = installFetch(async (route) => {
+    if (route === 'POST /api/pack-control/install') {
+      return new Response(JSON.stringify({
+        success: true,
+        data: {...binding(), pack_id: samplePack.id, installed: true},
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
+    if (route === 'GET /api/pack-control/catalog') {
+      useAppStore.setState({packVmDoctor: healthyDoctor});
+      return new Response(JSON.stringify({
+        success: true,
+        data: {...binding(), packs: [catalogPack(false)], count: 1},
+      }), {headers: {'Content-Type': 'application/json'}});
+    }
+    assert.equal(route, 'GET /api/ui/catalog');
+    return new Response(JSON.stringify({success: true, data: {dynamic_host: dynamicCatalog()}}), {
+      headers: {'Content-Type': 'application/json'},
+    });
+  });
+  useAppStore.setState({
+    packs: [availablePack],
+    packInstallPending: {},
+    packMutationUnknown: {},
+    packVmDoctor: {
+      ...healthyDoctor,
+      ready: false,
+      reason: 'PackVM startup is pending',
+      attestation_digest: null,
+    },
+    frontendCatalog: null,
+    frontendCatalogError: null,
+  });
+
+  await useAppStore.getState().installPack(samplePack.id);
+
+  assert.deepEqual(routes, [
+    'POST /api/pack-control/install',
+    'GET /api/pack-control/catalog',
+    'GET /api/ui/catalog',
+  ]);
+  assert.deepEqual(useAppStore.getState().packMutationUnknown, {});
+});
+
 test('disable denial leaves the Pack enabled, clears pending, and surfaces the server error', async () => {
   const routes = installFetch(async (route) => {
     assert.equal(route, 'POST /api/pack-control/disable');

@@ -48,15 +48,32 @@ function profileData() {
     shell: {pack_id: 'shell-pack'},
     application: {pack_id: 'application-pack', role: 'application'},
     pack_closure: [{pack_id: 'provider-pack'}],
-    profile_lock: {lock_digest: digest('d')},
-    resolved_plan: {plan_digest: digest('b')},
+    profile_lock: {
+      lock_digest: digest('d'),
+      plan_digest: digest('b'),
+      bundle_digest: digest('8'),
+      closure_digest: digest('9'),
+      profile_authority_snapshot_digest: digest('e'),
+      security_epoch: 4,
+    },
+    resolved_plan: {
+      plan_digest: digest('b'),
+      bundle_digest: digest('8'),
+      closure_digest: digest('9'),
+      security_epoch: 4,
+    },
     activation_record: {
-      activation_api_version: 'io.tobkiri.activation-record.v1',
+      activation_api_version: 'io.tobkiri.activation-record.v2',
       profile_id: 'defaults',
+      profile_revision: digest('a'),
       activation_id: 'activation:defaults-one',
       state: 'active',
       state_generation: 1,
+      catalog_revision: digest('c'),
+      bundle_digest: digest('8'),
+      lock_digest: digest('d'),
       plan_digest: digest('b'),
+      closure_digest: digest('9'),
       profile_authority_snapshot_digest: digest('e'),
       security_epoch: 4,
       fencing_token: 7,
@@ -322,6 +339,62 @@ test('real v4 read fixture accepts evidence refs and full Profile records only i
   assert.deepEqual(extractExactProfileSelectablePackIds(accepted.data), ['provider-pack']);
   assert.deepEqual(extractExactPlanBindings(accepted.data), profileData().resolved_wiring.bindings);
   assert.deepEqual(extractFiniteArtifactEntries(accepted.data), profileData().artifact_entries);
+});
+
+test('Profile activation record v2 is bound to every outer runtime digest', () => {
+  const valid = envelope('profile', profileData());
+  assert.doesNotThrow(() => validateRuntimeSurfaceEnvelope('profile', valid));
+
+  for (const [field, replacement] of [
+    ['profile_revision', digest('f')],
+    ['catalog_revision', digest('f')],
+    ['lock_digest', digest('f')],
+    ['plan_digest', digest('f')],
+    ['profile_authority_snapshot_digest', digest('f')],
+    ['bundle_digest', digest('f')],
+    ['closure_digest', digest('f')],
+    ['security_epoch', 5],
+    ['fencing_token', 8],
+  ] as const) {
+    const tampered = structuredClone(valid);
+    (tampered.data.activation_record as Record<string, unknown>)[field] = replacement;
+    assert.throws(
+      () => validateRuntimeSurfaceEnvelope('profile', tampered),
+      (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'INVALID',
+    );
+  }
+
+  for (const tampered of [
+    {...valid, plan_digest: digest('f')},
+    {...valid, records: {...valid.records, resolved_plan: {
+      ...valid.records.resolved_plan,
+      digest: digest('f'),
+    }}},
+    {...valid, data: {...valid.data, resolved_plan: {
+      ...valid.data.resolved_plan,
+      bundle_digest: digest('f'),
+    }}},
+    {...valid, data: {...valid.data, profile_lock: {
+      ...valid.data.profile_lock,
+      closure_digest: digest('f'),
+    }}},
+    {...valid, data: {...valid.data, authority_snapshot: {
+      ...valid.data.authority_snapshot,
+      security_epoch: 5,
+    }}},
+  ]) {
+    assert.throws(
+      () => validateRuntimeSurfaceEnvelope('profile', tampered),
+      (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'INVALID',
+    );
+  }
+
+  const legacy = structuredClone(valid);
+  legacy.data.activation_record.activation_api_version = 'io.tobkiri.activation-record.v1';
+  assert.throws(
+    () => validateRuntimeSurfaceEnvelope('profile', legacy),
+    (error: unknown) => error instanceof RuntimeSurfaceError && error.code === 'INVALID',
+  );
 });
 
 test('canonical read transport sends only target-selected guard keys', async () => {
