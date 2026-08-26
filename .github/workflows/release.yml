@@ -489,7 +489,7 @@ jobs:
           /usr/bin/grep -Fqx 'Identifier=dev.tobkiri.launcher.packvm-vz-helper' <<<"$helper_details"
           /usr/bin/grep -Fq 'designated => identifier "dev.tobkiri.launcher.packvm-vz-helper"' <<<"$helper_details"
           /usr/bin/codesign -d --entitlements :- "$helper" 2>/dev/null \
-            | /usr/bin/plutil -extract com.apple.security.virtualization raw -o - - \
+            | /usr/bin/plutil -extract 'com\.apple\.security\.virtualization' raw -o - - \
             | /usr/bin/grep -qx true
           python .github/scripts/macos_ci_artifact.py write-packvm-bundle-manifest \
             --app-bundle "$app" \

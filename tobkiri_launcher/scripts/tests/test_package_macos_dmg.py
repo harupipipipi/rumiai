@@ -126,7 +126,7 @@ if [ "$last_argument" = "-" ]; then
   cat >/dev/null
 fi
 if [ "${1:-}" = "-extract" ]; then
-  if [ "${2:-}" = "com.apple.security.virtualization" ]; then
+  if [ "${2:-}" = 'com\\.apple\\.security\\.virtualization' ]; then
     printf '%s\\n' 'true'
   else
     printf '%s\\n' '1.2.3'
@@ -641,6 +641,7 @@ def test_packager_uses_explicit_sidecar_and_outer_verification_not_deep_resignin
     source = SCRIPT.read_text(encoding="utf-8")
     assert "verify_packvm_helper_signature" in source
     assert "codesign --verify --strict --all-architectures" in source
+    assert "plutil -extract 'com\\.apple\\.security\\.virtualization'" in source
     assert "codesign --verify --deep" not in source
     assert "codesign --force --deep" not in source
 
