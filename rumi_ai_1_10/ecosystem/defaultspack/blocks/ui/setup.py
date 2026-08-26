@@ -52,6 +52,7 @@ def run(context):
     source_component = context.get("_source_component", "defaultspack:frontend:ui")
     routes = [
         ("GET", "/api/ui/catalog", _lazy("blocks.ui.catalog"), {}),
+        ("GET", "/api/ui/agent-notifications", _lazy("blocks.ui.agent_notifications"), {}),
         ("GET", "/api/ui/settings", _lazy("blocks.ui.settings"), {}),
         ("PUT", "/api/ui/settings", _lazy("blocks.ui.settings"), {}),
         ("GET", "/api/connections/codex", _lazy("blocks.connections.codex"), {}),

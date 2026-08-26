@@ -2478,6 +2478,13 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: GET
+  pattern: /api/ui/agent-notifications
+  legacy_block_module: blocks.ui.agent_notifications
+  replacement_function_id: ui_agent_notifications
+  owner: ui
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
   pattern: /api/ui/settings
   legacy_block_module: blocks.ui.settings
   replacement_function_id: ui_settings_get

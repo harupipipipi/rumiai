@@ -9,6 +9,7 @@ import { useDesktopInstances } from "../../features/sandboxes/useSandboxInstance
 import { useRuntimeDoctor } from "../../features/sandboxes/useRuntimeDoctor";
 import { useSandboxTemplates } from "../../features/sandboxes/useSandboxTemplates";
 import { cn } from "../../lib/cn";
+import { AgentNotificationCenter } from "./AgentNotificationCenter";
 import { DesktopCreateDialog } from "./DesktopCreateDialog";
 import { DesktopGrid } from "./DesktopGrid";
 import { DesktopInspector } from "./DesktopInspector";
@@ -258,6 +259,8 @@ export function DesktopMonitorWorkspace() {
               {surfaceError}
             </div>
           )}
+
+          <AgentNotificationCenter />
 
           {runtimeReady && (
             <div className="grid min-h-0 gap-2 min-[1280px]:grid-cols-[minmax(0,1fr)_300px] min-[1536px]:grid-cols-[minmax(0,1fr)_340px]">

@@ -13,6 +13,11 @@
       "method": "GET",
       "path": "/api/ui/catalog",
       "block_module": "blocks.ui.catalog"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ui/agent-notifications",
+      "block_module": "blocks.ui.agent_notifications"
     }
   ],
   "capabilities": {

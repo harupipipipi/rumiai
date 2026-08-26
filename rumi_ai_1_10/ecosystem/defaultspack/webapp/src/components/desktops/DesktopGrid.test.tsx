@@ -1,4 +1,5 @@
 import test from "node:test";
+import "./AgentNotificationCenter.test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
