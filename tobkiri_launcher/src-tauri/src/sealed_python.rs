@@ -3676,7 +3676,10 @@ mod tests {
         let binding = packaged_packvm_bundle_binding_from_app_dir(&app_dir)
             .unwrap()
             .unwrap();
-        assert_eq!(binding.root, root.join("Tobkiri Launcher.app"));
+        assert_eq!(
+            binding.root,
+            fs::canonicalize(root.join("Tobkiri Launcher.app")).unwrap()
+        );
         assert_eq!(binding.provisioning_sha256, sha256_bytes(provisioning));
         assert_eq!(binding.helper_manifest_sha256, sha256_bytes(helper));
 
