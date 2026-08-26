@@ -70,6 +70,9 @@
       "prompt_version_ledger"
     ],
     "asset_index": {
+      "index": [
+        "asset_index.json"
+      ],
       "readme": [
         "README.md"
       ],
@@ -87,7 +90,10 @@
         "catalog/provider_migration_matrix.yaml"
       ],
       "schema": [
-        "schemas/prompt_studio_record.schema.json"
+        "schemas/prompt_studio_record.schema.json",
+        "schemas/prompt_artifact.schema.json",
+        "schemas/instruction_migration_record.schema.json",
+        "schemas/prompt_lint_result.schema.json"
       ],
       "policy": [
         "policies/prompt_studio_safety.policy.yaml",

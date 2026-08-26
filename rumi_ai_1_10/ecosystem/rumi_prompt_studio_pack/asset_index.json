@@ -1,0 +1,102 @@
+{
+  "pack_id": "rumi_prompt_studio_pack",
+  "version": "0.1.0",
+  "asset_groups": {
+    "readme": {
+      "purpose": "Top-level pack orientation.",
+      "paths": [
+        "README.md"
+      ]
+    },
+    "docs": {
+      "purpose": "Human operating guide and boundary documentation.",
+      "paths": [
+        "docs/README.md",
+        "docs/architecture.md",
+        "docs/interfaces.md",
+        "docs/operations.md"
+      ]
+    },
+    "catalog": {
+      "purpose": "Prompt library, workflow, quality, and migration declarations.",
+      "paths": [
+        "catalog/prompt_studio_prompt_library.yaml",
+        "catalog/prompt_studio_workflows.yaml",
+        "catalog/prompt_studio_quality_matrix.yaml",
+        "catalog/custom_instruction_migration_map.yaml",
+        "catalog/provider_migration_matrix.yaml"
+      ]
+    },
+    "schema": {
+      "purpose": "Portable JSON contracts for prompt studio records, artifacts, migration records, and lint results.",
+      "paths": [
+        "schemas/prompt_studio_record.schema.json",
+        "schemas/prompt_artifact.schema.json",
+        "schemas/instruction_migration_record.schema.json",
+        "schemas/prompt_lint_result.schema.json"
+      ]
+    },
+    "policy": {
+      "purpose": "Declarative safety and provider-boundary policies.",
+      "paths": [
+        "policies/prompt_studio_safety.policy.yaml",
+        "policies/provider_style_boundary.policy.yaml"
+      ]
+    },
+    "checklist": {
+      "purpose": "Review checklist for prompt studio artifacts.",
+      "paths": [
+        "checklists/prompt_studio_review.checklist.yaml"
+      ]
+    },
+    "ledger": {
+      "purpose": "Prompt studio evidence and version ledgers.",
+      "paths": [
+        "ledgers/prompt_studio_evidence_ledger.schema.yaml",
+        "ledgers/prompt_version_ledger.yaml"
+      ]
+    },
+    "template": {
+      "purpose": "Prompt studio handoff and migration report templates.",
+      "paths": [
+        "templates/prompt_studio_handoff.template.md",
+        "templates/custom_instruction_migration.template.md"
+      ]
+    },
+    "profiles": {
+      "purpose": "Reviewer profile declarations.",
+      "paths": [
+        "profiles/prompt_editor.profile.yaml"
+      ]
+    },
+    "prompts": {
+      "purpose": "System prompt declarations for prompt linting.",
+      "paths": [
+        "prompts/prompt_linter.system.md"
+      ]
+    },
+    "presets": {
+      "purpose": "Reusable prompt review presets.",
+      "paths": [
+        "presets/safe_default.preset.yaml",
+        "presets/handoff_review.preset.yaml",
+        "presets/quality_gate.preset.yaml"
+      ]
+    },
+    "example": {
+      "purpose": "Portable examples for prompt linting and instruction migration.",
+      "paths": [
+        "examples/claude_style_instruction_migration.example.yaml",
+        "examples/chatgpt_custom_instruction_lint.example.yaml",
+        "examples/gemini_gem_prompt_normalization.example.yaml"
+      ]
+    },
+    "fixtures": {
+      "purpose": "Local-only dry-run inputs for migration and prompt lint smoke checks.",
+      "paths": [
+        "fixtures/prompt_regression_cases.yaml"
+      ]
+    }
+  },
+  "non_executable_statement": "This index references prompt artifacts and review rules only. It does not register tools, APIs, model routers, memory stores, or executable runtimes."
+}
