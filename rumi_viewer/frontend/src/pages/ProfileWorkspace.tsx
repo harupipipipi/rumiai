@@ -6,6 +6,7 @@ import type { ApiProfileWorkspaceDetail, StartupProfilesResponseData } from '@/s
 import { fetchActiveProfileWorkspace, fetchProfileWorkspace } from '@/src/lib/profileWorkspaceApi';
 import { useAppStore } from '@/src/store';
 import { FlowViewer } from './FlowViewer';
+import { InlineLoadError } from '@/src/components/ui/InlineLoadError';
 
 function JsonBlock({ value }: { value: unknown }) {
   return (
@@ -27,10 +28,13 @@ function PathRow({ label, value }: { label: string; value?: string }) {
 export function ProfileWorkspace() {
   const addToast = useAppStore((state) => state.addToast);
   const runtimeReady = useAppStore((state) => state.runtimeReady);
+  const runtimeStatus = useAppStore((state) => state.runtimeStatus);
+  const runtimeError = useAppStore((state) => state.runtimeError);
+  const refreshRuntimeHealth = useAppStore((state) => state.refreshRuntimeHealth);
   const [startupProfiles, setStartupProfiles] = useState<StartupProfilesResponseData | null>(null);
   const [workspace, setWorkspace] = useState<ApiProfileWorkspaceDetail | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadWorkspace = async (profileId?: string) => {
@@ -94,8 +98,23 @@ export function ProfileWorkspace() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
+        {!runtimeReady ? (
+          <InlineLoadError
+            title={runtimeStatus === 'error' ? 'Runtime failed to start' : 'Runtime is not ready'}
+            message={runtimeError || 'Profile workspace data becomes available after the local runtime is ready.'}
+            onRetry={() => void refreshRuntimeHealth()}
+          />
+        ) : null}
         {loading && <div className="text-sm text-text-muted">Loading workspace...</div>}
-        {error && <div className="border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">{error}</div>}
+        {error && runtimeReady ? (
+          <InlineLoadError
+            title="Profile workspace could not be loaded"
+            message={error}
+            onRetry={() => void loadWorkspace(selectedProfileId || undefined)}
+            retrying={loading}
+            stale={Boolean(workspace)}
+          />
+        ) : null}
         {workspace && (
           <div className="space-y-6">
             <section className="border border-border bg-bg-main p-4">

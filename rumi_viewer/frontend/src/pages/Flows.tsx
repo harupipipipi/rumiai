@@ -32,7 +32,6 @@ import {
   SelectionMode,
 } from '@xyflow/react';
 import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
 
 import { nodeTypes } from '@/src/components/flow/CustomNodes';
 import { nodesToYaml, yamlToNodes } from '@/src/lib/flowUtils';
@@ -365,6 +364,13 @@ function FlowEditorInner() {
 
   const selectedPorts = (((editorHook.selectedNode?.data as { ports?: FlowPort[] } | undefined)?.ports) ?? []);
 
+  const openFlowLibrary = () => {
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 999px)').matches) {
+      editorHook.setSelectedNode(null);
+    }
+    setIsFlowLibraryOpen(true);
+  };
+
   useEffect(() => {
     if (!reactFlowInstance || nodes.length === 0) return;
     const frame = window.requestAnimationFrame(() => {
@@ -385,9 +391,12 @@ function FlowEditorInner() {
   }
 
   return (
-    <div className="flow-focus-shell flex h-full flex-1 gap-3 p-2 animate-in fade-in slide-in-from-bottom-4 sm:p-3">
+    <div className="flow-focus-shell relative flex h-full min-w-0 flex-1 gap-3 overflow-hidden p-2 animate-in fade-in slide-in-from-bottom-4 sm:p-3">
       {isFlowLibraryOpen && (
-        <div className="flex w-64 shrink-0 flex-col gap-3 rounded-[28px] border border-border bg-bg-card/95 p-3 shadow-[0_22px_60px_rgba(0,0,0,0.24)] backdrop-blur-sm">
+        <div
+          data-testid="flow-library"
+          className="z-40 flex w-64 shrink-0 flex-col gap-3 rounded-2xl border border-border bg-bg-card p-3 shadow-lg min-[1000px]:relative max-[999px]:absolute max-[999px]:inset-y-2 max-[999px]:left-2"
+        >
           <div className="flex items-center justify-between">
             <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-text-muted">{t('flows.flow_list')}</div>
             <button
@@ -424,11 +433,12 @@ function FlowEditorInner() {
         </div>
       )}
 
-      <div className="relative flex flex-1 flex-col gap-3 overflow-hidden rounded-[30px] border border-border bg-bg-card/96 p-4 shadow-[0_24px_70px_rgba(0,0,0,0.28)] backdrop-blur-sm">
+      <div data-testid="flow-editor" className="relative flex min-w-0 flex-1 flex-col gap-3 overflow-hidden rounded-2xl border border-border bg-bg-card p-3 min-[1000px]:p-4">
         {!isFlowLibraryOpen && (
           <button
             type="button"
-            onClick={() => setIsFlowLibraryOpen(true)}
+            data-testid="flow-library-toggle"
+            onClick={openFlowLibrary}
             className="absolute left-4 top-4 z-30 inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-border bg-bg-main/92 text-text-muted shadow-sm transition-colors hover:bg-bg-hover hover:text-text-main"
             title={t('flows.open_flow_list')}
           >
@@ -437,8 +447,8 @@ function FlowEditorInner() {
         )}
         {isCreating || selectedFlowId ? (
           <>
-            <div className={cn('flex items-center justify-between gap-4', !isFlowLibraryOpen && 'pl-12')}>
-              <div className="flex items-center gap-3">
+            <div className={cn('flex min-w-0 flex-wrap items-center justify-between gap-2', !isFlowLibraryOpen && 'pl-12')}>
+              <div className="min-w-0 flex-1">
                 {isCreating ? (
                   <Input
                     placeholder={t('flows.name_placeholder')}
@@ -447,25 +457,25 @@ function FlowEditorInner() {
                     className="max-w-sm"
                   />
                 ) : (
-                  <div>
-                    <h2 className="text-xl font-bold text-text-main">{selectedFlow?.name}</h2>
-                    <div className="text-xs text-text-muted">{t('flows.flow_id')}: {flowMeta.flowId}</div>
+                  <div className="min-w-0">
+                    <h2 className="truncate text-lg font-bold text-text-main min-[1000px]:text-xl" title={selectedFlow?.name}>{selectedFlow?.name}</h2>
+                    <div className="truncate text-xs text-text-muted">{t('flows.flow_id')}: {flowMeta.flowId}</div>
                   </div>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div data-testid="flow-actions" className="flex flex-wrap items-center justify-end gap-2">
                 {!isCreating && (
-                  <Button variant="outline" onClick={handleExecute} disabled={isExecuteDisabled} className="gap-2">
+                  <Button variant="outline" onClick={handleExecute} disabled={isExecuteDisabled} className="gap-1.5 px-2 min-[1000px]:gap-2 min-[1000px]:px-4">
                     <Play className="h-4 w-4" />
                     {execution.isExecuting ? t('flows.executing') : t('flows.execute')}
                   </Button>
                 )}
-                <Button variant="outline" onClick={handleSave} className="gap-2">
+                <Button variant="outline" onClick={handleSave} className="gap-1.5 px-2 min-[1000px]:gap-2 min-[1000px]:px-4">
                   <Save className="h-4 w-4" />
                   {t('flows.save')}
                 </Button>
                 {!isCreating && (
-                  <Button variant="destructive" onClick={handleDelete} className="gap-2">
+                  <Button variant="destructive" onClick={handleDelete} className="gap-1.5 px-2 min-[1000px]:gap-2 min-[1000px]:px-4">
                     <Trash2 className="h-4 w-4" />
                     {t('flows.delete')}
                   </Button>
@@ -473,7 +483,7 @@ function FlowEditorInner() {
               </div>
             </div>
 
-            <div className={cn('flex items-center gap-4 rounded-2xl border border-border bg-bg-main/90 px-3 py-2.5', !isFlowLibraryOpen && 'ml-12')}>
+            <div className={cn('flex min-w-0 items-center gap-2 rounded-xl border border-border bg-bg-main px-2 py-2 min-[1000px]:gap-4 min-[1000px]:px-3', !isFlowLibraryOpen && 'ml-12')}>
               <div ref={packDropdownRef} className="relative">
                 <Button
                   variant="outline"
@@ -632,7 +642,10 @@ function FlowEditorInner() {
               )}
 
               {editorHook.selectedNode && (
-                <div className="absolute right-4 top-4 z-10 flex max-h-[80%] w-80 flex-col overflow-hidden rounded-2xl border border-border bg-bg-card shadow-xl shadow-black/20">
+                <div
+                  data-testid="flow-inspector"
+                  className="absolute inset-y-2 right-2 z-30 flex w-[min(20rem,calc(100%-4.5rem))] flex-col overflow-hidden rounded-xl border border-border bg-bg-card shadow-xl min-[1000px]:inset-y-auto min-[1000px]:right-4 min-[1000px]:top-4 min-[1000px]:max-h-[80%] min-[1000px]:w-80"
+                >
                   <div className="flex items-center justify-between border-b border-border p-3">
                     <div>
                       <h3 className="text-sm font-semibold text-text-main">{t('flows.properties')}</h3>
