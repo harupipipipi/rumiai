@@ -51,7 +51,12 @@ class OpenAIChatCompiler(ProviderCompiler):
             text = delta.get("content")
             if text:
                 events.append(RumiStreamEventIR(type="content_delta", delta={"type": "text", "text": str(text)}))
-            reasoning = delta.get("reasoning_content") or delta.get("reasoning") or delta.get("thinking")
+            reasoning = (
+                delta.get("reasoning_content")
+                or delta.get("reasoning")
+                or delta.get("thinking")
+                or delta.get("trace")
+            )
             if reasoning:
                 events.append(RumiStreamEventIR(type="reasoning_delta", delta={"type": "text", "text": str(reasoning)}))
             for tool_call in delta.get("tool_calls") or []:
