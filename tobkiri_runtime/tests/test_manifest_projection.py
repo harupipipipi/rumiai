@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from core_runtime.manifest_projection import (
+from scripts.offline_legacy_projection import (
     ManifestProjectionError,
     generate_legacy_ecosystem_projection,
     project_legacy_ecosystem,
@@ -70,6 +70,27 @@ def test_projection_never_guesses_contract_requirements_as_pack_dependencies() -
         "rumi.resource.example.echo.v1"
     ]
     assert projection["dependencies"] == {}
+
+
+def test_projection_preserves_explicit_legacy_activation_contract() -> None:
+    manifest = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+    manifest["extensions"] = {
+        "rumi.legacy_projection": {
+            "pack_id": "rumi_example_pack",
+            "dependencies": {
+                "rumi_workspace_mount_pack": ">=1.0.0,<2.0.0"
+            },
+            "host_execution": True,
+        }
+    }
+
+    projection = project_legacy_ecosystem(manifest)
+
+    assert projection["pack_id"] == "rumi_example_pack"
+    assert projection["dependencies"] == {
+        "rumi_workspace_mount_pack": ">=1.0.0,<2.0.0"
+    }
+    assert projection["host_execution"] is True
 
 
 def test_projection_rejects_a_noncanonical_manifest(tmp_path: Path) -> None:

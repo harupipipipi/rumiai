@@ -549,11 +549,12 @@ class ManagedUbuntuProvider:
             instance.opaque_state.get("command_path")
             or self._require_ready(MANAGED_UBUNTU_CAPABILITIES)
         )
-        resources = (
+        resources_value = (
             instance.opaque_state.get("resource_limits")
             if isinstance(instance.opaque_state.get("resource_limits"), Mapping)
             else {}
         )
+        resources = dict(resources_value) if isinstance(resources_value, Mapping) else {}
         display = self._client_display(command_path, instance)
         return ManagedUbuntuGuestAgent(
             provider_id=self.provider_id,
@@ -1152,6 +1153,13 @@ class WindowsWslProvider(ManagedUbuntuProvider):
             if actual_sha256.casefold() == cached_sha256.casefold():
                 return destination
         expected_sha256 = self._rootfs_expected_sha256(url, filename)
+        if expected_sha256 is None:
+            raise SandboxContractError(
+                RUNTIME_PROVIDER_UNAVAILABLE,
+                "Ubuntu SHA256SUMS did not provide a checksum for the selected rootfs.",
+                status_code=503,
+                details={"url": url, "filename": filename},
+            )
         if os.path.isfile(destination) and os.path.getsize(destination) > 0:
             actual_sha256 = _sha256_file(destination)
             if actual_sha256.casefold() == expected_sha256.casefold():
@@ -1479,15 +1487,15 @@ class ManagedUbuntuGuestAgent:
         prefix = ("env", f"DISPLAY={self._display}", "xdotool")
         if request.action == "move":
             return self._run(
-                (*prefix, "mousemove", str(int(request.x)), str(int(request.y))), timeout=10
+                (*prefix, "mousemove", str(int(request.x or 0)), str(int(request.y or 0))), timeout=10
             )
         if request.action == "click":
             return self._run(
                 (
                     *prefix,
                     "mousemove",
-                    str(int(request.x)),
-                    str(int(request.y)),
+                    str(int(request.x or 0)),
+                    str(int(request.y or 0)),
                     "click",
                     _button(request.button),
                 ),
@@ -1498,8 +1506,8 @@ class ManagedUbuntuGuestAgent:
                 (
                     *prefix,
                     "mousemove",
-                    str(int(request.x)),
-                    str(int(request.y)),
+                    str(int(request.x or 0)),
+                    str(int(request.y or 0)),
                     "click",
                     "--repeat",
                     "2",
@@ -1512,13 +1520,13 @@ class ManagedUbuntuGuestAgent:
                 (
                     *prefix,
                     "mousemove",
-                    str(int(request.x)),
-                    str(int(request.y)),
+                    str(int(request.x or 0)),
+                    str(int(request.y or 0)),
                     "mousedown",
                     _button(request.button),
                     "mousemove",
-                    str(int(request.to_x)),
-                    str(int(request.to_y)),
+                    str(int(request.to_x or 0)),
+                    str(int(request.to_y or 0)),
                     "mouseup",
                     _button(request.button),
                 ),
@@ -2492,7 +2500,7 @@ def _port_number(value: object) -> int:
             "INVALID_SANDBOX_PORT", "Sandbox port must be an integer.", status_code=400
         )
     try:
-        port = int(value or 0)
+        port = int(_numeric_value(value) or 0)
     except (TypeError, ValueError) as exc:
         raise SandboxContractError(
             "INVALID_SANDBOX_PORT", "Sandbox port must be an integer.", status_code=400
@@ -2516,7 +2524,7 @@ def _port_probe_argv(port: int) -> tuple[str, ...]:
 
 def _positive_int(value: object, fallback: int) -> int:
     try:
-        parsed = int(value or 0)
+        parsed = int(_numeric_value(value) or 0)
     except (TypeError, ValueError):
         return fallback
     return parsed if parsed > 0 else fallback
@@ -2524,7 +2532,7 @@ def _positive_int(value: object, fallback: int) -> int:
 
 def _optional_positive_int(value: object) -> int | None:
     try:
-        parsed = int(value or 0)
+        parsed = int(_numeric_value(value) or 0)
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
@@ -2532,10 +2540,14 @@ def _optional_positive_int(value: object) -> int | None:
 
 def _optional_positive_float(value: object) -> float | None:
     try:
-        parsed = float(value or 0)
+        parsed = float(_numeric_value(value) or 0)
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
+
+
+def _numeric_value(value: object) -> int | float | str:
+    return value if isinstance(value, (int, float, str)) else 0
 
 
 def _bounded_output(value: str, max_bytes: int | None) -> tuple[str, bool]:

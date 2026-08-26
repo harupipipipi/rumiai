@@ -76,6 +76,7 @@ def test_model_evals_pack_json_and_yaml_parse():
 def test_model_evals_pack_setup_metadata_and_selector_discoverability():
     setup = json.loads(SETUP_PACK_JSON.read_text(encoding="utf-8"))
     ecosystem = json.loads((PACK_DIR / "ecosystem.json").read_text(encoding="utf-8"))
+    legacy_annotations = ecosystem["metadata"]["legacy_annotations"]
     capabilities = yaml.safe_load((PACK_DIR / "catalog" / "capabilities.yaml").read_text(encoding="utf-8"))
 
     assert setup["pack_id"] == PACK_ID
@@ -89,7 +90,7 @@ def test_model_evals_pack_setup_metadata_and_selector_discoverability():
     assert setup["overlap_policy"]["rumi_data_analysis_pack"] == "feeds_analysis_model_fit_and_chart_or_sql_eval_results"
     assert setup["defaultspack_promotion"]["eligible"] is False
     assert "provider_smoke_success" in setup["defaultspack_promotion"]["gates"]
-    assert ecosystem["runtime"]["type"] == "verified_hybrid_pack"
+    assert legacy_annotations["runtime"]["type"] == "verified_hybrid_pack"
     assert "rumi.model_evals.fit_matrix_schema" in ecosystem["components"]["eval_specs"]["connectivity"]["provides"]
     assert "promotion_gate_review" not in capabilities["capabilities"]["model_fit_matrix"]["requires"]
 

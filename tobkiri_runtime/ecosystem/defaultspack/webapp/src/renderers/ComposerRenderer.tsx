@@ -1220,7 +1220,7 @@ function PendingFileChip({
           type="button"
           aria-label={`${name} の読み込みを取り消す`}
           onClick={() => onRemove(path)}
-          className="flex h-11 min-h-11 w-11 min-w-11 flex-shrink-0 items-center justify-center rounded-full text-sky-200/60 transition-colors hover:bg-sky-400/10 hover:text-sky-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-300"
+          className="flex h-[44px] min-h-[44px] w-[44px] min-w-[44px] flex-shrink-0 items-center justify-center rounded-full text-sky-200/60 transition-colors hover:bg-sky-400/10 hover:text-sky-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-300"
         >
           <X size={14} />
         </button>
@@ -1313,7 +1313,7 @@ function FilePreviewCard({
           type="button"
           aria-label={`${file.name} を削除`}
           onClick={() => onRemove(file.id)}
-          className="absolute right-0 top-0 flex h-11 min-h-11 w-11 min-w-11 items-center justify-center text-zinc-300 opacity-100 transition-opacity hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-sky-300"
+          className="absolute right-0 top-0 flex h-[44px] min-h-[44px] w-[44px] min-w-[44px] items-center justify-center text-zinc-300 opacity-100 transition-opacity hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-sky-300"
           title="削除"
         >
           <span className="flex h-6 w-6 items-center justify-center rounded-full border border-white/[0.08] bg-black/65 shadow-sm">
@@ -3268,7 +3268,7 @@ export function ComposerRenderer({
   );
 
   useEffect(() => {
-    updateAtMentionStateFromInput(input);
+    updateAtMentionStateFromInput(textareaRef.current?.value ?? input);
   }, [input, textareaFocused, updateAtMentionStateFromInput]);
 
   useIsomorphicLayoutEffect(() => {
@@ -4644,9 +4644,9 @@ export function ComposerRenderer({
                       role="combobox"
                       className={`rumi-composer-input-new rumi-composer-textarea relative rumi-layer-panel block min-h-[44px] w-full max-h-[240px] select-text resize-none overflow-x-hidden overflow-y-auto border-none bg-transparent px-0 py-2.5 text-[16px] font-medium leading-[24px] caret-zinc-100 outline-none placeholder:text-zinc-500/70 ${hasInlineMentions ? "rumi-composer-textarea-highlighted text-transparent" : "text-zinc-100"} ${textareaCanCollapse ? "pr-9" : ""}`}
                       onScroll={(event) => syncInlineMentionScroll(event.currentTarget)}
-                      onFocus={() => {
+                      onFocus={(event) => {
                         setTextareaFocused(true);
-                        window.setTimeout(() => updateAtMentionStateFromInput(input), 0);
+                        updateAtMentionStateFromInput(event.currentTarget.value);
                       }}
                       onBlur={() => {
                         window.setTimeout(() => {
@@ -4747,9 +4747,9 @@ export function ComposerRenderer({
                     role="combobox"
                     className={`rumi-composer-textarea relative min-h-[24px] w-full max-h-[240px] select-text resize-none overflow-x-hidden overflow-y-auto border-none bg-transparent px-2 pb-0 pt-2.5 text-[15px] leading-[22px] caret-zinc-100 outline-none placeholder:text-zinc-500/70 max-[640px]:min-h-[24px] max-[640px]:pb-0 max-[640px]:pt-2.5 max-[640px]:text-[13px] ${hasInlineMentions ? "rumi-composer-textarea-highlighted text-transparent" : "text-zinc-100"} ${textareaCanCollapse ? "pr-11 max-[640px]:pr-10" : ""}`}
                     onScroll={(event) => syncInlineMentionScroll(event.currentTarget)}
-                    onFocus={() => {
+                    onFocus={(event) => {
                       setTextareaFocused(true);
-                      window.setTimeout(() => updateAtMentionStateFromInput(input), 0);
+                      updateAtMentionStateFromInput(event.currentTarget.value);
                     }}
                     onBlur={() => {
                       window.setTimeout(() => {

@@ -6,7 +6,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -22,7 +21,6 @@ from domain.frontend.command_protocol import (  # noqa: E402
 )
 from transport.registry import (  # noqa: E402
     canonical_http_route_specs,
-    require_legacy_route_allowlisted,
 )
 
 
@@ -32,6 +30,29 @@ def test_resolved_catalog_projects_all_legacy_commands_to_v1() -> None:
     assert catalog["api_version"] == "tobkiri.commands/v1"
     assert len(catalog["commands"]) == 55
     assert len({item["canonical_id"] for item in catalog["commands"]}) == 55
+
+
+def test_pack_generation_reads_the_canonical_v4_manifest(tmp_path: Path) -> None:
+    """The command generation pin remains usable without legacy ecosystem.json."""
+    for relative in (
+        Path("pack.v4.json"),
+        Path("commands/default_commands.json"),
+        Path("schemas/command-protocol-v1.schema.json"),
+    ):
+        destination = tmp_path / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(DEFAULTSPACK_ROOT / relative, destination)
+
+    registry = CommandProtocolRegistry(tmp_path)
+    first = registry._pack_generation()
+    assert first > 0
+
+    manifest = tmp_path / "pack.v4.json"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + "\n",
+        encoding="utf-8",
+    )
+    assert registry._pack_generation() != first
 
 
 def test_all_command_bindings_are_concretely_probed_and_pack_blocks_execute(
@@ -303,7 +324,7 @@ def test_settings_registered_command_is_resolved_and_invoked_through_protocol(
     assert result["legacy_result"]["action"] == "toggle_yolo"
 
 
-def test_high_risk_command_requires_one_shot_approval_resume(
+def test_high_risk_command_refuses_removed_runtime_authority(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -319,10 +340,6 @@ def test_high_risk_command_requires_one_shot_approval_resume(
         "RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH",
         str(tmp_path / "frontend_settings.json"),
     )
-    monkeypatch.setenv("RUMI_AUTHORITY_MODE", "off")
-    from domain.safety.approval import approve, reset_approval_state_for_tests
-
-    reset_approval_state_for_tests()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     subprocess.run(["git", "init", "-q", str(workspace)], check=True)
@@ -354,86 +371,17 @@ def test_high_risk_command_requires_one_shot_approval_resume(
         "workspace_path": str(workspace),
         "authorized_workspace_roots": [str(workspace)],
     }
-    pending = protocol.invoke(payload, trusted_context)
-    decision = approve(pending["approval"]["request_id"])
-    resumed = protocol.invoke(
-        {
-            **payload,
-            "approval_token": decision["token"],
-        },
-        trusted_context,
-    )
-    replay = protocol.invoke(
-        {
-            **payload,
-            "invocation_id": "terminal-approval-2",
-            "approval_token": decision["token"],
-        },
-        trusted_context,
-    )
+    result = protocol.invoke(payload, trusted_context)
 
-    assert pending["status"] == "approval_required"
-    assert pending["approval"]["request_id"].startswith("apr_")
-    assert resumed["status"] == "succeeded"
-    assert resumed["legacy_result"]["action"] == "request_terminal_approval"
-    assert resumed["legacy_result"]["executed"] is True
-    receipt = resumed["legacy_result"]["execution_receipt"]
-    assert receipt["exit_code"] == 0
-    assert receipt["stdout_bytes"] > 0
-    assert receipt["stdout_sha256"].startswith("sha256:")
-    assert "argv" not in resumed["legacy_result"]
-    assert "cwd" not in resumed["legacy_result"]
-    assert "stdout" not in resumed["legacy_result"]
-    assert "stderr" not in resumed["legacy_result"]
-    assert "args" not in pending["approval"]["details"]
-    assert "operation_plan" not in pending["approval"]["details"]
-    assert set(pending["approval"]["details"]["operation_binding"]) == {
-        "version",
-        "action",
-        "plan_sha256",
-    }
-    assert replay["status"] == "failed"
-    assert replay["error"]["code"] in {
-        "APPROVAL_ARGUMENTS_CHANGED",
-        "APPROVAL_TOKEN_ARGUMENTS_MISMATCH",
-        "APPROVAL_TOKEN_USED",
-    }
-    durable_sqlite = b"".join(
-        path.read_bytes()
-        for path in tmp_path.glob("*.sqlite3*")
-        if path.is_file()
-    )
-    assert durable_secret.encode() not in durable_sqlite
-    assert str(workspace).encode() not in durable_sqlite
-    for raw_field in (b'"argv"', b'"cwd"', b'"stdout"', b'"stderr"'):
-        assert raw_field not in durable_sqlite
+    assert result["status"] == "failed"
+    assert result["error"]["code"] == "AUTHORITY_UNAVAILABLE"
+    assert "approval" not in result
+    assert durable_secret not in json.dumps(result, sort_keys=True)
 
 
-def test_high_risk_executor_policy_calls_runtime_authority(
+def test_high_risk_executor_policy_refuses_removed_runtime_authority(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
-    captured: dict[str, object] = {}
-
-    class Authority:
-        def check(self, **kwargs):
-            captured.update(kwargs)
-            return SimpleNamespace(
-                allowed=False,
-                approval_required=True,
-                request_id="auth-1",
-                permission_id="host.process.exec_guarded",
-                reason="approval required",
-            )
-
-    monkeypatch.setattr(
-        "core_runtime.authority.get_authority_service",
-        lambda: Authority(),
-    )
-    monkeypatch.setenv(
-        "RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH",
-        str(tmp_path / "settings.json"),
-    )
     protocol = CommandProtocolRegistry(DEFAULTSPACK_ROOT)
     result = protocol._enforce_runtime_authority(
         {
@@ -454,12 +402,8 @@ def test_high_risk_executor_policy_calls_runtime_authority(
     )
 
     assert result is not None
-    assert result["status"] == "approval_required"
-    assert result["approval"]["kind"] == "authority"
-    assert "operation_plan" not in result["approval"]["details"]
-    assert "cwd" not in captured["resource"]["metadata"]
-    assert captured["permission_id"] == "host.process.exec_guarded"
-    assert captured["principal_id"] == "alice"
+    assert result["status"] == "failed"
+    assert result["error"]["code"] == "AUTHORITY_UNAVAILABLE"
 
 
 def test_high_risk_operation_plan_binds_workspace_and_git_state(
@@ -706,39 +650,12 @@ def test_windows_host_process_gets_required_curated_environment(
     assert all(entry and entry != "." and Path(entry).is_absolute() for entry in path_entries)
 
 
-def test_command_protocol_routes_are_registered() -> None:
+def test_command_protocol_routes_are_not_legacy_transport_routes() -> None:
     specs = canonical_http_route_specs()
-    routes = {(item.method, item.pattern) for item in specs}
-    assert ("GET", "/api/command-protocol/v1/catalog") in routes
-    assert ("POST", "/api/command-protocol/v1/invoke") in routes
-    assert (
-        "POST",
-        "/api/command-protocol/v1/invocations/events/query",
-    ) in routes
-    assert (
-        "GET",
-        "/api/command-protocol/v1/invocations/{invocation_id}/events",
-    ) in routes
-    assert ("POST", "/api/command-protocol/v1/offline") in routes
-    assert ("POST", "/api/command-protocol/v1/resume") in routes
-    assert ("POST", "/api/command-protocol/v1/states/query") in routes
-    assert ("POST", "/api/command-protocol/v1/datasources/query") in routes
-
     protocol_specs = [
         item for item in specs if item.pattern.startswith("/api/command-protocol/v1/")
     ]
-    assert len(protocol_specs) == 8
-    remotely_resumable = {
-        "/api/command-protocol/v1/resume",
-        "/api/command-protocol/v1/invocations/{invocation_id}/events",
-    }
-    assert all(
-        not item.local_only
-        for item in protocol_specs
-        if item.pattern in remotely_resumable
-    )
-    for item in protocol_specs:
-        require_legacy_route_allowlisted(item)
+    assert protocol_specs == []
 
 
 def test_invocation_id_is_idempotent_and_conflict_safe(

@@ -33,26 +33,10 @@
       "sha256": "dee1a00e778a8eb5654d2457d7c39aebe01e2684889ceb16f41d271afbb3dbc0"
     },
     {
-      "definitions": [
-        "compatibilityAlias",
-        "contractId",
-        "contracts",
-        "entrypoint",
-        "lifecycle",
-        "migration",
-        "packIdentity",
-        "permission",
-        "provenance",
-        "providedContract",
-        "requiredContract",
-        "resource",
-        "schemaSet",
-        "semver",
-        "storage"
-      ],
-      "filename": "pack_manifest_v3.schema.json",
-      "schema_id": "https://schemas.rumi.local/rumi.pack.v3/pack_manifest_v3.schema.json",
-      "sha256": "26deedf7c396d53e2088091918c869a3f7c53516f1e59ece81cb776b69ac8e9d"
+      "definitions": [],
+      "filename": "pack_manifest_v4.schema.json",
+      "schema_id": "https://schemas.tobkiri.local/io.tobkiri/pack-manifest.v4.schema.json",
+      "sha256": "38ea3d19e207003bf4a8e07b08610c9ab3fd4e547113f74b1c9afcc282538900"
     }
   ]
 }

@@ -1,42 +1,82 @@
 {
-  "pack_id": "rumi_repository_context_pack",
-  "pack_identity": "rumi:ecosystem/rumi_repository_context_pack",
-  "display_name": "Tobkiri Repository Context Pack",
-  "version": "1.0.0",
-  "description": "Low-cost repository evidence selection through a typed Subagent Placement.",
-  "dependencies": {
-    "rumi_subagent_placement_pack": ">=1.0.0,<2.0.0",
-    "rumi_file_inspect_pack": ">=1.0.0,<2.0.0",
-    "rumi_ai_gateway_pack": ">=1.0.0,<2.0.0",
-    "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
-  },
   "connectivity": {
-    "requires": [
-      "rumi.service.subagent.placement.compile.v1",
-      "rumi.service.file.inspect.v1",
-      "rumi.service.ai.generate.v1",
-      "rumi.service.host.authorize.v1"
-    ],
     "provides": [
       "rumi.resource.subagent.catalog.v1",
       "rumi.resource.subagent.placement.v1",
-      "rumi.service.subagent.runtime.v1",
-      "rumi.service.repository.context.prepare.v1"
+      "rumi.service.repository.context.prepare.v1",
+      "rumi.service.subagent.runtime.v1"
+    ],
+    "requires": [
+      "rumi.service.ai.generate.v1",
+      "rumi.service.file.inspect.v1",
+      "rumi.service.host.authorize.v1",
+      "rumi.service.subagent.placement.compile.v1"
     ]
   },
-  "required_secrets": [],
-  "required_capabilities": [
-    "subagent.catalog.read",
-    "subagent.placement.read",
-    "subagent.placement.compile",
-    "repository.context.prepare",
-    "file.inspect",
-    "ai.gateway.generate",
-    "repository.content.external_share",
-    "host.authority.consume"
-  ],
-  "required_network": {"allowed_domains": [], "allowed_ports": []},
+  "dependencies": {
+    "rumi_ai_gateway_pack": ">=1.0.0,<2.0.0",
+    "rumi_file_inspect_pack": ">=1.0.0,<2.0.0",
+    "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0",
+    "rumi_subagent_placement_pack": ">=1.0.0,<2.0.0"
+  },
+  "description": "Low-cost repository evidence selection Subagent.",
+  "display_name": "Tobkiri Repository Context",
   "host_execution": true,
+  "metadata": {
+    "authoritative_owner": false,
+    "canonical_v4": {
+      "artifact": "pack.v4.json",
+      "artifact_digest": "sha256:8dd8edc2e73f29487a82d6d85b6486ab1968ca588eba6fbc41deb5c3bd100856",
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "source_identity": "sha256:d4cc541317bffa0e267c0961f74594916e0dab927c2f561a8e66c888549b3f3e"
+    },
+    "format": "rumi.ecosystem.v1",
+    "generated": true,
+    "generated_from": {
+      "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
+      "historical_format": "rumi.pack.v3.json",
+      "source": "pack.v4.json",
+      "source_content_hash": "sha256:d4cc541317bffa0e267c0961f74594916e0dab927c2f561a8e66c888549b3f3e"
+    },
+    "manifest_authority": "v4-authoritative",
+    "owner_surfaces": [
+      "repository_context_preparation"
+    ],
+    "projection_owner": "scripts/migrate_manifest_authority.py",
+    "read_only_projection": true,
+    "security": {
+      "model_cost_tiers": [
+        "free",
+        "low"
+      ],
+      "secret_like_content": "deny",
+      "secret_like_paths": "deny",
+      "workspace_read_only": true
+    }
+  },
+  "pack_id": "rumi_repository_context_pack",
+  "pack_identity": "rumi:ecosystem/rumi_repository_context_pack",
+  "provenance": {
+    "build_identity": "rumi_repository_context_pack:1.0.0",
+    "content_hash": "sha256:06b0f3df6941e47323f9c685d05b09ba466b9b7d001655073686547f774b83a1",
+    "signature": null,
+    "trust_class": "local"
+  },
+  "required_capabilities": [
+    "ai.gateway.generate",
+    "file.inspect",
+    "host.authority.consume",
+    "repository.content.external_share",
+    "repository.context.prepare",
+    "subagent.catalog.read",
+    "subagent.placement.compile",
+    "subagent.placement.read"
+  ],
+  "required_network": {
+    "allowed_domains": [],
+    "allowed_ports": []
+  },
+  "required_secrets": [],
   "resources": [
     "subagents/repository-context-subagent.json",
     "placements/repository-context.placement.json",
@@ -46,20 +86,10 @@
     "extensions/skills/repository_context_preparation/manifest.json",
     "extensions/skills/repository_context_preparation/SKILL.md"
   ],
-  "provenance": {
-    "content_hash": "sha256:06b0f3df6941e47323f9c685d05b09ba466b9b7d001655073686547f774b83a1",
-    "build_identity": "rumi-repository-context-pack:1.0.0",
-    "trust_class": "local",
-    "signature": null
-  },
-  "metadata": {
-    "authoritative_owner": false,
-    "owner_surfaces": ["repository_context_preparation"],
-    "security": {
-      "workspace_read_only": true,
-      "secret_like_paths": "deny",
-      "secret_like_content": "deny",
-      "model_cost_tiers": ["free", "low"]
-    }
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": [
+      "service"
+    ]
   }
 }

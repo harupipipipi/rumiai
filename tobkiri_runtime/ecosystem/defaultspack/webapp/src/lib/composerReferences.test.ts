@@ -102,6 +102,11 @@ test("reference state drops entities whose syntax was edited away", () => {
   assert.deepEqual(mergeComposerReferences(references, [], "Only @web_search remains"), [references[0]]);
 });
 
+test("reference state drops entities whose syntax is escaped", () => {
+  const reference = { kind: "tool", id: "web_search", syntax: "@Web Search" } satisfies ComposerEntityReference;
+  assert.deepEqual(mergeComposerReferences([reference], [], "Use \\@Web Search literally"), []);
+});
+
 test("malformed clipboard reference data is ignored", () => {
   assert.equal(restoreComposerReferences("not json", { tools, skills }), null);
   assert.equal(restoreComposerReferences(JSON.stringify({ version: 1, text: "@x", references: [{ kind: "tool", id: "x", start: 0, end: 99 }] }), { tools, skills }), null);

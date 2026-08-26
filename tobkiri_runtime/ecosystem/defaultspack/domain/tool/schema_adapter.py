@@ -7,6 +7,8 @@ from urllib.parse import unquote
 
 from domain.capability.tool_scope import normalize_tool_scope
 from domain.tool.security import requires_approval_for_security
+from .normalizers import list_or_empty as list_or_empty
+from .normalizers import mapping_or_empty as mapping_or_empty
 
 
 _APPROVAL_REQUIRED_NAME_PARTS = ("write", "create", "update", "delete", "patch", "commit", "push")

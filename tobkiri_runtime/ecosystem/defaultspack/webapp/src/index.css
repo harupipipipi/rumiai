@@ -15,18 +15,34 @@ body,
   min-height: 0;
 }
 
+html {
+  min-height: 100%;
+  overflow-y: auto;
+}
+
+body {
+  height: auto;
+  min-height: 100%;
+}
+
+#root {
+  height: 100%;
+  min-height: 0;
+}
+
 body {
   background-color: #09090b; /* zinc-950 */
   color: #fafafa; /* zinc-50 */
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: geometricPrecision;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* Scroll ownership contract:
-   - document/body stay fixed to the window so persistent navigation cannot
-     scroll away with a long conversation.
+   - the document keeps a vertical fallback for content outside the app shell;
+     persistent navigation remains fixed inside the shell.
    - .rumi-app-shell owns exactly one dynamic viewport.
    - top-level panes own internal scroll with min-h-0 + overflow-auto/y-auto. */
 .rumi-app-shell {
@@ -1665,7 +1681,7 @@ html.rumi-keyboard-focus #root :is(a, button, input, textarea, select, summary, 
        the lower half of the chat while the @ menu is open. */
     min-height: clamp(6.75rem, 14dvh, 8.25rem);
     border-radius: 2rem;
-    padding: 0.75rem 1.25rem 0.625rem;
+    padding: 0.625rem 1.25rem 0.5rem;
   }
 
   .rumi-composer-new .rumi-composer-toolbar {

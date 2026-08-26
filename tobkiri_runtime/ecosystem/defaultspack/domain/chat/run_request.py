@@ -19,7 +19,6 @@ from blocks._common import gen_id
 from core_runtime.authority.principal import build_principal_id
 from domain.ai_client.capabilities.registry import get_model_provider_capabilities
 from blocks.chat._context_helpers import enrich_messages, extract_user_text
-from domain.capability.catalog import CapabilityCatalog
 from domain.capabilities.runtime_snapshot import build_runtime_capability_snapshot
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
@@ -156,6 +155,11 @@ _CODING_PR_TOOL_IDS = [
     "coding_git_push",
     "coding_github_pr_create",
 ]
+
+# Empty conversations are routed through the catalog-owned Rumi profile.  The
+# persisted model settings default (``stub/default``) remains available for
+# explicit local-provider selection, but is not a user-facing chat default.
+DEFAULT_CHAT_MODEL = "rumi/rumi"
 
 
 def _is_provider_qualified_model(value: Any) -> bool:
@@ -303,8 +307,7 @@ def prepare_chat_run(
     conversation_metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
     if conversation_metadata.get("shared_read_only") is True:
         raise ValueError("This imported conversation is read-only. Create a continue copy to send messages.")
-    active_startup_profile = _load_active_startup_profile()
-    conversation = _conversation_with_active_profile_prompt(conversation, active_startup_profile)
+    active_startup_profile = _load_active_v4_profile()
 
     message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
     top_level_metadata = input_data.get("metadata") if isinstance(input_data.get("metadata"), dict) else {}
@@ -359,7 +362,7 @@ def prepare_chat_run(
             role=str(user_message.get("role") or message.get("role") or "user"),
             runtime_content=runtime_content,
         )
-    model = str((conversation or {}).get("model") or "stub/default")
+    model = str((conversation or {}).get("model") or DEFAULT_CHAT_MODEL)
     request_id = gen_id()
 
     manager = get_manager()
@@ -471,11 +474,14 @@ def prepare_chat_run(
     if isinstance(conversation_metadata.get("tool_preferences"), dict):
         request_context["conversation_tool_preferences"] = conversation_metadata["tool_preferences"]
     resolved_profile_id = str(
-        metadata.get("profile_id")
-        or conversation_metadata.get("profile_id")
-        or request_context.get("profile_id")
+        request_context.get("profile_id")
         or ""
     ).strip()
+    requested_profile_id = str(
+        metadata.get("profile_id") or conversation_metadata.get("profile_id") or ""
+    ).strip()
+    if requested_profile_id and requested_profile_id != resolved_profile_id:
+        request_context["ignored_requested_profile_id"] = requested_profile_id
     if resolved_profile_id:
         request_context["profile_id"] = resolved_profile_id
         _hydrate_profile_policy_from_profile_id(request_context, resolved_profile_id)
@@ -1982,7 +1988,6 @@ def _runtime_user_content_override(metadata: dict[str, Any] | None) -> str:
 
 _WORKSPACE_ID_KEYS = ("workspace_id", "workspaceId")
 _WORKSPACE_ROOT_KEYS = ("workspace_root", "workspaceRoot", "rootPath")
-_MERGED_PROFILE_DICT_FIELDS = ("policy", "permissions", "metadata", "surfaces", "node_settings")
 _CLIENT_TOOL_POLICY_PRIVILEGED_TRUE_KEYS = {
     "allow_browser",
     "allow_client_supplied_approved",
@@ -2016,27 +2021,6 @@ _CLIENT_TOOL_POLICY_APPROVAL_WEAKENING_FALSE_KEYS = {
 _CLIENT_TOOL_POLICY_UNTRUSTED_STRUCTURAL_KEYS = {
     "tool_permission_policy",
 }
-
-
-def _merge_profile_snapshot_sources(
-    profile_id: str,
-    catalog_profile: dict[str, Any] | None,
-    workspace_profile: dict[str, Any] | None,
-) -> dict[str, Any]:
-    merged = dict(catalog_profile) if isinstance(catalog_profile, dict) else {}
-    overrides = dict(workspace_profile) if isinstance(workspace_profile, dict) else {}
-    for field_name in _MERGED_PROFILE_DICT_FIELDS:
-        base = merged.get(field_name) if isinstance(merged.get(field_name), dict) else {}
-        override = overrides.get(field_name) if isinstance(overrides.get(field_name), dict) else {}
-        if base or override:
-            merged[field_name] = {**base, **override}
-    for key, value in overrides.items():
-        if key in _MERGED_PROFILE_DICT_FIELDS:
-            continue
-        merged[key] = value
-    if merged:
-        merged.setdefault("profile_id", profile_id)
-    return merged
 
 
 def _client_policy_value_truthy(value: Any) -> bool:
@@ -2130,26 +2114,29 @@ def _profile_snapshot(profile_id: str) -> dict[str, Any]:
     candidate = str(profile_id or "").strip()
     if not candidate:
         return {}
-    workspace_profile: dict[str, Any] = {}
     try:
-        from core_runtime.profile_workspace import ProfileWorkspaceManager
+        from core_runtime.resolved_profile_scope import persisted_resolved_profile
 
-        loaded = ProfileWorkspaceManager().load_profile_yaml(candidate)
-        if isinstance(loaded, dict) and loaded:
-            workspace_profile = dict(loaded)
+        plan = persisted_resolved_profile()
     except Exception:
-        workspace_profile = {}
-    catalog_profile: dict[str, Any] = {}
-    try:
-        loaded = CapabilityCatalog().profile(candidate)
-        if isinstance(loaded, dict) and loaded:
-            catalog_profile = dict(loaded)
-    except Exception:
-        catalog_profile = {}
-    merged = _merge_profile_snapshot_sources(candidate, catalog_profile, workspace_profile)
-    if merged:
-        return merged
-    return {}
+        return {}
+    if plan is None or str(plan.profile_id) != candidate:
+        return {}
+    return {
+        "version": 4,
+        "profile_id": str(plan.profile_id),
+        "profile_revision": str(plan.profile_revision),
+        "plan_hash": str(plan.plan_hash),
+        "packs": list(plan.effective_pack_set),
+        "providers": [
+            {
+                "contract_id": provider.contract_id,
+                "provider_instance_id": provider.provider_instance_id,
+                "source_pack_id": provider.source_pack_id,
+            }
+            for provider in plan.providers
+        ],
+    }
 
 
 def _first_non_empty_str(*sources: dict[str, Any] | None, keys: tuple[str, ...]) -> str:
@@ -2360,6 +2347,11 @@ def _runtime_profile_with_policy_connected_tools(
                     ),
                 },
             }
+        # The request-selected profile is authoritative even when its saved
+        # snapshot is temporarily unavailable.  Keeping the prior graph's ID
+        # here makes downstream tool-policy evaluation run under the wrong
+        # profile while retaining stale graph connections.
+        base_profile["profile_id"] = snapshot_profile_id
     if not isinstance(base_profile, dict) or not base_profile:
         return runtime_profile, str(agent_id or "").strip()
 
@@ -2399,7 +2391,7 @@ def _runtime_profile_with_policy_connected_tools(
     defaultspack["agents"] = agents
     patched["defaultspack"] = defaultspack
     if snapshot_profile_id:
-        patched.setdefault("profile_id", snapshot_profile_id)
+        patched["profile_id"] = snapshot_profile_id
     return patched, resolved_agent_id
 
 
@@ -2671,9 +2663,9 @@ def _authority_followup_was_issued(
     if not permission_id or not authority_request_id or not token:
         return False
     try:
-        from core_runtime.authority import get_authority_service
+        from core_runtime.legacy_runtime_removed import removed_authority_service
 
-        service = get_authority_service()
+        service = removed_authority_service()
         issued = getattr(service, "one_shot_approval_issued", None)
         if not callable(issued):
             return False
@@ -2742,49 +2734,24 @@ def _conversation_system_prompt(conv: dict[str, Any], manager: Any) -> str:
     return append_kanban_system_prompt_note(resolve_conversation_system_prompt(conv, manager), conv)
 
 
-def _load_active_startup_profile() -> dict[str, Any]:
+def _load_active_v4_profile() -> dict[str, Any]:
+    """Return a non-authoritative view of the verified v4 activation only."""
     try:
-        from core_runtime.profile_paths import active_profile_id
-        from core_runtime.profile_runtime_selection import apply_profile_graph_selection
-        from core_runtime.profile_workspace import ProfileWorkspaceManager
+        from core_runtime.resolved_profile_scope import persisted_resolved_profile
     except Exception:
         return {}
-
     try:
-        profile_id = str(active_profile_id() or "").strip()
+        plan = persisted_resolved_profile()
     except Exception:
         return {}
-    if not profile_id:
+    if plan is None:
         return {}
-
-    try:
-        profile = ProfileWorkspaceManager().load_profile_yaml(profile_id)
-    except Exception:
-        return {"profile_id": profile_id}
-    if not isinstance(profile, dict):
-        profile = {"profile_id": profile_id}
-    profile.setdefault("profile_id", profile_id)
-    try:
-        return apply_profile_graph_selection(profile)
-    except Exception:
-        return profile
-
-
-def _conversation_with_active_profile_prompt(
-    conversation: dict[str, Any],
-    active_profile: dict[str, Any] | None,
-) -> dict[str, Any]:
-    conv = dict(conversation or {})
-    if str(conv.get("system_prompt_id") or "").strip():
-        return conv
-    if not isinstance(active_profile, dict):
-        return conv
-    prompt_id = str(
-        active_profile.get("system_prompt_id") or active_profile.get("default_prompt_id") or ""
-    ).strip()
-    if prompt_id:
-        conv["system_prompt_id"] = prompt_id
-    return conv
+    return {
+        "profile_id": str(plan.profile_id),
+        "profile_revision": str(plan.profile_revision),
+        "plan_hash": str(plan.plan_hash),
+        "effective_pack_set": list(plan.effective_pack_set),
+    }
 
 
 def _merge_active_startup_profile_context(
@@ -2799,44 +2766,16 @@ def _merge_active_startup_profile_context(
     if not profile_id:
         return merged
 
-    policy = active_profile.get("policy") if isinstance(active_profile.get("policy"), dict) else {}
-    existing_policy = (
-        merged.get("profile_policy") if isinstance(merged.get("profile_policy"), dict) else {}
-    )
-    if policy or existing_policy:
-        merged["profile_policy"] = {
-            **dict(policy or {}),
-            **dict(existing_policy or {}),
-        }
-
-    metadata = (
-        active_profile.get("metadata") if isinstance(active_profile.get("metadata"), dict) else {}
-    )
-    selected = metadata.get("selected") if isinstance(metadata.get("selected"), dict) else {}
-    if selected and "profile_graph_selection" not in merged:
-        merged["profile_graph_selection"] = {
-            key: list(value) if isinstance(value, list) else value
-            for key, value in selected.items()
-        }
-
-    merged.setdefault("active_startup_profile_id", profile_id)
+    merged["profile_id"] = profile_id
     merged.setdefault(
-        "active_startup_profile",
+        "resolved_profile",
         {
             "profile_id": profile_id,
-            "system_prompt_id": active_profile.get("system_prompt_id"),
-            "default_prompt_id": active_profile.get("default_prompt_id"),
-            "selected": merged.get("profile_graph_selection", {}),
+            "profile_revision": active_profile.get("profile_revision"),
+            "plan_hash": active_profile.get("plan_hash"),
+            "effective_pack_set": list(active_profile.get("effective_pack_set") or []),
         },
     )
-
-    runtime_profile_key = str(active_profile.get("last_runtime_profile_key") or "").strip()
-    if (
-        runtime_profile_key
-        and not merged.get("runtime_profile_key")
-        and not merged.get("_runtime_profile_key")
-    ):
-        merged["runtime_profile_key"] = runtime_profile_key
     return merged
 
 
@@ -3636,7 +3575,22 @@ def _requested_tool_ids_include_shell(tool_ids: list[str]) -> bool:
         metadata = tool_def.get("metadata") if isinstance(tool_def.get("metadata"), dict) else {}
         category = str(tool_def.get("category") or metadata.get("category") or "").strip()
         action_type = str(tool_def.get("action_type") or metadata.get("action_type") or "").strip()
-        if category == "shell" or action_type == "shell":
+        capability_grants = tool_def.get("capability_grants")
+        capability_grants = capability_grants if isinstance(capability_grants, list) else []
+        tags = tool_def.get("tags")
+        tags = tags if isinstance(tags, list) else []
+        if (
+            category == "shell"
+            or action_type == "shell"
+            or any(
+                str(grant).strip().startswith(("shell.", "terminal."))
+                for grant in capability_grants
+            )
+            or any(
+                str(tag).strip().lower() in {"shell", "terminal", "command"}
+                for tag in tags
+            )
+        ):
             return True
     return False
 
@@ -3895,6 +3849,10 @@ def _available_tools(
         resolved_context["caller_provider_tool_ids"] = caller_provider_tool_ids
     agent_id = input_data.get("agent_id") or resolved_context.get("agent_id")
     requested_tool_ids = _requested_tool_ids_from_selection(selection)
+    if caller_provider_tool_ids:
+        requested_tool_ids = list(
+            dict.fromkeys([*requested_tool_ids, *caller_provider_tool_ids])
+        )
     runtime_profile, agent_id = _runtime_profile_with_policy_connected_tools(
         resolved_context.get("runtime_profile"),
         profile_id=resolved_context.get("profile_id"),

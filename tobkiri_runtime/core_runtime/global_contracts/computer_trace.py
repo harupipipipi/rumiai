@@ -914,14 +914,12 @@ def result_trace_facts(result: Any) -> dict[str, Any]:
         selection_source = result
     elif isinstance(result.get("result"), dict) and result["result"].get("action") == "computer.select_window":
         selection_source = result["result"]
-    ax_candidate = next(
-        (
-            source.get("ax_candidate")
-            for source in sources
-            if isinstance(source.get("ax_candidate"), dict)
-        ),
-        {},
-    )
+    ax_candidate: dict[str, Any] = {}
+    for source in sources:
+        candidate = source.get("ax_candidate")
+        if isinstance(candidate, dict):
+            ax_candidate = candidate
+            break
     facts: dict[str, Any] = {
         "selected_driver": first("driver", "selected_driver"),
         "background": bool(first("background")),

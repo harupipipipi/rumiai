@@ -5,14 +5,29 @@ test.use({ viewport: { width: 1440, height: 900 } });
 // These specs exercise mocked UI contracts only. Live MCP proof is covered by
 // the Python integration tests that assert tool_logs and tool_call events.
 const now = 1_785_000_000_000;
+const approvalDigest = "a".repeat(64);
 const historyChatDropMime = "application/rumi-history-chat";
+
+function routeKey(path: string): string {
+  return `/${path}`;
+}
+
+function requestTarget(url: URL): string {
+  const marker = "/api/contracts/defaultspack/";
+  if (!url.pathname.startsWith(marker)) return url.pathname;
+  const operation = decodeURIComponent(url.pathname.slice(marker.length));
+  const separator = operation.indexOf(" ");
+  const target = separator < 0 ? operation : operation.slice(separator + 1);
+  const queryIndex = target.indexOf("?");
+  return queryIndex < 0 ? target : target.slice(0, queryIndex);
+}
 
 test("bootstrap loading state uses the Tobkiri Launcher animation and honors reduced motion", async ({ page }) => {
   let releaseCatalogRequest: (() => void) | undefined;
   const catalogGate = new Promise<void>((resolve) => {
     releaseCatalogRequest = resolve;
   });
-  await page.route("**/api/ui/catalog", async (route) => {
+  await page.route("**/api/contracts/defaultspack/**", async (route) => {
     await catalogGate;
     await route.abort();
   });
@@ -556,6 +571,40 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     localStorage.clear();
     sessionStorage.clear();
   });
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "__TAURI__", {
+      configurable: true,
+      value: {
+        core: {
+          invoke: async (command: string, args?: Record<string, unknown>) => {
+            if (command === "get_desktop_system_info") {
+              return {
+                source: "viewer_tauri",
+                reliable: true,
+                app_name: "Tobkiri",
+                display_version: "ui-contract",
+                viewer_version: "ui-contract",
+                build_channel: "test",
+                platform: "linux",
+                platform_release: "ui-contract",
+                permission_subject: "Tobkiri Launcher",
+                permissions: [],
+              };
+            }
+            if (command !== "coding_approval_operator") {
+              throw new Error(`Unexpected native command: ${command}`);
+            }
+            return {
+              request_id: args?.requestId,
+              expected_digest: args?.expectedDigest,
+              decision: args?.decision,
+              operator: "ui-contract-fixture",
+            };
+          },
+        },
+      },
+    });
+  });
 
   let currentSettingsValues: Record<string, Record<string, unknown>> = JSON.parse(JSON.stringify({
     ...settingsValues,
@@ -567,6 +616,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
   }));
   let conversationToolPreferences: Record<string, unknown> = {};
   let codingApprovalRequest: Record<string, unknown> | null = null;
+  const settledApprovalRequestIds = new Set<string>();
   const codingCheckpoints: Record<string, unknown>[] = options.codingApprovalAfterRestore
     ? [{ snapshot_id: "checkpoint-1", path: "/repo/.rumi/checkpoints/checkpoint-1" }]
     : [];
@@ -574,19 +624,41 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     { server_id: "filesystem", name: "Filesystem MCP", transport: "stdio", connected: true, permissions: { approved: true }, tools: ["mcp_fs_read_file"] },
   ];
 
-  await page.route("**/api/**", async (route) => {
+  await page.route("**/api/contracts/defaultspack/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    const path = url.pathname;
+    const path = requestTarget(url);
     const method = request.method();
     const conversation = smokeConversation();
     options.conversationMutator?.(conversation);
+    const conversationMessages = conversation.messages as Array<{ events?: Record<string, unknown>[] }>;
+    for (const message of conversationMessages) {
+      if (!message.events) continue;
+      message.events = message.events.filter((event) => (
+        !settledApprovalRequestIds.has(String(event.approval_request_id ?? "").trim())
+      ));
+    }
+    const approvalEvent = conversationMessages
+      .flatMap((message) => message.events ?? [])
+      .find((event) => String(event.approval_request_id ?? "").trim());
+    const approvalEventId = String(approvalEvent?.approval_request_id ?? "").trim();
+    if (!codingApprovalRequest && approvalEventId) {
+      codingApprovalRequest = {
+        request_id: approvalEventId,
+        operation: String(approvalEvent?.action ?? "browser.open_url"),
+        risk_level: String(approvalEvent?.risk_level ?? "medium"),
+        status: "pending",
+        display_summary: String(approvalEvent?.display_summary ?? "Browser action requires approval."),
+        created_at: now,
+        args_hash: approvalDigest,
+      };
+    }
 
-    if (path === "/api/health") {
+    if (path === routeKey("api/health")) {
       return fulfill(route, { status: "ok", pack: "defaultspack", ts: "2026-05-20T00:00:00Z" });
     }
 
-    if (path === "/api/ui/catalog") {
+    if (path === routeKey("api/ui/catalog")) {
       return fulfill(route, {
         app: { id: "defaultspack", name: "Rumi", account: { display_name: "Smoke User", plan_label: "Local" } },
         agent_service: { profiles: [], capabilities: [], presets: [] },
@@ -618,7 +690,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/ui/settings" && method === "PUT") {
+    if (path === routeKey("api/ui/settings") && method === "PUT") {
       const payload = request.postDataJSON() as {
         values?: Record<string, Record<string, unknown>>;
         patches?: Array<{ section: string; field: string; value: unknown }>;
@@ -636,11 +708,11 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       return fulfill(route, { sections: settingsSections, values: currentSettingsValues });
     }
 
-    if (path === "/api/ui/settings") {
+    if (path === routeKey("api/ui/settings")) {
       return fulfill(route, { sections: settingsSections, values: currentSettingsValues });
     }
 
-    if (path === "/api/command-protocol/v1/catalog") {
+    if (path === routeKey("api/command-protocol/v1/catalog")) {
       await options.beforeCommandCatalogResponse?.();
       const protocolCommand = (
         id: string,
@@ -685,7 +757,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/ui/commands") {
+    if (path === routeKey("api/ui/commands")) {
       return fulfill(route, {
         commands: [
           {
@@ -714,7 +786,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/ui/commands/execute" && method === "POST") {
+    if (path === routeKey("api/ui/commands/execute") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       return fulfill(route, {
         executed: true,
@@ -726,11 +798,11 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/ai/profiles") {
+    if (path === routeKey("api/ai/profiles")) {
       return fulfill(route, { profiles: [smokeProfile, googleProfile, opencodeProfile, opencodeZenProfile], count: 4 });
     }
 
-    if (path === "/api/ai/models/search" && method === "POST") {
+    if (path === routeKey("api/ai/models/search") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       const types = Array.isArray(payload.type)
         ? payload.type.map((item) => String(item).trim())
@@ -741,7 +813,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       return fulfill(route, { models, count: models.length });
     }
 
-    if (path === "/api/tools/catalog") {
+    if (path === routeKey("api/tools/catalog")) {
       return fulfill(route, {
         services: toolCatalogServices,
         tools: toolCatalogTools,
@@ -749,7 +821,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/tools/selection/preview" && method === "POST") {
+    if (path === routeKey("api/tools/selection/preview") && method === "POST") {
       return fulfill(route, {
         preview_id: "preview-tool-selection",
         expires_at: "2026-05-20T00:05:00Z",
@@ -766,23 +838,23 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/chat/conversations" && method === "GET") {
+    if (path === routeKey("api/chat/conversations") && method === "GET") {
       return fulfill(route, { conversations: [{ ...conversation, messages: [] }], total: 1 });
     }
 
-    if (path === "/api/chat/conversations" && method === "POST") {
+    if (path === routeKey("api/chat/conversations") && method === "POST") {
       options.onConversationCreate?.(request.postDataJSON() as Record<string, unknown>);
       return fulfill(route, conversation);
     }
 
-    if (path === "/api/command-protocol/v1/invocations/events/query" && method === "POST") {
+    if (path === routeKey("api/command-protocol/v1/invocations/events/query") && method === "POST") {
       return fulfill(route, {
         api_version: "command-protocol/v1",
         pending_approvals: [],
       });
     }
 
-    if (path === "/api/chat/conversations/c-smoke/stream" && method === "POST") {
+    if (path === routeKey("api/chat/conversations/c-smoke/stream") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       options.onStreamRequest?.(payload);
       const message = {
@@ -809,11 +881,11 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       return fulfillStream(route, message);
     }
 
-    if (path === "/api/chat/conversations/c-smoke") {
+    if (path === routeKey("api/chat/conversations/c-smoke")) {
       return fulfill(route, conversation);
     }
 
-    if ((path === "/api/conversations/c-smoke/tool-preferences" || path === "/api/chat/conversations/c-smoke/tool-preferences") && method === "PUT") {
+    if ((path === routeKey("api/conversations/c-smoke/tool-preferences") || path === routeKey("api/chat/conversations/c-smoke/tool-preferences")) && method === "PUT") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       conversationToolPreferences = (payload.preferences && typeof payload.preferences === "object" && !Array.isArray(payload.preferences))
         ? payload.preferences as Record<string, unknown>
@@ -821,11 +893,11 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       return fulfill(route, { conversation_id: "c-smoke", preferences: conversationToolPreferences });
     }
 
-    if (path === "/api/conversations/c-smoke/tool-preferences" || path === "/api/chat/conversations/c-smoke/tool-preferences") {
+    if (path === routeKey("api/conversations/c-smoke/tool-preferences") || path === routeKey("api/chat/conversations/c-smoke/tool-preferences")) {
       return fulfill(route, { conversation_id: "c-smoke", preferences: conversationToolPreferences });
     }
 
-    if (path === "/api/ui/conversations/c-smoke/preview") {
+    if (path === routeKey("api/ui/conversations/c-smoke/preview")) {
       return fulfill(route, {
         conversation_id: "c-smoke",
         previews: [
@@ -845,11 +917,11 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/chat/steer") {
+    if (path === routeKey("api/chat/steer")) {
       return fulfill(route, { items: [] });
     }
 
-    if (path === "/api/agent/schedules") {
+    if (path === routeKey("api/agent/schedules")) {
       return fulfill(route, {
         schedules: [
           { id: "nightly-review", name: "nightly-review", schedule: "every 1h", next_run_at: "2026-05-20T12:00:00Z" },
@@ -857,14 +929,14 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/coding/workspaces") {
+    if (path === routeKey("api/coding/workspaces")) {
       return fulfill(route, {
         workspaces: [{ workspace_id: "ws-main", label: "Main Repo", root_path: "/repo", trusted: true }],
         selected_workspace_id: "ws-main",
       });
     }
 
-    if (path === "/api/coding/context") {
+    if (path === routeKey("api/coding/context")) {
       return fulfill(route, {
         branch: "main",
         root_folder: "/repo",
@@ -880,7 +952,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/coding/files/read" && method === "POST") {
+    if (path === routeKey("api/coding/files/read") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       await options.beforeWorkspaceFileReadResponse?.(payload);
       return fulfill(route, {
@@ -893,21 +965,23 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/coding/git/branch") {
+    if (path === routeKey("api/coding/git/branch")) {
       return fulfill(route, { branch: "main", branches: ["main", "codex/pr97"], workspace_id: "ws-main" });
     }
 
-    if (path === "/api/coding/git/status") {
+    if (path === routeKey("api/coding/git/status")) {
       return fulfill(route, { branch: "main", clean: false, modified: ["src/App.tsx"], untracked: [], staged: [] });
     }
 
-    if (path === "/api/coding/git/diff") {
+    if (path === routeKey("api/coding/git/diff")) {
       return fulfill(route, { diff: "-old\n+new", files_changed: 1, files: ["src/App.tsx"], workspace_id: "ws-main" });
     }
 
-    if (path === "/api/coding/approvals/approve" && method === "POST") {
+    if (path === routeKey("api/coding/approvals/approve") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       options.onApprovalDecision?.("approve", payload);
+      const requestId = String(payload.approval_request_id ?? "").trim();
+      if (requestId) settledApprovalRequestIds.add(requestId);
       if (codingApprovalRequest?.request_id === payload.approval_request_id) {
         codingApprovalRequest = { ...codingApprovalRequest, status: "approved" };
       }
@@ -918,13 +992,18 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/coding/approvals/deny" && method === "POST") {
+    if (path === routeKey("api/coding/approvals/deny") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       options.onApprovalDecision?.("deny", payload);
+      const requestId = String(payload.approval_request_id ?? "").trim();
+      if (requestId) settledApprovalRequestIds.add(requestId);
+      if (codingApprovalRequest?.request_id === requestId) {
+        codingApprovalRequest = { ...codingApprovalRequest, status: "denied" };
+      }
       return fulfill(route, { request_id: payload.approval_request_id, approved: false, status: "denied" });
     }
 
-    if (path === "/api/coding/terminal/exec" && method === "POST" && options.codingApprovalAfterTerminal) {
+    if (path === routeKey("api/coding/terminal/exec") && method === "POST" && options.codingApprovalAfterTerminal) {
       const payload = request.postDataJSON() as Record<string, unknown>;
       codingApprovalRequest = {
         request_id: "apr-terminal-write",
@@ -933,6 +1012,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
         status: "pending",
         display_summary: "terminal.exec: write qa-file.txt",
         created_at: now,
+        args_hash: approvalDigest,
       };
       return fulfill(route, {
         command: String(payload.command ?? ""),
@@ -946,7 +1026,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/coding/files/restore" && method === "POST" && options.codingApprovalAfterRestore) {
+    if (path === routeKey("api/coding/files/restore") && method === "POST" && options.codingApprovalAfterRestore) {
       const payload = request.postDataJSON() as Record<string, unknown>;
       const snapshotId = String(payload.snapshot_id ?? "checkpoint-1");
       if (payload.approval_token) {
@@ -959,6 +1039,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
         status: "pending",
         display_summary: `file.restore: ${snapshotId}`,
         created_at: now,
+        args_hash: approvalDigest,
       };
       return fulfill(route, {
         approval_required: true,
@@ -966,12 +1047,12 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/coding/approvals") {
+    if (path === routeKey("api/coding/approvals")) {
       const requests = codingApprovalRequest ? [codingApprovalRequest] : [];
       return fulfill(route, { requests, pending: requests, count: requests.length });
     }
 
-    if (path === "/api/coding/checkpoints") {
+    if (path === routeKey("api/coding/checkpoints")) {
       if (method === "POST") {
         const checkpoint = {
           snapshot_id: "checkpoint-2",
@@ -987,7 +1068,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/coding/rumi-log") {
+    if (path === routeKey("api/coding/rumi-log")) {
       return fulfill(route, {
         rumi_dir: "/repo/.rumi",
         events_path: "/repo/.rumi/events.jsonl",
@@ -1012,14 +1093,14 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/browser/artifacts") {
+    if (path === routeKey("api/browser/artifacts")) {
       return fulfill(route, {
         artifacts: [{ artifact_id: "browser-1", session_id: "s1", action: "browser.session", created_at: "2026-05-20T00:00:00Z", url: "https://example.com" }],
         count: 1,
       });
     }
 
-    if (path === "/api/tools/mcp" && method === "POST") {
+    if (path === routeKey("api/tools/mcp") && method === "POST") {
       const payload = request.postDataJSON() as { server?: Record<string, unknown> };
       const server = {
         server_id: String(payload.server?.server_id ?? "contract_digest"),
@@ -1033,10 +1114,29 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       return fulfill(route, { server });
     }
 
-    if (path === "/api/tools/mcp/connect" && method === "POST") {
+    if (path === routeKey("api/tools/mcp/connect") && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
       const serverId = String(payload.server_id ?? payload.server_name ?? "contract_digest");
       if (!payload.approval_token) {
+        codingApprovalRequest = {
+          request_id: "apr-mcp-contract",
+          operation: "tool.mcp_connect",
+          risk_level: "high",
+          status: "pending",
+          display_summary: `Connect MCP server ${serverId}`,
+          created_at: now,
+          args_hash: approvalDigest,
+          details: {
+            mcp_review: {
+              executable: String(payload.command ?? "python"),
+              transport: "stdio",
+              args: Array.isArray(payload.args) ? payload.args : [],
+              cwd: "/repo",
+              redacted_env: [],
+              server_source: "Pack v4 UI contract fixture",
+            },
+          },
+        };
         return fulfill(route, {
           approval_required: true,
           approval_request_id: "apr-mcp-contract",
@@ -1058,7 +1158,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
-    if (path === "/api/tools/mcp") {
+    if (path === routeKey("api/tools/mcp")) {
       return fulfill(route, {
         servers: mcpServers,
         count: mcpServers.length,
@@ -1201,7 +1301,7 @@ test("composer approval menu opens action permissions while selection modes live
 
   await page.getByRole("button", { name: "アクションの承認方法" }).click();
   const approvalMenu = page.getByRole("menu", { name: "アクションの承認方法" });
-  await expect(approvalMenu).toContainText("Codex アクションの承認方法");
+  await expect(approvalMenu).toHaveAccessibleName("アクションの承認方法");
   await expect(approvalMenu).toContainText("承認を求める");
   await expect(approvalMenu).toContainText("代理で承認");
   await expect(approvalMenu).toContainText("フルアクセス");
@@ -1210,13 +1310,12 @@ test("composer approval menu opens action permissions while selection modes live
 
   await approvalMenu.getByRole("button", { name: "詳細はこちら" }).click();
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Tools & MCP" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Tools & MCP" }).first()).toBeVisible();
-  await expect(page.getByText("Installed tools, MCP servers, discovered tools, visibility, and approval policy.")).toBeVisible();
-  await expect(page.getByText("Tools are not logins")).toBeVisible();
+  await page.getByRole("button", { name: "Tools", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Tools", exact: true })).toBeVisible();
+  await expect(page.getByText("ツールとログインは別に管理されます")).toBeVisible();
+  await expect(page.getByText("MCP servers and tool sources define callable actions. Account login, OAuth tokens, and access tokens remain in Accounts & Connections.")).toBeVisible();
   await expect(page.getByText("Safety rules")).toBeVisible();
   await expect(page.getByText("Tool source → Tools & MCP")).toBeVisible();
-  await expect(page.getByText("MCP servers can require a connection")).toBeVisible();
 });
 
 test("slash yolo toggles Full Access back to Ask without a duplicate status chip", async ({ page }) => {
@@ -1520,8 +1619,11 @@ test("composer removes semantic tool state after an escaped edit", async ({ page
   const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
 
   await composer.fill("Use @web");
+  await expect(page.getByRole("option", { name: /@web search/i })).toBeVisible();
   await composer.press("Enter");
   await composer.fill("Use \\@Web Search");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-selected-tool-ids")))
+    .toBe("[]");
   await page.getByRole("button", { name: "メッセージを送信" }).click();
   await expect.poll(() => escapedRequests.length).toBe(1);
 
@@ -1537,15 +1639,20 @@ test("composer removes semantic tool state after an escaped edit", async ({ page
   expect(escapedMetadata.dropped_widgets).toEqual([]);
 });
 
-test("composer removes semantic tool state after its chip is toggled off", async ({ page }) => {
+test("composer renders semantic tool mentions inline and clears state after an escaped edit", async ({ page }) => {
   const chipRequests: Record<string, unknown>[] = [];
   await openDefaultspack(page, "/chat", {
     onStreamRequest: (payload) => chipRequests.push(payload),
   });
   const chipComposer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
   await chipComposer.fill("Use @web");
+  await expect(page.getByRole("option", { name: /@web search/i })).toBeVisible();
   await chipComposer.press("Enter");
-  await page.locator('.rumi-composer-frame button[title="Search the web."]').click();
+  await expect(chipComposer).toHaveValue("Use @Web Search ");
+  await expect(page.locator('[data-composer-inline-mentions] .rumi-composer-inline-mention')).toContainText("@Web Search");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-selected-tool-ids")))
+    .toBe('["web_search"]');
+  await chipComposer.fill("Use \\@Web Search");
   await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-selected-tool-ids")))
     .toBe("[]");
   await page.getByRole("button", { name: "メッセージを送信" }).click();
@@ -1559,7 +1666,7 @@ test("composer removes semantic tool state after its chip is toggled off", async
   expect(chipMetadata.dropped_widgets).toEqual([]);
 });
 
-test("composer reconciles removed service tools before submit", async ({ page }) => {
+test("composer reconciles an escaped service mention before submit", async ({ page }) => {
   const serviceRequests: Record<string, unknown>[] = [];
   await openDefaultspack(page, "/chat", {
     onStreamRequest: (payload) => serviceRequests.push(payload),
@@ -1567,8 +1674,16 @@ test("composer reconciles removed service tools before submit", async ({ page })
   const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
 
   await composer.fill("Use @gith");
-  await page.getByRole("option").filter({ hasText: "@GitHub" }).filter({ hasText: "service" }).click();
-  await page.getByRole("button", { name: "GitHub Issues の今回指定を解除" }).click();
+  const githubOption = page.getByRole("option").filter({ hasText: "@GitHub" }).filter({ hasText: "service" });
+  await expect(githubOption).toBeVisible();
+  await githubOption.click();
+  await expect(composer).toHaveValue("Use @GitHub ");
+  await expect(page.locator('[data-composer-inline-mentions] .rumi-composer-inline-mention')).toContainText("@GitHub");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-selected-tool-ids")))
+    .toBe('["github_issue_search"]');
+  await composer.fill("Use \\@GitHub");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("rumi-selected-tool-ids")))
+    .toBe("[]");
   await page.getByRole("button", { name: "メッセージを送信" }).click();
   await expect.poll(() => serviceRequests.length).toBe(1);
   const serviceRequest = serviceRequests[0];
@@ -1886,10 +2001,24 @@ test("composer mention keyboard and ARIA contracts stay predictable at Unicode a
   await expect(composer).not.toBeFocused();
 
   await composer.focus();
+  await composer.evaluate((element) => {
+    const end = element.value.length;
+    element.setSelectionRange(end, end);
+  });
+  await expect.poll(() => composer.evaluate((element) => element.selectionStart)).toBe(
+    "@this_candidate_does_not_exist".length,
+  );
   await composer.press("Escape");
   await expect(mentions).toBeHidden();
 
   await composer.fill("@this_candidate_does_not_exist");
+  await composer.evaluate((element) => {
+    const end = element.value.length;
+    element.setSelectionRange(end, end);
+  });
+  await expect.poll(() => composer.evaluate((element) => element.selectionStart)).toBe(
+    "@this_candidate_does_not_exist".length,
+  );
   await composer.press("Shift+Enter");
   await expect(composer).toHaveValue("@this_candidate_does_not_exist\n");
   expect(streamRequests).toHaveLength(0);
@@ -1971,6 +2100,7 @@ test("composer controls are keyboard reachable, visibly named, and at least 44px
 test("composer uses a leading plus menu and accepts clipboard and workspace file drops", async ({ page }) => {
   await openDefaultspack(page, "/chat");
   await page.getByTitle("New Chat").first().click();
+  await expect(page.locator(".rumi-composer-new")).toHaveCSS("filter", "blur(0px)");
 
   const composer = page.getByRole("combobox", { name: "Rumiにメッセージを送信" });
   const attach = page.getByRole("button", { name: "ファイルを添付" });
@@ -2358,7 +2488,10 @@ test("calendar mode opens quick add and renders new tasks in blue", async ({ pag
   await expect(page.getByText("Range task")).toHaveCount(0);
 
   await page.getByTitle("Settings").last().click();
-  await expect(page.getByRole("heading", { name: "Rumi Control Center" })).toBeVisible();
+  const settingsDialog = page.getByRole("dialog", { name: "Settings" });
+  await expect(settingsDialog).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Settings categories" })).toBeVisible();
 });
 
 test("history card drag uses rumi history MIME and sends dropped_widgets metadata", async ({ page }) => {
@@ -2493,6 +2626,10 @@ test("mocked coding cockpit registers approves and connects an MCP server", asyn
   await page.getByTitle("Connect MCP server").click();
 
   const mcpServers = page.getByLabel("MCP servers");
+  const approvals = page.getByLabel("Approval queue");
+  await expect(approvals).toContainText("tool.mcp_connect");
+  await expect(approvals).toContainText("contract_digest");
+  await approvals.getByRole("button", { name: /許可|Approve/ }).click();
   await expect(mcpServers).toContainText("contract_digest");
   await expect(mcpServers).toContainText("approved");
   await expect(page.getByText("MCP connected: contract_digest (1 tools)")).toBeVisible();

@@ -1,4 +1,5 @@
 import type { ComposerExtensionItem, ComposerSkillItem } from "../renderers/types";
+import { hasUnescapedMentionSyntax } from "./mentionContract";
 
 export const COMPOSER_REFERENCE_MIME = "application/x-rumi-composer-references+json";
 
@@ -212,7 +213,7 @@ export function mergeComposerReferences(
 ): ComposerEntityReference[] {
   const byKey = new Map<string, ComposerEntityReference>();
   for (const reference of [...current, ...additions]) {
-    if (!input.includes(reference.syntax)) continue;
+    if (!hasUnescapedMentionSyntax(input, reference.syntax)) continue;
     byKey.set(referenceKey(reference), reference);
   }
   return [...byKey.values()];

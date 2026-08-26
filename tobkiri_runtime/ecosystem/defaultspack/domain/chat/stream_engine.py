@@ -2051,6 +2051,7 @@ class ChatRunEngine:
         except Exception:
             self._mark_subagent_prepare_failed(input_data, context)
             raise
+        self._ensure_prepared_user_message(prepared)
         self._run_id = gen_id()
         self._conversation_id = prepared.conversation_id
         self._event_seq = 0
@@ -2321,6 +2322,22 @@ class ChatRunEngine:
                 except Exception:
                     pass
             cancellation_registry.unregister(prepared.conversation_id, request_cancel)
+
+    def _ensure_prepared_user_message(self, prepared: PreparedChatRun) -> None:
+        """Bind manually prepared requests to the canonical owner before a run."""
+        message_id = str(prepared.user_message.get("id") or "").strip()
+        if not message_id:
+            return
+        get_message = getattr(self._store, "get_message", None)
+        add_message = getattr(self._store, "add_message", None)
+        if not callable(get_message) or not callable(add_message):
+            return
+        if get_message(prepared.conversation_id, message_id) is not None:
+            return
+        stored = add_message(prepared.conversation_id, prepared.user_message)
+        if stored is None:
+            raise RuntimeError("prepared user message could not be committed")
+        prepared.user_message = stored
 
     def _mark_subagent_prepare_failed(self, input_data: dict[str, Any], context: dict[str, Any]) -> None:
         if not isinstance(input_data, dict):
@@ -3189,6 +3206,20 @@ class ChatRunEngine:
             return (yield from self._model_turn_with_run_seal(prepared, messages, draft, seal_policy))
         if not self._stream_mode:
             return (yield from self._model_turn_via_complete(prepared, messages, draft))
+        if (
+            isinstance(prepared.tool_context, dict)
+            and prepared.tool_context.get("approval_replayed")
+            and not _scheduled_mimo_approval_followup(prepared)
+            and not bool(
+                isinstance(prepared.request_context, dict)
+                and prepared.request_context.get("user_requested_computer_use")
+            )
+        ):
+            # The approval replay has already completed the side effect and
+            # deliberately removed provider tools. Use the ordinary complete
+            # path for the token-free summary turn so a streaming provider
+            # cannot re-enter a provider-specific tool loop.
+            return (yield from self._model_turn_via_complete(prepared, messages, draft))
         if prepared.provider_tools and not self._provider_supports_stream_tool_calls(prepared.model):
             return (yield from self._model_turn_via_complete(prepared, messages, draft))
 
@@ -3833,7 +3864,7 @@ class ChatRunEngine:
 
         if not provider_requires_authority(provider_id, provider=provider, api_id="legacy"):
             return
-        from core_runtime.authority import get_authority_service
+        from core_runtime.legacy_runtime_removed import removed_authority_service
 
         authority_context = (
             prepared.request_context.get("authority") if isinstance(prepared.request_context, dict) else {}
@@ -3846,7 +3877,7 @@ class ChatRunEngine:
         allow_consumed_one_shot_tokens_for_run = bool(
             context.get("allow_consumed_one_shot_tokens_for_run")
         )
-        service = get_authority_service()
+        service = removed_authority_service()
 
         def mark_provider_call_verified() -> None:
             if not isinstance(authority_context, dict):
@@ -4132,8 +4163,6 @@ class ChatRunEngine:
             return None
 
         stored_args = details.get("arguments") if isinstance(details.get("arguments"), dict) else None
-        if stored_args is None:
-            return None
         if not operation:
             return None
         if not _approval_replay_operation_allowed(operation, tool_name):
