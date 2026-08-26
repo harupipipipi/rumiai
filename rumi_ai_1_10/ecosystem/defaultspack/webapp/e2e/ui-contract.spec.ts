@@ -412,6 +412,67 @@ const toolCatalogTools = [
   },
 ];
 
+const agentStudioManifest = {
+  profiles: [
+    {
+      id: "builtin.coding",
+      display_name: "Coding Agent",
+      source_type: "builtin",
+      description: "Code-focused registered profile.",
+      command_shortcuts: ["coding"],
+      runtime_profile_id: "stub/default",
+    },
+    {
+      id: "builtin.research",
+      display_name: "Research Agent",
+      source_type: "builtin",
+      description: "Research-focused registered profile.",
+      command_shortcuts: ["research"],
+      runtime_profile_id: "stub/default",
+    },
+  ],
+  teams: [
+    {
+      id: "builtin.delivery_team",
+      team_id: "builtin.delivery_team",
+      display_name: "Delivery Team",
+      description: "Coordinate coding, research, and review.",
+      member_profile_ids: ["builtin.coding", "builtin.research"],
+    },
+  ],
+  fusions: [
+    {
+      id: "builtin.delivery_fusion",
+      fusion_id: "builtin.delivery_fusion",
+      display_name: "Delivery Fusion",
+      description: "Synthesize multiple profile perspectives.",
+      participant_profile_ids: ["builtin.coding", "builtin.research"],
+      synthesis_profile_id: "builtin.coding",
+    },
+  ],
+  selection_rules: [
+    {
+      id: "rule-coding",
+      display_name: "Coding prompts",
+      target_type: "profile",
+      target_id: "builtin.coding",
+      match_terms: ["fix", "refactor", "implement"],
+    },
+  ],
+  settings: {},
+  shortcut_index: {
+    coding: "builtin.coding",
+    research: "builtin.research",
+  },
+  compatibility_alias_index: {},
+  summary: {
+    profiles: 2,
+    teams: 1,
+    fusions: 1,
+    selection_rules: 1,
+  },
+};
+
 async function fulfill(route: Route, data: unknown) {
   await route.fulfill({
     status: 200,
@@ -556,6 +617,17 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
           permission_summary: { auto: 2, confirm: 0, block: 0 },
           metadata: {},
         },
+      });
+    }
+
+    if (path === "/api/agent-studio" && method === "GET") {
+      return fulfill(route, agentStudioManifest);
+    }
+
+    if (path === "/api/agent-studio" && method === "POST") {
+      return fulfill(route, {
+        ...agentStudioManifest,
+        conversation,
       });
     }
 
@@ -871,6 +943,23 @@ test("tool hub service selections can be scoped to the conversation and survive 
   await page.getByRole("button", { name: "この会話" }).click();
   const reloadedGithubCard = page.locator("div.rounded-md").filter({ hasText: "GitHub" }).first();
   await expect(reloadedGithubCard).toContainText("会話固定");
+});
+
+test("workroom can open Agent Studio tabs without an existing company", async ({ page }) => {
+  await openDefaultspack(page);
+
+  await page.getByTitle("New tab").click();
+  await page.getByRole("button", { name: /Workroom Profiles, teams, and fusion/ }).click();
+
+  await page.getByLabel("Workroom options").click();
+  await page.getByRole("menuitem", { name: "Profiles" }).click();
+  await expect(page.getByText("Registered Profiles")).toBeVisible();
+  await expect(page.getByText("Coding Agent")).toBeVisible();
+
+  await page.getByLabel("Workroom options").click();
+  await page.getByRole("menuitem", { name: "Fusion" }).click();
+  await expect(page.getByText("Fusion Agents")).toBeVisible();
+  await expect(page.getByText("Delivery Fusion")).toBeVisible();
 });
 
 test("composer at mention selects tools and skills and sends mention metadata", async ({ page }) => {

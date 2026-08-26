@@ -92,13 +92,22 @@ class SlashCommandRegistry:
         if isinstance(args_result, dict) and args_result.get("status") == "error":
             return args_result
         args = args_result
+        guard = self._command_guard(
+            command,
+            payload,
+            args,
+            context or {},
+        )
+        if isinstance(guard, dict) and guard.get("status") == "error":
+            return guard
+        guard_message = str(guard.get("message") or "").strip() if isinstance(guard, dict) else ""
         if command.get("risk") == "high":
             return ok(
                 {
                     "command": self._public_command(command),
                     "executed": False,
                     "requires_approval": True,
-                    "message": "This command requires approval center confirmation.",
+                    "message": guard_message or "This command requires approval center confirmation.",
                 }
             )
 
@@ -112,6 +121,7 @@ class SlashCommandRegistry:
                     "executed": False,
                     "action": execution.get("action"),
                     "args": args,
+                    **({"message": guard_message} if guard_message else {}),
                 }
             )
 
@@ -737,7 +747,47 @@ class SlashCommandRegistry:
             normalized["args"] = []
         if not isinstance(normalized.get("execution"), dict):
             normalized["execution"] = {"type": "frontend", "action": normalized["id"]}
+        executor_policy = normalized.get("executor_policy")
+        normalized["executor_policy"] = executor_policy if isinstance(executor_policy, dict) else {}
         return normalized
+
+    def _command_guard(
+        self,
+        command: dict[str, Any],
+        payload: dict[str, Any],
+        args: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            from domain.agent_studio.service import AgentStudioService
+
+            profile_id = str(
+                args.get("profile_id")
+                or payload.get("profile_id")
+                or context.get("profile_id")
+                or ""
+            ).strip()
+            decision = AgentStudioService().command_guard(
+                str(command.get("name") or command.get("id") or ""),
+                conversation_id=str(payload.get("conversation_id") or "").strip(),
+                profile_id=profile_id,
+                context=context,
+                executor_policy=command.get("executor_policy")
+                if isinstance(command.get("executor_policy"), dict)
+                else {},
+            )
+        except Exception:
+            return {}
+        if not isinstance(decision, dict):
+            return {}
+        if decision.get("allowed") is False:
+            return error(
+                str(decision.get("message") or "command is blocked"),
+                str(decision.get("code") or "COMMAND_BLOCKED"),
+                details=decision,
+            )
+        message = str(decision.get("warning") or "").strip()
+        return {"message": message} if message else {}
 
     def _dedupe_by_id(
         self, commands: list[dict[str, Any]], manifest_errors: list[dict[str, Any]]

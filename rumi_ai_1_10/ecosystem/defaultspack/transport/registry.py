@@ -1040,6 +1040,8 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         block_module="blocks.agent.self_improvement_status",
         defaults={"action": "report"},
     ),
+    HttpRouteSpec("GET", "/api/agent-studio", block_module="blocks.agent_studio.registry"),
+    HttpRouteSpec("POST", "/api/agent-studio", block_module="blocks.agent_studio.registry"),
     HttpRouteSpec("GET", "/api/company", block_module="blocks.company.list"),
     HttpRouteSpec("POST", "/api/company", block_module="blocks.company.create"),
     HttpRouteSpec("GET", "/api/company/status", block_module="blocks.company.status"),

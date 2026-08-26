@@ -32,6 +32,28 @@ test("defaultspack renderer registry exposes render modules", () => {
   assert.equal(typeof defaultspackRenderers.settingsModal, "function");
 });
 
+test("chat header renders active agent status chips", () => {
+  const html = renderToStaticMarkup(
+    createElement(defaultspackRenderers.chatHeader, {
+      title: "Feature Chat",
+      showPreview: false,
+      canShowPreview: false,
+      canOpenSettings: true,
+      agentLabel: "Mini Coding Agent Profile",
+      agentSurface: "mode_agent",
+      activationReason: "manual_profile_switch",
+      reviewGateApproved: false,
+      onTogglePreview: () => {},
+      onOpenSettings: () => {},
+    }),
+  );
+
+  assert.match(html, /Feature Chat/);
+  assert.match(html, /Mode Agent: Mini Coding Agent Profile/);
+  assert.match(html, /Review gate pending/);
+  assert.match(html, /manual profile switch/);
+});
+
 test("defaultspack renderer resolver keeps builtin fallback for untrusted modules", () => {
   const resolved = resolveDefaultspackRenderers({
     shell: {
@@ -108,7 +130,7 @@ test("company task board renders dispatched completed runs", () => {
               {
                 role: "user",
                 label: "Assignment",
-                content: "Run a real MiniMax task through Company Workspace.",
+                content: "Run a real MiniMax task through the Workroom.",
               },
               {
                 role: "assistant",
@@ -129,9 +151,9 @@ test("company task board renders dispatched completed runs", () => {
   assert.match(html, /minimax_worker/);
   assert.match(html, /completed/);
   assert.match(html, /stub\/default/);
-  assert.match(html, /Employee Conversation/);
+  assert.match(html, /Workroom Conversation/);
   assert.match(html, /Deep research with DuckDuckGo/);
-  assert.match(html, /Run a real MiniMax task through Company Workspace/);
+  assert.match(html, /Run a real MiniMax task through the Workroom/);
   assert.match(html, /Agent reply/);
   assert.match(html, /Visible MiniMax result/);
 });
@@ -144,12 +166,13 @@ test("company workspace renders a visible empty state before a chat exists", () 
     }),
   );
 
-  assert.match(html, /Employees/);
-  assert.match(html, /Employee Group/);
-  assert.match(html, /Employee workspace options/);
+  assert.match(html, /Workroom/);
+  assert.doesNotMatch(html, /Employee Group/);
+  assert.match(html, /Workroom options/);
   assert.doesNotMatch(html, />Routes</);
   assert.doesNotMatch(html, />P2P</);
-  assert.match(html, /Start or send a chat message to create its employee group/);
+  assert.match(html, /Start or send a chat message to create its workroom/);
+  assert.match(html, /Registered Profiles/);
   assert.doesNotMatch(html, /Rumi Operations Company/);
 });
 
@@ -249,7 +272,7 @@ test("company agent list renders latest agent run errors", () => {
 
   assert.match(html, /Stub Worker/);
   assert.match(html, /error/);
-  assert.match(html, /Employee Conversation/);
+  assert.match(html, /Workroom Conversation/);
   assert.match(html, /Try the same task with stub\/default/);
   assert.match(html, /stub: provider is not configured/);
 });

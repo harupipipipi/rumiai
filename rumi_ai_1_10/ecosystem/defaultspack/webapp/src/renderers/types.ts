@@ -123,6 +123,10 @@ export type ChatHeaderRendererProps = {
   showPreview: boolean;
   canShowPreview: boolean;
   canOpenSettings: boolean;
+  agentLabel?: string;
+  agentSurface?: string;
+  activationReason?: string;
+  reviewGateApproved?: boolean;
   onTogglePreview: () => void;
   onOpenSettings: () => void;
 };

@@ -4000,9 +4000,10 @@ export function SettingsModalRenderer({
           >
             <div className="px-6 py-4 border-b border-zinc-800 flex justify-between items-center">
               <div className="min-w-0">
-                <h2 className="text-lg font-medium text-zinc-100">Rumi Control Center</h2>
+                <h1 className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Settings</h1>
+                <h2 className="mt-1 text-lg font-medium text-zinc-100">機能と接続</h2>
                 <p className="text-xs text-zinc-500 mt-1">
-                  {t(locale, "settings.backendRegistry", {
+                  Rumi Control Center · {t(locale, "settings.backendRegistry", {
                     extensionPoints: catalog?.extension_points.length ?? 0,
                     parts: catalog?.parts?.length ?? 0,
                     pack: health?.pack ?? "defaultspack",

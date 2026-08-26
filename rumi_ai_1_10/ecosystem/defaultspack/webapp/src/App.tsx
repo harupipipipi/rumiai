@@ -29,7 +29,7 @@ import { PromptStudio } from "./pages/PromptStudio";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type SettingsSection, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
+import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, defaultspackUrlWithLocalAuth, mergeComposerCommands, type AgentStudioConversationState, type AgentStudioManifest, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type SettingsSection, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
 import type { ActionApprovalMode } from "./features/tools/ActionApprovalControl";
 import type { ConversationToolPreferences } from "./features/tools/types";
 import { useToolSelectionController } from "./features/tools/useToolSelectionController";
@@ -2242,6 +2242,41 @@ function modelCommandInputQuery(value: string): string | null {
   return String(match[1] ?? "").trim();
 }
 
+function workroomTabTitle(value: string | null | undefined): string {
+  const title = String(value ?? "").trim();
+  return title ? `Workroom: ${title}` : "Workroom";
+}
+
+function resolveRegisteredProfileId(manifest: AgentStudioManifest | null, value: string): string {
+  const needle = value.trim().toLowerCase().replace(/^\//, "");
+  if (!needle) return "";
+  const indexed = manifest?.shortcut_index?.[needle] ?? manifest?.compatibility_alias_index?.[needle];
+  if (indexed) return indexed;
+  const profile = manifest?.profiles.find((item) => (
+    [
+      item.id,
+      item.runtime_profile_id,
+      item.base_profile_id,
+      ...(item.aliases ?? []),
+      ...(item.command_shortcuts ?? []),
+      ...(item.compatibility_aliases ?? []),
+    ].some((token) => String(token ?? "").trim().toLowerCase() === needle)
+  ));
+  return profile?.id ?? value.trim();
+}
+
+function resolveNamedAgentStudioItemId<T extends { id: string; display_name?: string }>(
+  items: T[],
+  value: string,
+): string {
+  const needle = value.trim().toLowerCase().replace(/^\//, "");
+  if (!needle) return "";
+  const matched = items.find((item) => (
+    [item.id, item.display_name].some((token) => String(token ?? "").trim().toLowerCase() === needle)
+  ));
+  return matched?.id ?? value.trim();
+}
+
 function ChatApp() {
   const [catalog, setCatalog] = useState<UICatalog | null>(null);
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
@@ -2384,20 +2419,29 @@ function ChatApp() {
   const activeWorkspaceKind = activeWorkspaceTab?.kind ?? "chat";
   const isChatWorkspace = activeWorkspaceKind === "chat";
   const isCodingWorkspace = activeWorkspaceKind === "coding";
+  const isWorkroomWorkspace = activeWorkspaceKind === "workroom";
   const isCanvasWorkspace = activeWorkspaceKind === "canvas";
   const isDesktopsWorkspace = activeWorkspaceKind === "desktops";
   const isToolsWorkspace = activeWorkspaceKind === "tools";
   const isNewConversation = activeConversation === null || activeConversation.messages.length === 0;
   useEffect(() => {
     setWorkspaceTabs((current) => current.map((tab) => {
-      if (tab.id !== activeWorkspaceTabId || tab.kind !== "chat") return tab;
-      const nextTitle = activeConversationId ? activeChatTitle : "New Conversation";
-      if (tab.conversationId === activeConversationId && tab.title === nextTitle) return tab;
-      return {
-        ...tab,
-        conversationId: activeConversationId,
-        title: nextTitle,
-      };
+      if (tab.id !== activeWorkspaceTabId) return tab;
+      if (tab.kind === "chat") {
+        const nextTitle = activeConversationId ? activeChatTitle : "New Conversation";
+        if (tab.conversationId === activeConversationId && tab.title === nextTitle) return tab;
+        return {
+          ...tab,
+          conversationId: activeConversationId,
+          title: nextTitle,
+        };
+      }
+      if (tab.kind === "workroom" && tab.conversationId && tab.conversationId === activeConversationId) {
+        const nextTitle = workroomTabTitle(activeChatTitle);
+        if (tab.title === nextTitle) return tab;
+        return { ...tab, title: nextTitle };
+      }
+      return tab;
     }));
   }, [activeChatTitle, activeConversationId, activeWorkspaceTabId]);
   const activePromptUsage = latestActiveMetadata.prompt_usage && typeof latestActiveMetadata.prompt_usage === "object" && !Array.isArray(latestActiveMetadata.prompt_usage)
@@ -2696,7 +2740,7 @@ function ChatApp() {
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
-  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview && !isCanvasWorkspace && !isDesktopsWorkspace;
+  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview && !isCanvasWorkspace && !isDesktopsWorkspace && !isWorkroomWorkspace;
   const activityPreviewWidthPx = clampNumber(activityPreviewWidth, 220, 720, 340);
   const operationsProfileAvailable = hasOperationsProfile(catalog);
   const mimoCodingProfileAvailable = hasMimoCodingProfile(catalog);
@@ -3110,6 +3154,53 @@ function ChatApp() {
     setActiveConversation(conversation);
     if (updateUrl) replaceChatIdInUrl(conversationId);
     void refreshPreview(conversationId);
+  }
+
+  function applyConversationUpdate(
+    conversation: Conversation,
+    options: { attachToActiveTab?: boolean } = {},
+  ) {
+    const nextTitle = String(conversation.title ?? "").trim() || "New Conversation";
+    setActiveConversationId(conversation.id);
+    setActiveConversation(conversation);
+    setConversations((current) => {
+      const summary = { ...conversation, messages: [] };
+      const existingIndex = current.findIndex((item) => item.id === conversation.id);
+      if (existingIndex >= 0) {
+        return current.map((item) => item.id === conversation.id ? summary : item);
+      }
+      return [summary, ...current];
+    });
+    setWorkspaceTabs((current) => current.map((tab) => {
+      const shouldAttachToActiveTab = Boolean(
+        options.attachToActiveTab
+        && tab.id === activeWorkspaceTabId
+        && (tab.kind === "chat" || tab.kind === "workroom"),
+      );
+      if (!shouldAttachToActiveTab && tab.conversationId !== conversation.id) return tab;
+      return {
+        ...tab,
+        conversationId: shouldAttachToActiveTab ? conversation.id : tab.conversationId,
+        title: tab.kind === "workroom"
+          ? workroomTabTitle(nextTitle)
+          : tab.kind === "chat"
+            ? nextTitle
+            : tab.title,
+      };
+    }));
+    replaceChatIdInUrl(conversation.id, false);
+    void refreshPreview(conversation.id);
+  }
+
+  async function ensureConversationForAgentStudio() {
+    if (activeConversationId) {
+      const existing = activeConversation ?? await api.getConversation(activeConversationId);
+      applyConversationUpdate(existing, { attachToActiveTab: false });
+      return existing;
+    }
+    const created = await api.createConversation({});
+    applyConversationUpdate(created, { attachToActiveTab: true });
+    return created;
   }
 
   async function refreshConversations(preferredId?: string | null) {
@@ -3827,6 +3918,108 @@ function ChatApp() {
           replaceChatIdInUrl(activeConversationId, false);
         }
         return;
+      case "activate_registered_profile_shortcut":
+      case "activate_registered_profile": {
+        void (async () => {
+          try {
+            const manifest = await api.getAgentStudio();
+            const requestedProfile = String(
+              action === "activate_registered_profile_shortcut"
+                ? (command.name ?? command.id)
+                : (args.profile ?? activeConversationAgentStudioState.active_profile_id ?? command.name ?? command.id),
+            ).trim();
+            const profileId = resolveRegisteredProfileId(manifest, requestedProfile || "coding");
+            if (!profileId) {
+              openWorkroomTab(activeConversationId, activeConversationId ? activeChatTitle : null);
+              setError("Choose a registered profile from the Workroom first.");
+              return;
+            }
+            const conversation = await ensureConversationForAgentStudio();
+            const result = await api.updateAgentStudio({
+              action: "activate_profile",
+              conversation_id: conversation.id,
+              profile_id: profileId,
+              surface: "mode_agent",
+            });
+            const updatedConversation = result?.conversation && typeof result.conversation === "object"
+              ? result.conversation as Conversation
+              : null;
+            if (updatedConversation) {
+              applyConversationUpdate(updatedConversation, { attachToActiveTab: true });
+              if (profileId === "builtin.coding" || profileId === "builtin.mini_coding") {
+                handleModeChange("coding");
+              } else {
+                handleModeChange("agent");
+              }
+              setError(`Mode Agent switched to ${profileId}.`);
+              return;
+            }
+            setError("Mode Agent activation did not return a conversation update.");
+          } catch (actionError) {
+            setError(actionError instanceof Error ? actionError.message : "Mode Agent activation failed.");
+          }
+        })();
+        return;
+      }
+      case "activate_team_agent": {
+        void (async () => {
+          try {
+            const manifest = await api.getAgentStudio();
+            const requestedTeamId = String(args.team_id ?? "builtin.delivery_team").trim() || "builtin.delivery_team";
+            const teamId = resolveNamedAgentStudioItemId(manifest.teams, requestedTeamId);
+            const conversation = await ensureConversationForAgentStudio();
+            const result = await api.updateAgentStudio({
+              action: "activate_team",
+              conversation_id: conversation.id,
+              team_id: teamId,
+            });
+            const updatedConversation = result?.conversation && typeof result.conversation === "object"
+              ? result.conversation as Conversation
+              : null;
+            if (updatedConversation) {
+              applyConversationUpdate(updatedConversation, { attachToActiveTab: true });
+              openWorkroomTab(updatedConversation.id, updatedConversation.title);
+              setError(`Team Agent switched to ${teamId}.`);
+              return;
+            }
+            setError("Team Agent activation did not return a conversation update.");
+          } catch (actionError) {
+            setError(actionError instanceof Error ? actionError.message : "Team Agent activation failed.");
+          }
+        })();
+        return;
+      }
+      case "activate_fusion_agent": {
+        void (async () => {
+          try {
+            const manifest = await api.getAgentStudio();
+            const requestedFusionId = String(args.fusion_id ?? "builtin.delivery_fusion").trim() || "builtin.delivery_fusion";
+            const fusionId = resolveNamedAgentStudioItemId(manifest.fusions, requestedFusionId);
+            const conversation = await ensureConversationForAgentStudio();
+            const result = await api.updateAgentStudio({
+              action: "activate_fusion",
+              conversation_id: conversation.id,
+              fusion_id: fusionId,
+            });
+            const updatedConversation = result?.conversation && typeof result.conversation === "object"
+              ? result.conversation as Conversation
+              : null;
+            if (updatedConversation) {
+              applyConversationUpdate(updatedConversation, { attachToActiveTab: true });
+              openWorkroomTab(updatedConversation.id, updatedConversation.title);
+              setError(`Fusion Agent switched to ${fusionId}.`);
+              return;
+            }
+            setError("Fusion Agent activation did not return a conversation update.");
+          } catch (actionError) {
+            setError(actionError instanceof Error ? actionError.message : "Fusion Agent activation failed.");
+          }
+        })();
+        return;
+      }
+      case "open_workroom":
+        openWorkroomTab(activeConversationId, activeConversationId ? activeChatTitle : null);
+        return;
       case "set_mode_coding":
         handleModeChange(mode === "coding" ? "agent" : "coding");
         return;
@@ -3869,7 +4062,7 @@ function ChatApp() {
       }
       case "show_status":
         setError(
-          `status: mode=${mode}, model=${activeProfile?.display_name ?? preferredModel}, thinking=${selectedThinkingLevel}, deepthink=${deepthinkEnabled ? "on" : "off"}, yolo=${yoloMode ? "on" : "off"}, ultra_yolo=${ultraYoloMode ? "on" : "off"}, tools=${selectedTools.length}`,
+          `status: mode=${mode}, surface=${String(activeConversationAgentStudioState.surface ?? "human")}, profile=${String(activeConversationAgentStudioState.active_profile_id ?? "-")}, team=${String(activeConversationAgentStudioState.active_team_id ?? "-")}, fusion=${String(activeConversationAgentStudioState.active_fusion_id ?? "-")}, model=${activeProfile?.display_name ?? preferredModel}, thinking=${selectedThinkingLevel}, deepthink=${deepthinkEnabled ? "on" : "off"}, yolo=${yoloMode ? "on" : "off"}, ultra_yolo=${ultraYoloMode ? "on" : "off"}, tools=${selectedTools.length}`,
         );
         return;
       case "open_settings":
@@ -4053,6 +4246,27 @@ function ChatApp() {
     }
   };
 
+  const openWorkroomTab = (conversationId?: string | null, conversationTitle?: string | null) => {
+    const attachedConversationId = conversationId ?? activeConversationId ?? null;
+    const title = workroomTabTitle(conversationTitle ?? (attachedConversationId ? activeChatTitle : ""));
+    const existingTab = activeWorkspaceTab?.kind === "workroom"
+      ? activeWorkspaceTab
+      : workspaceTabs.find((tab) => tab.kind === "workroom" && (tab.conversationId ?? null) === attachedConversationId);
+    if (existingTab) {
+      const nextTab = { ...existingTab, title };
+      setWorkspaceTabs((current) => current.map((tab) => tab.id === nextTab.id ? nextTab : tab));
+      activateWorkspaceTab(nextTab);
+      return nextTab;
+    }
+    const nextTab = createWorkspaceTab("workroom", {
+      conversationId: attachedConversationId,
+      title,
+    });
+    setWorkspaceTabs((current) => [...current, nextTab]);
+    activateWorkspaceTab(nextTab);
+    return nextTab;
+  };
+
   const activateWorkspaceTab = (tab: WorkspaceTab) => {
     setActiveWorkspaceTabId(tab.id);
     setError(null);
@@ -4063,6 +4277,13 @@ function ChatApp() {
     }
     if (tab.kind === "coding") {
       handleModeChange("coding");
+      return;
+    }
+    if (tab.kind === "workroom") {
+      handleModeChange("agent");
+      if (tab.conversationId) {
+        void loadConversation(tab.conversationId);
+      }
       return;
     }
     handleModeChange("agent");
@@ -4086,6 +4307,10 @@ function ChatApp() {
   const handleWorkspaceTabCreate = (kind: WorkspaceTabKind) => {
     const option = WORKSPACE_TAB_CREATE_OPTIONS.find((candidate) => candidate.kind === kind);
     if (option?.disabled) return;
+    if (kind === "workroom") {
+      openWorkroomTab(activeConversationId, activeConversationId ? activeChatTitle : null);
+      return;
+    }
     const tab = createWorkspaceTab(kind, {
       title: kind === "chat" ? "New Conversation" : option?.label,
     });
@@ -4862,6 +5087,33 @@ function ChatApp() {
       });
       replaceChatIdInUrl(conversation.id, true);
 
+      try {
+        const autoSelectionResult = await api.updateAgentStudio({
+          action: "auto_select_for_conversation",
+          conversation_id: conversation.id,
+          prompt: userText,
+        }) as {
+          conversation?: Conversation;
+          decision?: {
+            selected_target_id?: string;
+            requires_confirmation?: boolean;
+          };
+        };
+        const selectedConversation = autoSelectionResult?.conversation;
+        if (selectedConversation && typeof selectedConversation === "object" && selectedConversation.id) {
+          conversation = selectedConversation;
+          applyConversationUpdate(selectedConversation, { attachToActiveTab: wasNewConversation });
+        }
+        const selectionDecision = autoSelectionResult?.decision;
+        if (
+          selectionDecision?.requires_confirmation === true
+          && typeof selectionDecision.selected_target_id === "string"
+          && selectionDecision.selected_target_id.trim()
+        ) {
+          setError(`Agent Studio suggested ${selectionDecision.selected_target_id.trim()} but requires confirmation before switching.`);
+        }
+      } catch {}
+
       const title =
         conversation.title === "New Conversation"
           ? deriveConversationTitle(userText)
@@ -4881,7 +5133,7 @@ function ChatApp() {
         const withoutCurrent = current.filter((candidate) => candidate.id !== conversation.id);
         return [item, ...withoutCurrent];
       });
-      const assistantDraft = optimisticAssistantMessage(conversation.id, preferredModel || "stub/default");
+      const assistantDraft = optimisticAssistantMessage(conversation.id, conversation.model || preferredModel || "stub/default");
       const abortController = new AbortController();
       currentAbortControllerRef.current = abortController;
       streamingConversationIdRef.current = conversation.id;
@@ -5355,6 +5607,19 @@ function ChatApp() {
     : typeof activeConversationMetadata.companyId === "string"
       ? activeConversationMetadata.companyId
       : null;
+  const activeConversationAgentStudioState: AgentStudioConversationState = activeConversationMetadata.agent_studio && typeof activeConversationMetadata.agent_studio === "object"
+    ? activeConversationMetadata.agent_studio as AgentStudioConversationState
+    : {};
+  const activeConversationReviewGate = activeConversationAgentStudioState.review_gate && typeof activeConversationAgentStudioState.review_gate === "object"
+    ? activeConversationAgentStudioState.review_gate
+    : {};
+  const workroomConversationAgentStudioState: AgentStudioConversationState | null = (
+    activeWorkspaceTab?.kind === "workroom"
+    && activeWorkspaceTab.conversationId
+    && activeWorkspaceTab.conversationId !== activeConversationId
+  )
+    ? null
+    : activeConversationAgentStudioState;
   const handleCalendarModeToggle = () => {
     const existingCalendarTab = workspaceTabs.find((tab) => tab.kind === "calendar");
     if (existingCalendarTab) {
@@ -5586,6 +5851,10 @@ function ChatApp() {
                 showPreview={effectiveShowPreview}
                 canShowPreview={showRegion("activity_preview") && canShowCanvas}
                 canOpenSettings={showRegion("settings_modal")}
+                agentLabel={String(activeConversationAgentStudioState.active_label ?? activeConversationAgentStudioState.active_profile_id ?? "").trim() || undefined}
+                agentSurface={String(activeConversationAgentStudioState.surface ?? "").trim() || undefined}
+                activationReason={String(activeConversationAgentStudioState.activation_reason ?? "").trim() || undefined}
+                reviewGateApproved={activeConversationReviewGate.approved === true}
                 onTogglePreview={() => {
                   if (canShowCanvas) setShowPreview((value) => !value);
                 }}
@@ -5627,6 +5896,19 @@ function ChatApp() {
 
             {isDesktopsWorkspace ? (
               <DesktopMonitorWorkspace />
+            ) : isWorkroomWorkspace ? (
+              <div className="flex min-h-0 flex-1 p-1.5">
+                <div className="min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border border-zinc-800/70 bg-[#0a0a0c]">
+                  <CompanyWorkspacePanel
+                    activeConversationId={activeWorkspaceTab?.kind === "workroom" ? activeWorkspaceTab.conversationId ?? null : activeConversationId}
+                    activeConversationTitle={activeWorkspaceTab?.kind === "workroom"
+                      ? (activeWorkspaceTab.conversationId === activeConversationId ? activeChatTitle : activeWorkspaceTab.title.replace(/^Workroom:\s*/, ""))
+                      : activeChatTitle}
+                    agentStudioState={workroomConversationAgentStudioState}
+                    onConversationUpdate={(conversation) => applyConversationUpdate(conversation, { attachToActiveTab: true })}
+                  />
+                </div>
+              </div>
             ) : isKanbanMode ? (
               <div className="flex min-h-0 flex-1 p-1.5">
                 <KanbanWorkspacePanel
@@ -5884,7 +6166,7 @@ function ChatApp() {
             settingsValues={settingsValues}
             settingsSections={settingsSections}
             selectedToolIds={selectedToolIds}
-            companyPanel={<CompanyWorkspacePanel activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} />}
+            companyPanel={<CompanyWorkspacePanel activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} agentStudioState={activeConversationAgentStudioState} onConversationUpdate={(conversation) => applyConversationUpdate(conversation, { attachToActiveTab: false })} />}
             codingPanel={codingSidebarPanel}
             keyboardButtonNavigation={keyboardButtonNavigation}
             selectedProfile={activeProfile}

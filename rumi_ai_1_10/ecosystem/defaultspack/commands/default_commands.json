@@ -111,13 +111,71 @@
   {
     "id": "coding",
     "name": "coding",
-    "label": "Coding Mode",
-    "description": "Toggle coding mode.",
+    "label": "Coding Agent",
+    "description": "Activate the Coding Agent profile and open coding mode.",
     "category": "mode",
     "visibility": "default",
     "risk": "low",
     "modes": ["chat", "coding", "agent"],
-    "execution": { "type": "frontend", "action": "set_mode_coding" }
+    "execution": { "type": "frontend", "action": "activate_registered_profile_shortcut" }
+  },
+  {
+    "id": "mini",
+    "name": "mini",
+    "aliases": ["mini-coding", "mini_coding"],
+    "label": "Mini Coding Agent",
+    "description": "Activate the Mini Coding Agent profile for lighter coding tasks.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "execution": { "type": "frontend", "action": "activate_registered_profile_shortcut" }
+  },
+  {
+    "id": "design",
+    "name": "design",
+    "label": "Design Agent",
+    "description": "Activate the Design Agent profile.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "execution": { "type": "frontend", "action": "activate_registered_profile_shortcut" }
+  },
+  {
+    "id": "frontend",
+    "name": "frontend",
+    "aliases": ["frontend-only", "frontend_only"],
+    "label": "Frontend Agent",
+    "description": "Activate the Frontend Only Agent profile.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "execution": { "type": "frontend", "action": "activate_registered_profile_shortcut" }
+  },
+  {
+    "id": "research",
+    "name": "research",
+    "label": "Research Agent",
+    "description": "Activate the Research Agent profile.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "execution": { "type": "frontend", "action": "activate_registered_profile_shortcut" }
+  },
+  {
+    "id": "reviewer",
+    "name": "reviewer",
+    "aliases": ["review"],
+    "label": "Reviewer Agent",
+    "description": "Activate the Reviewer Agent profile.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "execution": { "type": "frontend", "action": "activate_registered_profile_shortcut" }
   },
   {
     "id": "chat",
@@ -133,13 +191,105 @@
   {
     "id": "agent",
     "name": "agent",
-    "label": "Agent Mode",
-    "description": "Switch to agent mode.",
+    "label": "Mode Agent",
+    "description": "Activate a visible Mode Agent profile such as /agent design or /agent research.",
     "category": "mode",
     "visibility": "default",
     "risk": "low",
     "modes": ["chat", "coding", "agent"],
-    "execution": { "type": "frontend", "action": "set_mode_agent" }
+    "args": [{ "name": "profile", "type": "string", "required": false }],
+    "execution": { "type": "frontend", "action": "activate_registered_profile" }
+  },
+  {
+    "id": "team",
+    "name": "team",
+    "label": "Team Agent",
+    "description": "Activate a Team Agent backed by registered member profiles.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "args": [{ "name": "team_id", "type": "string", "required": false }],
+    "execution": { "type": "frontend", "action": "activate_team_agent" }
+  },
+  {
+    "id": "fusion",
+    "name": "fusion",
+    "label": "Fusion Agent",
+    "description": "Activate a Fusion Agent that orchestrates multiple registered profiles.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "args": [{ "name": "fusion_id", "type": "string", "required": false }],
+    "execution": { "type": "frontend", "action": "activate_fusion_agent" }
+  },
+  {
+    "id": "workroom",
+    "name": "workroom",
+    "aliases": ["teamroom", "studio"],
+    "label": "Workroom",
+    "description": "Open the Team Workroom surface for registered profiles, teams, and fusion.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "execution": { "type": "frontend", "action": "open_workroom" }
+  },
+  {
+    "id": "doc",
+    "name": "doc",
+    "label": "Document Agent",
+    "description": "Activate the Document Agent profile.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "execution": { "type": "frontend", "action": "activate_registered_profile_shortcut" }
+  },
+  {
+    "id": "slide",
+    "name": "slide",
+    "label": "Slide Agent",
+    "description": "Activate the Slide Agent profile.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "execution": { "type": "frontend", "action": "activate_registered_profile_shortcut" }
+  },
+  {
+    "id": "sheet",
+    "name": "sheet",
+    "label": "Sheet Agent",
+    "description": "Activate the Sheet Agent profile.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "execution": { "type": "frontend", "action": "activate_registered_profile_shortcut" }
+  },
+  {
+    "id": "csv",
+    "name": "csv",
+    "label": "CSV Agent",
+    "description": "Activate the CSV Agent profile.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "execution": { "type": "frontend", "action": "activate_registered_profile_shortcut" }
+  },
+  {
+    "id": "movie",
+    "name": "movie",
+    "label": "Movie Agent",
+    "description": "Activate the Movie Agent profile.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "execution": { "type": "frontend", "action": "activate_registered_profile_shortcut" }
   },
   {
     "id": "yolo",
@@ -151,6 +301,7 @@
     "risk": "medium",
     "modes": ["chat", "coding", "agent"],
     "args": [{ "name": "enabled", "type": "boolean", "required": false }],
+    "executor_policy": { "human_only": true },
     "execution": { "type": "frontend", "action": "toggle_yolo" }
   },
   {
@@ -164,6 +315,7 @@
     "risk": "medium",
     "modes": ["chat", "coding", "agent"],
     "args": [{ "name": "enabled", "type": "boolean", "required": false }],
+    "executor_policy": { "human_only": true },
     "execution": { "type": "frontend", "action": "toggle_ultra_yolo" }
   },
   {

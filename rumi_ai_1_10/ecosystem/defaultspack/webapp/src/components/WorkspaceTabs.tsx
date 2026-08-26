@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AppWindow,
+  Building2,
   CalendarDays,
   Code2,
   GalleryVerticalEnd,
@@ -17,7 +18,7 @@ import {
 import type { KanbanBoardScope, SidebarItem } from "../lib/api";
 import { cn } from "../lib/cn";
 
-export type WorkspaceTabKind = "chat" | "coding" | "calendar" | "kanban" | "desktops" | "canvas" | "tools" | "browser";
+export type WorkspaceTabKind = "chat" | "coding" | "calendar" | "kanban" | "workroom" | "desktops" | "canvas" | "tools" | "browser";
 
 export type WorkspaceTab = {
   id: string;
@@ -64,6 +65,12 @@ export const WORKSPACE_TAB_CREATE_OPTIONS: WorkspaceTabCreateOption[] = [
     label: "Kanban",
     description: "Task and agent board",
     icon: KanbanSquare,
+  },
+  {
+    kind: "workroom",
+    label: "Workroom",
+    description: "Profiles, teams, and fusion",
+    icon: Building2,
   },
   {
     kind: "desktops",

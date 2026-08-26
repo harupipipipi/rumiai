@@ -15,8 +15,13 @@ compatibility matters.
 | `prompt` | Raw model input text assembled at execution time | Treat this as a runtime artifact, not the main user-facing concept. |
 | `system prompt` | The low-level system-role prompt payload sent to a model API | Prefer `rule` or `skill` in user-facing explanations unless the transport layer itself is the topic. |
 | `team workspace` | One user-facing workspace where multiple agents coordinate | Prefer this over `company workspace` in new docs and UI copy. |
+| `workroom` | The tab-level Rumi-native multi-agent management surface | Use this as the primary UI label for the Team Workroom surface. |
 | `team` | A cooperating set of agents | Use when describing the group, not the storage or routing layer. |
 | `agent` | A tool-capable runtime actor | This remains the general execution unit. |
+| `agent profile` | A registered reusable agent definition shared by Mode, Fusion, and Team orchestration | This is the primary reusable unit in Agent Studio. |
+| `mode agent` | One visible agent that switches between registered agent profiles | Use for single-agent profile switching flows. |
+| `fusion agent` | A multi-profile synthesis/orchestration agent | Use for OpenRouter Fusion-style orchestration or consensus flows. |
+| `team agent` | A coordinating agent that manages registered member profiles in a workroom | Use when multiple registered profiles act as a managed team. |
 | `specialist` | A narrowly scoped agent definition or role | Prefer this over `subagent` when naming reusable worker roles. |
 | `delegation` | The act of sending bounded work to another agent | Maps to the canonical `agent.delegate` runtime behavior. |
 | `tool` | An external action or integration an agent can call | Keep this meaning narrow and concrete. |
@@ -47,6 +52,8 @@ being discussed whenever ambiguity is possible.
 
 - Prefer `rule = always on`.
 - Prefer `skill = triggered or on demand`.
-- Prefer `team workspace` for the long-running multi-agent surface.
+- Prefer `workroom` or `team workspace` for the long-running multi-agent surface.
+- Prefer `agent profile` for reusable registered agent definitions.
+- Prefer `mode agent`, `fusion agent`, and `team agent` when the orchestration shape matters.
 - Prefer `delegation` for the runtime action and `specialist` for the worker role.
 - Reserve `prompt` and `system prompt` for implementation, runtime, or API details.

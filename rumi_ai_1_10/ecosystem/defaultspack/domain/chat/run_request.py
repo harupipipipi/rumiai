@@ -362,6 +362,43 @@ def prepare_chat_run(
     )
     if isinstance(conversation_metadata.get("tool_preferences"), dict):
         request_context["conversation_tool_preferences"] = conversation_metadata["tool_preferences"]
+    agent_studio_state = (
+        metadata.get("agent_studio")
+        if isinstance(metadata.get("agent_studio"), dict)
+        else conversation_metadata.get("agent_studio")
+        if isinstance(conversation_metadata.get("agent_studio"), dict)
+        else None
+    )
+    if isinstance(agent_studio_state, dict):
+        request_context["agent_studio"] = dict(agent_studio_state)
+    agent_context_policy = (
+        metadata.get("agent_context_policy")
+        if isinstance(metadata.get("agent_context_policy"), dict)
+        else conversation_metadata.get("agent_context_policy")
+        if isinstance(conversation_metadata.get("agent_context_policy"), dict)
+        else None
+    )
+    agent_command_policy = (
+        metadata.get("agent_command_policy")
+        if isinstance(metadata.get("agent_command_policy"), dict)
+        else conversation_metadata.get("agent_command_policy")
+        if isinstance(conversation_metadata.get("agent_command_policy"), dict)
+        else None
+    )
+    agent_review_gate = (
+        metadata.get("agent_review_gate")
+        if isinstance(metadata.get("agent_review_gate"), dict)
+        else conversation_metadata.get("agent_review_gate")
+        if isinstance(conversation_metadata.get("agent_review_gate"), dict)
+        else None
+    )
+    agent_model_settings = (
+        metadata.get("agent_model_settings")
+        if isinstance(metadata.get("agent_model_settings"), dict)
+        else conversation_metadata.get("agent_model_settings")
+        if isinstance(conversation_metadata.get("agent_model_settings"), dict)
+        else None
+    )
     resolved_profile_id = str(
         request_context.get("profile_id")
         or metadata.get("profile_id")
@@ -371,6 +408,36 @@ def prepare_chat_run(
     if resolved_profile_id:
         request_context["profile_id"] = resolved_profile_id
         _hydrate_profile_policy_from_profile_id(request_context, resolved_profile_id)
+    if isinstance(agent_context_policy, dict):
+        request_context["agent_context_policy"] = dict(agent_context_policy)
+        request_context["profile_policy"] = {
+            **(
+                request_context.get("profile_policy")
+                if isinstance(request_context.get("profile_policy"), dict)
+                else {}
+            ),
+            "agent_context_policy": dict(agent_context_policy),
+        }
+    if isinstance(agent_command_policy, dict):
+        request_context["profile_policy"] = {
+            **(
+                request_context.get("profile_policy")
+                if isinstance(request_context.get("profile_policy"), dict)
+                else {}
+            ),
+            "command_policy": dict(agent_command_policy),
+        }
+    if isinstance(agent_review_gate, dict):
+        request_context["profile_policy"] = {
+            **(
+                request_context.get("profile_policy")
+                if isinstance(request_context.get("profile_policy"), dict)
+                else {}
+            ),
+            "review_gate": dict(agent_review_gate),
+        }
+    if isinstance(agent_model_settings, dict):
+        request_context["agent_model_settings"] = dict(agent_model_settings)
     resolved_agent_id = str(
         request_context.get("agent_id")
         or metadata.get("agent_id")
