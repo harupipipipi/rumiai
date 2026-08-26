@@ -40,6 +40,24 @@ def _private_file(path: Path, payload: bytes, mode: int = 0o600) -> Path:
     return path
 
 
+def test_packvm_lifecycle_exposes_only_its_verified_backend_registration(
+    tmp_path: Path,
+) -> None:
+    """Production capture reuses the lifecycle-owned provisioner facts."""
+
+    facts = object()
+
+    class Provisioner:
+        state_path = tmp_path / "packvm-vz-attestation.json"
+
+        def prepare_direct_vz(self) -> object:
+            return facts
+
+    lifecycle = PackVMLifecycleV4(provisioner=Provisioner())  # type: ignore[arg-type]
+
+    assert lifecycle.production_backend_registration() is facts
+
+
 @pytest.fixture
 def provisioner_fixture(tmp_path: Path) -> tuple[MacOSVZProvisioner, MacOSVZAssetManifest, Path]:
     """Build tiny verified inputs without a VM image download or VZ helper."""

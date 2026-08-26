@@ -311,6 +311,8 @@ class LifecyclePort(Protocol):
 class PackVMLifecyclePort(Protocol):
     """Typed Host-owned lifecycle for the dedicated v4 PackVM."""
 
+    def production_backend_registration(self) -> object | None: ...
+
     def prepare(self, *, session_id: str | None = None) -> Mapping[str, object]: ...
 
     def consent(
@@ -2256,6 +2258,7 @@ class PackAPIServer:
                         bundle_root=bundle_root,
                         ecosystem_root=runtime_root / "ecosystem",
                         authority_store=authority,
+                        packvm_provisioner=self._packvm_lifecycle,
                         packvm_readiness_reader=(
                             self._packvm_lifecycle.readiness_snapshot
                         ),

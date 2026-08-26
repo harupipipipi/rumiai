@@ -402,14 +402,15 @@ def write_packvm_bundle_manifest(
         "schema": PACKVM_BUNDLE_SCHEMA,
         "helper": {
             "path": PACKVM_HELPER_RELATIVE,
-            "code_sha256": _macho_code_sha256(helper),
+            "code_sha256": "sha256:" + _macho_code_sha256(helper),
             "identifier": PACKVM_HELPER_IDENTIFIER,
             "entitlements": list(PACKVM_REQUIRED_ENTITLEMENTS),
             "signing": signing,
         },
         "provisioning": {
             "path": PACKVM_PROVISIONING_MANIFEST_RELATIVE,
-            "sha256": _sha256(app_bundle / PACKVM_PROVISIONING_MANIFEST_RELATIVE),
+            "sha256": "sha256:"
+            + _sha256(app_bundle / PACKVM_PROVISIONING_MANIFEST_RELATIVE),
         },
     }
     temporary = manifest_path.with_name(f".{manifest_path.name}.tmp-{os.getpid()}")
@@ -456,15 +457,18 @@ def verify_packvm_bundle(app_bundle: Path) -> None:
         or helper["identifier"] != PACKVM_HELPER_IDENTIFIER
         or helper["entitlements"] != list(PACKVM_REQUIRED_ENTITLEMENTS)
         or not signing_valid
-        or not _is_sha256(helper["code_sha256"])
+        or not _is_sha256(helper["code_sha256"], prefix=True)
         or provisioning["path"] != PACKVM_PROVISIONING_MANIFEST_RELATIVE
-        or not _is_sha256(provisioning["sha256"])
+        or not _is_sha256(provisioning["sha256"], prefix=True)
     ):
         raise ValueError("PackVM bundle manifest domain is invalid")
-    if _macho_code_sha256(app_bundle / PACKVM_HELPER_RELATIVE) != helper["code_sha256"]:
+    if (
+        "sha256:" + _macho_code_sha256(app_bundle / PACKVM_HELPER_RELATIVE)
+        != helper["code_sha256"]
+    ):
         raise ValueError("PackVM helper code identity changed")
     if (
-        _sha256(app_bundle / PACKVM_PROVISIONING_MANIFEST_RELATIVE)
+        "sha256:" + _sha256(app_bundle / PACKVM_PROVISIONING_MANIFEST_RELATIVE)
         != provisioning["sha256"]
     ):
         raise ValueError("PackVM provisioning manifest identity changed")

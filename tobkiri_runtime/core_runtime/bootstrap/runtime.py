@@ -102,10 +102,15 @@ class Kernel:
     owns_host_http_surface = True
 
     def __init__(self) -> None:
+        from ..packvm_lifecycle_v4 import PackVMLifecycleV4
+
         self._lock = RLock()
         self._server: PackAPIServer | None = None
         self._dispatch_session: V4DispatchSession | None = None
-        self._lifecycle = AppLifecycleManager()
+        self._packvm_lifecycle = PackVMLifecycleV4()
+        self._lifecycle = AppLifecycleManager(
+            packvm_lifecycle=self._packvm_lifecycle,
+        )
 
     def run_startup_until(self, step_id: str) -> dict[str, Any]:
         """Start the authenticated Host HTTP surface through ``step_id``."""
@@ -145,6 +150,10 @@ class Kernel:
                             bundle_root=bundle_root,
                             ecosystem_root=runtime_root / "ecosystem",
                             authority_store=authority_store,
+                            packvm_provisioner=self._packvm_lifecycle,
+                            packvm_readiness_reader=(
+                                self._packvm_lifecycle.readiness_snapshot
+                            ),
                             frontend_contract_bindings=contract_bindings,
                         )
                     except Exception:
@@ -161,6 +170,7 @@ class Kernel:
                 dispatch_session=dispatch_session,
                 app_lifecycle_manager=self._lifecycle,
                 contract_bindings=contract_bindings,
+                packvm_lifecycle=self._packvm_lifecycle,
             )
             if reconfirmation_error is None:
                 mark_panel_ready()
@@ -202,6 +212,7 @@ class Kernel:
                     dispatch_session=session,
                     app_lifecycle_manager=self._lifecycle,
                     contract_bindings=bindings,
+                    packvm_lifecycle=self._packvm_lifecycle,
                 )
             mark_runtime_ready()
             return {"status": "ok", "runtime_ready": True}

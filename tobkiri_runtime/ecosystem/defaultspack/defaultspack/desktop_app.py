@@ -14,7 +14,7 @@ import urllib.request
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from core_runtime.panel_auth import PanelAuthManager
@@ -245,7 +245,7 @@ def _surface_url(url: str) -> str:
     return url.partition("#")[0]
 
 
-def _restore_active_profile_contracts():
+def _restore_active_profile_contracts(packvm_lifecycle: Any):
     """Capture and verify the exact persisted Defaults activation and UI map."""
 
     from core_runtime.authority.v4 import AuthorityStore
@@ -281,6 +281,8 @@ def _restore_active_profile_contracts():
         bundle_root=bundle_root,
         ecosystem_root=ecosystem_root,
         authority_store=AuthorityStore(runtime_user_data_root() / "authority" / "v4.sqlite3"),
+        packvm_provisioner=packvm_lifecycle,
+        packvm_readiness_reader=packvm_lifecycle.readiness_snapshot,
         frontend_contract_bindings=bindings,
     )
     install_dispatch_session(get_container(), session)
@@ -465,11 +467,15 @@ def main(argv: list[str] | None = None) -> int:
     from ecosystem.defaultspack.domain.runtime_v4 import (
         ProfileReconfirmationRequired,
     )
+    from core_runtime.packvm_lifecycle_v4 import PackVMLifecycleV4
 
-    lifecycle = AppLifecycleManager()
+    packvm_lifecycle = PackVMLifecycleV4()
+    lifecycle = AppLifecycleManager(packvm_lifecycle=packvm_lifecycle)
     reconfirmation_error: str | None = None
     try:
-        dispatch_session, contract_bindings = _restore_active_profile_contracts()
+        dispatch_session, contract_bindings = _restore_active_profile_contracts(
+            packvm_lifecycle
+        )
     except ProfileReconfirmationRequired as error:
         dispatch_session, contract_bindings = None, ()
         reconfirmation_error = str(error)
@@ -514,6 +520,7 @@ def main(argv: list[str] | None = None) -> int:
         app_lifecycle_manager=lifecycle,
         contract_bindings=contract_bindings,
         web_mounts=web_mounts,
+        packvm_lifecycle=packvm_lifecycle,
     )
     _write_launch_event("server_start_attempt", port=port, url=url)
     try:

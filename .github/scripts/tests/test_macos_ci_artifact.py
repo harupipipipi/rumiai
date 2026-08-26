@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import struct
+import sys
 from pathlib import Path
 
 import pytest
@@ -188,6 +189,51 @@ def test_packvm_asset_or_helper_tampering_is_rejected(tmp_path: Path) -> None:
     helper.write_bytes(helper_bytes)
     with pytest.raises(ValueError, match="PackVM helper code identity changed"):
         macos_ci_artifact.verify_packvm_bundle(bundle)
+
+
+def test_packvm_bundle_manifest_matches_production_runtime_digest_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Feed the generated Developer ID manifest through the real runtime parser."""
+
+    monkeypatch.setattr(
+        macos_ci_artifact,
+        "_inspect_packvm_helper_signing",
+        lambda _path: {
+            "signing_mode": "developer-id",
+            "team_id": "ABCDEFGHIJ",
+            "authority": "Developer ID Application: Tobkiri Test (ABCDEFGHIJ)",
+        },
+    )
+    bundle = _bundle(tmp_path)
+    document = json.loads(
+        (bundle / macos_ci_artifact.PACKVM_BUNDLE_MANIFEST_RELATIVE).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert document["helper"]["code_sha256"].startswith("sha256:")
+    assert document["provisioning"]["sha256"].startswith("sha256:")
+
+    runtime_root = ROOT / "tobkiri_runtime"
+    sys.path.insert(0, os.fspath(runtime_root))
+    try:
+        from ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner import (
+            MacOSVZProvisioner,
+        )
+
+        parsed = MacOSVZProvisioner(
+            state_dir=tmp_path / "state",
+            bundle_root=bundle,
+            platform_system="Darwin",
+            machine="arm64",
+        )._parse_bundle_helper_manifest(bundle / "Contents/Resources")
+    finally:
+        sys.path.remove(os.fspath(runtime_root))
+
+    assert parsed["helper_digest"] == document["helper"]["code_sha256"]
+    assert parsed["helper_bundle_id"] == macos_ci_artifact.PACKVM_HELPER_IDENTIFIER
+    assert parsed["helper_team_id"] == "ABCDEFGHIJ"
 
 
 def test_packvm_bubblewrap_package_is_present_sized_and_descriptor_pinned(
