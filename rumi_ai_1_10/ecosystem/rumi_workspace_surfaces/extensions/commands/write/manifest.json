@@ -1,0 +1,14 @@
+{
+  "id": "write",
+  "name": "write",
+  "label": "Write",
+  "description": "Open a local document writing surface.",
+  "category": "write",
+  "visibility": "default",
+  "risk": "low",
+  "modes": ["chat", "coding", "agent"],
+  "args": [{ "name": "text", "type": "string", "required": false, "capture": "rest" }],
+  "context_bindings": ["conversation_id", "workspace_id", "selection", "attached_files", "chat_json_url"],
+  "execution": { "type": "rumi_function", "pack_id": "rumi_workspace_surfaces", "function_id": "open_write_surface" },
+  "ui": { "surface": { "kind": "write", "layoutMode": "split", "chatPlacement": "left" } }
+}

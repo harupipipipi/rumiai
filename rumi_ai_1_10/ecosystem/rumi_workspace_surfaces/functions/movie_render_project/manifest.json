@@ -1,0 +1,13 @@
+{
+  "function_id": "movie_render_project",
+  "description": "Report movie rendering as disabled because no safe render route is configured.",
+  "tags": ["surface", "movie", "render"],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "input_schema": {"type": "object", "additionalProperties": true},
+  "output_schema": {"type": "object", "additionalProperties": true}
+}

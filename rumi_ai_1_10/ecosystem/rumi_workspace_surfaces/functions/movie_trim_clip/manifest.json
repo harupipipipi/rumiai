@@ -1,0 +1,13 @@
+{
+  "function_id": "movie_trim_clip",
+  "description": "Trim a movie timeline clip by updating in/out points or duration.",
+  "tags": ["surface", "movie", "timeline", "trim"],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "input_schema": {"type": "object", "additionalProperties": true},
+  "output_schema": {"type": "object", "additionalProperties": true}
+}

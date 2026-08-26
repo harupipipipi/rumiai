@@ -76,9 +76,9 @@ def _sanitized_authority_context(raw: Any) -> dict[str, Any]:
     approvals = raw.get("approvals")
     if isinstance(approvals, list):
         nested_list = [
-            sanitized_approval(item)
+            _sanitized_authority_approval(item)
             for item in approvals
-            if isinstance(item, dict) and sanitized_approval(item)
+            if isinstance(item, dict) and _sanitized_authority_approval(item)
         ]
         if nested_list:
             sanitized["approvals"] = nested_list
@@ -218,12 +218,71 @@ def ensure_defaultspack_functions_registered(container: Any | None = None) -> in
     return registered
 
 
+def ensure_pack_functions_registered(
+    pack_id: str,
+    pack_root: Path | str | None = None,
+    container: Any | None = None,
+) -> int:
+    """Register functions contributed by an activated sibling pack."""
+    normalized_pack_id = str(pack_id or "").strip()
+    if not normalized_pack_id:
+        return 0
+    if normalized_pack_id in {"default", "defaults", "defaultspack"}:
+        return ensure_defaultspack_functions_registered(container)
+    if pack_root is None:
+        return 0
+    if container is None:
+        try:
+            from core_runtime.di_container import get_container
+
+            container = get_container()
+        except Exception:
+            return 0
+    try:
+        registry = container.get_or_none("function_registry")
+    except Exception:
+        registry = None
+    if registry is None:
+        return 0
+
+    root = Path(pack_root)
+    functions_root = root / "functions"
+    if not functions_root.is_dir():
+        return 0
+    registered = 0
+    for function_dir in sorted(path for path in functions_root.iterdir() if path.is_dir()):
+        manifest_path = function_dir / "manifest.json"
+        if not manifest_path.is_file():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(manifest, dict):
+            continue
+        function_id = str(manifest.get("function_id") or function_dir.name).strip()
+        if not function_id:
+            continue
+        try:
+            if registry.register(
+                pack_id=normalized_pack_id,
+                function_id=function_id,
+                manifest=manifest,
+                function_dir=function_dir,
+            ):
+                registered += 1
+        except Exception:
+            continue
+    return registered
+
+
 def invoke_function(
     qualified_name: str,
     args: dict[str, Any] | None,
     context: dict[str, Any] | None = None,
     principal_id: str = "defaultspack",
     timeout_seconds: float | None = None,
+    function_pack_root: Path | str | None = None,
 ) -> dict[str, Any]:
     """Invoke a Rumi function through the shared CapabilityExecutor."""
     try:
@@ -245,8 +304,11 @@ def invoke_function(
         request["timeout_seconds"] = timeout_seconds
     try:
         container = get_container()
+        pack_id = _pack_id_from_qualified_name(qualified_name)
         if qualified_name.startswith("defaultspack:") or qualified_name.startswith("defaults."):
             ensure_defaultspack_functions_registered(container)
+        elif pack_id:
+            ensure_pack_functions_registered(pack_id, function_pack_root, container)
         executor = container.get_or_none("capability_executor")
         if executor is None:
             from core_runtime.capability_executor import get_capability_executor
@@ -278,6 +340,15 @@ def invoke_function(
             (getattr(response, "error_type", None) or "FUNCTION_CALL_FAILED").upper(),
         )
     return normalize_output(getattr(response, "output", None))
+
+
+def _pack_id_from_qualified_name(qualified_name: str) -> str:
+    value = str(qualified_name or "").strip()
+    if ":" in value:
+        return value.split(":", 1)[0].strip()
+    if "." in value:
+        return value.split(".", 1)[0].strip()
+    return ""
 
 
 def invoke_defaultspack_function(

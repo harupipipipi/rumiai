@@ -1,0 +1,26 @@
+{
+  "id": "movie",
+  "name": "movie",
+  "label": "Movie",
+  "description": "Open a local movie timeline surface.",
+  "category": "movie",
+  "visibility": "default",
+  "risk": "low",
+  "modes": ["chat", "coding", "agent"],
+  "args": [{ "name": "text", "type": "string", "required": false, "capture": "rest" }],
+  "context_bindings": ["conversation_id", "workspace_id", "selection", "attached_files", "chat_json_url"],
+  "execution": { "type": "rumi_function", "pack_id": "rumi_workspace_surfaces", "function_id": "open_movie_surface" },
+  "ui": {
+    "surface": { "kind": "movie", "layoutMode": "split", "chatPlacement": "left" },
+    "operations": [
+      "movie_import_media",
+      "movie_edit_timeline",
+      "movie_trim_clip",
+      "movie_split_clip",
+      "movie_update_captions",
+      "movie_save_project",
+      "movie_export_project",
+      "movie_render_project"
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "function_id": "movie_update_captions",
+  "description": "Create or replace timed captions for a movie project.",
+  "tags": ["surface", "movie", "captions"],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "input_schema": {"type": "object", "additionalProperties": true},
+  "output_schema": {"type": "object", "additionalProperties": true}
+}

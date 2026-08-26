@@ -1,0 +1,29 @@
+{
+  "function_id": "goal_start",
+  "description": "Start an isolated goal monitor for the current conversation.",
+  "tags": ["goal", "ui", "monitor"],
+  "risk": "medium",
+  "requires": ["goal.start"],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.goal.start",
+    "defaultspack.goal.start"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true,
+    "required": ["goal", "conversation_id"],
+    "properties": {
+      "goal": {"type": "string"},
+      "conversation_id": {"type": "string"},
+      "checker_policy": {"type": "object"}
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

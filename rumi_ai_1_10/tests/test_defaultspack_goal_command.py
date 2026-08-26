@@ -1,14 +1,14 @@
-"""Tests for the /goal slash command and its pack_block extension hook.
+"""Tests for slash command extension hooks and the /goal monitor command.
 
 These tests exercise two layers:
 
-1. The minimal extensibility patch in ``SlashCommandRegistry`` that adds a
-   ``pack_block`` execution type. After this patch, slash commands with new
-   backend behavior can be added by file additions only (a manifest under
-   ``commands/manifests/`` plus a block module under ``blocks/``).
+1. The legacy ``pack_block`` execution type, kept for compatibility with
+   file-added slash commands.
 
-2. The /goal block itself: a goal-pursuit loop with a Worker agent and a
-   third-party Evaluator agent that decides when the goal has been achieved.
+2. The live /goal slash command, which now starts an isolated goal monitor
+   through a defaultspack ``rumi_function`` instead of running a public loop.
+
+3. The old /goal block itself, which remains covered as a compatibility unit.
 """
 
 from __future__ import annotations
@@ -314,11 +314,14 @@ class TestGoalSlashCommandRegistration(unittest.TestCase):
         self.assertIn("goal", ids)
 
         goal_cmd = next(command for command in commands if command["id"] == "goal")
-        self.assertEqual(goal_cmd["execution"]["type"], "pack_block")
-        self.assertEqual(goal_cmd["execution"]["qualified_name"], "defaultspack:goal.run")
+        self.assertEqual(goal_cmd["execution"]["type"], "rumi_function")
+        self.assertEqual(goal_cmd["execution"]["pack_id"], "defaultspack")
+        self.assertEqual(goal_cmd["execution"]["function_id"], "goal_start")
         self.assertEqual(goal_cmd["modes"], ["chat", "coding"])
         # Required goal arg keeps the registry's MISSING_ARGUMENT validation honest.
-        self.assertTrue(any(arg["name"] == "goal" and arg.get("required") for arg in goal_cmd["args"]))
+        goal_arg = next(arg for arg in goal_cmd["args"] if arg["name"] == "goal")
+        self.assertTrue(goal_arg.get("required"))
+        self.assertEqual(goal_arg.get("capture"), "rest")
 
     def test_goal_command_rejects_missing_goal_argument(self):
         from domain.frontend.command_registry import SlashCommandRegistry
@@ -327,6 +330,86 @@ class TestGoalSlashCommandRegistration(unittest.TestCase):
         result = registry.execute({"command": "goal", "mode": "chat", "args": {}}, {})
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["error"]["code"], "MISSING_ARGUMENT")
+
+
+class TestGoalMonitorStore(unittest.TestCase):
+    """The new /goal path creates a monitor run and gates checker writes."""
+
+    def test_start_goal_creates_surface_effect(self):
+        from domain.goal.monitor import start_goal
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch.dict(
+            "os.environ",
+            {"RUMI_DEFAULTSPACK_GOAL_STORE_PATH": str(Path(tmpdir) / "goals.json")},
+        ):
+            result = start_goal(conversation_id="conv-1", objective="Ship the slice")
+
+        self.assertEqual(result["status"], "running")
+        self.assertEqual(result["conversation_id"], "conv-1")
+        self.assertEqual(result["goal_run"]["objective"], "Ship the slice")
+        effect = result["effects"][0]
+        self.assertEqual(effect["type"], "surface.open")
+        surface = effect["surface"]
+        self.assertEqual(surface["kind"], "goal_monitor")
+        self.assertEqual(surface["sourcePackId"], "defaultspack")
+        self.assertEqual(surface["payload"]["objective"], "Ship the slice")
+
+    def test_checker_verdict_requires_internal_writer(self):
+        from domain.goal.store import GoalStore
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch.dict(
+            "os.environ",
+            {"RUMI_DEFAULTSPACK_GOAL_STORE_PATH": str(Path(tmpdir) / "goals.json")},
+        ):
+            store = GoalStore()
+            run = store.create_run(conversation_id="conv-1", objective="Finish safely")
+            with self.assertRaises(PermissionError):
+                store.apply_checker_verdict(
+                    run["goal_run_id"],
+                    {"status": "achieved", "reason": "client says so"},
+                )
+            updated = store.apply_checker_verdict(
+                run["goal_run_id"],
+                {"status": "achieved", "reason": "checker verified it"},
+                message_id="msg-1",
+                internal=True,
+            )
+
+        self.assertEqual(updated["status"], "achieved")
+        self.assertEqual(updated["latest_verdict"]["reason"], "checker verified it")
+        self.assertEqual(updated["last_checked_message_id"], "msg-1")
+
+    def test_list_runs_refreshes_subprocess_created_runs(self):
+        from domain.goal.store import GoalStore
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch.dict(
+            "os.environ",
+            {"RUMI_DEFAULTSPACK_GOAL_STORE_PATH": str(Path(tmpdir) / "goals.json")},
+        ):
+            GoalStore._instance = None
+            store = GoalStore()
+            run = store.create_run(conversation_id="conv-1", objective="Initial goal")
+            store_path = Path(tmpdir) / "goals.json"
+            data = json.loads(store_path.read_text(encoding="utf-8"))
+            external_run = {
+                "goal_run_id": "external-run",
+                "conversation_id": "conv-1",
+                "objective": "Created by subprocess",
+                "status": "running",
+                "checker_policy": {},
+                "last_checked_message_id": None,
+                "latest_verdict": None,
+                "created_at": int(run["created_at"]) + 1,
+                "updated_at": int(run["updated_at"]) + 1,
+                "metadata": {},
+                "event_log": [],
+            }
+            data["runs"][external_run["goal_run_id"]] = external_run
+            store_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+            runs = store.list_runs(conversation_id="conv-1")
+
+        self.assertIn("external-run", {item["goal_run_id"] for item in runs})
 
 
 class TestGoalBlockLoop(unittest.TestCase):

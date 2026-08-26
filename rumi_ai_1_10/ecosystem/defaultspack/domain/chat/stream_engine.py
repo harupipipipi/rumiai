@@ -1934,7 +1934,13 @@ class ChatRunEngine:
 
         tool_uses = accumulator.tool_uses()
         response_text = "".join(self._text_parts)
-        if not response_text.strip() and not tool_uses:
+        has_thinking_transcript = bool("".join(self._thinking_transcript_parts).strip())
+        should_recover_empty_stream = (
+            not response_text.strip()
+            and not tool_uses
+            and (not has_thinking_transcript or finish_reason == "stop")
+        )
+        if should_recover_empty_stream:
             fallback_response = self._fallback_complete_without_thinking(
                 prepared,
                 messages,
@@ -1955,7 +1961,7 @@ class ChatRunEngine:
             response = None
 
         if response is None:
-            if not response_text.strip() and not tool_uses:
+            if not response_text.strip() and not tool_uses and not has_thinking_transcript:
                 response_text = _empty_response_message(finish_reason)
             response = {
                 "content": [{"type": "text", "text": response_text}],
@@ -2596,7 +2602,11 @@ class ChatRunEngine:
             prepared.params,
             events=list(self._activity_events),
         ))
-        if not _tool_use_blocks(finalized) and not self._response_text(finalized).strip():
+        if (
+            not _tool_use_blocks(finalized)
+            and not self._response_text(finalized).strip()
+            and not "".join(self._thinking_transcript_parts).strip()
+        ):
             finalized["content"] = [{"type": "text", "text": _empty_response_message(finalized.get("finish_reason"))}]
             metadata = dict(finalized.get("metadata") or {})
             metadata["empty_ai_response"] = True

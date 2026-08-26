@@ -6,7 +6,7 @@
   "version": "1",
   "status": "experimental",
   "display_name": "OpenCode Zen",
-  "description": "OpenCode Zen curated model gateway with Anthropic-compatible MiniMax M3 Free access.",
+  "description": "OpenCode Zen free model gateway with OpenAI-compatible MiMo V2.5 Free access.",
   "entrypoints": {
     "adapter": "../ai_client/providers/opencode_zen_provider.py",
     "models": "models.json"
@@ -19,7 +19,7 @@
   "provider_metadata": {
     "display_name": "OpenCode Zen",
     "kind": "cloud",
-    "description": "OpenCode Zen curated model gateway with MiniMax M3 Free.",
+    "description": "OpenCode Zen free gateway for MiMo V2.5 Free.",
     "env_vars": [
       "OPENCODE_ZEN_API_KEY"
     ],
@@ -29,17 +29,16 @@
     "catalog_only": false,
     "supports_invoke": true,
     "default_base_url": "https://opencode.ai/zen",
-    "default_model": "minimax-m3-free",
+    "default_model": "mimo-v2.5-free",
     "default_model_for": {
-      "chat": "minimax-m3-free",
-      "coding": "minimax-m3-free",
-      "reasoning": "minimax-m3-free"
+      "chat": "mimo-v2.5-free",
+      "coding": "mimo-v2.5-free",
+      "reasoning": "mimo-v2.5-free"
     },
     "catalog_features": [
       "chat",
       "streaming",
-      "anthropic_compatible",
-      "vision",
+      "openai_compatible",
       "reasoning"
     ]
   },
@@ -48,7 +47,7 @@
     "category": "llm_provider",
     "version": "1",
     "display_name": "OpenCode Zen",
-    "description": "OpenCode Zen curated model gateway with MiniMax M3 Free.",
+    "description": "OpenCode Zen free gateway for MiMo V2.5 Free.",
     "enabled": true,
     "priority": 63,
     "adapter": "python_entrypoint",
@@ -61,16 +60,17 @@
     "catalog_only": false,
     "supports_invoke": true,
     "default_base_url": "https://opencode.ai/zen",
-    "default_model": "minimax-m3-free",
+    "default_model": "mimo-v2.5-free",
     "default_model_for": {
-      "chat": "minimax-m3-free",
-      "coding": "minimax-m3-free",
-      "reasoning": "minimax-m3-free"
+      "chat": "mimo-v2.5-free",
+      "coding": "mimo-v2.5-free",
+      "reasoning": "mimo-v2.5-free"
     },
     "config": {
-      "api_compatibility": "anthropic_messages",
+      "api_compatibility": "openai_chat_completions",
       "source_docs": "opencode_zen",
-      "model_sync": "fixed_allowlist_for_user_requested_minimax_m3_free"
+      "endpoint_path": "/v1/chat/completions",
+      "model_sync": "fixed_allowlist_for_user_requested_mimo_v2_5_free"
     }
   },
   "aliases": {
@@ -82,16 +82,15 @@
   "compatibility": {
     "legacy_ids": [
       "opencode-zen",
-      "opencode-zen/minimax-m3-free",
-      "opencode/minimax-m3-free"
+      "opencode-zen/mimo-v2.5-free",
+      "opencode/mimo-v2.5-free"
     ]
   },
   "source_pack_id": "defaultspack",
   "catalog_features": [
     "chat",
     "streaming",
-    "anthropic_compatible",
-    "vision",
+    "openai_compatible",
     "reasoning"
   ]
 }

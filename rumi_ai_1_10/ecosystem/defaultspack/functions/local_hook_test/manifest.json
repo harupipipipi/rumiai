@@ -1,0 +1,14 @@
+{
+  "function_id": "local_hook_test",
+  "description": "Send a test payload to a localhost local hook.",
+  "tags": ["local_hook", "webhook", "input"],
+  "risk": "medium",
+  "requires": ["local_hook.test"],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": ["defaults.local_hook.test", "defaultspack.local_hook.test"],
+  "input_schema": {"type": "object", "additionalProperties": true},
+  "output_schema": {"type": "object", "additionalProperties": true}
+}

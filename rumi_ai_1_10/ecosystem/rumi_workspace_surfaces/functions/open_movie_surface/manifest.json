@@ -1,0 +1,13 @@
+{
+  "function_id": "open_movie_surface",
+  "description": "Open the editable movie sidecar surface with timeline, media, caption, save, export, and render operation descriptors.",
+  "tags": ["surface", "movie"],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "input_schema": {"type": "object", "additionalProperties": true},
+  "output_schema": {"type": "object", "additionalProperties": true}
+}

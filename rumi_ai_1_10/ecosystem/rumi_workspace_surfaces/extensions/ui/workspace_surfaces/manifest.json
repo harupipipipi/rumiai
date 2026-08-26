@@ -1,0 +1,15 @@
+{
+  "id": "workspace_surfaces",
+  "category": "ui_surface",
+  "version": "1",
+  "display_name": "Workspace Sidecar Surfaces",
+  "enabled": true,
+  "config": {
+    "renderers": [
+      "rumi_workspace_surfaces.write",
+      "rumi_workspace_surfaces.image",
+      "rumi_workspace_surfaces.slide",
+      "rumi_workspace_surfaces.movie"
+    ]
+  }
+}

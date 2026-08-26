@@ -243,6 +243,86 @@ class ChatStore:
             self._save_conversations()
             return copy.deepcopy(conv)
 
+    def clone_conversation(
+        self,
+        conversation_id,
+        *,
+        system_prompt_override=None,
+        model_override=None,
+        metadata=None,
+        title=None,
+        conversation_kind=None,
+    ):
+        with self._lock:
+            self._refresh_if_storage_changed()
+            source_id = str(conversation_id or "")
+            source = self._conversations.get(source_id)
+            if source is None:
+                return None
+            self._normalize_conversation(source_id, source)
+            cid = _gen_id()
+            now = _now_ms()
+            metadata_dict = copy.deepcopy(source.get("metadata") if isinstance(source.get("metadata"), dict) else {})
+            metadata_dict.update(dict(metadata) if isinstance(metadata, dict) else {})
+            metadata_dict["source_conversation_id"] = source_id
+            metadata_dict["cloned_from_conversation_id"] = source_id
+            override_text = str(system_prompt_override) if system_prompt_override is not None else ""
+            if override_text.strip():
+                metadata_dict["system_prompt_override"] = override_text
+            cloned = copy.deepcopy(source)
+            cloned["id"] = cid
+            cloned["title"] = str(title or source.get("title") or "Cloned Conversation")
+            cloned["created_at"] = now
+            cloned["updated_at"] = now
+            cloned["model"] = str(model_override or source.get("model") or _default_conversation_model())
+            if override_text.strip():
+                cloned["system_prompt_override"] = override_text
+                materialized_prompt_id = self._materialize_system_prompt_override(
+                    cid,
+                    override_text,
+                    source_conversation_id=source_id,
+                )
+                cloned["system_prompt_id"] = materialized_prompt_id
+                metadata_dict["system_prompt_override_prompt_id"] = materialized_prompt_id
+            cloned["parent_conversation_id"] = source_id
+            cloned["child_conversation_ids"] = []
+            cloned["conversation_kind"] = conversation_kind or "chat_clone"
+            cloned["metadata"] = metadata_dict
+            old_to_new = {}
+            messages = []
+            for index, message in enumerate(source.get("messages", []) if isinstance(source.get("messages"), list) else []):
+                if not isinstance(message, dict):
+                    continue
+                old_id = str(message.get("id") or "")
+                new_id = _gen_id()
+                if old_id:
+                    old_to_new[old_id] = new_id
+                cloned_message = copy.deepcopy(message)
+                cloned_message["id"] = new_id
+                cloned_message["conversation_id"] = cid
+                cloned_message["sequence_number"] = index + 1
+                messages.append(cloned_message)
+            for cloned_message in messages:
+                parent_id = cloned_message.get("parent_id")
+                cloned_message["parent_id"] = old_to_new.get(str(parent_id), None) if parent_id is not None else None
+                cloned_message["children_ids"] = [
+                    old_to_new[str(item)]
+                    for item in (cloned_message.get("children_ids") if isinstance(cloned_message.get("children_ids"), list) else [])
+                    if str(item) in old_to_new
+                ]
+            cloned["messages"] = messages
+            current_node_id = source.get("current_node_id")
+            cloned["current_node_id"] = old_to_new.get(str(current_node_id), messages[-1]["id"] if messages else None)
+            self._conversations[cid] = cloned
+            parent = self._conversations.get(source_id)
+            if isinstance(parent, dict):
+                child_ids = parent.setdefault("child_conversation_ids", [])
+                if isinstance(child_ids, list) and cid not in child_ids:
+                    child_ids.append(cid)
+                parent["updated_at"] = now
+            self._save_conversations()
+            return copy.deepcopy(cloned)
+
     def get_conversation(self, conversation_id):
         self._refresh_if_storage_changed()
         conv = self._conversations.get(conversation_id)
@@ -411,6 +491,7 @@ class ChatStore:
             conv["updated_at"] = _now_ms()
             self._save_conversations()
             self._persist_message_artifacts(conversation_id, msg)
+            self._notify_goal_monitor(conversation_id, msg)
             return copy.deepcopy(msg)
 
     def get_message(self, conversation_id, message_id):
@@ -437,6 +518,7 @@ class ChatStore:
                 conv["updated_at"] = _now_ms()
                 self._save_conversations()
                 self._persist_message_artifacts(conversation_id, msg)
+                self._notify_goal_monitor(conversation_id, msg)
                 return copy.deepcopy(msg)
         return None
 
@@ -793,6 +875,29 @@ class ChatStore:
     # Helpers
     # ----------------------------------------------------------
     @staticmethod
+    def _materialize_system_prompt_override(
+        conversation_id,
+        prompt_text,
+        *,
+        source_conversation_id=None,
+    ):
+        from domain.prompt.manager import get_manager
+
+        prompt = get_manager().create_prompt(
+            {
+                "name": "cloned_conversation_system_prompt_{}".format(str(conversation_id or "")),
+                "body": str(prompt_text),
+                "description": "System prompt override materialized for a cloned conversation.",
+                "metadata": {
+                    "source": "chat.clone_conversation",
+                    "conversation_id": str(conversation_id or ""),
+                    "source_conversation_id": str(source_conversation_id or ""),
+                },
+            }
+        )
+        return str(prompt.get("id") or "")
+
+    @staticmethod
     def _extract_raw_text(content_blocks):
         parts = []
         if not isinstance(content_blocks, list):
@@ -812,6 +917,7 @@ class ChatStore:
         conversation.setdefault("updated_at", conversation.get("created_at", _now_ms()))
         conversation.setdefault("model", _default_conversation_model())
         conversation.setdefault("system_prompt_id", None)
+        conversation.setdefault("system_prompt_override", None)
         conversation.setdefault("agent_id", None)
         conversation.setdefault("tags", [])
         conversation.setdefault("is_starred", False)
@@ -1083,6 +1189,29 @@ class ChatStore:
             tool_dir.mkdir(parents=True, exist_ok=True)
             path = tool_dir / "{}-tool_logs.json".format(self._safe_filename(str(msg.get("id") or "message")))
             path.write_text(json.dumps(msg["tool_logs"], ensure_ascii=False, indent=2), encoding="utf-8")
+
+    @staticmethod
+    def _notify_goal_monitor(conversation_id, msg):
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            return
+        metadata = msg.get("metadata") if isinstance(msg.get("metadata"), dict) else {}
+        if str(msg.get("finish_reason") or "") == "streaming" or metadata.get("streaming") is True or metadata.get("draft") is True:
+            return
+        conversation_id = str(conversation_id or "")
+        message = copy.deepcopy(msg)
+
+        def worker():
+            try:
+                from domain.goal.monitor import monitor_after_assistant_message
+
+                monitor_after_assistant_message(conversation_id, message)
+            except Exception:
+                pass
+
+        try:
+            threading.Thread(target=worker, name="goal-monitor", daemon=True).start()
+        except Exception:
+            pass
 
     def _sanitize_inline_thought_messages(self, conversation):
         for msg in conversation.get("messages", []) if isinstance(conversation.get("messages"), list) else []:

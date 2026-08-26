@@ -493,6 +493,8 @@ def runtime_profile_enforced_tool_names(
 ) -> Optional[Set[str]]:
     if not runtime_profile:
         return None
+    if not _runtime_profile_declares_tool_boundary(runtime_profile, agent_id):
+        return None
     return _runtime_profile_tool_names(runtime_profile, agent_id, tools)
 
 
@@ -719,6 +721,26 @@ def _runtime_profile_tool_refs(
     if not isinstance(tools, list):
         return set()
     return {str(tool) for tool in tools if tool}
+
+
+def _runtime_profile_declares_tool_boundary(
+    runtime_profile: Optional[Dict[str, Any]],
+    agent_id: Optional[str],
+) -> bool:
+    if not isinstance(runtime_profile, dict):
+        return False
+    defaultspack = runtime_profile.get("defaultspack")
+    if not isinstance(defaultspack, dict):
+        return False
+    agents = defaultspack.get("agents")
+    if not isinstance(agents, dict):
+        return False
+    selected = agents.get(agent_id) if agent_id else None
+    if not isinstance(selected, dict) and len(agents) == 1:
+        selected = next(iter(agents.values()))
+    if not isinstance(selected, dict):
+        return False
+    return isinstance(selected.get("tools"), list)
 
 
 def _tool_names_from_bundle_record(record: Dict[str, Any]) -> Set[str]:

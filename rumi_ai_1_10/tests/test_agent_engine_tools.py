@@ -415,6 +415,19 @@ def test_runtime_profile_empty_tool_bundle_does_not_fallback_to_supplied_tools()
     assert seen["tools"] == []
 
 
+def test_runtime_profile_without_agent_tool_boundary_does_not_enforce_empty_tools() -> None:
+    runtime_profile = {
+        "version": "rumi.runtime_profile.v1",
+        "profile_id": "default-profile",
+        "metadata": {"selected": {"tools": []}},
+    }
+    tools = [_tool("read"), _tool("write")]
+
+    enforced = runtime_profile_enforced_tool_names(runtime_profile, "agent", tools)
+
+    assert enforced is None
+
+
 def test_agent_approve_preserves_tools_for_followup_completion() -> None:
     engine = AgentEngine()
     tools = [_tool("search")]

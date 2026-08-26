@@ -892,6 +892,7 @@ export function RightSidebar({
   promptUsage = null,
   promptProfileId,
   conversationId = null,
+  conversationToolPreferencesSnapshot,
   showChatPromptUsage = true,
   yoloMode = false,
   workspaceTabs = [],
@@ -926,6 +927,7 @@ export function RightSidebar({
   promptUsage?: PromptUsageSummary | null;
   promptProfileId?: string;
   conversationId?: string | null;
+  conversationToolPreferencesSnapshot?: Record<string, unknown> | null;
   showChatPromptUsage?: boolean;
   yoloMode?: boolean;
   workspaceTabs?: WorkspaceTab[];
@@ -1030,6 +1032,10 @@ export function RightSidebar({
       setToolSelectionScope("turn");
       return;
     }
+    if (conversationToolPreferencesSnapshot !== undefined) {
+      setConversationToolPreferences(conversationToolPreferencesSnapshot ?? {});
+      return;
+    }
     let cancelled = false;
     toolResources.getConversationToolPreferences(activeConversationId)
       .then((result) => {
@@ -1041,7 +1047,7 @@ export function RightSidebar({
     return () => {
       cancelled = true;
     };
-  }, [activeConversationId]);
+  }, [activeConversationId, conversationToolPreferencesSnapshot]);
 
   const startPanelResize = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {

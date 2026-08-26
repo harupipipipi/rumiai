@@ -51,7 +51,12 @@ from .paths import (
 logger = logging.getLogger(__name__)
 
 
-TRUSTED_BUILTIN_PACK_IDS = {"defaultspack", "rumi_default_tools_pack", "rumi_host_capabilities_pack"}
+TRUSTED_BUILTIN_PACK_IDS = {
+    "defaultspack",
+    "rumi_default_tools_pack",
+    "rumi_host_capabilities_pack",
+    "rumi_workspace_surfaces",
+}
 
 
 from .hmac_key_manager import (

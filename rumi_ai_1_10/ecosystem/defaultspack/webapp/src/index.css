@@ -378,6 +378,21 @@ body {
   overflow-x: hidden;
 }
 
+.rumi-user-message-stack {
+  width: min(82%, 34rem);
+}
+
+@media (min-width: 1024px) {
+  .rumi-user-message-stack {
+    width: min(70%, 34rem);
+  }
+}
+
+.rumi-workspace-main.has-activity-preview .rumi-user-message-stack {
+  width: min(100%, 34rem);
+  max-width: min(100%, 34rem);
+}
+
 .rumi-message-row .markdown-body,
 .rumi-message-row .markdown-body *,
 .rumi-message-row p,
@@ -555,7 +570,7 @@ body {
 
 .rumi-workspace-main.has-activity-preview {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 6px minmax(0, var(--rumi-activity-preview-width));
+  grid-template-columns: minmax(360px, 1fr) 6px minmax(280px, var(--rumi-activity-preview-width));
   overflow: hidden;
 }
 
@@ -842,6 +857,15 @@ body {
 
   .rumi-activity-preview-pane {
     display: none;
+  }
+
+  .rumi-workspace-main.has-activity-preview.has-sidecar-surface .rumi-chat-pane {
+    display: none;
+  }
+
+  .rumi-workspace-main.has-activity-preview.has-sidecar-surface .rumi-activity-preview-pane {
+    display: block;
+    flex: 1 1 auto;
   }
 }
 

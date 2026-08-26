@@ -6,7 +6,20 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-CATEGORIES = {"chat", "model", "mode", "coding", "tools", "settings", "debug"}
+CATEGORIES = {
+    "chat",
+    "model",
+    "mode",
+    "coding",
+    "tools",
+    "settings",
+    "debug",
+    "surface",
+    "write",
+    "image",
+    "slide",
+    "movie",
+}
 VISIBILITIES = {"default", "advanced", "hidden"}
 MODES = {"chat", "coding", "agent"}
 RISKS = {"low", "medium", "high"}
@@ -112,6 +125,7 @@ class SlashCommandRegistry:
                     "executed": False,
                     "action": execution.get("action"),
                     "args": args,
+                    "effects": self._collect_effects(command, execution, args, payload, None),
                 }
             )
 
@@ -119,35 +133,7 @@ class SlashCommandRegistry:
             return self._execute_model_command(command, execution, args)
 
         if execution_type == "rumi_function":
-            if command.get("_manifest_origin") != MANIFEST_ORIGIN_DEFAULT:
-                return error(
-                    "rumi_function execution is only allowed for built-in default commands",
-                    "INVALID_COMMAND",
-                )
-            qualified_name = str(execution.get("qualified_name") or "").strip()
-            if not qualified_name:
-                return error("rumi_function command is missing qualified_name", "INVALID_COMMAND")
-            if self._rumi_function_id(qualified_name) not in ALLOWED_RUMI_FUNCTIONS:
-                return error("rumi_function command is not allowlisted", "INVALID_COMMAND")
-            function_args = dict(args)
-            if payload.get("conversation_id"):
-                function_args.setdefault("conversation_id", payload.get("conversation_id"))
-            builtin_result = self._execute_builtin_rumi_function(qualified_name, function_args)
-            if isinstance(builtin_result, dict) and builtin_result.get("status") == "error":
-                return builtin_result
-            if builtin_result is not None:
-                payload = {
-                    "command": self._public_command(command),
-                    "executed": True,
-                    "result": builtin_result,
-                }
-                if (
-                    isinstance(builtin_result, dict)
-                    and str(builtin_result.get("message") or "").strip()
-                ):
-                    payload["message"] = str(builtin_result.get("message") or "")
-                return ok(payload)
-            return error("rumi_function command is not allowlisted", "INVALID_COMMAND")
+            return self._execute_rumi_function(command, execution, args, payload, context or {})
 
         if execution_type == "chat_action":
             return self._execute_chat_action(command, execution, args, payload, context or {})
@@ -374,6 +360,125 @@ class SlashCommandRegistry:
             return result
         return error("pack_block returned an unexpected response", "EXECUTION_FAILED")
 
+    def _execute_rumi_function(
+        self,
+        command: dict[str, Any],
+        execution: dict[str, Any],
+        args: dict[str, Any],
+        payload: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        origin = str(command.get("_manifest_origin") or "")
+        if origin == MANIFEST_ORIGIN_USER:
+            return error("rumi_function execution is not allowed for user commands", "INVALID_COMMAND")
+
+        resolved = self._resolve_rumi_function_target(command, execution)
+        if resolved.get("status") == "error":
+            return resolved
+        source_pack_id = str(resolved["source_pack_id"])
+        execution_pack_id = str(resolved["pack_id"])
+        function_id = str(resolved["function_id"])
+        qualified_name = f"{execution_pack_id}:{function_id}"
+
+        function_args = self._apply_context_bindings(command, args, payload, context)
+        if payload.get("conversation_id"):
+            function_args.setdefault("conversation_id", payload.get("conversation_id"))
+
+        try:
+            from domain.function_runtime.bridge import (
+                ensure_pack_functions_registered,
+                invoke_function,
+            )
+
+            source_pack_root = command.get("_manifest_pack_root")
+            if isinstance(source_pack_root, Path) and source_pack_id == execution_pack_id:
+                ensure_pack_functions_registered(execution_pack_id, source_pack_root)
+            result = invoke_function(
+                qualified_name,
+                function_args,
+                context,
+                principal_id=source_pack_id or "defaultspack",
+                function_pack_root=source_pack_root if isinstance(source_pack_root, Path) else None,
+            )
+        except Exception as exc:
+            return error(f"rumi_function execution failed: {exc}", "EXECUTION_FAILED")
+
+        if self._should_use_builtin_rumi_function_fallback(result):
+            builtin_result = self._execute_builtin_rumi_function(qualified_name, function_args)
+            if builtin_result is not None:
+                return self._rumi_function_response(
+                    command, execution, args, payload, builtin_result
+                )
+
+        return self._rumi_function_response(command, execution, args, payload, result)
+
+    def _rumi_function_response(
+        self,
+        command: dict[str, Any],
+        execution: dict[str, Any],
+        args: dict[str, Any],
+        payload: dict[str, Any],
+        result: Any,
+    ) -> dict[str, Any]:
+        if isinstance(result, dict) and result.get("status") == "error":
+            return result
+        result_data = result.get("data") if isinstance(result, dict) and result.get("status") == "ok" else result
+        response_payload = {
+            "command": self._public_command(command),
+            "executed": True,
+            "result": result_data,
+            "effects": self._collect_effects(command, execution, args, payload, result_data),
+        }
+        if isinstance(result_data, dict) and str(result_data.get("message") or "").strip():
+            response_payload["message"] = str(result_data.get("message") or "")
+        return ok(response_payload)
+
+    @staticmethod
+    def _should_use_builtin_rumi_function_fallback(result: Any) -> bool:
+        if not isinstance(result, dict) or result.get("status") != "error":
+            return False
+        err = result.get("error")
+        code = str(err.get("code") if isinstance(err, dict) else "").strip().upper()
+        return code == "FUNCTION_NOT_FOUND"
+
+    def _resolve_rumi_function_target(
+        self, command: dict[str, Any], execution: dict[str, Any]
+    ) -> dict[str, Any]:
+        source_pack_id = str(command.get("source_pack_id") or command.get("_manifest_source_pack_id") or "").strip()
+        if not source_pack_id and command.get("_manifest_origin") in {
+            MANIFEST_ORIGIN_DEFAULT,
+            MANIFEST_ORIGIN_PACK,
+        }:
+            source_pack_id = "defaultspack"
+
+        execution_pack_id = str(execution.get("pack_id") or "").strip()
+        function_id = str(execution.get("function_id") or "").strip()
+        qualified_name = str(execution.get("qualified_name") or "").strip()
+        if qualified_name:
+            parsed_pack_id, parsed_function_id = self._parse_qualified_function_name(qualified_name)
+            execution_pack_id = execution_pack_id or parsed_pack_id
+            function_id = function_id or parsed_function_id
+        if not execution_pack_id:
+            execution_pack_id = source_pack_id
+        if not execution_pack_id or not function_id:
+            return error("rumi_function command requires pack_id and function_id", "INVALID_COMMAND")
+
+        aliases = {"default": "defaultspack", "defaults": "defaultspack"}
+        source_pack_id = aliases.get(source_pack_id, source_pack_id)
+        execution_pack_id = aliases.get(execution_pack_id, execution_pack_id)
+        if source_pack_id != execution_pack_id:
+            return error(
+                "cross-pack rumi_function command execution is not allowed",
+                "INVALID_COMMAND",
+                details={"source_pack_id": source_pack_id, "execution_pack_id": execution_pack_id},
+            )
+        return {
+            "status": "ok",
+            "source_pack_id": source_pack_id,
+            "pack_id": execution_pack_id,
+            "function_id": function_id,
+        }
+
     def _execute_builtin_rumi_function(
         self, qualified_name: str, args: dict[str, Any]
     ) -> dict[str, Any] | None:
@@ -438,6 +543,7 @@ class SlashCommandRegistry:
                 self._pack_root / "commands" / "manifests", MANIFEST_ORIGIN_PACK, manifest_errors
             )
         )
+        commands.extend(self._load_extension_command_manifests(manifest_errors))
         commands.extend(
             self._load_manifest_dir(
                 self._pack_root / "user_data" / "shared" / "commands",
@@ -668,7 +774,12 @@ class SlashCommandRegistry:
         return items
 
     def _load_manifest_file(
-        self, path: Path, origin: str, manifest_errors: list[dict[str, Any]]
+        self,
+        path: Path,
+        origin: str,
+        manifest_errors: list[dict[str, Any]],
+        *,
+        extra_fields: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
@@ -702,8 +813,57 @@ class SlashCommandRegistry:
             tagged_item = deepcopy(item)
             tagged_item["_manifest_origin"] = origin
             tagged_item["_manifest_path"] = str(path)
+            for key, value in (extra_fields or {}).items():
+                tagged_item[key] = value
             tagged.append(tagged_item)
         return tagged
+
+    def _load_extension_command_manifests(
+        self, manifest_errors: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for extensions_root in self._extension_roots():
+            commands_root = extensions_root / "commands"
+            if not commands_root.is_dir():
+                continue
+            source_pack_root = self._source_pack_root_for_extension_root(extensions_root)
+            source_pack_id = self._pack_id_for_pack_root(source_pack_root)
+            for manifest_path in sorted(commands_root.glob("*/manifest.json")):
+                items.extend(
+                    self._load_manifest_file(
+                        manifest_path,
+                        MANIFEST_ORIGIN_PACK,
+                        manifest_errors,
+                        extra_fields={
+                            "source_pack_id": source_pack_id,
+                            "source_path": str(manifest_path),
+                            "trust_level": "activated_pack",
+                            "_manifest_source_pack_id": source_pack_id,
+                            "_manifest_pack_root": source_pack_root,
+                        },
+                    )
+                )
+        return items
+
+    def _extension_roots(self) -> list[Path]:
+        try:
+            from domain.extensions.runtime import (
+                _extra_extension_roots_from_env,
+                build_extensions_roots,
+                get_extensions_roots,
+            )
+
+            default_pack_root = Path(__file__).resolve().parents[2]
+            if self._pack_root.resolve() == default_pack_root.resolve():
+                roots = get_extensions_roots()
+            else:
+                roots = build_extensions_roots(
+                    self._pack_root,
+                    extra_roots=_extra_extension_roots_from_env(),
+                )
+        except Exception:
+            roots = [self._pack_root / "extensions"]
+        return [Path(root) for root in roots if Path(root).is_dir()]
 
     @staticmethod
     def _normalize(command: dict[str, Any]) -> dict[str, Any]:
@@ -737,6 +897,21 @@ class SlashCommandRegistry:
             normalized["args"] = []
         if not isinstance(normalized.get("execution"), dict):
             normalized["execution"] = {"type": "frontend", "action": normalized["id"]}
+        origin = str(normalized.get("_manifest_origin") or "")
+        if not str(normalized.get("source_pack_id") or "").strip():
+            if origin in {MANIFEST_ORIGIN_DEFAULT, MANIFEST_ORIGIN_PACK}:
+                normalized["source_pack_id"] = "defaultspack"
+            elif origin == MANIFEST_ORIGIN_USER:
+                normalized["source_pack_id"] = "user_data"
+        if not str(normalized.get("source_path") or "").strip() and normalized.get("_manifest_path"):
+            normalized["source_path"] = str(normalized.get("_manifest_path") or "")
+        if not str(normalized.get("trust_level") or "").strip():
+            if origin == MANIFEST_ORIGIN_DEFAULT:
+                normalized["trust_level"] = "builtin"
+            elif origin == MANIFEST_ORIGIN_PACK:
+                normalized["trust_level"] = "pack"
+            elif origin == MANIFEST_ORIGIN_USER:
+                normalized["trust_level"] = "user"
         return normalized
 
     def _dedupe_by_id(
@@ -873,8 +1048,150 @@ class SlashCommandRegistry:
         return value is None or (isinstance(value, str) and not value.strip())
 
     @staticmethod
+    def _parse_qualified_function_name(qualified_name: str) -> tuple[str, str]:
+        value = str(qualified_name or "").strip()
+        if ":" in value:
+            pack_id, _, function_id = value.partition(":")
+            return pack_id.strip(), function_id.strip()
+        if "." in value:
+            pack_id, _, function_id = value.partition(".")
+            return pack_id.strip(), function_id.strip()
+        return "", value
+
+    def _apply_context_bindings(
+        self,
+        command: dict[str, Any],
+        args: dict[str, Any],
+        payload: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        bound = dict(args)
+        bindings = command.get("context_bindings")
+        if isinstance(bindings, dict):
+            binding_names = [str(key) for key, enabled in bindings.items() if enabled]
+        elif isinstance(bindings, list):
+            binding_names = [str(item) for item in bindings if str(item or "").strip()]
+        else:
+            binding_names = []
+        for name in binding_names:
+            if name in bound:
+                continue
+            value = self._context_binding_value(name, payload, context)
+            if value not in (None, ""):
+                bound[name] = value
+        return bound
+
+    @staticmethod
+    def _context_binding_value(
+        name: str, payload: dict[str, Any], context: dict[str, Any]
+    ) -> Any:
+        if name in payload:
+            return payload.get(name)
+        if name in context:
+            return context.get(name)
+        if name == "conversation_id":
+            return payload.get("conversation_id") or context.get("conversation_id")
+        if name == "workspace_id":
+            return payload.get("workspace_id") or context.get("workspace_id")
+        if name == "surface_id":
+            return payload.get("surface_id") or context.get("surface_id")
+        if name == "selection":
+            return payload.get("selection") or context.get("selection")
+        if name == "attached_files":
+            return payload.get("attached_files") or context.get("attached_files")
+        if name == "chat_json_url":
+            conversation_id = str(payload.get("conversation_id") or context.get("conversation_id") or "").strip()
+            return f"/api/chat/conversations/{conversation_id}/export?format=json" if conversation_id else ""
+        return None
+
+    def _collect_effects(
+        self,
+        command: dict[str, Any],
+        execution: dict[str, Any],
+        args: dict[str, Any],
+        payload: dict[str, Any],
+        result_data: Any,
+    ) -> list[dict[str, Any]]:
+        effects: list[dict[str, Any]] = []
+        values = self._effect_template_values(command, args, payload, result_data)
+        for source in (execution.get("effects"), command.get("effects")):
+            if isinstance(source, list):
+                for effect in source:
+                    if isinstance(effect, dict):
+                        materialized = self._materialize_effect_value(effect, values)
+                        if (
+                            isinstance(materialized, dict)
+                            and str(materialized.get("type") or "").strip()
+                        ):
+                            effects.append(materialized)
+        if isinstance(result_data, dict) and isinstance(result_data.get("effects"), list):
+            for effect in result_data.get("effects") or []:
+                if isinstance(effect, dict) and str(effect.get("type") or "").strip():
+                    effects.append(effect)
+        return effects
+
+    @staticmethod
+    def _effect_template_values(
+        command: dict[str, Any],
+        args: dict[str, Any],
+        payload: dict[str, Any],
+        result_data: Any,
+    ) -> dict[str, Any]:
+        values: dict[str, Any] = {}
+        values.update({f"arg.{key}": value for key, value in args.items()})
+        values.update({key: value for key, value in payload.items() if isinstance(key, str)})
+        values.setdefault("command_id", command.get("id"))
+        values.setdefault("source_pack_id", command.get("source_pack_id"))
+        if isinstance(result_data, dict):
+            values.update(result_data)
+            for key, value in result_data.items():
+                values[f"result.{key}"] = value
+        return values
+
+    @classmethod
+    def _materialize_effect_value(cls, value: Any, values: dict[str, Any]) -> Any:
+        if isinstance(value, dict):
+            return {key: cls._materialize_effect_value(item, values) for key, item in value.items()}
+        if isinstance(value, list):
+            return [cls._materialize_effect_value(item, values) for item in value]
+        if isinstance(value, str):
+            result = value
+            for key, replacement in values.items():
+                if isinstance(replacement, (str, int, float, bool)):
+                    result = result.replace("{" + str(key) + "}", str(replacement))
+            return result
+        return value
+
+    @staticmethod
     def _rumi_function_id(qualified_name: str) -> str:
         return str(qualified_name or "").strip().split(":", 1)[-1]
+
+    @staticmethod
+    def _source_pack_root_for_extension_root(extensions_root: Path) -> Path:
+        root = Path(extensions_root)
+        if root.name == "extensions":
+            return root.parent
+        return root
+
+    @staticmethod
+    def _pack_id_for_pack_root(pack_root: Path) -> str:
+        for manifest_name in ("ecosystem.json", "rumi-pack.json"):
+            manifest_path = Path(pack_root) / manifest_name
+            if not manifest_path.is_file():
+                continue
+            try:
+                raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(raw, dict):
+                continue
+            for key in ("pack_id", "id"):
+                value = str(raw.get(key) or "").strip()
+                if value:
+                    return value
+        if Path(pack_root).name == "defaultspack":
+            return "defaultspack"
+        return Path(pack_root).name
 
     @staticmethod
     def _command_tokens(command: dict[str, Any]) -> dict[str, str]:
@@ -894,7 +1211,7 @@ class SlashCommandRegistry:
         return {
             key: deepcopy(value)
             for key, value in command.items()
-            if not str(key).startswith(("_manifest_", "_template_"))
+            if not str(key).startswith("_")
         }
 
     @staticmethod

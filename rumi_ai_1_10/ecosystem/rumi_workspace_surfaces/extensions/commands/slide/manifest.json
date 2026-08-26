@@ -1,0 +1,17 @@
+{
+  "id": "slide",
+  "name": "slide",
+  "label": "Slide",
+  "description": "Open a local slide/deck surface.",
+  "category": "slide",
+  "visibility": "default",
+  "risk": "low",
+  "modes": ["chat", "coding", "agent"],
+  "args": [{ "name": "text", "type": "string", "required": false, "capture": "rest" }],
+  "context_bindings": ["conversation_id", "workspace_id", "selection", "attached_files", "chat_json_url"],
+  "execution": { "type": "rumi_function", "pack_id": "rumi_workspace_surfaces", "function_id": "open_slide_surface" },
+  "ui": {
+    "surface": { "kind": "slide", "layoutMode": "split", "chatPlacement": "left" },
+    "operations": ["slide_save_project", "slide_export_deck"]
+  }
+}

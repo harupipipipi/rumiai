@@ -10,58 +10,58 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
-MINIMAX_PROFILE_ID = "opencode-zen/minimax-m3-free"
+MIMO_PROFILE_ID = "opencode-zen/mimo-v2.5-free"
 
 
 def _catalog_model() -> dict:
     from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_model_catalog
 
-    return next(item for item in list_model_catalog(provider="opencode-zen") if item["id"] == MINIMAX_PROFILE_ID)
+    return next(item for item in list_model_catalog(provider="opencode-zen") if item["id"] == MIMO_PROFILE_ID)
 
 
 def _catalog_profile() -> dict:
     from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
 
-    return next(item for item in list_profile_catalog() if item["profile_id"] == MINIMAX_PROFILE_ID)
+    return next(item for item in list_profile_catalog() if item["profile_id"] == MIMO_PROFILE_ID)
 
 
-def test_defaultspack_catalog_exposes_minimax_m3_free_capability_metadata():
+def test_defaultspack_catalog_exposes_mimo_v2_5_free_capability_metadata():
     model = _catalog_model()
     profile = _catalog_profile()
 
-    assert model["model_id"] == "minimax-m3-free"
-    assert profile["qualified_model_id"] == MINIMAX_PROFILE_ID
+    assert model["model_id"] == "mimo-v2.5-free"
+    assert profile["qualified_model_id"] == MIMO_PROFILE_ID
 
     for item in (model, profile):
         assert item["supports_tool_calling"] is False
         assert item["supports_thinking"] is True
-        assert item["supports_vision"] is True
+        assert item["supports_vision"] is False
         assert item["metadata"]["supports_tool_calling"] is False
         assert item["metadata"]["supports_thinking"] is True
-        assert item["metadata"]["supports_vision"] is True
+        assert item["metadata"]["supports_vision"] is False
         assert item["model_capabilities"]["capabilities"]["tool_calling"] is False
         assert item["model_capabilities"]["capabilities"]["thinking"] is True
-        assert item["model_capabilities"]["capabilities"]["vision"] is True
+        assert item["model_capabilities"]["capabilities"]["vision"] is False
 
-    assert {"thinking", "vision"}.issubset(model["capability_tags"])
-    assert {"deep_reasoning", "vision_ocr"}.issubset(profile["recommended_roles"])
+    assert "thinking" in model["capability_tags"]
+    assert "deep_reasoning" in profile["recommended_roles"]
 
 
-def test_defaultspack_model_search_returns_minimax_m3_free_for_capability_query():
+def test_defaultspack_model_search_returns_mimo_v2_5_free_for_capability_query():
     from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
     from domain.ai_client.model_search import search_models
 
     result = search_models(
         {
-            "query": "minimax m3 free",
+            "query": "mimo v2.5 free",
             "provider_id": "opencode-zen",
-            "requires": {"thinking": True, "vision": True},
+            "requires": {"thinking": True},
             "max_results": 10,
         },
         profiles=list_profile_catalog(),
     )
 
-    assert [item["profile_id"] for item in result["models"]] == [MINIMAX_PROFILE_ID]
+    assert [item["profile_id"] for item in result["models"]] == [MIMO_PROFILE_ID]
     assert result["models"][0]["supports_tool_calling"] is False
     assert result["models"][0]["supports_thinking"] is True
-    assert result["models"][0]["supports_vision"] is True
+    assert result["models"][0]["supports_vision"] is False

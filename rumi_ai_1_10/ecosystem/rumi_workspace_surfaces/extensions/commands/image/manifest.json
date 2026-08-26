@@ -1,0 +1,17 @@
+{
+  "id": "image",
+  "name": "image",
+  "label": "Image",
+  "description": "Open a local image artifact surface.",
+  "category": "image",
+  "visibility": "default",
+  "risk": "low",
+  "modes": ["chat", "coding", "agent"],
+  "args": [{ "name": "prompt", "type": "string", "required": false, "capture": "rest" }],
+  "context_bindings": ["conversation_id", "workspace_id", "selection", "attached_files", "chat_json_url"],
+  "execution": { "type": "rumi_function", "pack_id": "rumi_workspace_surfaces", "function_id": "open_image_surface" },
+  "ui": {
+    "surface": { "kind": "image", "layoutMode": "split", "chatPlacement": "left" },
+    "operations": ["image_export"]
+  }
+}

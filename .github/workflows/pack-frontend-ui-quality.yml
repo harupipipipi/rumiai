@@ -1,0 +1,57 @@
+name: Pack Frontend UI Quality
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pack-frontend-ui:
+    name: Pack frontend UI contract (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          # defaultspack is the current host harness. This gate is for any
+          # Rumi pack that contributes frontend commands, surfaces, sidecars,
+          # renderers, or command effects; add more pack host apps here.
+          - rumi_ai_1_10/ecosystem/defaultspack/webapp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ${{ matrix.app }}
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: ${{ matrix.app }}
+        run: npx playwright install --with-deps chromium
+
+      - name: Run pack-provided frontend UI quality gate
+        working-directory: ${{ matrix.app }}
+        run: npm run test:e2e:pack-ui
+
+      - name: Upload Playwright UI quality artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pack-frontend-ui-quality-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ matrix.app }}/playwright-report
+            ${{ matrix.app }}/test-results
+          if-no-files-found: ignore

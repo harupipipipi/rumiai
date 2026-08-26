@@ -64,6 +64,7 @@ domains:
     - domain/context_engine
     - domain/dev
     - domain/extensions
+    - domain/goal
     - domain/human_operator
     - domain/kanban
     - domain/prompt
@@ -136,6 +137,7 @@ domains:
     - domain/dev
     - domain/extensions
     - domain/external
+    - domain/function_runtime
     - domain/tool
     - domain/webhook
     path: domain/frontend
@@ -159,6 +161,11 @@ domains:
     may_import:
     - domain/gateway
     path: domain/gateway_channels
+  goal:
+    may_import:
+    - domain/ai_client
+    - domain/chat
+    path: domain/goal
   hooks:
     may_import:
     - domain/agent_runtime
@@ -305,6 +312,7 @@ domains:
     path: domain/vision
   webhook:
     may_import:
+    - domain/chat
     - domain/components
     - domain/external
     - domain/webhook_url_providers

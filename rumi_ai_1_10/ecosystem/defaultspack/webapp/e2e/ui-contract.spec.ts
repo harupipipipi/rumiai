@@ -167,17 +167,17 @@ const opencodeProfile = {
 };
 
 const opencodeZenProfile = {
-  profile_id: "opencode-zen/minimax-m3-free",
-  qualified_model_id: "opencode-zen/minimax-m3-free",
+  profile_id: "opencode-zen/mimo-v2.5-free",
+  qualified_model_id: "opencode-zen/mimo-v2.5-free",
   provider_id: "opencode-zen",
   provider_display_name: "OpenCode Zen",
-  model_id: "minimax-m3-free",
-  display_name: "MiniMax M3 Free via OpenCode Zen",
-  max_context: 200_000,
-  max_context_tokens: 200_000,
+  model_id: "mimo-v2.5-free",
+  display_name: "MiMo V2.5 Free via OpenCode Zen",
+  max_context: 131_072,
+  max_context_tokens: 131_072,
   supports_thinking: true,
-  supports_tool_calling: true,
-  supports_vision: true,
+  supports_tool_calling: false,
+  supports_vision: false,
   local: false,
   availability: { configured: false, status: "requires_api_key" },
 };
@@ -1037,11 +1037,11 @@ test("model picker search supports @provider filters", async ({ page }) => {
   const search = page.getByPlaceholder("モデルを検索... @google");
   await search.fill("@opencode");
   await expect(page.getByText("Qwen3.5 Plus via OpenCode Go")).toBeVisible();
-  await expect(page.getByText("MiniMax M3 Free via OpenCode Zen")).toBeVisible();
+  await expect(page.getByText("MiMo V2.5 Free via OpenCode Zen")).toBeVisible();
   await expect(page.getByText("Gemini 2.5 Flash")).toBeHidden();
 
   await search.fill("@opencode zen");
-  await expect(page.getByText("MiniMax M3 Free via OpenCode Zen")).toBeVisible();
+  await expect(page.getByText("MiMo V2.5 Free via OpenCode Zen")).toBeVisible();
   await expect(page.getByText("Qwen3.5 Plus via OpenCode Go")).toBeHidden();
 
   await search.fill("@google flash");
@@ -1054,8 +1054,8 @@ test("model picker keeps unconfigured opencode zen visible for first-run setup",
 
   await page.getByRole("button", { name: /Stub Default/ }).click();
   const search = page.getByPlaceholder("モデルを検索... @google");
-  await search.fill("minimax");
-  await expect(page.getByText("MiniMax M3 Free via OpenCode Zen")).toBeVisible();
+  await search.fill("mimo");
+  await expect(page.getByText("MiMo V2.5 Free via OpenCode Zen")).toBeVisible();
 });
 
 test("preview pane opens from the chat canvas peek", async ({ page }) => {

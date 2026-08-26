@@ -1,0 +1,13 @@
+{
+  "function_id": "movie_export_project",
+  "description": "Export movie project JSON, valid WebVTT captions, and timeline EDL data with safe filenames.",
+  "tags": ["surface", "movie", "export"],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "input_schema": {"type": "object", "additionalProperties": true},
+  "output_schema": {"type": "object", "additionalProperties": true}
+}

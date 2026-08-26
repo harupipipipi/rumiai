@@ -1493,7 +1493,7 @@ export type SettingsSection = {
   fields: SidebarField[];
 };
 
-export type ComposerCommandCategory = "chat" | "model" | "mode" | "coding" | "tools" | "settings" | "debug";
+export type ComposerCommandCategory = "chat" | "model" | "mode" | "coding" | "tools" | "settings" | "debug" | "surface" | "write" | "image" | "slide" | "movie";
 export type ComposerCommandVisibility = "default" | "advanced" | "hidden";
 export type ComposerCommandRisk = "low" | "medium" | "high";
 export type ComposerCommandMode = "chat" | "coding" | "agent";
@@ -1502,6 +1502,7 @@ export type ComposerCommandArg = {
   name: string;
   type: "string" | "enum" | "boolean";
   required?: boolean;
+  capture?: "rest";
   values?: string[];
 };
 
@@ -1509,9 +1510,30 @@ export type ComposerCommandExecution =
   | { type: "frontend"; action: string }
   | { type: "model_command"; action: string }
   | { type: "settings_patch"; section: string; field: string }
-  | { type: "rumi_function"; qualified_name: string }
+  | { type: "rumi_function"; qualified_name?: string; pack_id?: string; function_id?: string }
   | { type: "chat_action"; action: string }
   | { type: "pack_block"; qualified_name: string };
+
+export type SurfaceDescriptor = {
+  id: string;
+  kind: string;
+  title?: string;
+  sourcePackId?: string;
+  renderer?: string;
+  conversationId?: string;
+  resourceId?: string;
+  payload?: Record<string, unknown>;
+  layoutMode?: "split" | "tab" | "full";
+  chatPlacement?: "left" | "right" | "bottom" | "hidden";
+};
+
+export type CommandEffect =
+  | { type: "surface.open"; surface: SurfaceDescriptor }
+  | { type: "surface.close"; surfaceId?: string }
+  | { type: "surface.focus"; surfaceId: string }
+  | { type: "surface.set_layout"; surfaceId?: string; layoutMode?: SurfaceDescriptor["layoutMode"]; chatPlacement?: SurfaceDescriptor["chatPlacement"] }
+  | { type: "composer.append_text"; text: string }
+  | { type: "toast.show"; message: string; level?: "info" | "success" | "warning" | "error" };
 
 export type ComposerCommandItem = {
   id: string;
@@ -1528,8 +1550,13 @@ export type ComposerCommandItem = {
   args?: ComposerCommandArg[];
   execution: ComposerCommandExecution;
   source?: string;
+  source_pack_id?: string;
+  source_path?: string;
+  trust_level?: string;
   template_id?: string;
   piece_id?: string;
+  context_bindings?: string[] | Record<string, boolean>;
+  ui?: Record<string, unknown>;
 };
 
 export type ComposerCommandExecuteResult = {
@@ -1539,6 +1566,7 @@ export type ComposerCommandExecuteResult = {
   action?: string;
   args?: Record<string, unknown>;
   result?: unknown;
+  effects?: CommandEffect[];
   message?: string;
   candidates?: ModelCommandCandidate[];
   selected_model?: string | ModelCommandCandidate | null;

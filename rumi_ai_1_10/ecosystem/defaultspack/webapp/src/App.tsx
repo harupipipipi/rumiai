@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { Hand, Loader2 } from "lucide-react";
+import { Hand, Loader2, X } from "lucide-react";
 
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
 import { AmbientTriggerPanel } from "./ambient/AmbientTriggerPanel";
@@ -14,6 +14,7 @@ import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
 import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import { DesktopMonitorWorkspace } from "./components/desktops/DesktopMonitorWorkspace";
+import { WorkspaceSurfacePanel } from "./components/surfaces/WorkspaceSurfacePanel";
 import { WarmActionIcon } from "./components/WarmActionIcon";
 import {
   DEFAULT_WORKSPACE_TAB_ID,
@@ -29,7 +30,7 @@ import { PromptStudio } from "./pages/PromptStudio";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type SettingsSection, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
+import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type CommandEffect, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type SettingsSection, type SidebarAction, type SidebarItem, type SurfaceDescriptor, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
 import type { ActionApprovalMode } from "./features/tools/ActionApprovalControl";
 import type { ConversationToolPreferences } from "./features/tools/types";
 import { useToolSelectionController } from "./features/tools/useToolSelectionController";
@@ -159,6 +160,14 @@ function parseConversationToolPreferences(metadata: unknown): ConversationToolPr
     include: normalizeConversationToolTargets(raw.include),
     exclude: normalizeConversationToolTargets(raw.exclude),
   };
+}
+
+function conversationToolPreferencesSnapshot(metadata: unknown): Record<string, unknown> {
+  const source = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? (metadata as Record<string, unknown>).tool_preferences
+    : null;
+  if (!source || typeof source !== "object" || Array.isArray(source)) return {};
+  return { ...(source as Record<string, unknown>) };
 }
 
 function normalizeConversationToolTargets(value: unknown): ToolTarget[] {
@@ -2123,7 +2132,15 @@ export function parseSlashCommandInput(
   const rest = body.slice(matchedName.length).trim();
   const args: Record<string, unknown> = {};
   const specs = matchedCommand.args ?? [];
-  if (specs.length === 1 && rest) {
+  const restCaptureIndex = specs.findIndex((spec) => spec.capture === "rest");
+  if (restCaptureIndex >= 0 && rest) {
+    const prefixValues = rest.split(/\s+/).slice(0, restCaptureIndex);
+    specs.slice(0, restCaptureIndex).forEach((spec, index) => {
+      if (prefixValues[index]) args[spec.name] = prefixValues[index];
+    });
+    const restTokens = rest.split(/\s+/).slice(restCaptureIndex);
+    args[specs[restCaptureIndex].name] = restTokens.length ? restTokens.join(" ") : rest;
+  } else if (specs.length === 1 && rest) {
     args[specs[0].name] = rest;
   } else if (specs.length > 1 && rest) {
     const tokens = rest.split(/\s+/);
@@ -2281,6 +2298,8 @@ function ChatApp() {
   const [activityPreviewWidth, setActivityPreviewWidth] = useLocalStorage("rumi-activity-preview-width", 340);
   const [canvasMemo, setCanvasMemo] = useLocalStorage("rumi-canvas-memo", "");
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
+  const [activeSidecarSurface, setActiveSidecarSurface] = useState<SurfaceDescriptor | null>(null);
+  const [surfaceDrafts, setSurfaceDrafts] = useState<Record<string, string>>({});
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
   const [settledRuntimeApprovalIds, setSettledRuntimeApprovalIds] = useState<string[]>([]);
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
@@ -2336,6 +2355,10 @@ function ChatApp() {
   const visibleSpotlightResults = spotlightQuery.trim() ? spotlightResults : recentSpotlightResults;
   const activeModelId = activeConversation?.model ?? String(settingsValues.models?.preferred_model ?? "stub/default").trim();
   const activeProfile = findProfile(modelProfiles, activeModelId);
+  const activeConversationToolPreferencesSnapshot = useMemo<Record<string, unknown> | null>(() => {
+    if (!activeConversationId || !activeConversation) return null;
+    return conversationToolPreferencesSnapshot(activeConversation.metadata);
+  }, [activeConversationId, activeConversation?.metadata]);
   const orderedMessages = useMemo(
     () => activeConversation ? orderConversationMessages(activeConversation.messages) : [],
     [activeConversation?.messages],
@@ -2696,8 +2719,11 @@ function ChatApp() {
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
-  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview && !isCanvasWorkspace && !isDesktopsWorkspace;
-  const activityPreviewWidthPx = clampNumber(activityPreviewWidth, 220, 720, 340);
+  const isActivityPreviewVisible = showRegion("activity_preview") && Boolean(activeSidecarSurface || effectiveShowPreview) && !isCanvasWorkspace && !isDesktopsWorkspace;
+  const isWorkspaceSidecarSurface = Boolean(activeSidecarSurface && ["write", "image", "slide", "movie"].includes(activeSidecarSurface.kind));
+  const activityPreviewMaxWidth = isWorkspaceSidecarSurface ? 540 : 720;
+  const activityPreviewDefaultWidth = isWorkspaceSidecarSurface ? 520 : 340;
+  const activityPreviewWidthPx = clampNumber(activityPreviewWidth, 220, activityPreviewMaxWidth, activityPreviewDefaultWidth);
   const operationsProfileAvailable = hasOperationsProfile(catalog);
   const mimoCodingProfileAvailable = hasMimoCodingProfile(catalog);
 
@@ -2708,7 +2734,7 @@ function ChatApp() {
       const startX = event.clientX;
       const startWidth = activityPreviewWidthPx;
       const handlePointerMove = (moveEvent: PointerEvent) => {
-        const nextWidth = clampNumber(startWidth + (startX - moveEvent.clientX), 220, 720, startWidth);
+        const nextWidth = clampNumber(startWidth + (startX - moveEvent.clientX), 220, activityPreviewMaxWidth, startWidth);
         setActivityPreviewWidth(nextWidth);
       };
       const handlePointerUp = () => {
@@ -2722,7 +2748,7 @@ function ChatApp() {
       window.addEventListener("pointermove", handlePointerMove);
       window.addEventListener("pointerup", handlePointerUp, { once: true });
     },
-    [activityPreviewWidthPx, setActivityPreviewWidth],
+    [activityPreviewMaxWidth, activityPreviewWidthPx, setActivityPreviewWidth],
   );
 
   useEffect(() => {
@@ -3926,6 +3952,67 @@ function ChatApp() {
     }
   };
 
+  const applyCommandEffects = (effects: CommandEffect[] | undefined): boolean => {
+    if (!Array.isArray(effects) || effects.length === 0) return false;
+    let handled = false;
+    for (const effect of effects) {
+      if (!effect || typeof effect !== "object") continue;
+      switch (effect.type) {
+        case "surface.open":
+          if (effect.surface && typeof effect.surface.id === "string" && typeof effect.surface.kind === "string") {
+            setActiveSidecarSurface(effect.surface);
+            if (effect.surface.kind === "write" || effect.surface.kind === "image" || effect.surface.kind === "slide" || effect.surface.kind === "movie") {
+              setActivityPreviewWidth((current) => Math.min(540, Math.max(current, 520)));
+            }
+            if (effect.surface.kind === "tool_timeline" || effect.surface.kind === "canvas") {
+              setShowPreview(true);
+            }
+            handled = true;
+          }
+          break;
+        case "surface.close":
+          setActiveSidecarSurface((current) => (
+            !effect.surfaceId || current?.id === effect.surfaceId ? null : current
+          ));
+          handled = true;
+          break;
+        case "surface.focus":
+          setActiveSidecarSurface((current) => (current?.id === effect.surfaceId ? { ...current } : current));
+          handled = true;
+          break;
+        case "surface.set_layout":
+          setActiveSidecarSurface((current) => {
+            if (!current || (effect.surfaceId && current.id !== effect.surfaceId)) return current;
+            return {
+              ...current,
+              layoutMode: effect.layoutMode ?? current.layoutMode,
+              chatPlacement: effect.chatPlacement ?? current.chatPlacement,
+            };
+          });
+          handled = true;
+          break;
+        case "composer.append_text": {
+          const text = String(effect.text ?? "");
+          if (text) {
+            setInput((current) => {
+              const prefix = current.trim() ? `${current.trimEnd()}\n` : "";
+              return `${prefix}${text}`;
+            });
+            handled = true;
+          }
+          break;
+        }
+        case "toast.show":
+          setError(String(effect.message ?? ""));
+          handled = true;
+          break;
+        default:
+          break;
+      }
+    }
+    return handled;
+  };
+
   const executeComposerCommand = async (commandId: string, rawInput = `/${commandId}`): Promise<boolean | void> => {
     const parsed = parseSlashCommandInput(rawInput, effectiveCommandCatalog) ?? {
       command: effectiveCommandCatalog.find((command) => command.id === commandId || command.name === commandId),
@@ -3954,6 +4041,7 @@ function ChatApp() {
         conversation_id: activeConversationId,
         mode: mode as ComposerCommandMode,
       });
+      const effectsHandled = applyCommandEffects(result.effects);
       const feedbackMessage = composerCommandResultMessage(result);
       if (result.requires_approval) {
         setError(feedbackMessage ?? `/${parsed.command.name} は approval center 経由で実行してください。`);
@@ -3992,7 +4080,7 @@ function ChatApp() {
         }
       }
 
-      if (result.action || parsed.command.execution.type === "frontend") {
+      if (result.action || (!effectsHandled && parsed.command.execution.type === "frontend")) {
         const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
         runFrontendCommandAction(
           result.action ?? frontendAction,
@@ -5500,6 +5588,112 @@ function ChatApp() {
     />
   );
 
+  const renderSidecarSurface = () => {
+    const surface = activeSidecarSurface;
+    if (!surface) {
+      return (
+        <Renderers.toolPreviewPanel
+          previews={canvasPreviews}
+          showPreview={effectiveShowPreview}
+          onClose={() => setShowPreview(false)}
+          previewMode={previewMode}
+          onModeChange={setPreviewMode}
+          activePreviewId={activePreviewId}
+          memo={canvasMemo}
+          onMemoChange={setCanvasMemo}
+        />
+      );
+    }
+
+    const closeSurface = () => setActiveSidecarSurface(null);
+    const title = surface.title || surface.kind.replace(/[_-]+/g, " ");
+    const payload = surface.payload && typeof surface.payload === "object" ? surface.payload : {};
+    const draft = surfaceDrafts[surface.id] ?? String(payload.initial_text ?? payload.text ?? "");
+    const isWorkspaceSurface = surface.kind === "write" || surface.kind === "image" || surface.kind === "slide" || surface.kind === "movie";
+    const setDraft = (value: string) => {
+      setSurfaceDrafts((current) => ({ ...current, [surface.id]: value }));
+    };
+    const appendDraftToComposer = () => {
+      if (!draft.trim()) return;
+      setInput((current) => `${current.trim() ? `${current.trimEnd()}\n` : ""}${draft.trim()}`);
+    };
+
+    let body;
+    if (surface.kind === "coding") {
+      body = (
+        <CodingCockpit
+          variant="sidecar"
+          workspaces={codingWorkspaces}
+          selectedWorkspaceId={effectiveWorkspaceId}
+          consoleScopeKey={effectiveConsoleKey}
+          onWorkspaceSelect={handleCodingWorkspaceSelect}
+          onWorkspaceCreate={() => void handleCodingWorkspacePickCreate()}
+          onWorkspaceTrust={handleCodingWorkspaceTrust}
+          onWorkspacesRefresh={() => void loadCodingWorkspaces()}
+        />
+      );
+    } else if (surface.kind === "tool_timeline" || surface.kind === "canvas") {
+      body = (
+        <Renderers.toolPreviewPanel
+          previews={canvasPreviews}
+          showPreview
+          onClose={closeSurface}
+          previewMode={previewMode}
+          onModeChange={setPreviewMode}
+          activePreviewId={activePreviewId}
+          memo={canvasMemo}
+          onMemoChange={setCanvasMemo}
+        />
+      );
+    } else if (surface.kind === "goal_monitor") {
+      body = (
+        <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-4">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+            <div className="text-[11px] uppercase tracking-[0.14em] text-zinc-500">{String(payload.status ?? "running")}</div>
+            <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-100">{String(payload.objective ?? "")}</div>
+          </div>
+          {payload.reason ? (
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 text-sm leading-6 text-zinc-300">
+              {String(payload.reason)}
+            </div>
+          ) : null}
+        </div>
+      );
+    } else {
+      body = (
+        <WorkspaceSurfacePanel
+          surface={surface}
+          draft={draft}
+          onDraftChange={setDraft}
+          onAppendDraftToComposer={appendDraftToComposer}
+          onClose={closeSurface}
+        />
+      );
+    }
+
+    if (isWorkspaceSurface) {
+      return <div className="h-full min-h-0 bg-[#09090b]">{body}</div>;
+    }
+
+    return (
+      <div className="flex h-full min-h-0 flex-col bg-[#09090b]">
+        <div className="flex h-11 shrink-0 items-center justify-between border-b border-zinc-800/70 px-3">
+          <div className="min-w-0 truncate text-sm font-semibold text-zinc-100">{title}</div>
+          <button
+            type="button"
+            aria-label="Close sidecar"
+            title="Close sidecar"
+            onClick={closeSurface}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1">{body}</div>
+      </div>
+    );
+  };
+
   return (
     <RendererBoundary>
     <div className="flex flex-col h-screen w-full bg-[#09090b] text-zinc-300 font-sans overflow-hidden selection:bg-zinc-800">
@@ -5568,7 +5762,11 @@ function ChatApp() {
         )}
 
         <main
-          className={cn("rumi-workspace-main flex-1 flex min-w-0 bg-[#09090b] relative", isActivityPreviewVisible && "has-activity-preview")}
+          className={cn(
+            "rumi-workspace-main flex-1 flex min-w-0 bg-[#09090b] relative",
+            isActivityPreviewVisible && "has-activity-preview",
+            activeSidecarSurface && "has-sidecar-surface",
+          )}
           style={{ "--rumi-activity-preview-width": `${activityPreviewWidthPx}px` } as CSSProperties}
         >
           <div className={cn("rumi-chat-pane flex-1 flex flex-col min-w-0 rumi-anim-fade-up", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
@@ -5862,16 +6060,7 @@ function ChatApp() {
 
           {isActivityPreviewVisible && (
             <aside className="rumi-activity-preview-pane rumi-anim-fade-right" aria-label="Activity preview">
-              <Renderers.toolPreviewPanel
-                previews={canvasPreviews}
-                showPreview={effectiveShowPreview}
-                onClose={() => setShowPreview(false)}
-                previewMode={previewMode}
-                onModeChange={setPreviewMode}
-                activePreviewId={activePreviewId}
-                memo={canvasMemo}
-                onMemoChange={setCanvasMemo}
-              />
+              {renderSidecarSurface()}
             </aside>
           )}
         </main>
@@ -5893,6 +6082,7 @@ function ChatApp() {
             promptUsage={activePromptUsage}
             promptProfileId={activePromptProfileId}
             conversationId={activeConversationId}
+            conversationToolPreferencesSnapshot={activeConversationToolPreferencesSnapshot}
             showChatPromptUsage={showPromptUsageInMessages}
             onLoadPromptActive={promptResources.getActiveSummary}
             onTogglePromptEdge={promptResources.toggleEdge}

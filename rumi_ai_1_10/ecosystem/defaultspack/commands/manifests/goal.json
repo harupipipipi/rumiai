@@ -3,19 +3,26 @@
     "id": "goal",
     "name": "goal",
     "label": "Goal",
-    "description": "Pursue a goal until a third-party evaluator confirms it is achieved.",
+    "description": "Start an isolated checker-backed goal monitor.",
     "category": "tools",
     "visibility": "default",
     "risk": "medium",
     "modes": ["chat", "coding"],
     "args": [
-      { "name": "goal", "type": "string", "required": true },
-      { "name": "max_iterations", "type": "string", "required": false },
-      { "name": "model", "type": "string", "required": false }
+      { "name": "goal", "type": "string", "required": true, "capture": "rest" }
     ],
+    "context_bindings": ["conversation_id", "workspace_id", "surface_id", "selection", "attached_files", "chat_json_url"],
     "execution": {
-      "type": "pack_block",
-      "qualified_name": "defaultspack:goal.run"
+      "type": "rumi_function",
+      "pack_id": "defaultspack",
+      "function_id": "goal_start"
+    },
+    "ui": {
+      "surface": {
+        "kind": "goal_monitor",
+        "layoutMode": "split",
+        "chatPlacement": "left"
+      }
     }
   }
 ]

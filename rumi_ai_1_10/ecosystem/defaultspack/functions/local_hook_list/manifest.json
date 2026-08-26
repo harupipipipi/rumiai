@@ -1,0 +1,14 @@
+{
+  "function_id": "local_hook_list",
+  "description": "List localhost local hooks.",
+  "tags": ["local_hook", "webhook", "input"],
+  "risk": "low",
+  "requires": ["local_hook.list"],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": ["defaults.local_hook.list", "defaultspack.local_hook.list"],
+  "input_schema": {"type": "object", "additionalProperties": true},
+  "output_schema": {"type": "object", "additionalProperties": true}
+}

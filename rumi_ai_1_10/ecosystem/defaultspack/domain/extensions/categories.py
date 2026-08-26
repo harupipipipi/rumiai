@@ -51,6 +51,10 @@ DEFAULT_CATEGORY_SPECS: Dict[str, CategorySpec] = {
         category_id="ui_surface",
         manifest_glob="ui/*/manifest.json",
     ),
+    "command": CategorySpec(
+        category_id="command",
+        manifest_glob="commands/*/manifest.json",
+    ),
     "policy": CategorySpec(
         category_id="policy",
         manifest_glob="policies/*/manifest.json",

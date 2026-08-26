@@ -34,6 +34,7 @@ def handle_inbound_webhook(webhook_id: str, input_data: dict[str, Any], context:
     runtime_context.setdefault("webhook_endpoint", endpoint.as_dict())
     if endpoint.response_profile_id:
         runtime_context.setdefault("output_profile_id", endpoint.response_profile_id)
+    target = _target_for_endpoint_call(endpoint, input_data)
     result = dispatch_external_event(
         event,
         input_profile_id=endpoint.input_profile_id,
@@ -41,7 +42,7 @@ def handle_inbound_webhook(webhook_id: str, input_data: dict[str, Any], context:
         context=runtime_context,
         send_response=True,
         envelope_overrides={
-            "target": dict(endpoint.target),
+            "target": target,
             "delivery": {
                 **(endpoint.default_delivery if isinstance(endpoint.default_delivery, dict) else {}),
                 **(delivery_override or {}),
@@ -107,3 +108,34 @@ def _is_endpoint_expired(endpoint) -> bool:
     if expires_at is None:
         return False
     return expires_at <= int(time.time() * 1000)
+
+
+def _target_for_endpoint_call(endpoint, input_data: dict[str, Any]) -> dict[str, Any]:
+    target = dict(endpoint.target)
+    metadata = endpoint.metadata if isinstance(endpoint.metadata, dict) else {}
+    if metadata.get("local_hook") is True and str(metadata.get("clone_strategy") or "") == "clone_on_call":
+        source_conversation_id = str(metadata.get("source_conversation_id") or target.get("conversation_id") or "").strip()
+        if source_conversation_id:
+            try:
+                from domain.chat.store import ChatStore
+
+                clone = ChatStore().clone_conversation(
+                    source_conversation_id,
+                    system_prompt_override=metadata.get("system_prompt_override"),
+                    model_override=metadata.get("model_override"),
+                    metadata={
+                        "local_hook": True,
+                        "local_hook_endpoint_id": endpoint.id,
+                        "clone_strategy": "clone_on_call",
+                        "input_preview": str(input_data.get("text") or input_data.get("message") or "")[:500],
+                    },
+                    title="Local Hook Conversation",
+                    conversation_kind="local_hook_clone",
+                )
+                if clone is not None:
+                    target["conversation_id"] = str(clone.get("id") or "")
+                    target["direct"] = True
+                    target["cloned_on_call"] = True
+            except Exception:
+                pass
+    return target
