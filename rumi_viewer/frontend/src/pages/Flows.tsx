@@ -32,7 +32,6 @@ import {
   SelectionMode,
 } from '@xyflow/react';
 import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
 
 import { nodeTypes } from '@/src/components/flow/CustomNodes';
 import { nodesToYaml, yamlToNodes } from '@/src/lib/flowUtils';
@@ -50,6 +49,7 @@ import {
   DEFAULT_BASE_PACK,
   normalizeContracts,
 } from '@/src/lib/flowGraph';
+import { runConfirmedMutation } from '@/src/lib/mutations';
 
 function buildAvailableSteps(t: ReturnType<typeof useT>): AvailableStep[] {
   return [
@@ -94,6 +94,8 @@ function FlowEditorInner() {
   const [activeTab, setActiveTab] = useState<'yaml' | 'result'>('yaml');
   const [selectedPack, setSelectedPack] = useState<string>('all');
   const [flowLoading, setFlowLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [flowMeta, setFlowMeta] = useState<FlowDocumentMeta>(() => createDefaultFlowGraph().meta);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -103,8 +105,16 @@ function FlowEditorInner() {
   const stepRailRef = useRef<HTMLDivElement>(null);
   const packDropdownRef = useRef<HTMLDivElement>(null);
   const flowRequestIdRef = useRef(0);
+  const flowDetailAbortRef = useRef<AbortController | null>(null);
+  const editorIntentGenerationRef = useRef(0);
+  const flowInteractionLockedRef = useRef(false);
+  const executeFlowRef = useRef<() => void>(() => {});
   const flowsRef = useRef(flows);
+  const selectedFlowIdRef = useRef(selectedFlowId);
+  const isCreatingRef = useRef(isCreating);
   flowsRef.current = flows;
+  selectedFlowIdRef.current = selectedFlowId;
+  isCreatingRef.current = isCreating;
 
   const selectedFlow = flows.find((flow) => flow.id === selectedFlowId);
   const packs = useMemo(() => ['all', ...Array.from(new Set(availableSteps.map((step) => step.pack)))], [availableSteps]);
@@ -112,16 +122,28 @@ function FlowEditorInner() {
 
   const history = useFlowHistory(nodes, edges, setNodes, setEdges);
   const execution = useFlowExecution(nodes, edges, setNodes);
+  const flowInteractionLocked = (
+    flowLoading || isSaving || isDeleting || execution.isExecuting
+  );
+  const isFlowInteractionLockedNow = useCallback((): boolean => (
+    flowInteractionLockedRef.current
+    || flowLoading
+    || isSaving
+    || isDeleting
+    || execution.isExecutingNow()
+  ), [execution.isExecutingNow, flowLoading, isDeleting, isSaving]);
 
   const menuPosRef = useRef<((pos: { x: number; y: number } | null) => void) | null>(null);
 
   const keyboard = useFlowKeyboard({
+    disabled: flowInteractionLocked,
+    isDisabled: isFlowInteractionLockedNow,
     nodes,
     setNodes,
     saveHistory: history.saveHistory,
     undo: history.undo,
     redo: history.redo,
-    execute: execution.execute,
+    execute: () => executeFlowRef.current(),
     reactFlowInstance,
     setMenuPos: (pos) => {
       menuPosRef.current?.(pos);
@@ -194,11 +216,15 @@ function FlowEditorInner() {
     if (!selectedFlowId || isCreating) return;
     const requestId = flowRequestIdRef.current + 1;
     flowRequestIdRef.current = requestId;
+    const abortController = new AbortController();
+    flowDetailAbortRef.current?.abort();
+    flowDetailAbortRef.current = abortController;
     let cancelled = false;
     const fallbackFlow = flowsRef.current.find((flow) => flow.id === selectedFlowId);
 
+    flowInteractionLockedRef.current = true;
     setFlowLoading(true);
-    fetchFlowDetail(selectedFlowId)
+    fetchFlowDetail(selectedFlowId, {signal: abortController.signal})
       .then((detail) => {
         if (cancelled || flowRequestIdRef.current !== requestId) return;
         const flow = transformFlowDetail(detail);
@@ -229,21 +255,45 @@ function FlowEditorInner() {
       })
       .finally(() => {
         if (cancelled || flowRequestIdRef.current !== requestId) return;
+        if (flowDetailAbortRef.current === abortController) {
+          flowDetailAbortRef.current = null;
+          flowInteractionLockedRef.current = false;
+        }
         setFlowLoading(false);
       });
 
     return () => {
       cancelled = true;
+      abortController.abort();
+      if (flowDetailAbortRef.current === abortController) {
+        flowDetailAbortRef.current = null;
+        flowInteractionLockedRef.current = false;
+      }
     };
   }, [addToast, execution.clearResult, isCreating, selectedFlowId, setEdges, setNodes, editorHook.setSelectedNode]);
 
+  const invalidateFlowDetailRequest = () => {
+    flowRequestIdRef.current += 1;
+    flowDetailAbortRef.current?.abort();
+    flowDetailAbortRef.current = null;
+    flowInteractionLockedRef.current = false;
+    setFlowLoading(false);
+  };
+
   const handleSelectFlow = (id: string) => {
+    if (execution.isExecutingNow()) return;
+    if (id === selectedFlowId && !isCreating) return;
+    editorIntentGenerationRef.current += 1;
+    invalidateFlowDetailRequest();
     setSelectedFlowId(id);
     setIsCreating(false);
     setIsFlowLibraryOpen(false);
   };
 
   const handleCreateNew = () => {
+    if (execution.isExecutingNow()) return;
+    editorIntentGenerationRef.current += 1;
+    invalidateFlowDetailRequest();
     setIsCreating(true);
     setSelectedFlowId(null);
     setIsFlowLibraryOpen(false);
@@ -257,9 +307,10 @@ function FlowEditorInner() {
   };
 
   const generatedYaml = nodesToYaml(nodes, edges, flowMeta);
-  const isExecuteDisabled = execution.isExecuting || (!selectedFlowId && !isCreating);
+  const isExecuteDisabled = flowInteractionLocked || (!selectedFlowId && !isCreating);
 
   const handleSave = async () => {
+    if (isFlowInteractionLockedNow()) return;
     if (isCreating) {
       if (!newFlowName.trim()) {
         addToast(t('flows.name_required'), 'error');
@@ -272,51 +323,106 @@ function FlowEditorInner() {
         flowId,
         name: fileName,
       });
-      await addFlow({ id: flowId, name: fileName, content: yamlContent });
-      const created = useAppStore.getState().flows.find((flow) => flow.id === flowId);
-      if (created) {
-        setSelectedFlowId(created.id);
+      const editorIntentGeneration = editorIntentGenerationRef.current;
+      invalidateFlowDetailRequest();
+      flowInteractionLockedRef.current = true;
+      setIsSaving(true);
+      try {
+        await runConfirmedMutation(
+          () => addFlow({ id: flowId, name: fileName, content: yamlContent }),
+          () => {
+            const created = useAppStore.getState().flows.find((flow) => flow.id === flowId);
+            if (
+              created
+              && editorIntentGenerationRef.current === editorIntentGeneration
+              && isCreatingRef.current
+              && selectedFlowIdRef.current === null
+            ) {
+              setSelectedFlowId(created.id);
+              setFlowMeta((previous) => ({ ...previous, flowId, name: fileName }));
+              setIsCreating(false);
+            }
+            addToast(t('flows.created'), 'success');
+          },
+        );
+      } finally {
+        flowInteractionLockedRef.current = false;
+        setIsSaving(false);
       }
-      setFlowMeta((previous) => ({ ...previous, flowId, name: fileName }));
-      setIsCreating(false);
-      addToast(t('flows.created'), 'success');
       return;
     }
 
     if (selectedFlowId) {
-      await updateFlow(selectedFlowId, generatedYaml);
-      addToast(t('flows.saved'), 'success');
+      invalidateFlowDetailRequest();
+      flowInteractionLockedRef.current = true;
+      setIsSaving(true);
+      try {
+        await runConfirmedMutation(
+          () => updateFlow(selectedFlowId, generatedYaml),
+          () => addToast(t('flows.saved'), 'success'),
+        );
+      } finally {
+        flowInteractionLockedRef.current = false;
+        setIsSaving(false);
+      }
     }
   };
 
   const handleDelete = () => {
-    if (!selectedFlowId) return;
+    if (!selectedFlowId || isFlowInteractionLockedNow()) return;
+    const flowIdToDelete = selectedFlowId;
     showDialog({
       title: t('flows.delete_title'),
       message: t('flows.delete_message'),
       confirmText: t('flows.delete_confirm'),
       onConfirm: async () => {
-        await deleteFlow(selectedFlowId);
-        setSelectedFlowId(null);
-        const graph = createDefaultFlowGraph(DEFAULT_BASE_PACK);
-        setNodes(graph.nodes);
-        setEdges(graph.edges);
-        setFlowMeta(graph.meta);
-        addToast(t('flows.deleted'), 'success');
+        if (isFlowInteractionLockedNow()) return;
+        invalidateFlowDetailRequest();
+        flowInteractionLockedRef.current = true;
+        setIsDeleting(true);
+        try {
+          await runConfirmedMutation(
+            () => deleteFlow(flowIdToDelete),
+            () => {
+              if (selectedFlowIdRef.current === flowIdToDelete) {
+                setSelectedFlowId(null);
+                const graph = createDefaultFlowGraph(DEFAULT_BASE_PACK);
+                setNodes(graph.nodes);
+                setEdges(graph.edges);
+                setFlowMeta(graph.meta);
+              }
+              addToast(t('flows.deleted'), 'success');
+            },
+          );
+        } finally {
+          flowInteractionLockedRef.current = false;
+          setIsDeleting(false);
+        }
       },
     });
   };
 
   const handleExecute = async () => {
+    if (isFlowInteractionLockedNow()) return;
+    flowInteractionLockedRef.current = true;
     setActiveTab('result');
     setIsConsoleOpen(true);
-    const result = await execution.execute();
-    if (result) {
-      addToast(t('flows.executed'), result.status === 'success' ? 'success' : 'error');
+    try {
+      const result = await execution.execute();
+      if (result) {
+        addToast(t('flows.executed'), result.status === 'success' ? 'success' : 'error');
+      }
+    } finally {
+      flowInteractionLockedRef.current = false;
     }
   };
+  executeFlowRef.current = () => { void handleExecute(); };
 
   const onDragStart = (event: DragEvent, step: AvailableStep) => {
+    if (isFlowInteractionLockedNow()) {
+      event.preventDefault();
+      return;
+    }
     const ghost = new Image();
     ghost.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
     event.dataTransfer.setDragImage(ghost, 0, 0);
@@ -328,7 +434,7 @@ function FlowEditorInner() {
   };
 
   const handleStepMiddleClick = useCallback((event: MouseEvent, step: AvailableStep) => {
-    if (event.button !== 1 || !reactFlowInstance) return;
+    if (isFlowInteractionLockedNow() || event.button !== 1 || !reactFlowInstance) return;
     event.preventDefault();
     const wrapper = reactFlowWrapper.current;
     if (!wrapper) return;
@@ -350,7 +456,7 @@ function FlowEditorInner() {
         ports: step.ports ?? [],
       },
     }));
-  }, [history, reactFlowInstance, setNodes]);
+  }, [history, isFlowInteractionLockedNow, reactFlowInstance, setNodes]);
 
   const handleStepRailWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
     const rail = stepRailRef.current;
@@ -362,6 +468,15 @@ function FlowEditorInner() {
     rail.scrollLeft += delta;
     event.preventDefault();
   }, []);
+
+  function guardCanvasCallback<Args extends unknown[]>(
+    callback: (...args: Args) => void,
+  ): (...args: Args) => void {
+    return (...args: Args) => {
+      if (isFlowInteractionLockedNow()) return;
+      callback(...args);
+    };
+  }
 
   const selectedPorts = (((editorHook.selectedNode?.data as { ports?: FlowPort[] } | undefined)?.ports) ?? []);
 
@@ -399,7 +514,14 @@ function FlowEditorInner() {
               <PanelLeft className="h-4 w-4" />
             </button>
           </div>
-          <Button size="sm" onClick={handleCreateNew} variant={isCreating ? 'default' : 'outline'} className="w-full gap-1.5 text-xs">
+          <Button
+            size="sm"
+            onClick={handleCreateNew}
+            disabled={execution.isExecuting}
+            aria-disabled={execution.isExecuting}
+            variant={isCreating ? 'default' : 'outline'}
+            className="w-full gap-1.5 text-xs"
+          >
             <Plus className="h-3.5 w-3.5" />
             {t('flows.new')}
           </Button>
@@ -409,6 +531,8 @@ function FlowEditorInner() {
                 key={flow.id}
                 type="button"
                 onClick={() => handleSelectFlow(flow.id)}
+                disabled={execution.isExecuting}
+                aria-disabled={execution.isExecuting}
                 className={cn(
                   'flex items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors',
                   selectedFlowId === flow.id && !isCreating
@@ -443,7 +567,8 @@ function FlowEditorInner() {
                   <Input
                     placeholder={t('flows.name_placeholder')}
                     value={newFlowName}
-                    onChange={(event) => setNewFlowName(event.target.value)}
+                    onChange={guardCanvasCallback((event) => setNewFlowName(event.target.value))}
+                    disabled={flowInteractionLocked}
                     className="max-w-sm"
                   />
                 ) : (
@@ -460,12 +585,24 @@ function FlowEditorInner() {
                     {execution.isExecuting ? t('flows.executing') : t('flows.execute')}
                   </Button>
                 )}
-                <Button variant="outline" onClick={handleSave} className="gap-2">
+                <Button
+                  variant="outline"
+                  onClick={handleSave}
+                  disabled={flowInteractionLocked}
+                  loading={isSaving}
+                  className="gap-2"
+                >
                   <Save className="h-4 w-4" />
                   {t('flows.save')}
                 </Button>
                 {!isCreating && (
-                  <Button variant="destructive" onClick={handleDelete} className="gap-2">
+                  <Button
+                    variant="destructive"
+                    onClick={handleDelete}
+                    disabled={flowInteractionLocked}
+                    loading={isDeleting}
+                    className="gap-2"
+                  >
                     <Trash2 className="h-4 w-4" />
                     {t('flows.delete')}
                   </Button>
@@ -473,13 +610,23 @@ function FlowEditorInner() {
               </div>
             </div>
 
-            <div className={cn('flex items-center gap-4 rounded-2xl border border-border bg-bg-main/90 px-3 py-2.5', !isFlowLibraryOpen && 'ml-12')}>
+            <div
+              data-testid="flow-editor-toolbar"
+              aria-disabled={flowInteractionLocked}
+              inert={flowInteractionLocked ? true : undefined}
+              className={cn(
+                'flex items-center gap-4 rounded-2xl border border-border bg-bg-main/90 px-3 py-2.5',
+                !isFlowLibraryOpen && 'ml-12',
+                flowInteractionLocked && 'pointer-events-none opacity-60',
+              )}
+            >
               <div ref={packDropdownRef} className="relative">
                 <Button
                   variant="outline"
                   size="sm"
+                  disabled={flowInteractionLocked}
                   className="h-8 gap-1.5 border-border bg-bg-card px-3 text-xs font-medium"
-                  onClick={() => setIsPackDropdownOpen((open) => !open)}
+                  onClick={guardCanvasCallback(() => setIsPackDropdownOpen((open) => !open))}
                   aria-haspopup="listbox"
                   aria-expanded={isPackDropdownOpen}
                   aria-controls="flow-pack-selector-menu"
@@ -500,7 +647,7 @@ function FlowEditorInner() {
                         type="button"
                         role="option"
                         aria-selected={selectedPack === pack}
-                        onClick={() => { setSelectedPack(pack); setIsPackDropdownOpen(false); }}
+                        onClick={guardCanvasCallback(() => { setSelectedPack(pack); setIsPackDropdownOpen(false); })}
                         className={cn(
                           'w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-bg-hover',
                           selectedPack === pack ? 'bg-bg-hover text-text-main' : 'text-text-muted',
@@ -521,7 +668,7 @@ function FlowEditorInner() {
                   <div
                     key={step.id}
                     className="flex shrink-0 cursor-grab items-center gap-1.5 rounded-full border border-border bg-bg-card px-3 py-1.5 text-xs font-medium shadow-sm transition-colors hover:border-accent hover:text-accent"
-                    draggable
+                    draggable={!flowInteractionLocked}
                     onDragStart={(event) => onDragStart(event, step)}
                     onMouseDown={(event) => handleStepMiddleClick(event, step)}
                     onAuxClick={(event) => event.preventDefault()}
@@ -536,33 +683,42 @@ function FlowEditorInner() {
 
             <div
               ref={reactFlowWrapper}
+              data-testid="flow-canvas"
+              aria-busy={flowInteractionLocked}
+              inert={flowInteractionLocked ? true : undefined}
               className="flow-canvas relative flex-1 overflow-hidden rounded-[28px] border border-border"
             >
               <ReactFlow<Node, Edge>
                 nodes={nodes}
                 edges={edges}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                onConnect={editorHook.onConnect}
-                onNodeClick={editorHook.onNodeClick}
-                onNodeDragStart={dragDrop.onNodeDragStart}
-                onNodeDrag={dragDrop.onNodeDrag}
-                onNodeDragStop={dragDrop.onNodeDragStop}
-                onPaneClick={editorHook.onPaneClick}
-                onPaneContextMenu={editorHook.onPaneContextMenu}
-                onConnectEnd={editorHook.onConnectEnd}
-                onEdgeClick={editorHook.onEdgeClick}
-                onReconnect={editorHook.onReconnect}
-                onEdgeDoubleClick={editorHook.onEdgeDoubleClick}
-                onNodesDelete={editorHook.onNodesDelete}
-                onEdgesDelete={editorHook.onEdgesDelete}
+                onNodesChange={guardCanvasCallback(onNodesChange)}
+                onEdgesChange={guardCanvasCallback(onEdgesChange)}
+                onConnect={guardCanvasCallback(editorHook.onConnect)}
+                onNodeClick={guardCanvasCallback(editorHook.onNodeClick)}
+                onNodeDragStart={guardCanvasCallback(dragDrop.onNodeDragStart)}
+                onNodeDrag={guardCanvasCallback(dragDrop.onNodeDrag)}
+                onNodeDragStop={guardCanvasCallback(dragDrop.onNodeDragStop)}
+                onPaneClick={guardCanvasCallback(editorHook.onPaneClick)}
+                onPaneContextMenu={guardCanvasCallback(editorHook.onPaneContextMenu)}
+                onConnectEnd={guardCanvasCallback(editorHook.onConnectEnd)}
+                onEdgeClick={guardCanvasCallback(editorHook.onEdgeClick)}
+                onReconnect={guardCanvasCallback(editorHook.onReconnect)}
+                onEdgeDoubleClick={guardCanvasCallback(editorHook.onEdgeDoubleClick)}
+                onNodesDelete={guardCanvasCallback(editorHook.onNodesDelete)}
+                onEdgesDelete={guardCanvasCallback(editorHook.onEdgesDelete)}
                 onInit={(instance) => setReactFlowInstance(instance)}
-                onDrop={dragDrop.onDrop}
-                onDragOver={dragDrop.onDragOver}
-                isValidConnection={editorHook.isValidConnection}
+                onDrop={guardCanvasCallback(dragDrop.onDrop)}
+                onDragOver={guardCanvasCallback(dragDrop.onDragOver)}
+                isValidConnection={(connection) => (
+                  !isFlowInteractionLockedNow()
+                  && editorHook.isValidConnection(connection)
+                )}
                 nodeTypes={nodeTypes}
-                panOnDrag={[1, 2]}
-                selectionOnDrag
+                nodesDraggable={!flowInteractionLocked}
+                nodesConnectable={!flowInteractionLocked}
+                elementsSelectable={!flowInteractionLocked}
+                panOnDrag={flowInteractionLocked ? false : [1, 2]}
+                selectionOnDrag={!flowInteractionLocked}
                 selectionMode={SelectionMode.Partial}
                 fitView
                 className="flow-grid"
@@ -573,8 +729,10 @@ function FlowEditorInner() {
 
               <div
                 className={cn(
-                  'pointer-events-none absolute inset-0 z-20 flex items-center justify-center transition-opacity duration-150',
-                  flowLoading ? 'opacity-100' : 'opacity-0',
+                  'absolute inset-0 z-20 flex items-center justify-center transition-opacity duration-150',
+                  flowInteractionLocked
+                    ? 'pointer-events-auto opacity-100'
+                    : 'pointer-events-none opacity-0',
                 )}
               >
                 <div className="rounded-full border border-border bg-bg-card/85 p-3 shadow-lg backdrop-blur-sm">
@@ -611,7 +769,8 @@ function FlowEditorInner() {
                     autoFocus
                     placeholder={t('flows.search_nodes')}
                     value={editorHook.menuFilter}
-                    onChange={(event) => editorHook.setMenuFilter(event.target.value)}
+                    disabled={flowInteractionLocked}
+                    onChange={guardCanvasCallback((event) => editorHook.setMenuFilter(event.target.value))}
                     className="mb-2 h-8 text-sm"
                   />
                   <div className="flex max-h-64 flex-col gap-1 overflow-y-auto scrollbar-dark">
@@ -620,8 +779,9 @@ function FlowEditorInner() {
                       .map((step) => (
                         <div
                           key={step.id}
+                          aria-disabled={flowInteractionLocked}
                           className="flex cursor-pointer flex-col rounded px-2 py-2 text-sm hover:bg-bg-hover"
-                          onClick={() => editorHook.handleAddNodeFromMenu({ id: step.id, title: step.name, ports: step.ports })}
+                          onClick={guardCanvasCallback(() => editorHook.handleAddNodeFromMenu({ id: step.id, title: step.name, ports: step.ports }))}
                         >
                           <span className="font-medium">{step.name}</span>
                           <span className="text-[10px] text-text-muted">{step.description}</span>
@@ -649,7 +809,8 @@ function FlowEditorInner() {
                           <label className="text-xs font-medium text-text-muted">{t('flows.start_type')}</label>
                           <Input
                             value={(editorHook.selectedNode.data.type as string) || ''}
-                            onChange={(event) => editorHook.updateNodeData('type', event.target.value)}
+                            disabled={flowInteractionLocked}
+                            onChange={guardCanvasCallback((event) => editorHook.updateNodeData('type', event.target.value))}
                             className="h-8 text-sm"
                           />
                         </div>
@@ -657,10 +818,11 @@ function FlowEditorInner() {
                           <label className="text-xs font-medium text-text-muted">{t('flows.base_pack')}</label>
                           <Input
                             value={(editorHook.selectedNode.data.basePack as string) || DEFAULT_BASE_PACK}
-                            onChange={(event) => {
+                            disabled={flowInteractionLocked}
+                            onChange={guardCanvasCallback((event) => {
                               editorHook.updateNodeData('basePack', event.target.value);
                               setFlowMeta((previous) => ({ ...previous, basePack: event.target.value }));
-                            }}
+                            })}
                             className="h-8 text-sm"
                           />
                         </div>
@@ -672,7 +834,8 @@ function FlowEditorInner() {
                           <label className="text-xs font-medium text-text-muted">{t('flows.step_id')}</label>
                           <Input
                             value={(editorHook.selectedNode.data.id as string) || ''}
-                            onChange={(event) => editorHook.updateNodeData('id', event.target.value)}
+                            disabled={flowInteractionLocked}
+                            onChange={guardCanvasCallback((event) => editorHook.updateNodeData('id', event.target.value))}
                             className="h-8 text-sm"
                           />
                         </div>
@@ -680,7 +843,8 @@ function FlowEditorInner() {
                           <label className="text-xs font-medium text-text-muted">{t('flows.step_title')}</label>
                           <Input
                             value={(editorHook.selectedNode.data.title as string) || ''}
-                            onChange={(event) => editorHook.updateNodeData('title', event.target.value)}
+                            disabled={flowInteractionLocked}
+                            onChange={guardCanvasCallback((event) => editorHook.updateNodeData('title', event.target.value))}
                             className="h-8 text-sm"
                           />
                         </div>
@@ -688,7 +852,8 @@ function FlowEditorInner() {
                           <label className="text-xs font-medium text-text-muted">{t('flows.step_type')}</label>
                           <Input
                             value={(editorHook.selectedNode.data.type as string) || ''}
-                            onChange={(event) => editorHook.updateNodeData('type', event.target.value)}
+                            disabled={flowInteractionLocked}
+                            onChange={guardCanvasCallback((event) => editorHook.updateNodeData('type', event.target.value))}
                             className="h-8 text-sm"
                           />
                         </div>
@@ -696,7 +861,8 @@ function FlowEditorInner() {
                           <label className="text-xs font-medium text-text-muted">{t('flows.phase')}</label>
                           <Input
                             value={(editorHook.selectedNode.data.phase as string) || flowMeta.phases[0] || 'graph'}
-                            onChange={(event) => editorHook.updateNodeData('phase', event.target.value)}
+                            disabled={flowInteractionLocked}
+                            onChange={guardCanvasCallback((event) => editorHook.updateNodeData('phase', event.target.value))}
                             className="h-8 text-sm"
                           />
                         </div>
@@ -710,8 +876,8 @@ function FlowEditorInner() {
                           <div className="text-[11px] text-text-muted">{t('flows.port_contract_help')}</div>
                         </div>
                         <div className="flex gap-2">
-                          <Button type="button" variant="outline" size="sm" onClick={() => editorHook.addPortToSelectedNode('input')}>{t('flows.add_input')}</Button>
-                          <Button type="button" variant="outline" size="sm" onClick={() => editorHook.addPortToSelectedNode('output')}>{t('flows.add_output')}</Button>
+                          <Button type="button" variant="outline" size="sm" disabled={flowInteractionLocked} onClick={guardCanvasCallback(() => editorHook.addPortToSelectedNode('input'))}>{t('flows.add_input')}</Button>
+                          <Button type="button" variant="outline" size="sm" disabled={flowInteractionLocked} onClick={guardCanvasCallback(() => editorHook.addPortToSelectedNode('output'))}>{t('flows.add_output')}</Button>
                         </div>
                       </div>
                       <div className="flex flex-col gap-3">
@@ -719,14 +885,15 @@ function FlowEditorInner() {
                           <div key={port.id} className="rounded-xl border border-border bg-bg-card p-3">
                             <div className="mb-2 flex items-center justify-between">
                               <div className="text-xs font-semibold text-text-main">{port.id}</div>
-                              <button type="button" className="text-xs text-rose-400 hover:text-rose-300" onClick={() => editorHook.removeSelectedNodePort(port.id)}>
+                              <button type="button" disabled={flowInteractionLocked} className="text-xs text-rose-400 hover:text-rose-300" onClick={guardCanvasCallback(() => editorHook.removeSelectedNodePort(port.id))}>
                                 {t('flows.remove')}
                               </button>
                             </div>
                             <div className="grid grid-cols-2 gap-2">
                               <Input
                                 value={port.label}
-                                onChange={(event) => editorHook.updateSelectedNodePort(port.id, { label: event.target.value })}
+                                disabled={flowInteractionLocked}
+                                onChange={guardCanvasCallback((event) => editorHook.updateSelectedNodePort(port.id, { label: event.target.value }))}
                                 className="h-8 text-xs"
                               />
                               <div className="grid h-8 grid-cols-2 overflow-hidden rounded-md border border-border bg-bg-main p-0.5">
@@ -734,7 +901,8 @@ function FlowEditorInner() {
                                   <button
                                     key={direction}
                                     type="button"
-                                    onClick={() => editorHook.updateSelectedNodePort(port.id, { direction })}
+                                    disabled={flowInteractionLocked}
+                                    onClick={guardCanvasCallback(() => editorHook.updateSelectedNodePort(port.id, { direction }))}
                                     className={cn(
                                       'rounded-[5px] px-2 text-xs font-semibold transition-colors',
                                       port.direction === direction
@@ -748,12 +916,14 @@ function FlowEditorInner() {
                               </div>
                               <Input
                                 value={port.id}
-                                onChange={(event) => editorHook.updateSelectedNodePort(port.id, { id: event.target.value })}
+                                disabled={flowInteractionLocked}
+                                onChange={guardCanvasCallback((event) => editorHook.updateSelectedNodePort(port.id, { id: event.target.value }))}
                                 className="h-8 text-xs"
                               />
                               <Input
                                 value={port.contracts.join(', ')}
-                                onChange={(event) => editorHook.updateSelectedNodePort(port.id, { contracts: normalizeContracts(event.target.value) })}
+                                disabled={flowInteractionLocked}
+                                onChange={guardCanvasCallback((event) => editorHook.updateSelectedNodePort(port.id, { contracts: normalizeContracts(event.target.value) }))}
                                 className="h-8 text-xs"
                               />
                             </div>
@@ -762,7 +932,7 @@ function FlowEditorInner() {
                       </div>
                     </div>
 
-                    <Button variant="destructive" size="sm" onClick={editorHook.deleteSelectedNode} className="mt-2">
+                    <Button variant="destructive" size="sm" disabled={flowInteractionLocked} onClick={guardCanvasCallback(editorHook.deleteSelectedNode)} className="mt-2">
                       <Trash2 className="mr-2 h-4 w-4" /> {t('flows.delete_node')}
                     </Button>
                   </div>

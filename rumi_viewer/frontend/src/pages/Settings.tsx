@@ -9,6 +9,7 @@ import { Button } from '@/src/components/ui/Button';
 import { Input } from '@/src/components/ui/Input';
 import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
+import { runConfirmedMutation } from '@/src/lib/mutations';
 import { User, Settings as SettingsIcon, Globe, Briefcase, Palette, Moon, Sun, LogIn, Loader2, CheckCircle2, ChevronDown, RefreshCw, DownloadCloud, MonitorOff, ShieldCheck } from 'lucide-react';
 
 function permissionBadgeVariant(permission: DesktopPermissionStatus): 'success' | 'warning' | 'destructive' | 'secondary' {
@@ -52,6 +53,7 @@ export function Settings() {
   const [activeTab, setActiveTab] = useState<'profile' | 'version'>('profile');
   const [formData, setFormData] = useState(profile);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isProfileSaving, setIsProfileSaving] = useState(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [backgroundStatus, setBackgroundStatus] = useState<BackgroundControlStatus | null>(null);
   const [backgroundBusy, setBackgroundBusy] = useState(false);
@@ -145,8 +147,16 @@ export function Settings() {
   }, [profile]);
 
   const handleSave = async () => {
-    await updateProfile(formData);
-    addToast(t('settings.saved'), 'success');
+    if (isProfileSaving) return;
+    setIsProfileSaving(true);
+    try {
+      await runConfirmedMutation(
+        () => updateProfile(formData),
+        () => addToast(t('settings.saved'), 'success'),
+      );
+    } finally {
+      setIsProfileSaving(false);
+    }
   };
 
   const handleConnect = async () => {
@@ -344,7 +354,9 @@ export function Settings() {
 
                     {/* Save - right aligned */}
                     <div className="flex justify-end pt-2">
-                      <Button onClick={handleSave}>{t('settings.save')}</Button>
+                      <Button onClick={handleSave} disabled={isProfileSaving} loading={isProfileSaving}>
+                        {t('settings.save')}
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>

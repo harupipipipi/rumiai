@@ -7,6 +7,7 @@ import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
 import { Card, CardHeader, CardTitle, CardContent } from '@/src/components/ui/Card';
 import { panelRoutes } from '@/src/lib/routes';
+import { runConfirmedMutation } from '@/src/lib/mutations';
 import { ArrowLeft, Play, Loader2 } from 'lucide-react';
 
 export function PackDetail() {
@@ -18,8 +19,10 @@ export function PackDetail() {
   const loadPacks = useAppStore(state => state.loadPacks);
   const togglePack = useAppStore(state => state.togglePack);
   const addToast = useAppStore(state => state.addToast);
+  const pendingPackIds = useAppStore(state => state.pendingPackIds);
 
   const pack = packs.find(p => p.id === id);
+  const isToggling = Boolean(id && pendingPackIds.includes(id));
 
   useEffect(() => {
     if (packs.length === 0) loadPacks();
@@ -44,10 +47,13 @@ export function PackDetail() {
     );
   }
 
-  const handleToggle = () => {
+  const handleToggle = async () => {
+    if (isToggling) return;
     const key = pack.enabled ? 'packs.toggle_off' : 'packs.toggle_on';
-    togglePack(pack.id);
-    addToast(t(key, { name: pack.name }), 'success');
+    await runConfirmedMutation(
+      () => togglePack(pack.id),
+      () => addToast(t(key, { name: pack.name }), 'success'),
+    );
   };
 
   return (
@@ -70,7 +76,13 @@ export function PackDetail() {
           </div>
           <div className="flex items-center gap-3 shrink-0">
             <span className="text-sm text-text-muted">{pack.enabled ? t('packs.enabled') : t('packs.disabled')}</span>
-            <Switch checked={pack.enabled} onCheckedChange={handleToggle} aria-label={`Toggle ${pack.name}`} />
+            <Switch
+              checked={pack.enabled}
+              disabled={isToggling}
+              onCheckedChange={() => { void handleToggle(); }}
+              aria-busy={isToggling}
+              aria-label={`Toggle ${pack.name}`}
+            />
           </div>
         </div>
 

@@ -4,6 +4,7 @@ import {
   fetchDashboard,
   fetchPacks,
   fetchFlows,
+  fetchFlowDetail,
   fetchProfile,
   fetchVersion,
   enablePack as apiEnablePack,
@@ -36,6 +37,7 @@ import {
   normalizeTheme,
 } from './lib/appearance';
 import type { ColorMode, Theme } from './lib/appearance';
+import type { MutationResult } from './lib/mutations';
 
 export type { ColorMode, Theme } from './lib/appearance';
 
@@ -189,14 +191,15 @@ interface AppState {
   refreshRuntimeHealth: () => Promise<void>;
 
   packs: Pack[];
+  pendingPackIds: string[];
   loadPacks: () => Promise<void>;
-  togglePack: (id: string) => Promise<void>;
+  togglePack: (id: string) => Promise<MutationResult>;
 
   flows: Flow[];
   loadFlows: () => Promise<void>;
-  addFlow: (flow: { id: string; name: string; content: string }) => Promise<void>;
-  updateFlow: (id: string, content: string) => Promise<void>;
-  deleteFlow: (id: string) => Promise<void>;
+  addFlow: (flow: { id: string; name: string; content: string }) => Promise<MutationResult>;
+  updateFlow: (id: string, content: string) => Promise<MutationResult>;
+  deleteFlow: (id: string) => Promise<MutationResult>;
 
   dashboard: DashboardData;
   loadDashboard: () => Promise<void>;
@@ -205,7 +208,7 @@ interface AppState {
 
   profile: Profile;
   loadProfile: () => Promise<void>;
-  updateProfile: (profile: Partial<Profile>) => Promise<void>;
+  updateProfile: (profile: Partial<Profile>) => Promise<MutationResult>;
   connectAccount: () => Promise<void>;
 
   version: VersionInfo;
@@ -238,6 +241,10 @@ const defaultProfile: Profile = {
   connected: false,
 };
 
+const allowedProfileLanguages = new Set([
+  'ja', 'en', 'zh', 'ko', 'es', 'fr', 'de', 'pt', 'ru', 'ar',
+]);
+
 const defaultVersion: VersionInfo = {
   app: RUMI_DISPLAY_VERSION,
   kernel: '--',
@@ -266,6 +273,25 @@ function transformUpdateInfo(update: {
     releaseUrl: update.release_url,
     repo: update.repo,
   };
+}
+
+// A pack write is not confirmed until its following list refresh completes.
+// Keep that whole transaction serial so a later write cannot share an older
+// in-flight GET through apiFetch's read deduplication.
+let packMutationQueue: Promise<void> = Promise.resolve();
+let packReadGeneration = 0;
+let flowReadGeneration = 0;
+let profileReadGeneration = 0;
+
+function enqueuePackMutation(
+  mutation: () => Promise<MutationResult>,
+): Promise<MutationResult> {
+  const result = packMutationQueue.then(mutation);
+  packMutationQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -348,33 +374,73 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ============================================================
 
   packs: [],
+  pendingPackIds: [],
 
   loadPacks: async () => {
+    const readGeneration = packReadGeneration;
     set({ isLoading: true, apiError: null });
     try {
       const data = await fetchPacks();
+      if (readGeneration !== packReadGeneration) {
+        set({ isLoading: false });
+        return;
+      }
       set({ packs: transformPacks(data.packs), isLoading: false });
     } catch (e) {
+      if (readGeneration !== packReadGeneration) {
+        set({ isLoading: false });
+        return;
+      }
       const msg = e instanceof Error ? e.message : 'Failed to load packs';
       set({ apiError: msg, isLoading: false });
       get().addToast(msg, 'error');
     }
   },
 
-  togglePack: async (id) => {
-    const pack = get().packs.find((p) => p.id === id);
-    if (!pack) return;
-    try {
-      if (pack.enabled) {
-        await apiDisablePack(id);
-      } else {
-        await apiEnablePack(id);
-      }
-      await get().loadPacks();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to toggle pack';
-      get().addToast(msg, 'error');
+  togglePack: (id) => {
+    const state = get();
+    if (state.pendingPackIds.includes(id)) {
+      return Promise.resolve({ok: false, error: 'Pack update already in progress'});
     }
+    const pack = state.packs.find((candidate) => candidate.id === id);
+    if (!pack) {
+      const error = 'Pack not found';
+      get().addToast(error, 'error');
+      return Promise.resolve({ok: false, error});
+    }
+
+    const targetEnabled = !pack.enabled;
+    packReadGeneration += 1;
+    set((current) => ({
+      pendingPackIds: current.pendingPackIds.concat(id),
+    }));
+
+    return enqueuePackMutation(async () => {
+      try {
+        if (targetEnabled) {
+          await apiEnablePack(id);
+        } else {
+          await apiDisablePack(id);
+        }
+        const data = await fetchPacks({fresh: true});
+        const confirmedPacks = transformPacks(data.packs);
+        set({ packs: confirmedPacks });
+        const confirmedPack = confirmedPacks.find((candidate) => candidate.id === id);
+        if (!confirmedPack || confirmedPack.enabled !== targetEnabled) {
+          throw new Error('Pack update was not confirmed');
+        }
+        return { ok: true };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Failed to toggle pack';
+        get().addToast(msg, 'error');
+        return { ok: false, error: msg };
+      } finally {
+        packReadGeneration += 1;
+        set((current) => ({
+          pendingPackIds: current.pendingPackIds.filter((packId) => packId !== id),
+        }));
+      }
+    });
   },
 
   // ============================================================
@@ -384,11 +450,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   flows: [],
 
   loadFlows: async () => {
+    const readGeneration = flowReadGeneration;
     set({ isLoading: true, apiError: null });
     try {
       const data = await fetchFlows();
+      if (readGeneration !== flowReadGeneration) {
+        set({ isLoading: false });
+        return;
+      }
       set({ flows: transformFlows(data.flows), isLoading: false });
     } catch (e) {
+      if (readGeneration !== flowReadGeneration) {
+        set({ isLoading: false });
+        return;
+      }
       const msg = e instanceof Error ? e.message : 'Failed to load flows';
       set({ apiError: msg, isLoading: false });
       get().addToast(msg, 'error');
@@ -396,36 +471,73 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   addFlow: async (flow) => {
+    flowReadGeneration += 1;
     try {
       await apiCreateFlow({
         flow_id: flow.id,
         yaml_content: flow.content,
         filename: flow.name,
       });
-      await get().loadFlows();
+      const data = await fetchFlows({fresh: true});
+      const confirmedFlows = transformFlows(data.flows);
+      if (!confirmedFlows.some((candidate) => candidate.id === flow.id)) {
+        throw new Error('Flow creation was not confirmed');
+      }
+      set({ flows: confirmedFlows });
+      return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to create flow';
       get().addToast(msg, 'error');
+      return { ok: false, error: msg };
+    } finally {
+      flowReadGeneration += 1;
     }
   },
 
   updateFlow: async (id, content) => {
+    flowReadGeneration += 1;
     try {
       await apiUpdateFlow(id, { yaml_content: content });
-      await get().loadFlows();
+      const [data, detail] = await Promise.all([
+        fetchFlows({fresh: true}),
+        fetchFlowDetail(id, {fresh: true}),
+      ]);
+      const confirmedFlows = transformFlows(data.flows);
+      if (
+        !confirmedFlows.some((candidate) => candidate.id === id)
+        || detail.flow_id !== id
+        || detail.yaml_content !== content
+      ) {
+        throw new Error('Flow update was not confirmed');
+      }
+      set({ flows: confirmedFlows });
+      return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to update flow';
       get().addToast(msg, 'error');
+      return { ok: false, error: msg };
+    } finally {
+      flowReadGeneration += 1;
     }
   },
 
   deleteFlow: async (id) => {
+    flowReadGeneration += 1;
     try {
       await apiDeleteFlow(id);
-      await get().loadFlows();
+      const data = await fetchFlows({fresh: true});
+      const confirmedFlows = transformFlows(data.flows);
+      if (confirmedFlows.some((candidate) => candidate.id === id)) {
+        throw new Error('Flow deletion was not confirmed');
+      }
+      set({ flows: confirmedFlows });
+      return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to delete flow';
       get().addToast(msg, 'error');
+      return { ok: false, error: msg };
+    } finally {
+      flowReadGeneration += 1;
     }
   },
 
@@ -474,10 +586,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   profile: defaultProfile,
 
   loadProfile: async () => {
+    const readGeneration = profileReadGeneration;
     try {
       const data = await fetchProfile();
+      if (readGeneration !== profileReadGeneration) return;
       set({ profile: transformProfile(data.profile) });
     } catch (e) {
+      if (readGeneration !== profileReadGeneration) return;
       // Profile not found (404) is expected for new users
       const msg = e instanceof Error ? e.message : '';
       if (!msg.includes('Profile not found')) {
@@ -487,19 +602,52 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   updateProfile: async (profileUpdate) => {
+    profileReadGeneration += 1;
     try {
       const current = get().profile;
+      const submittedUsername = profileUpdate.username ?? current.username;
+      const submittedLanguage = profileUpdate.language ?? current.language;
+      if (submittedUsername.trim() === '') {
+        throw new Error('username is required and must be a non-empty string');
+      }
+      if (submittedUsername.length > 100) {
+        throw new Error('username must be 100 characters or less');
+      }
+      if (!allowedProfileLanguages.has(submittedLanguage)) {
+        throw new Error('language is not allowed');
+      }
+      const expected: Profile = {
+        avatar: profileUpdate.avatar ?? current.avatar,
+        username: submittedUsername.trim(),
+        language: submittedLanguage,
+        job: profileUpdate.job ?? current.job,
+        connected: current.connected,
+      };
       const payload: Record<string, unknown> = {
-        username: profileUpdate.username ?? current.username,
-        language: profileUpdate.language ?? current.language,
-        icon: profileUpdate.avatar ?? current.avatar,
-        occupation: profileUpdate.job ?? current.job,
+        username: expected.username,
+        language: expected.language,
+        icon: expected.avatar,
+        occupation: expected.job,
       };
       await apiUpdateProfile(payload);
-      await get().loadProfile();
+      const data = await fetchProfile({fresh: true});
+      const confirmed = transformProfile(data.profile);
+      if (
+        confirmed.avatar !== expected.avatar
+        || confirmed.username !== expected.username
+        || confirmed.language !== expected.language
+        || confirmed.job !== expected.job
+      ) {
+        throw new Error('Profile update was not confirmed');
+      }
+      set({ profile: confirmed });
+      return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to update profile';
       get().addToast(msg, 'error');
+      return { ok: false, error: msg };
+    } finally {
+      profileReadGeneration += 1;
     }
   },
 

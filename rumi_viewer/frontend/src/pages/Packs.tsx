@@ -7,6 +7,7 @@ import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
 import { Card } from '@/src/components/ui/Card';
 import { panelRoutes } from '@/src/lib/routes';
+import { runConfirmedMutation } from '@/src/lib/mutations';
 import { AlertTriangle, Search, Package, Loader2, ShieldCheck } from 'lucide-react';
 
 type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning';
@@ -37,6 +38,8 @@ export function Packs() {
   const isLoading = useAppStore(state => state.isLoading);
   const loadPacks = useAppStore(state => state.loadPacks);
   const togglePack = useAppStore(state => state.togglePack);
+  const addToast = useAppStore(state => state.addToast);
+  const pendingPackIds = useAppStore(state => state.pendingPackIds);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
@@ -55,6 +58,16 @@ export function Packs() {
   }
 
   const filteredPacks = packs.filter(pack => pack.name.toLowerCase().includes(search.toLowerCase()));
+
+  const handleToggle = async (pack: Pack) => {
+    if (pendingPackIds.includes(pack.id)) return;
+
+    const key = pack.enabled ? 'packs.toggle_off' : 'packs.toggle_on';
+    await runConfirmedMutation(
+      () => togglePack(pack.id),
+      () => addToast(t(key, { name: pack.name }), 'success'),
+    );
+  };
 
   return (
     <div className="flex-1 overflow-y-auto page-enter">
@@ -123,7 +136,9 @@ export function Packs() {
                   <div className="ml-4 flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
                     <Switch
                       checked={pack.enabled}
-                      onCheckedChange={() => togglePack(pack.id)}
+                      disabled={pendingPackIds.includes(pack.id)}
+                      onCheckedChange={() => { void handleToggle(pack); }}
+                      aria-busy={pendingPackIds.includes(pack.id)}
                       aria-label={`Toggle ${pack.name}`}
                     />
                   </div>
