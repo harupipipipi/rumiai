@@ -2683,6 +2683,13 @@ def test_role_smoke_forces_no_bytecode_environment_and_B(
     command = captured["command"]
     kwargs = captured["kwargs"]
     assert command[:3] == [str(python), "-I", "-B"]
+    for option in (
+        "--application-bundle-root",
+        "--packvm-provisioning-sha256",
+        "--packvm-helper-manifest-sha256",
+        "--packvm-helper-team-id",
+    ):
+        assert command[command.index(option) + 1] == ""
     assert kwargs["env"][BUILDER.PYTHON_BYTECODE_ENVIRONMENT] == "1"
     assert environment[BUILDER.PYTHON_BYTECODE_ENVIRONMENT] == "0"
     assert after == before
@@ -3651,6 +3658,10 @@ def test_bootstrap_and_resource_wiring_match_the_fixed_contract() -> None:
         '"typed"',
         '"defaultspack"',
         '"host_helper"',
+        '"--application-bundle-root"',
+        '"--packvm-provisioning-sha256"',
+        '"--packvm-helper-manifest-sha256"',
+        '"--packvm-helper-team-id"',
     ):
         assert marker in builder
     assert "--health" not in (

@@ -2153,6 +2153,18 @@ def _run_role_smoke(
             runtime_overlay_sha256,
             "--outer-runtime-manifest-sha256",
             outer_runtime_manifest_sha256,
+            # The builder smoke runs before a signed outer ``.app`` exists.
+            # Pass the protocol-v3 absence sentinel explicitly so the smoke
+            # exercises the required production wire without inventing an
+            # unauthenticated PackVM resource binding.
+            "--application-bundle-root",
+            "",
+            "--packvm-provisioning-sha256",
+            "",
+            "--packvm-helper-manifest-sha256",
+            "",
+            "--packvm-helper-team-id",
+            "",
             "--",
             *role_arguments,
         ]
