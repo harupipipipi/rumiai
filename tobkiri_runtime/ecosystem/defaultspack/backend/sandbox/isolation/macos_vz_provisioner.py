@@ -716,7 +716,23 @@ class MacOSVZProvisioner:
                 VZ_INSTANCE,
                 attestation_digest=str(state["attestation_digest"]),
             )
-        except (OSError, ValueError) as exc:
+        except FileNotFoundError:
+            return PackVMDoctor(
+                False,
+                PACKVM_BACKEND_ID,
+                VZ_PLATFORM,
+                VZ_INSTANCE,
+                reason="PackVM VZ has not completed authenticated provisioning",
+            )
+        except OSError:
+            return PackVMDoctor(
+                False,
+                PACKVM_BACKEND_ID,
+                VZ_PLATFORM,
+                VZ_INSTANCE,
+                reason="PackVM VZ authenticated state could not be verified",
+            )
+        except ValueError as exc:
             return PackVMDoctor(False, PACKVM_BACKEND_ID, VZ_PLATFORM, VZ_INSTANCE, reason=str(exc))
 
     def readiness_snapshot(self) -> dict[str, Any]:

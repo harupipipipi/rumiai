@@ -196,6 +196,23 @@ def test_prepare_declares_three_gib_download_without_downloading(
     assert plan.image_size_bytes == VZ_RAW_EFI_IMAGE_DECLARED_BYTES
 
 
+def test_doctor_reports_bounded_reason_before_provisioning(tmp_path: Path) -> None:
+    """A fresh install reports not-provisioned without exposing its host path."""
+
+    state_dir = (tmp_path / "private-user-state" / "packvm-vz").resolve()
+    provisioner = MacOSVZProvisioner(
+        state_dir=state_dir,
+        platform_system="darwin",
+        machine="arm64",
+    )
+
+    doctor = provisioner.doctor()
+
+    assert doctor.ready is False
+    assert doctor.reason == "PackVM VZ has not completed authenticated provisioning"
+    assert str(tmp_path) not in str(doctor.reason)
+
+
 def test_seed_and_template_tampering_are_rejected_separately(
     provisioner_fixture: tuple[MacOSVZProvisioner, MacOSVZAssetManifest, Path],
 ) -> None:
