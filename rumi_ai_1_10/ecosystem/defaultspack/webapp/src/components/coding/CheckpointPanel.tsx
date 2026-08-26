@@ -12,10 +12,12 @@ export function CheckpointPanel({
   workspaceId,
   initialCheckpoints,
   initialDiff,
+  onActionResult,
 }: {
   workspaceId?: string | null;
   initialCheckpoints?: CodingCheckpoint[];
   initialDiff?: CodingDiffResponse;
+  onActionResult?: (result: unknown) => void;
 }) {
   const [checkpoints, setCheckpoints] = useState<CodingCheckpoint[]>(initialCheckpoints ?? []);
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<string>("");
@@ -77,6 +79,7 @@ export function CheckpointPanel({
     setMessage(null);
     try {
       const result = await codingResources.restoreCodingSnapshot(selectedSnapshotId, { workspace_id: workspaceId });
+      onActionResult?.(result);
       const approvalRequired = Boolean(result.approval_required || result.approval_request);
       setMessage(approvalRequired ? "Approval required" : `Restored ${selectedSnapshotId}`);
     } catch (err) {

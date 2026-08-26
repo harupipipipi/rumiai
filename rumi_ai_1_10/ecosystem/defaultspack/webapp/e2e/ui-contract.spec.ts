@@ -10,6 +10,8 @@ const historyChatDropMime = "application/rumi-history-chat";
 type ApiMockOptions = {
   onStreamRequest?: (payload: Record<string, unknown>) => void;
   streamEvents?: (message: Record<string, unknown>) => Record<string, unknown>[];
+  codingApprovalAfterTerminal?: boolean;
+  codingApprovalAfterRestore?: boolean;
 };
 
 function ok(data: unknown) {
@@ -449,6 +451,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
 
   let currentSettingsValues = JSON.parse(JSON.stringify(settingsValues)) as typeof settingsValues;
   let conversationToolPreferences: Record<string, unknown> = {};
+  let codingApprovalRequest: Record<string, unknown> | null = null;
   const mcpServers = [
     { server_id: "filesystem", name: "Filesystem MCP", transport: "stdio", connected: true, permissions: { approved: true }, tools: ["mcp_fs_read_file"] },
   ];
@@ -686,12 +689,53 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       });
     }
 
+    if (path === "/api/coding/terminal/exec" && method === "POST" && options.codingApprovalAfterTerminal) {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      codingApprovalRequest = {
+        request_id: "apr-terminal-write",
+        operation: "terminal.exec",
+        risk_level: "high",
+        status: "pending",
+        display_summary: "terminal.exec: write qa-file.txt",
+        created_at: now,
+      };
+      return fulfill(route, {
+        command: String(payload.command ?? ""),
+        classification: "high",
+        risk_reasons: ["write"],
+        approval_required: true,
+        approval_request_id: "apr-terminal-write",
+        exit_code: null,
+        stdout: "",
+        stderr: "",
+      });
+    }
+
+    if (path === "/api/coding/files/restore" && method === "POST" && options.codingApprovalAfterRestore) {
+      codingApprovalRequest = {
+        request_id: "apr-checkpoint-restore",
+        operation: "file.restore",
+        risk_level: "high",
+        status: "pending",
+        display_summary: "file.restore: checkpoint-1",
+        created_at: now,
+      };
+      return fulfill(route, {
+        approval_required: true,
+        approval_request: codingApprovalRequest,
+      });
+    }
+
     if (path === "/api/coding/approvals") {
-      return fulfill(route, { requests: [], pending: [], count: 0 });
+      const requests = codingApprovalRequest ? [codingApprovalRequest] : [];
+      return fulfill(route, { requests, pending: requests, count: requests.length });
     }
 
     if (path === "/api/coding/checkpoints") {
-      return fulfill(route, { checkpoints: [], workspace_id: "ws-main", workspace_root: "/repo" });
+      const checkpoints = options.codingApprovalAfterRestore
+        ? [{ snapshot_id: "checkpoint-1", path: "/repo/.rumi/checkpoints/checkpoint-1" }]
+        : [];
+      return fulfill(route, { checkpoints, workspace_id: "ws-main", workspace_root: "/repo" });
     }
 
     if (path === "/api/coding/rumi-log") {
@@ -782,8 +826,8 @@ async function openDefaultspack(page: Page, path = "/chat", options: ApiMockOpti
   await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
 }
 
-async function openCodingWidget(page: Page) {
-  await openDefaultspack(page, "/chat");
+async function openCodingWidget(page: Page, options: ApiMockOptions = {}) {
+  await openDefaultspack(page, "/chat", options);
   await page.locator("textarea.rumi-composer-textarea").fill("/coding");
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/coding(?:\?|$)/);
@@ -1282,4 +1326,32 @@ test("mocked coding cockpit registers approves and connects an MCP server", asyn
   await expect(mcpServers).toContainText("contract_digest");
   await expect(mcpServers).toContainText("approved");
   await expect(page.getByText("MCP connected: contract_digest (1 tools)")).toBeVisible();
+});
+
+test("coding approval queue refreshes immediately after terminal requests approval", async ({ page }) => {
+  await openCodingWidget(page, { codingApprovalAfterTerminal: true });
+
+  const terminal = page.getByLabel("Terminal");
+  await terminal.locator("input").fill("write qa-file.txt");
+  await terminal.getByTitle("Run command").click();
+
+  await expect(terminal).toContainText("Approval required");
+  const approvals = page.getByLabel("Approval queue");
+  await expect(approvals).toContainText("terminal.exec");
+  await expect(approvals.getByTitle("Approve")).toBeVisible();
+  await expect(approvals.getByTitle("Deny")).toBeVisible();
+});
+
+test("coding approval queue refreshes immediately after checkpoint restore requests approval", async ({ page }) => {
+  await openCodingWidget(page, { codingApprovalAfterRestore: true });
+
+  const checkpoints = page.getByLabel("Checkpoints");
+  await expect(checkpoints.locator("select")).toHaveValue("checkpoint-1");
+  await checkpoints.getByTitle("Restore checkpoint").click();
+
+  await expect(checkpoints).toContainText("Approval required");
+  const approvals = page.getByLabel("Approval queue");
+  await expect(approvals).toContainText("file.restore");
+  await expect(approvals.getByTitle("Approve")).toBeVisible();
+  await expect(approvals.getByTitle("Deny")).toBeVisible();
 });

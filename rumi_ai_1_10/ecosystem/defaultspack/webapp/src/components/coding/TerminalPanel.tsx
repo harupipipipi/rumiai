@@ -51,11 +51,13 @@ export function TerminalPanel({
   initialLogs = EMPTY_LOGS,
   approvedDecision,
   storageKey,
+  onActionResult,
 }: {
   workspaceId?: string | null;
   initialLogs?: TerminalLog[];
   approvedDecision?: ApprovedTerminalDecision | null;
   storageKey?: string;
+  onActionResult?: (result: unknown) => void;
 }) {
   const [command, setCommand] = useState("git status");
   const [logs, setLogs] = useState<TerminalLog[]>(() => readStoredLogs(storageKey, initialLogs));
@@ -95,6 +97,7 @@ export function TerminalPanel({
     try {
       const result = await codingResources.runTerminalCommand(nextCommand, { workspace_id: workspaceId, timeout });
       pushLog({ ...result, id: `${Date.now()}:${nextCommand}`, timeout, workspace_id: workspaceId ?? null });
+      onActionResult?.(result);
     } catch (err) {
       pushLog({
         id: `${Date.now()}:error`,
@@ -135,6 +138,7 @@ export function TerminalPanel({
           { ...result, id: `${Date.now()}:approved:${pending.command}`, replay_status: "replayed" as const },
           ...items.map((item) => (item.id === pending.id ? { ...item, replay_status: "replayed" as const } : item)),
         ].slice(0, 8));
+        onActionResult?.(result);
       } catch (err) {
         pushLog({
           id: `${Date.now()}:approval-error`,
@@ -151,7 +155,7 @@ export function TerminalPanel({
     };
 
     void retry();
-  }, [approvedDecision, logs, workspaceId]);
+  }, [approvedDecision, logs, onActionResult, workspaceId]);
 
   return (
     <section className="border-b border-zinc-800/60 p-3" aria-label="Terminal">

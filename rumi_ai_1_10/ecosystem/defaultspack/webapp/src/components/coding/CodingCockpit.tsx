@@ -15,6 +15,7 @@ import { CheckpointPanel } from "./CheckpointPanel";
 import { DiffPanel } from "./DiffPanel";
 import { RumiLogPanel } from "./RumiLogPanel";
 import { TerminalPanel, type ApprovedTerminalDecision } from "./TerminalPanel";
+import { nextApprovalQueueRefreshSignal } from "./approvalQueueSync";
 
 function workspaceLabel(workspace: CodingWorkspaceRecord): string {
   return workspace.label || workspace.workspace_id;
@@ -73,6 +74,7 @@ export function CodingCockpit({
   const [sessionTask, setSessionTask] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [approvedTerminalDecision, setApprovedTerminalDecision] = useState<ApprovedTerminalDecision | null>(null);
+  const [approvalRefreshSignal, setApprovalRefreshSignal] = useState(0);
   const [mcpServerId, setMcpServerId] = useState("");
   const [mcpCommand, setMcpCommand] = useState("");
   const [mcpArgs, setMcpArgs] = useState("");
@@ -135,6 +137,10 @@ export function CodingCockpit({
       nonce: Date.now(),
     });
   };
+
+  const handleCodingActionResult = useCallback((result: unknown) => {
+    setApprovalRefreshSignal((current) => nextApprovalQueueRefreshSignal(current, result));
+  }, []);
 
   const connectMcpServer = async () => {
     const serverId = mcpServerId.trim();
@@ -237,12 +243,19 @@ export function CodingCockpit({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <RumiLogPanel workspaceId={activeWorkspaceId} />
-        <ApprovalQueue onApproved={handleApprovalApproved} />
+        <ApprovalQueue
+          onApproved={handleApprovalApproved}
+          refreshSignal={approvalRefreshSignal}
+        />
         <DiffPanel workspaceId={activeWorkspaceId} />
-        <CheckpointPanel workspaceId={activeWorkspaceId} />
+        <CheckpointPanel
+          workspaceId={activeWorkspaceId}
+          onActionResult={handleCodingActionResult}
+        />
         <TerminalPanel
           workspaceId={activeWorkspaceId}
           approvedDecision={approvedTerminalDecision}
+          onActionResult={handleCodingActionResult}
           storageKey={`rumi-terminal-logs:${consoleScopeKey ?? activeWorkspaceId ?? "default"}`}
         />
 
