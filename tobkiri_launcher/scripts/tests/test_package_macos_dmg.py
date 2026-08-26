@@ -99,7 +99,8 @@ case "${1:-}" in
       printf '%s\\n' '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>com.apple.security.virtualization</key><true/></dict></plist>'
     else
       printf '%s\\n' 'Identifier=dev.tobkiri.launcher.packvm-vz-helper' >&2
-      printf '%s\\n' 'designated => identifier "dev.tobkiri.launcher.packvm-vz-helper"' >&2
+      printf '%s\\n' 'Signature=adhoc' >&2
+      printf '%s\\n' '# designated => cdhash H"0123456789abcdef0123456789abcdef01234567"' >&2
     fi
     ;;
 esac
@@ -641,6 +642,8 @@ def test_packager_uses_explicit_sidecar_and_outer_verification_not_deep_resignin
     source = SCRIPT.read_text(encoding="utf-8")
     assert "verify_packvm_helper_signature" in source
     assert "codesign --verify --strict --all-architectures" in source
+    assert "Signature=adhoc" in source
+    assert "designated => cdhash" in source
     assert "plutil -extract 'com\\.apple\\.security\\.virtualization'" in source
     assert "codesign --verify --deep" not in source
     assert "codesign --force --deep" not in source

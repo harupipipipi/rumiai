@@ -477,11 +477,19 @@ verify_packvm_helper_signature() {
     printf '%s\n' 'PackVM VZ helper has an unexpected identifier' >&2
     return 1
   }
-  grep -Fq "designated => identifier \"$packvm_helper_identifier\"" \
-    <<<"$helper_details" || {
-    printf '%s\n' 'PackVM VZ helper has an unexpected designated requirement' >&2
-    return 1
-  }
+  if grep -Fqx 'Signature=adhoc' <<<"$helper_details"; then
+    grep -Eq '^# designated => cdhash H"[0-9a-fA-F]{40}"$' \
+      <<<"$helper_details" || {
+      printf '%s\n' 'PackVM VZ helper has an invalid ad-hoc requirement' >&2
+      return 1
+    }
+  else
+    grep -Fq "designated => identifier \"$packvm_helper_identifier\"" \
+      <<<"$helper_details" || {
+      printf '%s\n' 'PackVM VZ helper has an unexpected designated requirement' >&2
+      return 1
+    }
+  fi
   codesign -d --entitlements :- "$helper_path" 2>/dev/null \
     | plutil -extract 'com\.apple\.security\.virtualization' raw -o - - \
     | grep -qx true || {
