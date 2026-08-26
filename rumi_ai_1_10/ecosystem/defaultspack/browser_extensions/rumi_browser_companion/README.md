@@ -27,6 +27,7 @@ This gives Rumi a "computer use + browser use" path where the model can inspect 
 
    - `Server URL` such as `http://127.0.0.1:8766`
    - `Pairing Token`
+   - Optional `Profile Label`, for example `Work` or `Personal`
 
 6. Click `Poll Bridge Now` to confirm the extension can connect.
 
@@ -45,12 +46,39 @@ The extension talks to these local endpoints:
   "client": {
     "client_id": "uuid",
     "label": "My Edge Companion",
+    "client_label": "My Edge Companion",
+    "browser_profile_id": "profile-uuid",
+    "profile_label": "Work",
+    "installation_id": "install-uuid",
+    "client_profile": {
+      "browser_profile_id": "profile-uuid",
+      "profile_label": "Work",
+      "installation_id": "install-uuid",
+      "extension_id": "extension-id",
+      "browser_name": "Microsoft Edge",
+      "browser_version": "136.0.0.0"
+    },
     "browser_name": "Microsoft Edge",
     "browser_version": "136.0.0.0",
     "extension_version": "0.1.0",
     "platform": "Win32",
     "user_agent": "...",
     "active_tab_id": 123,
+    "capabilities": {
+      "multi_browser": true,
+      "user_session_cookies": true,
+      "semantic_dom": true,
+      "semantic_targeting": [
+        "element_id",
+        "selector",
+        "text",
+        "text_query",
+        "accessible_name",
+        "role",
+        "semantic_id",
+        "nearby_text"
+      ]
+    },
     "tabs": [
       {
         "id": 123,
@@ -96,19 +124,65 @@ The extension talks to these local endpoints:
     {
       "command_id": "cmd_123",
       "ok": true,
+      "browser_profile_id": "profile-uuid",
+      "profile_label": "Work",
+      "installation_id": "install-uuid",
+      "client_profile": {
+        "browser_profile_id": "profile-uuid",
+        "profile_label": "Work",
+        "installation_id": "install-uuid",
+        "extension_id": "extension-id",
+        "browser_name": "Microsoft Edge",
+        "browser_version": "136.0.0.0"
+      },
+      "elements": [
+        {
+          "element_id": "rumi-el-...",
+          "semantic_id": "button:button:submit",
+          "accessible_name": "Submit"
+        }
+      ],
       "result": {
         "snapshot": {
+          "schema_id": "rumi.browser.semantic_dom_v2",
           "schema_version": "semantic_dom_v2",
           "url": "https://example.com",
           "title": "Example",
+          "snapshot_metadata": {
+            "source": "rumi_browser_companion",
+            "browser_profile_id": "profile-uuid",
+            "profile_label": "Work",
+            "installation_id": "install-uuid"
+          },
+          "client_profile": {
+            "browser_profile_id": "profile-uuid",
+            "profile_label": "Work",
+            "installation_id": "install-uuid"
+          },
+          "browser_profile_id": "profile-uuid",
+          "profile_label": "Work",
+          "installation_id": "install-uuid",
+          "elements": [
+            {
+              "element_id": "rumi-el-...",
+              "semantic_id": "button:button:submit",
+              "accessible_name": "Submit"
+            }
+          ],
           "nodes": [
             {
               "element_id": "rumi-el-...",
               "semantic_id": "button:button:submit",
               "accessible_name": "Submit",
               "labels": ["Submit"],
+              "nearby_text": "Contact form",
+              "viewport_center": {"x": 540, "y": 320},
+              "page_rect": {"x": 500, "y": 300, "width": 80, "height": 40},
+              "page_center": {"x": 540, "y": 320},
               "action_hints": ["extract", "click", "press"],
-              "selector_hint": "button.primary"
+              "selector_hint": "button.primary",
+              "selector_hints": ["#submit", "button.primary"],
+              "xpath_hint": "/html[1]/body[1]/button[1]"
             }
           ]
         }
@@ -132,6 +206,16 @@ The extension talks to these local endpoints:
 - `page.extract`
 - `page.highlight`
 - `page.clear_highlight`
+
+Element actions can target a tab by `tab_id` and an element by `element_id`, `selector`, or `selectors`. For semantic targeting, the extension also accepts:
+
+- `text` or `text_query`
+- `accessible_name`
+- `role`
+- `semantic_id`
+- `nearby_text`
+
+For `page.extract` and `page.highlight`, text and accessibility matching prefers direct, smaller semantic elements over broad containers such as `html`, `body`, or large parent `div` elements.
 
 ## Safety Notes
 

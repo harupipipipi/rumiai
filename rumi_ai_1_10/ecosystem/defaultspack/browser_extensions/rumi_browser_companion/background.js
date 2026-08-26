@@ -2,11 +2,14 @@ const DEFAULT_SETTINGS = {
   serverUrl: "http://127.0.0.1:8766",
   pairingToken: "",
   clientLabel: "",
+  profileLabel: "",
   pollIntervalMinutes: 1
 };
 
 const STORAGE_KEY = "rumiBrowserCompanionSettings";
 const CLIENT_ID_KEY = "rumiBrowserCompanionClientId";
+const INSTALLATION_ID_KEY = "rumiBrowserCompanionInstallationId";
+const BROWSER_PROFILE_ID_KEY = "rumiBrowserCompanionProfileId";
 const LAST_STATUS_KEY = "rumiBrowserCompanionLastStatus";
 const ALARM_NAME = "rumi-browser-companion-poll";
 const BRIDGE_POLL_PATH = "/api/tools/browser-companion/bridge/poll";
@@ -16,7 +19,7 @@ const SEARCH_HOME_ROUTE_MAX_AGE_MS = 1000 * 60 * 60 * 6;
 
 chrome.runtime.onInstalled.addListener(async () => {
   const settings = await ensureSettings();
-  await ensureClientId();
+  await ensureClientIdentity();
   chrome.alarms.create(ALARM_NAME, { periodInMinutes: normalizePollInterval(settings.pollIntervalMinutes) });
   await chrome.runtime.openOptionsPage();
   void pollBridge("onInstalled");
@@ -24,7 +27,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 
 chrome.runtime.onStartup.addListener(async () => {
   const settings = await ensureSettings();
-  await ensureClientId();
+  await ensureClientIdentity();
   chrome.alarms.create(ALARM_NAME, { periodInMinutes: normalizePollInterval(settings.pollIntervalMinutes) });
   void pollBridge("onStartup");
 });
@@ -120,14 +123,67 @@ async function readLocalSettingsWithSyncMigration() {
   return null;
 }
 
-async function ensureClientId() {
-  const stored = await chrome.storage.local.get(CLIENT_ID_KEY);
-  if (stored[CLIENT_ID_KEY]) {
-    return stored[CLIENT_ID_KEY];
+async function ensureClientIdentity() {
+  const stored = await chrome.storage.local.get([
+    CLIENT_ID_KEY,
+    INSTALLATION_ID_KEY,
+    BROWSER_PROFILE_ID_KEY
+  ]);
+  let clientId = stringOrEmpty(stored[CLIENT_ID_KEY]);
+  let installationId = stringOrEmpty(stored[INSTALLATION_ID_KEY]);
+  let browserProfileId = stringOrEmpty(stored[BROWSER_PROFILE_ID_KEY]);
+
+  if (!clientId && browserProfileId) {
+    clientId = browserProfileId;
   }
-  const clientId = self.crypto && crypto.randomUUID ? crypto.randomUUID() : `rumi-${Date.now()}`;
-  await chrome.storage.local.set({ [CLIENT_ID_KEY]: clientId });
-  return clientId;
+  if (!installationId && clientId) {
+    installationId = clientId;
+  }
+  if (!browserProfileId && clientId) {
+    browserProfileId = clientId;
+  }
+  if (!installationId) {
+    installationId = generateStableId("install");
+  }
+  if (!browserProfileId) {
+    browserProfileId = generateStableId("profile");
+  }
+  if (!clientId) {
+    clientId = browserProfileId;
+  }
+
+  const updates = {};
+  if (stored[CLIENT_ID_KEY] !== clientId) {
+    updates[CLIENT_ID_KEY] = clientId;
+  }
+  if (stored[INSTALLATION_ID_KEY] !== installationId) {
+    updates[INSTALLATION_ID_KEY] = installationId;
+  }
+  if (stored[BROWSER_PROFILE_ID_KEY] !== browserProfileId) {
+    updates[BROWSER_PROFILE_ID_KEY] = browserProfileId;
+  }
+  if (Object.keys(updates).length > 0) {
+    await chrome.storage.local.set(updates);
+  }
+  return {
+    client_id: clientId,
+    installation_id: installationId,
+    browser_profile_id: browserProfileId
+  };
+}
+
+async function ensureClientId() {
+  const identity = await ensureClientIdentity();
+  return identity.client_id;
+}
+
+function generateStableId(prefix) {
+  const raw = self.crypto && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}-${raw}`;
+}
+
+function stringOrEmpty(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 async function getStatus() {
@@ -154,7 +210,7 @@ function normalizePollInterval(value) {
 
 async function pollBridge(trigger) {
   const settings = await getSettings();
-  const clientId = await ensureClientId();
+  const identity = await ensureClientIdentity();
   if (!settings.serverUrl || !settings.pairingToken) {
     return setStatus({
       ok: false,
@@ -164,7 +220,7 @@ async function pollBridge(trigger) {
     });
   }
 
-  const metadata = await buildClientMetadata(settings, clientId);
+  const metadata = await buildClientMetadata(settings, identity);
   const requestBody = {
     event: "poll",
     trigger,
@@ -215,13 +271,17 @@ async function pollBridge(trigger) {
   }
 }
 
-async function buildClientMetadata(settings, clientId) {
+async function buildClientMetadata(settings, identity) {
   const browser = detectBrowser();
   const tabs = await getTabsSummary();
   const activeTab = tabs.find((tab) => tab.active) || null;
+  const profile = buildClientProfileMetadata(settings, identity, browser);
   return {
-    client_id: clientId,
-    label: settings.clientLabel || `${browser.name} Companion`,
+    client_id: identity.client_id,
+    ...profile,
+    label: settings.clientLabel || profile.profile_label || `${browser.name} Companion`,
+    client_label: settings.clientLabel || "",
+    client_profile: profile,
     extension_version: chrome.runtime.getManifest().version,
     browser_name: browser.name,
     browser_version: browser.version,
@@ -239,9 +299,25 @@ async function buildClientMetadata(settings, clientId) {
       dom_snapshot: true,
       semantic_dom: true,
       accessible_labels: true,
+      semantic_targeting: ["element_id", "selector", "text", "text_query", "accessible_name", "role", "semantic_id", "nearby_text"],
       element_actions: ["click", "type", "press", "scroll", "extract", "highlight", "clear_highlight"]
     },
     generated_at: new Date().toISOString()
+  };
+}
+
+function buildClientProfileMetadata(settings, identity, browser) {
+  const profileLabel =
+    stringOrEmpty(settings.profileLabel) ||
+    stringOrEmpty(settings.clientLabel) ||
+    `${browser.name} Profile`;
+  return {
+    browser_profile_id: identity.browser_profile_id,
+    profile_label: profileLabel,
+    installation_id: identity.installation_id,
+    extension_id: chrome.runtime.id || "",
+    browser_name: browser.name,
+    browser_version: browser.version
   };
 }
 
@@ -309,6 +385,7 @@ async function executeBridgeCommand(command) {
   try {
     const result = await dispatchCommand(command);
     const semantics = actionResultSemantics(action, result);
+    const publicResultFields = topLevelResultFields(result);
     return {
       command_id: command.command_id || null,
       action,
@@ -316,6 +393,7 @@ async function executeBridgeCommand(command) {
       started_at: startedAt,
       finished_at: new Date().toISOString(),
       ...semantics,
+      ...publicResultFields,
       result
     };
   } catch (error) {
@@ -330,6 +408,30 @@ async function executeBridgeCommand(command) {
       error: String(error && error.message ? error.message : error)
     };
   }
+}
+
+function topLevelResultFields(result) {
+  const fields = {};
+  if (!result || typeof result !== "object") {
+    return fields;
+  }
+  for (const key of [
+    "snapshot",
+    "elements",
+    "client_profile",
+    "browser_profile_id",
+    "profile_label",
+    "installation_id",
+    "tab",
+    "tabs",
+    "active_tab_id",
+    "url"
+  ]) {
+    if (result[key] !== undefined) {
+      fields[key] = result[key];
+    }
+  }
+  return fields;
 }
 
 function actionResultSemantics(action, result) {
@@ -452,6 +554,9 @@ async function captureVisibleTab(payload) {
 
 async function captureDomSnapshot(payload) {
   const tabId = await resolveTabId(payload.tab_id);
+  const settings = await getSettings();
+  const identity = await ensureClientIdentity();
+  const clientProfile = buildClientProfileMetadata(settings, identity, detectBrowser());
   const snapshotOptions = {};
   if (payload.include_hidden !== undefined) {
     snapshotOptions.includeHidden = Boolean(payload.include_hidden);
@@ -481,18 +586,26 @@ async function captureDomSnapshot(payload) {
 
   const snapshotRequest = {
     type: "rumi:dom-snapshot",
-    maxNodes: payload.limit
+    maxNodes: payload.limit,
+    clientProfile
   };
   if (Object.keys(snapshotOptions).length > 0) {
     snapshotRequest.options = snapshotOptions;
   }
 
-  const snapshot = await sendToTab(tabId, snapshotRequest);
+  const rawSnapshot = await sendToTab(tabId, snapshotRequest);
   const tab = await chrome.tabs.get(tabId);
+  const snapshot = enrichSnapshot(rawSnapshot, clientProfile, tab);
+  const elements = Array.isArray(snapshot.nodes) ? snapshot.nodes : [];
   const result = {
     tab: tabSummary(tab),
     active_tab_id: tab.id,
     snapshot,
+    elements,
+    client_profile: clientProfile,
+    browser_profile_id: clientProfile.browser_profile_id,
+    profile_label: clientProfile.profile_label,
+    installation_id: clientProfile.installation_id,
     requires_foreground: false,
     can_parallel_user_work: true
   };
@@ -506,6 +619,9 @@ async function captureDomSnapshot(payload) {
 
 async function sendElementCommand(action, payload) {
   const tabId = await resolveTabId(payload.tab_id);
+  const settings = await getSettings();
+  const identity = await ensureClientIdentity();
+  const clientProfile = buildClientProfileMetadata(settings, identity, detectBrowser());
   const result = await sendToTab(tabId, {
     type: "rumi:element-command",
     command: {
@@ -519,9 +635,34 @@ async function sendElementCommand(action, payload) {
     tab: tabSummary(tab),
     active_tab_id: tab.id,
     url: tab.url || "",
+    client_profile: clientProfile,
+    browser_profile_id: clientProfile.browser_profile_id,
+    profile_label: clientProfile.profile_label,
+    installation_id: clientProfile.installation_id,
     requires_foreground: false,
     can_parallel_user_work: true
   };
+}
+
+function enrichSnapshot(snapshot, clientProfile, tab) {
+  const value = snapshot && typeof snapshot === "object" ? { ...snapshot } : { ok: false, nodes: [] };
+  const elements = Array.isArray(value.nodes) ? value.nodes : Array.isArray(value.elements) ? value.elements : [];
+  value.nodes = elements;
+  value.elements = elements;
+  value.client_profile = clientProfile;
+  value.browser_profile_id = clientProfile.browser_profile_id;
+  value.profile_label = clientProfile.profile_label;
+  value.installation_id = clientProfile.installation_id;
+  value.snapshot_metadata = {
+    ...(value.snapshot_metadata && typeof value.snapshot_metadata === "object" ? value.snapshot_metadata : {}),
+    source: "rumi_browser_companion",
+    tab_id: tab.id,
+    window_id: tab.windowId,
+    browser_profile_id: clientProfile.browser_profile_id,
+    profile_label: clientProfile.profile_label,
+    installation_id: clientProfile.installation_id
+  };
+  return value;
 }
 
 async function sendToTab(tabId, message) {

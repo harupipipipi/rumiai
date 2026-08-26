@@ -1974,6 +1974,64 @@ def test_authority_events_are_core_only(tmp_path, monkeypatch):
     assert core["events"]
 
 
+@pytest.mark.parametrize("actor_kind", ("object", "mapping"))
+def test_authority_core_principal_shape_has_grant_admin_parity(tmp_path, monkeypatch, actor_kind):
+    from core_runtime.access_tokens import AuthenticatedPrincipal
+
+    service, grants, store = _service(tmp_path, monkeypatch)
+    grants.grant_permission("profile:work", "model.invoke", {"provider_ids": ["openai"]})
+    grants.grant_permission("profile:personal", "network.egress", {"domains": ["example.com"]})
+    store.audit("authority_request_denied", {"principal_id": "profile:personal"})
+    actor = AuthenticatedPrincipal.legacy_root() if actor_kind == "object" else {"core_role": True}
+
+    listed = service.list_grants(actor_principal=actor)
+    deleted = service.delete_grant("profile:personal", "network.egress", actor_principal=actor)
+    events = service.events(actor_principal=actor)
+
+    assert set(listed["grants"]) >= {"profile:work", "profile:personal"}
+    assert deleted == {
+        "success": True,
+        "principal_id": "profile:personal",
+        "permission_id": "network.egress",
+        "revoked": True,
+    }
+    assert events["_sse"] is True
+    assert events["events"]
+
+
+@pytest.mark.parametrize("actor_kind", ("object", "mapping"))
+def test_authority_non_core_principal_shape_is_denied_grant_admin_access(tmp_path, monkeypatch, actor_kind):
+    from core_runtime.access_tokens import AuthenticatedPrincipal
+
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    grants.grant_permission("profile:work", "model.invoke", {"provider_ids": ["openai"]})
+    actor = (
+        AuthenticatedPrincipal(
+            token_id="tok",
+            profile_id="",
+            surface_id="mobile",
+            device_id="phone-1",
+            role="mobile_client",
+            audiences=("kernel_api",),
+            issued_at="",
+            expires_at=None,
+        )
+        if actor_kind == "object"
+        else {"core_role": False, "profile_id": ""}
+    )
+
+    listed = service.list_grants(actor_principal=actor)
+    deleted = service.delete_grant("profile:work", "model.invoke", actor_principal=actor)
+    events = service.events(actor_principal=actor)
+
+    for result in (listed, deleted, events):
+        assert result["success"] is False
+        assert result["status_code"] == 403
+    grant = grants.get_grant("profile:work")
+    assert grant is not None
+    assert grant.permissions["model.invoke"].enabled is True
+
+
 def test_authority_request_resource_redacts_secret_like_keys(tmp_path, monkeypatch):
     service, _, store = _service(tmp_path, monkeypatch)
 

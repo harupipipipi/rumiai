@@ -83,18 +83,32 @@
 
     (async () => {
       if (message.type === "rumi:dom-snapshot") {
+        const viewport = buildViewportMetadata();
+        const nodes = collectSnapshot(Number(message.maxNodes) || 300, message.options || message);
+        const clientProfile = normalizeClientProfile(message.clientProfile || message.profile || {});
         sendResponse({
           ok: true,
+          schema_id: "rumi.browser.semantic_dom_v2",
           schema_version: "semantic_dom_v2",
           url: location.href,
           title: document.title,
-          viewport: {
-            width: window.innerWidth,
-            height: window.innerHeight,
-            scrollX: window.scrollX,
-            scrollY: window.scrollY
+          viewport,
+          snapshot_metadata: {
+            source: "rumi_browser_companion",
+            schema_id: "rumi.browser.semantic_dom_v2",
+            schema_version: "semantic_dom_v2",
+            captured_at: new Date().toISOString(),
+            node_count: nodes.length,
+            browser_profile_id: clientProfile.browser_profile_id || "",
+            profile_label: clientProfile.profile_label || "",
+            installation_id: clientProfile.installation_id || ""
           },
-          nodes: collectSnapshot(Number(message.maxNodes) || 300, message.options || message)
+          client_profile: clientProfile,
+          browser_profile_id: clientProfile.browser_profile_id || "",
+          profile_label: clientProfile.profile_label || "",
+          installation_id: clientProfile.installation_id || "",
+          elements: nodes,
+          nodes
         });
         return;
       }
@@ -112,6 +126,27 @@
 
     return true;
   });
+
+  function buildViewportMetadata() {
+    return {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      scrollX: window.scrollX,
+      scrollY: window.scrollY
+    };
+  }
+
+  function normalizeClientProfile(value) {
+    const profile = value && typeof value === "object" ? value : {};
+    return {
+      browser_profile_id: String(profile.browser_profile_id || ""),
+      profile_label: String(profile.profile_label || ""),
+      installation_id: String(profile.installation_id || ""),
+      extension_id: String(profile.extension_id || ""),
+      browser_name: String(profile.browser_name || ""),
+      browser_version: String(profile.browser_version || "")
+    };
+  }
 
   function collectSnapshot(maxNodes, options) {
     const nodes = [];
@@ -148,6 +183,8 @@
         const text = extractAccessibleText(element, labels);
         const interactive = isInteractiveElement(element, role);
         const actionHints = buildActionHints(element, role, interactive);
+        const geometry = buildGeometry(rect);
+        const selectorHints = buildSelectorHints(element, role, text);
 
         nodes.push({
           index: nodes.length,
@@ -161,12 +198,12 @@
           text,
           labels,
           nearby_text: extractNearbyText(element),
-          rect: {
-            x: round2(rect.x),
-            y: round2(rect.y),
-            width: round2(rect.width),
-            height: round2(rect.height)
-          },
+          rect: geometry.rect,
+          viewport_center: geometry.viewport_center,
+          viewport_coordinates: geometry.viewport_center,
+          page_rect: geometry.page_rect,
+          page_center: geometry.page_center,
+          page_coordinates: geometry.page_center,
           is_visible: isVisible,
           is_in_viewport: isInViewport(rect),
           interactive,
@@ -179,7 +216,8 @@
           action_hints: actionHints,
           attributes: collectSafeAttributes(element),
           recognition_confidence: recognitionConfidence(element, role, text, labels, interactive),
-          selector_hint: buildSelectorHint(element),
+          selector_hint: selectorHints[0] || buildSelectorHint(element),
+          selector_hints: selectorHints,
           xpath_hint: buildXPathHint(element)
         });
       }
@@ -190,16 +228,19 @@
 
   async function executeElementCommand(command) {
     const target = resolveTarget(command);
+    if (target instanceof Element) {
+      ensureElementId(target);
+    }
     const action = String(command.action || command.type || "");
     switch (action) {
       case "page.click":
       ensureTarget(target, "click");
       focusElement(target);
       target.click();
-      return { action: "click", element_id: target.getAttribute(ELEMENT_ATTR) };
+      return { action: "click", element_id: ensureElementId(target) };
       case "page.type":
       ensureTarget(target, "type");
-      return typeIntoElement(target, String(command.text ?? ""));
+      return typeIntoElement(target, typedTextValue(command));
       case "page.press":
       return pressKeys(target, command);
       case "page.scroll":
@@ -218,6 +259,7 @@
   }
 
   function resolveTarget(command) {
+    const action = String(command.action || command.type || "");
     if (command.element_id) {
       const found = document.querySelector(`[${ELEMENT_ATTR}="${cssEscape(command.element_id)}"]`);
       if (found) {
@@ -227,7 +269,20 @@
     if (command.selector) {
       return document.querySelector(command.selector);
     }
-    const action = String(command.action || command.type || "");
+    if (Array.isArray(command.selectors)) {
+      for (const selector of command.selectors) {
+        const found = querySelectorMaybe(selector);
+        if (found) {
+          return found;
+        }
+      }
+    }
+    if (isSemanticTargetAction(action)) {
+      const semanticTarget = findSemanticTarget(command, action);
+      if (semanticTarget) {
+        return semanticTarget;
+      }
+    }
     if (action === "page.press") {
       return document.activeElement || document.body || document.documentElement;
     }
@@ -238,6 +293,251 @@
       return document.body || document.documentElement;
     }
     return null;
+  }
+
+  function querySelectorMaybe(selector) {
+    const value = String(selector || "").trim();
+    if (!value) {
+      return null;
+    }
+    try {
+      return document.querySelector(value);
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function isSemanticTargetAction(action) {
+    return (
+      action === "page.click" ||
+      action === "page.type" ||
+      action === "page.extract" ||
+      action === "page.highlight"
+    );
+  }
+
+  function findSemanticTarget(command, action) {
+    const criteria = semanticTargetCriteria(command, action);
+    if (!criteria.hasCriteria) {
+      return null;
+    }
+    let best = null;
+    let bestScore = -1;
+    const candidates = Array.from(document.querySelectorAll("*"));
+    for (const element of candidates) {
+      if (!(element instanceof HTMLElement)) {
+        continue;
+      }
+      const score = semanticTargetScore(element, criteria, action);
+      if (score > bestScore || (score === bestScore && isBetterSemanticTarget(element, best, criteria, action))) {
+        best = element;
+        bestScore = score;
+      }
+    }
+    return bestScore >= 0 ? best : null;
+  }
+
+  function semanticTargetCriteria(command, action) {
+    const hasExplicitTypedValue =
+      hasOwnValue(command, "value") ||
+      hasOwnValue(command, "input_text") ||
+      hasOwnValue(command, "inputText");
+    const textQuery =
+      firstString(command.text_query, command.textQuery) ||
+      (action !== "page.type" || hasExplicitTypedValue ? firstString(command.text) : "");
+    const criteria = {
+      text_query: textQuery,
+      accessible_name: firstString(command.accessible_name, command.accessibleName, command.name),
+      role: firstString(command.role),
+      semantic_id: firstString(command.semantic_id, command.semanticId),
+      nearby_text: firstString(command.nearby_text, command.nearbyText)
+    };
+    criteria.hasCriteria = Boolean(
+      criteria.text_query ||
+        criteria.accessible_name ||
+        criteria.role ||
+        criteria.semantic_id ||
+        criteria.nearby_text
+    );
+    return criteria;
+  }
+
+  function semanticTargetScore(element, criteria, action) {
+    const rect = element.getBoundingClientRect();
+    const computedStyle = window.getComputedStyle(element);
+    const isVisible =
+      rect.width > 0 &&
+      rect.height > 0 &&
+      computedStyle.visibility !== "hidden" &&
+      computedStyle.display !== "none" &&
+      Number(computedStyle.opacity || 1) > 0;
+    if (!isVisible) {
+      return -1;
+    }
+
+    const role = element.getAttribute("role") || inferRole(element);
+    const labels = extractLabels(element);
+    const accessibleName = extractAccessibleText(element, labels);
+    const nearbyText = extractNearbyText(element);
+    const semanticId = buildSemanticId(element, role, accessibleName);
+    const visibleText = (element.innerText || element.textContent || "").replace(/\s+/g, " ").trim();
+    const attributes = collectSafeAttributes(element);
+    let score = 0;
+
+    if (criteria.semantic_id) {
+      if (semanticId !== criteria.semantic_id) {
+        return -1;
+      }
+      score += 100;
+    }
+    if (criteria.role) {
+      if (normalizeSearchText(role) !== normalizeSearchText(criteria.role)) {
+        return -1;
+      }
+      score += 20;
+    }
+    if (criteria.accessible_name) {
+      const match = textMatchScore([accessibleName, labels.join(" ")].join(" "), criteria.accessible_name);
+      if (match <= 0) {
+        return -1;
+      }
+      score += match + 30;
+    }
+    if (criteria.text_query) {
+      const haystack = [
+        accessibleName,
+        visibleText,
+        labels.join(" "),
+        attributes.placeholder || "",
+        attributes.title || "",
+        "value" in element ? element.value : ""
+      ].join(" ");
+      const match = textMatchScore(haystack, criteria.text_query);
+      if (match <= 0) {
+        return -1;
+      }
+      score += match + 20;
+    }
+    if (criteria.nearby_text) {
+      const match = textMatchScore(nearbyText, criteria.nearby_text);
+      if (match <= 0) {
+        return -1;
+      }
+      score += match + 15;
+    }
+    if (usesTextLikeSemanticCriteria(criteria) && isReadOnlySemanticTargetAction(action)) {
+      score += semanticTargetSpecificityScore(element, criteria, {
+        accessibleName,
+        visibleText,
+        rect
+      });
+    }
+
+    const interactive = isInteractiveElement(element, role);
+    if (action === "page.type" && interactive.editable) {
+      score += 25;
+    } else if (action === "page.click" && interactive.clickable) {
+      score += 20;
+    } else if (action === "page.highlight" && interactive.focusable) {
+      score += 8;
+    }
+    if (isInViewport(rect)) {
+      score += 6;
+    }
+    if (element.id || element.getAttribute("data-testid") || element.getAttribute("data-test") || element.getAttribute("name")) {
+      score += 4;
+    }
+    return score;
+  }
+
+  function usesTextLikeSemanticCriteria(criteria) {
+    return Boolean(criteria.text_query || criteria.accessible_name);
+  }
+
+  function isReadOnlySemanticTargetAction(action) {
+    return action === "page.extract" || action === "page.highlight";
+  }
+
+  function semanticTargetSpecificityScore(element, criteria, context) {
+    const targetText = criteria.accessible_name || criteria.text_query;
+    const normalizedTarget = normalizeSearchText(targetText);
+    if (!normalizedTarget) {
+      return 0;
+    }
+
+    const accessibleName = normalizeSearchText(context.accessibleName);
+    const visibleText = normalizeSearchText(context.visibleText);
+    const directText = normalizeSearchText(directElementText(element));
+    let score = 0;
+
+    if (accessibleName === normalizedTarget) {
+      score += 24;
+    }
+    if (directText === normalizedTarget) {
+      score += 18;
+    } else if (directText && directText.includes(normalizedTarget)) {
+      score += 10;
+    }
+    if (visibleText === normalizedTarget) {
+      score += 12;
+    }
+    if (!directText && element.children.length > 0 && visibleText.includes(normalizedTarget)) {
+      score -= 8;
+    }
+    if (isBroadSemanticContainer(element, visibleText, normalizedTarget, context.rect)) {
+      score -= 32;
+    }
+    return score;
+  }
+
+  function directElementText(element) {
+    const values = [];
+    for (const node of element.childNodes) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        values.push(node.textContent || "");
+      }
+    }
+    return values.join(" ").replace(/\s+/g, " ").trim();
+  }
+
+  function isBroadSemanticContainer(element, visibleText, targetText, rect) {
+    const tag = element.tagName.toLowerCase();
+    if (tag === "html" || tag === "body") {
+      return true;
+    }
+    if (!element.children.length) {
+      return false;
+    }
+    const containerTags = new Set(["div", "main", "section", "article", "form", "ul", "ol", "nav", "header", "footer", "aside"]);
+    if (!containerTags.has(tag)) {
+      return false;
+    }
+    const muchLongerText = visibleText.length > Math.max(targetText.length * 3, targetText.length + 80);
+    const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+    const largeArea = rect.width * rect.height > viewportArea * 0.35;
+    return muchLongerText || largeArea;
+  }
+
+  function isBetterSemanticTarget(candidate, current, criteria, action) {
+    if (!current || !usesTextLikeSemanticCriteria(criteria) || !isReadOnlySemanticTargetAction(action)) {
+      return false;
+    }
+    const candidateBroad = isBroadTieBreakTarget(candidate);
+    const currentBroad = isBroadTieBreakTarget(current);
+    if (candidateBroad !== currentBroad) {
+      return !candidateBroad;
+    }
+    return semanticTargetArea(candidate) < semanticTargetArea(current);
+  }
+
+  function isBroadTieBreakTarget(element) {
+    const tag = element.tagName.toLowerCase();
+    return tag === "html" || tag === "body";
+  }
+
+  function semanticTargetArea(element) {
+    const rect = element.getBoundingClientRect();
+    return Math.max(0, rect.width) * Math.max(0, rect.height);
   }
 
   function ensureTarget(target, action) {
@@ -268,7 +568,29 @@
     }
     target.dispatchEvent(new Event("input", { bubbles: true }));
     target.dispatchEvent(new Event("change", { bubbles: true }));
-    return { action: "type", element_id: target.getAttribute(ELEMENT_ATTR), text_length: text.length };
+    return { action: "type", element_id: ensureElementId(target), text_length: text.length };
+  }
+
+  function typedTextValue(command) {
+    if (hasOwnValue(command, "input_text")) {
+      return String(command.input_text);
+    }
+    if (hasOwnValue(command, "inputText")) {
+      return String(command.inputText);
+    }
+    if (hasOwnValue(command, "value")) {
+      return String(command.value);
+    }
+    return String(command.text ?? "");
+  }
+
+  function hasOwnValue(object, key) {
+    return Boolean(
+      object &&
+        Object.prototype.hasOwnProperty.call(object, key) &&
+        object[key] !== undefined &&
+        object[key] !== null
+    );
   }
 
   function pressKeys(target, command) {
@@ -353,12 +675,13 @@
 
   function extractFromElement(target, command) {
     const mode = String(command.mode || "text");
+    const elementId = ensureElementId(target);
     if (mode === "html") {
-      return { action: "extract", mode, value: target.outerHTML };
+      return { action: "extract", element_id: elementId, mode, value: target.outerHTML };
     }
     if (mode === "value") {
       const value = "value" in target ? target.value : "";
-      return { action: "extract", mode, value };
+      return { action: "extract", element_id: elementId, mode, value };
     }
     if (mode === "attributes") {
       const attributes = {};
@@ -371,9 +694,9 @@
         }
         attributes[attribute.name] = attribute.value;
       }
-      return { action: "extract", mode, value: attributes };
+      return { action: "extract", element_id: elementId, mode, value: attributes };
     }
-    return { action: "extract", mode: "text", value: extractAccessibleText(target) };
+    return { action: "extract", element_id: elementId, mode: "text", value: extractAccessibleText(target) };
   }
 
   function ensureElementId(element) {
@@ -406,6 +729,34 @@
       return "combobox";
     }
     return "";
+  }
+
+  function buildGeometry(rect) {
+    const viewportCenter = {
+      x: round2(rect.x + rect.width / 2),
+      y: round2(rect.y + rect.height / 2)
+    };
+    const pageRect = {
+      x: round2(rect.x + window.scrollX),
+      y: round2(rect.y + window.scrollY),
+      width: round2(rect.width),
+      height: round2(rect.height)
+    };
+    const pageCenter = {
+      x: round2(pageRect.x + pageRect.width / 2),
+      y: round2(pageRect.y + pageRect.height / 2)
+    };
+    return {
+      rect: {
+        x: round2(rect.x),
+        y: round2(rect.y),
+        width: round2(rect.width),
+        height: round2(rect.height)
+      },
+      viewport_center: viewportCenter,
+      page_rect: pageRect,
+      page_center: pageCenter
+    };
   }
 
   function extractAccessibleText(element, labels) {
@@ -490,9 +841,37 @@
     };
   }
 
+  function buildSelectorHints(element, role, text) {
+    const hints = [];
+    const testId = element.getAttribute("data-testid");
+    if (testId) {
+      hints.push(`[data-testid="${cssStringEscape(testId)}"]`);
+    }
+    const dataTest = element.getAttribute("data-test");
+    if (dataTest) {
+      hints.push(`[data-test="${cssStringEscape(dataTest)}"]`);
+    }
+    if (element.id) {
+      hints.push(`#${cssEscape(element.id)}`);
+    }
+    const name = element.getAttribute("name");
+    if (name) {
+      hints.push(`${element.tagName.toLowerCase()}[name="${cssStringEscape(name)}"]`);
+    }
+    const ariaLabel = element.getAttribute("aria-label");
+    if (ariaLabel) {
+      hints.push(`${element.tagName.toLowerCase()}[aria-label="${cssStringEscape(ariaLabel)}"]`);
+    }
+    if (role && text) {
+      hints.push(`[role="${cssStringEscape(role)}"]`);
+    }
+    hints.push(buildSelectorHint(element));
+    return Array.from(new Set(hints.filter(Boolean))).slice(0, 8);
+  }
+
   function buildSelectorHint(element) {
     if (element.id) {
-      return `#${element.id}`;
+      return `#${cssEscape(element.id)}`;
     }
     const parts = [];
     let current = element;
@@ -613,10 +992,11 @@
   }
 
   function highlightElement(target, command) {
+    const elementId = ensureElementId(target);
     const rect = target.getBoundingClientRect();
     const layer = ensureHighlightLayer(Boolean(command.clear_existing ?? true));
     const color = String(command.color || "#2563eb");
-    const label = String(command.label || target.getAttribute(ELEMENT_ATTR) || "Rumi").slice(0, 80);
+    const label = String(command.label || elementId || "Rumi").slice(0, 80);
     const overlay = document.createElement("div");
     overlay.style.position = "fixed";
     overlay.style.left = `${rect.left}px`;
@@ -656,7 +1036,7 @@
 
     return {
       action: "highlight",
-      element_id: target.getAttribute(ELEMENT_ATTR),
+      element_id: elementId,
       rect: {
         x: round2(rect.x),
         y: round2(rect.y),
@@ -709,6 +1089,48 @@
     return result;
   }
 
+  function firstString(...values) {
+    for (const value of values) {
+      if (value === undefined || value === null) {
+        continue;
+      }
+      const text = String(value).trim();
+      if (text) {
+        return text;
+      }
+    }
+    return "";
+  }
+
+  function normalizeSearchText(value) {
+    return String(value || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  function textMatchScore(haystack, needle) {
+    const hay = normalizeSearchText(haystack);
+    const need = normalizeSearchText(needle);
+    if (!hay || !need) {
+      return 0;
+    }
+    if (hay === need) {
+      return 40;
+    }
+    if (hay.includes(need)) {
+      return 30;
+    }
+    if (need.includes(hay) && hay.length >= 3) {
+      return 18;
+    }
+    const tokens = need.split(" ").filter(Boolean);
+    if (tokens.length > 0 && tokens.every((token) => hay.includes(token))) {
+      return 14;
+    }
+    return 0;
+  }
+
   function slugify(value) {
     return String(value || "")
       .trim()
@@ -744,6 +1166,10 @@
       return window.CSS.escape(value);
     }
     return String(value).replace(/["\\]/g, "\\$&");
+  }
+
+  function cssStringEscape(value) {
+    return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   }
 
   function round2(value) {

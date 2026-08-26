@@ -131,6 +131,7 @@ test("authority approval window sends only the terse hidden resume marker", () =
   assert.match(source, /sendAuthorityResume\([\s\S]*"Internal authority resume\."/);
   assertNoRiskyAuthorityFollowupPhrases(source);
   assert.match(source, /runtime_content: authorityApprovalRuntimeContent\(settledApproval, decision\.token\)/);
+  assert.match(source, /related_permissions: authorityRelatedPermissions\(approval\)/);
 });
 
 test("authority approval window always surfaces host execution summary rows", () => {
@@ -399,11 +400,10 @@ test("authority approval browser token helper accepts URL aliases and builds tok
   );
 });
 
-test("authority approval window approves exact request by default without related permission bundling", () => {
+test("authority approval window bundles related provider permissions", () => {
   const source = authorityApprovalWindowSource();
 
-  assert.doesNotMatch(source, /related_permissions:\s*authorityRelatedPermissions/);
-  assert.doesNotMatch(source, /authorityRelatedPermissions/);
+  assert.match(source, /related_permissions:\s*authorityRelatedPermissions\(approval\)/);
   assert.match(source, /approveAuthorityApproval\(request\.request_id,[\s\S]*scope: selectedScope,[\s\S]*config,[\s\S]*ui_operator: context\.ui_operator/);
 });
 

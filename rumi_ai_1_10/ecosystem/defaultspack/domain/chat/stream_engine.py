@@ -81,6 +81,8 @@ class _ChatCancelled(Exception):
 
 _APPROVAL_WAITING_TEXT = "許可が必要なため、ユーザーが承認するまで待機します。承認後に続行します。"
 _AUTHORITY_WAITING_TEXT = "モデル/API の使用許可が必要です。承認後に続行します。"
+_APPROVAL_FOLLOWUP_ALREADY_HANDLED_TEXT = "承認済みの操作はすでに処理済みです。重複した承認再開リクエストは実行しません。"
+_APPROVAL_FOLLOWUP_INVALID_TEXT = "承認再開トークンを検証できなかったため、操作を再実行しません。"
 
 
 def _tool_selection_activity_message(selection: dict[str, Any]) -> str:
@@ -249,6 +251,18 @@ def _provider_visible_params(params: dict[str, Any] | None) -> dict[str, Any]:
     return clean
 
 
+def _provider_request_timeout_kwargs(params: dict[str, Any] | None) -> dict[str, float]:
+    raw = params if isinstance(params, dict) else {}
+    if "request_timeout" not in raw and "timeout" not in raw:
+        return {}
+    value = raw.get("request_timeout", raw.get("timeout", 120.0))
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        timeout = 120.0
+    return {"timeout": max(2.0, min(timeout, 120.0))}
+
+
 def _authority_context_token_for_permission(context: dict[str, Any], permission_id: str) -> tuple[str, str]:
     permission_id = str(permission_id or "").strip()
     tokens = context.get("approval_tokens") if isinstance(context, dict) else None
@@ -286,6 +300,222 @@ def _normalize_tool_call_name_and_arguments(
     return base, normalized_args
 
 
+def _approval_replay_executable_arguments(
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    action: str = "",
+    operation: str = "",
+) -> tuple[str, dict[str, Any]]:
+    normalized_tool_name = str(tool_name or "").strip()
+    executable = _strip_approval_tokens(arguments or {})
+    raw_action = str(action or "").strip()
+    scoped_operation = str(operation or "").strip()
+    if normalized_tool_name == "browser_computer":
+        payload_action = str(executable.get("action") or "").strip()
+        if (
+            payload_action.startswith(("browser.", "computer."))
+            and isinstance(executable.get("payload"), dict)
+        ):
+            if not raw_action:
+                raw_action = payload_action
+            if not scoped_operation:
+                scoped_operation = payload_action
+            executable["action"] = (
+                scoped_operation
+                if raw_action.startswith("tool.") and scoped_operation
+                else raw_action or scoped_operation or payload_action
+            )
+            return _normalize_tool_call_name_and_arguments(normalized_tool_name, executable)
+    if normalized_tool_name in {"browser_use", "computer_use"}:
+        for _ in range(3):
+            payload_action = str(executable.get("action") or "").strip()
+            nested = executable.get("payload")
+            if not (
+                payload_action.startswith(("browser.", "computer."))
+                and isinstance(nested, dict)
+            ):
+                break
+            executable = dict(nested)
+            if not raw_action:
+                raw_action = payload_action
+            if not scoped_operation:
+                scoped_operation = payload_action
+            executable.setdefault("action", payload_action)
+        final_action = (
+            scoped_operation
+            if raw_action.startswith("tool.") and scoped_operation
+            else raw_action or scoped_operation
+        )
+        if final_action and not executable.get("action"):
+            executable["action"] = final_action
+    return _normalize_tool_call_name_and_arguments(normalized_tool_name, executable)
+
+
+def _strip_approval_tokens(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _strip_approval_tokens(item)
+            for key, item in value.items()
+            if key != "approval_token"
+        }
+    if isinstance(value, list):
+        return [_strip_approval_tokens(item) for item in value]
+    return value
+
+
+def _canonical_approval_replay_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    canonical = _strip_approval_tokens(arguments or {})
+    payload = canonical.pop("payload", None)
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            canonical.setdefault(key, value)
+    action = str(canonical.get("action") or "").strip()
+    action_aliases = {
+        "browser.open_url": "open_url",
+        "browser_open_url": "open_url",
+        "open": "open_url",
+        "computer.apps": "apps",
+        "applications": "apps",
+        "open_apps": "apps",
+        "list_apps": "apps",
+        "computer.windows": "windows",
+        "computer.show_app": "show_app",
+        "computer.select_app": "select_app",
+        "computer.select_window": "select_window",
+        "computer.screenshot": "screenshot",
+        "computer.observe": "observe",
+        "computer.type": "type",
+        "computer.key": "key",
+        "computer.click": "click",
+        "computer.move": "move",
+        "computer.drag": "drag",
+        "computer.scroll": "scroll",
+    }
+    if action:
+        canonical["action"] = action_aliases.get(action, action)
+    return canonical
+
+
+def _approval_tool_reference_key(value: Any) -> str:
+    raw = str(value or "").strip()
+    if raw.casefold().startswith("tool."):
+        raw = raw[5:].strip()
+    pieces: list[str] = []
+    previous_separator = False
+    for char in raw.casefold():
+        if char.isalnum():
+            pieces.append(char)
+            previous_separator = False
+        elif not previous_separator:
+            pieces.append("_")
+            previous_separator = True
+    return "".join(pieces).strip("_")
+
+
+def _approval_registry_tool_identity(value: Any) -> str:
+    key = _approval_tool_reference_key(value)
+    if not key:
+        return ""
+    try:
+        from domain.tool.registry import ToolRegistry
+
+        tools = ToolRegistry().list_tools()
+    except Exception:
+        return ""
+
+    matches: set[str] = set()
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        tool_id = str(tool.get("tool_id") or "").strip()
+        if not tool_id:
+            continue
+        candidates: list[Any] = [
+            tool_id,
+            tool.get("name"),
+            tool.get("display_name"),
+        ]
+        ui = tool.get("ui") if isinstance(tool.get("ui"), dict) else {}
+        candidates.extend(
+            [
+                ui.get("composer_label"),
+                ui.get("label"),
+                ui.get("title"),
+            ]
+        )
+        metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
+        aliases = metadata.get("aliases")
+        if isinstance(aliases, list):
+            candidates.extend(aliases)
+        elif isinstance(aliases, dict):
+            candidates.extend(aliases.keys())
+            candidates.extend(aliases.values())
+        elif isinstance(aliases, str):
+            candidates.append(aliases)
+        for candidate in candidates:
+            if _approval_tool_reference_key(candidate) == key:
+                matches.add(tool_id)
+    return next(iter(matches)) if len(matches) == 1 else ""
+
+
+def _approval_followup_tool_identity_matches(
+    request_tool_name: str,
+    followup_tool_name: str,
+    *,
+    details: dict[str, Any],
+    operation: str,
+) -> bool:
+    request_tool_name = str(request_tool_name or "").strip()
+    followup_tool_name = str(followup_tool_name or "").strip()
+    if not request_tool_name or not followup_tool_name:
+        return False
+    if request_tool_name == followup_tool_name:
+        return True
+
+    followup_identity = _approval_registry_tool_identity(followup_tool_name)
+    if not followup_identity:
+        return False
+
+    request_candidates = [
+        request_tool_name,
+        details.get("function_id") if isinstance(details, dict) else "",
+        details.get("operation") if isinstance(details, dict) else "",
+        operation,
+    ]
+    request_identities = {
+        identity
+        for candidate in request_candidates
+        for identity in [_approval_registry_tool_identity(candidate)]
+        if identity
+    }
+    return followup_identity in request_identities
+
+
+def _duplicate_approval_replay_result(
+    context: dict[str, Any] | None,
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not isinstance(context, dict):
+        return None
+    replayed = context.get("approval_replayed")
+    if not isinstance(replayed, dict):
+        return None
+    if str(replayed.get("tool_name") or "").strip() != tool_name:
+        return None
+    replayed_arguments = replayed.get("arguments")
+    if not isinstance(replayed_arguments, dict):
+        return None
+    if _canonical_approval_replay_arguments(replayed_arguments) != _canonical_approval_replay_arguments(arguments):
+        return None
+    return {
+        "result": "Skipped duplicate approval-followup tool call; the approved operation was already replayed once.",
+        "is_error": False,
+        "approval_replay_duplicate": True,
+    }
+
+
 def _approval_followup_tool_use(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(metadata, dict):
         return None
@@ -301,13 +531,17 @@ def _approval_followup_tool_use(metadata: dict[str, Any] | None) -> dict[str, An
         payload = followup.get("arguments") if isinstance(followup.get("arguments"), dict) else None
     if payload is None:
         return None
-    arguments = dict(payload or {})
     raw_action = str(followup.get("action") or "").strip()
     operation = str(followup.get("operation") or "").strip()
     action = operation if raw_action.startswith("tool.") and operation else raw_action or operation
+    tool_name, arguments = _approval_replay_executable_arguments(
+        tool_name,
+        payload,
+        action=action,
+        operation=operation,
+    )
     if tool_name in {"browser_computer", "browser_use", "computer_use"} and action and not arguments.get("action"):
         arguments["action"] = action
-    tool_name, arguments = _normalize_tool_call_name_and_arguments(tool_name, arguments)
     token_map = {tool_name: token}
     request_id = str(followup.get("request_id") or followup.get("approval_request_id") or "").strip()
     for key in (action, operation, request_id):
@@ -331,6 +565,34 @@ def _approval_followup_has_inline_payload(metadata: dict[str, Any] | None) -> bo
     if not isinstance(followup, dict):
         return False
     return isinstance(followup.get("payload"), dict) or isinstance(followup.get("arguments"), dict)
+
+
+def _authority_followup_tool_use(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(metadata, dict):
+        return None
+    followup = metadata.get("authority_followup")
+    if not isinstance(followup, dict):
+        followup = metadata.get("authorityFollowup")
+    if not isinstance(followup, dict):
+        return None
+    chat_display = metadata.get("chat_display")
+    if not isinstance(chat_display, dict):
+        chat_display = metadata.get("chatDisplay")
+    hidden = bool(followup.get("hidden"))
+    if isinstance(chat_display, dict):
+        hidden = hidden or (
+            bool(chat_display.get("hidden"))
+            and str(chat_display.get("reason") or "").strip() == "authority_followup"
+        )
+    request_id = str(followup.get("request_id") or followup.get("approval_request_id") or "").strip()
+    permission_id = str(followup.get("permission_id") or "").strip()
+    if not (hidden and request_id and permission_id):
+        return None
+    return {
+        "id": str(followup.get("tool_call_id") or request_id or gen_id()).strip(),
+        "name": "job_resume",
+        "input": {"job_id": request_id},
+    }
 
 
 def _merge_tool_context(base: dict[str, Any] | None, extra: dict[str, Any] | None) -> dict[str, Any]:
@@ -621,6 +883,38 @@ def _approval_waiting_response(
             "model": model,
             "pending_approval": approval_request,
             "thinking_level": params.get("thinking_level"),
+        },
+        "events": list(events),
+    }
+
+
+def _approval_followup_terminal_response(
+    model: str,
+    params: dict[str, Any],
+    events: list[dict[str, Any]],
+    *,
+    message: str,
+    request_id: str,
+    tool_name: str,
+    operation: str,
+    status: str,
+    code: str = "",
+) -> dict[str, Any]:
+    return {
+        "content": [{"type": "text", "text": message}],
+        "finish_reason": "stop",
+        "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+        "metadata": {
+            "model": model,
+            "approval_followup": {
+                "status": status,
+                "code": code,
+                "request_id": request_id,
+                "tool_name": tool_name,
+                "operation": operation,
+            },
+            "thinking": {"state": "completed"},
+            "thinking_level": params.get("thinking_level") if isinstance(params, dict) else None,
         },
         "events": list(events),
     }
@@ -992,6 +1286,7 @@ class ChatRunEngine:
         self._progress_signatures: set[tuple[str, str, str, str]] = set()
         self._progress_without_external_tool = 0
         self._progress_state: dict[str, Any] = {}
+        self._provider_trace_requests: list[dict[str, Any]] = []
 
     def stream(
         self,
@@ -1015,6 +1310,7 @@ class ChatRunEngine:
         self._progress_signatures = set()
         self._progress_without_external_tool = 0
         self._progress_state = {}
+        self._provider_trace_requests = []
         self._cancel_event = threading.Event()
         self._current_stream = None
 
@@ -1352,15 +1648,17 @@ class ChatRunEngine:
             yield event
         for event in self._before_tool_call(prepared, tool_name, tool_call_id, arguments):
             yield event
-        approval_context = block.get("approval_context") if isinstance(block.get("approval_context"), dict) else None
-        original_tool_context = prepared.tool_context
-        if approval_context:
-            prepared.tool_context = _merge_tool_context(prepared.tool_context, approval_context)
-        try:
-            result = self._execute_tool(prepared, tool_name, tool_call_id, arguments)
-        finally:
+        result = _duplicate_approval_replay_result(prepared.tool_context, tool_name, arguments)
+        if result is None:
+            approval_context = block.get("approval_context") if isinstance(block.get("approval_context"), dict) else None
+            original_tool_context = prepared.tool_context
             if approval_context:
-                prepared.tool_context = original_tool_context
+                prepared.tool_context = _merge_tool_context(prepared.tool_context, approval_context)
+            try:
+                result = self._execute_tool(prepared, tool_name, tool_call_id, arguments)
+            finally:
+                if approval_context:
+                    prepared.tool_context = original_tool_context
         self._raise_if_cancelled()
         summary = _tool_result_summary(tool_name, result)
         artifacts = _tool_result_artifacts(result)
@@ -1492,6 +1790,13 @@ class ChatRunEngine:
             if blocked_response is not None:
                 response = blocked_response
                 return response
+
+        authority_followup = _authority_followup_tool_use(prepared.user_message.get("metadata"))
+        if authority_followup is not None and isinstance(prepared.tool_context, dict):
+            prepared.tool_context["authority_resume_followup_applied"] = {
+                "request_id": authority_followup.get("input", {}).get("job_id"),
+                "tool_name": authority_followup.get("name"),
+            }
 
         model_turns = 0
         for step_index in range(max(1, emergency_budget.max_model_turns)):
@@ -1821,6 +2126,12 @@ class ChatRunEngine:
                         "authority_context": prepared.request_context.get("authority", {}),
                     }
                 )
+                self._record_provider_request_for_trace(
+                    messages=messages,
+                    tools=prepared.provider_tools,
+                    params=prepared.params,
+                    transport="stream",
+                )
                 self._raise_if_cancelled()
                 for chunk in self._current_stream:
                     self._raise_if_cancelled()
@@ -1940,7 +2251,11 @@ class ChatRunEngine:
                 messages,
                 transcript="".join(self._thinking_transcript_parts),
             )
-            fallback_tool_uses = _tool_use_blocks(fallback_response) if isinstance(fallback_response, dict) else []
+            fallback_tool_uses = (
+                _tool_use_blocks(fallback_response)
+                if isinstance(fallback_response, dict)
+                else []
+            )
             if fallback_tool_uses:
                 tool_uses = fallback_tool_uses
             fallback_text = self._text_from_content_blocks(
@@ -1963,6 +2278,8 @@ class ChatRunEngine:
                 "usage": usage,
                 "metadata": {},
             }
+        if not tool_uses:
+            tool_uses = _tool_use_blocks(response)
         return response, tool_uses
 
     def _model_turn_via_complete(
@@ -2065,6 +2382,12 @@ class ChatRunEngine:
             if self._use_provider_compiler(prepared):
                 response = self._complete_turn_with_compiler(prepared, messages)
             else:
+                self._record_provider_request_for_trace(
+                    messages=messages,
+                    tools=prepared.provider_tools,
+                    params=prepared.params,
+                    transport="complete",
+                )
                 response = self._call_ai_complete_with_retry(
                     prepared.model,
                     messages,
@@ -2093,11 +2416,19 @@ class ChatRunEngine:
         if not _tool_use_blocks(response) and not self._response_text(response).strip():
             retry_params = _params_without_thinking(prepared.params)
             if retry_params != prepared.params:
+                retry_visible_params = _provider_visible_params(retry_params)
+                self._record_provider_request_for_trace(
+                    messages=messages,
+                    tools=prepared.provider_tools,
+                    params=retry_visible_params,
+                    transport="complete",
+                    reason="empty_response_retry",
+                )
                 retry_response = self._call_ai_complete_with_retry(
                     prepared.model,
                     messages,
                     prepared.provider_tools,
-                    _provider_visible_params(retry_params),
+                    retry_visible_params,
                     prepared.call_handler,
                     allow_retry=False,
                     authority_context=prepared.request_context.get("authority", {}),
@@ -2113,6 +2444,13 @@ class ChatRunEngine:
 
     def _complete_turn_with_compiler(self, prepared: PreparedChatRun, messages: list[dict[str, Any]]) -> dict[str, Any]:
         if prepared.call_handler is not None:
+            self._record_provider_request_for_trace(
+                messages=messages,
+                tools=prepared.provider_tools,
+                params=prepared.params,
+                transport="complete",
+                reason="call_handler",
+            )
             return self._call_ai_complete_with_retry(
                 prepared.model,
                 messages,
@@ -2133,6 +2471,13 @@ class ChatRunEngine:
                 pass
         api_family = str(caps.get("api_family") or "")
         if compiler_for_api_family(api_family) is None or not callable(getattr(provider, "_request_json", None)):
+            self._record_provider_request_for_trace(
+                messages=messages,
+                tools=prepared.provider_tools,
+                params=prepared.params,
+                transport="complete",
+                reason="compiler_unavailable",
+            )
             return self._gateway.complete(
                 {
                     "model": prepared.model,
@@ -2151,13 +2496,24 @@ class ChatRunEngine:
             metadata=dict(prepared.provider_planning.get("metadata") or {}),
         )
         compiled = compile_complete(planned)
+        self._record_provider_request_for_trace(
+            messages=compiled.legacy_messages or messages,
+            tools=prepared.provider_tools,
+            params=prepared.params,
+            transport="complete",
+            compiled=compiled,
+        )
         self._check_authority_for_compiled_provider(
             prepared,
             provider=provider,
             provider_id=str(caps.get("provider_id") or ""),
             model_name=model_name,
         )
-        raw = provider._request_json(compiled.path, compiled.body)
+        request_kwargs = _provider_request_timeout_kwargs(prepared.params)
+        try:
+            raw = provider._request_json(compiled.path, compiled.body, **request_kwargs)
+        except TypeError:
+            raw = provider._request_json(compiled.path, compiled.body)
         parser = compiler_for_api_family(compiled.api_family)
         response_ir = parser.parse_response(raw, compiled)
         response = response_ir.to_standard_response()
@@ -2170,6 +2526,40 @@ class ChatRunEngine:
         response["metadata"] = metadata
         return response
 
+    def _record_provider_request_for_trace(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        params: dict[str, Any] | None,
+        transport: str,
+        reason: str | None = None,
+        compiled: Any | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "transport": str(transport or "complete"),
+            "legacy_messages": list(messages or []),
+            "tools": list(tools or []),
+            "params": dict(params or {}),
+        }
+        if reason:
+            payload["reason"] = str(reason)
+        if compiled is not None:
+            payload["compiled"] = {
+                "api_family": getattr(compiled, "api_family", ""),
+                "provider_id": getattr(compiled, "provider_id", ""),
+                "model": getattr(compiled, "model", ""),
+                "path": getattr(compiled, "path", ""),
+                "method": getattr(compiled, "method", ""),
+                "body": dict(getattr(compiled, "body", {}) or {}),
+                "warnings": list(getattr(compiled, "warnings", []) or []),
+                "dropped_features": list(getattr(compiled, "dropped_features", []) or []),
+                "metadata": dict(getattr(compiled, "metadata", {}) or {}),
+            }
+        self._provider_trace_requests.append(payload)
+        if len(self._provider_trace_requests) > 16:
+            self._provider_trace_requests = self._provider_trace_requests[-16:]
+
     @staticmethod
     def _check_authority_for_compiled_provider(
         prepared: PreparedChatRun,
@@ -2177,6 +2567,7 @@ class ChatRunEngine:
         provider: Any,
         provider_id: str,
         model_name: str,
+        consume_one_shots: bool = True,
     ) -> None:
         provider_id = str(provider_id or "").strip()
         if provider_id in {"", "stub", "rumi"}:
@@ -2187,9 +2578,69 @@ class ChatRunEngine:
             return
         from core_runtime.authority import get_authority_service
 
-        context = prepared.request_context.get("authority") if isinstance(prepared.request_context, dict) else {}
-        context = dict(context) if isinstance(context, dict) else {}
+        authority_context = (
+            prepared.request_context.get("authority") if isinstance(prepared.request_context, dict) else {}
+        )
+        context = dict(authority_context) if isinstance(authority_context, dict) else {}
+        provider_call_key = f"{provider_id}:{model_name}"
+        verified_provider_calls = context.get("_provider_one_shot_verified_for_run")
+        if isinstance(verified_provider_calls, list) and provider_call_key in verified_provider_calls:
+            return
+        allow_consumed_one_shot_tokens_for_run = bool(
+            context.get("allow_consumed_one_shot_tokens_for_run")
+        )
         service = get_authority_service()
+
+        def mark_provider_call_verified() -> None:
+            if not isinstance(authority_context, dict):
+                return
+            current = authority_context.get("_provider_one_shot_verified_for_run")
+            verified = list(current) if isinstance(current, list) else []
+            if provider_call_key not in verified:
+                verified.append(provider_call_key)
+            authority_context["_provider_one_shot_verified_for_run"] = verified
+
+        def one_shot_issued_for_resource(
+            *,
+            permission_id: str,
+            request_id: str,
+            approval_token: str,
+            resource: dict[str, Any],
+            include_consumed: bool = False,
+        ) -> bool:
+            issued = getattr(service, "one_shot_approval_issued", None)
+            if not callable(issued):
+                return False
+            try:
+                return bool(
+                    issued(
+                        request_id=request_id,
+                        permission_id=permission_id,
+                        token=approval_token,
+                        conversation_id=context.get("conversation_id"),
+                        principal_id=principal_id,
+                        resource=resource,
+                        include_consumed=include_consumed,
+                    )
+                )
+            except TypeError:
+                if include_consumed:
+                    return False
+                try:
+                    return bool(
+                        issued(
+                            request_id=request_id,
+                            permission_id=permission_id,
+                            token=approval_token,
+                            conversation_id=context.get("conversation_id"),
+                            principal_id=principal_id,
+                        )
+                    )
+                except Exception:
+                    return False
+            except Exception:
+                return False
+
         checks = [
             ("model.invoke", "model"),
             ("api_key.use", "api_key"),
@@ -2217,6 +2668,29 @@ class ChatRunEngine:
                 provider=provider,
                 stream=False,
             )
+            effective_request_id = request_id or str(context.get("request_id") or "").strip()
+            trusted_consumed_token = False
+            if (
+                allow_consumed_one_shot_tokens_for_run
+                and effective_request_id
+                and approval_token
+            ):
+                if not one_shot_issued_for_resource(
+                    permission_id=permission_id,
+                    request_id=effective_request_id,
+                    approval_token=approval_token,
+                    resource=resource,
+                ) and one_shot_issued_for_resource(
+                    permission_id=permission_id,
+                    request_id=effective_request_id,
+                    approval_token=approval_token,
+                    resource=resource,
+                    include_consumed=True,
+                ):
+                    trusted_consumed_token = True
+            if trusted_consumed_token:
+                decisions.append((permission_id, resource, request_id, approval_token, None))
+                continue
             decision = service.check(
                 principal_id=principal_id,
                 permission_id=permission_id,
@@ -2236,7 +2710,11 @@ class ChatRunEngine:
 
         token_consumes = []
         rechecks: list[tuple[str, dict[str, Any], str, str]] = []
+        trusted_consumed_provider_call = False
         for permission_id, resource, request_id, approval_token, decision in decisions:
+            if decision is None:
+                trusted_consumed_provider_call = True
+                continue
             effective_request_id = request_id or str(context.get("request_id") or "").strip()
             if (
                 decision.reason == "One-shot approval verified"
@@ -2267,14 +2745,18 @@ class ChatRunEngine:
                 graph_id=context.get("graph_id"),
                 request_id=request_id or context.get("request_id"),
                 approval_token=approval_token,
-                consume_approval_token=True,
+                consume_approval_token=False,
             )
             if not decision.allowed:
                 raise AuthorityApprovalRequired(decision)
-        if token_consumes:
+        can_consume_one_shots = callable(getattr(service, "consume_one_shot_approvals_atomically", None))
+        if token_consumes and consume_one_shots and can_consume_one_shots:
             decision = service.consume_one_shot_approvals_atomically(token_consumes)
             if not decision.allowed:
                 raise AuthorityApprovalRequired(decision)
+            mark_provider_call_verified()
+        elif trusted_consumed_provider_call and consume_one_shots:
+            mark_provider_call_verified()
 
     def _replay_approval_followup_if_present(
         self,
@@ -2293,10 +2775,11 @@ class ChatRunEngine:
         the working chain, and clears ``provider_tools`` so the model can only
         summarize the result.
 
-        Falls through (no-op) for non-coding flows, missing tokens, expired or
-        consumed tokens, mismatched args_hash, tool_name mismatch, or any
-        internal error. The existing model-driven path then runs unchanged so
-        we never regress non-followup turns.
+        Falls through (no-op) for non-coding flows, missing tokens,
+        mismatched args_hash, tool_name mismatch, or any internal error. A
+        consumed or invalid approval token returns a terminal followup response
+        instead of entering another model turn, preventing stale hidden
+        followups from rediscovering and re-requesting the same tool.
 
         When the replayed tool result itself reports ``approval_required`` or
         a ``tool_blocked`` recovery kind, this generator emits the same
@@ -2330,30 +2813,67 @@ class ChatRunEngine:
         # Replay only when the request was approved by the user. ``consumed``
         # is excluded because the one-shot token has already burnt and would
         # not pass verify_execution_token below.
-        if str(request.get("status") or "") != "approved":
+        request_status = str(request.get("status") or "").strip()
+        if request_status != "approved":
+            if request_status == "consumed":
+                if isinstance(prepared.tool_context, dict):
+                    prepared.tool_context["_approval_followup_block_legacy"] = True
+                event = self._emit(
+                    "status",
+                    data={
+                        "request_id": request_id,
+                        "tool_name": tool_name,
+                        "operation": str(request.get("operation") or "").strip(),
+                        "status": "consumed",
+                    },
+                    message=_APPROVAL_FOLLOWUP_ALREADY_HANDLED_TEXT,
+                    phase="approval_followup_consumed",
+                    tool_name=tool_name,
+                )
+                self._sync_draft(draft, force=True)
+                yield event
+                return _approval_followup_terminal_response(
+                    prepared.model,
+                    prepared.params,
+                    events=list(self._activity_events),
+                    message=_APPROVAL_FOLLOWUP_ALREADY_HANDLED_TEXT,
+                    request_id=request_id,
+                    tool_name=tool_name,
+                    operation=str(request.get("operation") or "").strip(),
+                    status="consumed",
+                    code="APPROVAL_TOKEN_USED",
+                )
             return None
 
         details = request.get("details") if isinstance(request.get("details"), dict) else {}
+        operation = str(request.get("operation") or "").strip()
         # Safety guard: if the original approval request stored the requesting
-        # tool_name, the followup must target the exact same tool. This blocks
-        # a malicious or stale followup from reusing an approved token to
-        # invoke a different tool than the one the user actually saw and
-        # approved. When the request did not record a tool_name (older /
-        # non-coding flows) we skip this check and fall through to the
-        # signed-token verification below, which still binds the approval to
-        # the operation + args_hash.
+        # tool_name, the followup must target the same canonical tool identity.
+        # Some first-party tool manifests store display names (for example
+        # ``Job Resume``) in the approval details while the followup carries the
+        # executable tool id (``job_resume``). Resolve both through the manifest
+        # registry when exact string equality is not available, and treat
+        # ambiguous or unknown aliases as a mismatch.
         request_tool_name = str(details.get("tool_name") or "").strip()
-        if request_tool_name and request_tool_name != tool_name:
+        if request_tool_name and not _approval_followup_tool_identity_matches(
+            request_tool_name,
+            tool_name,
+            details=details,
+            operation=operation,
+        ):
             return None
 
         stored_args = details.get("arguments") if isinstance(details.get("arguments"), dict) else None
         if stored_args is None:
             return None
-        operation = str(request.get("operation") or "").strip()
         if not operation:
             return None
         if not operation.startswith("tool."):
-            return None
+            if not (
+                operation.startswith(("browser.", "computer."))
+                and tool_name in {"browser_computer", "browser_use", "computer_use"}
+            ):
+                return None
         if isinstance(prepared.tool_context, dict):
             prepared.tool_context["_approval_followup_block_legacy"] = True
 
@@ -2365,10 +2885,54 @@ class ChatRunEngine:
         except Exception:
             return None
         if not getattr(verification, "valid", False):
-            return None
+            code = str(getattr(verification, "code", "") or "").strip()
+            message = (
+                _APPROVAL_FOLLOWUP_ALREADY_HANDLED_TEXT
+                if code == "APPROVAL_TOKEN_USED"
+                else _APPROVAL_FOLLOWUP_INVALID_TEXT
+            )
+            event = self._emit(
+                "status",
+                data={
+                    "request_id": request_id,
+                    "tool_name": tool_name,
+                    "operation": operation,
+                    "status": "invalid_token",
+                    "code": code,
+                },
+                message=message,
+                phase="approval_followup_invalid",
+                tool_name=tool_name,
+            )
+            self._sync_draft(draft, force=True)
+            yield event
+            return _approval_followup_terminal_response(
+                prepared.model,
+                prepared.params,
+                events=list(self._activity_events),
+                message=message,
+                request_id=request_id,
+                tool_name=tool_name,
+                operation=operation,
+                status="invalid_token",
+                code=code,
+            )
 
-        invoke_args = dict(stored_args)
+        tool_name, display_args = _approval_replay_executable_arguments(
+            tool_name,
+            stored_args,
+            action=str(followup.get("action") or details.get("action") or "").strip(),
+            operation=operation,
+        )
+        invoke_args = dict(display_args)
         invoke_args["approval_token"] = token
+        if (
+            tool_name in {"browser_computer", "browser_use", "computer_use"}
+            and isinstance(invoke_args.get("payload"), dict)
+        ):
+            nested_payload = dict(invoke_args["payload"])
+            nested_payload.setdefault("approval_token", token)
+            invoke_args["payload"] = nested_payload
         # ``display_args`` is the version we expose to the model context
         # (synthetic tool_use message + IR), the SSE event stream, and any
         # nested-approval payload that surfaces from the replayed tool result.
@@ -2377,7 +2941,7 @@ class ChatRunEngine:
         # approval-required payload where a malicious component could attempt
         # to replay it. ``invoke_args`` (with token) is only handed to the
         # actual tool executor below.
-        display_args = {k: v for k, v in invoke_args.items() if k != "approval_token"}
+        display_args = _strip_approval_tokens(invoke_args)
         tool_call_id = str(
             followup.get("tool_call_id")
             or details.get("tool_call_id")
@@ -2470,10 +3034,8 @@ class ChatRunEngine:
             # the tool somehow surfaced it - a chained approval must mint
             # its own fresh token, never recycle ours.
             nested_payload = approval_request.get("payload")
-            if isinstance(nested_payload, dict) and "approval_token" in nested_payload:
-                scrubbed = dict(nested_payload)
-                scrubbed.pop("approval_token", None)
-                approval_request["payload"] = scrubbed
+            if isinstance(nested_payload, dict):
+                approval_request["payload"] = _strip_approval_tokens(nested_payload)
             if approval_request.get("approval_token") == token:
                 approval_request["approval_token"] = None
             approval_event = self._emit(
@@ -2534,22 +3096,33 @@ class ChatRunEngine:
         # natural-language summary; we have already replayed the pending tool
         # exactly once, and any further provider tool call from the same
         # followup turn would be a regression of the deterministic contract.
-        # The original list is snapshotted on ``tool_context`` so
-        # ``_final_response`` can still surface the truthful set of attached
-        # tools on the finalised assistant ``metadata.attached_tools`` /
-        # ``metadata.attached_tool_count`` (the suppression here is scoped to
-        # the model summary turn only).
-        if isinstance(prepared.tool_context, dict):
-            prepared.tool_context.setdefault(
-                "_attached_provider_tools_snapshot",
-                list(prepared.provider_tools or []),
-            )
-        prepared.provider_tools = []
+        #
+        # Browser/computer control is the one exception: user-requested
+        # computer-use tasks are naturally multi-step (open URL, then key/click
+        # etc.). Keep the tool surface there so the model can continue with the
+        # next approved action instead of emitting a plain-text ``call:...``.
+        keep_provider_tools = (
+            tool_name in {"browser_computer", "browser_use", "computer_use"}
+            and isinstance(prepared.request_context, dict)
+            and bool(prepared.request_context.get("user_requested_computer_use"))
+        )
+        if not keep_provider_tools:
+            # The original list is snapshotted on ``tool_context`` so
+            # ``_final_response`` can still surface the truthful set of
+            # attached tools on the finalised assistant metadata (the
+            # suppression here is scoped to the model summary turn only).
+            if isinstance(prepared.tool_context, dict):
+                prepared.tool_context.setdefault(
+                    "_attached_provider_tools_snapshot",
+                    list(prepared.provider_tools or []),
+                )
+            prepared.provider_tools = []
         if isinstance(prepared.tool_context, dict):
             prepared.tool_context["approval_replayed"] = {
                 "tool_name": tool_name,
                 "tool_call_id": tool_call_id,
                 "request_id": request_id,
+                "arguments": dict(display_args),
             }
         return None
     def _execute_tool(
@@ -2723,6 +3296,16 @@ class ChatRunEngine:
             capabilities = dict(prepared.provider_capabilities or {})
             provider_id = str(capabilities.get("provider_id") or (prepared.model.split("/", 1)[0] if "/" in prepared.model else "unknown"))
             planning = dict(prepared.provider_planning or {})
+            if self._provider_trace_requests:
+                compiled_payload = dict(self._provider_trace_requests[-1])
+                compiled_payload["provider_request_count"] = len(self._provider_trace_requests)
+                compiled_payload["provider_requests"] = list(self._provider_trace_requests)
+            else:
+                compiled_payload = {
+                    "legacy_messages": list(prepared.standard_messages or []),
+                    "tools": list(prepared.provider_tools or []),
+                    "params": dict(prepared.params or {}),
+                }
             return write_provider_trace(
                 conversation_id=prepared.conversation_id,
                 request_id=prepared.request_id,
@@ -2735,11 +3318,7 @@ class ChatRunEngine:
                 dropped_features=list(planning.get("dropped_features") or []),
                 bridge_actions=list(planning.get("bridge_actions") or []),
                 warnings=list(planning.get("warnings") or []),
-                compiled_payload={
-                    "legacy_messages": list(prepared.standard_messages or []),
-                    "tools": list(prepared.provider_tools or []),
-                    "params": dict(prepared.params or {}),
-                },
+                compiled_payload=compiled_payload,
                 response_summary={
                     "finish_reason": response.get("finish_reason"),
                     "usage": response.get("usage") if isinstance(response.get("usage"), dict) else {},

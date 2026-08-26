@@ -3,11 +3,11 @@
   "category": "tool",
   "version": "1",
   "display_name": "Browser Companion",
-  "description": "Connect to the Rumi Browser Companion extension running inside the user's browser. Uses the user's live browser session and cookies, can list connected browsers, inspect tabs and DOM snapshots, capture the active tab, and act on elements by element_id or selector.",
+  "description": "Connect to the Rumi Browser Companion extension running inside the user's browser. Uses the user's live browser session and cookies, can list connected browsers/profiles, inspect tabs and DOM snapshots, capture the active tab, and act on elements by element_id, selector, or semantic target fields.",
   "enabled": true,
   "config": {
     "name": "browser_companion",
-    "summary": "Extension-backed browser control with live user session cookies, multi-browser selection, DOM snapshots, tab capture, and element actions.",
+    "summary": "Extension-backed browser control with live user session cookies, multi-browser/profile selection, DOM snapshots, tab capture, and semantic element actions.",
     "tags": ["browser", "extension", "dom", "cookies", "session"],
     "schema": {
       "parameters": {
@@ -36,6 +36,9 @@
             "default": "session"
           },
           "client_id": {"type": "string"},
+          "browser_profile_id": {"type": "string"},
+          "profile_label": {"type": "string"},
+          "installation_id": {"type": "string"},
           "browser": {"type": "string"},
           "browser_name": {"type": "string"},
           "label": {"type": "string"},
@@ -44,7 +47,18 @@
           "url": {"type": "string"},
           "element_id": {"type": "string"},
           "selector": {"type": "string"},
+          "selectors": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
           "text": {"type": "string"},
+          "text_query": {"type": "string"},
+          "accessible_name": {"type": "string"},
+          "role": {"type": "string"},
+          "semantic_id": {"type": "string"},
+          "nearby_text": {"type": "string"},
+          "value": {"type": "string"},
+          "input_text": {"type": "string"},
           "key": {"type": "string"},
           "code": {"type": "string"},
           "modifiers": {

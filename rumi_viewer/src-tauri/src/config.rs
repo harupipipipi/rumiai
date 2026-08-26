@@ -147,6 +147,11 @@ impl AppConfig {
         self.host_broker_dir().join("audit.jsonl")
     }
 
+    /// Return the owner-only directory containing consumed approval markers.
+    pub fn host_broker_approval_replay_dir(&self) -> PathBuf {
+        self.host_broker_dir().join("consumed_approvals")
+    }
+
     /// Return the path where a bundled `uv` binary would live.
     ///
     /// Layout: `{app_dir}/bundled/uv` (Unix) or `{app_dir}/bundled/uv.exe` (Windows).

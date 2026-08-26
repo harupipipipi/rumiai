@@ -31,6 +31,8 @@ _USED_TOKEN_IDS: set[str] = set()
 _ARG_HASH_IGNORE_KEYS = {
     "approval_token",
     "approved",
+    "computer_use_haze_sequence_id",
+    "computer_use_sequence_id",
     "_headers",
     "_method",
     "_raw_body",

@@ -289,6 +289,12 @@ def test_profile_tool_permission_policy_resolves_action_overrides():
     assert click["matched_value"] == "click"
 
 
+def test_profile_tool_permission_policy_normalizes_browser_open_url_alias():
+    from domain.tool_policy.profile_permission import infer_tool_action
+
+    assert infer_tool_action("computer_use", {"action": "browser_open_url"}) == "browser.open_url"
+
+
 def test_tool_executor_denies_profile_tool_permission(monkeypatch):
     class Registry:
         def get(self, name):

@@ -29,6 +29,7 @@ import inspect
 import json
 import logging
 import os
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,10 @@ _FRONTEND_PERMISSION_FAIL_CLOSED_RISKS = {
     "capability_mutation",
     "pack_install",
 }
+_COMPUTER_APPROVAL_PROMPT = (
+    "承認してください。foreground/on-screen 操作も利用できます。"
+    "リクエストを承認するか、表/前面で作業しますか?"
+)
 
 
 def json_dumps(value):
@@ -289,7 +294,12 @@ class ToolExecutor:
         if approval_error is not None:
             return approval_error
         if _requires_rumi_api_request_approval(tool_def, arguments) and not _context_has_tool_server_approval(approved_context):
-            return _approval_required_tool_response(tool_def, arguments or {}, approved_context)
+            approval_arguments = _browser_computer_preflight_approval_arguments(
+                _tool_approval_tool_name(tool_def),
+                arguments,
+                approved_context,
+            )
+            return _approval_required_tool_response(tool_def, approval_arguments, approved_context)
         forwarded_context = _function_call_context(approved_context, tool_def)
         if forwarded_context:
             request["context"] = forwarded_context
@@ -380,7 +390,11 @@ class ToolExecutor:
                 "widget": None,
             }
         result = self._tool_response_from_capability(response, tool_def, request.get("args") or {}, context)
-        if isinstance(result, dict) and not result.get("is_error"):
+        if (
+            isinstance(result, dict)
+            and not result.get("is_error")
+            and not _tool_handles_deferred_approval_consumption(tool_def)
+        ):
             consume_error = self._consume_deferred_tool_approval(context)
             if consume_error is not None:
                 return consume_error
@@ -757,7 +771,7 @@ class ToolExecutor:
                         and context.get("user_requested_computer_use")
                     )
                 ):
-                    return _approval_required_tool_response(tool_def, arguments or {}, context)
+                    return _approval_required_tool_response_for_context(tool_def, arguments or {}, context)
                 result = {
                     "result": str(error or "Pack not approved"),
                     "is_error": True,
@@ -785,7 +799,7 @@ class ToolExecutor:
                             "reason": str(error or "capability execution denied"),
                         },
                     }
-                return _approval_required_tool_response(tool_def, arguments or {}, context)
+                return _approval_required_tool_response_for_context(tool_def, arguments or {}, context)
             return {
                 "result": str(error or "Capability execution failed"),
                 "is_error": True,
@@ -888,7 +902,11 @@ class ToolExecutor:
             return approval_error
 
         def finish_handler_result(result):
-            if isinstance(result, dict) and not result.get("is_error"):
+            if (
+                isinstance(result, dict)
+                and not result.get("is_error")
+                and not _tool_handles_deferred_approval_consumption(tool_def)
+            ):
                 consume_error = self._consume_deferred_tool_approval(next_context)
                 if consume_error is not None:
                     return consume_error
@@ -901,7 +919,7 @@ class ToolExecutor:
         elif _context_has_tool_server_approval(next_context):
             pass
         elif _requires_approval(tool_def):
-            return _approval_required_tool_response(tool_def, next_arguments, next_context)
+            return _approval_required_tool_response_for_context(tool_def, next_arguments, next_context)
 
         module_name, attr_name = handler.split(":", 1)
         try:
@@ -948,7 +966,11 @@ class ToolExecutor:
         self._current_local_tool_def = tool_def
         try:
             result = self._execute_local(tool_name, arguments, context)
-            if isinstance(result, dict) and not result.get("is_error"):
+            if (
+                isinstance(result, dict)
+                and not result.get("is_error")
+                and not _tool_handles_deferred_approval_consumption(tool_def)
+            ):
                 consume_error = self._consume_deferred_tool_approval(context)
                 if consume_error is not None:
                     return consume_error
@@ -1322,10 +1344,81 @@ def _safe_calculate(expression):
     return {"is_error": False, "result": result}
 
 
+_URL_IN_TEXT_RE = re.compile(r"(?:https?://|file://|www\.)[^\s\"'<>]+")
+
+
+def _browser_open_url_candidates(value):
+    if not isinstance(value, str):
+        return []
+    text = value.strip()
+    if not text:
+        return []
+    urls = []
+    seen = set()
+    for match in _URL_IN_TEXT_RE.finditer(text):
+        url = match.group(0).rstrip(".,;)")
+        if url.startswith("www."):
+            url = "https://" + url
+        if url and url not in seen:
+            seen.add(url)
+            urls.append(url)
+    return urls
+
+
+def _browser_open_url_from_value(value):
+    candidates = _browser_open_url_candidates(value)
+    return candidates[0] if candidates else ""
+
+
+def _single_browser_open_url_from_context(context):
+    if not isinstance(context, dict):
+        return ""
+    urls = []
+    seen = set()
+    for key in ("user_text", "conversation_user_text"):
+        for url in _browser_open_url_candidates(context.get(key)):
+            if url not in seen:
+                seen.add(url)
+                urls.append(url)
+    return urls[0] if len(urls) == 1 else ""
+
+
+def _canonical_browser_computer_action(raw_action, action_map):
+    action = str(raw_action or "").strip()
+    if action in action_map:
+        return action_map[action]
+    first_token = action.split(maxsplit=1)[0] if action else ""
+    if first_token in action_map:
+        return action_map[first_token]
+    return action
+
+
+def _normalize_browser_open_url_payload(action, payload, *url_candidates):
+    payload = dict(payload or {})
+    if action != "browser.open_url" or payload.get("url"):
+        return payload
+    for key in ("value", "text", "target", "href", "link", "url_contains", "title", "title_contains"):
+        candidate = _browser_open_url_from_value(str(payload.get(key) or ""))
+        if candidate:
+            payload["url"] = candidate
+            return payload
+    for value in url_candidates:
+        candidate = _browser_open_url_from_value(value)
+        if candidate:
+            payload["url"] = candidate
+            return payload
+    return payload
+
+
 def _browser_computer_action_payload(tool_name, arguments):
     arguments = arguments if isinstance(arguments, dict) else {}
     if tool_name == "browser_computer":
-        return str(arguments.get("action", "browser.session")), dict(arguments.get("payload") or {})
+        action = str(arguments.get("action", "browser.session"))
+        return action, _normalize_browser_open_url_payload(
+            action,
+            dict(arguments.get("payload") or {}),
+            str(arguments.get("action") or ""),
+        )
 
     raw_payload = dict(arguments.get("payload") or {})
     raw_action = str(arguments.get("action") or "").strip()
@@ -1334,6 +1427,7 @@ def _browser_computer_action_payload(tool_name, arguments):
             "": "browser.session",
             "session": "browser.session",
             "open_url": "browser.open_url",
+            "browser_open_url": "browser.open_url",
             "open": "browser.open_url",
             "context/apps/windows": "computer.context",
             "context_apps_windows": "computer.context",
@@ -1368,10 +1462,16 @@ def _browser_computer_action_payload(tool_name, arguments):
             "windows": "computer.windows",
             "list_windows": "computer.windows",
         }
-        action = action_map.get(raw_action, raw_action)
+        action = _canonical_browser_computer_action(raw_action, action_map)
         for key in (
             "url",
             "url_contains",
+            "browser",
+            "browser_app",
+            "profile_id",
+            "session_id",
+            "persistent",
+            "target_app",
             "x",
             "y",
             "point",
@@ -1391,6 +1491,7 @@ def _browser_computer_action_payload(tool_name, arguments):
             "to_x",
             "to_y",
             "text",
+            "value",
             "key",
             "modifier",
             "modifiers",
@@ -1436,6 +1537,9 @@ def _browser_computer_action_payload(tool_name, arguments):
             "mode",
             "method",
             "driver",
+            "background",
+            "foreground",
+            "fallback",
         ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
@@ -1443,6 +1547,7 @@ def _browser_computer_action_payload(tool_name, arguments):
         action_map = {
             "": "computer.screenshot",
             "open_url": "browser.open_url",
+            "browser_open_url": "browser.open_url",
             "open": "browser.open_url",
             "context/apps/windows": "computer.context",
             "context_apps_windows": "computer.context",
@@ -1477,10 +1582,16 @@ def _browser_computer_action_payload(tool_name, arguments):
             "windows": "computer.windows",
             "list_windows": "computer.windows",
         }
-        action = action_map.get(raw_action, raw_action)
+        action = _canonical_browser_computer_action(raw_action, action_map)
         for key in (
             "url",
             "url_contains",
+            "browser",
+            "browser_app",
+            "profile_id",
+            "session_id",
+            "persistent",
+            "target_app",
             "x",
             "y",
             "point",
@@ -1500,6 +1611,7 @@ def _browser_computer_action_payload(tool_name, arguments):
             "to_x",
             "to_y",
             "text",
+            "value",
             "key",
             "modifier",
             "modifiers",
@@ -1545,6 +1657,9 @@ def _browser_computer_action_payload(tool_name, arguments):
             "mode",
             "method",
             "driver",
+            "background",
+            "foreground",
+            "fallback",
         ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
@@ -1552,7 +1667,88 @@ def _browser_computer_action_payload(tool_name, arguments):
         raw_payload["dry_run"] = arguments.get("dry_run")
     if "approval_token" in arguments:
         raw_payload["approval_token"] = arguments.get("approval_token")
+    raw_payload = _drop_redundant_background_flag(raw_payload)
+    raw_payload = _normalize_browser_open_url_payload(action, raw_payload, raw_action)
     return action, raw_payload
+
+
+_BROWSER_APP_ALIAS_KEYS = ("app", "application", "name", "browser", "browser_app", "target_app")
+_BROWSER_APP_ALIASES = {
+    "atlas",
+    "chatgpt",
+    "chatgptatlas",
+    "chrome",
+    "firefox",
+    "googlechrome",
+    "msedge",
+    "safari",
+    "vivaldi",
+}
+_COMPUTER_USE_FOREGROUND_APP_ALIASES = {
+    "atlas",
+    "chatgptatlas",
+}
+_COMPUTER_USE_FOREGROUND_DEFAULT_ACTIONS = {"computer.type", "computer.key", "computer.scroll"}
+
+
+def _normalized_app_alias(value):
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().casefold())
+
+
+def _is_browser_app_alias(value):
+    return _normalized_app_alias(value) in _BROWSER_APP_ALIASES
+
+
+def _computer_use_prefers_foreground(action, payload, context):
+    if action not in _COMPUTER_USE_FOREGROUND_DEFAULT_ACTIONS:
+        return False
+    if not isinstance(context, dict) or not _truthy(context.get("user_requested_computer_use")):
+        return False
+    if payload.get("physical") is True or payload.get("virtual_only") is True:
+        return False
+    if _truthy(context.get("computer_use_foreground_preferred")):
+        return True
+    target_alias = _normalized_app_alias(context.get("computer_use_target_app"))
+    return target_alias in _COMPUTER_USE_FOREGROUND_APP_ALIASES
+
+
+def _payload_with_computer_use_foreground_preference(action, payload, context):
+    next_payload = dict(payload or {})
+    if not _computer_use_prefers_foreground(action, next_payload, context):
+        return next_payload
+    next_payload.pop("background", None)
+    next_payload.setdefault("fallback", "foreground")
+    return next_payload
+
+
+def _drop_redundant_background_flag(payload):
+    payload = dict(payload or {})
+    if payload.get("background") is True:
+        mode = str(payload.get("mode") or payload.get("method") or payload.get("driver") or "").strip()
+        if mode:
+            payload.pop("background", None)
+    return payload
+
+
+def _payload_with_target_app_override(payload, target_app):
+    target = str(target_app or "").strip()
+    if not target:
+        return dict(payload or {})
+    next_payload = dict(payload or {})
+    target_alias = _normalized_app_alias(target)
+    existing_values = [
+        str(next_payload.get(key) or "").strip()
+        for key in _BROWSER_APP_ALIAS_KEYS
+        if str(next_payload.get(key) or "").strip()
+    ]
+    if any(_normalized_app_alias(value) == target_alias for value in existing_values):
+        return next_payload
+    if not existing_values or any(_is_browser_app_alias(value) for value in existing_values):
+        for key in _BROWSER_APP_ALIAS_KEYS:
+            if _is_browser_app_alias(next_payload.get(key)):
+                next_payload.pop(key, None)
+        next_payload["app"] = target
+    return next_payload
 
 
 def _computer_use_payload_with_context_defaults(action, payload, context):
@@ -1563,18 +1759,18 @@ def _computer_use_payload_with_context_defaults(action, payload, context):
     target_title = context.get("computer_use_target_title")
     physical_clicks = _truthy(context.get("computer_use_physical_clicks"))
     if action == "browser.open_url":
-        if isinstance(target_app, str) and target_app.strip() and not any(
-            payload.get(key) for key in ("app", "application", "browser", "browser_app")
-        ):
-            payload["app"] = target_app.strip()
+        payload = _payload_with_target_app_override(payload, target_app)
+        if not payload.get("url"):
+            inferred_url = _single_browser_open_url_from_context(context)
+            if inferred_url:
+                payload["url"] = inferred_url
         return payload
     if action.startswith("computer.") and action not in {"computer.windows", "computer.apps"}:
-        if isinstance(target_app, str) and target_app.strip():
-            if action in {"computer.select_app", "computer.show_app"}:
-                if not any(payload.get(key) for key in ("app", "application", "name")):
-                    payload["app"] = target_app.strip()
-            else:
-                payload.setdefault("app", target_app.strip())
+        if isinstance(target_app, str) and target_app.strip() and (
+            action not in {"computer.select_app", "computer.show_app"}
+            or _truthy(context.get("user_requested_computer_use"))
+        ):
+            payload = _payload_with_target_app_override(payload, target_app)
         if (
             isinstance(target_title, str)
             and target_title.strip()
@@ -1583,7 +1779,96 @@ def _computer_use_payload_with_context_defaults(action, payload, context):
             payload.setdefault("title", target_title.strip())
         if physical_clicks and action == "computer.click" and "physical" not in payload:
             payload["physical"] = True
+        payload = _payload_with_computer_use_foreground_preference(action, payload, context)
+        if _should_default_computer_use_background(action, payload, context):
+            payload["background"] = True
     return payload
+
+
+def _should_default_computer_use_background(action, payload, context):
+    if not _truthy(context.get("user_requested_computer_use")):
+        return False
+    if action not in {"computer.type", "computer.key", "computer.scroll", "computer.click"}:
+        return False
+    if payload.get("background") is not None:
+        return False
+    if payload.get("foreground") is not None:
+        return False
+    if payload.get("fallback") is not None:
+        return False
+    if payload.get("physical") is True or payload.get("virtual_only") is True:
+        return False
+    mode = str(payload.get("mode") or payload.get("method") or payload.get("driver") or "").strip()
+    return not mode
+
+
+def _controller_browser_open_url_approval_payload(payload):
+    payload = dict(payload or {})
+    url = str(payload.get("url") or "").strip()
+    if not url:
+        return payload
+    profile_id = _browser_profile_id(
+        payload.get("profile_id")
+        or payload.get("session_id")
+        or _active_browser_computer_profile_id()
+    )
+    target_app = _browser_app_name_from_payload(payload)
+    return {
+        "url": url,
+        "profile_id": profile_id,
+        "persistent": payload.get("persistent", True) is not False,
+        "target_app": target_app,
+    }
+
+
+def _browser_computer_controller_approval_payloads(action, payload, context=None):
+    payload = dict(payload or {})
+    if action != "browser.open_url":
+        return [payload]
+    payloads = []
+    for candidate in (
+        payload,
+        _computer_use_payload_with_context_defaults(action, payload, context),
+    ):
+        controller_payload = _controller_browser_open_url_approval_payload(candidate)
+        if controller_payload not in payloads:
+            payloads.append(controller_payload)
+    return payloads or [payload]
+
+
+def _browser_profile_id(value):
+    raw = str(value or "default").strip().lower()
+    cleaned = re.sub(r"[^a-z0-9._-]+", "-", raw).strip(".-_")
+    return (cleaned or "default")[:64]
+
+
+def _active_browser_computer_profile_id():
+    try:
+        sessions_path = (
+            Path(__file__).resolve().parents[3]
+            / "rumi_default_tools_pack"
+            / "user_data"
+            / "shared"
+            / "browser_sessions.json"
+        )
+        sessions = json.loads(sessions_path.read_text(encoding="utf-8"))
+        if isinstance(sessions, dict):
+            return _browser_profile_id(sessions.get("active_profile_id") or "default")
+    except Exception:
+        pass
+    return "default"
+
+
+def _browser_app_name_from_payload(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    return str(
+        payload.get("app")
+        or payload.get("application")
+        or payload.get("target_app")
+        or payload.get("browser")
+        or payload.get("browser_app")
+        or ""
+    ).strip()
 
 
 def _conversation_tool_artifact_root(context):
@@ -1715,7 +2000,12 @@ def _approval_hash_arguments(arguments):
             return {
                 key: sanitize(item)
                 for key, item in value.items()
-                if key not in {"approval_token", "approved"}
+                if key not in {
+                    "approval_token",
+                    "approved",
+                    "computer_use_haze_sequence_id",
+                    "computer_use_sequence_id",
+                }
             }
         if isinstance(value, list):
             return [sanitize(item) for item in value]
@@ -1724,12 +2014,18 @@ def _approval_hash_arguments(arguments):
     return sanitize(dict(arguments))
 
 
+def _tool_handles_deferred_approval_consumption(tool_def):
+    return _tool_approval_tool_name(tool_def) in {"browser_computer", "browser_use", "computer_use"}
+
+
 def _browser_computer_request_arguments(tool_name, action, payload):
-    if tool_name == "browser_computer":
-        return {
-            "action": str(action or "browser.session"),
-            "payload": dict(payload or {}),
-        }
+    return {
+        "action": str(action or "browser.session"),
+        "payload": dict(payload or {}),
+    }
+
+
+def _browser_computer_payload_only_request_arguments(action, payload):
     return dict(payload or {})
 
 
@@ -1739,6 +2035,13 @@ def _browser_computer_legacy_request_arguments(tool_name, action, payload):
     return {
         "action": str(action or ""),
         **dict(payload or {}),
+    }
+
+
+def _browser_computer_controller_request_arguments(action, payload):
+    return {
+        "action": str(action or ""),
+        "payload": dict(payload or {}),
     }
 
 
@@ -1821,7 +2124,7 @@ def _preflight_profile_tool_permission(tool_name, tool_def, arguments, context, 
             and approved_context.get("_tool_permission_policy_approved") is True
         ):
             return approved_context, None
-        return context, _approval_required_tool_response(tool_def, arguments or {}, context)
+        return context, _approval_required_tool_response_for_context(tool_def, arguments or {}, context)
     if status == "allowed":
         return _context_with_profile_tool_permission_allow(context, tool_def, arguments, decision)
     return context, None
@@ -1848,7 +2151,7 @@ def _preflight_frontend_tool_permission(tool_name, tool_def, arguments, context,
                 reason="confirmation required because Settings permission resolution failed",
             )
             _audit_frontend_tool_permission(context, decision, decision.get("resolution"))
-            return context, _approval_required_tool_response(tool_def, arguments or {}, context)
+            return context, _approval_required_tool_response_for_context(tool_def, arguments or {}, context)
         return context, None
     permission = str(resolution.get("permission") or "auto").strip().lower()
     if permission == "block":
@@ -1889,7 +2192,7 @@ def _preflight_frontend_tool_permission(tool_name, tool_def, arguments, context,
         return approved_context, approval_error
     if isinstance(approved_context, dict) and approved_context.get("_frontend_tool_permission_approved") is True:
         return approved_context, None
-    return context, _approval_required_tool_response(tool_def, arguments or {}, context)
+    return context, _approval_required_tool_response_for_context(tool_def, arguments or {}, context)
 
 
 def _frontend_permission_decision(tool_name, tool_def, resolution, permission, *, reason):
@@ -1939,7 +2242,7 @@ def _context_with_frontend_tool_permission_token(context, tool_def, arguments, d
         return _attach_tool_approval_token(approved_context, tool_def, token_result), None
     code = str(getattr(verification, "code", "") or "")
     if code in _STALE_APPROVAL_TOKEN_CODES:
-        response = _approval_required_tool_response(tool_def, arguments or {}, next_context)
+        response = _approval_required_tool_response_for_context(tool_def, arguments or {}, next_context)
         if isinstance(response.get("widget"), dict):
             response["widget"]["stale_approval_token"] = True
             response["widget"]["stale_approval_code"] = code
@@ -1981,7 +2284,7 @@ def _context_with_profile_tool_permission_token(context, tool_def, arguments, de
         return _attach_tool_approval_token(approved_context, tool_def, token_result), None
     code = str(getattr(verification, "code", "") or "")
     if code in _STALE_APPROVAL_TOKEN_CODES:
-        response = _approval_required_tool_response(tool_def, arguments or {}, next_context)
+        response = _approval_required_tool_response_for_context(tool_def, arguments or {}, next_context)
         if isinstance(response.get("widget"), dict):
             response["widget"]["stale_approval_token"] = True
             response["widget"]["stale_approval_code"] = code
@@ -2219,7 +2522,110 @@ def _preflight_user_requested_computer_approval(tool_name, tool_def, arguments, 
         return None
     if _approval_token_from_context(context, tool_def, arguments) or _approval_token_from_arguments(arguments):
         return None
-    return _approval_required_tool_response(tool_def, arguments or {}, context)
+    approval_arguments = _browser_computer_preflight_approval_arguments(tool_name, arguments, context)
+    invalid_response = _invalid_user_requested_computer_approval_response(tool_name, approval_arguments, context)
+    if invalid_response is not None:
+        return invalid_response
+    display_arguments = _browser_computer_preflight_display_arguments(tool_name, arguments, context)
+    return _approval_required_tool_response(
+        tool_def,
+        approval_arguments,
+        context,
+        display_arguments=display_arguments,
+    )
+
+
+def _invalid_user_requested_computer_approval_response(tool_name, approval_arguments, context):
+    if tool_name not in {"browser_computer", "browser_use", "computer_use"}:
+        return None
+    if not isinstance(context, dict) or not context.get("user_requested_computer_use"):
+        return None
+    if not isinstance(approval_arguments, dict):
+        return None
+    action = str(approval_arguments.get("action") or "").strip()
+    payload = approval_arguments.get("payload") if isinstance(approval_arguments.get("payload"), dict) else {}
+    if action == "browser.open_url" and not str(payload.get("url") or "").strip():
+        return _computer_use_invalid_arguments_result(
+            tool_name,
+            action,
+            "browser.open_url requires a non-empty url. Retry with the required url argument, "
+            "or use context/apps/windows/screenshot first to inspect the target.",
+        )
+    if action in {"computer.select_app", "computer.show_app"} and not any(
+        str(payload.get(key) or "").strip() for key in ("app", "application", "name")
+    ):
+        return _computer_use_invalid_arguments_result(
+            tool_name,
+            action,
+            f"{action} requires a non-empty app, application, or name. Retry with the required "
+            "app argument, or use context/apps/windows/screenshot first to inspect available apps/windows.",
+        )
+    return None
+
+
+def _computer_use_invalid_arguments_result(tool_name, action, message):
+    return {
+        "result": f"Tool '{tool_name}' rejected invalid {action} arguments: {message}",
+        "is_error": True,
+        "widget": None,
+        "error_type": "invalid_computer_use_arguments",
+        "rejected_by_tool_validation": True,
+    }
+
+
+def _browser_computer_preflight_approval_arguments(tool_name, arguments, context):
+    if tool_name not in {"browser_computer", "browser_use", "computer_use"}:
+        return arguments or {}
+    if not isinstance(arguments, dict):
+        return {}
+    action, payload = _browser_computer_action_payload(tool_name, arguments)
+    if not str(action or "").startswith(("browser.", "computer.")):
+        return dict(arguments)
+    if action == "browser.open_url":
+        approval_payload = _computer_use_payload_with_context_defaults(action, payload, context)
+        if (
+            isinstance(context, dict)
+            and context.get("user_requested_computer_use")
+            and not any(key in approval_payload for key in ("persistent", "profile_id", "session_id"))
+        ):
+            approval_payload = dict(approval_payload)
+            approval_payload["persistent"] = False
+        approval_payload = _controller_browser_open_url_approval_payload(approval_payload)
+        return _browser_computer_controller_request_arguments(action, approval_payload)
+    payload = _computer_use_payload_with_context_defaults(action, payload, context)
+    return _browser_computer_controller_request_arguments(action, payload)
+
+
+def _browser_computer_preflight_display_arguments(tool_name, arguments, context):
+    if tool_name not in {"browser_use", "computer_use"} or not isinstance(arguments, dict):
+        return None
+    action, payload = _browser_computer_action_payload(tool_name, arguments)
+    if action != "browser.open_url":
+        return None
+    display_payload = _computer_use_payload_with_context_defaults(action, payload, context)
+    for key in ("profile_id", "persistent", "target_app"):
+        if key not in payload:
+            display_payload.pop(key, None)
+    return _browser_computer_controller_request_arguments(action, display_payload)
+
+
+def _approval_required_tool_response_for_context(tool_def, arguments, context=None):
+    tool_name = _tool_approval_tool_name(tool_def if isinstance(tool_def, dict) else {})
+    approval_arguments = _browser_computer_preflight_approval_arguments(
+        tool_name,
+        arguments if isinstance(arguments, dict) else {},
+        context,
+    )
+    invalid_response = _invalid_user_requested_computer_approval_response(tool_name, approval_arguments, context)
+    if invalid_response is not None:
+        return invalid_response
+    display_arguments = _browser_computer_preflight_display_arguments(tool_name, arguments, context)
+    return _approval_required_tool_response(
+        tool_def,
+        approval_arguments,
+        context,
+        display_arguments=display_arguments,
+    )
 
 
 def _context_with_tool_approval_token(context, tool_def, arguments, *extra_lookup_keys):
@@ -2250,14 +2656,44 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
         and isinstance(arguments, dict)
     ):
         action, payload = _browser_computer_action_payload(_tool_approval_tool_name(tool_def), arguments)
-        legacy_scoped_args = _approval_hash_arguments(_browser_computer_legacy_request_arguments(
-            _tool_approval_tool_name(tool_def),
-            action,
-            payload,
-        ))
-        candidates.append(
-            (operation, approval.hash_arguments(legacy_scoped_args), pack_id, conversation_id),
-        )
+        if (
+            isinstance(next_context, dict)
+            and next_context.get("user_requested_computer_use")
+            and action == "browser.open_url"
+            and not any(key in payload for key in ("persistent", "profile_id", "session_id"))
+        ):
+            payload = dict(payload)
+            payload["persistent"] = False
+        payload_candidates = [payload]
+        context_payload = _computer_use_payload_with_context_defaults(action, payload, next_context)
+        if context_payload != payload:
+            payload_candidates.append(context_payload)
+        for candidate_payload in payload_candidates:
+            payload_only_args = _approval_hash_arguments(
+                _browser_computer_payload_only_request_arguments(action, candidate_payload)
+            )
+            candidates.append(
+                (operation, approval.hash_arguments(payload_only_args), pack_id, conversation_id),
+            )
+            for controller_payload in _browser_computer_controller_approval_payloads(
+                action,
+                candidate_payload,
+                next_context,
+            ):
+                controller_args = _approval_hash_arguments(
+                    _browser_computer_controller_request_arguments(action, controller_payload)
+                )
+                candidates.append(
+                    (operation, approval.hash_arguments(controller_args), pack_id, conversation_id),
+                )
+            legacy_scoped_args = _approval_hash_arguments(_browser_computer_legacy_request_arguments(
+                _tool_approval_tool_name(tool_def),
+                action,
+                candidate_payload,
+            ))
+            candidates.append(
+                (operation, approval.hash_arguments(legacy_scoped_args), pack_id, conversation_id),
+            )
         legacy_args_hash = approval.hash_arguments(_approval_replayable_arguments(arguments))
         legacy_operation = _tool_approval_operation(tool_def)
         candidates.extend(
@@ -2308,7 +2744,7 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
         next_context["_tool_server_approval_conversation_id"] = verified_conversation_id
         return next_context, None
     if _tool_approval_tool_name(tool_def) in {"browser_computer", "browser_use", "computer_use"}:
-        return next_context, _approval_required_tool_response(tool_def, arguments, next_context)
+        return next_context, _approval_required_tool_response_for_context(tool_def, arguments, next_context)
     if verification.code == "APPROVAL_TOKEN_USED":
         return next_context, {
             "result": verification.message or "approval token has already been used",
@@ -2316,7 +2752,7 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
             "widget": None,
         }
     if verification.code in _STALE_APPROVAL_TOKEN_CODES:
-        return next_context, _approval_required_tool_response(tool_def, arguments, next_context)
+        return next_context, _approval_required_tool_response_for_context(tool_def, arguments, next_context)
     return next_context, {
         "result": verification.message or "approval token is invalid",
         "is_error": True,
@@ -2324,13 +2760,14 @@ def _context_with_tool_approval_token(context, tool_def, arguments, *extra_looku
     }
 
 
-def _approval_required_tool_response(tool_def, arguments, context=None):
+def _approval_required_tool_response(tool_def, arguments, context=None, *, display_arguments=None):
     tool_name = _tool_approval_tool_name(tool_def)
     operation, approval_args = _tool_approval_scope(tool_def, arguments)
     risk_level = _tool_approval_risk_level(tool_def)
     args = approval_args
-    display_args = _tool_approval_display_arguments(tool_def, arguments, approval_args)
-    display_payload = _tool_approval_display_payload(tool_def, arguments, approval_args)
+    visible_arguments = display_arguments if isinstance(display_arguments, dict) else arguments
+    display_args = _tool_approval_display_arguments(tool_def, visible_arguments, approval_args)
+    display_payload = _tool_approval_display_payload(tool_def, visible_arguments, approval_args)
     context = context if isinstance(context, dict) else {}
     request = _approval_module().create_approval_request(
         operation,
@@ -2342,11 +2779,27 @@ def _approval_required_tool_response(tool_def, arguments, context=None):
             "function_id": operation,
             "pack_id": str(context.get("owner_pack") or context.get("pack_id") or context.get("_source_pack_id") or "defaultspack"),
             "conversation_id": str(context.get("conversation_id") or context.get("conversation_turn_id") or ""),
-            "arguments": display_args,
+            "arguments": args,
         },
     )
+    is_computer_tool = tool_name in {"browser_computer", "browser_use", "computer_use"}
+    prompt = _COMPUTER_APPROVAL_PROMPT if is_computer_tool else ""
+    recovery = (
+        {
+            "kind": "approval_required",
+            "requires_approval": True,
+            "prompt": prompt,
+            "note": (
+                "foreground/on-screen operation is available after approval; "
+                "approve the request or choose foreground work."
+            ),
+            "recommended_next_actions": ["approve_request", "choose_foreground_work"],
+        }
+        if is_computer_tool
+        else None
+    )
     return {
-        "result": "Tool '{}' requires approval".format(tool_name),
+        "result": prompt or "Tool '{}' requires approval".format(tool_name),
         "is_error": False,
         "widget": {
             "type": "approval_request",
@@ -2362,7 +2815,11 @@ def _approval_required_tool_response(tool_def, arguments, context=None):
             "args_hash": request["args_hash"],
             "expires_at": request["expires_at"],
             "display_summary": request["display_summary"],
+            **({"message": prompt, "user_prompt": prompt} if prompt else {}),
+            **({"recovery": recovery} if recovery else {}),
         },
+        **({"message": prompt, "user_prompt": prompt} if prompt else {}),
+        **({"recovery": recovery} if recovery else {}),
     }
 
 
@@ -2499,6 +2956,8 @@ def _function_call_context(context, tool_def):
         "user_requested_computer_use",
         "computer_use_target_app",
         "computer_use_target_title",
+        "computer_use_foreground_preferred",
+        "computer_use_mouse_keyboard_requested",
         "computer_use_physical_clicks",
     ):
         if key in context and _json_safe_value(context.get(key)):

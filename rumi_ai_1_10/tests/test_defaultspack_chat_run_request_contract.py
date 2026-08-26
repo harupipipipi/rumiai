@@ -61,6 +61,18 @@ def _external_provider_tool_names(prepared) -> set[str]:
     }
 
 
+def _provider_tool_action_enum(prepared, tool_name: str) -> list[str]:
+    for tool in prepared.provider_tools:
+        function_def = tool.get("function") if isinstance(tool, dict) else {}
+        if not isinstance(function_def, dict) or function_def.get("name") != tool_name:
+            continue
+        parameters = function_def.get("parameters")
+        properties = parameters.get("properties") if isinstance(parameters, dict) else {}
+        action_schema = properties.get("action") if isinstance(properties, dict) else {}
+        return list(action_schema.get("enum") or []) if isinstance(action_schema, dict) else []
+    return []
+
+
 def test_prepare_chat_run_creates_message_chain_ir_and_context(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore
@@ -194,26 +206,38 @@ def test_prepare_chat_run_maps_approval_followup_tokens_for_action_operation_and
 
     store = _setup_store(tmp_path, monkeypatch)
     conv = store.create_conversation(model="stub/default")
+    store.add_message(conv["id"], {"role": "user", "content": "Operate ChatGPT Atlas"})
+    runtime_resume_text = (
+        "The user approved the pending browser/computer operation. "
+        "Continue with the exact pending tool once."
+    )
 
     prepared = prepare_chat_run(
         {
             "conversation_id": conv["id"],
             "message": {
                 "content": "continue",
-                "metadata": {
-                    "approval_followup": {
-                        "tool_name": "computer_use",
-                        "action": "apps",
-                        "operation": "computer.apps",
-                        "approval_token": "tok_followup",
-                        "request_id": "apr_followup",
-                    },
+            },
+            "metadata": {
+                "approval_followup": {
+                    "tool_name": "computer_use",
+                    "action": "apps",
+                    "operation": "computer.apps",
+                    "approval_token": "tok_followup",
+                    "request_id": "apr_followup",
                 },
+                "runtime_content": runtime_resume_text,
             },
         },
         {},
     )
 
+    assert prepared.request_context["user_text"] == "Operate ChatGPT Atlas"
+    assert "continue" not in prepared.request_context["conversation_user_text"]
+    user_messages = [message for message in prepared.standard_messages if message.get("role") == "user"]
+    assert user_messages[-1]["content"] == "Operate ChatGPT Atlas"
+    assert all(message.get("content") != "continue" for message in user_messages)
+    assert all(message.get("content") != runtime_resume_text for message in user_messages)
     assert prepared.request_context["tool_approval_tokens"] == {
         "computer_use": "tok_followup",
         "browser_use": "tok_followup",
@@ -222,6 +246,189 @@ def test_prepare_chat_run_maps_approval_followup_tokens_for_action_operation_and
         "computer.apps": "tok_followup",
         "apr_followup": "tok_followup",
     }
+
+
+def test_prepare_chat_run_authority_resume_forces_job_resume_without_progress_tool(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(model="stub/default")
+    store.add_message(conv["id"], {"role": "user", "content": "Open Google in Atlas"})
+    runtime_resume_text = (
+        "Runtime authority resume: model/API access is approved. "
+        "Continue without mentioning approval."
+    )
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {
+                "content": "Internal authority resume.",
+                "metadata": {
+                    "authority_followup": {
+                        "request_id": "auth_1",
+                        "permission_id": "model.invoke",
+                        "hidden": True,
+                    },
+                    "chat_display": {
+                        "hidden": True,
+                        "reason": "authority_followup",
+                    },
+                    "runtime_content": runtime_resume_text,
+                },
+            },
+            "tools": ["job_resume"],
+        },
+        {},
+    )
+
+    assert [tool["function"]["name"] for tool in prepared.provider_tools] == ["job_resume"]
+    assert prepared.params["tool_choice"] == "required"
+    assert prepared.request_context["authority_resume_followup"] is True
+    assert prepared.request_context["user_text"] == "Open Google in Atlas"
+    assert "Internal authority resume." not in prepared.request_context["conversation_user_text"]
+    user_messages = [message for message in prepared.standard_messages if message.get("role") == "user"]
+    assert user_messages[-1]["content"] == "Open Google in Atlas"
+    assert all(message.get("content") != "Internal authority resume." for message in user_messages)
+    assert all(message.get("content") != runtime_resume_text for message in user_messages)
+    assert "assistant_progress_enabled" not in prepared.tool_context
+    ChatStore._instance = None
+
+
+def test_computer_use_preferences_target_chatgpt_atlas_as_app():
+    from domain.chat.run_request import _computer_use_preferences_from_text
+
+    preferences = _computer_use_preferences_from_text("ChatGPT Atlas を操作して YouTube を開いて")
+
+    assert preferences["computer_use_target_app"] == "ChatGPT Atlas"
+    assert preferences["computer_use_foreground_preferred"] is True
+    assert "computer_use_target_title" not in preferences
+
+
+def test_computer_use_runtime_prompt_prefers_open_url_for_explicit_browser_url():
+    from domain.chat.run_request import _computer_use_runtime_prompt
+
+    prompt = _computer_use_runtime_prompt(
+        {
+            "user_requested_computer_use": True,
+            "computer_use_target_app": "ChatGPT Atlas",
+            "user_text": "ChatGPT Atlas で https://www.google.com を開いて youtube を検索して",
+        },
+        [{"name": "browser_computer"}],
+    )
+
+    assert "browser.open_url" in prompt
+    assert "first external action" in prompt
+    assert "computer.context" in prompt
+    assert "visible foreground computer-use run" in prompt
+    assert "fallback=foreground" in prompt
+
+
+def test_computer_use_runtime_prompt_requires_exact_complete_input_without_autocomplete_reliance():
+    from domain.chat.run_request import _computer_use_runtime_prompt
+
+    prompt = _computer_use_runtime_prompt(
+        {
+            "user_requested_computer_use": True,
+            "user_text": "Search for youtube",
+        },
+        [{"name": "browser_computer"}],
+    )
+
+    assert "exactly and completely, character-for-character" in prompt
+    assert "clear or replace existing content" in prompt
+    assert "type the full literal" in prompt
+    assert "rely on autocomplete/search suggestions" in prompt
+
+
+def test_computer_use_runtime_prompt_requires_post_action_recovery_and_final_state_verification():
+    from domain.chat.run_request import _computer_use_runtime_prompt
+
+    prompt = _computer_use_runtime_prompt(
+        {
+            "user_requested_computer_use": True,
+            "user_text": "Open a video and play it",
+        },
+        [{"name": "browser_computer"}],
+    )
+
+    assert "after every consequential action" in prompt
+    assert "typing, Enter/submission, navigation" in prompt
+    assert "last visually verified state" in prompt
+    assert "requested final state is visually verified" in prompt
+    assert "verify actual playback state" in prompt
+
+
+def test_prepare_chat_run_shapes_browser_computer_schema_for_ordered_url_navigation(
+    tmp_path, monkeypatch
+):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(model="openai/gpt-4o-mini")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {
+                "content": "atlas browserで。google.com→input youtube→open youtube.com→いい動画を選んで再生",
+                "metadata": {"selected_tools": ["browser_computer"]},
+            },
+            "tools": ["browser_computer"],
+        },
+        {},
+    )
+
+    actions = _provider_tool_action_enum(prepared, "browser_computer")
+    assert actions
+    assert actions[0] == "browser.open_url"
+    assert "browser.session" not in actions
+    assert "computer.context" not in actions
+    assert "computer.apps" not in actions
+    assert "computer.windows" not in actions
+    assert "computer.doctor" not in actions
+    assert "computer.type" in actions
+    assert "computer.click" in actions
+    assert prepared.request_context["user_requested_computer_use"] is True
+    [restriction] = prepared.tool_context["provider_tool_schema_restrictions"]
+    assert restriction["reason"] == "explicit_browser_navigation"
+    assert "computer.context" in restriction["removed_actions"]
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_keeps_requested_browser_computer_when_profile_has_no_connected_tools(
+    tmp_path, monkeypatch
+):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(model="openai/gpt-4o-mini")
+    runtime_profile = {
+        "profile_id": "defaultspack.default",
+        "defaultspack": {"agents": {"agent": {"tools": []}}},
+    }
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {
+                "content": "atlas browserで。google.com→input youtube→open youtube.com→いい動画を選んで再生",
+                "metadata": {"selected_tools": ["browser_computer"]},
+            },
+            "tools": ["browser_computer"],
+        },
+        {"runtime_profile": runtime_profile, "agent_id": "agent"},
+    )
+
+    tool_names = _external_provider_tool_names(prepared)
+    assert "browser_computer" in tool_names
+    assert prepared.request_context["user_requested_computer_use"] is True
+    assert prepared.tool_context.get("unselected_requested_tools") in (None, [])
+    assert "browser_computer" in prepared.connected_tool_names
+    ChatStore._instance = None
 
 
 def test_prepare_chat_run_propagates_conversation_workspace_to_tool_context(tmp_path, monkeypatch):

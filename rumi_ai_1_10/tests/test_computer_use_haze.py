@@ -670,6 +670,15 @@ def test_edge_haze_draw_path_uses_cached_state():
     assert "controller.targetWindowDrawRect" in draw_body
 
 
+def test_mac_swift_host_click_text_accepts_text_aliases():
+    source = ROOT / "ecosystem" / "rumi_default_tools_pack" / "domain" / "computer" / "mac" / "ComputerUseHost.swift"
+    text = source.read_text(encoding="utf-8")
+    semantic_text_body = text.split("func semanticText(args: [String: Any]) -> String", 1)[1].split("struct AXCandidate", 1)[0]
+
+    assert '"text_query"' in semantic_text_body
+    assert '"match_text"' in semantic_text_body
+
+
 def test_edge_haze_swift_self_test_passes(tmp_path):
     if sys.platform != "darwin":
         return
@@ -741,7 +750,11 @@ def test_browser_computer_wraps_foreground_open_url_with_haze(tmp_path, monkeypa
             events.append(f"exit:{action}")
 
     monkeypatch.setattr(BrowserComputerController, "_edge_haze", fake_haze)
-    monkeypatch.setattr(BrowserComputerController, "_open_url_foreground", staticmethod(lambda url, app_name="": True))
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_open_url_result",
+        lambda self, url, *, app_name="": {"opened": True},
+    )
 
     result = BrowserComputerController(artifact_root=tmp_path).run(
         "browser.open_url",

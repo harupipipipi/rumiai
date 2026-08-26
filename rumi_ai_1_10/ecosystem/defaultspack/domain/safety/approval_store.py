@@ -228,6 +228,18 @@ class ApprovalStore:
         if existing:
             persist_runtime_secret_for_broker(existing)
             return existing
+        # The isolated Viewer harness creates this owner-only file before
+        # either the broker or Defaultspack starts.  Adopt it for a fresh
+        # approval database so both processes verify the same one-shot tokens.
+        # Existing database state remains authoritative for normal restarts.
+        try:
+            prepared = default_approval_secret_path().read_text(encoding="utf-8").strip()
+        except OSError:
+            prepared = ""
+        if prepared:
+            self.set_metadata("runtime_secret", prepared)
+            persist_runtime_secret_for_broker(prepared)
+            return prepared
         generated = secrets.token_urlsafe(32)
         self.set_metadata("runtime_secret", generated)
         persist_runtime_secret_for_broker(generated)

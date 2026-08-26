@@ -25,6 +25,10 @@
             <input id="client-label" name="clientLabel" type="text" placeholder="Optional name shown to Rumi">
           </label>
           <label class="field">
+            <span>Profile Label</span>
+            <input id="profile-label" name="profileLabel" type="text" placeholder="Optional browser profile name">
+          </label>
+          <label class="field">
             <span>Poll Interval (minutes)</span>
             <input id="poll-interval" name="pollIntervalMinutes" type="number" min="1" step="1" value="1" required>
           </label>
@@ -39,9 +43,10 @@
         <h2>Capabilities</h2>
         <ul class="capabilities">
           <li>Periodic bridge poll with browser metadata and tabs summary</li>
+          <li>Local browser/profile metadata with installation id and profile label</li>
           <li>Tab operations: list, select, navigate, capture visible tab</li>
           <li>Semantic DOM snapshot with element id, role, labels, nearby text, geometry, and action hints</li>
-          <li>Element actions by `element_id` or CSS selector: click, type, press, scroll, extract, highlight</li>
+          <li>Element actions by `element_id`, CSS selector, text, accessible name, role, semantic id, or nearby text</li>
         </ul>
       </section>
     </main>

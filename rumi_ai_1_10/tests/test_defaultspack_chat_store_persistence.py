@@ -96,6 +96,41 @@ def test_chat_store_list_conversations_omits_full_messages_by_default(tmp_path, 
     ChatStore._instance = None
 
 
+def test_chat_store_list_conversations_iterates_snapshot_when_store_changes(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    first = store.create_conversation(model="stub/default")
+    second = store.create_conversation(model="stub/default")
+    original_normalize = ChatStore._normalize_conversation
+    injected = {"done": False}
+
+    def normalize_and_change_store(conversation_id, conversation):
+        original_normalize(conversation_id, conversation)
+        if not injected["done"]:
+            injected["done"] = True
+            store._conversations["conv-added-during-list"] = {
+                "id": "conv-added-during-list",
+                "title": "Added During List",
+                "created_at": 0,
+                "updated_at": 0,
+                "model": "stub/default",
+                "messages": [],
+            }
+
+    monkeypatch.setattr(ChatStore, "_normalize_conversation", staticmethod(normalize_and_change_store))
+
+    listed, total = store.list_conversations(limit=10, include_messages=False)
+
+    assert total == 2
+    assert {conversation["id"] for conversation in listed} == {first["id"], second["id"]}
+    ChatStore._instance = None
+
+
 def test_chat_store_update_replaces_client_supplied_icon_svg(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
 

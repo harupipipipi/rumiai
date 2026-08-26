@@ -30,6 +30,17 @@ def _browser_companion_extension_root() -> Path:
     return candidates[0]
 
 
+def _defaultspack_domain_module(module_name: str):
+    sys.modules.pop("domain", None)
+    for name in list(sys.modules):
+        if name.startswith("domain."):
+            sys.modules.pop(name, None)
+    while str(DEFAULTSPACK_ROOT) in sys.path:
+        sys.path.remove(str(DEFAULTSPACK_ROOT))
+    sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+    return __import__(module_name, fromlist=["*"])
+
+
 def test_browser_companion_candidate_urls_match_defaultspack_default_port():
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import candidate_base_urls
 
@@ -47,6 +58,9 @@ def test_browser_companion_store_accepts_tabs_summary_alias(tmp_path):
         {
             "client_id": "edge-1",
             "browser_name": "Microsoft Edge",
+            "browser_profile_id": "edge-work-profile",
+            "profile_label": "Work",
+            "installation_id": "install-edge-1",
             "tabs_summary": [
                 {"id": 17, "active": True, "title": "Example", "url": "https://example.com"},
             ],
@@ -55,6 +69,13 @@ def test_browser_companion_store_accepts_tabs_summary_alias(tmp_path):
 
     assert record["tabs"][0]["id"] == 17
     assert record["active_tab_id"] == 17
+    assert record["browser_profile_id"] == "edge-work-profile"
+    assert record["profile_label"] == "Work"
+    assert record["installation_id"] == "install-edge-1"
+    assert record["client_profile"]["browser_profile_id"] == "edge-work-profile"
+    assert store.resolve_client(browser_profile_id="edge-work-profile")["client_id"] == "edge-1"
+    assert store.resolve_client(installation_id="install-edge-1")["client_id"] == "edge-1"
+    assert store.resolve_client(profile_label="wor")["client_id"] == "edge-1"
 
 
 def test_browser_companion_controller_round_trip_uses_active_tab_and_saves_capture(tmp_path):
@@ -66,6 +87,9 @@ def test_browser_companion_controller_round_trip_uses_active_tab_and_saves_captu
         {
             "client_id": "edge-1",
             "browser_name": "Microsoft Edge",
+            "browser_profile_id": "edge-work-profile",
+            "profile_label": "Work",
+            "installation_id": "install-edge-1",
             "tabs": [
                 {"id": 17, "active": True, "title": "Example", "url": "https://example.com"},
             ],
@@ -115,7 +139,12 @@ def test_browser_companion_controller_round_trip_uses_active_tab_and_saves_captu
 
     assert result["is_error"] is False
     assert result["client_id"] == "edge-1"
+    assert result["browser_profile_id"] == "edge-work-profile"
+    assert result["profile_label"] == "Work"
+    assert result["installation_id"] == "install-edge-1"
+    assert result["client_profile"]["browser_profile_id"] == "edge-work-profile"
     assert result["snapshot"]["url"] == "https://example.com"
+    assert result["elements"][0]["element_id"] == "rumi-el-1"
     assert result["requires_foreground"] is True
     assert result["can_parallel_user_work"] is False
     assert result["path"].endswith(".png")
@@ -292,7 +321,7 @@ def test_browser_companion_read_only_safety_blocks_write_actions(tmp_path):
 
 
 def test_browser_companion_executor_approval_scope_is_page_action():
-    from domain.tool.executor import _tool_approval_scope
+    _tool_approval_scope = _defaultspack_domain_module("domain.tool.executor")._tool_approval_scope
 
     operation, approval_args = _tool_approval_scope(
         {"name": "browser_companion"},
@@ -350,21 +379,42 @@ def test_browser_companion_extension_semantic_dom_and_highlight_contract():
 
     for needle in (
         'schema_version: "semantic_dom_v2"',
+        'schema_id: "rumi.browser.semantic_dom_v2"',
         "semantic_id:",
         "accessible_name:",
         "labels,",
         "nearby_text:",
+        "viewport_center:",
+        "page_rect:",
+        "page_center:",
         "action_hints:",
         "recognition_confidence:",
+        "selector_hints:",
         "xpath_hint:",
+        "function findSemanticTarget",
+        "isBetterSemanticTarget(element, best, criteria, action)",
+        "function semanticTargetSpecificityScore",
+        "function isBroadSemanticContainer",
+        "text_query",
+        "accessible_name",
+        "nearby_text",
+        "typedTextValue(command)",
         "function highlightElement",
         "function clearHighlights",
     ):
         assert needle in content
 
     for needle in (
+        "profileLabel",
+        "browser_profile_id",
+        "profile_label",
+        "installation_id",
+        "client_profile",
+        "function topLevelResultFields",
+        "elements,",
         "semantic_dom: true",
         "accessible_labels: true",
+        "semantic_targeting",
         '"highlight"',
         '"clear_highlight"',
         'case "page.highlight"',
@@ -394,6 +444,7 @@ def test_browser_companion_extension_keeps_pairing_token_in_local_storage():
     extension_root = _browser_companion_extension_root()
     background = (extension_root / "background.js").read_text(encoding="utf-8")
     options = (extension_root / "options.js").read_text(encoding="utf-8")
+    options_html = (extension_root / "options.html").read_text(encoding="utf-8")
 
     assert "readLocalSettingsWithSyncMigration" in background
     assert "chrome.storage.local.set({ [STORAGE_KEY]: merged })" in background
@@ -401,6 +452,8 @@ def test_browser_companion_extension_keeps_pairing_token_in_local_storage():
     assert 'areaName !== "local"' in background
     assert "chrome.storage.local.get(STORAGE_KEY)" in options
     assert "chrome.storage.local.set({ [STORAGE_KEY]: settings })" in options
+    assert "profileLabel" in options
+    assert 'name="profileLabel"' in options_html
     assert "chrome.storage.sync.set({ [STORAGE_KEY]: settings })" not in options
 
 
@@ -449,7 +502,7 @@ def test_browser_companion_bridge_routes_support_batch_results(tmp_path, monkeyp
 
 
 def test_browser_companion_pack_not_approved_does_not_fall_back_to_local(monkeypatch):
-    from domain.tool.executor import ToolExecutor
+    ToolExecutor = _defaultspack_domain_module("domain.tool.executor").ToolExecutor
 
     called = {"local": False}
 
