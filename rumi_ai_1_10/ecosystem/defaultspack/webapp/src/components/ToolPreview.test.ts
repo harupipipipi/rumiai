@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 
 import {
   artifactDialogItemFromToolPreview,
+  buildCanvasTabPickerItems,
   buildToolPreviewDisplayItems,
   buildToolPreviewTimelineItems,
   hasCanvasItems,
   isCanvasPreviewItemRenderable,
+  MEMO_PREVIEW_ID,
+  selectCanvasTab,
   WEB_PREVIEW_IFRAME_SANDBOX,
   type ToolPreviewItem,
 } from "./ToolPreview";
@@ -62,6 +65,41 @@ test("canvas filters planned-tool placeholders", () => {
 test("memo is shown first only when it is active or has content", () => {
   assert.equal(buildToolPreviewDisplayItems(previews, "", "__memo__")[0]?.id, "__memo__");
   assert.equal(buildToolPreviewDisplayItems(previews, "draft note", null)[0]?.id, "__memo__");
+});
+
+test("canvas picker offers and selects the first empty memo tab", () => {
+  const displayItems = buildToolPreviewDisplayItems(previews, "", null);
+  const pickerItems = buildCanvasTabPickerItems(displayItems, "", true);
+  const memoItem = pickerItems.find((item) => item.id === MEMO_PREVIEW_ID);
+
+  assert.ok(memoItem);
+  assert.equal(memoItem.data.type, "file");
+  assert.equal(memoItem.data.filename, "memo.md");
+  assert.equal(memoItem.data.content, "");
+
+  const selected = selectCanvasTab([], memoItem);
+  assert.deepEqual(selected.openPreviewIds, [MEMO_PREVIEW_ID]);
+  assert.equal(selected.activeTabId, MEMO_PREVIEW_ID);
+  assert.equal(selected.memoTabCreated, true);
+});
+
+test("canvas picker omits memo when editing is not supported and never duplicates it", () => {
+  const displayItems = buildToolPreviewDisplayItems(previews, "", null);
+
+  assert.equal(
+    buildCanvasTabPickerItems(displayItems, "", false).some(
+      (item) => item.id === MEMO_PREVIEW_ID,
+    ),
+    false,
+  );
+
+  const withMemo = buildToolPreviewDisplayItems(previews, "draft", null);
+  assert.equal(
+    buildCanvasTabPickerItems(withMemo, "draft", true).filter(
+      (item) => item.id === MEMO_PREVIEW_ID,
+    ).length,
+    1,
+  );
 });
 
 test("tool preview timeline is chronological regardless of display ordering", () => {
