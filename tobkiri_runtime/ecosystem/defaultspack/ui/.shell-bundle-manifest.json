@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b42ece2e05b7e89452dd0b2bcef89f6dec5a148be13a2554686f4a0a7edbf8c6",
+    "digest": "cc6356fb831d9df4150afebe5502f940d8ae562e35d59e5057f638d3e7261076",
     "entries": [
       {
         "path": "index.html",
@@ -1660,13 +1660,13 @@
       },
       {
         "path": "src/renderers/SettingsModalRenderer.test.tsx",
-        "size": 64961,
-        "sha256": "16b990ab79b54aceec9e709866587a325a5e73a07db077960686c69caeb26ef8"
+        "size": 64927,
+        "sha256": "048fcd90b785986ae71302cfe5de71b86c275229cf7113d56b8c6e26562c25dc"
       },
       {
         "path": "src/renderers/SettingsModalRenderer.tsx",
-        "size": 278855,
-        "sha256": "0284573e41c65fe0c14708ac73e5d10934e17a92326185037ba2d92b2af5f10d"
+        "size": 278873,
+        "sha256": "c49748f044cd79a1caf8a124b291f20da50f3159778ab699c7fb847ec2408364"
       },
       {
         "path": "src/renderers/TitleBarRenderer.tsx",
@@ -1770,13 +1770,13 @@
       },
       {
         "path": "src/settings/controlCenter.test.ts",
-        "size": 21032,
-        "sha256": "2279b890de64fbb254fe3a134ce40d415c26aa0c9b26c96c8035db788126a65d"
+        "size": 21065,
+        "sha256": "d9ea4014d71ae29228065000dbdef7b5256e976cc9280d772dc71086fedd1cb7"
       },
       {
         "path": "src/settings/controlCenter.ts",
-        "size": 51080,
-        "sha256": "ea897ccf809a24a6a008135637d0d1d503b4a734e581294efdda5ae0cb8f7880"
+        "size": 52308,
+        "sha256": "d08707219887bd491a6d3aab1b1027f94f5bb9fdbb2cd1f0b927bb9a34f15f79"
       },
       {
         "path": "src/styles/rumi-liquid-mobile.css",
@@ -1851,7 +1851,7 @@
     ]
   },
   "bundle": {
-    "digest": "6452bbd7184eb2fcaf39237cc3aae2ee663a0e8734cab7ac726958b6c71c92ff",
+    "digest": "80c4c072ffceec64d5c2818218406447dce7efbaa4430a7ea62f10458270407d",
     "entries": [
       {
         "path": "shell-app.css",
@@ -1865,8 +1865,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2208068,
-        "sha256": "3ebb1666ccf5ea40cdb7105b68dbfa5b8a7222cef3cd8d5b570da61f8b67ec25"
+        "size": 2208858,
+        "sha256": "90c37b431a8ffb61ca86adbc8d9853fe5fa5d6740477371dd603208871a9fe47"
       },
       {
         "path": "shell-rolldown-runtime.js",
