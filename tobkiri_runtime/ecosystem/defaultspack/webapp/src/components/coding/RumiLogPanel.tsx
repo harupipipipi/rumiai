@@ -1,5 +1,5 @@
 import { AtSign, History, ListTodo, MessageSquare, RefreshCw, Send, Sparkles } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 
 import type { RumiLogEvent, RumiLogSummary } from "../../lib/api";
 import { cn } from "../../lib/cn";
@@ -196,6 +196,7 @@ export function RumiLogPanel({ workspaceId }: { workspaceId?: string | null }) {
   const [filter, setFilter] = useState<LogFilter>("all");
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const messageId = `rumi-log-message-${useId().replace(/:/g, "")}`;
 
   const loadLogs = useCallback(async () => {
     setStatus(null);
@@ -311,6 +312,7 @@ export function RumiLogPanel({ workspaceId }: { workspaceId?: string | null }) {
           onClick={() => void loadLogs()}
           className="ml-auto flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100"
           title="Refresh .rumi log"
+          aria-label={`Refresh Rumi local log, ${events.length} events`}
         >
           <RefreshCw size={13} />
         </button>
@@ -320,10 +322,13 @@ export function RumiLogPanel({ workspaceId }: { workspaceId?: string | null }) {
           disabled={busy}
           className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100 disabled:cursor-not-allowed disabled:text-zinc-700"
           title="Create local agent room"
+          aria-label="Create local agent room"
         >
           <Sparkles size={13} />
         </button>
       </div>
+
+      <p className="sr-only" role="status" aria-live="polite">{busy ? "Rumi local log update in progress" : `${events.length} local log events`}</p>
 
       <div className="mb-3 grid grid-cols-5 gap-1">
         {stats.map((stat) => (
@@ -368,12 +373,13 @@ export function RumiLogPanel({ workspaceId }: { workspaceId?: string | null }) {
         </div>
       </div>
 
-      <div className="mb-2 grid grid-cols-4 gap-1 border border-zinc-800 bg-zinc-950/40 p-1">
+      <div className="mb-2 grid grid-cols-4 gap-1 border border-zinc-800 bg-zinc-950/40 p-1" role="group" aria-label="Filter Rumi log history">
         {filterOptions.map((option) => (
           <button
             key={option.value}
             type="button"
             onClick={() => setFilter(option.value)}
+            aria-pressed={filter === option.value}
             className={cn(
               "h-6 rounded text-[10px]",
               filter === option.value
@@ -386,8 +392,10 @@ export function RumiLogPanel({ workspaceId }: { workspaceId?: string | null }) {
         ))}
       </div>
 
+      <label htmlFor={messageId} className="mb-1 block text-[11px] font-medium text-zinc-400">Agent room message</label>
       <div className="mb-2 flex items-center gap-1.5">
         <input
+          id={messageId}
           value={note}
           onChange={(event) => setNote(event.target.value)}
           onKeyDown={(event) => {
@@ -403,12 +411,13 @@ export function RumiLogPanel({ workspaceId }: { workspaceId?: string | null }) {
           disabled={busy || !note.trim()}
           className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-zinc-100 text-zinc-950 hover:bg-white disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-600"
           title="Append agent message"
+          aria-label="Append agent room message"
         >
           <Send size={13} />
         </button>
       </div>
 
-      {status && <p className="mb-2 rounded border border-zinc-700 bg-zinc-900/70 px-2 py-1 text-[11px] text-zinc-300">{status}</p>}
+      {status && <p role="status" aria-live="polite" className="mb-2 rounded border border-zinc-700 bg-zinc-900/70 px-2 py-1 text-[11px] text-zinc-300">{status}</p>}
 
       <div className="mb-2 flex items-center gap-2">
         <h3 className="text-xs font-semibold uppercase text-zinc-500">History</h3>
