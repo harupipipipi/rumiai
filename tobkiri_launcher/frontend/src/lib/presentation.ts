@@ -1,5 +1,6 @@
 import type {
   ApiBasePackDescriptor,
+  ApiDynamicFrontendCatalog,
   ApiPresentationCatalog,
   ApiPresentationMaterialization,
   ApiPresentationSelection,
@@ -7,6 +8,43 @@ import type {
 } from './apiTypes';
 
 export const SHELL_CONTRACT_ID = 'app.shell.v1';
+
+const CONVERSATION_CONTRIBUTION_ID = 'defaults.conversation.complete';
+const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/;
+
+export function isConversationCapabilityReady(
+  catalog: ApiDynamicFrontendCatalog | null,
+): boolean {
+  if (
+    catalog?.version !== 'rumi.ui.contribution.v1'
+    || !catalog.profile_id
+    || !SHA256_DIGEST.test(catalog.profile_revision)
+    || !SHA256_DIGEST.test(catalog.plan_hash)
+    || !SHA256_DIGEST.test(catalog.catalog_hash)
+    || catalog.quarantined_pack_ids.includes('defaultspack')
+  ) {
+    return false;
+  }
+  const matches = catalog.contributions.filter(
+    (contribution) => contribution.contribution_id === CONVERSATION_CONTRIBUTION_ID,
+  );
+  if (matches.length !== 1) return false;
+  const contribution = matches[0];
+  return contribution.kind === 'route'
+    && contribution.mode === 'declarative'
+    && contribution.route === '/chat'
+    && contribution.owner_pack_id === 'defaultspack'
+    && contribution.action_contract === 'conversation.turn.v1'
+    && contribution.operation_id === 'complete'
+    && contribution.provider_id === 'defaultspack.conversation'
+    && contribution.function_id === 'defaultspack.conversation'
+    && contribution.build_identity === 'defaultspack.conversation'
+    && SHA256_DIGEST.test(contribution.owner_pack_hash ?? '')
+    && SHA256_DIGEST.test(contribution.descriptor_hash ?? '')
+    && contribution.resolved_profile_revision === catalog.profile_revision
+    && contribution.resolved_plan_hash === catalog.plan_hash
+    && contribution.view?.type === 'conversation_v4';
+}
 
 export interface PresentationCompatibility {
   compatible: boolean;

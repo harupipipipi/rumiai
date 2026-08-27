@@ -113,6 +113,9 @@ class PlatformIsolationDriver(Protocol):
         """Destroy one domain and release all platform resources."""
 
 
+CapabilityBridge = Callable[[object, Mapping[str, Any]], Mapping[str, Any]]
+
+
 class UnavailablePlatformDriver:
     """Deterministic fail-closed driver used when Host dependencies are absent."""
 
@@ -174,6 +177,7 @@ class ProductionIsolationBackend:
         self._leases: dict[str, IsolationLease] = {}
         self._request_domains: dict[str, str] = {}
         self._request_lock = threading.RLock()
+        self._capability_bridge: CapabilityBridge | None = None
         self.status = BackendStatus(
             backend_id=driver.backend_id,
             execution_kind=ExecutionKind.PACK_VM,
@@ -219,6 +223,30 @@ class ProductionIsolationBackend:
         ):
             raise BackendUnavailableError("target domain resolver is already bound")
         self._target_domain_resolver = resolver
+
+    def bind_capability_bridge(self, callback: CapabilityBridge) -> None:
+        """Bind verified PackVM-to-Host capability continuation handling.
+
+        Only a direct platform driver that implements the explicit bridge
+        method may receive this callback.  Lima and legacy drivers therefore
+        cannot be promoted by merely accepting an arbitrary callable.
+        """
+
+        if not callable(callback):
+            raise BackendUnavailableError("PackVM capability bridge is invalid")
+        if self._domains or self._reservations:
+            raise BackendUnavailableError(
+                "PackVM capability bridge cannot change after materialization"
+            )
+        if self._capability_bridge is not None and self._capability_bridge is not callback:
+            raise BackendUnavailableError("PackVM capability bridge is already bound")
+        binder = getattr(self._driver, "bind_capability_bridge", None)
+        if not callable(binder):
+            raise BackendUnavailableError(
+                "platform supervisor does not support a verified capability bridge"
+            )
+        binder(callback)
+        self._capability_bridge = callback
 
     def materialize(
         self,
@@ -722,6 +750,7 @@ def _platform_attestation_digest(attestation: PlatformAttestation) -> str:
 
 
 __all__ = [
+    "CapabilityBridge",
     "IsolationLaunch",
     "IsolationLease",
     "LinuxFirecrackerBackend",

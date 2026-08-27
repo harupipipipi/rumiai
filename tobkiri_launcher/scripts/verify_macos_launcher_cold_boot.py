@@ -34,7 +34,8 @@ from typing import Any, Optional
 CI_BUNDLE_IDENTIFIER = "dev.tobkiri.launcher.ci-e2e"
 CI_APP_DATA_DIRECTORY_NAME = CI_BUNDLE_IDENTIFIER
 CI_APP_NAME = "Tobkiri Launcher CI E2E.app"
-EXECUTABLE_RELATIVE = Path("Contents/MacOS/Tobkiri Launcher CI E2E")
+CI_EXECUTABLE_NAME = "tobkiri-launcher"
+EXECUTABLE_DIRECTORY_RELATIVE = Path("Contents/MacOS")
 INFO_PLIST_RELATIVE = Path("Contents/Info.plist")
 BROKER_CONNECTION_RELATIVE = Path("user_data/host_broker/connection.json")
 BROKER_HEALTH_PATH = "/api/host/health"
@@ -174,25 +175,52 @@ def _validate_port(value: int, label: str) -> int:
     return value
 
 
-def _validate_app_bundle(app_bundle: Path) -> Path:
-    app_bundle = _canonical_directory(app_bundle, "application bundle")
-    if app_bundle.name != CI_APP_NAME:
-        raise ColdBootError("cold boot requires the non-publishable CI/E2E app bundle")
-    executable = _canonical_regular_file(
-        app_bundle / EXECUTABLE_RELATIVE,
-        "CI/E2E application executable",
-    )
-    if not os.access(executable, os.X_OK):
-        raise ColdBootError("CI/E2E application executable is not executable")
+def _read_info_plist(app_bundle: Path) -> Mapping[str, Any]:
     info_plist = _canonical_regular_file(app_bundle / INFO_PLIST_RELATIVE, "Info.plist")
     try:
         with info_plist.open("rb") as source:
             metadata = plistlib.load(source)
     except (OSError, plistlib.InvalidFileException) as error:
         raise ColdBootError("CI/E2E Info.plist is unreadable") from error
+    if not isinstance(metadata, dict):
+        raise ColdBootError("CI/E2E Info.plist must contain a dictionary")
+    return metadata
+
+
+def _bundle_executable_name(metadata: Mapping[str, Any]) -> str:
+    executable_name = metadata.get("CFBundleExecutable")
+    if not isinstance(executable_name, str) or not executable_name:
+        raise ColdBootError("CI/E2E CFBundleExecutable must be a non-empty filename")
+    if executable_name in {".", ".."}:
+        raise ColdBootError("CI/E2E CFBundleExecutable must not traverse directories")
+    if Path(executable_name).is_absolute():
+        raise ColdBootError("CI/E2E CFBundleExecutable must be bundle-relative")
+    if "/" in executable_name or "\\" in executable_name:
+        raise ColdBootError(
+            "CI/E2E CFBundleExecutable must not contain path separators"
+        )
+    if "\x00" in executable_name:
+        raise ColdBootError("CI/E2E CFBundleExecutable contains an invalid character")
+    if executable_name != CI_EXECUTABLE_NAME:
+        raise ColdBootError("CI/E2E CFBundleExecutable is not the attested executable")
+    return executable_name
+
+
+def _validate_app_bundle(app_bundle: Path) -> tuple[Path, Path]:
+    app_bundle = _canonical_directory(app_bundle, "application bundle")
+    if app_bundle.name != CI_APP_NAME:
+        raise ColdBootError("cold boot requires the non-publishable CI/E2E app bundle")
+    metadata = _read_info_plist(app_bundle)
     if metadata.get("CFBundleIdentifier") != CI_BUNDLE_IDENTIFIER:
         raise ColdBootError("CI/E2E application bundle identifier is invalid")
-    return app_bundle
+    executable_name = _bundle_executable_name(metadata)
+    executable = _canonical_regular_file(
+        app_bundle / EXECUTABLE_DIRECTORY_RELATIVE / executable_name,
+        "CI/E2E application executable",
+    )
+    if not os.access(executable, os.X_OK):
+        raise ColdBootError("CI/E2E application executable is not executable")
+    return app_bundle, executable
 
 
 def _validate_fresh_app_data(app_data_dir: Path) -> Path:
@@ -206,8 +234,8 @@ def _validate_fresh_app_data(app_data_dir: Path) -> Path:
     return app_data_dir
 
 
-def _validate_config(config: ColdBootConfig) -> ColdBootConfig:
-    app_bundle = _validate_app_bundle(config.app_bundle)
+def _validate_config(config: ColdBootConfig) -> tuple[ColdBootConfig, Path]:
+    app_bundle, executable = _validate_app_bundle(config.app_bundle)
     app_data_dir = _validate_fresh_app_data(config.app_data_dir)
     diagnostics_dir = _canonical_directory(
         config.diagnostics_dir,
@@ -216,12 +244,15 @@ def _validate_config(config: ColdBootConfig) -> ColdBootConfig:
     kernel_port = _validate_port(config.kernel_port, "kernel port")
     if not 5.0 <= config.timeout_seconds <= 300.0:
         raise ColdBootError("timeout must be between 5 and 300 seconds")
-    return ColdBootConfig(
-        app_bundle=app_bundle,
-        app_data_dir=app_data_dir,
-        diagnostics_dir=diagnostics_dir,
-        kernel_port=kernel_port,
-        timeout_seconds=config.timeout_seconds,
+    return (
+        ColdBootConfig(
+            app_bundle=app_bundle,
+            app_data_dir=app_data_dir,
+            diagnostics_dir=diagnostics_dir,
+            kernel_port=kernel_port,
+            timeout_seconds=config.timeout_seconds,
+        ),
+        executable,
     )
 
 
@@ -436,11 +467,14 @@ def _panel_bootstrap_is_reachable(response: Optional[HttpResponse]) -> bool:
     if response is None or response.status != 200:
         return False
     content_type = response.headers.get("content-type", "").lower()
+    cache_control = response.headers.get("cache-control", "").lower()
     body = response.body.lower()
     return (
         "text/html" in content_type
-        and b"<html" in body
-        and b"/panel/assets/" in body
+        and "no-store" in cache_control
+        and b"<!doctype html>" in body
+        and b"/api/panel/auth/exchange" in body
+        and b"tobkiri launcher authentication required" in body
     )
 
 
@@ -630,7 +664,7 @@ def verify_cold_boot(
 ) -> ColdBootResult:
     """Run the bounded, local-only cold-boot gate and return safe evidence."""
     try:
-        config = _validate_config(config)
+        config, executable = _validate_config(config)
     except BaseException as error:
         _write_preflight_diagnostic(config, error)
         raise
@@ -651,7 +685,6 @@ def verify_cold_boot(
             raise ColdBootError("broker port must differ from configured Kernel port")
         if not probes.port_available(broker_port):
             raise ColdBootError("reserved broker port became unavailable before cold boot")
-        executable = config.app_bundle / EXECUTABLE_RELATIVE
         process = launch(
             executable,
             config.app_bundle,

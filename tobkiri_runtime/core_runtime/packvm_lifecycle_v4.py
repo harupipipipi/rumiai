@@ -15,7 +15,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Any, Iterator, Mapping
+from typing import Any, Iterator, Mapping, Protocol
 
 from core_runtime.hmac_key_manager import (
     SigningKeyError,
@@ -24,10 +24,13 @@ from core_runtime.hmac_key_manager import (
 )
 from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
     PACKVM_CLEANUP_PREFIX,
-    PackVMLimaProvisioner,
+    PackVMDoctor,
     PackVMProcessError,
     PackVMProvisioningPlan,
     PackVMProvisioningRequest,
+)
+from ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner import (
+    default_packvm_provisioner,
 )
 from ecosystem.defaultspack.backend.sandbox.isolation.packvm_image_cache import (
     PackVMImageCancelled,
@@ -51,17 +54,61 @@ _WINDOWS_VERIFIED_LOCKS_GUARD = threading.Lock()
 _WINDOWS_VERIFIED_LOCKS: set[tuple[int, int, int]] = set()
 
 
+class PackVMLifecycleProvisioner(Protocol):
+    """The narrow authenticated lifecycle surface shared by production backends."""
+
+    @property
+    def state_path(self) -> Path:
+        """Return the durable authenticated state path."""
+
+    def operation_gate(self, operation: str, binding: Mapping[str, str | int], **kwargs: Any) -> Any:
+        """Serialize exactly one authenticated lifecycle operation."""
+
+    def recovery_identity(self) -> dict[str, int | str]:
+        """Return non-secret recovery identity facts."""
+
+    def prepare(self) -> PackVMProvisioningPlan:
+        """Return one explicit provisioning plan."""
+
+    def provision(self, request: PackVMProvisioningRequest, **kwargs: Any) -> PackVMDoctor:
+        """Provision from one consumed authorization."""
+
+    def doctor(self) -> PackVMDoctor:
+        """Return the current authenticated health projection."""
+
+    def readiness_snapshot(self) -> dict[str, Any]:
+        """Return a public readiness projection."""
+
+    def stop(self, confirmation: str) -> None:
+        """Stop one authenticated instance."""
+
+    def cleanup(self, confirmation: str) -> None:
+        """Remove one authenticated instance."""
+
+    def cleanup_failed_provision(
+        self, confirmation: str, expected_proof: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Recoverably remove an exact failed provisioning instance."""
+
+    def recover_provision_operation(self, expected_proof: Mapping[str, Any]) -> PackVMDoctor:
+        """Reconcile an in-flight provision after host restart."""
+
+
 class PackVMLifecycleV4:
     """Enforce prepare, explicit consent, and one-shot provision ceremonies."""
 
     def __init__(
         self,
-        provisioner: PackVMLimaProvisioner | None = None,
+        provisioner: PackVMLifecycleProvisioner | None = None,
         *,
         archive_max_bytes: int = PACKVM_OPERATIONS_ARCHIVE_MAX_BYTES,
         archive_max_records: int = PACKVM_OPERATIONS_ARCHIVE_MAX_RECORDS,
     ) -> None:
-        self._provisioner = provisioner or PackVMLimaProvisioner()
+        # Lima is deliberately not a default production path.  Tests and
+        # conformance environments may still inject ``PackVMLimaProvisioner``
+        # explicitly, but a normal Launcher lifecycle selects direct VZ and
+        # reports unavailable if its signed prerequisites are not installed.
+        self._provisioner = provisioner or default_packvm_provisioner()
         self._plans: dict[str, tuple[PackVMProvisioningPlan, str]] = {}
         self._consents: dict[str, tuple[PackVMProvisioningRequest, PackVMProvisioningPlan]] = {}
         self._operations_path = self._provisioner.state_path.parent / "packvm-operations.json"
@@ -312,6 +359,22 @@ class PackVMLifecycleV4:
 
         with self._lock:
             return self._provisioner.readiness_snapshot()
+
+    def production_backend_registration(self) -> object | None:
+        """Expose authenticated direct-VZ facts to the bootstrap composition root.
+
+        Explicit Lima injection is intentionally not adaptable here.  Only a
+        provisioner that independently verifies direct VZ state may offer a
+        registration, and a missing signed helper transport stays unavailable.
+        """
+
+        candidate = getattr(self._provisioner, "prepare_direct_vz", None)
+        if not callable(candidate):
+            return None
+        try:
+            return candidate()
+        except (OSError, ValueError):
+            return None
 
     def stop(self, payload: Mapping[str, object]) -> Mapping[str, Any]:
         """Stop only the authenticated v4 instance after exact confirmation."""

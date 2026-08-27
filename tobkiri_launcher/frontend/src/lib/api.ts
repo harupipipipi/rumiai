@@ -788,6 +788,7 @@ export function fetchDashboard(): Promise<ApiDashboard> {
 export async function fetchFrontendCatalog(): Promise<ApiDynamicFrontendCatalog> {
   const data = await apiFetch<{dynamic_host?: ApiDynamicFrontendCatalog | null}>(
     frontendContractPath('GET', '/api/ui/catalog'),
+    {cache: 'no-store'},
   );
   if (!data.dynamic_host) {
     throw new Error('Tobkiri dynamic frontend catalog is unavailable.');

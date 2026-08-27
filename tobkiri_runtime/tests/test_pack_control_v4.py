@@ -67,12 +67,26 @@ def _approve_target(session) -> None:
     )
 
 
+def _catalog_pack(catalog: dict, pack_id: str) -> dict:
+    """Return one Pack projection from a catalog response."""
+    return next(item for item in catalog["packs"] if item["pack_id"] == pack_id)
+
+
+def _catalog_operation(pack: dict, contract_id: str, operation_id: str) -> dict:
+    """Return one declared operation from a Pack projection."""
+    return next(
+        item
+        for item in pack["operations"]
+        if item["contract_id"] == contract_id and item["operation_id"] == operation_id
+    )
+
+
 def test_catalog_install_approve_enable_and_restart_read_back(captured_session) -> None:
     """The positive lifecycle survives a fresh captured session."""
     session, _state_path, user_data = captured_session
     initial = _invoke(session, "catalog.read")
     assert initial["count"] == 143
-    target = next(item for item in initial["packs"] if item["pack_id"] == TARGET_PACK)
+    target = _catalog_pack(initial, TARGET_PACK)
     assert target["installed"] is False
     assert target["enabled"] is False
     assert target["approved"] is False
@@ -247,13 +261,61 @@ def test_enable_does_not_require_unrelated_pack_install_or_approval(
     """Activation approval is limited to the requested Pack dependency closure."""
 
     session, _state_path, _user_data = captured_session
-    unrelated = "defaults"
+    catalog = _invoke(session, "catalog.read")
+    unrelated = next(
+        item["pack_id"]
+        for item in catalog["packs"]
+        if item["pack_id"] != TARGET_PACK and not item["required"]
+    )
     assert _invoke(session, "pack.status", {"pack_id": unrelated})["installed"] is False
     _approve_target(session)
     assert _invoke(session, "pack.enable", {"pack_id": TARGET_PACK})["enabled"] is True
     restarted = capture_pack_control_session()
     assert (
         _invoke(restarted, "pack.status", {"pack_id": unrelated})["approved"] is False
+    )
+
+
+def test_committed_baseline_defaultspack_requires_a_live_grant_to_invoke(
+    captured_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Baseline trust does not bypass the live grant required to invoke it."""
+
+    session, _state_path, _user_data = captured_session
+    catalog = _invoke(session, "catalog.read")
+    defaultspack = _catalog_pack(catalog, "defaultspack")
+    assert defaultspack["required"] is True
+    assert defaultspack["installed"] is True
+    assert defaultspack["approved"] is True
+    assert defaultspack["approval_status"] == "approved"
+    assert defaultspack["approval_reason"] is None
+    assert defaultspack["enabled"] is True
+    complete = _catalog_operation(
+        defaultspack,
+        "conversation.turn.v1",
+        "complete",
+    )
+    assert complete["invokable"] is False
+
+    monkeypatch.setattr(
+        pack_control,
+        "_active_grant_bindings",
+        lambda _state: {("conversation.turn.v1", "complete")},
+    )
+    with_live_grant = _catalog_pack(
+        _invoke(session, "catalog.read"),
+        "defaultspack",
+    )
+    assert with_live_grant["approved"] is True
+    assert with_live_grant["enabled"] is True
+    assert (
+        _catalog_operation(
+            with_live_grant,
+            "conversation.turn.v1",
+            "complete",
+        )["invokable"]
+        is True
     )
 
 

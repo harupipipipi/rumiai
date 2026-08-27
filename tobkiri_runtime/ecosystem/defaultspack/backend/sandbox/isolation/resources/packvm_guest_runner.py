@@ -5,26 +5,32 @@ from __future__ import annotations
 
 import base64
 import binascii
+from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 import fcntl
 import hashlib
 import hmac
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
 import signal
 import shutil
+import socket
 import stat
 import subprocess
 import sys
+import threading
 import time
+from typing import Protocol
 
 
 PROTOCOL = "io.tobkiri.packvm-supervisor.v1"
-BUILD_ID = "tobkiri-packvm-runner-2"
+BUILD_ID = "tobkiri-packvm-runner-3"
 ARTIFACT_ROOT = Path("/var/lib/tobkiri-packvm/artifacts")
 REQUEST_ROOT = Path("/run/tobkiri-packvm/requests")
 MAX_REQUEST_BYTES = 700 * 1024 * 1024
@@ -38,8 +44,36 @@ MAX_RESULT_BYTES = 16 * 1024 * 1024
 CANCEL_GRACE_SECONDS = 0.25
 PACK_UID = 65534
 PACK_GID = 65534
+PACKVM_BRIDGE_PROTOCOL = "io.tobkiri.packvm.bridge.v1"
+PACKVM_BRIDGE_VERSION = 1
+PACKVM_BRIDGE_REQUEST_KIND = "tobkiri.packvm.bridge.request.v1"
+PACKVM_BRIDGE_RESULT_KIND = "tobkiri.packvm.bridge.result.v1"
+PACKVM_CONTINUATION_KIND = "tobkiri.packvm.continuation.v1"
+PACKVM_BRIDGE_HOST_RESULT_KIND = "tobkiri.packvm.bridge.host-result.v1"
+PACKVM_BRIDGE_TARGET = {
+    "contract_id": "tobkiri.service.ai.generate.v1",
+    "operation_id": "rumi_ai_gateway_pack.ai-gateway.generate",
+}
+MAX_BRIDGE_REQUEST_BYTES = 64 * 1024
+MAX_BRIDGE_RESULT_BYTES = 512 * 1024
+PACKVM_GUEST_AGENT_PORT = 19001
+PACKVM_GUEST_AGENT_CONFIG = Path("/run/tobkiri-packvm/agent-config.json")
+PACKVM_GUEST_AGENT_KEY = Path("/run/tobkiri-packvm/agent-ed25519.pem")
+PACKVM_GUEST_AGENT_REQUEST_PROTOCOL = PROTOCOL
+PACKVM_GUEST_AGENT_RESPONSE_PROTOCOL = "io.tobkiri.macos-vz-supervisor.v1"
+PACKVM_GUEST_AGENT_RESPONSE_KIND = "tobkiri.packvm.guest.response.v1"
+PACKVM_GUEST_AGENT_RESPONSE_VERSION = 1
+PACKVM_GUEST_AGENT_VERSION = 1
+MAX_AGENT_REQUEST_BYTES = 1024 * 1024
+MAX_AGENT_RESPONSE_BYTES = MAX_RESULT_BYTES
+AGENT_IO_TIMEOUT_SECONDS = 30.0
+MAX_PENDING_BRIDGES = 64
+MAX_SEEN_AGENT_CHALLENGES = 256
+PENDING_BRIDGE_TTL_SECONDS = 60.0
 _DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
 _IDENTIFIER = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
+_BRIDGE_NONCE = re.compile(r"^[a-f0-9]{48}$")
+_AGENT_CHALLENGE = re.compile(r"^[a-f0-9]{64}$")
 
 
 def main() -> int:
@@ -47,9 +81,11 @@ def main() -> int:
 
     try:
         if sys.argv[1:]:
-            if len(sys.argv) != 3 or sys.argv[1] != "--execute":
-                raise ValueError("PackVM runner arguments are invalid")
-            return _execute_staged_module(Path(sys.argv[2]))
+            if len(sys.argv) == 3 and sys.argv[1] == "--execute":
+                return _execute_staged_module(Path(sys.argv[2]))
+            if len(sys.argv) == 2 and sys.argv[1] == "--serve-vsock":
+                return _serve_vsock_agent()
+            raise ValueError("PackVM runner arguments are invalid")
         raw = sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1)
         if len(raw) > MAX_REQUEST_BYTES:
             raise ValueError("request exceeds size limit")
@@ -143,26 +179,12 @@ def _invoke(request: dict[str, object]) -> dict[str, object]:
     manifest = _load_manifest(target)
     implementation_path = _relative_path(manifest.get("implementation_path"))
     implementation = target.joinpath(*PurePosixPath(implementation_path).parts)
-    encoded = json.dumps(
-        {
-            "contract_id": _identifier(request["contract_id"], "contract_id"),
-            "operation_id": _identifier(request["operation_id"], "operation_id"),
-            "payload": request["payload"],
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode()
-    if len(encoded) > MAX_REQUEST_BYTES:
-        raise ValueError("PackVM invocation payload exceeds size limit")
-    process = subprocess.Popen(
-        _sandbox_argv(target, implementation),
-        cwd=target,
-        env={"PATH": "/usr/bin:/bin"},
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
-    )
+    child_request = {
+        "contract_id": _identifier(request["contract_id"], "contract_id"),
+        "operation_id": _identifier(request["operation_id"], "operation_id"),
+        "payload": request["payload"],
+    }
+    process = _spawn_staged_implementation(target, implementation)
     try:
         _register_request(request, process.pid, cancel_token)
     except Exception:
@@ -170,21 +192,1122 @@ def _invoke(request: dict[str, object]) -> dict[str, object]:
         process.communicate()
         raise
     try:
+        result = _communicate_staged_implementation(process, child_request)
+        if _looks_like_bridge_request(result):
+            result = _validate_bridge_request(result)
+    finally:
+        _unregister_request(str(request["request_id"]), process.pid)
+    return {
+        "ok": True,
+        "protocol": PROTOCOL,
+        "guest_artifact_identity": identity,
+        "payload": result,
+    }
+
+
+def _spawn_staged_implementation(target: Path, implementation: Path) -> subprocess.Popen[bytes]:
+    """Start one untrusted artifact child without the Host bridge descriptor."""
+
+    return subprocess.Popen(
+        _sandbox_argv(target, implementation),
+        cwd=target,
+        # Never pass a supervisor descriptor, socket, signing key, or session
+        # into the Pack. The root-owned guest agent resumes a fresh sandbox.
+        env={"PATH": "/usr/bin:/bin"},
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+        close_fds=True,
+    )
+
+
+def _communicate_staged_implementation(
+    process: subprocess.Popen[bytes],
+    child_request: dict[str, object],
+) -> dict[str, object]:
+    """Run one sandboxed ABI step and return its one bounded object result."""
+
+    encoded = _bridge_canonical_json(child_request)
+    if len(encoded) > MAX_REQUEST_BYTES:
+        raise ValueError("PackVM invocation payload exceeds size limit")
+    try:
         stdout, stderr = process.communicate(encoded, timeout=60.0)
     except subprocess.TimeoutExpired as exc:
         _terminate_process_group(process.pid)
         process.communicate()
         raise ValueError("PackVM invocation timed out") from exc
-    finally:
-        _unregister_request(str(request["request_id"]), process.pid)
     if process.returncode != 0:
-        message = stderr.decode("utf-8", errors="replace")[:1000]
-        raise ValueError(message or "PackVM implementation failed")
+        # Child stderr is artifact-controlled.  Do not include it in errors
+        # that cross the authenticated supervisor boundary.
+        del stderr
+        raise ValueError("PackVM implementation failed")
     if len(stdout) > MAX_RESULT_BYTES:
         raise ValueError("PackVM invocation result exceeds size limit")
     result = json.loads(stdout)
     if not isinstance(result, dict):
         raise ValueError("PackVM implementation result must be an object")
+    return result
+
+
+def _looks_like_bridge_request(value: dict[str, object]) -> bool:
+    """Return whether an artifact selected the explicit bridge ABI path."""
+
+    return value.get("kind") == PACKVM_BRIDGE_REQUEST_KIND
+
+
+def _validate_bridge_request(value: object) -> dict[str, object]:
+    """Accept only the fixed Conversation-to-AI bridge request ABI."""
+
+    bridge_request = _exact_bridge_object(
+        value,
+        {
+            "kind",
+            "protocol",
+            "version",
+            "target",
+            "request",
+            "request_digest",
+            "continuation",
+        },
+        "PackVM bridge request",
+    )
+    if (
+        bridge_request["kind"] != PACKVM_BRIDGE_REQUEST_KIND
+        or bridge_request["protocol"] != PACKVM_BRIDGE_PROTOCOL
+        or bridge_request["version"] != PACKVM_BRIDGE_VERSION
+    ):
+        raise ValueError("PackVM bridge request identity is invalid")
+    target = _validate_bridge_target(bridge_request["target"])
+    requested = _exact_bridge_object(
+        bridge_request["request"],
+        {"messages", "requirements"},
+        "PackVM bridge request payload",
+    )
+    messages = requested["messages"]
+    if not isinstance(messages, list) or not messages:
+        raise ValueError("PackVM bridge messages are invalid")
+    request_payload = {
+        "messages": _bounded_bridge_json(messages),
+        "requirements": {"request_surface": "defaultspack.conversation"},
+    }
+    if requested["requirements"] != request_payload["requirements"]:
+        raise ValueError("PackVM bridge request surface is invalid")
+    if len(_bridge_canonical_json(request_payload)) > MAX_BRIDGE_REQUEST_BYTES:
+        raise ValueError("PackVM bridge request exceeds the size limit")
+    request_digest = _digest(
+        bridge_request["request_digest"],
+        "PackVM bridge request digest",
+    )
+    if not hmac.compare_digest(
+        request_digest,
+        _bridge_canonical_digest(request_payload),
+    ):
+        raise ValueError("PackVM bridge request digest is invalid")
+    continuation = _validate_bridge_continuation(
+        bridge_request["continuation"],
+        target=target,
+        request_digest=request_digest,
+    )
+    return {
+        "kind": PACKVM_BRIDGE_REQUEST_KIND,
+        "protocol": PACKVM_BRIDGE_PROTOCOL,
+        "version": PACKVM_BRIDGE_VERSION,
+        "target": target,
+        "request": request_payload,
+        "request_digest": request_digest,
+        "continuation": continuation,
+    }
+
+
+def _validate_host_bridge_result(
+    value: object,
+    *,
+    request_id: str,
+    target_domain: str,
+    guest_artifact_identity: str,
+    request_digest: str,
+    bridge_request_digest: str,
+    continuation: object,
+) -> dict[str, object]:
+    """Validate the helper-bound Host result and return its Pack ABI result."""
+
+    response = _exact_bridge_object(
+        value,
+        {
+            "kind",
+            "protocol",
+            "version",
+            "request_id",
+            "target_domain",
+            "guest_artifact_identity",
+            "request_digest",
+            "bridge_request_digest",
+            "continuation_nonce",
+            "bridge_result",
+            "bridge_result_digest",
+        },
+        "PackVM Host bridge result",
+    )
+    expected = {
+        "kind": PACKVM_BRIDGE_HOST_RESULT_KIND,
+        "protocol": PACKVM_BRIDGE_PROTOCOL,
+        "version": PACKVM_BRIDGE_VERSION,
+        "request_id": request_id,
+        "target_domain": target_domain,
+        "guest_artifact_identity": guest_artifact_identity,
+        "request_digest": request_digest,
+        "bridge_request_digest": bridge_request_digest,
+    }
+    if any(response[field] != expected_value for field, expected_value in expected.items()):
+        raise ValueError("PackVM Host bridge result binding is invalid")
+    checked_continuation = _checked_continuation(continuation)
+    if not hmac.compare_digest(
+        str(response["continuation_nonce"]),
+        str(checked_continuation["nonce"]),
+    ):
+        raise ValueError("PackVM Host bridge continuation binding is invalid")
+    bridge_result = _validate_bridge_result(
+        response["bridge_result"],
+        checked_continuation,
+    )
+    if len(_bridge_canonical_json(bridge_result)) > MAX_BRIDGE_RESULT_BYTES:
+        raise ValueError("PackVM Host bridge result exceeds the size limit")
+    result_digest = _digest(
+        response["bridge_result_digest"],
+        "PackVM Host bridge result digest",
+    )
+    if not hmac.compare_digest(result_digest, _bridge_canonical_digest(bridge_result)):
+        raise ValueError("PackVM Host bridge result digest is invalid")
+    return bridge_result
+
+
+def _checked_continuation(value: object) -> dict[str, object]:
+    """Validate an already-emitted continuation without reconstructing it."""
+
+    raw = _exact_bridge_object(
+        value,
+        {
+            "kind",
+            "protocol",
+            "version",
+            "operation_id",
+            "nonce",
+            "target",
+            "request_digest",
+        },
+        "PackVM bridge continuation",
+    )
+    return _validate_bridge_continuation(
+        raw,
+        target=_validate_bridge_target(raw["target"]),
+        request_digest=_digest(raw["request_digest"], "PackVM bridge continuation digest"),
+    )
+
+
+def _validate_bridge_continuation(
+    value: object,
+    *,
+    target: dict[str, str],
+    request_digest: str,
+) -> dict[str, object]:
+    """Return an exact continuation that may be resumed once by the Pack ABI."""
+
+    continuation = _exact_bridge_object(
+        value,
+        {
+            "kind",
+            "protocol",
+            "version",
+            "operation_id",
+            "nonce",
+            "target",
+            "request_digest",
+        },
+        "PackVM bridge continuation",
+    )
+    if (
+        continuation["kind"] != PACKVM_CONTINUATION_KIND
+        or continuation["protocol"] != PACKVM_BRIDGE_PROTOCOL
+        or continuation["version"] != PACKVM_BRIDGE_VERSION
+        or continuation["operation_id"] != "complete"
+        or _validate_bridge_target(continuation["target"]) != target
+        or not hmac.compare_digest(str(continuation["request_digest"]), request_digest)
+    ):
+        raise ValueError("PackVM bridge continuation is invalid")
+    nonce = continuation["nonce"]
+    if not isinstance(nonce, str) or _BRIDGE_NONCE.fullmatch(nonce) is None:
+        raise ValueError("PackVM bridge continuation nonce is invalid")
+    return {
+        "kind": PACKVM_CONTINUATION_KIND,
+        "protocol": PACKVM_BRIDGE_PROTOCOL,
+        "version": PACKVM_BRIDGE_VERSION,
+        "operation_id": "complete",
+        "nonce": nonce,
+        "target": dict(target),
+        "request_digest": request_digest,
+    }
+
+
+def _validate_bridge_result(
+    value: object,
+    continuation: dict[str, object],
+) -> dict[str, object]:
+    """Validate the response that is safe to pass into the second child ABI."""
+
+    bridge_result = _exact_bridge_object(
+        value,
+        {
+            "kind",
+            "protocol",
+            "version",
+            "operation_id",
+            "nonce",
+            "target",
+            "request_digest",
+            "result",
+            "result_digest",
+        },
+        "PackVM bridge result",
+    )
+    if (
+        bridge_result["kind"] != PACKVM_BRIDGE_RESULT_KIND
+        or bridge_result["protocol"] != PACKVM_BRIDGE_PROTOCOL
+        or bridge_result["version"] != PACKVM_BRIDGE_VERSION
+        or bridge_result["operation_id"] != "complete"
+        or not hmac.compare_digest(
+            str(bridge_result["nonce"]), str(continuation["nonce"])
+        )
+        or _validate_bridge_target(bridge_result["target"])
+        != continuation["target"]
+        or not hmac.compare_digest(
+            str(bridge_result["request_digest"]),
+            str(continuation["request_digest"]),
+        )
+    ):
+        raise ValueError("PackVM bridge result does not match its continuation")
+    outcome = _validate_bridge_outcome(bridge_result["result"])
+    result_digest = _digest(bridge_result["result_digest"], "PackVM bridge result digest")
+    if not hmac.compare_digest(result_digest, _bridge_canonical_digest(outcome)):
+        raise ValueError("PackVM bridge result digest is invalid")
+    return {
+        "kind": PACKVM_BRIDGE_RESULT_KIND,
+        "protocol": PACKVM_BRIDGE_PROTOCOL,
+        "version": PACKVM_BRIDGE_VERSION,
+        "operation_id": "complete",
+        "nonce": continuation["nonce"],
+        "target": dict(PACKVM_BRIDGE_TARGET),
+        "request_digest": continuation["request_digest"],
+        "result": outcome,
+        "result_digest": result_digest,
+    }
+
+
+def _validate_bridge_outcome(value: object) -> dict[str, object]:
+    """Keep the resumed artifact input bounded and typed before sandbox entry."""
+
+    if not isinstance(value, dict):
+        raise ValueError("PackVM bridge outcome is invalid")
+    if value.get("status") == "ok":
+        outcome = _exact_bridge_object(value, {"status", "value"}, "PackVM bridge success")
+        if not isinstance(outcome["value"], dict):
+            raise ValueError("PackVM bridge success value is invalid")
+        return {"status": "ok", "value": _bounded_bridge_json(outcome["value"])}
+    if value.get("status") == "error":
+        outcome = _exact_bridge_object(value, {"status", "error"}, "PackVM bridge error")
+        error = _exact_bridge_object(outcome["error"], {"code", "message"}, "PackVM bridge error")
+        code = error["code"]
+        message = error["message"]
+        if (
+            not isinstance(code, str)
+            or re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", code) is None
+            or not isinstance(message, str)
+            or not message.strip()
+            or len(message) > 512
+        ):
+            raise ValueError("PackVM bridge error is invalid")
+        return {"status": "error", "error": {"code": code, "message": message}}
+    raise ValueError("PackVM bridge outcome status is invalid")
+
+
+def _validate_bridge_target(value: object) -> dict[str, str]:
+    """Ensure the Pack cannot select a different Host capability target."""
+
+    target = _exact_bridge_object(value, set(PACKVM_BRIDGE_TARGET), "PackVM bridge target")
+    if target != PACKVM_BRIDGE_TARGET:
+        raise ValueError("PackVM bridge target is not permitted")
+    return dict(PACKVM_BRIDGE_TARGET)
+
+
+def _exact_bridge_object(
+    value: object,
+    fields: set[str],
+    label: str,
+) -> dict[str, object]:
+    """Copy an object only when its protocol field set is exact."""
+
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError(f"{label} fields are invalid")
+    return dict(value)
+
+
+def _bounded_bridge_json(value: object, *, depth: int = 0) -> object:
+    """Copy an I-JSON-compatible value with finite nesting and scalar bounds."""
+
+    if depth > 8:
+        raise ValueError("PackVM bridge JSON nesting exceeds the limit")
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        if not -(2**53) < value < 2**53:
+            raise ValueError("PackVM bridge integer is outside the safe range")
+        return value
+    if isinstance(value, str):
+        if len(value) > 16 * 1024:
+            raise ValueError("PackVM bridge string exceeds the limit")
+        return value
+    if isinstance(value, list):
+        if len(value) > 64:
+            raise ValueError("PackVM bridge array exceeds the limit")
+        return [_bounded_bridge_json(item, depth=depth + 1) for item in value]
+    if isinstance(value, dict):
+        if len(value) > 64:
+            raise ValueError("PackVM bridge object exceeds the limit")
+        copied: dict[str, object] = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or not key or len(key) > 128:
+                raise ValueError("PackVM bridge object key is invalid")
+            copied[key] = _bounded_bridge_json(item, depth=depth + 1)
+        return copied
+    raise ValueError("PackVM bridge value must be JSON-compatible")
+
+
+def _normalise_bridge_deadline(value: object) -> str:
+    """Encode the Host deadline deterministically without non-finite JSON."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("PackVM invocation deadline is invalid")
+    deadline = float(value)
+    if not math.isfinite(deadline):
+        raise ValueError("PackVM invocation deadline is invalid")
+    return format(deadline, ".17g")
+
+
+def _bridge_canonical_json(value: object) -> bytes:
+    """Return deterministic I-JSON bytes for the private bridge frame."""
+
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def _bridge_canonical_digest(value: object) -> str:
+    """Return the SHA-256 binding used only by the private bridge protocol."""
+
+    return _sha256(_bridge_canonical_json(value))
+
+
+class _AgentSigner(Protocol):
+    """Root-only signer for authenticated guest-agent responses."""
+
+    def sign(self, payload: bytes) -> bytes:
+        """Return an Ed25519 signature over canonical response bytes."""
+
+
+@dataclass(frozen=True)
+class _VsockAgentConfig:
+    """Launch-bound identities that the guest agent must echo exactly."""
+
+    domain_id: str
+    binding_digests: dict[str, str]
+    private_key_path: Path
+
+
+@dataclass(frozen=True)
+class _PendingBridge:
+    """One bounded, one-shot continuation held only by the root guest agent."""
+
+    request: dict[str, object]
+    guest_artifact_identity: str
+    bridge_request: dict[str, object]
+    expires_at: float
+
+
+class _PendingBridgeLedger:
+    """Fence replayed Host bridge results across fresh Pack child processes."""
+
+    def __init__(self) -> None:
+        self._pending: dict[tuple[str, str], _PendingBridge] = {}
+        self._seen_challenges: OrderedDict[str, None] = OrderedDict()
+        self._cancelled: OrderedDict[tuple[str, str], float] = OrderedDict()
+        self._lock = threading.RLock()
+
+    def accept_challenge(self, challenge: object) -> str:
+        """Consume one helper freshness challenge before dispatching its request."""
+
+        with self._lock:
+            if (
+                not isinstance(challenge, str)
+                or _AGENT_CHALLENGE.fullmatch(challenge) is None
+            ):
+                raise ValueError("PackVM guest agent challenge is invalid")
+            if challenge in self._seen_challenges:
+                raise ValueError("PackVM guest agent challenge was replayed")
+            if len(self._seen_challenges) >= MAX_SEEN_AGENT_CHALLENGES:
+                # Helper challenges are 256-bit and the Host's authenticated
+                # ledger remains authoritative.  Keeping a fixed local window
+                # prevents an otherwise permanent availability failure.
+                self._seen_challenges.popitem(last=False)
+            self._seen_challenges[challenge] = None
+            return challenge
+
+    def add(
+        self,
+        *,
+        domain_id: str,
+        request: dict[str, object],
+        guest_artifact_identity: str,
+        bridge_request: dict[str, object],
+    ) -> None:
+        """Persist one exact initial turn until its Host result is received."""
+
+        with self._lock:
+            self._purge_expired()
+            key = (domain_id, str(request["request_id"]))
+            if key in self._cancelled:
+                raise ValueError("PackVM bridge request was cancelled")
+            if key in self._pending:
+                raise ValueError("PackVM bridge request is already pending")
+            if len(self._pending) >= MAX_PENDING_BRIDGES:
+                raise ValueError("PackVM bridge ledger is full")
+            self._pending[key] = _PendingBridge(
+                request=dict(request),
+                guest_artifact_identity=guest_artifact_identity,
+                bridge_request=dict(bridge_request),
+                expires_at=time.monotonic() + PENDING_BRIDGE_TTL_SECONDS,
+            )
+
+    def consume(self, *, domain_id: str, request_id: str) -> _PendingBridge:
+        """Remove and return a one-shot pending continuation before resuming it."""
+
+        with self._lock:
+            self._purge_expired()
+            pending = self._pending.pop((domain_id, request_id), None)
+            if pending is None:
+                raise ValueError("PackVM bridge continuation is unavailable")
+            return pending
+
+    def cancel(self, *, domain_id: str, request_id: str) -> bool:
+        """Erase an unconsumed bridge continuation for an authenticated cancel."""
+
+        with self._lock:
+            self._purge_expired()
+            key = (domain_id, request_id)
+            cancelled = self._pending.pop(key, None) is not None
+            if len(self._cancelled) >= MAX_PENDING_BRIDGES:
+                self._cancelled.popitem(last=False)
+            self._cancelled[key] = time.monotonic() + PENDING_BRIDGE_TTL_SECONDS
+            return cancelled
+
+    def _purge_expired(self) -> None:
+        now = time.monotonic()
+        for key, pending in tuple(self._pending.items()):
+            if pending.expires_at <= now:
+                self._pending.pop(key, None)
+        for key, expires_at in tuple(self._cancelled.items()):
+            if expires_at <= now:
+                self._cancelled.pop(key, None)
+
+
+class _OpenSSLAgentSigner:
+    """Use the root-only Ed25519 key without importing it into Python or Pack."""
+
+    def __init__(self, key_path: Path) -> None:
+        self._key_path = key_path
+
+    def sign(self, payload: bytes) -> bytes:
+        """Sign canonical bytes via OpenSSL and return only the detached signature."""
+
+        _assert_root_only_regular_file(self._key_path, "PackVM guest agent key")
+        try:
+            completed = subprocess.run(
+                (
+                    "/usr/bin/openssl",
+                    "pkeyutl",
+                    "-sign",
+                    "-rawin",
+                    "-inkey",
+                    str(self._key_path),
+                ),
+                input=payload,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=5.0,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ValueError("PackVM guest agent signer is unavailable") from exc
+        if completed.returncode != 0 or len(completed.stdout) != 64:
+            raise ValueError("PackVM guest agent signature is invalid")
+        return completed.stdout
+
+
+def _serve_vsock_agent() -> int:
+    """Run the root-owned, no-network VZ virtio-socket guest agent."""
+
+    if os.geteuid() != 0:
+        raise ValueError("PackVM guest agent requires the root-owned supervisor")
+    config = _load_vsock_agent_config(PACKVM_GUEST_AGENT_CONFIG)
+    vsock_family = getattr(socket, "AF_VSOCK", None)
+    vmaddr_any = getattr(socket, "VMADDR_CID_ANY", None)
+    if not isinstance(vsock_family, int) or not isinstance(vmaddr_any, int):
+        raise ValueError("PackVM guest agent requires AF_VSOCK")
+    listener = socket.socket(vsock_family, socket.SOCK_STREAM)
+    try:
+        listener.bind((vmaddr_any, PACKVM_GUEST_AGENT_PORT))
+        listener.listen(8)
+        return _serve_authenticated_guest_agent(
+            listener,
+            config,
+            _OpenSSLAgentSigner(config.private_key_path),
+        )
+    finally:
+        listener.close()
+
+
+def _load_vsock_agent_config(path: Path) -> _VsockAgentConfig:
+    """Load only a root-owned launch binding and root-only signing-key path."""
+
+    _assert_root_only_regular_file(path, "PackVM guest agent configuration")
+    raw = path.read_bytes()
+    if len(raw) > 16 * 1024:
+        raise ValueError("PackVM guest agent configuration exceeds the size limit")
+    value = json.loads(raw)
+    config = _exact_bridge_object(
+        value,
+        {"version", "domain_id", "binding_digests", "private_key_path"},
+        "PackVM guest agent configuration",
+    )
+    if config["version"] != PACKVM_GUEST_AGENT_VERSION:
+        raise ValueError("PackVM guest agent configuration version is invalid")
+    domain_id = config["domain_id"]
+    if not isinstance(domain_id, str) or not domain_id:
+        raise ValueError("PackVM guest agent configuration domain is invalid")
+    bindings = config["binding_digests"]
+    required_bindings = {
+        "domain",
+        "lease",
+        "reservation",
+        "image",
+        "agent",
+        "config",
+        "disk",
+        "guest_public_key",
+        "efi_variable_store",
+        "artifact",
+        "executable",
+        "materialization",
+    }
+    optional_linux_bindings = {"kernel", "initrd"}
+    if not isinstance(bindings, dict) or set(bindings) not in (
+        required_bindings,
+        {*required_bindings, *optional_linux_bindings},
+    ):
+        raise ValueError("PackVM guest agent configuration bindings are invalid")
+    copied_bindings = {
+        key: _digest(value, f"PackVM guest agent {key} binding")
+        for key, value in bindings.items()
+    }
+    key_value = config["private_key_path"]
+    if not isinstance(key_value, str) or not key_value:
+        raise ValueError("PackVM guest agent configuration key is invalid")
+    key_path = Path(key_value)
+    if not key_path.is_absolute():
+        raise ValueError("PackVM guest agent key path is invalid")
+    return _VsockAgentConfig(
+        domain_id=domain_id,
+        binding_digests=copied_bindings,
+        private_key_path=key_path,
+    )
+
+
+def _assert_root_only_regular_file(path: Path, label: str) -> None:
+    """Reject symlinks, hardlinks, or non-root-readable key/config material."""
+
+    metadata = path.lstat()
+    if (
+        path.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != 0
+        or metadata.st_nlink != 1
+        or stat.S_IMODE(metadata.st_mode) & 0o077
+    ):
+        raise ValueError(f"{label} is unsafe")
+
+
+def _serve_authenticated_guest_agent(
+    listener: socket.socket,
+    config: _VsockAgentConfig,
+    signer: _AgentSigner,
+    *,
+    max_requests: int | None = None,
+) -> int:
+    """Serve bounded canonical helper requests with signed bound responses.
+
+    ``listener`` and ``signer`` are injected so this protocol is fully tested
+    with a local Unix socket and fake signer; production binds AF_VSOCK only.
+    """
+
+    ledger = _PendingBridgeLedger()
+    workers: list[threading.Thread] = []
+
+    def serve_connection(connection: socket.socket) -> None:
+        try:
+            _serve_agent_connection(connection, config, signer, ledger)
+        finally:
+            connection.close()
+
+    served = 0
+    while max_requests is None or served < max_requests:
+        connection, _address = listener.accept()
+        worker = threading.Thread(
+            target=serve_connection,
+            args=(connection,),
+            daemon=True,
+        )
+        worker.start()
+        workers.append(worker)
+        served += 1
+    for worker in workers:
+        worker.join()
+    return 0
+
+
+def _serve_agent_connection(
+    connection: socket.socket,
+    config: _VsockAgentConfig,
+    signer: _AgentSigner,
+    ledger: _PendingBridgeLedger,
+) -> None:
+    """Handle one helper request without exposing raw local diagnostics."""
+
+    request: dict[str, object] | None = None
+    try:
+        request = _read_agent_request(connection)
+        response = _dispatch_agent_request(request, config, ledger)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        response = _safe_agent_error_response(request, exc)
+    signed = _sign_agent_response(response, signer)
+    encoded = _bridge_canonical_json(signed)
+    if len(encoded) > MAX_AGENT_RESPONSE_BYTES:
+        raise ValueError("PackVM guest agent response exceeds the size limit")
+    connection.sendall(encoded + b"\n")
+
+
+def _read_agent_request(connection: socket.socket) -> dict[str, object]:
+    """Read one canonical newline-delimited helper envelope under a hard cap."""
+
+    connection.settimeout(AGENT_IO_TIMEOUT_SECONDS)
+    content = bytearray()
+    while True:
+        chunk = connection.recv(min(64 * 1024, MAX_AGENT_REQUEST_BYTES + 1 - len(content)))
+        if not chunk:
+            raise ValueError("PackVM guest agent request ended before newline")
+        content.extend(chunk)
+        if len(content) > MAX_AGENT_REQUEST_BYTES:
+            raise ValueError("PackVM guest agent request exceeds the size limit")
+        if b"\n" in chunk:
+            break
+    if content.count(b"\n") != 1 or not content.endswith(b"\n"):
+        raise ValueError("PackVM guest agent request framing is invalid")
+    encoded = bytes(content[:-1])
+    value = json.loads(encoded)
+    if not isinstance(value, dict) or not hmac.compare_digest(
+        encoded, _bridge_canonical_json(value)
+    ):
+        raise ValueError("PackVM guest agent request is invalid")
+    return value
+
+
+def _dispatch_agent_request(
+    request: dict[str, object],
+    config: _VsockAgentConfig,
+    ledger: _PendingBridgeLedger,
+) -> dict[str, object]:
+    """Verify launch bindings and execute only invoke/cancel/bridge-result."""
+
+    base = _validate_agent_envelope(request, config, ledger)
+    operation = base["operation"]
+    request_id = base["request_id"]
+    if operation == "invoke":
+        payload = base["payload"]
+        if not isinstance(payload, dict):
+            raise ValueError("PackVM guest agent invocation payload is invalid")
+        if (
+            payload.get("operation") != "invoke"
+            or payload.get("request_id") != request_id
+            or payload.get("target_domain") != config.domain_id
+        ):
+            raise ValueError("PackVM guest agent invocation binding is invalid")
+        result = _invoke(dict(payload))
+        bridge = result.get("payload")
+        if isinstance(bridge, dict) and _looks_like_bridge_request(bridge):
+            checked_bridge = _validate_bridge_request(bridge)
+            ledger.add(
+                domain_id=config.domain_id,
+                request=dict(payload),
+                guest_artifact_identity=str(result["guest_artifact_identity"]),
+                bridge_request=checked_bridge,
+            )
+            return _agent_success(
+                base,
+                {
+                    "state": "pending",
+                    "host_bridge_request": {
+                        "kind": "tobkiri.packvm.bridge.host-request.v1",
+                        "protocol": PACKVM_BRIDGE_PROTOCOL,
+                        "version": PACKVM_BRIDGE_VERSION,
+                        "request_id": request_id,
+                        "target_domain": config.domain_id,
+                        "guest_artifact_identity": result[
+                            "guest_artifact_identity"
+                        ],
+                        "request_digest": payload["request_digest"],
+                        "bridge_request_digest": _bridge_canonical_digest(
+                            checked_bridge
+                        ),
+                        "bridge_request": checked_bridge,
+                        "deadline_monotonic": _normalise_bridge_deadline(
+                            payload["deadline_monotonic"]
+                        ),
+                    },
+                },
+            )
+        return _agent_success(base, result)
+    if operation == "bridge_result":
+        host_bridge_result = base["host_bridge_result"]
+        pending = ledger.consume(domain_id=config.domain_id, request_id=request_id)
+        bridge_result = _validate_host_bridge_result(
+            host_bridge_result,
+            request_id=request_id,
+            target_domain=config.domain_id,
+            guest_artifact_identity=pending.guest_artifact_identity,
+            request_digest=_digest(pending.request["request_digest"], "request_digest"),
+            bridge_request_digest=_bridge_canonical_digest(pending.bridge_request),
+            continuation=pending.bridge_request["continuation"],
+        )
+        result = _resume_bridge_invocation(
+            pending.request,
+            pending.bridge_request,
+            bridge_result,
+        )
+        return _agent_success(base, result)
+    if operation == "attest":
+        if request_id != f"attest-{config.domain_id}":
+            raise ValueError("PackVM guest attestation request id is invalid")
+        return _agent_success(
+            base,
+            {
+                "guest_artifact_identity": _bridge_canonical_digest(
+                    config.binding_digests
+                ),
+            },
+        )
+    if operation == "cancel":
+        cancelled = ledger.cancel(domain_id=config.domain_id, request_id=request_id)
+        signals = _cancel_agent_execution(config.domain_id, request_id)
+        return _agent_success(
+            base,
+            {
+                "ok": True,
+                "protocol": PROTOCOL,
+                "operation": "cancel",
+                "request_id": request_id,
+                "target_domain": config.domain_id,
+                "state": "cancelled",
+                "signals": signals,
+                "pending_bridge_cancelled": cancelled,
+            },
+        )
+    raise ValueError("PackVM guest agent operation is invalid")
+
+
+def _cancel_agent_execution(domain_id: str, request_id: str) -> list[str]:
+    """Cancel a currently running child using only the root ownership record."""
+
+    try:
+        record = _read_request(_request_path(request_id))
+    except (OSError, ValueError):
+        return []
+    if not hmac.compare_digest(str(record.get("target_domain") or ""), domain_id):
+        return []
+    response = _cancel(
+        {
+            "operation": "cancel",
+            "request_id": request_id,
+            "target_domain": domain_id,
+            "guest_artifact_identity": record["guest_artifact_identity"],
+            "cancel_token": record["cancel_token"],
+        }
+    )
+    signals = response.get("signals")
+    if not isinstance(signals, list) or any(
+        value not in {"TERM", "KILL"} for value in signals
+    ):
+        raise ValueError("PackVM guest cancellation acknowledgement is invalid")
+    return list(signals)
+
+
+def _validate_agent_envelope(
+    request: dict[str, object],
+    config: _VsockAgentConfig,
+    ledger: _PendingBridgeLedger,
+) -> dict[str, object]:
+    """Validate one helper envelope against the authenticated launch binding."""
+
+    operation = request.get("operation")
+    fields_by_operation = {
+        "invoke": {
+            "protocol",
+            "operation",
+            "request_id",
+            "domain_id",
+            "binding_digests",
+            "payload",
+            "guest_challenge",
+        },
+        "bridge_result": {
+            "protocol",
+            "operation",
+            "request_id",
+            "domain_id",
+            "binding_digests",
+            "host_bridge_result",
+            "guest_challenge",
+        },
+        "attest": {
+            "protocol",
+            "operation",
+            "request_id",
+            "domain_id",
+            "binding_digests",
+            "attestation_nonce",
+            "guest_challenge",
+        },
+        "cancel": {
+            "protocol",
+            "operation",
+            "request_id",
+            "domain_id",
+            "binding_digests",
+            "guest_challenge",
+        },
+    }
+    if not isinstance(operation, str) or operation not in fields_by_operation:
+        raise ValueError("PackVM guest agent operation is invalid")
+    envelope = _exact_bridge_object(
+        request,
+        fields_by_operation[operation],
+        "PackVM guest agent request",
+    )
+    if envelope["protocol"] != PACKVM_GUEST_AGENT_REQUEST_PROTOCOL:
+        raise ValueError("PackVM guest agent protocol is invalid")
+    request_id = envelope["request_id"]
+    if not isinstance(request_id, str) or not request_id or len(request_id) > 256:
+        raise ValueError("PackVM guest agent request id is invalid")
+    if envelope["domain_id"] != config.domain_id:
+        raise ValueError("PackVM guest agent domain binding is invalid")
+    if envelope["binding_digests"] != config.binding_digests:
+        raise ValueError("PackVM guest agent launch binding is invalid")
+    if operation == "attest":
+        nonce = envelope["attestation_nonce"]
+        if not isinstance(nonce, str) or _AGENT_CHALLENGE.fullmatch(nonce) is None:
+            raise ValueError("PackVM guest attestation nonce is invalid")
+    ledger.accept_challenge(envelope["guest_challenge"])
+    return envelope
+
+
+def _agent_success(
+    request: dict[str, object],
+    data: dict[str, object],
+) -> dict[str, object]:
+    """Build the exact unsigned success envelope that the agent signs."""
+
+    response = {
+        "kind": PACKVM_GUEST_AGENT_RESPONSE_KIND,
+        "protocol": PACKVM_GUEST_AGENT_RESPONSE_PROTOCOL,
+        "version": PACKVM_GUEST_AGENT_RESPONSE_VERSION,
+        "operation": request["operation"],
+        "request_id": request["request_id"],
+        "domain_id": request["domain_id"],
+        "binding_digests": request["binding_digests"],
+        "guest_challenge": request["guest_challenge"],
+        "success": True,
+        "data": data,
+    }
+    if request["operation"] == "attest":
+        response["attestation_nonce"] = request["attestation_nonce"]
+    return response
+
+
+def _safe_agent_error_response(
+    request: dict[str, object] | None,
+    error: Exception,
+) -> dict[str, object]:
+    """Return a bounded error without leaking socket, path, key, or Pack data."""
+
+    del error
+    if isinstance(request, dict):
+        operation = request.get("operation")
+        request_id = request.get("request_id")
+        domain_id = request.get("domain_id")
+        bindings = request.get("binding_digests")
+        challenge = request.get("guest_challenge")
+        if (
+            isinstance(operation, str)
+            and isinstance(request_id, str)
+            and isinstance(domain_id, str)
+            and isinstance(bindings, dict)
+            and isinstance(challenge, str)
+        ):
+            response = {
+                "kind": PACKVM_GUEST_AGENT_RESPONSE_KIND,
+                "protocol": PACKVM_GUEST_AGENT_RESPONSE_PROTOCOL,
+                "version": PACKVM_GUEST_AGENT_RESPONSE_VERSION,
+                "operation": operation,
+                "request_id": request_id,
+                "domain_id": domain_id,
+                "binding_digests": bindings,
+                "guest_challenge": challenge,
+                "success": False,
+                "error": {
+                    "code": "CAPABILITY_UNAVAILABLE",
+                    "message": "The authenticated PackVM operation was rejected.",
+                },
+            }
+            if operation == "attest" and isinstance(
+                request.get("attestation_nonce"), str
+            ):
+                response["attestation_nonce"] = request["attestation_nonce"]
+            return response
+    return {
+        "kind": PACKVM_GUEST_AGENT_RESPONSE_KIND,
+        "protocol": PACKVM_GUEST_AGENT_RESPONSE_PROTOCOL,
+        "version": PACKVM_GUEST_AGENT_RESPONSE_VERSION,
+        "operation": "invalid",
+        "request_id": "invalid",
+        "domain_id": "invalid",
+        "binding_digests": {},
+        "guest_challenge": "0" * 64,
+        "success": False,
+        "error": {
+            "code": "CAPABILITY_UNAVAILABLE",
+            "message": "The authenticated PackVM operation was rejected.",
+        },
+    }
+
+
+def _sign_agent_response(
+    response: dict[str, object],
+    signer: _AgentSigner,
+) -> dict[str, object]:
+    """Attach exactly one Ed25519 signature over the canonical unsigned map."""
+
+    if response.get("success") is True:
+        expected_success_fields = {
+            "kind",
+            "protocol",
+            "version",
+            "operation",
+            "request_id",
+            "domain_id",
+            "binding_digests",
+            "guest_challenge",
+            "success",
+            "data",
+        }
+        if response.get("operation") == "attest":
+            expected_success_fields.add("attestation_nonce")
+        _exact_bridge_object(
+            response,
+            expected_success_fields,
+            "PackVM guest agent success response",
+        )
+    else:
+        expected_error_fields = {
+            "kind",
+            "protocol",
+            "version",
+            "operation",
+            "request_id",
+            "domain_id",
+            "binding_digests",
+            "guest_challenge",
+            "success",
+            "error",
+        }
+        if response.get("operation") == "attest":
+            expected_error_fields.add("attestation_nonce")
+        _exact_bridge_object(
+            response,
+            expected_error_fields,
+            "PackVM guest agent error response",
+        )
+    signature = signer.sign(_bridge_canonical_json(response))
+    if not isinstance(signature, bytes) or len(signature) != 64:
+        raise ValueError("PackVM guest agent signer returned an invalid signature")
+    return {
+        **response,
+        "agent_signature": base64.b64encode(signature).decode("ascii"),
+    }
+
+
+def _resume_bridge_invocation(
+    request: dict[str, object],
+    bridge_request: dict[str, object],
+    bridge_result: dict[str, object],
+) -> dict[str, object]:
+    """Resume exactly once in a fresh Pack sandbox after Host authorization."""
+
+    identity = _verify_invocation_artifact(request)
+    artifact_digest = _digest(request["artifact_digest"], "artifact_digest")
+    materialization_digest = _digest(
+        request["materialization_digest"], "materialization_digest"
+    )
+    target = (
+        ARTIFACT_ROOT
+        / artifact_digest.removeprefix("sha256:")
+        / materialization_digest.removeprefix("sha256:")
+    )
+    manifest = _load_manifest(target)
+    implementation_path = _relative_path(manifest.get("implementation_path"))
+    implementation = target.joinpath(*PurePosixPath(implementation_path).parts)
+    child_request = {
+        "contract_id": _identifier(request["contract_id"], "contract_id"),
+        "operation_id": _identifier(request["operation_id"], "operation_id"),
+        "payload": {
+            "continuation": bridge_request["continuation"],
+            "bridge_result": bridge_result,
+        },
+    }
+    cancel_token = str(request["cancel_token"])
+    process = _spawn_staged_implementation(target, implementation)
+    try:
+        _register_request(request, process.pid, cancel_token)
+    except Exception:
+        _terminate_process_group(process.pid)
+        process.communicate()
+        raise
+    try:
+        result = _communicate_staged_implementation(process, child_request)
+    finally:
+        _unregister_request(str(request["request_id"]), process.pid)
+    if _looks_like_bridge_request(result):
+        raise ValueError("PackVM bridge requested more than one Host exchange")
     return {
         "ok": True,
         "protocol": PROTOCOL,

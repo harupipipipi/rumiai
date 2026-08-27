@@ -230,6 +230,14 @@
       "presentation": "capability_result",
       "targets": [
         {
+          "contribution_id": "defaults.conversation.complete",
+          "contract_id": "conversation.turn.v1",
+          "operation_id": "complete",
+          "provider_id": "defaultspack.conversation",
+          "function_id": "defaultspack.conversation",
+          "allowed_payload_keys": ["messages"]
+        },
+        {
           "contribution_id": "defaults.pack.install",
           "contract_id": "tobkiri.host.pack-control.v4",
           "operation_id": "pack.install",

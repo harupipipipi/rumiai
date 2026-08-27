@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from core_runtime.global_contract_dispatch import GlobalContractInvocationError
+from core_runtime.host_provider_backend_v4 import (
+    CapturedHostProviderV4,
+    HostProviderCaptureContextV4,
+    HostProviderContributionV4,
+    HostProviderInvocationContextV4,
+)
 
 _ALLOWED_TYPES = {
     "text_delta",
@@ -78,3 +84,77 @@ def create_stream_normalize_operation(client: Any):
         return {"events": normalized}
 
     return operation
+
+
+_PACK_ID = "rumi_ai_stream_pack"
+_FUNCTION_ID = "rumi_ai_stream_pack.ai-stream.normalize"
+
+
+class AIStreamHostFactoryV4:
+    """Capture the pure stream normalizer for exact Host Provider dispatch."""
+
+    function_id = _FUNCTION_ID
+
+    def capture(
+        self,
+        context: HostProviderCaptureContextV4,
+    ) -> CapturedHostProviderV4:
+        """Bind only resolved normalizer Function principals and domains."""
+
+        if not context.provider_bindings or any(
+            binding.function.function_id != self.function_id
+            for binding in context.provider_bindings
+        ):
+            raise PermissionError("AI stream bindings are incomplete")
+
+        def invoke(
+            _operation_id: str,
+            payload: Mapping[str, Any],
+            invocation: HostProviderInvocationContextV4,
+        ) -> Mapping[str, Any]:
+            client = invocation.contract_client(
+                allowed_contract_ids=frozenset(),
+                consumer_pack_id=_PACK_ID,
+            )
+            return create_stream_normalize_operation(client)("normalize", payload)
+
+        return CapturedHostProviderV4(
+            tuple(_contributions(context, invoke)),
+            lambda: None,
+        )
+
+
+def _contributions(
+    context: HostProviderCaptureContextV4,
+    invoke: Callable[
+        [str, Mapping[str, Any], HostProviderInvocationContextV4], Mapping[str, Any]
+    ],
+) -> list[HostProviderContributionV4]:
+    """Create immutable contributions from resolved Host Function bindings."""
+
+    contributions: list[HostProviderContributionV4] = []
+    for binding in context.provider_bindings:
+        key = (
+            binding.operation.contract_id,
+            binding.operation.operation_id,
+            binding.principal_ref.value,
+        )
+        domain_id = context.domain_ids.get(key)
+        if domain_id is None:
+            raise PermissionError("AI stream domain binding is unavailable")
+        contributions.append(
+            HostProviderContributionV4(
+                contract_id=binding.operation.contract_id,
+                contract_version=binding.operation.contract_version,
+                operation_id=binding.operation.operation_id,
+                principal_id=binding.principal_ref.value,
+                artifact_digest=binding.artifact.digest,
+                implementation_digest=binding.function.implementation_digest,
+                domain_id=domain_id,
+                invoke=invoke,
+            )
+        )
+    return contributions
+
+
+HOST_PROVIDER_FACTORY = AIStreamHostFactoryV4()

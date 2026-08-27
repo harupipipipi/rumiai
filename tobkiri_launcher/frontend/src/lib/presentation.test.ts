@@ -1,16 +1,45 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import type { ApiPresentationCatalog } from './apiTypes';
+import type { ApiDynamicFrontendCatalog, ApiPresentationCatalog } from './apiTypes';
 import {
   checkShellCompatibility,
   compatibleShellProviders,
   defaultPresentationSelection,
+  isConversationCapabilityReady,
   launchDisabledReason,
   launchDisabledReasonForSelection,
   normalizePresentationSelection,
   selectShellAfterBaseChange,
 } from './presentation';
+
+const conversationCatalog = (): ApiDynamicFrontendCatalog => ({
+  version: 'rumi.ui.contribution.v1',
+  profile_id: 'defaults',
+  profile_revision: `sha256:${'a'.repeat(64)}`,
+  plan_hash: `sha256:${'a'.repeat(64)}`,
+  contributions: [{
+    contribution_id: 'defaults.conversation.complete',
+    kind: 'route',
+    mode: 'declarative',
+    label: 'Tobkiri Conversation',
+    owner_pack_id: 'defaultspack',
+    owner_pack_hash: `sha256:${'b'.repeat(64)}`,
+    build_identity: 'defaultspack.conversation',
+    resolved_profile_revision: `sha256:${'a'.repeat(64)}`,
+    resolved_plan_hash: `sha256:${'a'.repeat(64)}`,
+    descriptor_hash: `sha256:${'c'.repeat(64)}`,
+    route: '/chat',
+    action_contract: 'conversation.turn.v1',
+    operation_id: 'complete',
+    provider_id: 'defaultspack.conversation',
+    function_id: 'defaultspack.conversation',
+    view: {type: 'conversation_v4'},
+  }],
+  diagnostics: [],
+  quarantined_pack_ids: [],
+  catalog_hash: `sha256:${'d'.repeat(64)}`,
+});
 
 const approval = {
   state: 'verified' as const,
@@ -180,4 +209,44 @@ test('launch remains blocked until a verified materialization exists', () => {
     }),
     null,
   );
+});
+
+test('Conversation readiness requires one exact live capability binding', () => {
+  assert.equal(isConversationCapabilityReady(conversationCatalog()), true);
+
+  const tamperCases: Array<[string, (candidate: ApiDynamicFrontendCatalog) => void]> = [
+    ['version', (candidate) => { candidate.version = 'other'; }],
+    ['profile id', (candidate) => { candidate.profile_id = ''; }],
+    ['profile revision', (candidate) => { candidate.profile_revision = 'sha256:short'; }],
+    ['plan hash', (candidate) => { candidate.plan_hash = 'sha256:short'; }],
+    ['catalog hash', (candidate) => { candidate.catalog_hash = 'sha256:short'; }],
+    ['quarantine', (candidate) => { candidate.quarantined_pack_ids = ['defaultspack']; }],
+    ['kind', (candidate) => { candidate.contributions[0].kind = 'action'; }],
+    ['mode', (candidate) => { candidate.contributions[0].mode = 'same_origin_builtin'; }],
+    ['route', (candidate) => { candidate.contributions[0].route = '/packs'; }],
+    ['owner', (candidate) => { candidate.contributions[0].owner_pack_id = 'other'; }],
+    ['contract', (candidate) => { candidate.contributions[0].action_contract = 'other.v1'; }],
+    ['operation', (candidate) => { candidate.contributions[0].operation_id = 'other'; }],
+    ['provider', (candidate) => { candidate.contributions[0].provider_id = 'other'; }],
+    ['function', (candidate) => { candidate.contributions[0].function_id = 'other'; }],
+    ['build', (candidate) => { candidate.contributions[0].build_identity = 'other'; }],
+    ['owner hash', (candidate) => { candidate.contributions[0].owner_pack_hash = ''; }],
+    ['descriptor hash', (candidate) => { candidate.contributions[0].descriptor_hash = ''; }],
+    ['profile binding', (candidate) => {
+      candidate.contributions[0].resolved_profile_revision = 'sha256:stale';
+    }],
+    ['plan binding', (candidate) => {
+      candidate.contributions[0].resolved_plan_hash = 'sha256:stale';
+    }],
+    ['view', (candidate) => { candidate.contributions[0].view = {type: 'other'}; }],
+  ];
+  for (const [label, tamper] of tamperCases) {
+    const candidate = structuredClone(conversationCatalog());
+    tamper(candidate);
+    assert.equal(isConversationCapabilityReady(candidate), false, label);
+  }
+
+  const duplicate = conversationCatalog();
+  duplicate.contributions.push({...duplicate.contributions[0]});
+  assert.equal(isConversationCapabilityReady(duplicate), false);
 });

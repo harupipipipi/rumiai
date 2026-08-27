@@ -274,7 +274,7 @@ export function PackVMLifecyclePanel() {
   };
 
   const handleProvision = async () => {
-    if (!plan || !consent || !beginAction('provision')) return;
+    if (!planIsAvailable || !plan || !consent || !beginAction('provision')) return;
     try {
       const operationId = globalThis.crypto?.randomUUID?.();
       if (!operationId || !isCanonicalPackVMOperationId(operationId)) {
@@ -357,8 +357,15 @@ export function PackVMLifecyclePanel() {
     && (!operation || operation.state === 'failed' || operation.state === 'cancelled'),
   );
   const canPrepare = !doctor?.ready && !hasActiveOperation && !pendingAction;
-  const canConsent = Boolean(plan && consentChecked && !consent && !pendingAction);
-  const canProvision = Boolean(consent && !operation && !pendingAction);
+  const planIsAvailable = plan?.runtime_path_status === 'ready'
+    && plan.launcher_reason === null
+    && plan.image_source !== 'unavailable';
+  const canConsent = Boolean(
+    planIsAvailable && consentChecked && !consent && !pendingAction,
+  );
+  const canProvision = Boolean(
+    planIsAvailable && consent && !operation && !pendingAction,
+  );
 
   return (
     <>
@@ -482,13 +489,15 @@ export function PackVMLifecyclePanel() {
                   {userSafePackVMError(plan.launcher_reason)}
                 </p>
               ) : null}
-              <div className="mt-4 rounded-lg border border-border bg-bg-main p-3">
-                <p className="text-xs font-medium text-text-main">Exact confirmation phrase</p>
-                <p className="mt-1 break-all font-mono text-xs text-text-muted">
-                  {userSafePackVMError(plan.confirmation)}
-                </p>
-              </div>
-              {!consent ? (
+              {planIsAvailable ? (
+                <div className="mt-4 rounded-lg border border-border bg-bg-main p-3">
+                  <p className="text-xs font-medium text-text-main">Exact confirmation phrase</p>
+                  <p className="mt-1 break-all font-mono text-xs text-text-muted">
+                    {userSafePackVMError(plan.confirmation)}
+                  </p>
+                </div>
+              ) : null}
+              {!consent && planIsAvailable ? (
                 <div className="mt-4 space-y-3">
                   <label className="flex cursor-pointer items-start gap-3 text-sm text-text-main">
                     <input

@@ -15,22 +15,26 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "tobkiri_launcher/scripts/verify_macos_launcher_cold_boot.py"
 WORKFLOW = ROOT / ".github/workflows/desktop-installers.yml"
+CI_ARTIFACT_SCRIPT = ROOT / ".github/scripts/macos_ci_artifact.py"
 
 
-def _load_script():
+def _load_script(module_name: str, script: Path):
+    """Load a standalone repository script as an isolated test module."""
     spec = importlib.util.spec_from_file_location(
-        "verify_macos_launcher_cold_boot",
-        SCRIPT,
+        module_name,
+        script,
     )
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load {SCRIPT}")
+        raise RuntimeError(f"cannot load {script}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
 
-VERIFY = _load_script()
+VERIFY = _load_script("verify_macos_launcher_cold_boot", SCRIPT)
+CI_ARTIFACT = _load_script("macos_ci_artifact", CI_ARTIFACT_SCRIPT)
+_TEST_EXECUTABLE_NAME = VERIFY.CI_EXECUTABLE_NAME
 
 
 @dataclass
@@ -52,16 +56,30 @@ class _Process:
         return None
 
 
-def _bundle_and_config(tmp_path: Path) -> tuple[object, Path]:
-    app_bundle = tmp_path / VERIFY.CI_APP_NAME
-    executable = app_bundle / VERIFY.EXECUTABLE_RELATIVE
-    executable.parent.mkdir(parents=True)
-    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    executable.chmod(0o755)
+def _write_info_plist(app_bundle: Path, executable_name: object) -> None:
+    """Write the minimal signed-bundle metadata used by cold-boot tests."""
     info_plist = app_bundle / VERIFY.INFO_PLIST_RELATIVE
     info_plist.parent.mkdir(exist_ok=True)
     with info_plist.open("wb") as output:
-        plistlib.dump({"CFBundleIdentifier": VERIFY.CI_BUNDLE_IDENTIFIER}, output)
+        plistlib.dump(
+            {
+                "CFBundleIdentifier": VERIFY.CI_BUNDLE_IDENTIFIER,
+                "CFBundleExecutable": executable_name,
+            },
+            output,
+        )
+
+
+def _bundle_and_config(
+    tmp_path: Path,
+    executable_name: str = _TEST_EXECUTABLE_NAME,
+) -> tuple[object, Path]:
+    app_bundle = tmp_path / VERIFY.CI_APP_NAME
+    executable = app_bundle / VERIFY.EXECUTABLE_DIRECTORY_RELATIVE / executable_name
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    executable.chmod(0o755)
+    _write_info_plist(app_bundle, executable_name)
 
     app_data_parent = tmp_path / "Application Support"
     app_data_parent.mkdir()
@@ -123,6 +141,7 @@ def test_cold_boot_requires_embedded_broker_then_owned_kernel_and_panel(
     signals: list[tuple[int, signal.Signals]] = []
     calls: list[tuple[int, str]] = []
     launched_environment: dict[str, str] = {}
+    launched_executable: Optional[Path] = None
 
     def request(port: int, path: str) -> Optional[object]:
         calls.append((port, path))
@@ -142,12 +161,22 @@ def test_cold_boot_requires_embedded_broker_then_owned_kernel_and_panel(
         if port == config.kernel_port and path == VERIFY.PANEL_BOOTSTRAP_PATH:
             return VERIFY.HttpResponse(
                 200,
-                {"content-type": "text/html; charset=utf-8"},
-                b'<html><script src="/panel/assets/index-test.js"></script></html>',
+                {
+                    "content-type": "text/html; charset=utf-8",
+                    "cache-control": "no-store",
+                },
+                (
+                    b"<!doctype html><script>"
+                    b"document.body.textContent='Tobkiri Launcher authentication required';"
+                    b"fetch('/api/panel/auth/exchange');"
+                    b"</script>"
+                ),
             )
         return None
 
-    def launch(_executable: Path, _bundle: Path, environment: object) -> _Process:
+    def launch(executable: Path, _bundle: Path, environment: object) -> _Process:
+        nonlocal launched_executable
+        launched_executable = executable
         launched_environment.update(environment)
         return _Process()
 
@@ -169,6 +198,11 @@ def test_cold_boot_requires_embedded_broker_then_owned_kernel_and_panel(
 
     assert result.kernel_pid == 4243
     assert result.panel_reachable is True
+    assert launched_executable == (
+        config.app_bundle
+        / VERIFY.EXECUTABLE_DIRECTORY_RELATIVE
+        / _TEST_EXECUTABLE_NAME
+    )
     assert calls == [
         (18770, VERIFY.BROKER_HEALTH_PATH),
         (config.kernel_port, VERIFY.KERNEL_HEALTH_PATH),
@@ -182,6 +216,47 @@ def test_cold_boot_requires_embedded_broker_then_owned_kernel_and_panel(
         (4242, signal.SIGTERM),
         (4242, signal.SIGKILL),
     ]
+
+
+def test_panel_bootstrap_probe_rejects_unauthenticated_static_panel() -> None:
+    response = VERIFY.HttpResponse(
+        200,
+        {
+            "content-type": "text/html; charset=utf-8",
+            "cache-control": "no-store",
+        },
+        b'<html><script src="/panel/assets/index-test.js"></script></html>',
+    )
+
+    assert VERIFY._panel_bootstrap_is_reachable(response) is False
+
+
+@pytest.mark.parametrize(
+    ("headers", "body"),
+    [
+        (
+            {"content-type": "text/html; charset=utf-8"},
+            (
+                b"<!doctype html>Tobkiri Launcher authentication required"
+                b"/api/panel/auth/exchange"
+            ),
+        ),
+        (
+            {
+                "content-type": "text/html; charset=utf-8",
+                "cache-control": "no-store",
+            },
+            b"<!doctype html>Tobkiri Launcher authentication required",
+        ),
+    ],
+)
+def test_panel_bootstrap_probe_requires_fail_closed_auth_markers(
+    headers: dict[str, str],
+    body: bytes,
+) -> None:
+    response = VERIFY.HttpResponse(200, headers, body)
+
+    assert VERIFY._panel_bootstrap_is_reachable(response) is False
 
 
 def test_cold_boot_rejects_healthy_kernel_not_owned_by_launched_app(
@@ -240,6 +315,64 @@ def test_cold_boot_fails_closed_when_ci_app_data_is_not_fresh(tmp_path: Path) ->
         )
 
     assert launched is False
+
+
+def test_cold_boot_executable_matches_the_ci_attestation_contract() -> None:
+    attested_executable = Path(CI_ARTIFACT.SIGNED_PATHS[0])
+
+    assert (
+        VERIFY.EXECUTABLE_DIRECTORY_RELATIVE / VERIFY.CI_EXECUTABLE_NAME
+        == attested_executable
+    )
+
+
+@pytest.mark.parametrize(
+    "executable_name",
+    [
+        "",
+        "/tmp/launcher",
+        "nested/launcher",
+        "../launcher",
+        ".",
+        "..",
+        r"nested\\launcher",
+        "unattested-launcher",
+    ],
+)
+def test_cold_boot_rejects_unsafe_cf_bundle_executable(
+    tmp_path: Path,
+    executable_name: str,
+) -> None:
+    config, _diagnostics = _bundle_and_config(tmp_path)
+    _write_info_plist(config.app_bundle, executable_name)
+    launched = False
+
+    def launch(*_args: object) -> _Process:
+        nonlocal launched
+        launched = True
+        return _Process()
+
+    with pytest.raises(VERIFY.ColdBootError, match="CFBundleExecutable"):
+        VERIFY.verify_cold_boot(config, launch=launch)
+
+    assert launched is False
+
+
+def test_cold_boot_rejects_symlink_cf_bundle_executable(tmp_path: Path) -> None:
+    config, _diagnostics = _bundle_and_config(tmp_path)
+    executable = (
+        config.app_bundle
+        / VERIFY.EXECUTABLE_DIRECTORY_RELATIVE
+        / _TEST_EXECUTABLE_NAME
+    )
+    outside_executable = tmp_path / "outside-launcher"
+    outside_executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    outside_executable.chmod(0o755)
+    executable.unlink()
+    executable.symlink_to(outside_executable)
+
+    with pytest.raises(VERIFY.ColdBootError, match="canonical regular file"):
+        VERIFY.verify_cold_boot(config)
 
 
 def test_workflow_runs_cold_boot_after_host_seal_and_before_dmg() -> None:

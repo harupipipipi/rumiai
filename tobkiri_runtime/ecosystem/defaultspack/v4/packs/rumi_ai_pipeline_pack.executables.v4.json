@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:a2c5b75ae1864d028900f72a3db76cd45db77b66c44cac09ae5a59b49ef74312",
+  "catalog_digest": "sha256:d58348fd07fcd8861ab3806daa8dde64421a893fc825f7a30263b970264164ed",
   "pack_id": "rumi_ai_pipeline_pack",
-  "source_identity": "sha256:026008df582bff75ecf5eed06bf24a4206a2f8e745250604e6725c1cfbffe414",
+  "source_identity": "sha256:1c4d9ebb82cbe1116f47d205e7ff2283c3760d6cf5f80d2461fee941854e9be5",
   "variants": [
     {
       "architecture": "any",
@@ -10,7 +10,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_ai_pipeline_pack.ai-pipeline.failover",
-      "implementation_digest": "sha256:dd9e1e9294cc7232bf5764b8c196a8d56139397582ef522faf742e39d142911c",
+      "implementation_digest": "sha256:b1a3104fa7af317958dff3e18a39e4a5f443311ca94d58ae97301d6516303ed4",
       "implementation_path": "runtime/pipeline.py",
       "materialization_mode": "on_demand",
       "operations": [
@@ -82,7 +82,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_ai_pipeline_pack.ai-pipeline.prepare",
-      "implementation_digest": "sha256:dd9e1e9294cc7232bf5764b8c196a8d56139397582ef522faf742e39d142911c",
+      "implementation_digest": "sha256:b1a3104fa7af317958dff3e18a39e4a5f443311ca94d58ae97301d6516303ed4",
       "implementation_path": "runtime/pipeline.py",
       "materialization_mode": "on_demand",
       "operations": [
