@@ -84,6 +84,7 @@ import { cn } from "./lib/cn";
 import { deleteCalendarScheduleBeforeLocalChange } from "./lib/calendarScheduleDeletion";
 import {
   canExecuteComposerEndpointAction,
+  composerExtensionItems,
   composerMentionMetadataFromWidgets,
   composerMentionSyntaxesForToolId,
   composerMentionToolIdsFromWidgets,
@@ -2209,19 +2210,6 @@ function contextUsageFor(conversation: Conversation | null, profile: ModelProfil
   }
   const ratio = Math.min(1, Math.max(0, usedTokens / maxContext));
   return { usedTokens, maxContext, ratio, label: `${Math.round(ratio * 100)}%` };
-}
-
-function composerExtensionItems(items: SidebarItem[]): ComposerExtensionItem[] {
-  return items
-    .filter((item) => item.category === "tool" || item.category === "capability")
-    .map((item) => ({
-      id: item.id,
-      label: item.label,
-      category: item.category,
-      description: item.description,
-      tags: item.tags ?? [],
-      ui: item.ui,
-    }));
 }
 
 function chatIdFromLocation(): string | null {
