@@ -5,6 +5,7 @@ import type { AdaptiveOperatingProfile } from "../lib/adaptiveApi";
 import { fetchAdaptiveOperatingProfile, saveAdaptiveOperatingProfile } from "../lib/adaptiveApi";
 import {
   AdaptiveEmptyState,
+  AdaptiveStatusMessage,
   ResourceBanner,
   SurfaceHeader,
   ToneBadge,
@@ -35,6 +36,7 @@ export function OperatingProfilePage({ initialProfile }: { initialProfile?: Adap
   const [summaryDraft, setSummaryDraft] = useState(initialDraft.summary);
   const [autonomyDraft, setAutonomyDraft] = useState(initialDraft.autonomy.level);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!data) return;
@@ -43,10 +45,12 @@ export function OperatingProfilePage({ initialProfile }: { initialProfile?: Adap
   }, [data]);
 
   const handleSave = async () => {
+    if (saving) return;
     if (!data) {
       setSaveStatus("Cannot save until the adaptive API returns a profile.");
       return;
     }
+    setSaving(true);
     setSaveStatus("Saving profile draft...");
     try {
       await saveAdaptiveOperatingProfile({
@@ -61,6 +65,8 @@ export function OperatingProfilePage({ initialProfile }: { initialProfile?: Adap
       setSaveStatus("Profile draft saved.");
     } catch (err) {
       setSaveStatus(`Kept local draft. ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -115,15 +121,29 @@ export function OperatingProfilePage({ initialProfile }: { initialProfile?: Adap
             </div>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" className={adaptivePrimaryControlClass} onClick={handleSave} aria-label="Save operating profile draft">
+            <button
+              type="button"
+              className={adaptivePrimaryControlClass}
+              onClick={handleSave}
+              aria-label="Save operating profile draft"
+              aria-busy={saving}
+              disabled={saving}
+            >
               <Save size={14} aria-hidden="true" />
               Save draft
             </button>
-            <button type="button" className={adaptiveControlClass} onClick={refresh} aria-label="Reload operating profile">
+            <button type="button" className={adaptiveControlClass} onClick={refresh} aria-label="Reload operating profile" aria-busy={status === "loading"} disabled={status === "loading"}>
               Reload
             </button>
           </div>
-          {saveStatus ? <p className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/45 px-3 py-2 text-xs text-zinc-300">{saveStatus}</p> : null}
+          {saveStatus ? (
+            <AdaptiveStatusMessage
+              urgent={saveStatus.startsWith("Kept local") || saveStatus.startsWith("Cannot save")}
+              className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/45 px-3 py-2 text-xs text-zinc-300"
+            >
+              {saveStatus}
+            </AdaptiveStatusMessage>
+          ) : null}
         </div>
 
         <aside className={adaptiveSectionClass} aria-label="Profile guardrails">

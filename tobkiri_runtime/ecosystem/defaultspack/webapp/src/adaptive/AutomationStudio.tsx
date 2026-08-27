@@ -5,6 +5,7 @@ import type { AdaptiveAutomation, AdaptiveAutomationState } from "../lib/adaptiv
 import { fetchAdaptiveAutomations, updateAdaptiveAutomation } from "../lib/adaptiveApi";
 import {
   AdaptiveEmptyState,
+  AdaptiveStatusMessage,
   ResourceBanner,
   SurfaceHeader,
   ToneBadge,
@@ -22,10 +23,14 @@ import { useAdaptiveResource } from "./useAdaptiveResource";
 function AutomationItem({
   automation,
   enabled,
+  pending,
+  blocked,
   onToggle,
 }: {
   automation: AdaptiveAutomation;
   enabled: boolean;
+  pending: boolean;
+  blocked: boolean;
   onToggle: () => void;
 }) {
   return (
@@ -49,6 +54,8 @@ function AutomationItem({
           className={adaptiveControlClass}
           onClick={onToggle}
           aria-pressed={enabled}
+          aria-busy={pending}
+          disabled={blocked}
           aria-label={`${enabled ? "Pause" : "Enable"} ${automation.name}`}
         >
           <Power size={14} aria-hidden="true" />
@@ -80,6 +87,7 @@ export function AutomationStudio({ initialState }: { initialState?: AdaptiveAuto
   });
   const [enabledOverrides, setEnabledOverrides] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState<string | null>(null);
+  const [pendingAutomationId, setPendingAutomationId] = useState<string | null>(null);
   const automations = useMemo(
     () => (data?.automations ?? []).map((automation) => ({
       ...automation,
@@ -89,14 +97,23 @@ export function AutomationStudio({ initialState }: { initialState?: AdaptiveAuto
   );
 
   const handleToggle = async (automation: AdaptiveAutomation) => {
+    if (pendingAutomationId) return;
     const nextEnabled = !(enabledOverrides[automation.id] ?? automation.enabled);
+    setPendingAutomationId(automation.id);
     setEnabledOverrides((current) => ({ ...current, [automation.id]: nextEnabled }));
-    setMessage(nextEnabled ? "Automation enabled locally." : "Automation paused locally.");
+    setMessage(`${nextEnabled ? "Enabling" : "Pausing"} ${automation.name}.`);
     try {
       await updateAdaptiveAutomation(automation.id, { enabled: nextEnabled });
-      setMessage(nextEnabled ? "Automation enabled." : "Automation paused.");
+      setMessage(`${automation.name} ${nextEnabled ? "enabled" : "paused"}.`);
     } catch (err) {
-      setMessage(`Kept local automation state. ${err instanceof Error ? err.message : String(err)}`);
+      setEnabledOverrides((current) => {
+        const next = { ...current };
+        delete next[automation.id];
+        return next;
+      });
+      setMessage(`Could not ${nextEnabled ? "enable" : "pause"} ${automation.name}. ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setPendingAutomationId(null);
     }
   };
 
@@ -108,7 +125,7 @@ export function AutomationStudio({ initialState }: { initialState?: AdaptiveAuto
         description="Draft, simulate, and enable recurring workflows while keeping risky steps behind local review gates."
         action={
           <div className="flex gap-2">
-            <button type="button" className={adaptiveControlClass} onClick={refresh} aria-label="Refresh automations">
+            <button type="button" className={adaptiveControlClass} onClick={refresh} aria-label="Refresh automations" aria-busy={status === "loading"} disabled={status === "loading"}>
               <RotateCw size={14} aria-hidden="true" />
               Refresh
             </button>
@@ -120,7 +137,14 @@ export function AutomationStudio({ initialState }: { initialState?: AdaptiveAuto
         }
       />
       <ResourceBanner status={status} error={error} onRefresh={refresh} />
-      {message ? <div className="border-t border-zinc-800/70 bg-zinc-950/60 px-3 py-2 text-xs text-zinc-300">{message}</div> : null}
+      {message ? (
+        <AdaptiveStatusMessage
+          urgent={message.startsWith("Could not")}
+          className="border-t border-zinc-800/70 bg-zinc-950/60 px-3 py-2 text-xs text-zinc-300"
+        >
+          {message}
+        </AdaptiveStatusMessage>
+      ) : null}
       {!data ? (
         <AdaptiveEmptyState>Adaptive automations are unavailable until the API returns live state.</AdaptiveEmptyState>
       ) : (
@@ -138,6 +162,8 @@ export function AutomationStudio({ initialState }: { initialState?: AdaptiveAuto
                 key={automation.id}
                 automation={automation}
                 enabled={automation.enabled}
+                pending={pendingAutomationId === automation.id}
+                blocked={pendingAutomationId !== null}
                 onToggle={() => void handleToggle(automation)}
               />
             ))}
