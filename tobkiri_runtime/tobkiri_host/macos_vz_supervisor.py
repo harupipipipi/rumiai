@@ -1388,10 +1388,13 @@ def verify_macos_vz_helper_identity(
         return False, "macOS VZ native helper signing identity mismatch"
     entitlement_source = described.stdout + "\n" + described.stderr
     start = entitlement_source.find("<?xml")
-    if start < 0:
+    end = entitlement_source.find("</plist>", start)
+    if start < 0 or end < 0:
         return False, "macOS VZ native helper virtualization entitlement is missing"
     try:
-        entitlements = plistlib.loads(entitlement_source[start:].encode("utf-8"))
+        entitlements = plistlib.loads(
+            entitlement_source[start : end + len("</plist>")].encode("utf-8")
+        )
     except (ValueError, TypeError):
         return False, "macOS VZ native helper virtualization entitlement is invalid"
     if not isinstance(entitlements, Mapping) or entitlements.get(

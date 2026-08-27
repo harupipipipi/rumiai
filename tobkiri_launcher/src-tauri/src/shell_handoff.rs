@@ -70,7 +70,7 @@ pub(crate) fn create_shell_handoff(
     binding: ShellHandoffBinding<'_>,
     runtime_url: &str,
 ) -> Result<PathBuf> {
-    let root = launcher_handoff_root(config);
+    let root = launcher_handoff_root(config)?;
     prepare_private_root(&root)?;
     cleanup_stale_handoffs(&root);
 
@@ -196,11 +196,38 @@ pub(crate) fn handoff_path_from_strings(args: &[String]) -> Result<PathBuf> {
     handoff_path_from_os_args(args.iter().map(OsString::from))
 }
 
-fn launcher_handoff_root(config: &AppConfig) -> PathBuf {
-    config.user_data_dir.join(HANDOFF_DIRECTORY)
+fn launcher_handoff_root(config: &AppConfig) -> Result<PathBuf> {
+    #[cfg(debug_assertions)]
+    if MACOS_ARTIFACT_POLICY == "production-v1" && config.dev_workspace_root.is_some() {
+        return development_launcher_handoff_root();
+    }
+    Ok(config.user_data_dir.join(HANDOFF_DIRECTORY))
+}
+
+#[cfg(debug_assertions)]
+fn development_launcher_handoff_root() -> Result<PathBuf> {
+    // LaunchServices deliberately does not preserve the Launcher's TMPDIR.
+    // Both independently launched app processes can, however, resolve the
+    // same per-user cache directory without inherited environment state.
+    let cache_dir = dirs::cache_dir().context("platform cache directory is unavailable")?;
+    Ok(cache_dir
+        .join("dev.tobkiri.launcher")
+        .join("development")
+        .join(HANDOFF_DIRECTORY))
 }
 
 fn expected_launcher_handoff_root() -> Result<PathBuf> {
+    // App-bundled debug Launchers deliberately keep rebuild-specific writable
+    // state out of Application Support.  The development Shell is launched by
+    // LaunchServices, so it cannot inherit the Launcher's environment; derive
+    // the same bounded root that AppConfig uses instead.  File ownership,
+    // permissions, path containment, nonce, lifetime, and payload identity are
+    // still verified below. Packaged production and CI policies remain bound
+    // to their Application Support container.
+    #[cfg(debug_assertions)]
+    if MACOS_ARTIFACT_POLICY == "production-v1" {
+        return development_launcher_handoff_root();
+    }
     let data_dir = dirs::data_dir().context("platform data directory is unavailable")?;
     let launcher_bundle_identifier =
         launcher_bundle_identifier_for_artifact_policy(MACOS_ARTIFACT_POLICY)?;

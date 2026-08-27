@@ -68,6 +68,7 @@ use windows_sys::Win32::System::IO::OVERLAPPED;
 
 // ---------------------------------------------------------------------------
 // Constants
+const DEVELOPMENT_PACKVM_BUNDLE_ROOT_ENV: &str = "TOBKIRI_DEVELOPMENT_PACKVM_BUNDLE_ROOT";
 // ---------------------------------------------------------------------------
 
 /// Pinned CPython patch version. Avoid resolving a mutable latest patch at startup.
@@ -247,6 +248,26 @@ where
         progress("Packaged Python will be verified immediately before the runtime starts...");
         return Ok(());
     }
+
+    // A source checkout is an explicit developer-controlled execution domain.
+    // Use the environment prepared by the documented repository setup instead
+    // of routing development through packaged provisioning and signing policy.
+    // Production remains on the sealed, build-bound path above.
+    if config.is_dev_workspace() {
+        let venv_python = config.venv_python();
+        if !venv_python.is_file() {
+            bail!(
+                "developer venv Python not found at {} -- create the repository .venv and install the locked development dependencies first",
+                venv_python.display()
+            );
+        }
+        progress(&format!(
+            "Using developer Python environment at {}...",
+            config.venv_dir.display()
+        ));
+        return Ok(());
+    }
+
     let options = ProvisionOptions::production();
     let lock_path = provision_lock_path(config);
     let lock = acquire_provision_lock(&lock_path, options.lock_wait)?;
@@ -322,6 +343,12 @@ where
         return crate::sealed_python::spawn_packaged_role(config, role, role_arguments, configure);
     }
     let mut command = process_utils::isolated_python(config.venv_python());
+    if let Some(bundle_root) = development_packvm_bundle_root(config) {
+        // Debug .app bundles may carry the same ad-hoc-signed VZ helper used
+        // by macOS CI. Pass only the enclosing bundle selected by Tauri;
+        // direct checkout launches have no bundle and receive no override.
+        command.env(DEVELOPMENT_PACKVM_BUNDLE_ROOT_ENV, bundle_root);
+    }
     match role {
         PythonRole::Kernel => {
             command.args(["-m", "app"]);
@@ -348,6 +375,33 @@ where
         .spawn()
         .map(PythonChild::development)
         .context("failed to spawn development Python role")
+}
+
+fn development_packvm_bundle_root(config: &AppConfig) -> Option<PathBuf> {
+    if !cfg!(debug_assertions) || !config.is_dev_workspace() {
+        return None;
+    }
+    let app_dir = config.app_dir.canonicalize().ok()?;
+    let resources = app_dir.parent()?;
+    let contents = resources.parent()?;
+    let bundle = contents.parent()?;
+    if app_dir.file_name()? != "app"
+        || resources.file_name()? != "Resources"
+        || contents.file_name()? != "Contents"
+        || bundle.extension()? != "app"
+        || !bundle
+            .join("Contents/MacOS/tobkiri-packvm-vz-helper")
+            .is_file()
+        || !bundle
+            .join("Contents/Resources/packvm-vz-provisioning.v1.json")
+            .is_file()
+        || !bundle
+            .join("Contents/Resources/packvm-vz-helper.manifest.v1.json")
+            .is_file()
+    {
+        return None;
+    }
+    Some(bundle.to_path_buf())
 }
 
 // ---------------------------------------------------------------------------
@@ -3104,6 +3158,68 @@ mod tests {
             |_| Ok(()),
         )
         .is_err());
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn development_setup_uses_repository_venv_without_packaged_provisioning() {
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-development-python-setup-{}",
+            unix_timestamp_nanos()
+        ));
+        let resource_dir = root
+            .join("tobkiri_launcher")
+            .join("src-tauri")
+            .join("target")
+            .join("debug");
+        fs::create_dir_all(&resource_dir).unwrap();
+        fs::create_dir_all(root.join("tobkiri_runtime")).unwrap();
+        fs::write(root.join("tobkiri_runtime/app.py"), b"print('ok')\n").unwrap();
+
+        let config = AppConfig::detect_for_tauri(resource_dir, root.join("appdata")).unwrap();
+        let venv_python = config.venv_python();
+        fs::create_dir_all(venv_python.parent().unwrap()).unwrap();
+        fs::write(&venv_python, b"developer python").unwrap();
+
+        let progress = RefCell::new(Vec::new());
+        ensure_python_env_with_progress(&config, |message| {
+            progress.borrow_mut().push(message.to_string());
+        })
+        .unwrap();
+
+        assert_eq!(config.venv_dir, root.join(".venv"));
+        assert_eq!(
+            progress.into_inner(),
+            vec![format!(
+                "Using developer Python environment at {}...",
+                root.join(".venv").display()
+            )]
+        );
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn development_setup_reports_missing_repository_venv() {
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-development-python-missing-{}",
+            unix_timestamp_nanos()
+        ));
+        let resource_dir = root
+            .join("tobkiri_launcher")
+            .join("src-tauri")
+            .join("target")
+            .join("debug");
+        fs::create_dir_all(&resource_dir).unwrap();
+        fs::create_dir_all(root.join("tobkiri_runtime")).unwrap();
+        fs::write(root.join("tobkiri_runtime/app.py"), b"print('ok')\n").unwrap();
+
+        let config = AppConfig::detect_for_tauri(resource_dir, root.join("appdata")).unwrap();
+        let error = ensure_python_env_with_progress(&config, |_| {}).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("developer venv Python not found"));
+        assert!(error.to_string().contains(".venv"));
         fs::remove_dir_all(root).ok();
     }
 

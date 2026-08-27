@@ -394,6 +394,7 @@ class MacOSVZProvisioner:
         transport_factory: MacOSVZTransportFactory | None = None,
         helper_identity_verifier: Callable[[MacOSVZAssetManifest], tuple[bool, str | None]]
         | None = None,
+        allow_ad_hoc_helper_identity: bool = False,
         clone_file: Callable[[Path, Path], None] | None = None,
         efi_store_preparer: Callable[[Path, str, Path, bytes], Mapping[str, object]] | None = None,
     ) -> None:
@@ -462,6 +463,7 @@ class MacOSVZProvisioner:
         )
         self._transport_factory = transport_factory
         self._helper_identity_verifier = helper_identity_verifier
+        self._allow_ad_hoc_helper_identity = allow_ad_hoc_helper_identity
         self._clone_file = clone_file or _clone_file_apfs
         self._efi_store_preparer = efi_store_preparer
         self._pending: dict[str, PackVMProvisioningPlan] = {}
@@ -517,7 +519,6 @@ class MacOSVZProvisioner:
     ) -> Iterator[None]:
         """Serialize a mutation and retain an exact owner claim durably."""
 
-        del recover_claim  # Recovery is authenticated by the state/proof below.
         self._ensure_state_root()
         claim = {
             "version": 1,
@@ -533,9 +534,21 @@ class MacOSVZProvisioner:
             _try_lock(descriptor)
             locked = True
             existing = _read_json_if_present(self.mutation_claim_path)
-            if existing is not None and _canonical_bytes(existing) != _canonical_bytes(claim):
-                raise ValueError("PackVM VZ mutation has an unresolved owner claim")
-            _atomic_private_json(self.mutation_claim_path, claim)
+            if existing is not None:
+                same_owner = hmac.compare_digest(
+                    _canonical_bytes(existing), _canonical_bytes(claim)
+                )
+                stale_recovery = (
+                    recover_claim
+                    and _claim_binding_equal(existing, claim)
+                    and not _process_is_alive(existing.get("owner_pid"))
+                )
+                if not same_owner and not stale_recovery:
+                    raise ValueError("PackVM VZ mutation has an unresolved owner claim")
+                if stale_recovery:
+                    _atomic_private_json(self.mutation_claim_path, claim)
+            else:
+                _atomic_private_json(self.mutation_claim_path, claim)
             yield
             succeeded = True
         finally:
@@ -1226,7 +1239,10 @@ class MacOSVZProvisioner:
             if not _secure_equal(recovery.get(key), expected_proof.get(key)):
                 raise ValueError("PackVM VZ orphan recovery proof does not match")
         instance_root = Path(str(recovery["instance_root"]))
-        with self.operation_gate("provision", _recovery_binding(expected_proof)):
+        recovery = self._bind_legacy_empty_recovery_root(instance_root, recovery)
+        with self.operation_gate(
+            "provision", _recovery_binding(expected_proof), recover_claim=True
+        ):
             self._remove_exact_instance(instance_root, recovery)
             self.recovery_path.unlink(missing_ok=True)
             self._audit("failed_provision_deleted", None)
@@ -1311,6 +1327,15 @@ class MacOSVZProvisioner:
         if root.exists() or root.is_symlink():
             raise ValueError("PackVM VZ instance root already exists")
         _ensure_private_directory(root)
+        recovery = self._load_recovery()
+        metadata = root.lstat()
+        recovery.update(
+            {
+                "instance_root_device": int(metadata.st_dev),
+                "instance_root_inode": int(metadata.st_ino),
+            }
+        )
+        _atomic_private_json(self.recovery_path, self._signed_recovery(recovery))
         try:
             verified = image.verified
             source = verified.path
@@ -1318,7 +1343,8 @@ class MacOSVZProvisioner:
                 raise ValueError("PackVM VZ verified raw EFI image digest changed")
             if (
                 manifest.image_sha512 is not None
-                and _file_digest_algorithm(source, "sha512") != manifest.image_sha512
+                and _file_digest_algorithm(source, "sha512").removeprefix("sha512:")
+                != manifest.image_sha512
             ):
                 raise ValueError("PackVM VZ verified raw EFI image SHA-512 changed")
             # The cache owns the immutable base.  The per-instance metadata only
@@ -1528,6 +1554,20 @@ class MacOSVZProvisioner:
         ):
             raise ValueError("packaged macOS VZ helper manifest binding is invalid")
         signing = helper.get("signing")
+        developer_id_identity = (
+            isinstance(signing, Mapping)
+            and signing.get("signing_mode") == "developer-id"
+            and isinstance(signing.get("team_id"), str)
+            and isinstance(signing.get("authority"), str)
+        )
+        ad_hoc_identity = (
+            self._allow_ad_hoc_helper_identity
+            and self._bundle_binding is None
+            and isinstance(signing, Mapping)
+            and signing.get("signing_mode") == "ad-hoc"
+            and signing.get("team_id") is None
+            and signing.get("authority") is None
+        )
         if (
             helper.get("path") != "Contents/MacOS/tobkiri-packvm-vz-helper"
             or helper.get("identifier") != "dev.tobkiri.launcher.packvm-vz-helper"
@@ -1535,14 +1575,12 @@ class MacOSVZProvisioner:
             or not _is_digest(helper.get("code_sha256"))
             or not isinstance(signing, Mapping)
             or set(signing) != {"signing_mode", "team_id", "authority"}
-            or signing.get("signing_mode") != "developer-id"
-            or not isinstance(signing.get("team_id"), str)
-            or not isinstance(signing.get("authority"), str)
+            or not (developer_id_identity or ad_hoc_identity)
         ):
             raise ValueError("packaged macOS VZ helper production identity is unavailable")
-        team_id = str(signing["team_id"])
-        authority = str(signing["authority"])
-        if (
+        team_id = "" if ad_hoc_identity else str(signing["team_id"])
+        authority = "" if ad_hoc_identity else str(signing["authority"])
+        if developer_id_identity and (
             len(team_id) != 10
             or not team_id.isascii()
             or not team_id.isalnum()
@@ -1760,6 +1798,33 @@ class MacOSVZProvisioner:
         if root.exists():
             raise ValueError("PackVM VZ cleanup left instance residue")
 
+    def _bind_legacy_empty_recovery_root(
+        self, root: Path, recovery: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        """Bind an empty root created before recovery recorded its inode."""
+
+        device = recovery.get("instance_root_device")
+        inode = recovery.get("instance_root_inode")
+        if device is not None or inode is not None:
+            if isinstance(device, int) and isinstance(inode, int):
+                return recovery
+            raise ValueError("PackVM VZ cleanup target binding is incomplete")
+        expected = self._state_dir / "instances" / VZ_INSTANCE
+        if root != expected or root.is_symlink():
+            raise ValueError("PackVM VZ cleanup target changed")
+        metadata = root.lstat()
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_mode & 0o077
+            or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+            or next(root.iterdir(), None) is not None
+        ):
+            raise ValueError("PackVM VZ cleanup target changed")
+        bound = dict(recovery)
+        bound["instance_root_device"] = int(metadata.st_dev)
+        bound["instance_root_inode"] = int(metadata.st_ino)
+        return bound
+
     def _audit(self, event: str, attestation_digest: str | None) -> None:
         self._ensure_state_root()
         record = {
@@ -1780,6 +1845,22 @@ class MacOSVZProvisioner:
 def default_packvm_provisioner() -> MacOSVZProvisioner:
     """Return direct VZ on supported macOS and no Lima default elsewhere."""
 
+    if os.environ.get("RUMI_ENVIRONMENT") == "development":
+        development_bundle = os.environ.get(
+            "TOBKIRI_DEVELOPMENT_PACKVM_BUNDLE_ROOT", ""
+        ).strip()
+        if development_bundle:
+            bundle_root = Path(development_bundle)
+            return MacOSVZProvisioner(
+                bundle_root=bundle_root,
+                asset_manifest_path=(
+                    bundle_root
+                    / "Contents"
+                    / "Resources"
+                    / "packvm-vz-provisioning.v1.json"
+                ),
+                allow_ad_hoc_helper_identity=True,
+            )
     return MacOSVZProvisioner()
 
 
@@ -2486,6 +2567,26 @@ def _canonical_bytes(value: object) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
+def _claim_binding_equal(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    fields = ("version", "operation", "instance", "binding")
+    return hmac.compare_digest(
+        _canonical_bytes({field: left.get(field) for field in fields}),
+        _canonical_bytes({field: right.get(field) for field in fields}),
+    )
+
+
+def _process_is_alive(value: object) -> bool:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return False
+    try:
+        os.kill(value, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def _digest_bytes(value: bytes) -> str:
     return _DIGEST_PREFIX + hashlib.sha256(value).hexdigest()
 
@@ -2525,7 +2626,16 @@ def _format_gib(value: int) -> str:
 
 
 def _secure_equal(left: object, right: object) -> bool:
-    return isinstance(left, str) and isinstance(right, str) and hmac.compare_digest(left, right)
+    if isinstance(left, str) and isinstance(right, str):
+        return hmac.compare_digest(left, right)
+    if (
+        isinstance(left, int)
+        and not isinstance(left, bool)
+        and isinstance(right, int)
+        and not isinstance(right, bool)
+    ):
+        return hmac.compare_digest(str(left).encode(), str(right).encode())
+    return False
 
 
 __all__ = [

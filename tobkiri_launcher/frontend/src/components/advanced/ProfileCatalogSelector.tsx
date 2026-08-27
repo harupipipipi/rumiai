@@ -1,13 +1,15 @@
 import {useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import {AlertTriangle, CheckCircle2, Database, FileKey2, PackageCheck, RefreshCw, ShieldCheck} from 'lucide-react';
+import {AlertTriangle, CheckCircle2, Database, FileKey2, PackageCheck, Plus, RefreshCw, Search, ShieldCheck, X} from 'lucide-react';
 
 import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
 import {Card, CardContent, CardDescription, CardHeader, CardTitle} from '@/src/components/ui/Card';
+import {Input} from '@/src/components/ui/Input';
 import {ProfileCeremonyPanel} from '@/src/components/advanced/ProfileCeremonyPanel';
 import type {RuntimeSurfaceState} from '@/src/hooks/useRuntimeSurface';
 import {
   extractExactProfileCatalog,
+  extractExactProfileCatalogSelectablePackIds,
   type RuntimeProfileCatalogEntry,
   type RuntimeProfileCatalogProjection,
 } from '@/src/lib/runtimeSurface';
@@ -15,6 +17,20 @@ import type {ProfileActivateResult, ProfileCeremonyClient} from '@/src/lib/profi
 import type {Pack} from '@/src/store';
 
 type CeremonyMode = 'catalog' | 'defaults';
+
+export function profileMatchesQuery(entry: RuntimeProfileCatalogEntry, query: string): boolean {
+  const normalized = query.trim().toLocaleLowerCase();
+  if (!normalized) return true;
+  return [
+    entry.display_name,
+    entry.profile_id,
+    entry.bindings.base.pack_id,
+    entry.bindings.shell.provider_id,
+    entry.bindings.shell.pack_id,
+    entry.bindings.application?.pack_id,
+    ...entry.pack_closure.flatMap((pack) => [pack.pack_id, pack.role, pack.version]),
+  ].some((value) => value?.toLocaleLowerCase().includes(normalized));
+}
 
 function published(value: string | null | undefined): string {
   return value ?? 'not published';
@@ -51,6 +67,7 @@ function BindingCard({
 
 function ProfileDefinitionDetails({entry}: {entry: RuntimeProfileCatalogEntry}) {
   const {base, shell, application} = entry.bindings;
+  const selectablePackCount = extractExactProfileCatalogSelectablePackIds(entry)?.length ?? 0;
   return (
     <div className="mt-4 flex flex-col gap-4" aria-label={`Details for Profile ${entry.profile_id}`}>
       <section className="rounded-lg border border-border bg-bg-main p-4">
@@ -110,7 +127,10 @@ function ProfileDefinitionDetails({entry}: {entry: RuntimeProfileCatalogEntry}) 
       <section className="rounded-lg border border-border bg-bg-main p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h4 className="flex items-center gap-2 text-sm font-semibold text-text-main"><PackageCheck className="h-4 w-4" aria-hidden="true" />Authoritative Pack closure</h4>
-          <Badge variant="outline">{entry.pack_closure.length} exact rows</Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline">{entry.pack_closure.length} exact rows</Badge>
+            <Badge variant="outline">{selectablePackCount} selectable Packs</Badge>
+          </div>
         </div>
         <div className="mt-3 flex flex-col gap-2">
           {entry.pack_closure.map((pack) => (
@@ -158,6 +178,8 @@ export function ProfileCatalogSelector({
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [ceremonyMode, setCeremonyMode] = useState<CeremonyMode>('catalog');
   const [ceremonyBusy, setCeremonyBusy] = useState(false);
+  const [query, setQuery] = useState('');
+  const [showAddProfileHelp, setShowAddProfileHelp] = useState(false);
   const previousPackFingerprint = useRef<string | null>(null);
 
   const catalogProjection = useMemo(
@@ -210,6 +232,10 @@ export function ProfileCatalogSelector({
   }, [catalogSurface.refresh, packFingerprint, packsLoading]);
 
   const selectedEntry = catalogProjection?.profiles.find((entry) => entry.profile_id === selectedProfileId) ?? null;
+  const filteredProfiles = useMemo(
+    () => catalogProjection?.profiles.filter((entry) => profileMatchesQuery(entry, query)) ?? [],
+    [catalogProjection, query],
+  );
   const catalogCeremonyMode = ceremonyMode === 'catalog' && selectedEntry !== null;
   const handleActivated = useCallback(async (result: ProfileActivateResult) => {
     setSelectedProfileId(result.profile_id);
@@ -225,14 +251,30 @@ export function ProfileCatalogSelector({
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-4 w-4" aria-hidden="true" />Advanced Profile catalog</CardTitle>
-            <Badge variant={catalogProjection && !catalogSurface.stale ? 'success' : 'warning'}>
-              {catalogProjection ? `${catalogProjection.count} definitions` : 'locked'}
-            </Badge>
+            <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-4 w-4" aria-hidden="true" />Profiles</CardTitle>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={catalogProjection && !catalogSurface.stale ? 'success' : 'warning'}>
+                {catalogProjection ? `${catalogProjection.count} profiles` : 'locked'}
+              </Badge>
+              <Button type="button" size="sm" variant="outline" onClick={() => setShowAddProfileHelp((current) => !current)}>
+                {showAddProfileHelp ? <X className="h-4 w-4" aria-hidden="true" /> : <Plus className="h-4 w-4" aria-hidden="true" />}
+                {showAddProfileHelp ? 'Close' : 'Add Profile'}
+              </Button>
+            </div>
           </div>
-          <CardDescription>Profiles are read from the Broker-backed Protocol v4 catalog. The selected definition owns its Pack closure and exact digest bindings; this Launcher cannot invent or edit named Profiles.</CardDescription>
+          <CardDescription>Select, inspect, and activate a verified Profile. Each Profile owns its exact Base, Shell, and Pack set.</CardDescription>
         </CardHeader>
         <CardContent>
+          {showAddProfileHelp ? (
+            <div className="mb-4 rounded-lg border border-accent/30 bg-accent/5 px-4 py-4" role="note">
+              <p className="text-sm font-semibold text-text-main">Add a verified Profile</p>
+              <p className="mt-1 text-sm leading-6 text-text-muted">New Profiles come from a signed Profile bundle published to the runtime catalog. This runtime does not currently expose a Profile-authoring operation, so Launcher will not create an unverified local substitute. Install or publish the bundle, then refresh this list.</p>
+              <Button type="button" className="mt-3" size="sm" variant="outline" onClick={() => void catalogSurface.refresh(true)} disabled={catalogSurface.status === 'loading'}>
+                <RefreshCw className={catalogSurface.status === 'loading' ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} aria-hidden="true" />
+                Refresh Profiles
+              </Button>
+            </div>
+          ) : null}
           {showLoading ? (
             <div className="flex min-h-28 items-center gap-3 rounded-lg border border-border bg-bg-main px-4 py-4 text-sm text-text-muted" role="status" aria-live="polite">
               <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -269,8 +311,17 @@ export function ProfileCatalogSelector({
               {catalogSurface.stale ? (
                 <p className="mb-3 rounded-lg border border-amber-300/70 bg-amber-50/70 px-4 py-3 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200" role="alert">The catalog is stale. Definitions and markers remain visible for diagnosis, but selection and ceremony actions are locked.</p>
               ) : null}
-              <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label="Select an authoritative Profile definition">
-                {catalogProjection.profiles.map((entry) => {
+              <div className="mb-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                <Input
+                  label="Find a Profile"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Name, ID, Base, Shell, or Pack"
+                />
+                <span className="pb-2 text-xs text-text-muted">{filteredProfiles.length} of {catalogProjection.profiles.length}</span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label="Select a verified Profile">
+                {filteredProfiles.map((entry) => {
                   const selected = selectedProfileId === entry.profile_id;
                   const unavailableLabel = entry.available ? '' : ' unavailable';
                   return (
@@ -301,6 +352,13 @@ export function ProfileCatalogSelector({
                   );
                 })}
               </div>
+              {filteredProfiles.length === 0 ? (
+                <div className="mt-3 flex min-h-24 flex-col items-center justify-center rounded-lg border border-dashed border-border px-4 text-center">
+                  <Search className="mb-2 h-5 w-5 text-text-muted" aria-hidden="true" />
+                  <p className="text-sm font-medium text-text-main">No Profiles match “{query.trim()}”</p>
+                  <Button type="button" className="mt-2" size="sm" variant="ghost" onClick={() => setQuery('')}>Clear search</Button>
+                </div>
+              ) : null}
             </>
           ) : null}
         </CardContent>
@@ -310,8 +368,8 @@ export function ProfileCatalogSelector({
         <>
           <Card>
             <CardHeader>
-              <CardTitle>Selected authoritative Profile</CardTitle>
-              <CardDescription>Every displayed field below comes from the verified catalog projection and is bound into the resolve request. Pack refreshes can change compatibility, never the definition.</CardDescription>
+              <CardTitle>Configure {selectedEntry.display_name}</CardTitle>
+              <CardDescription>Review the verified composition, then activate it as published or create a new Defaults Pack-set through the staged change ceremony.</CardDescription>
             </CardHeader>
             <CardContent>
               <ProfileDefinitionDetails entry={selectedEntry} />
@@ -324,7 +382,7 @@ export function ProfileCatalogSelector({
                   disabled={ceremonyBusy}
                   onClick={() => setCeremonyMode('catalog')}
                 >
-                  Use selected Profile ceremony
+                  Activate this Profile
                 </Button>
                 <Button
                   type="button"
@@ -334,7 +392,7 @@ export function ProfileCatalogSelector({
                   disabled={ceremonyBusy}
                   onClick={() => setCeremonyMode('defaults')}
                 >
-                  Edit Defaults Pack-set
+                  Edit Defaults Pack set
                 </Button>
               </div>
             </CardContent>
