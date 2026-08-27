@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b42ece2e05b7e89452dd0b2bcef89f6dec5a148be13a2554686f4a0a7edbf8c6",
+    "digest": "5328062c5507bfc764be8fecdcf97b485bf8a153ff073d34de1ef52f7fd991e8",
     "entries": [
       {
         "path": "index.html",
@@ -449,9 +449,14 @@
         "sha256": "f9b2f67c76b6b359bcb17bac293f4069b2dab8e69174074725701906d7bd3895"
       },
       {
+        "path": "src/components/ToolExperienceSettingsPanel.test.tsx",
+        "size": 1235,
+        "sha256": "633f5ef7bb75941115e70b5900752a25f78a420b14044c52adb9202367ac2726"
+      },
+      {
         "path": "src/components/ToolExperienceSettingsPanel.tsx",
-        "size": 37300,
-        "sha256": "2470c34abf3f01dde20d8cca2ada804b66ec655331e18fd226d68e194c5764ee"
+        "size": 39312,
+        "sha256": "abbf396380b2fd1a8bef0a2748d0d6ca326b4b9754edbea523b1d7d8cc09485b"
       },
       {
         "path": "src/components/ToolPreview.test.ts",
@@ -1851,7 +1856,7 @@
     ]
   },
   "bundle": {
-    "digest": "6452bbd7184eb2fcaf39237cc3aae2ee663a0e8734cab7ac726958b6c71c92ff",
+    "digest": "0d03817f7a519a18a678c2d77d20fb6da668e8ec75437dffb672d283c5bf0f72",
     "entries": [
       {
         "path": "shell-app.css",
@@ -1865,8 +1870,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2208068,
-        "sha256": "3ebb1666ccf5ea40cdb7105b68dbfa5b8a7222cef3cd8d5b570da61f8b67ec25"
+        "size": 2209262,
+        "sha256": "218245b69808706c59673a692f68c6b8004d1e212f2db2a53bd8f07eb362fe23"
       },
       {
         "path": "shell-rolldown-runtime.js",

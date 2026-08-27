@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from domain.ai_client.model_call import call_model
+from domain.ai_client.secondary_model_policy import INHERIT_CONVERSATION_MODEL
 from domain.agent.subagent_roles import get_subagent_role
 from domain.agent.placement_catalog import compile_utility_effective_plan
 
@@ -19,6 +19,14 @@ _DELEGATE_CONTEXT_KEYS = (
 _TRUSTED_AUTHORITY_KEYS = ("principal_id", "authority_principal_id")
 
 
+def call_model(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Keep the legacy monkeypatch seam while loading settings lazily."""
+
+    from domain.ai_client.model_call import call_model as invoke_model
+
+    return invoke_model(*args, **kwargs)
+
+
 class SubagentOrchestrator:
     def __init__(self, *, call_handler: Any = None) -> None:
         self._call_handler = call_handler
@@ -29,6 +37,8 @@ class SubagentOrchestrator:
         payload: dict[str, Any] | None = None,
         *,
         model: str = "",
+        model_policy: dict[str, Any] | None = None,
+        thinking_policy: dict[str, Any] | None = None,
         settings: dict[str, Any] | None = None,
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -37,10 +47,40 @@ class SubagentOrchestrator:
             raise ValueError("unknown subagent role: " + str(role_id))
         payload = payload if isinstance(payload, dict) else {}
         selected_model = model or _model_for_role(role_id, settings or {})
+        effective_model_policy = _subagent_model_policy(
+            selected_model,
+            model_policy,
+            context,
+        )
+        effective_thinking_policy = (
+            dict(thinking_policy)
+            if isinstance(thinking_policy, dict)
+            else {"mode": "fixed", "level": "none"}
+        )
         output = (
-            self._run_with_model(role_id, payload, selected_model, role, context=context)
-            if (selected_model or self._call_handler is not None)
+            self._run_with_model(
+                role_id,
+                payload,
+                selected_model,
+                role,
+                model_policy=effective_model_policy,
+                thinking_policy=effective_thinking_policy,
+                context=context,
+            )
+            if (
+                selected_model
+                or self._call_handler is not None
+                or effective_model_policy["mode"] != "auto_route"
+            )
             else None
+        )
+        policy_receipt = (
+            output.pop("_model_policy_receipt", None) if isinstance(output, dict) else None
+        )
+        resolved_model = (
+            str(policy_receipt.get("resolved_profile_id") or selected_model)
+            if isinstance(policy_receipt, dict)
+            else selected_model
         )
         if output is None:
             output = self._deterministic_output(role_id, payload)
@@ -50,15 +90,13 @@ class SubagentOrchestrator:
             output_schema=str(role.get("output_schema") or "object"),
             maximum_tokens=int(role.get("max_tokens") or 800),
         )
-        return {
+        result = {
             "role_id": role_id,
-            "model": selected_model,
+            "model": resolved_model,
             "role": role,
             "agent_kind": "subagent",
             "runtime_kind": "utility_model_call",
-            "subagent_role": str(
-                role.get("subagent_role") or role_id
-            ),
+            "subagent_role": str(role.get("subagent_role") or role_id),
             "placement_id": effective_plan["placement"]["id"],
             "placement_revision": effective_plan["placement"]["revision"],
             "effective_plan_hash": effective_plan["plan_hash"],
@@ -68,14 +106,18 @@ class SubagentOrchestrator:
                 {
                     "type": "subagent_completed",
                     "role_id": role_id,
-                    "model": selected_model,
+                    "model": resolved_model,
                     "output_schema": role.get("output_schema"),
+                    **({"model_policy_receipt": policy_receipt} if policy_receipt else {}),
                     "runtime_kind": "utility_model_call",
                     "placement_id": effective_plan["placement"]["id"],
                     "effective_plan_hash": effective_plan["plan_hash"],
                 }
             ],
         }
+        if policy_receipt:
+            result["model_policy_receipt"] = policy_receipt
+        return result
 
     def _run_with_model(
         self,
@@ -84,6 +126,8 @@ class SubagentOrchestrator:
         model: str,
         role: dict[str, Any],
         *,
+        model_policy: dict[str, Any],
+        thinking_policy: dict[str, Any],
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         prompt = _prompt_for_role(role_id, payload, role)
@@ -93,11 +137,15 @@ class SubagentOrchestrator:
             response = call_model(
                 {
                     "model_hint": model,
+                    "model_policy": model_policy,
+                    "thinking_policy": thinking_policy,
                     "question": prompt,
                     "output_schema": role.get("output_schema"),
                     "max_tokens": role.get("max_tokens", 800),
                     "thinking_level": "none",
-                    "required_capabilities": ["model.image_input"] if role_id == "vision_ocr" else [],
+                    "required_capabilities": ["model.image_input"]
+                    if role_id == "vision_ocr"
+                    else [],
                 },
                 runtime_context,
                 call_handler=self._call_handler,
@@ -107,7 +155,14 @@ class SubagentOrchestrator:
         if isinstance(response, dict) and response.get("status") == "ok":
             output = response.get("output")
             if isinstance(output, dict):
-                return output
+                return {
+                    **output,
+                    **(
+                        {"_model_policy_receipt": response["model_policy_receipt"]}
+                        if isinstance(response.get("model_policy_receipt"), dict)
+                        else {}
+                    ),
+                }
             parsed = _parse_json_response({"data": {"content": str(output or "")}})
             if parsed is not None:
                 return parsed
@@ -116,24 +171,49 @@ class SubagentOrchestrator:
     @staticmethod
     def _deterministic_output(role_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         if role_id == "tool_selector":
-            tools = payload.get("candidate_tools") if isinstance(payload.get("candidate_tools"), list) else []
+            tools = (
+                payload.get("candidate_tools")
+                if isinstance(payload.get("candidate_tools"), list)
+                else []
+            )
             selected = []
             for tool in tools[:8]:
                 if not isinstance(tool, dict):
                     continue
                 tool_id = str(tool.get("tool_id") or tool.get("name") or "").strip()
                 if tool_id:
-                    selected.append({"tool_id": tool_id, "confidence": 0.55, "reason": "keyword prefilter candidate"})
-            return {"recommended_tools": selected, "not_selected": [], "requires_tool_calling_model": bool(selected)}
+                    selected.append(
+                        {
+                            "tool_id": tool_id,
+                            "confidence": 0.55,
+                            "reason": "keyword prefilter candidate",
+                        }
+                    )
+            return {
+                "recommended_tools": selected,
+                "not_selected": [],
+                "requires_tool_calling_model": bool(selected),
+            }
         if role_id == "prompt_compactor":
             text = str(payload.get("prompt") or "")
-            return {"original_chars": len(text), "compact_chars": len(text.strip()), "suggested_prompt": text.strip(), "risk": "low"}
+            return {
+                "original_chars": len(text),
+                "compact_chars": len(text.strip()),
+                "suggested_prompt": text.strip(),
+                "risk": "low",
+            }
         if role_id == "context_summarizer":
             return {"summary": str(payload.get("text") or "")[:1200], "source": "deterministic"}
         if role_id == "model_router":
-            return {"reason_codes": ["deterministic_router"], "selected_model": payload.get("preferred_model", "")}
+            return {
+                "reason_codes": ["deterministic_router"],
+                "selected_model": payload.get("preferred_model", ""),
+            }
         if role_id == "vision_ocr":
-            return {"summary": "画像添付あり", "uncertainties": ["subagent did not call a vision model"]}
+            return {
+                "summary": "画像添付あり",
+                "uncertainties": ["subagent did not call a vision model"],
+            }
         return {}
 
 
@@ -142,6 +222,8 @@ def run_subagent(
     payload: dict[str, Any] | None = None,
     *,
     model: str = "",
+    model_policy: dict[str, Any] | None = None,
+    thinking_policy: dict[str, Any] | None = None,
     settings: dict[str, Any] | None = None,
     call_handler: Any = None,
     context: dict[str, Any] | None = None,
@@ -150,6 +232,8 @@ def run_subagent(
         role_id,
         payload,
         model=model,
+        model_policy=model_policy,
+        thinking_policy=thinking_policy,
         settings=settings,
         context=context,
     )
@@ -160,6 +244,8 @@ def run_subagent_compat(
     payload: dict[str, Any] | None = None,
     *,
     model: str = "",
+    model_policy: dict[str, Any] | None = None,
+    thinking_policy: dict[str, Any] | None = None,
     settings: dict[str, Any] | None = None,
     call_handler: Any = None,
     context: dict[str, Any] | None = None,
@@ -171,6 +257,8 @@ def run_subagent_compat(
             cleaned_role_id,
             cleaned_payload,
             model=model,
+            model_policy=model_policy,
+            thinking_policy=thinking_policy,
             settings=settings,
             call_handler=call_handler,
             context=context,
@@ -178,35 +266,72 @@ def run_subagent_compat(
         result["compatibility_alias"] = "subagent"
         result["route_kind"] = "utility_model_call"
         return result
-    if cleaned_role_id in {"delegate", "agent_delegate", "task"} or str(cleaned_payload.get("task") or cleaned_payload.get("prompt") or "").strip():
+    if (
+        cleaned_role_id in {"delegate", "agent_delegate", "task"}
+        or str(cleaned_payload.get("task") or cleaned_payload.get("prompt") or "").strip()
+    ):
+        if model_policy is not None and "model_policy" not in cleaned_payload:
+            cleaned_payload = {**cleaned_payload, "model_policy": model_policy}
+        if thinking_policy is not None and "thinking_policy" not in cleaned_payload:
+            cleaned_payload = {**cleaned_payload, "thinking_policy": thinking_policy}
         return _delegate_via_input(cleaned_role_id, cleaned_payload, model=model, context=context)
     raise ValueError("unknown subagent role: " + cleaned_role_id)
 
 
 def _model_for_role(role_id: str, settings: dict[str, Any]) -> str:
-    utility_models = settings.get("utility_models") if isinstance(settings.get("utility_models"), dict) else {}
+    utility_models = (
+        settings.get("utility_models") if isinstance(settings.get("utility_models"), dict) else {}
+    )
     return str(utility_models.get(role_id) or utility_models.get("subagent_default") or "")
+
+
+def _subagent_model_policy(
+    selected_model: str,
+    requested_policy: dict[str, Any] | None,
+    context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if isinstance(requested_policy, dict):
+        return dict(requested_policy)
+    if selected_model == INHERIT_CONVERSATION_MODEL:
+        return {"mode": "inherit_conversation"}
+    if selected_model:
+        return {"mode": "fixed", "profile_id": selected_model}
+    runtime = context if isinstance(context, dict) else {}
+    if runtime.get("conversation_model") or runtime.get("selected_model"):
+        return {"mode": "inherit_conversation"}
+    return {"mode": "auto_route"}
 
 
 def _prompt_for_role(role_id: str, payload: dict[str, Any], role: dict[str, Any]) -> str:
     return (
-        "You are a utility subagent. Return JSON only.\n"
-        "role: {}\n"
-        "schema: {}\n"
-        "payload:\n{}"
-    ).format(role_id, role.get("output_schema"), json.dumps(payload, ensure_ascii=False, indent=2)[:12000])
+        "You are a utility subagent. Return JSON only.\nrole: {}\nschema: {}\npayload:\n{}"
+    ).format(
+        role_id,
+        role.get("output_schema"),
+        json.dumps(payload, ensure_ascii=False, indent=2)[:12000],
+    )
 
 
 def _parse_json_response(response: Any) -> dict[str, Any] | None:
-    data = response.get("data") if isinstance(response, dict) and response.get("status") == "ok" else response
-    if isinstance(data, dict) and any(key in data for key in ("recommended_tools", "summary", "selected_model", "suggested_prompt")):
+    data = (
+        response.get("data")
+        if isinstance(response, dict) and response.get("status") == "ok"
+        else response
+    )
+    if isinstance(data, dict) and any(
+        key in data
+        for key in ("recommended_tools", "summary", "selected_model", "suggested_prompt")
+    ):
         return data
     content = data.get("content") if isinstance(data, dict) else None
     text = ""
     if isinstance(content, str):
         text = content
     elif isinstance(content, list):
-        text = "".join(str(block.get("text") or block) if isinstance(block, dict) else str(block) for block in content)
+        text = "".join(
+            str(block.get("text") or block) if isinstance(block, dict) else str(block)
+            for block in content
+        )
     if not text.strip():
         return None
     try:
@@ -246,7 +371,16 @@ def extract_assistant_text_from_result(value: Any, *, _depth: int = 0) -> str:
     if not isinstance(value, dict):
         return ""
 
-    for key in ("assistant_text", "raw_text", "output_text", "text", "answer", "summary", "message", "content"):
+    for key in (
+        "assistant_text",
+        "raw_text",
+        "output_text",
+        "text",
+        "answer",
+        "summary",
+        "message",
+        "content",
+    ):
         if key not in value:
             continue
         text = extract_assistant_text_from_result(value.get(key), _depth=_depth + 1)
@@ -297,6 +431,8 @@ def _delegate_via_input(
         "task": task,
         "tools": list(payload.get("tools") if isinstance(payload.get("tools"), list) else []),
         "model": str(payload.get("model") or model or ""),
+        "model_policy": payload.get("model_policy"),
+        "thinking_policy": payload.get("thinking_policy"),
         "system_prompt": payload.get("system_prompt"),
         "runtime_profile_key": payload.get("runtime_profile_key"),
         "capability_profile": payload.get("capability_profile"),
@@ -325,7 +461,9 @@ def _delegate_via_input(
             source={"type": "compatibility", "provider": "subagent"},
             target=_delegate_target(payload, dispatch_context),
             delivery={"action_id": "agent.delegate"},
-            attachments=list(payload.get("attachments") if isinstance(payload.get("attachments"), list) else []),
+            attachments=list(
+                payload.get("attachments") if isinstance(payload.get("attachments"), list) else []
+            ),
             metadata=metadata,
             params=params,
             tools=list(payload.get("tools") if isinstance(payload.get("tools"), list) else []),
@@ -341,7 +479,9 @@ def _delegate_via_input(
     return result
 
 
-def _delegate_dispatch_context(payload: dict[str, Any], context: dict[str, Any] | None) -> dict[str, Any]:
+def _delegate_dispatch_context(
+    payload: dict[str, Any], context: dict[str, Any] | None
+) -> dict[str, Any]:
     updated = dict(context or {}) if isinstance(context, dict) else {}
     sources = [
         payload.get("params") if isinstance(payload.get("params"), dict) else {},
@@ -367,11 +507,15 @@ def _trusted_model_context(context: dict[str, Any] | None) -> dict[str, Any]:
     return updated
 
 
-def _synthesize_trusted_profile_principal(updated: dict[str, Any], context: dict[str, Any] | None) -> None:
+def _synthesize_trusted_profile_principal(
+    updated: dict[str, Any], context: dict[str, Any] | None
+) -> None:
     if not isinstance(context, dict):
         return
     profile_id = str(context.get("profile_id") or "").strip()
-    principal_id = str(context.get("principal_id") or context.get("authority_principal_id") or "").strip()
+    principal_id = str(
+        context.get("principal_id") or context.get("authority_principal_id") or ""
+    ).strip()
     if principal_id:
         updated.setdefault("principal_id", principal_id)
     if profile_id and not principal_id:
@@ -407,7 +551,11 @@ def _delegate_params(payload: dict[str, Any]) -> dict[str, Any]:
             "workspace_write_contract",
             {
                 "output_dir": params.get("output_dir"),
-                "allowed_paths": list(params.get("allowed_paths") if isinstance(params.get("allowed_paths"), list) else []),
+                "allowed_paths": list(
+                    params.get("allowed_paths")
+                    if isinstance(params.get("allowed_paths"), list)
+                    else []
+                ),
                 "mode": "create-from-empty-directory",
             },
         )

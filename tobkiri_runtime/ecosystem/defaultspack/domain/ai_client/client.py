@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sys
+from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Protocol
 
@@ -31,6 +32,10 @@ from domain.ai_client.model_metadata_schema import (
 )
 from domain.ai_client import rumi_process
 from domain.ai_client.rumi_process_runner import RumiProcessRunner
+from domain.ai_client.secondary_model_policy import (
+    ModelPolicyResolutionError,
+    resolve_secondary_model_policy,
+)
 from domain.ai_client.oauth_store import provider_has_oauth_connection
 from domain.ai_client.providers import (
     _cloud_runtime_enabled,
@@ -1501,6 +1506,72 @@ class AIClient:
         generator_model = self._resolve_rumi_member_model(generator_model, params)
         reviewer_model = self._resolve_rumi_member_model(reviewer_model, params)
         context = rumi_process.context_for_request(messages, tools or [], params)
+        policy_context = {
+            **params,
+            **context,
+            "preferred_model": str(
+                params.get("preferred_model") or params.get("conversation_model") or generator_model
+            ),
+            "conversation_model": str(
+                params.get("conversation_model") or params.get("selected_model") or generator_model
+            ),
+            "conversation_thinking_level": str(
+                params.get("conversation_thinking_level")
+                or context.get("default_thinking_level")
+                or params.get("thinking_level")
+                or "none"
+            ),
+        }
+        profile_catalog = [
+            dict(profile) for profile in self.list_models() if isinstance(profile, dict)
+        ]
+        generator_metadata = (
+            generator_member.get("metadata")
+            if isinstance(generator_member, dict)
+            and isinstance(generator_member.get("metadata"), dict)
+            else {}
+        )
+        reviewer_metadata = (
+            reviewer_member.get("metadata")
+            if isinstance(reviewer_member, dict)
+            and isinstance(reviewer_member.get("metadata"), dict)
+            else {}
+        )
+        try:
+            generator_policy_receipt = resolve_secondary_model_policy(
+                generator_metadata.get("model_policy"),
+                generator_metadata.get("thinking_policy"),
+                context=policy_context,
+                profiles=profile_catalog,
+                legacy_model=generator_model,
+                legacy_thinking_level=str(generator_metadata.get("thinking_level") or ""),
+                replay_receipt=generator_metadata.get("model_policy_receipt")
+                if isinstance(generator_metadata.get("model_policy_receipt"), dict)
+                else None,
+            )
+            reviewer_policy_receipt = resolve_secondary_model_policy(
+                reviewer_metadata.get("model_policy"),
+                reviewer_metadata.get("thinking_policy"),
+                context=policy_context,
+                profiles=profile_catalog,
+                legacy_model=reviewer_model,
+                legacy_thinking_level=str(reviewer_metadata.get("thinking_level") or ""),
+                replay_receipt=reviewer_metadata.get("model_policy_receipt")
+                if isinstance(reviewer_metadata.get("model_policy_receipt"), dict)
+                else None,
+            )
+        except ModelPolicyResolutionError as exc:
+            raise RuntimeError(f"{exc.code}: {exc}") from exc
+        generator_model = str(generator_policy_receipt["resolved_profile_id"])
+        reviewer_model = str(reviewer_policy_receipt["resolved_profile_id"])
+        generator_member = deepcopy(generator_member)
+        reviewer_member = deepcopy(reviewer_member)
+        generator_member.setdefault("metadata", {})["thinking_level"] = generator_policy_receipt[
+            "thinking_level"
+        ]
+        reviewer_member.setdefault("metadata", {})["thinking_level"] = reviewer_policy_receipt[
+            "thinking_level"
+        ]
         max_reviews = RumiProcessRunner._positive_int(
             params.get("max_review_rounds")
             or budget.get("max_review_rounds")
@@ -1522,6 +1593,10 @@ class AIClient:
             "base_model": generator_model,
             **base_model_metadata,
             "reviewer_model": reviewer_model,
+            "model_policy_receipts": {
+                "generator": generator_policy_receipt,
+                "reviewer": reviewer_policy_receipt,
+            },
             "events": [],
             "watchdog": {
                 "max_review_rounds": max_reviews,

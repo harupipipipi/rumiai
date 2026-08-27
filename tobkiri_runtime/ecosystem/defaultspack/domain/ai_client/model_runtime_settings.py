@@ -225,6 +225,16 @@ class ModelRuntimeSettingsService:
             "candidates": [self._public_candidate(item) for item in scored[:max_items]],
         }
 
+    def list_profile_catalog(self) -> list[dict[str, Any]]:
+        """Return the canonical selectable catalog for policy resolution."""
+
+        settings = self.get_settings()
+        return [
+            dict(profile)
+            for profile in self._list_profile_catalog_for_resolution(settings)
+            if isinstance(profile, dict) and self._is_chat_profile(profile)
+        ]
+
     def get_thinking_level(
         self,
         scope: str = "global",

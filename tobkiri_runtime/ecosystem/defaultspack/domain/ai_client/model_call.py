@@ -13,6 +13,10 @@ from domain.ai_client.gateway import LLMGateway
 from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.ai_client.model_search import get_model_capabilities, get_profile_catalog
+from domain.ai_client.secondary_model_policy import (
+    ModelPolicyResolutionError,
+    resolve_secondary_model_policy,
+)
 from domain.temporal_context import add_temporal_context_message, current_datetime_context
 
 
@@ -39,21 +43,74 @@ def call_model(
         }
     messages = _normalized_messages(payload)
     if not messages:
-        return {"status": "error", "code": "MISSING_INPUT", "error": "question or messages is required"}
+        return {
+            "status": "error",
+            "code": "MISSING_INPUT",
+            "error": "question or messages is required",
+        }
 
     required_capabilities = normalize_capability_tokens(
-        payload.get("required_capabilities")
-        or payload.get("capability")
+        payload.get("required_capabilities") or payload.get("capability")
     )
     model_requirements = model_requirements_from_tokens(required_capabilities)
-    model_settings = ModelRuntimeSettingsService().get_settings()
+    model_service = ModelRuntimeSettingsService()
+    model_settings = model_service.get_settings()
     profiles = get_profile_catalog()
-    preferred_model = str(
-        payload.get("model_hint")
-        or payload.get("model")
-        or model_settings.get("preferred_model")
-        or "stub/default"
-    ).strip() or "stub/default"
+    legacy_model = str(payload.get("model_hint") or payload.get("model") or "").strip()
+    explicit_thinking = str(
+        payload.get("thinking_level") or payload.get("requested_thinking_level") or ""
+    ).strip()
+    if not explicit_thinking and "model.thinking" in set(required_capabilities):
+        explicit_thinking = "medium"
+    policy_context = {
+        **runtime_context,
+        "preferred_model": str(model_settings.get("preferred_model") or "stub/default"),
+        "global_thinking_level": str(model_settings.get("thinking_level") or "none"),
+    }
+    conversation_id = str(
+        runtime_context.get("conversation_id") or payload.get("conversation_id") or ""
+    ).strip()
+    if conversation_id:
+        if not (
+            policy_context.get("conversation_model")
+            or policy_context.get("conversation_model_profile_id")
+            or policy_context.get("selected_model")
+        ):
+            try:
+                from domain.chat.store import ChatStore
+
+                conversation = ChatStore().get_conversation(conversation_id) or {}
+                policy_context["conversation_model"] = str(conversation.get("model") or "").strip()
+            except Exception:
+                pass
+        effective_thinking = model_service.get_effective_thinking_level(
+            str(policy_context.get("conversation_model") or legacy_model or ""),
+            conversation_id,
+        )
+        policy_context["conversation_thinking_level"] = str(
+            effective_thinking.get("level") or "none"
+        )
+    try:
+        model_policy_receipt = resolve_secondary_model_policy(
+            payload.get("model_policy"),
+            payload.get("thinking_policy"),
+            context=policy_context,
+            profiles=profiles,
+            legacy_model=legacy_model,
+            legacy_thinking_level=explicit_thinking,
+            required_capabilities=required_capabilities,
+            replay_receipt=payload.get("model_policy_receipt")
+            if isinstance(payload.get("model_policy_receipt"), dict)
+            else None,
+        )
+    except (ModelPolicyResolutionError, ValueError) as exc:
+        return {
+            "status": "error",
+            "code": getattr(exc, "code", "MODEL_POLICY_INVALID"),
+            "error": str(exc),
+            "model_policy_receipt": getattr(exc, "receipt", {}),
+        }
+    preferred_model = str(model_policy_receipt["resolved_profile_id"] or "stub/default")
     has_images = _messages_have_images(messages) or model_requirements["image_input"]
     has_audio = _messages_have_audio(messages)
     routing_request = ModelRoutingRequest(
@@ -62,11 +119,16 @@ def call_model(
         has_audio=has_audio,
         requires_tool_calling=model_requirements["tool_calling"],
         requires_fast=model_requirements["fast"],
-        requested_thinking_level=_requested_thinking_level(payload, required_capabilities),
+        requested_thinking_level=str(model_policy_receipt["thinking_level"] or "none"),
         preferred_model=preferred_model,
         preferred_group=str(model_settings.get("preferred_model_group") or "default"),
-        auto_route_within_group=bool(model_settings.get("auto_route_within_group", True)),
-        task_hints=dict(payload.get("task_hints") if isinstance(payload.get("task_hints"), dict) else {}),
+        auto_route_within_group=(
+            model_policy_receipt["requested_model_policy"]["mode"] == "auto_route"
+            and bool(model_settings.get("auto_route_within_group", True))
+        ),
+        task_hints=dict(
+            payload.get("task_hints") if isinstance(payload.get("task_hints"), dict) else {}
+        ),
         settings=model_settings,
     )
     try:
@@ -78,6 +140,13 @@ def call_model(
             raise
         decision = route_model_request(routing_request)
     model = decision.selected_model
+    if model != model_policy_receipt["resolved_profile_id"]:
+        model_policy_receipt["router_input_profile_id"] = model_policy_receipt[
+            "resolved_profile_id"
+        ]
+        model_policy_receipt["resolved_profile_id"] = model
+        model_policy_receipt["resolution_source"] = "canonical_router"
+    model_policy_receipt["routing"] = decision.to_dict()
     try:
         selected_capabilities = get_model_capabilities(model, profiles=profiles) or {}
     except TypeError as exc:
@@ -91,15 +160,18 @@ def call_model(
         return {
             "status": "error",
             "code": "MODEL_CAPABILITY_UNSATISFIED",
-            "error": "selected model does not satisfy required capabilities: {}".format(", ".join(missing_capabilities)),
+            "error": "selected model does not satisfy required capabilities: {}".format(
+                ", ".join(missing_capabilities)
+            ),
             "model": model,
             "required_capabilities": required_capabilities,
             "missing_capabilities": missing_capabilities,
             "routing": decision.to_dict(),
+            "model_policy_receipt": model_policy_receipt,
         }
     params = {
         "max_tokens": _max_tokens(payload),
-        "thinking_level": _requested_thinking_level(payload, required_capabilities),
+        "thinking_level": str(model_policy_receipt["thinking_level"] or "none"),
     }
     if payload.get("output_schema"):
         params["response_format"] = {"type": "json_object"}
@@ -121,7 +193,11 @@ def call_model(
                     "params": params,
                 },
             )
-            response = response.get("data") if isinstance(response, dict) and response.get("status") == "ok" else response
+            response = (
+                response.get("data")
+                if isinstance(response, dict) and response.get("status") == "ok"
+                else response
+            )
         else:
             response = LLMGateway().complete(
                 {
@@ -132,7 +208,13 @@ def call_model(
                 }
             )
     except RuntimeError as exc:
-        return {"status": "error", "code": "PROVIDER_ERROR", "error": str(exc), "model": model}
+        return {
+            "status": "error",
+            "code": "PROVIDER_ERROR",
+            "error": str(exc),
+            "model": model,
+            "model_policy_receipt": model_policy_receipt,
+        }
     output = _extract_output(response, expect_json=bool(payload.get("output_schema")))
     return {
         "status": "ok",
@@ -141,6 +223,7 @@ def call_model(
         "response": response,
         "required_capabilities": required_capabilities,
         "routing": decision.to_dict(),
+        "model_policy_receipt": model_policy_receipt,
     }
 
 
@@ -149,7 +232,9 @@ def _normalized_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(raw, list) and raw:
         messages = [dict(item) for item in raw if isinstance(item, dict)]
     else:
-        question = str(payload.get("question") or payload.get("prompt") or payload.get("input") or "").strip()
+        question = str(
+            payload.get("question") or payload.get("prompt") or payload.get("input") or ""
+        ).strip()
         if not question:
             return []
         messages = [{"role": "user", "content": question}]
@@ -168,17 +253,28 @@ def _normalized_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
             mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
             data_url = attachment.get("dataUrl") or attachment.get("data_url")
-            if mime.startswith("image/") and isinstance(data_url, str) and data_url.startswith("data:image/"):
+            if (
+                mime.startswith("image/")
+                and isinstance(data_url, str)
+                and data_url.startswith("data:image/")
+            ):
                 blocks.append({"type": "image_url", "image_url": {"url": data_url}})
             else:
-                blocks.append({"type": "text", "text": f"[attachment] {attachment.get('name') or mime or 'file'}"})
+                blocks.append(
+                    {
+                        "type": "text",
+                        "text": f"[attachment] {attachment.get('name') or mime or 'file'}",
+                    }
+                )
         last["content"] = blocks
         messages[-1] = last
     return messages
 
 
 def _requested_thinking_level(payload: dict[str, Any], required_capabilities: list[str]) -> str:
-    explicit = str(payload.get("thinking_level") or payload.get("requested_thinking_level") or "").strip()
+    explicit = str(
+        payload.get("thinking_level") or payload.get("requested_thinking_level") or ""
+    ).strip()
     if explicit:
         return explicit
     if "model.thinking" in set(required_capabilities):
@@ -261,7 +357,9 @@ def _messages_have_images(messages: list[dict[str, Any]]) -> bool:
             image_url = block.get("image_url")
             if block_type in {"image", "image_url", "input_image"}:
                 return True
-            if isinstance(image_url, dict) and str(image_url.get("url") or "").startswith("data:image/"):
+            if isinstance(image_url, dict) and str(image_url.get("url") or "").startswith(
+                "data:image/"
+            ):
                 return True
     return False
 

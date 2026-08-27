@@ -91,7 +91,9 @@ def _attachment_modalities(attachments):
         if not isinstance(attachment, dict):
             continue
         mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
-        if mime.startswith("image/") or str(attachment.get("dataUrl") or attachment.get("data_url") or "").startswith("data:image/"):
+        if mime.startswith("image/") or str(
+            attachment.get("dataUrl") or attachment.get("data_url") or ""
+        ).startswith("data:image/"):
             has_images = True
         else:
             has_files = True
@@ -110,7 +112,11 @@ def _message_content_with_attachments(task, attachments):
             continue
         mime = str(attachment.get("type") or attachment.get("mime_type") or "").lower()
         data_url = attachment.get("dataUrl") or attachment.get("data_url")
-        if mime.startswith("image/") and isinstance(data_url, str) and data_url.startswith("data:image/"):
+        if (
+            mime.startswith("image/")
+            and isinstance(data_url, str)
+            and data_url.startswith("data:image/")
+        ):
             content.append({"type": "image_url", "image_url": {"url": data_url}})
             continue
         label = str(attachment.get("name") or mime or "file")
@@ -179,20 +185,14 @@ def _bind_effective_subagent_plan(
         )
     plan_model = plan.get("model") if isinstance(plan.get("model"), dict) else {}
     selected_model = str(plan_model.get("model_id") or model or "default")
-    tool_bindings = (
-        plan.get("tool_bindings")
-        if isinstance(plan.get("tool_bindings"), dict)
-        else {}
-    )
+    tool_bindings = plan.get("tool_bindings") if isinstance(plan.get("tool_bindings"), dict) else {}
     allowed_tool_ids = {
         str(value).strip()
         for value in tool_bindings.get("allow_tool_ids", [])
         if str(value).strip()
     }
     denied_tool_ids = {
-        str(value).strip()
-        for value in tool_bindings.get("deny_tool_ids", [])
-        if str(value).strip()
+        str(value).strip() for value in tool_bindings.get("deny_tool_ids", []) if str(value).strip()
     }
     bounded_tools = []
     for tool in tools or []:
@@ -204,9 +204,7 @@ def _bind_effective_subagent_plan(
         if allowed_tool_ids and tool_id not in allowed_tool_ids:
             continue
         bounded_tools.append(tool)
-    placement = (
-        plan.get("placement") if isinstance(plan.get("placement"), dict) else {}
-    )
+    placement = plan.get("placement") if isinstance(plan.get("placement"), dict) else {}
     context.update(
         {
             "agent_kind": str(plan.get("agent_kind") or "subagent"),
@@ -222,9 +220,7 @@ def _bind_effective_subagent_plan(
             "effective_subagent_plan": plan,
             "effective_plan_hash": str(plan["plan_hash"]),
             "root_scope_id": str(
-                context.get("root_scope_id")
-                or context.get("root_run_id")
-                or execution_id
+                context.get("root_scope_id") or context.get("root_run_id") or execution_id
             ),
         }
     )
@@ -232,15 +228,9 @@ def _bind_effective_subagent_plan(
         plan,
         run_id=execution_id,
         root_scope_id=str(context["root_scope_id"]),
-        parent_run_id=(
-            str(context.get("parent_run_id"))
-            if context.get("parent_run_id")
-            else None
-        ),
+        parent_run_id=(str(context.get("parent_run_id")) if context.get("parent_run_id") else None),
         root_run_id=(
-            str(context.get("root_run_id"))
-            if context.get("root_run_id")
-            else execution_id
+            str(context.get("root_run_id")) if context.get("root_run_id") else execution_id
         ),
     )
     return (
@@ -261,7 +251,12 @@ def _route_agent_model(
     context,
 ):
     model_requirements = model_requirements_from_tokens(required_capabilities)
-    thinking_level = str((params or {}).get("thinking_level") or (params or {}).get("requested_thinking_level") or "").strip()
+    thinking_level = str(
+        (params or {}).get("thinking_level")
+        or (params or {}).get("requested_thinking_level")
+        or (context or {}).get("thinking_level")
+        or ""
+    ).strip()
     requested_tool_names = [
         name for name in (tool_name_from_definition(tool) for tool in tools or []) if name
     ]
@@ -276,11 +271,14 @@ def _route_agent_model(
     if not route_needed:
         return model if model else "default"
     settings = ModelRuntimeSettingsService().get_settings()
-    preferred_model = str(
-        model
-        if model and model != "default"
-        else settings.get("preferred_model") or model or "stub/default"
-    ).strip() or "stub/default"
+    preferred_model = (
+        str(
+            model
+            if model and model != "default"
+            else settings.get("preferred_model") or model or "stub/default"
+        ).strip()
+        or "stub/default"
+    )
     decision = route_model_request(
         ModelRoutingRequest(
             user_text=str(task or ""),
@@ -289,12 +287,23 @@ def _route_agent_model(
             requested_tools=requested_tool_names,
             requires_tool_calling=bool(model_requirements["tool_calling"] or has_tools),
             requires_fast=bool(model_requirements["fast"]),
-            requested_thinking_level=thinking_level or ("medium" if model_requirements["thinking"] else "none"),
+            requested_thinking_level=thinking_level
+            or ("medium" if model_requirements["thinking"] else "none"),
             preferred_model=preferred_model,
             preferred_group=str(settings.get("preferred_model_group") or "default"),
-            auto_route_within_group=bool(settings.get("auto_route_within_group", True)),
+            auto_route_within_group=(
+                (
+                    not isinstance(context.get("model_policy"), dict)
+                    or context["model_policy"].get("mode") == "auto_route"
+                )
+                and bool(settings.get("auto_route_within_group", True))
+            ),
             task_hints={
-                **((params or {}).get("task_hints") if isinstance((params or {}).get("task_hints"), dict) else {}),
+                **(
+                    (params or {}).get("task_hints")
+                    if isinstance((params or {}).get("task_hints"), dict)
+                    else {}
+                ),
                 "modalities": modalities,
                 "required_capabilities": list(required_capabilities or []),
             },
@@ -333,7 +342,8 @@ class AgentEngine:
             self._transcripts.append(
                 transcript_id,
                 event_type,
-                payload or {
+                payload
+                or {
                     "execution_id": execution.execution_id,
                     "status": execution.status,
                     "current_step": execution.current_step,
@@ -399,7 +409,11 @@ class AgentEngine:
         execution.pending_tool_call = None
         execution.updated_at = timestamp()
         self._persist_execution(execution, "run_completed", {"status": "cancelled"})
-        return {"execution_id": execution.execution_id, "status": "cancelled", "result": execution.to_dict()}
+        return {
+            "execution_id": execution.execution_id,
+            "status": "cancelled",
+            "result": execution.to_dict(),
+        }
 
     def _execution_from_store(self, execution_id):
         data = self._run_store.load_execution_dict(execution_id)
@@ -415,7 +429,9 @@ class AgentEngine:
         execution.status = data.get("status", "created")
         execution.result = data.get("result")
         execution.error = data.get("error")
-        execution.messages = data.get("messages", []) if isinstance(data.get("messages"), list) else []
+        execution.messages = (
+            data.get("messages", []) if isinstance(data.get("messages"), list) else []
+        )
         execution.pending_tool_call = data.get("pending_tool_call")
         execution.queued_tool_calls = data.get("queued_tool_calls", [])
         execution.created_at = data.get("created_at", execution.created_at)
@@ -444,6 +460,7 @@ class AgentEngine:
     def _get_instruction_queue(self):
         try:
             from blocks.agent._state import get_instruction_queue
+
             return get_instruction_queue()
         except Exception:
             return None
@@ -468,9 +485,7 @@ class AgentEngine:
         if len(parts) == 1:
             combined = parts[0]
         else:
-            combined = "\n".join(
-                "- " + p for p in parts
-            )
+            combined = "\n".join("- " + p for p in parts)
         header = (
             "[RUNTIME INSTRUCTION — URGENT: Override current approach] "
             if has_urgent
@@ -478,14 +493,17 @@ class AgentEngine:
         )
         message_content = header + combined
         execution.messages.append({"role": "user", "content": message_content})
-        execution.add_step("instruction_injected", {
-            "count": len(pending),
-            "has_urgent": has_urgent,
-            "instructions": [
-                {"id": i["id"], "priority": i["priority"], "instruction": i["instruction"]}
-                for i in pending
-            ],
-        })
+        execution.add_step(
+            "instruction_injected",
+            {
+                "count": len(pending),
+                "has_urgent": has_urgent,
+                "instructions": [
+                    {"id": i["id"], "priority": i["priority"], "instruction": i["instruction"]}
+                    for i in pending
+                ],
+            },
+        )
         return True
 
     def _process_conversation_steer(self, execution):
@@ -500,14 +518,17 @@ class AgentEngine:
                 context=context,
             )
             if processed:
-                execution.add_step("conversation_steer", {
-                    "processed": len(processed),
-                    "items": [
-                        {"id": item.get("id"), "status": item.get("status")}
-                        for item in processed
-                        if isinstance(item, dict)
-                    ],
-                })
+                execution.add_step(
+                    "conversation_steer",
+                    {
+                        "processed": len(processed),
+                        "items": [
+                            {"id": item.get("id"), "status": item.get("status")}
+                            for item in processed
+                            if isinstance(item, dict)
+                        ],
+                    },
+                )
             return processed
         except Exception as exc:
             execution.add_step("conversation_steer_error", {"error": str(exc)})
@@ -515,8 +536,17 @@ class AgentEngine:
 
     def _ai_complete(self, messages, model, context, tools=None):
         from blocks.ai.complete import run as ai_complete_run
-        params = context.get("params") if isinstance(context, dict) and isinstance(context.get("params"), dict) else {}
-        result = ai_complete_run({"messages": messages, "model": model, "tools": tools or [], "params": params}, context)
+
+        params = (
+            dict(context.get("params"))
+            if isinstance(context, dict) and isinstance(context.get("params"), dict)
+            else {}
+        )
+        if isinstance(context, dict) and context.get("thinking_level"):
+            params.setdefault("thinking_level", context.get("thinking_level"))
+        result = ai_complete_run(
+            {"messages": messages, "model": model, "tools": tools or [], "params": params}, context
+        )
         return result
 
     def _execute_tool(self, tool_name, tool_args, context):
@@ -559,7 +589,9 @@ class AgentEngine:
     def _normalize_tool_call(self, raw_call):
         if not isinstance(raw_call, dict):
             return None
-        function_def = raw_call.get("function") if isinstance(raw_call.get("function"), dict) else {}
+        function_def = (
+            raw_call.get("function") if isinstance(raw_call.get("function"), dict) else {}
+        )
         tool_name = (
             raw_call.get("name")
             or raw_call.get("tool_name")
@@ -587,35 +619,47 @@ class AgentEngine:
             return False
         execution.status = "error"
         execution.error = "tool call is not connected to this agent: " + tool_name
-        execution.add_step("error", {
-            "error": execution.error,
-            "tool_name": tool_name,
-            "connected_tools": sorted(connected_tools),
-            "enforced_tools": sorted(enforced_tools) if enforced_tools is not None else None,
-        })
+        execution.add_step(
+            "error",
+            {
+                "error": execution.error,
+                "tool_name": tool_name,
+                "connected_tools": sorted(connected_tools),
+                "enforced_tools": sorted(enforced_tools) if enforced_tools is not None else None,
+            },
+        )
         return True
 
     def _reject_policy_violation(self, execution, parsed):
         context = getattr(execution, "context", {}) or {}
         limit = max_tool_calls(context)
         if limit is None:
-            params = context.get("params") if isinstance(context, dict) and isinstance(context.get("params"), dict) else {}
+            params = (
+                context.get("params")
+                if isinstance(context, dict) and isinstance(context.get("params"), dict)
+                else {}
+            )
             limit = explicit_param_max_tool_calls(params)
         if limit is None or self._tool_call_count(execution) < limit:
             return False
         tool_name = parsed.get("tool_name", "")
         execution.status = "error"
         execution.error = "max tool calls exceeded"
-        execution.add_step("error", {
-            "error": execution.error,
-            "tool_name": tool_name,
-            "max_tool_calls": limit,
-        })
+        execution.add_step(
+            "error",
+            {
+                "error": execution.error,
+                "tool_name": tool_name,
+                "max_tool_calls": limit,
+            },
+        )
         return True
 
     def _set_pending_tool_call(self, execution, parsed):
         queued = parsed.get("tool_calls", []) if isinstance(parsed.get("tool_calls"), list) else []
-        execution.queued_tool_calls = queued[1:] if queued and queued[0].get("raw") == parsed.get("raw") else queued
+        execution.queued_tool_calls = (
+            queued[1:] if queued and queued[0].get("raw") == parsed.get("raw") else queued
+        )
         execution.status = "waiting_approval"
         raw = parsed.get("raw", {}) if isinstance(parsed.get("raw"), dict) else {}
         tool_call_id = str(
@@ -633,10 +677,13 @@ class AgentEngine:
             "tool_args": self._normalize_tool_args(parsed["tool_args"]),
             "raw": raw,
         }
-        execution.add_step("tool_call", {
-            "tool_name": parsed["tool_name"],
-            "tool_args": execution.pending_tool_call["tool_args"],
-        })
+        execution.add_step(
+            "tool_call",
+            {
+                "tool_name": parsed["tool_name"],
+                "tool_args": execution.pending_tool_call["tool_args"],
+            },
+        )
         step = execution.steps[-1]
         step.status = "pending"
 
@@ -670,17 +717,14 @@ class AgentEngine:
             (
                 item
                 for item in execution.tools
-                if isinstance(item, dict)
-                and self._tool_name_from_definition(item) == tool_name
+                if isinstance(item, dict) and self._tool_name_from_definition(item) == tool_name
             ),
             {},
         )
         review = review_tool_action(
             tool_name,
             tool_def,
-            pending.get("tool_args")
-            if isinstance(pending.get("tool_args"), dict)
-            else {},
+            pending.get("tool_args") if isinstance(pending.get("tool_args"), dict) else {},
             context,
         )
         pending["delegated_review"] = review
@@ -765,7 +809,9 @@ class AgentEngine:
             return False
         parsed = execution.queued_tool_calls.pop(0)
         remaining = list(execution.queued_tool_calls)
-        if self._reject_unconnected_tool_call(execution, parsed) or self._reject_policy_violation(execution, parsed):
+        if self._reject_unconnected_tool_call(execution, parsed) or self._reject_policy_violation(
+            execution, parsed
+        ):
             return True
         self._set_pending_tool_call(execution, parsed)
         execution.queued_tool_calls = remaining
@@ -775,8 +821,17 @@ class AgentEngine:
         messages = []
         if execution.system_prompt:
             messages.append({"role": "system", "content": execution.system_prompt})
-        attachments = execution.context.get("attachments") if isinstance(getattr(execution, "context", None), dict) else []
-        messages.append({"role": "user", "content": _message_content_with_attachments(execution.task, attachments)})
+        attachments = (
+            execution.context.get("attachments")
+            if isinstance(getattr(execution, "context", None), dict)
+            else []
+        )
+        messages.append(
+            {
+                "role": "user",
+                "content": _message_content_with_attachments(execution.task, attachments),
+            }
+        )
         return messages
 
     def execute(self, task, tools, model, system_prompt, context):
@@ -819,12 +874,22 @@ class AgentEngine:
                 "status": "error",
                 "result": execution.to_dict(),
             }
-        required_capabilities = normalize_capability_tokens(execution_context.get("required_capabilities"))
+        required_capabilities = normalize_capability_tokens(
+            execution_context.get("required_capabilities")
+        )
         if required_capabilities:
             execution_context["required_capabilities"] = required_capabilities
-        params = dict(execution_context.get("params") if isinstance(execution_context.get("params"), dict) else {})
+        params = dict(
+            execution_context.get("params")
+            if isinstance(execution_context.get("params"), dict)
+            else {}
+        )
         execution_context["params"] = params
-        attachments = list(execution_context.get("attachments") if isinstance(execution_context.get("attachments"), list) else [])
+        attachments = list(
+            execution_context.get("attachments")
+            if isinstance(execution_context.get("attachments"), list)
+            else []
+        )
         modalities = _attachment_modalities(attachments)
         normalized_tools = adapt_tool_definitions(tools if tools else [])
         provider_tools = filter_tool_definitions_for_runtime_profile(
@@ -843,7 +908,9 @@ class AgentEngine:
             context=execution_context,
         )
         selected_capabilities = get_model_capabilities(model if model else "default") or {}
-        missing_capabilities = missing_model_capabilities(required_capabilities, selected_capabilities)
+        missing_capabilities = missing_model_capabilities(
+            required_capabilities, selected_capabilities
+        )
         if missing_capabilities:
             execution = AgentExecution(
                 execution_id=execution_id,
@@ -854,7 +921,9 @@ class AgentEngine:
             )
             execution.context = execution_context
             execution.status = "error"
-            execution.error = "selected model does not satisfy required capabilities: " + ", ".join(missing_capabilities)
+            execution.error = "selected model does not satisfy required capabilities: " + ", ".join(
+                missing_capabilities
+            )
             execution.add_step(
                 "error",
                 {
@@ -910,7 +979,9 @@ class AgentEngine:
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
         self._touch_execution(execution, "model_call_started", {"phase": "execute"})
-        ai_result = self._ai_complete(execution.messages, execution.model, execution.context, execution.tools)
+        ai_result = self._ai_complete(
+            execution.messages, execution.model, execution.context, execution.tools
+        )
         self._touch_execution(execution, "model_call_completed", {"phase": "execute"})
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
@@ -928,7 +999,9 @@ class AgentEngine:
                 "result": execution.to_dict(),
             }
         if parsed["type"] == "tool_call":
-            if self._reject_unconnected_tool_call(execution, parsed) or self._reject_policy_violation(execution, parsed):
+            if self._reject_unconnected_tool_call(
+                execution, parsed
+            ) or self._reject_policy_violation(execution, parsed):
                 self._persist_execution(execution, "run_failed", {"error": execution.error})
                 return {
                     "execution_id": execution_id,
@@ -965,16 +1038,27 @@ class AgentEngine:
     def approve(self, execution_id, source="agent.approve"):
         execution = self._get_execution(execution_id)
         if not execution:
-            return {"execution_id": execution_id, "status": "error", "result": {"error": "execution not found"}}
+            return {
+                "execution_id": execution_id,
+                "status": "error",
+                "result": {"error": "execution not found"},
+            }
         if execution.status != "waiting_approval":
             return {
                 "execution_id": execution_id,
                 "status": "error",
-                "result": {"error": "execution is not waiting for approval, current status: " + execution.status},
+                "result": {
+                    "error": "execution is not waiting for approval, current status: "
+                    + execution.status
+                },
             }
         pending = execution.pending_tool_call
         if not pending:
-            return {"execution_id": execution_id, "status": "error", "result": {"error": "no pending tool call"}}
+            return {
+                "execution_id": execution_id,
+                "status": "error",
+                "result": {"error": "no pending tool call"},
+            }
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
         execution.status = "running"
@@ -999,7 +1083,9 @@ class AgentEngine:
             self._connected_tool_names(execution),
         )
         self._touch_execution(execution, "tool_call_started", {"tool_name": pending["tool_name"]})
-        tool_result = self._execute_tool(pending["tool_name"], pending["tool_args"], context_for_tool)
+        tool_result = self._execute_tool(
+            pending["tool_name"], pending["tool_args"], context_for_tool
+        )
         self._touch_execution(execution, "tool_call_completed", {"tool_name": pending["tool_name"]})
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
@@ -1008,21 +1094,30 @@ class AgentEngine:
             tool_content = tool_result.get("data", tool_result.get("error", str(tool_result)))
         else:
             tool_content = str(tool_result)
-        execution.add_step("tool_result", {
-            "tool_name": pending["tool_name"],
-            "result": tool_content,
-        })
-        execution.messages.append({
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [pending.get("raw", {"name": pending["tool_name"], "args": pending["tool_args"]})],
-        })
-        execution.messages.append({
-            "role": "tool",
-            "content": str(tool_content) if not isinstance(tool_content, str) else tool_content,
-            "name": pending["tool_name"],
-            "tool_call_id": str(tool_call_id),
-        })
+        execution.add_step(
+            "tool_result",
+            {
+                "tool_name": pending["tool_name"],
+                "result": tool_content,
+            },
+        )
+        execution.messages.append(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    pending.get("raw", {"name": pending["tool_name"], "args": pending["tool_args"]})
+                ],
+            }
+        )
+        execution.messages.append(
+            {
+                "role": "tool",
+                "content": str(tool_content) if not isinstance(tool_content, str) else tool_content,
+                "name": pending["tool_name"],
+                "tool_call_id": str(tool_call_id),
+            }
+        )
         self._transcripts.append_tool_result(
             execution.context["transcript_id"],
             {"tool_name": pending["tool_name"], "result": tool_content},
@@ -1034,7 +1129,9 @@ class AgentEngine:
             auto_result = self._auto_approve_pending_tool_call(execution)
             if auto_result is not None:
                 return auto_result
-            self._persist_execution(execution, "approval_requested", execution.pending_tool_call or {})
+            self._persist_execution(
+                execution, "approval_requested", execution.pending_tool_call or {}
+            )
             return {
                 "execution_id": execution_id,
                 "status": execution.status,
@@ -1064,7 +1161,9 @@ class AgentEngine:
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
         self._touch_execution(execution, "model_call_started", {"phase": "approve"})
-        ai_result = self._ai_complete(execution.messages, execution.model, context_for_tool, execution.tools)
+        ai_result = self._ai_complete(
+            execution.messages, execution.model, context_for_tool, execution.tools
+        )
         self._touch_execution(execution, "model_call_completed", {"phase": "approve"})
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
@@ -1082,7 +1181,9 @@ class AgentEngine:
                 "result": execution.to_dict(),
             }
         if parsed["type"] == "tool_call":
-            if self._reject_unconnected_tool_call(execution, parsed) or self._reject_policy_violation(execution, parsed):
+            if self._reject_unconnected_tool_call(
+                execution, parsed
+            ) or self._reject_policy_violation(execution, parsed):
                 self._persist_execution(execution, "run_failed", {"error": execution.error})
                 return {
                     "execution_id": execution_id,
@@ -1119,12 +1220,19 @@ class AgentEngine:
     def reject(self, execution_id, reason):
         execution = self._get_execution(execution_id)
         if not execution:
-            return {"execution_id": execution_id, "status": "error", "result": {"error": "execution not found"}}
+            return {
+                "execution_id": execution_id,
+                "status": "error",
+                "result": {"error": "execution not found"},
+            }
         if execution.status != "waiting_approval":
             return {
                 "execution_id": execution_id,
                 "status": "error",
-                "result": {"error": "execution is not waiting for approval, current status: " + execution.status},
+                "result": {
+                    "error": "execution is not waiting for approval, current status: "
+                    + execution.status
+                },
             }
         if not reason:
             reason = "Rejected by user"
@@ -1147,7 +1255,9 @@ class AgentEngine:
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
         self._touch_execution(execution, "model_call_started", {"phase": "reject"})
-        ai_result = self._ai_complete(execution.messages, execution.model, context_for_ai, execution.tools)
+        ai_result = self._ai_complete(
+            execution.messages, execution.model, context_for_ai, execution.tools
+        )
         self._touch_execution(execution, "model_call_completed", {"phase": "reject"})
         if self._is_cancelled(execution):
             return self._cancelled_result(execution)
@@ -1165,7 +1275,9 @@ class AgentEngine:
                 "result": execution.to_dict(),
             }
         if parsed["type"] == "tool_call":
-            if self._reject_unconnected_tool_call(execution, parsed) or self._reject_policy_violation(execution, parsed):
+            if self._reject_unconnected_tool_call(
+                execution, parsed
+            ) or self._reject_policy_violation(execution, parsed):
                 self._persist_execution(execution, "run_failed", {"error": execution.error})
                 return {
                     "execution_id": execution_id,
@@ -1202,7 +1314,11 @@ class AgentEngine:
     def cancel(self, execution_id):
         execution = self._get_execution(execution_id)
         if not execution:
-            return {"execution_id": execution_id, "status": "error", "result": {"error": "execution not found"}}
+            return {
+                "execution_id": execution_id,
+                "status": "error",
+                "result": {"error": "execution not found"},
+            }
         execution.status = "cancelled"
         execution.pending_tool_call = None
         execution.updated_at = timestamp()
@@ -1213,7 +1329,11 @@ class AgentEngine:
     def status(self, execution_id):
         execution = self._get_execution(execution_id)
         if not execution:
-            return {"execution_id": execution_id, "status": "error", "result": {"error": "execution not found"}}
+            return {
+                "execution_id": execution_id,
+                "status": "error",
+                "result": {"error": "execution not found"},
+            }
         return {
             "execution_id": execution_id,
             "status": execution.status,

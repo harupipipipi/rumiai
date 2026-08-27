@@ -410,6 +410,8 @@ def test_agent_delegate_action_starts_agent_with_tools_params_capabilities(monke
     )
 
     assert result["status"] == "ok"
+    assert result["model_policy_receipt"]["resolved_profile_id"]
+    assert result["delegate"]["model_policy_receipt"] == result["model_policy_receipt"]
     assert seen["input_data"]["tools"] == ["web_search"]
     assert seen["input_data"]["required_capabilities"] == ["runtime.workspace"]
     assert seen["input_data"]["params"] == {"mode": "review"}
@@ -683,6 +685,9 @@ def test_model_pack_review_chain_uses_isolated_reviewer(monkeypatch, tmp_path):
     assert response["content"][0]["text"] == "draft ok"
     assert response["finish_reason"] == "stop"
     assert process["review"]["approved"] is True
+    assert process["model_policy_receipts"]["generator"]["resolved_profile_id"] == "demo/generator"
+    assert process["model_policy_receipts"]["reviewer"]["resolved_profile_id"] == "demo/reviewer"
+    assert process["model_policy_receipts"]["reviewer"]["thinking_level"] == "medium"
     assert [event["phase"] for event in process["events"]] == ["generator", "reviewer"]
     assert [call["model"] for call in provider.calls] == ["generator", "reviewer"]
     assert provider.calls[0]["params"]["thinking_level"] == "medium"
@@ -1139,6 +1144,8 @@ def test_model_call_uses_required_capabilities(monkeypatch):
 
     assert result["status"] == "ok"
     assert result["model"] == "demo/tool"
+    assert result["model_policy_receipt"]["resolved_profile_id"] == "demo/tool"
+    assert result["model_policy_receipt"]["required_capabilities"] == ["model.tool_calling"]
     assert seen["requires_tool_calling"] is True
 
 

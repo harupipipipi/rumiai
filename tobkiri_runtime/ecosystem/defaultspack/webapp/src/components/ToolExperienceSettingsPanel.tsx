@@ -11,6 +11,8 @@ type PermissionDecision = "auto" | "confirm" | "block";
 type ToolSettings = Record<string, unknown>;
 type SettingsValues = Record<string, Record<string, unknown>>;
 
+export const INHERIT_CONVERSATION_MODEL = "@inherit_conversation";
+
 const MODE_OPTIONS: Array<{ value: ToolSelectionMode; label: string; note: string; badge?: string }> = [
   { value: "auto", label: "自動で選ぶ", note: "依頼に必要な機能だけをRumiが選びます", badge: "推奨" },
   { value: "review", label: "使う前に確認", note: "候補を確認してから回答を開始します" },
@@ -231,13 +233,15 @@ function ToggleRow({
   );
 }
 
-function ModelPicker({
+export function ModelPicker({
   label,
   note,
   value,
   models,
   loading,
   includeAuto = true,
+  includeInheritConversation = false,
+  resolvedConversationModel = "",
   placeholder,
   onChange,
 }: {
@@ -247,6 +251,8 @@ function ModelPicker({
   models: ModelSearchItem[];
   loading: boolean;
   includeAuto?: boolean;
+  includeInheritConversation?: boolean;
+  resolvedConversationModel?: string;
   placeholder: string;
   onChange: (value: string) => void;
 }) {
@@ -274,7 +280,9 @@ function ModelPicker({
           />
         </div>
         <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-400 lg:min-w-[220px]">
-          {selected ? modelLabel(selected) : value ? "保存済みモデル" : "自動"}
+          {value === INHERIT_CONVERSATION_MODEL
+            ? `現在の会話モデルを継承${resolvedConversationModel ? ` (${resolvedConversationModel})` : ""}`
+            : selected ? modelLabel(selected) : value ? "保存済みモデル" : "自動"}
         </div>
       </div>
       <div className="max-h-72 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950/50">
@@ -289,6 +297,25 @@ function ModelPicker({
               <span className="block text-xs text-zinc-500">Tobkiriのモデル設定から選びます</span>
             </span>
             {!value && <Check size={16} />}
+          </button>
+        )}
+        {includeInheritConversation && (
+          <button
+            type="button"
+            onClick={() => onChange(INHERIT_CONVERSATION_MODEL)}
+            className={cn(
+              "flex w-full items-center justify-between gap-3 border-t border-zinc-800 px-3 py-2.5 text-left text-sm hover:bg-zinc-900",
+              value === INHERIT_CONVERSATION_MODEL ? "text-sky-200" : "text-zinc-300",
+            )}
+          >
+            <span>
+              <span className="block font-medium">現在の会話モデルを継承</span>
+              <span className="block text-xs text-zinc-500">
+                呼び出すたびに会話の選択を解決します
+                {resolvedConversationModel ? `（現在の既定: ${resolvedConversationModel}）` : ""}
+              </span>
+            </span>
+            {value === INHERIT_CONVERSATION_MODEL && <Check size={16} />}
           </button>
         )}
         {loading ? (
@@ -632,8 +659,21 @@ export function ToolExperienceSettingsPanel({
           value={stringValue(utilityModels.tool_selector)}
           models={chatModels}
           loading={modelsLoading}
+          includeInheritConversation
+          resolvedConversationModel={stringValue(modelSettings.main_model)}
           placeholder="補助AIモデルを検索"
           onChange={(value) => updateUtilityModel("tool_selector", value)}
+        />
+        <ModelPicker
+          label="委任エージェントのモデル"
+          note="会話モデルを実行時に継承するか、登録済みモデルへ固定します。"
+          value={stringValue(utilityModels.subagent_default)}
+          models={chatModels}
+          loading={modelsLoading}
+          includeInheritConversation
+          resolvedConversationModel={stringValue(modelSettings.main_model)}
+          placeholder="委任エージェントのモデルを検索"
+          onChange={(value) => updateUtilityModel("subagent_default", value)}
         />
         <ModelPicker
           label="ベクトルモデル"
