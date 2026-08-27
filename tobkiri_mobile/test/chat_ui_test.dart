@@ -401,15 +401,49 @@ void main() {
     )));
     await tester.pumpAndSettle();
 
-    final copyButtons = find.byTooltip('コピー');
-    expect(copyButtons, findsNWidgets(2));
+    expect(find.byKey(const ValueKey('message-copy')), findsNothing);
 
-    await tester.tap(copyButtons.first);
+    await tester.longPress(
+      find.byKey(const ValueKey('message-semantics:u-copy')),
+    );
+    await tester.pump();
+    var copyButton = find.byKey(const ValueKey('message-copy'));
+    expect(copyButton, findsOneWidget);
+    tester
+        .widget<IconButton>(
+          find.descendant(
+            of: copyButton,
+            matching: find.byType(IconButton),
+          ),
+        )
+        .onPressed!();
     await tester.pump();
     var copied = await Clipboard.getData(Clipboard.kTextPlain);
     expect(copied?.text, 'ユーザーの本文');
-
-    await tester.tap(copyButtons.last);
+    final assistantMessage = find.byKey(
+      const ValueKey('message-semantics:a-copy'),
+    );
+    tester
+        .widget<GestureDetector>(
+          find
+              .descendant(
+                of: assistantMessage,
+                matching: find.byType(GestureDetector),
+              )
+              .first,
+        )
+        .onLongPress!();
+    await tester.pump();
+    copyButton = find.byKey(const ValueKey('message-copy'));
+    expect(copyButton, findsOneWidget);
+    tester
+        .widget<IconButton>(
+          find.descendant(
+            of: copyButton,
+            matching: find.byType(IconButton),
+          ),
+        )
+        .onPressed!();
     await tester.pump();
     copied = await Clipboard.getData(Clipboard.kTextPlain);
     expect(copied?.text, 'AIの本文');
