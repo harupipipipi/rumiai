@@ -42,6 +42,14 @@ def _prepend_runtime_python_to_path(env: Dict[str, str]) -> None:
     env.setdefault("PYTHONUNBUFFERED", "1")
 
 
+def _ensure_log_dir_env(env: Dict[str, str]) -> None:
+    if env.get("RUMI_LOG_DIR"):
+        return
+    user_data = env.get("RUMI_USER_DATA")
+    if user_data:
+        env["RUMI_LOG_DIR"] = str(Path(user_data).expanduser().parent / "logs")
+
+
 def _runtime_python_for_app() -> str:
     if sys.platform == "win32":
         pythonw = Path(sys.executable).resolve().with_name("pythonw.exe")
@@ -259,6 +267,7 @@ class DesktopAppManager:
             env["RUMI_TOKEN"] = issued_desktop_token
             env.setdefault("RUMI_PORT", os.environ.get("RUMI_PORT", "8765"))
         _prepend_runtime_python_to_path(env)
+        _ensure_log_dir_env(env)
 
         working_dir = meta.get("working_dir") or meta.get("pack_dir", "")
         if issued_desktop_token:

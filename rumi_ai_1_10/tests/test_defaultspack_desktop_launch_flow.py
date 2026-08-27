@@ -359,6 +359,48 @@ def test_desktop_direct_launch_uses_current_python_and_hidden_console(tmp_path):
         assert captured["kwargs"]["creationflags"] == manager_module.subprocess.CREATE_NO_WINDOW
 
 
+def test_desktop_launch_sets_default_log_dir_from_user_data(tmp_path):
+    from core_runtime.desktop_app_manager import DesktopAppManager
+
+    repo_dir = tmp_path / "repo"
+    apps_dir = repo_dir / "user_data" / "apps"
+    apps_dir.mkdir(parents=True)
+    pack_dir = tmp_path / "defaultspack"
+    pack_dir.mkdir()
+    user_data = tmp_path / "app-data" / "user_data"
+    user_data.mkdir(parents=True)
+    (apps_dir / "defaultspack.json").write_text(
+        json.dumps(
+            {
+                "pack_id": "defaultspack",
+                "command": "python defaultspack/desktop_app.py",
+                "pack_dir": str(pack_dir),
+                "requires_api_token": True,
+                "env": {},
+                "working_dir": str(pack_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    manager = DesktopAppManager(repo_dir=str(repo_dir))
+    captured = {}
+
+    class FakeProcess:
+        pid = 123
+
+    def fake_popen(args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return FakeProcess()
+
+    with mock.patch.dict(os.environ, {"RUMI_USER_DATA": str(user_data)}, clear=True):
+        with mock.patch("core_runtime.desktop_app_manager.subprocess.Popen", side_effect=fake_popen):
+            result = manager.launch_app_with_env("defaultspack", api_token="token")
+
+    assert result["success"] is True
+    assert captured["kwargs"]["env"]["RUMI_LOG_DIR"] == str(user_data.parent / "logs")
+
+
 @pytest.mark.parametrize("action", ["stop", "status"])
 def test_desktop_capability_delegates_non_launch_actions(action):
     from core_runtime.desktop_capability import DesktopCapabilityHandler
