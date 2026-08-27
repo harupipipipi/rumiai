@@ -12,11 +12,9 @@ pytestmark = pytest.mark.contract
 SEARCH_HOME_ROUTES = {
     ("GET", "/api/models"): {"approval_required": False},
     ("GET", "/api/settings"): {"approval_required": False},
-    ("GET", "/api/route-state"): {"approval_required": False},
     ("POST", "/api/route"): {"approval_required": False},
     ("POST", "/api/answer"): {"approval_required": False},
     ("POST", "/api/settings/model"): {"approval_required": False},
-    ("POST", "/api/route-state"): {"approval_required": False},
 }
 
 
@@ -32,15 +30,15 @@ def test_search_home_operation_resolves_exact_route_and_query() -> None:
     resolved = resolve_contract_route(
         _SearchHomeHost(),
         "GET",
-        _operation("GET", "/api/route-state?source=restart"),
+        _operation("GET", "/api/models?source=picker"),
         pack_id="search_home_pack",
         route_families=(),
     )
 
     assert resolved is not None
     assert resolved.method == "GET"
-    assert resolved.path == "/api/route-state"
-    assert resolved.query == {"source": "restart"}
+    assert resolved.path == "/api/models"
+    assert resolved.query == {"source": "picker"}
 
 
 @pytest.mark.parametrize(
