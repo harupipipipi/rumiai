@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b42ece2e05b7e89452dd0b2bcef89f6dec5a148be13a2554686f4a0a7edbf8c6",
+    "digest": "2fa8a231eae2ebf9966d8028043d5dfcd264b25a9cbc4e26eb893575fe80f013",
     "entries": [
       {
         "path": "index.html",
@@ -15,8 +15,8 @@
       },
       {
         "path": "package.json",
-        "size": 5472,
-        "sha256": "fd39aba72deb7069521c154759a1e5f42676598aa705e8b2aeea89f84b4f2d40"
+        "size": 5521,
+        "sha256": "2a9d65657b7578d2bbeae3ce95758627d6d5f2bb4d877ca65635518b11841166"
       },
       {
         "path": "public/assets/tobkiri-startup-blade-cut.svg",
@@ -390,8 +390,8 @@
       },
       {
         "path": "src/components/MobilePairingApproval.tsx",
-        "size": 9756,
-        "sha256": "b449d7fba661488e94417356bbca0a17465c73b5fee0cf04f86a34e5d5a71b79"
+        "size": 10934,
+        "sha256": "ebe5228a6e66f70310dd5e80ab0d5faec71a7341da16682639cef113fbcf4674"
       },
       {
         "path": "src/components/ModalFoundation.tsx",
@@ -1851,7 +1851,7 @@
     ]
   },
   "bundle": {
-    "digest": "6452bbd7184eb2fcaf39237cc3aae2ee663a0e8734cab7ac726958b6c71c92ff",
+    "digest": "2cfa4a19fac3ee7cdc954e8b728195db3d262845b40b1da4f3bc5840df66ebad",
     "entries": [
       {
         "path": "shell-app.css",
@@ -1865,8 +1865,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2208068,
-        "sha256": "3ebb1666ccf5ea40cdb7105b68dbfa5b8a7222cef3cd8d5b570da61f8b67ec25"
+        "size": 2208497,
+        "sha256": "81ccd80d9000442ead37ec0a397be6ffae21c7ee80dfb8527f4a4a9eb7f2f7eb"
       },
       {
         "path": "shell-rolldown-runtime.js",
