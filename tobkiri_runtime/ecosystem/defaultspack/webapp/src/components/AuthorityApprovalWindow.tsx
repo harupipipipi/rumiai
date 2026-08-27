@@ -125,7 +125,7 @@ async function returnToFingerRecordingAfterApproval() {
   window.close();
   window.setTimeout(() => {
     if (document.hidden) return;
-    window.location.replace("/finger-recording?authority_approved=1");
+    window.location.replace("/finger-recording");
   }, 250);
 }
 
