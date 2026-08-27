@@ -9004,7 +9004,7 @@
         "version": "1.0.0"
       },
       {
-        "digest": "sha256:125153339c60f1d0989fbc248a8e63aeb72a4728f5d1c26f6b9ceb461f0cfba6",
+        "digest": "sha256:5deeac211065bbd65d4665f94349d137189514a21357ecb1263318b0c1e926bd",
         "identity": "rumi_kanban_state_store_pack",
         "kind": "manifest",
         "legacy": true,
@@ -9012,7 +9012,7 @@
         "version": "1.0.0"
       },
       {
-        "digest": "sha256:6c1abbf9c9e46c9c7bd7d65654f6fc0147391f6583e6e674c2f545be816e3329",
+        "digest": "sha256:d1729209feccbfd0563202ca0d22f5861844f59bf8f60d5b60b9f24149bf85ba",
         "identity": "rumi.kanban_state_store",
         "kind": "manifest",
         "legacy": true,
@@ -13878,19 +13878,19 @@
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:125153339c60f1d0989fbc248a8e63aeb72a4728f5d1c26f6b9ceb461f0cfba6",
+        "evidence_digest": "sha256:5deeac211065bbd65d4665f94349d137189514a21357ecb1263318b0c1e926bd",
         "line": 16,
         "path": "tobkiri_runtime/ecosystem/rumi_kanban_state_store_pack/ecosystem.json",
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:6c1abbf9c9e46c9c7bd7d65654f6fc0147391f6583e6e674c2f545be816e3329",
+        "evidence_digest": "sha256:d1729209feccbfd0563202ca0d22f5861844f59bf8f60d5b60b9f24149bf85ba",
         "line": 97,
         "path": "tobkiri_runtime/ecosystem/rumi_kanban_state_store_pack/rumi.pack.v3.json",
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:6c1abbf9c9e46c9c7bd7d65654f6fc0147391f6583e6e674c2f545be816e3329",
+        "evidence_digest": "sha256:d1729209feccbfd0563202ca0d22f5861844f59bf8f60d5b60b9f24149bf85ba",
         "line": 113,
         "path": "tobkiri_runtime/ecosystem/rumi_kanban_state_store_pack/rumi.pack.v3.json",
         "rule_id": "legacy_host_execution"
@@ -16014,13 +16014,13 @@
         "rule_id": "legacy_v3_manifest"
       },
       {
-        "evidence_digest": "sha256:125153339c60f1d0989fbc248a8e63aeb72a4728f5d1c26f6b9ceb461f0cfba6",
+        "evidence_digest": "sha256:5deeac211065bbd65d4665f94349d137189514a21357ecb1263318b0c1e926bd",
         "line": 29,
         "path": "tobkiri_runtime/ecosystem/rumi_kanban_state_store_pack/ecosystem.json",
         "rule_id": "legacy_v3_manifest"
       },
       {
-        "evidence_digest": "sha256:6c1abbf9c9e46c9c7bd7d65654f6fc0147391f6583e6e674c2f545be816e3329",
+        "evidence_digest": "sha256:d1729209feccbfd0563202ca0d22f5861844f59bf8f60d5b60b9f24149bf85ba",
         "line": 186,
         "path": "tobkiri_runtime/ecosystem/rumi_kanban_state_store_pack/rumi.pack.v3.json",
         "rule_id": "legacy_v3_manifest"
@@ -17405,14 +17405,14 @@
       },
       {
         "legacy": true,
-        "manifest_digest": "sha256:125153339c60f1d0989fbc248a8e63aeb72a4728f5d1c26f6b9ceb461f0cfba6",
+        "manifest_digest": "sha256:5deeac211065bbd65d4665f94349d137189514a21357ecb1263318b0c1e926bd",
         "pack_id": "rumi_kanban_state_store_pack",
         "path": "tobkiri_runtime/ecosystem/rumi_kanban_state_store_pack/ecosystem.json",
         "version": "1.0.0"
       },
       {
         "legacy": true,
-        "manifest_digest": "sha256:6c1abbf9c9e46c9c7bd7d65654f6fc0147391f6583e6e674c2f545be816e3329",
+        "manifest_digest": "sha256:d1729209feccbfd0563202ca0d22f5861844f59bf8f60d5b60b9f24149bf85ba",
         "pack_id": "rumi.kanban_state_store",
         "path": "tobkiri_runtime/ecosystem/rumi_kanban_state_store_pack/rumi.pack.v3.json",
         "version": "1.0.0"
@@ -18410,8 +18410,8 @@
     ]
   },
   "repository": {
-    "commit": "d8b41fa9655f5503f1457e5df445558d15f0d603",
-    "tree_digest": "d4525e61c9825f921138e751051a0b5d41b442ad3e2d025f4ffe0a38f4900d0d"
+    "commit": "99bda670d2c9fe79d0623cda0c3f1401856e2396",
+    "tree_digest": "2f7a7784af48aa0ebdb8f5f3a4d9eb5da000d1993a1bf95c3d730f0a1a791ca0"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
   "schema": "io.tobkiri.architecture.inventory.v1"

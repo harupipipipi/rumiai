@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b42ece2e05b7e89452dd0b2bcef89f6dec5a148be13a2554686f4a0a7edbf8c6",
+    "digest": "56fb532fb3e9b8f14d023ae3231942dc69fb606f011be85c8159958acd9aaa14",
     "entries": [
       {
         "path": "index.html",
@@ -725,13 +725,13 @@
       },
       {
         "path": "src/components/kanban/KanbanWorkspacePanel.test.tsx",
-        "size": 1625,
-        "sha256": "6cc002c85d72575ccd15fb350c6bf734853b6d0e3d8f6b76416ca456c0d41397"
+        "size": 3540,
+        "sha256": "d5ee73ae9a79e3ad5f68aacdbf61ccadc8defcdd452c214782556ac346a65769"
       },
       {
         "path": "src/components/kanban/KanbanWorkspacePanel.tsx",
-        "size": 19443,
-        "sha256": "b375baba6298ae76fd9ece8af6d9833d0619c3f95c18669216a6b4c8e5fa8949"
+        "size": 38505,
+        "sha256": "05957761f2c9346c86d2ec50edf5c3754ce28a682062e2c7a2274a6274bf548c"
       },
       {
         "path": "src/components/liquidParts.tsx",
@@ -1851,12 +1851,12 @@
     ]
   },
   "bundle": {
-    "digest": "6452bbd7184eb2fcaf39237cc3aae2ee663a0e8734cab7ac726958b6c71c92ff",
+    "digest": "10573f95ffb9bbec27296e8d4ca8489fe93128470db9264b91f33de2b87ceac1",
     "entries": [
       {
         "path": "shell-app.css",
-        "size": 233535,
-        "sha256": "caa33736df4d884e02be3248fe28431e7071d81da7e2ab7118ae6a505aafff91"
+        "size": 233451,
+        "sha256": "87ccde242d951d667c5071843bd05caf60083544a7be16b94118f8ed9a295557"
       },
       {
         "path": "shell-app.js",
@@ -1865,8 +1865,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2208068,
-        "sha256": "3ebb1666ccf5ea40cdb7105b68dbfa5b8a7222cef3cd8d5b570da61f8b67ec25"
+        "size": 2217507,
+        "sha256": "cb88bd000d5a9a1b6ea27f40f819d5d0f0b87c5b6703f9cacbb429b254e28daf"
       },
       {
         "path": "shell-rolldown-runtime.js",
