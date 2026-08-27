@@ -488,6 +488,44 @@ jobs:
         if: matrix.app == 'tobkiri_runtime/ecosystem/defaultspack/webapp'
         run: git diff --exit-code -- tobkiri_runtime/ecosystem/defaultspack/ui
 
+  defaultspack-playwright-ui-e2e:
+    name: Defaultspack Playwright UI E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tobkiri_runtime/ecosystem/defaultspack/webapp/package-lock.json
+
+      - name: Install defaultspack frontend dependencies
+        working-directory: tobkiri_runtime/ecosystem/defaultspack/webapp
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: tobkiri_runtime/ecosystem/defaultspack/webapp
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Defaultspack Playwright UI E2E
+        id: defaultspack_playwright
+        working-directory: tobkiri_runtime/ecosystem/defaultspack/webapp
+        run: npm run test:e2e:ui-contract
+
+      - name: Upload Playwright UI E2E diagnostics
+        if: failure() && steps.defaultspack_playwright.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: defaultspack-playwright-ui-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            tobkiri_runtime/ecosystem/defaultspack/webapp/playwright-report
+            tobkiri_runtime/ecosystem/defaultspack/webapp/test-results
+          if-no-files-found: ignore
+
   tobkiri-static-checks:
     runs-on: ubuntu-latest
     steps:
