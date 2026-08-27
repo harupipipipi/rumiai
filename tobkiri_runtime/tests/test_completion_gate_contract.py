@@ -446,14 +446,10 @@ def test_agent_http_blocks_attach_status_and_resume_completion_gate(
 
     from blocks.agent import execute as execute_block
     from blocks.agent import resume_completion_gate as resume_block
+    from blocks.agent import setup as setup_block
     from blocks.agent import status as status_block
     from blocks.agent._state import _engines
     from domain.agent.engine import AgentEngine
-    from transport.registry import (
-        canonical_http_route_specs,
-        legacy_http_route_metadata,
-    )
-    from transport.uds import _match_route
 
     _engines.clear()
     monkeypatch.setattr(
@@ -493,18 +489,29 @@ def test_agent_http_blocks_attach_status_and_resume_completion_gate(
     assert resumed["data"]["status"] == "completed"
 
     route_path = "/api/agent/{id}/completion-gate/resume"
-    http_spec = next(
-        spec
-        for spec in canonical_http_route_specs()
-        if spec.method == "POST" and spec.pattern == route_path
+
+    class RouteRegistry:
+        def __init__(self) -> None:
+            self.entries: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+
+        def register(
+            self, key: str, value: dict[str, Any], meta: dict[str, Any] | None = None
+        ) -> None:
+            self.entries.append((key, value, meta or {}))
+
+    route_registry = RouteRegistry()
+    setup_block.run({"interface_registry": route_registry})
+    route = next(
+        value
+        for key, value, _meta in route_registry.entries
+        if key == "io.http.route"
+        and value["method"] == "POST"
+        and value["pattern"] == route_path
     )
-    assert legacy_http_route_metadata(http_spec)["owner"] == "agent"
-    pattern, module_name, params = _match_route(
-        "POST", f"/api/agent/{execution_id}/completion-gate/resume"
-    )
-    assert pattern == route_path
-    assert module_name == "blocks.agent.resume_completion_gate"
-    assert params == {"id": execution_id}
+    assert route["path_inject"] == {"id": "execution_id"}
+    missing = route["handler"]({"execution_id": "missing"}, {})
+    assert missing["status"] == "error"
+    assert missing["error"] == "execution not found"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="soon imports fcntl in frontend settings")
