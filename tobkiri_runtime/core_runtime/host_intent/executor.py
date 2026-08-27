@@ -110,7 +110,7 @@ def _prepare_viewer_broker(intent: HostIntent) -> _PreparedViewerBroker | dict[s
             "success": False,
             "error_type": "host_broker_unavailable",
             "host_broker": {"available": False},
-            "message": "Host intent is approved, but Rumi Viewer host broker is unavailable.",
+            "message": "Host intent is approved, but Tobkiri Launcher host broker is unavailable.",
         }
 
     return _PreparedViewerBroker(client=client, issue_execution_token=issue_execution_token)
@@ -269,7 +269,7 @@ def _host_broker_initialization_failed(reason: str, exc: Exception | None = None
         "success": False,
         "error_type": "host_broker_initialization_failed",
         "host_broker": host_broker,
-        "message": "Host intent is approved, but Rumi Viewer host broker could not be initialized.",
+        "message": "Host intent is approved, but Tobkiri Launcher host broker could not be initialized.",
     }
 
 

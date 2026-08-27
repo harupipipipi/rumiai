@@ -205,7 +205,7 @@ npm run tauri -- dev
 ```
 
 開発用 viewer は repo 内の `tobkiri_runtime/` を自動検出して kernel を起動します。
-Viewer build は起動前に空き容量を確認します。`Rumi Viewer build preflight failed: not enough free disk space.` が出た場合はディスク容量を空けてから再実行してください。検証済みの環境で閾値だけを調整したい場合は `RUMI_VIEWER_MIN_FREE_MB=<MB>` を指定できます。
+Viewer build は起動前に空き容量を確認します。`Tobkiri Launcher build preflight failed: not enough free disk space.` が出た場合はディスク容量を空けてから再実行してください。検証済みの環境で閾値だけを調整したい場合は `RUMI_VIEWER_MIN_FREE_MB=<MB>` を指定できます。
 `Open Defaultspack` は開発起動では repo 同梱の `defaultspack` を優先して開きます。
 起動時の詰まり方を含めたガイドは [`tobkiri_runtime/docs/tobkiri_launcher_start.md`](./tobkiri_runtime/docs/tobkiri_launcher_start.md) を参照してください。
 
