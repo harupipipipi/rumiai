@@ -12,6 +12,7 @@ import { ToastContainer } from '@/src/components/ui/ToastContainer';
 import { DialogContainer } from '@/src/components/ui/DialogContainer';
 import { bootstrapPanelSession, hasPendingPanelBootstrapCode } from '@/src/lib/api';
 import { applyAppearanceToRoot } from '@/src/lib/appearance';
+import {applyLocaleToRoot} from '@/src/lib/localeAvailability';
 import { runtimeMonitorDelay } from '@/src/lib/runtimeHealth';
 import { panelRoutes } from '@/src/lib/routes';
 import { RouteAnnouncer } from '@/src/components/layout/RouteAnnouncer';
@@ -33,6 +34,7 @@ import {
 export default function App() {
   const theme = useAppStore(state => state.theme);
   const colorMode = useAppStore(state => state.colorMode);
+  const language = useAppStore(state => state.profile.language);
   const isSetupDone = useAppStore(state => state.isSetupDone);
   const runtimeStatus = useAppStore(state => state.runtimeStatus);
   const setSetupDone = useAppStore(state => state.setSetupDone);
@@ -42,6 +44,10 @@ export default function App() {
   useLayoutEffect(() => {
     applyAppearanceToRoot(document.documentElement, { theme, colorMode });
   }, [theme, colorMode]);
+
+  useLayoutEffect(() => {
+    applyLocaleToRoot(document.documentElement, language);
+  }, [language]);
 
   useEffect(() => () => {
     cancelPackMutationReconciliation();

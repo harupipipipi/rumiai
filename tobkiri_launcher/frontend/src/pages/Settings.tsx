@@ -9,9 +9,12 @@ import {useRuntimeSurface} from '@/src/hooks/useRuntimeSurface';
 import {VALID_COLOR_MODES, VALID_THEMES} from '@/src/lib/appearance';
 import {LAUNCHER_ADVANCED_VIEWS} from '@/src/lib/advancedSurfaces';
 import {extractRuntimeProfileSettings} from '@/src/lib/runtimeSurface';
+import {UI_LOCALE_OPTIONS, uiLocaleOption} from '@/src/lib/localeAvailability';
+import {useT} from '@/src/lib/i18n';
 import {useAppStore} from '@/src/store';
 
 export function Settings() {
+  const t = useT();
   const theme = useAppStore((state) => state.theme);
   const colorMode = useAppStore((state) => state.colorMode);
   const language = useAppStore((state) => state.profile.language);
@@ -23,6 +26,7 @@ export function Settings() {
   const runtimeSettings = surface.data
     ? extractRuntimeProfileSettings(surface.data.data)
     : null;
+  const selectedLocale = uiLocaleOption(language);
 
   return (
     <AdvancedSurfaceFrame
@@ -78,17 +82,23 @@ export function Settings() {
               </div>
             </div>
             <label className="flex flex-col gap-1.5 text-sm font-medium text-text-main">
-              Language
+              {t('settings.language')}
               <select
                 className="min-h-11 rounded-lg border border-border bg-bg-main px-3 py-2 text-sm text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
                 value={language}
                 onChange={(event) => updateLocalProfile({language: event.target.value})}
-                aria-label="Language"
+                aria-label={t('settings.language')}
               >
-                <option value="en">English</option>
-                <option value="ja">日本語</option>
+                {UI_LOCALE_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.nativeLabel} — {t(`settings.language_${option.availability}`)}
+                  </option>
+                ))}
               </select>
-              <span className="text-xs font-normal text-text-muted">Stored locally; this does not change runtime Profile policy.</span>
+              <span className="text-xs font-normal text-text-muted" role="status">
+                {t(`settings.language_${selectedLocale.availability}_help`)}{' '}
+                Stored locally; this does not change runtime Profile policy.
+              </span>
             </label>
           </CardContent>
         </Card>
