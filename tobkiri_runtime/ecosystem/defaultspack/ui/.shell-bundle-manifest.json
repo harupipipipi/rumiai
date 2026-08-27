@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b42ece2e05b7e89452dd0b2bcef89f6dec5a148be13a2554686f4a0a7edbf8c6",
+    "digest": "257950b85abb76f372ee177c0217768b2d387201deb5c020b71ef7d882482ad8",
     "entries": [
       {
         "path": "index.html",
@@ -195,8 +195,8 @@
       },
       {
         "path": "src/ambient/AmbientTriggerPanel.tsx",
-        "size": 108179,
-        "sha256": "d5f5234da1857945ad8f9922ead6071304c371ecc005f31c9cd0228a9ad78b8c"
+        "size": 103392,
+        "sha256": "ff9091873aab7a384db1b2e691488c3868f5769ae20af216db0afdf0fd6d4842"
       },
       {
         "path": "src/ambient/AmbientTriggerStatusIcon.tsx",
@@ -215,8 +215,8 @@
       },
       {
         "path": "src/ambient/ambientApprovalBoundary.test.ts",
-        "size": 20952,
-        "sha256": "d34c5116bc7ba63c1324454206a7438fca63c3f124345cc033cf46fc798d3a3f"
+        "size": 20586,
+        "sha256": "b918b86ad421152dbd77d1de881f76aecf1d7730bac4656e65a9b78b4729ae9d"
       },
       {
         "path": "src/ambient/ambientConversationCompletion.ts",
@@ -315,8 +315,8 @@
       },
       {
         "path": "src/ambient/useAmbientHandTracker.ts",
-        "size": 2581,
-        "sha256": "e2f1c4cd744513690a152bad695e3f77eeada81290c95ce81ddd5b70442278e6"
+        "size": 2481,
+        "sha256": "d9f29089b7d1116803d15654be3c46ba3a281863ab8957e1fba4c16941b37a68"
       },
       {
         "path": "src/ambient/useAmbientRouting.ts",
@@ -1851,7 +1851,7 @@
     ]
   },
   "bundle": {
-    "digest": "6452bbd7184eb2fcaf39237cc3aae2ee663a0e8734cab7ac726958b6c71c92ff",
+    "digest": "c8d8aeb0adc89ea333ac37f5ae1eee1a920095f903f3267e872cab623805bad0",
     "entries": [
       {
         "path": "shell-app.css",
@@ -1865,8 +1865,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2208068,
-        "sha256": "3ebb1666ccf5ea40cdb7105b68dbfa5b8a7222cef3cd8d5b570da61f8b67ec25"
+        "size": 2205873,
+        "sha256": "82bcd279242bcad00f268e65acc66e9fbd3736437b8a79e1958ef0dfad02f00b"
       },
       {
         "path": "shell-rolldown-runtime.js",
