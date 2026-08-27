@@ -1,18 +1,18 @@
 {
-  "artifact_set_digest": "sha256:153a19ff9728c44aa82100a9d6f38a0ee908d9872f3f96d85a30ec73cd4962ca",
+  "artifact_set_digest": "sha256:ce9788357dac82498fbf6f712efadcdb47958147965994efb5d09b59c9e2cfc8",
   "artifacts": [
     {
-      "digest": "sha256:4ac4723072cda21360a1e9372631d76ee76a0736a096afe395812ebf8cdc478e",
+      "digest": "sha256:be1f5089551bbc3967310f6fde9ebef09d4dfc4933ecccaae3284f52ba382833",
       "path": "contracts.v4.json",
       "role": "contract_catalog"
     },
     {
-      "digest": "sha256:a7a44cb84a8785541cac8d4bb51ad3d28d3d65bc2b26672aa260eb8f4359f81b",
+      "digest": "sha256:37d15f011e796a33585e9e8ee3a904fe7923d0f39489b12c75994c77ae05e6e7",
       "path": "executables.v4.json",
       "role": "sidecar"
     },
     {
-      "digest": "sha256:b06e0cb38447a28ee65af0359255856304abb83f6231679e06634eb9fd2c6c4d",
+      "digest": "sha256:75fd09116e6973e236065c7843a49aa617c9f8710cb1adf217d9351759df51ba",
       "path": "pack.v4.json",
       "role": "canonical_manifest"
     },
@@ -22,7 +22,7 @@
       "role": "runtime"
     },
     {
-      "digest": "sha256:cf339a1e99524d37d5bec3b3ab721aef8063f532b7873c0bafc253f4cabc780f",
+      "digest": "sha256:6d32152810b1682545f6066e6133942b959de6ef07998162ba7137839b1b06d2",
       "path": "runtime/catalog.py",
       "role": "runtime"
     }
@@ -30,8 +30,8 @@
   "index_api_version": "io.tobkiri.pack-artifact-index.v4",
   "integrity_seal": {
     "algorithm": "sha256-canonical-v1",
-    "signed_digest": "sha256:6101a674e18e832c04914d3629e69ec3976ff483dd5d1913fdbdf43050cfdcf9"
+    "signed_digest": "sha256:7587754397cfcf639bac9eec3c2797d8615e596dc7b6af0ba660143434ad11eb"
   },
   "pack_id": "rumi_model_catalog_pack",
-  "source_identity": "sha256:958bfa5daf78bdf17a1995ffd5ddf0b69b4ddbe6ed80259c2b0968b56fda760c"
+  "source_identity": "sha256:9eb95241a7034f7ab9a5e539988ba06e9527f989ccefb93e3e46f5f276a67d11"
 }
