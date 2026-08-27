@@ -6,7 +6,9 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import error, ok
+from domain.agent_runtime.context_snapshot import build_run_context_snapshot
 from domain.context_engine.compact_packet import build_compact_packet
+from domain.context_engine.validation import validate_compact_packet
 from domain.hooks.dispatcher import dispatch_hook
 
 
@@ -20,7 +22,40 @@ def _context_root():
     return root
 
 
+def _bool_value(value):
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _merge_run_snapshot(input_data, context=None):
+    if not _bool_value(input_data.get("include_run_snapshot")):
+        return input_data
+    run_id = str(input_data.get("run_id") or "").strip()
+    if not run_id:
+        return input_data
+    snapshot = build_run_context_snapshot(
+        run_id,
+        context=context if isinstance(context, dict) else {},
+        require_context_match=True,
+    )
+    merged = dict(input_data)
+    for key in (
+        "progress",
+        "changed_files",
+        "tool_results",
+        "terminal_results",
+        "critical_context",
+        "next_steps",
+    ):
+        if not merged.get(key) and snapshot.get(key):
+            merged[key] = snapshot[key]
+    return merged
+
+
 def run(input_data, context=None):
+    context = context or {}
+    input_data = _merge_run_snapshot(input_data or {}, context)
     dispatch_hook("before_compaction", {"input": input_data, "context": context or {}})
     summary = input_data.get("summary")
     if summary is None:
@@ -53,6 +88,10 @@ def run(input_data, context=None):
         next_steps=input_data.get("next_steps", []),
         critical_context=input_data.get("critical_context", []),
     )
+    validation = validate_compact_packet(payload)
+    if not validation.valid:
+        return error("; ".join(validation.errors), code="INVALID_CONTEXT_PACKET")
+    payload["validation"] = validation.to_dict()
     compact_id = payload["compact_id"]
     path = _context_root() / (compact_id + ".json")
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

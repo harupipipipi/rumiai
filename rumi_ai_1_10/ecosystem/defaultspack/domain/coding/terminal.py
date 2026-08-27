@@ -17,6 +17,7 @@ MAX_OUTPUT_BYTES = 128 * 1024
 ENV_ALLOWLIST = {"PATH", "HOME", "USER", "USERNAME", "USERPROFILE", "TEMP", "TMP", "SYSTEMROOT"}
 SNAPSHOT_DIR = ".rumi_snapshots"
 COMMAND_LOG_FILE = "terminal_log.jsonl"
+TERMINAL_OUTPUT_DIR = "terminal_outputs"
 
 
 class Terminal:
@@ -34,6 +35,9 @@ class Terminal:
 
     def _command_log_path(self):
         return os.path.join(self._root, SNAPSHOT_DIR, COMMAND_LOG_FILE)
+
+    def _terminal_output_dir(self):
+        return os.path.join(self._root, SNAPSHOT_DIR, TERMINAL_OUTPUT_DIR)
 
     def _record_command(self, record):
         entry = dict(record)
@@ -101,6 +105,39 @@ class Terminal:
         if len(raw) <= MAX_OUTPUT_BYTES:
             return str(text or "")
         return raw[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace") + "\n[output truncated]\n"
+
+    def _captured_output(self, text, stream_name):
+        full_text = str(text or "")
+        raw = full_text.encode("utf-8", errors="replace")
+        result = {
+            "text": self._truncate_output(full_text),
+            "truncated": len(raw) > MAX_OUTPUT_BYTES,
+        }
+        if not result["truncated"]:
+            return result
+
+        try:
+            output_dir = self._terminal_output_dir()
+            os.makedirs(output_dir, exist_ok=True)
+            artifact_path = os.path.join(
+                output_dir,
+                f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{uuid.uuid4().hex}.{stream_name}.txt",
+            )
+            with open(artifact_path, "w", encoding="utf-8", errors="replace") as handle:
+                handle.write(full_text)
+            result["artifact_path"] = artifact_path
+        except Exception:
+            pass
+        return result
+
+    def _attach_captured_outputs(self, result, stdout, stderr):
+        for stream_name, text in (("stdout", stdout), ("stderr", stderr)):
+            captured = self._captured_output(text, stream_name)
+            result[stream_name] = captured["text"]
+            result[f"{stream_name}_truncated"] = captured["truncated"]
+            if captured.get("artifact_path"):
+                result[f"{stream_name}_artifact_path"] = captured["artifact_path"]
+        return result
 
     def execute(self, command, cwd=None, timeout=30, env=None, approved=False):
         """コマンドを実行する。medium/high risk は approved が必要。"""
@@ -179,9 +216,8 @@ class Terminal:
             "risk_reasons": risk.get("risk_reasons", [risk.get("reason", "command_execution")]),
             "approval_required": False,
             "exit_code": completed.returncode,
-            "stdout": self._truncate_output(completed.stdout),
-            "stderr": self._truncate_output(completed.stderr),
         }
+        self._attach_captured_outputs(result, completed.stdout, completed.stderr)
         record.update({
             "approval_required": False,
             "executed": True,
@@ -286,10 +322,9 @@ class Terminal:
             "risk_reasons": risk.get("risk_reasons", [risk.get("reason", "command_execution")]),
             "started": True,
             "exit_code": process.returncode,
-            "stdout": self._truncate_output(stdout),
-            "stderr": self._truncate_output(stderr),
             "timed_out": timed_out,
         }
+        self._attach_captured_outputs(result, stdout, stderr)
         record.update({
             "approval_required": False,
             "executed": True,

@@ -7,6 +7,7 @@ import re
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import error, ok
+from domain.context_engine.validation import validate_compact_packet
 
 
 def _pack_root():
@@ -28,5 +29,9 @@ def run(input_data, context=None):
     if not path.is_file():
         return error("Compact context not found", code="NOT_FOUND")
     payload = json.loads(path.read_text(encoding="utf-8"))
+    validation = validate_compact_packet(payload)
+    if not validation.valid:
+        return error("Stored compact context is invalid: " + "; ".join(validation.errors), code="INVALID_CONTEXT_PACKET")
+    payload["validation"] = validation.to_dict()
     payload["restored"] = True
     return ok(payload)

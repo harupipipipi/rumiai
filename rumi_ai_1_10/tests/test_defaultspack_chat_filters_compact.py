@@ -36,6 +36,53 @@ def _add_messages(store, conversation_id, count):
     return messages
 
 
+def _add_tool_pair(store, conversation_id, call_id="call_1"):
+    call = store.add_message(
+        conversation_id,
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_call",
+                    "id": call_id,
+                    "name": "search_docs",
+                    "arguments": "{}",
+                }
+            ],
+        },
+    )
+    result = store.add_message(
+        conversation_id,
+        {
+            "role": "tool",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_call_id": call_id,
+                    "name": "search_docs",
+                    "content": "ok",
+                }
+            ],
+        },
+    )
+    return call, result
+
+
+class _ScriptedAI:
+    def __init__(self, *texts):
+        self.texts = list(texts)
+        self.requests = []
+
+    def __call__(self, name, params):
+        assert name == "defaults.ai.complete"
+        self.requests.append(params)
+        index = min(len(self.requests) - 1, len(self.texts) - 1)
+        return {
+            "status": "ok",
+            "data": {"content": [{"type": "text", "text": self.texts[index]}]},
+        }
+
+
 def test_chat_store_filters_and_sorts_pinned_conversations(tmp_path, monkeypatch):
     from blocks.chat.list_conversations import run as list_conversations
 
@@ -188,6 +235,123 @@ def test_chat_compact_protects_last_messages(tmp_path, monkeypatch):
     assert [message["id"] for message in updated["messages"][-4:]] == protected_ids
     assert len(updated["messages"]) == 5
     assert updated["messages"][0]["metadata"]["compact"] is True
+    ChatStore._instance = None
+
+
+def test_chat_compact_expands_explicit_range_to_keep_tool_pairs(tmp_path, monkeypatch):
+    from blocks.chat.compact import run as compact
+    from domain.chat.store import ChatStore
+
+    store = _reset_chat_store(monkeypatch, tmp_path)
+    conversation = store.create_conversation(model="stub/default")
+    call, result = _add_tool_pair(store, conversation["id"])
+
+    compacted = compact(
+        {
+            "conversation_id": conversation["id"],
+            "start_message_id": result["id"],
+            "end_message_id": result["id"],
+            "protect_last_messages": 0,
+        },
+        {},
+    )
+
+    assert compacted["status"] == "ok"
+    data = compacted["data"]
+    assert data["deleted_message_ids"] == [call["id"], result["id"]]
+    summary = data["summary_message"]
+    assert summary["metadata"]["original_message_ids"] == [call["id"], result["id"]]
+    ChatStore._instance = None
+
+
+def test_oldest_compact_keeps_tool_pair_when_result_is_protected(tmp_path, monkeypatch):
+    from blocks.chat._compact_helpers import select_oldest_safe_segment
+    from domain.chat.store import ChatStore
+
+    store = _reset_chat_store(monkeypatch, tmp_path)
+    conversation = store.create_conversation(model="stub/default")
+    old_messages = _add_messages(store, conversation["id"], 8)
+    call, result = _add_tool_pair(store, conversation["id"], call_id="call_protected")
+    tail = store.add_message(conversation["id"], {"role": "user", "content": "fresh tail"})
+    conversation = ChatStore().get_conversation(conversation["id"])
+
+    segment, err = select_oldest_safe_segment(conversation["messages"], protect_last_messages=2)
+
+    assert err is None
+    assert segment["end_id"] == old_messages[-1]["id"]
+    assert call["id"] not in segment["original_message_ids"]
+    assert result["id"] not in segment["original_message_ids"]
+    assert tail["id"] not in segment["original_message_ids"]
+    ChatStore._instance = None
+
+
+def test_chat_compact_rejects_explicit_range_that_would_split_protected_tool_pair(tmp_path, monkeypatch):
+    from blocks.chat.compact import run as compact
+    from domain.chat.store import ChatStore
+
+    store = _reset_chat_store(monkeypatch, tmp_path)
+    conversation = store.create_conversation(model="stub/default")
+    call, result = _add_tool_pair(store, conversation["id"], call_id="call_protected")
+
+    compacted = compact(
+        {
+            "conversation_id": conversation["id"],
+            "start_message_id": call["id"],
+            "end_message_id": call["id"],
+            "protect_last_messages": 1,
+        },
+        {},
+    )
+
+    assert compacted["status"] == "ok"
+    assert compacted["data"]["deleted_message_ids"] == []
+    assert compacted["data"]["message"] == "Selected range cannot be compacted safely"
+    messages = ChatStore().get_conversation(conversation["id"])["messages"]
+    assert [message["id"] for message in messages] == [call["id"], result["id"]]
+    ChatStore._instance = None
+
+
+def test_history_compact_ai_segment_expands_to_keep_tool_pair(tmp_path, monkeypatch):
+    from blocks.chat.history.compact import run as compact_history
+    from domain.chat.store import ChatStore
+
+    store = _reset_chat_store(monkeypatch, tmp_path)
+    conversation = store.create_conversation(model="stub/default")
+    call, result = _add_tool_pair(store, conversation["id"], call_id="call_ai_range")
+    store.add_message(conversation["id"], {"role": "user", "content": "tail " + ("x" * 160)})
+    scripted = _ScriptedAI(
+        json.dumps(
+            [
+                {
+                    "start_id": result["id"],
+                    "end_id": result["id"],
+                    "reason": "tool result only",
+                    "summary_preview": "unsafe half range",
+                }
+            ]
+        )
+    )
+
+    compacted = compact_history(
+        {"conversation_id": conversation["id"], "dry_run": True},
+        {"call_handler": scripted},
+    )
+
+    assert compacted["status"] == "ok"
+    assert len(scripted.requests) == 1
+    request = scripted.requests[0]
+    assert request["model"] == "stub/default"
+    assert request["tools"] == []
+    segments = compacted["data"]["trim_plan"]["segments"]
+    assert segments == [
+        {
+            "start_id": call["id"],
+            "end_id": result["id"],
+            "reason": "tool result only",
+            "summary_preview": "unsafe half range",
+        }
+    ]
+    assert ChatStore().get_conversation(conversation["id"])["messages"][1]["id"] == result["id"]
     ChatStore._instance = None
 
 

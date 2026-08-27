@@ -14,6 +14,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 
 from blocks.chat._prompt_helpers import build_text_from_content
+from domain.chat.tool_pairing import normalize_compaction_range as normalize_compaction_range  # noqa: F401
 
 
 def _gen_id():

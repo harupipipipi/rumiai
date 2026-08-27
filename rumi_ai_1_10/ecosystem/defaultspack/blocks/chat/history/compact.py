@@ -28,6 +28,7 @@ from domain.chat.message_converter import convert_to_standard
 from domain.chat.history_editor import (
     replace_range_with_message,
     identify_compactable_segments,
+    normalize_compaction_range,
     _build_text_from_content,
 )
 from blocks.chat.send import _ai_direct_complete
@@ -172,22 +173,35 @@ def run(input_data, context):
 
     # --- Step 3: merge AI segments with heuristic segments ---
     msg_id_set = {m["id"] for m in messages}
+    msg_index = {m.get("id", ""): idx for idx, m in enumerate(messages)}
     validated_segments = []
     seen_ranges = set()
 
+    def add_segment_if_safe(seg):
+        start_idx = msg_index.get(seg["start_id"])
+        end_idx = msg_index.get(seg["end_id"])
+        if start_idx is None or end_idx is None:
+            return
+        normalized = normalize_compaction_range(messages, start_idx, end_idx)
+        if normalized is None:
+            return
+        normalized_start, normalized_end = normalized
+        normalized_seg = dict(seg)
+        normalized_seg["start_id"] = messages[normalized_start]["id"]
+        normalized_seg["end_id"] = messages[normalized_end]["id"]
+        key = (normalized_seg["start_id"], normalized_seg["end_id"])
+        if key in seen_ranges:
+            return
+        seen_ranges.add(key)
+        validated_segments.append(normalized_seg)
+
     for seg in ai_segments:
         if seg["start_id"] in msg_id_set and seg["end_id"] in msg_id_set:
-            key = (seg["start_id"], seg["end_id"])
-            if key not in seen_ranges:
-                seen_ranges.add(key)
-                validated_segments.append(seg)
+            add_segment_if_safe(seg)
 
     for seg in heuristic_segments:
-        key = (seg["start_id"], seg["end_id"])
-        if key not in seen_ranges:
-            if seg["start_id"] in msg_id_set and seg["end_id"] in msg_id_set:
-                seen_ranges.add(key)
-                validated_segments.append(seg)
+        if seg["start_id"] in msg_id_set and seg["end_id"] in msg_id_set:
+            add_segment_if_safe(seg)
 
     if not validated_segments:
         return ok({
@@ -207,10 +221,6 @@ def run(input_data, context):
         })
 
     # --- Step 4: sort segments by position (last first) to preserve indices ---
-    msg_index = {}
-    for idx, msg in enumerate(messages):
-        msg_index[msg.get("id", "")] = idx
-
     def segment_sort_key(seg):
         return msg_index.get(seg["start_id"], 0)
 
