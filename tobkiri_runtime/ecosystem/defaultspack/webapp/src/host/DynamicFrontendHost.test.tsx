@@ -7,9 +7,12 @@ import {
   ISOLATED_FRONTEND_SANDBOX,
   ISOLATED_FRAME_RESPONSE_TARGET_ORIGIN,
   contributionsForRoute,
+  frontendActionErrorCode,
   frontendActionErrorMessage,
   isolatedFrontendFrameUrl,
   parseIsolatedCapabilityRequest,
+  parseIsolatedDirtyState,
+  parseIsolatedNavigationRequest,
   quarantineFrontendContribution,
   resetFrontendHostQuarantineForTests,
   synchronizeFrontendHostQuarantine,
@@ -130,6 +133,17 @@ test("isolated contribution URLs are owner-bound and receive an opaque frame san
     ),
     null,
   );
+  assert.equal(
+    parseIsolatedNavigationRequest(
+      {
+        type: "rumi.navigation.request",
+        nonce: "nonce-1",
+        href: ["", "api", "profile", "delete"].join("/"),
+      },
+      "https://tobkiri.local",
+    ),
+    null,
+  );
 });
 
 test("isolated frame RPC accepts only a bounded contract request envelope", () => {
@@ -160,6 +174,31 @@ test("isolated frame RPC accepts only a bounded contract request envelope", () =
   );
 });
 
+test("isolated editor navigation and dirty state stay nonce-bound and same-origin", () => {
+  assert.deepEqual(
+    parseIsolatedNavigationRequest(
+      { type: "rumi.navigation.request", nonce: "nonce-1", href: "/chat?id=1" },
+      "https://tobkiri.local",
+    ),
+    { nonce: "nonce-1", href: "/chat?id=1" },
+  );
+  assert.equal(
+    parseIsolatedNavigationRequest(
+      { type: "rumi.navigation.request", nonce: "nonce-1", href: "https://example.com" },
+      "https://tobkiri.local",
+    ),
+    null,
+  );
+  assert.deepEqual(
+    parseIsolatedDirtyState({ type: "rumi.editor.dirty-state", nonce: "nonce-1", dirty: true }),
+    { nonce: "nonce-1", dirty: true },
+  );
+  assert.equal(
+    parseIsolatedDirtyState({ type: "rumi.editor.dirty-state", nonce: "nonce-1", dirty: "yes" }),
+    null,
+  );
+});
+
 test("catalog synchronization releases obsolete contribution quarantines", () => {
   resetFrontendHostQuarantineForTests();
   const failed = contribution();
@@ -183,4 +222,6 @@ test("capability action errors preserve stale-catalog recovery guidance", () => 
     frontendActionErrorMessage(new Error("Action denied")),
     "Action denied",
   );
+  assert.equal(frontendActionErrorCode({ code: "PROMPT_WRITE_CONFLICT" }), "PROMPT_WRITE_CONFLICT");
+  assert.equal(frontendActionErrorCode({ code: "unsafe-code!" }), null);
 });

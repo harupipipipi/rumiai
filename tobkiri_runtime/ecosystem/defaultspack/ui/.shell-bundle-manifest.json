@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b42ece2e05b7e89452dd0b2bcef89f6dec5a148be13a2554686f4a0a7edbf8c6",
+    "digest": "3df1fc0aa081353497b88d35c70f4e221e4563a54e853d4d29211787f66b86b7",
     "entries": [
       {
         "path": "index.html",
@@ -1040,13 +1040,13 @@
       },
       {
         "path": "src/host/DynamicFrontendHost.test.tsx",
-        "size": 5477,
-        "sha256": "69f1eeb801741ded981224d76b9ec31434be0b2ce950e1159d2bf6e7a5c69dd8"
+        "size": 6794,
+        "sha256": "3c7a9cf334f42335ce999e44baf079b83829c18e69398516e8d00e83baa74d7b"
       },
       {
         "path": "src/host/DynamicFrontendHost.tsx",
-        "size": 14240,
-        "sha256": "64c2f67feac56c6012ec0f22d96840790ce83823ea8bf5d8ac2ebb0dae4d2100"
+        "size": 16648,
+        "sha256": "d990e1baa74669b16ab773cfdd23274a8c173f3d494ef734604e10400e10dfd8"
       },
       {
         "path": "src/host/HostBootstrap.test.tsx",
@@ -1609,6 +1609,11 @@
         "sha256": "9f1dcf2bc5baafa1921e2aad51f4cb46de802a2ac9524f6f58698ced09200c89"
       },
       {
+        "path": "src/pages/PromptStudio.test.ts",
+        "size": 6273,
+        "sha256": "94ff3f7db0a1a9a516ab1c0a8d89e69470580f713f1f173a7eaa85d9a93c2258"
+      },
+      {
         "path": "src/pages/UiPrecisionComparator.test.tsx",
         "size": 24728,
         "sha256": "fa72390969fe6a6298ef6b210c4a78456bc4d895c98e57a6a934946e7a7b4ad3"
@@ -1851,7 +1856,7 @@
     ]
   },
   "bundle": {
-    "digest": "6452bbd7184eb2fcaf39237cc3aae2ee663a0e8734cab7ac726958b6c71c92ff",
+    "digest": "a0d222d82fc7e3e94fda2a1c6590a562722a2927568ca9355f700a856aba369c",
     "entries": [
       {
         "path": "shell-app.css",
@@ -1860,8 +1865,8 @@
       },
       {
         "path": "shell-app.js",
-        "size": 22380,
-        "sha256": "d2ffbc4b595c4afcd363316e939d272f227b5b394ad8110667428eeae1163ed4"
+        "size": 23397,
+        "sha256": "dc9daab7cd6f863fe5cd970c5c85e0d4aa3e07be887233025fdca14150237940"
       },
       {
         "path": "shell-defaultspack-app.js",
