@@ -289,6 +289,7 @@ test('dynamic catalog and capability invocation use the exact canonical v4 route
   };
 
   const catalog = await fetchFrontendCatalog();
+  assert.equal(lastFetchInit?.cache, 'no-store');
   const result = await invokeFrontendCapability({
     profileId: catalog.profile_id,
     planHash: catalog.plan_hash,

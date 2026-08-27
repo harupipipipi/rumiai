@@ -796,6 +796,54 @@ def test_server_closes_server_captured_refresh_session_on_stop(
     assert server._dispatch_session_owned_by_server is False
 
 
+def test_server_refresh_reuses_exact_packvm_lifecycle_for_backend_capture(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A refresh must not silently construct an unavailable second provisioner."""
+
+    import core_runtime.authority.v4 as authority_v4
+    import core_runtime.bootstrap.production_v4 as production_v4
+    import core_runtime.bootstrap.profile_capture as profile_capture
+
+    class Lifecycle:
+        def readiness_snapshot(self) -> dict[str, object]:
+            return {"ready": True}
+
+        def production_backend_registration(self) -> object:
+            return object()
+
+    lifecycle = Lifecycle()
+    captured = _RefreshDispatch("captured")
+    server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
+        dispatch_session=_RefreshDispatch("initial"),  # type: ignore[arg-type]
+        packvm_lifecycle=lifecycle,  # type: ignore[arg-type]
+    )
+    generation = _prepare_refresh_race(server, monkeypatch)
+    monkeypatch.setattr(profile_capture, "capture_default_profile", lambda: object())
+    monkeypatch.setattr(profile_capture, "runtime_user_data_root", lambda: tmp_path)
+    monkeypatch.setattr(authority_v4, "AuthorityStore", lambda _path: object())
+    seen: dict[str, object] = {}
+
+    def capture(*_args: object, **kwargs: object) -> _RefreshDispatch:
+        seen.update(kwargs)
+        return captured
+
+    monkeypatch.setattr(production_v4, "capture_production_dispatch", capture)
+
+    try:
+        server._refresh_runtime_capture(None, lifecycle_generation=generation)
+    finally:
+        server.stop()
+
+    assert seen["packvm_provisioner"] is lifecycle
+    readiness = seen["packvm_readiness_reader"]
+    assert callable(readiness)
+    assert readiness() == {"ready": True}
+
+
 def test_older_same_generation_refresh_cannot_replace_newer_publish(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

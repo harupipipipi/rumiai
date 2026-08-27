@@ -6,7 +6,7 @@
     },
     {
       "path": "runtime/bridge.py",
-      "sha256": "sha256:92e4d5adfaa75ca8b3ca7756f3e64868dba9db6a788595ed94c9211d842865a1"
+      "sha256": "sha256:27c6d726d1c1db4bb7a67565e4d56c9bddaab875d30824f330e15ec5c3e7e6b0"
     }
   ],
   "version": "rumi.pack-artifacts.v1"

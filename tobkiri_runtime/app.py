@@ -17,6 +17,16 @@ from collections.abc import Sequence
 from core_runtime.bootstrap.runtime import Kernel
 
 
+def prepare_for_sealed_dispatch(scope: object) -> None:
+    """Capture the Launcher-issued PackVM bundle identity before startup."""
+
+    from core_runtime.packaged_application_bundle import (
+        install_packvm_bundle_binding_from_sealed_scope,
+    )
+
+    install_packvm_bundle_binding_from_sealed_scope(scope, __file__)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Tobkiri Pack v4 Host")
     parser.add_argument(

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import http.cookiejar
 import json
+import os
 import socket
+import stat
 import threading
 import urllib.error
 import urllib.request
@@ -20,7 +22,8 @@ from core_runtime.authority.v4 import AuthorityStoreError
 from core_runtime.app_lifecycle_manager import get_runtime_readiness
 from core_runtime.bootstrap.runtime import Kernel
 from core_runtime.bootstrap.profile_capture import capture_default_profile
-from core_runtime.di_container import get_container
+from core_runtime.di_container import get_container, reset_container
+from core_runtime.hmac_key_manager import get_hmac_key_manager
 from core_runtime.panel_auth import PanelAuthManager, reset_panel_auth_manager_for_tests
 from core_runtime.pack_api_server import PackAPIServer
 from tobkiri_host.broker import RequestBroker
@@ -34,6 +37,7 @@ def _free_port() -> int:
 
 
 def test_superseded_packaged_artifact_starts_ui_ready_reconfirmation(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A valid predecessor transition serves setup instead of wedging startup."""
@@ -47,6 +51,7 @@ def test_superseded_packaged_artifact_starts_ui_ready_reconfirmation(
         "active Profile Shell artifact identity was superseded by the verified "
         "packaged release; explicit reconfirmation is required"
     )
+    monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
 
     class SetupServer:
         port = 8765
@@ -89,6 +94,152 @@ def test_superseded_packaged_artifact_starts_ui_ready_reconfirmation(
         }
     finally:
         kernel.shutdown()
+
+
+def test_kernel_bootstrap_publishes_and_reuses_desktop_api_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fresh and restarted Kernels publish the authoritative local token."""
+
+    import core_runtime.bootstrap.runtime as runtime_bootstrap
+
+    class RunningServer:
+        port = 8765
+        _contract_routes: tuple[object, ...] = ()
+
+        @staticmethod
+        def is_running() -> bool:
+            return True
+
+        @staticmethod
+        def stop() -> None:
+            return None
+
+    user_data = tmp_path / "user_data"
+    token_cache = tmp_path / ".desktop_api_token"
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
+    monkeypatch.setattr(runtime_bootstrap, "active_default_profile_exists", lambda: False)
+    monkeypatch.setattr(runtime_bootstrap, "resolve_runtime_port", lambda: 8765)
+    monkeypatch.setattr(
+        runtime_bootstrap,
+        "initialize_pack_api_server",
+        lambda **_kwargs: RunningServer(),
+    )
+
+    reset_container()
+    first_kernel = Kernel()
+    try:
+        first_kernel.run_startup_until(first_kernel.API_INIT_STEP)
+        first_token = get_hmac_key_manager().get_active_key()
+        assert (user_data / "hmac_keys.json").is_file()
+        assert token_cache.read_text(encoding="utf-8") == first_token
+        if os.name != "nt":
+            assert stat.S_IMODE(token_cache.stat().st_mode) == 0o600
+    finally:
+        first_kernel.shutdown()
+
+    reset_container()
+    second_kernel = Kernel()
+    try:
+        second_kernel.run_startup_until(second_kernel.API_INIT_STEP)
+        restarted_token = get_hmac_key_manager().get_active_key()
+        assert restarted_token == first_token
+        assert token_cache.read_text(encoding="utf-8") == restarted_token
+        assert not tuple(tmp_path.glob(".desktop_api_token.*.tmp"))
+    finally:
+        second_kernel.shutdown()
+
+
+def test_kernel_bootstrap_refreshes_desktop_api_token_after_hmac_rotation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A subsequent bootstrap replaces the cache after the HMAC token rotates."""
+
+    import core_runtime.bootstrap.runtime as runtime_bootstrap
+
+    class RunningServer:
+        port = 8765
+        _contract_routes: tuple[object, ...] = ()
+
+        @staticmethod
+        def is_running() -> bool:
+            return True
+
+        @staticmethod
+        def stop() -> None:
+            return None
+
+    user_data = tmp_path / "user_data"
+    token_cache = tmp_path / ".desktop_api_token"
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
+    monkeypatch.setattr(runtime_bootstrap, "active_default_profile_exists", lambda: False)
+    monkeypatch.setattr(runtime_bootstrap, "resolve_runtime_port", lambda: 8765)
+    monkeypatch.setattr(
+        runtime_bootstrap,
+        "initialize_pack_api_server",
+        lambda **_kwargs: RunningServer(),
+    )
+
+    reset_container()
+    first_kernel = Kernel()
+    try:
+        first_kernel.run_startup_until(first_kernel.API_INIT_STEP)
+        original_token = token_cache.read_text(encoding="utf-8")
+        rotated_token = get_hmac_key_manager().rotate()
+        assert rotated_token != original_token
+        assert token_cache.read_text(encoding="utf-8") == original_token
+    finally:
+        first_kernel.shutdown()
+
+    reset_container()
+    refreshed_kernel = Kernel()
+    try:
+        refreshed_kernel.run_startup_until(refreshed_kernel.API_INIT_STEP)
+        assert token_cache.read_text(encoding="utf-8") == rotated_token
+    finally:
+        refreshed_kernel.shutdown()
+
+
+def test_kernel_bootstrap_fails_closed_when_token_cache_cannot_be_published(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Host HTTP surface must not start without the Launcher token cache."""
+
+    import core_runtime.bootstrap.runtime as runtime_bootstrap
+
+    user_data = tmp_path / "user_data"
+    server_started = False
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
+    monkeypatch.setattr(
+        runtime_bootstrap,
+        "active_default_profile_exists",
+        lambda: False,
+    )
+
+    def reject_cache(_user_data: Path, _api_token: str) -> Path:
+        raise OSError("simulated token cache failure")
+
+    def start_server(**_kwargs: object) -> object:
+        nonlocal server_started
+        server_started = True
+        raise AssertionError("server must not start")
+
+    monkeypatch.setattr(
+        runtime_bootstrap,
+        "_persist_desktop_api_token_cache",
+        reject_cache,
+    )
+    monkeypatch.setattr(runtime_bootstrap, "initialize_pack_api_server", start_server)
+
+    reset_container()
+    with pytest.raises(OSError, match="simulated token cache failure"):
+        Kernel().run_startup_until(Kernel.API_INIT_STEP)
+
+    assert server_started is False
+    assert not (tmp_path / ".desktop_api_token").exists()
 
 
 def test_public_kernel_first_start_requires_confirmed_defaults_transaction(

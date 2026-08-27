@@ -12,6 +12,17 @@ from .models import (
 )
 from .authority_v4 import AuthorityV4Adapter
 from .backends import production_backend_registry
+from .macos_vz_supervisor import (
+    MacOSVZAgentIdentity,
+    MacOSVZDomainAllocation,
+    MacOSVZDomainAllocator,
+    MacOSVZHelperIdentity,
+    MacOSVZLaunchAssets,
+    MacOSVZRuntime,
+    MacOSVZSupervisorDriver,
+    MacOSVZSupervisorTransport,
+    MacOSVZTransportFactory,
+)
 from .extension_sdk import (
     CapabilityProviderRegistration,
     HostExtensionRegistration,
@@ -36,6 +47,15 @@ __all__ = [
     "CapabilityProviderRegistration",
     "HostExtensionRegistration",
     "HostExtensionSDK",
+    "MacOSVZAgentIdentity",
+    "MacOSVZDomainAllocation",
+    "MacOSVZDomainAllocator",
+    "MacOSVZHelperIdentity",
+    "MacOSVZLaunchAssets",
+    "MacOSVZRuntime",
+    "MacOSVZSupervisorDriver",
+    "MacOSVZSupervisorTransport",
+    "MacOSVZTransportFactory",
     "InvocationFrame",
     "HostV4Composition",
     "OpaqueAuthorityRef",

@@ -6,7 +6,7 @@
     },
     {
       "path": "runtime/router.py",
-      "sha256": "sha256:e0d076c92b7d45707e7ef90b74c922f1461aeec09b1d9eb429f351a0c12a21fa"
+      "sha256": "sha256:99fe1e1a126b8c0df54edb044461ecaf5efe33c55948e722c5216639cc230148"
     }
   ],
   "version": "rumi.pack-artifacts.v1"

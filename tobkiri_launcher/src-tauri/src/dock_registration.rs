@@ -145,6 +145,24 @@ fn defaultspack_window_url_with_local_auth(port: u16, api_token: &str) -> AnyRes
     Ok(url.to_string())
 }
 
+fn add_defaultspack_bootstrap_code(mut url: Url, code: &str) -> AnyResult<Url> {
+    if code.is_empty() {
+        bail!("Defaultspack panel bootstrap code must not be empty");
+    }
+    if url.query_pairs().any(|(key, _)| key == "code") {
+        bail!("Defaultspack URL already contains a panel bootstrap code");
+    }
+    url.set_fragment(None);
+    url.query_pairs_mut().append_pair("code", code);
+    Ok(url)
+}
+
+fn defaultspack_window_url_with_bootstrap_code(port: u16, code: &str) -> AnyResult<String> {
+    let url = Url::parse(&defaultspack_window_url(port))
+        .with_context(|| format!("invalid defaultspack window port: {port}"))?;
+    Ok(add_defaultspack_bootstrap_code(url, code)?.to_string())
+}
+
 fn defaultspack_window_url_with_path(authenticated_url: &str, path: &str) -> AnyResult<String> {
     let mut url = Url::parse(authenticated_url)
         .with_context(|| format!("invalid authenticated Defaultspack URL: {authenticated_url}"))?;
@@ -181,6 +199,7 @@ pub(crate) fn add_defaultspack_local_auth(config: &AppConfig, mut url: Url) -> A
 fn defaultspack_window_url_for_log(url: &str) -> String {
     match Url::parse(url) {
         Ok(mut parsed) => {
+            parsed.set_query(None);
             parsed.set_fragment(None);
             parsed.to_string()
         }
@@ -189,11 +208,7 @@ fn defaultspack_window_url_for_log(url: &str) -> String {
 }
 
 fn defaultspack_health_url(port: u16) -> String {
-    format!("http://127.0.0.1:{port}/api/health")
-}
-
-fn defaultspack_auth_probe_url(port: u16) -> String {
-    format!("http://127.0.0.1:{port}/api/integrations/secrets")
+    format!("http://127.0.0.1:{port}/health")
 }
 
 fn read_defaultspack_port(env_vars: &[(String, String)]) -> AnyResult<u16> {
@@ -207,59 +222,21 @@ fn read_defaultspack_port(env_vars: &[(String, String)]) -> AnyResult<u16> {
     Ok(DEFAULTSPACK_DEFAULT_PORT)
 }
 
-fn check_defaultspack_health_ready(client: &reqwest::blocking::Client, port: u16) -> bool {
-    client
-        .get(defaultspack_health_url(port))
-        .send()
-        .is_ok_and(|response| response.status().is_success())
-}
-
-fn check_defaultspack_auth_ready(
-    client: &reqwest::blocking::Client,
-    port: u16,
-    api_token: &str,
-) -> bool {
-    client
-        .get(defaultspack_auth_probe_url(port))
-        .bearer_auth(api_token)
-        .send()
-        .is_ok_and(|response| response.status().is_success())
-}
-
-fn check_defaultspack_http_ready(
-    client: &reqwest::blocking::Client,
-    port: u16,
-    api_token: &str,
-) -> bool {
-    check_defaultspack_health_ready(client, port)
-        && check_defaultspack_auth_ready(client, port, api_token)
-}
-
-fn defaultspack_health_client() -> AnyResult<reqwest::blocking::Client> {
-    reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(1))
-        .build()
-        .context("failed to build defaultspack health client")
-}
-
-fn is_defaultspack_http_ready(port: u16, api_token: &str) -> bool {
-    defaultspack_health_client()
-        .map(|client| check_defaultspack_http_ready(&client, port, api_token))
-        .unwrap_or(false)
+fn is_defaultspack_http_ready(port: u16, bootstrap_secret: &str) -> bool {
+    crate::health_check::check_authenticated_health(port, bootstrap_secret).unwrap_or(false)
 }
 
 fn wait_for_defaultspack_http_ready(
     port: u16,
-    api_token: &str,
+    bootstrap_secret: &str,
     manager: &DefaultspackManager,
 ) -> AnyResult<()> {
-    let client = defaultspack_health_client()?;
     let deadline = Instant::now() + DEFAULTSPACK_READY_TIMEOUT;
     let mut poll_count: u32 = 0;
 
     loop {
         poll_count += 1;
-        if check_defaultspack_http_ready(&client, port, api_token) {
+        if is_defaultspack_http_ready(port, bootstrap_secret) {
             info!(
                 "wait_for_defaultspack_http_ready: ready after {poll_count} polls on port {port}"
             );
@@ -313,11 +290,21 @@ pub(crate) fn register_defaultspack_dock_impl(config: &AppConfig) -> AnyResult<S
 }
 
 #[tauri::command]
-pub fn launch_defaultspack_desktop(
+pub async fn launch_defaultspack_desktop(
     app: AppHandle,
     config: tauri::State<'_, AppConfig>,
 ) -> Result<String, String> {
-    launch_defaultspack_desktop_window_impl(&app, config.inner()).map_err(|e| {
+    let app_handle = app.clone();
+    let app_config = config.inner().clone();
+    let launch_result = tauri::async_runtime::spawn_blocking(move || {
+        launch_defaultspack_desktop_window_impl(&app_handle, &app_config)
+    })
+    .await
+    .map_err(|error| {
+        error!("launch_defaultspack_desktop task failed: {error}");
+        "Defaultspack desktop could not be launched".to_string()
+    })?;
+    launch_result.map_err(|e| {
         error!("launch_defaultspack_desktop failed: {e:#}");
         format!("{e:#}")
     })
@@ -335,7 +322,12 @@ pub(crate) fn prepare_defaultspack_shell_runtime_url(
     app: &AppHandle,
     config: &AppConfig,
 ) -> AnyResult<String> {
-    with_defaultspack_launch_coordination(|| ensure_defaultspack_desktop_ready(app, config))
+    with_defaultspack_launch_coordination(|| {
+        let (port, bootstrap_secret) = ensure_defaultspack_desktop_ready(app, config)?;
+        let code = crate::request_panel_bootstrap_code_with_retry(port, &bootstrap_secret)
+            .context("failed to issue a Defaultspack shell bootstrap code")?;
+        defaultspack_window_url_with_bootstrap_code(port, &code)
+    })
 }
 
 /// Ensure the real Defaultspack listener is Launcher-owned and registered as
@@ -357,7 +349,10 @@ pub(crate) fn open_defaultspack_desktop_window_path_impl(
 ) -> AnyResult<String> {
     with_defaultspack_launch_coordination(|| {
         info!("open_defaultspack_desktop_window_path_impl: starting");
-        let authenticated_url = ensure_defaultspack_desktop_ready(app, config)?;
+        let (port, _) = ensure_defaultspack_desktop_ready(app, config)?;
+        let api_token = read_desktop_api_token_from_config(config)
+            .context("failed to read Viewer local auth token for Defaultspack window")?;
+        let authenticated_url = defaultspack_window_url_with_local_auth(port, &api_token)?;
         let url = defaultspack_window_url_with_path(&authenticated_url, path)?;
         open_defaultspack_tauri_window(app, &url)?;
         info!(
@@ -405,12 +400,43 @@ fn identify_authenticated_stale_defaultspack_listener(
     normalized_process_value(&listener.command).contains("defaultspack")
 }
 
+fn listener_matches_launcher_owned_defaultspack(
+    listener: &PortListener,
+    metadata: &DefaultspackDesktopMetadata,
+    retained_manager_process: bool,
+) -> bool {
+    retained_manager_process || identify_defaultspack_listener(listener, metadata)
+}
+
+fn is_launcher_owned_defaultspack_listener(
+    manager: &DefaultspackManager,
+    listener: &PortListener,
+    metadata: &DefaultspackDesktopMetadata,
+) -> AnyResult<bool> {
+    if !process_is_descendant_of(listener.pid, std::process::id())? {
+        return Ok(false);
+    }
+    let retained_manager_process = match manager.managed_child_pid()? {
+        Some(managed_pid) => process_is_descendant_of(listener.pid, managed_pid)?,
+        None => false,
+    };
+    Ok(listener_matches_launcher_owned_defaultspack(
+        listener,
+        metadata,
+        retained_manager_process,
+    ))
+}
+
 fn recover_authenticated_stale_defaultspack_listener(
+    manager: &DefaultspackManager,
     metadata: &DefaultspackDesktopMetadata,
 ) -> AnyResult<bool> {
     let Some(listener) = detect_port_listener(metadata.port)? else {
         return Ok(false);
     };
+    if is_launcher_owned_defaultspack_listener(manager, &listener, metadata)? {
+        return Ok(false);
+    }
     if !identify_authenticated_stale_defaultspack_listener(&listener, metadata) {
         return Ok(false);
     }
@@ -460,7 +486,10 @@ fn recover_stale_defaultspack_listener(metadata: &DefaultspackDesktopMetadata) -
     })
 }
 
-fn ensure_defaultspack_desktop_ready(app: &AppHandle, config: &AppConfig) -> AnyResult<String> {
+fn ensure_defaultspack_desktop_ready(
+    app: &AppHandle,
+    config: &AppConfig,
+) -> AnyResult<(u16, String)> {
     let manager = app.state::<Arc<DefaultspackManager>>();
     let metadata = match read_defaultspack_desktop_metadata(config) {
         Ok(m) => {
@@ -483,24 +512,22 @@ fn ensure_defaultspack_desktop_ready(app: &AppHandle, config: &AppConfig) -> Any
         crate::host_contract::DEFAULT_PROFILE_ID,
         [
             ("desktop_api_token", api_token.clone()),
-            ("panel_bootstrap_secret", panel_bootstrap_secret),
+            ("panel_bootstrap_secret", panel_bootstrap_secret.clone()),
         ],
     )?;
 
     let managed_process = manager
         .has_managed_process()
         .context("failed to inspect managed Defaultspack process")?;
-    let mut server_ready = is_defaultspack_http_ready(metadata.port, &api_token);
-    if server_ready && recover_authenticated_stale_defaultspack_listener(&metadata)? {
+    let mut server_ready = is_defaultspack_http_ready(metadata.port, &panel_bootstrap_secret);
+    if server_ready && recover_authenticated_stale_defaultspack_listener(&manager, &metadata)? {
         server_ready = false;
     }
     if server_ready {
         let listener = detect_port_listener(metadata.port)?.ok_or_else(|| {
             anyhow!("authenticated Defaultspack listener identity is unavailable")
         })?;
-        if !identify_defaultspack_listener(&listener, &metadata)
-            || !process_is_descendant_of(listener.pid, std::process::id())?
-        {
+        if !is_launcher_owned_defaultspack_listener(&manager, &listener, &metadata)? {
             warn!(
                 "Stopping authenticated Defaultspack listener that is not descended from this Launcher: pid {}",
                 listener.pid
@@ -512,14 +539,10 @@ fn ensure_defaultspack_desktop_ready(app: &AppHandle, config: &AppConfig) -> Any
 
     if server_ready {
         info!(
-            "launch_defaultspack_desktop_impl: health and local auth checks passed, server already ready at {base_url}"
+            "launch_defaultspack_desktop_impl: authenticated health check passed, server already ready at {base_url}"
         );
     } else {
-        if !managed_process
-            && defaultspack_health_client()
-                .map(|client| check_defaultspack_health_ready(&client, metadata.port))
-                .unwrap_or(false)
-        {
+        if !managed_process && detect_port_listener(metadata.port)?.is_some() {
             recover_stale_defaultspack_listener(&metadata)?;
         }
         info!("launch_defaultspack_desktop_impl: health check indicates server not ready; ensuring supervised pack-shell is running...");
@@ -534,7 +557,11 @@ fn ensure_defaultspack_desktop_ready(app: &AppHandle, config: &AppConfig) -> Any
             );
             return Err(error);
         }
-        match wait_for_defaultspack_http_ready(metadata.port, &api_token, manager.inner()) {
+        match wait_for_defaultspack_http_ready(
+            metadata.port,
+            &panel_bootstrap_secret,
+            manager.inner(),
+        ) {
             Ok(()) => info!("launch_defaultspack_desktop_impl: server became ready at {base_url}"),
             Err(e) => {
                 error!("launch_defaultspack_desktop_impl: wait_for_ready failed: {e:#}");
@@ -545,9 +572,7 @@ fn ensure_defaultspack_desktop_ready(app: &AppHandle, config: &AppConfig) -> Any
 
     let mut listener = detect_port_listener(metadata.port)?
         .ok_or_else(|| anyhow!("authenticated Defaultspack listener identity is unavailable"))?;
-    if !identify_defaultspack_listener(&listener, &metadata)
-        || !process_is_descendant_of(listener.pid, std::process::id())?
-    {
+    if !is_launcher_owned_defaultspack_listener(&manager, &listener, &metadata)? {
         // The Kernel can finish restoring an old startup profile while the
         // supervised pack-shell is starting. Resolve that race once: stop the
         // authenticated but unowned winner, then launch a fresh owned child.
@@ -558,13 +583,11 @@ fn ensure_defaultspack_desktop_ready(app: &AppHandle, config: &AppConfig) -> Any
         terminate_external_listener(listener.pid, metadata.port)?;
         manager.stop()?;
         manager.start_or_reuse(metadata.clone())?;
-        wait_for_defaultspack_http_ready(metadata.port, &api_token, manager.inner())?;
+        wait_for_defaultspack_http_ready(metadata.port, &panel_bootstrap_secret, manager.inner())?;
         listener = detect_port_listener(metadata.port)?
             .ok_or_else(|| anyhow!("replacement Defaultspack listener identity is unavailable"))?;
     }
-    if !identify_defaultspack_listener(&listener, &metadata)
-        || !process_is_descendant_of(listener.pid, std::process::id())?
-    {
+    if !is_launcher_owned_defaultspack_listener(&manager, &listener, &metadata)? {
         bail!("replacement Defaultspack listener is not owned by this Launcher");
     }
     if let Some(wrapper_pid) = manager.managed_child_pid()? {
@@ -583,7 +606,7 @@ fn ensure_defaultspack_desktop_ready(app: &AppHandle, config: &AppConfig) -> Any
         return Err(error);
     }
 
-    defaultspack_window_url_with_local_auth(metadata.port, &api_token)
+    Ok((metadata.port, panel_bootstrap_secret))
 }
 
 fn write_guardian_ready_audit(
@@ -1046,6 +1069,8 @@ fn viewer_host_broker_connection_env_value(config: &AppConfig) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
@@ -1253,9 +1278,28 @@ mod tests {
             command: "python -m http.server 8766".into(),
             cwd: Some("/tmp/rumi/defaultspack".into()),
         };
+        let managed_sealed = PortListener {
+            pid: 303,
+            command: "python -m tobkiri_sealed.bootstrap --role defaultspack".into(),
+            cwd: Some("/private/tmp/.tobkiri-sealed-python-snapshot".into()),
+        };
 
         assert!(identify_defaultspack_listener(&owned, &metadata));
         assert!(!identify_defaultspack_listener(&foreign, &metadata));
+        assert!(!identify_defaultspack_listener(&managed_sealed, &metadata));
+        assert!(listener_matches_launcher_owned_defaultspack(
+            &managed_sealed,
+            &metadata,
+            true,
+        ));
+        assert!(!listener_matches_launcher_owned_defaultspack(
+            &managed_sealed,
+            &metadata,
+            false,
+        ));
+        assert!(!listener_matches_launcher_owned_defaultspack(
+            &foreign, &metadata, false,
+        ));
     }
 
     #[test]
@@ -1354,7 +1398,19 @@ mod tests {
     }
 
     #[test]
-    fn defaultspack_window_url_with_local_auth_uses_fragment() {
+    fn defaultspack_window_url_with_bootstrap_code_uses_query() {
+        assert_eq!(
+            defaultspack_window_url_with_bootstrap_code(
+                DEFAULTSPACK_DEFAULT_PORT,
+                "one-time+code/1="
+            )
+            .unwrap(),
+            "http://127.0.0.1:8766/chat?code=one-time%2Bcode%2F1%3D"
+        );
+    }
+
+    #[test]
+    fn defaultspack_window_url_with_local_auth_keeps_auxiliary_fragment_contract() {
         assert_eq!(
             defaultspack_window_url_with_local_auth(DEFAULTSPACK_DEFAULT_PORT, "local+token/1=")
                 .unwrap(),
@@ -1387,49 +1443,61 @@ mod tests {
     }
 
     #[test]
-    fn defaultspack_window_url_for_log_strips_local_auth_fragment() {
+    fn defaultspack_window_url_for_log_strips_query_and_fragment() {
         assert_eq!(
             defaultspack_window_url_for_log(
-                "http://127.0.0.1:8766/chat#rumi_local_auth=local%2Btoken%2F1%3D"
+                "http://127.0.0.1:8766/chat?chat=abc&code=one-time-code#ignored"
             ),
             "http://127.0.0.1:8766/chat"
         );
     }
 
     #[test]
-    fn defaultspack_auth_probe_url_targets_sensitive_read_route() {
+    fn defaultspack_health_url_targets_authenticated_health_route() {
         assert_eq!(
-            defaultspack_auth_probe_url(DEFAULTSPACK_DEFAULT_PORT),
-            "http://127.0.0.1:8766/api/integrations/secrets"
+            defaultspack_health_url(DEFAULTSPACK_DEFAULT_PORT),
+            "http://127.0.0.1:8766/health"
         );
     }
 
     #[test]
-    fn guardian_readiness_requires_health_and_authenticated_probe() {
+    fn guardian_readiness_requires_authenticated_health_challenge() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = std::thread::spawn(move || {
-            for expected in ["GET /api/health ", "GET /api/integrations/secrets "] {
-                let (mut stream, _) = listener.accept().unwrap();
-                let mut request = [0_u8; 4096];
-                let length = stream.read(&mut request).unwrap();
-                let request = String::from_utf8_lossy(&request[..length]);
-                assert!(request.starts_with(expected));
-                if expected.contains("integrations/secrets") {
-                    assert!(request
-                        .to_ascii_lowercase()
-                        .contains("authorization: bearer local-token"));
-                }
-                stream
-                    .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
-                    )
-                    .unwrap();
-            }
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let length = stream.read(&mut request).unwrap();
+            let request = String::from_utf8_lossy(&request[..length]);
+            assert!(request.starts_with("GET /health "));
+            assert!(!request.to_ascii_lowercase().contains("authorization:"));
+            let challenge = request
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("X-Rumi-Desktop-Health-Challenge")
+                        .then(|| value.trim())
+                })
+                .expect("health challenge header");
+            let mut mac = Hmac::<Sha256>::new_from_slice(b"bootstrap-secret").unwrap();
+            mac.update(challenge.as_bytes());
+            let challenge_response = mac
+                .finalize()
+                .into_bytes()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            let body = format!(
+                r#"{{"success":true,"data":{{"panel_ready":true,"desktop_challenge_response":"{challenge_response}"}}}}"#
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
         });
-        let client = defaultspack_health_client().unwrap();
 
-        assert!(check_defaultspack_http_ready(&client, port, "local-token"));
+        assert!(is_defaultspack_http_ready(port, "bootstrap-secret"));
         server.join().unwrap();
     }
 

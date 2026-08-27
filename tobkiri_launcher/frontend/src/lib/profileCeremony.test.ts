@@ -35,22 +35,43 @@ function profileSnapshot(): RuntimeSurfaceEnvelope<unknown> {
         profile_revision: digest('a'),
         catalog_revision: digest('c'),
       },
-      profile_lock: {lock_digest: digest('d')},
-      resolved_plan: {plan_digest: digest('b')},
+      profile_lock: {
+        lock_digest: digest('d'),
+        plan_digest: digest('b'),
+        bundle_digest: digest('8'),
+        closure_digest: digest('9'),
+        profile_authority_snapshot_digest: digest('e'),
+        security_epoch: 4,
+      },
+      resolved_plan: {
+        plan_digest: digest('b'),
+        bundle_digest: digest('8'),
+        closure_digest: digest('9'),
+        security_epoch: 4,
+      },
       activation_record: {
-        activation_api_version: 'io.tobkiri.activation-record.v1',
+        activation_api_version: 'io.tobkiri.activation-record.v2',
         profile_id: 'defaults',
+        profile_revision: digest('a'),
         activation_id: 'activation:defaults-one',
         state: 'active',
         state_generation: 1,
+        catalog_revision: digest('c'),
+        bundle_digest: digest('8'),
+        lock_digest: digest('d'),
         plan_digest: digest('b'),
+        closure_digest: digest('9'),
         profile_authority_snapshot_digest: digest('e'),
         security_epoch: 4,
         fencing_token: 7,
         created_at: '2026-08-10T00:00:00Z',
         committed_at: '2026-08-10T00:00:01Z',
       },
-      authority_snapshot: {profile_authority_snapshot_digest: digest('e')},
+      authority_snapshot: {
+        profile_authority_snapshot_digest: digest('e'),
+        security_epoch: 4,
+        fencing_token: 7,
+      },
       profile_document: {packs: [{pack_id: 'provider-pack', role: 'provider', artifact_digest: digest('1')}]},
       resolved_wiring: {requested_edges: [], bindings: []},
     },
@@ -335,7 +356,14 @@ test('Profile approval and activate snapshots remain digest-bound to the Kernel 
   mismatchedSnapshot.plan_digest = digest('f');
   mismatchedSnapshot.records.resolved_plan = {digest: digest('f'), source_ref: 'resolved-plan-v1://defaults/plan-two'};
   const mismatchedData = mismatchedSnapshot.data as Record<string, unknown>;
-  mismatchedData.resolved_plan = {plan_digest: digest('f')};
+  mismatchedData.resolved_plan = {
+    ...(mismatchedData.resolved_plan as Record<string, unknown>),
+    plan_digest: digest('f'),
+  };
+  mismatchedData.profile_lock = {
+    ...(mismatchedData.profile_lock as Record<string, unknown>),
+    plan_digest: digest('f'),
+  };
   const mismatchedActivation = mismatchedData.activation_record as Record<string, unknown>;
   mismatchedActivation.plan_digest = digest('f');
   const mismatchedSnapshotClient = createProfileCeremonyClient(undefined, queuedTransport([{
