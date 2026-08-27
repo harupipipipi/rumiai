@@ -60,6 +60,31 @@ def create_model_catalog_operation(client: Any):
     return operation
 
 
+def tobkiri_packvm_invoke(
+    operation_id: object,
+    payload: object,
+) -> dict[str, Any]:
+    """Execute only the sealed Catalog PackVM ABI operations.
+
+    This module intentionally depends only on the standard library. The
+    PackVM sandbox supplies no network and this entrypoint neither imports a
+    Host provider nor selects any non-catalog capability.
+    """
+
+    allowed_operations = {
+        "rumi_model_catalog_pack.bundled-model-catalog.generate",
+        "rumi_model_catalog_pack.bundled-model-catalog.stream",
+    }
+    if not isinstance(operation_id, str) or operation_id not in allowed_operations:
+        raise ValueError("PackVM model catalog operation is not permitted")
+    if not isinstance(payload, Mapping):
+        raise ValueError("PackVM model catalog payload must be an object")
+    result = create_model_catalog_operation(None)(operation_id, payload)
+    if not isinstance(result, dict):
+        raise ValueError("PackVM model catalog result must be an object")
+    return dict(result)
+
+
 def _load_catalog() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     if _catalog_revision() != CATALOG_REVISION:
         raise RuntimeError("model catalog integrity mismatch")

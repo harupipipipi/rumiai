@@ -15,6 +15,13 @@ import type {
   FrontendCatalog,
   VerifiedFrontendContribution,
 } from "./frontendContracts";
+import {
+  ConversationV4View,
+  frontendActionErrorMessage,
+  isConversationV4Contribution,
+} from "./ConversationV4View";
+
+export { frontendActionErrorMessage } from "./ConversationV4View";
 
 const quarantined = new Set<string>();
 
@@ -123,6 +130,15 @@ function ContributionView({
   catalogHash: string;
   capabilities: FrontendCapabilityClient;
 }) {
+  if (isConversationV4Contribution(item)) {
+    return (
+      <ConversationV4View
+        item={item}
+        catalogHash={catalogHash}
+        capabilities={capabilities}
+      />
+    );
+  }
   if (item.mode === "declarative") {
     return (
       <DeclarativeView
@@ -366,15 +382,6 @@ export function parseIsolatedCapabilityRequest(
     contractId,
     payload: { operation, input },
   };
-}
-
-export function frontendActionErrorMessage(error: unknown): string {
-  const code = isRecord(error) ? error.code : undefined;
-  if (code === "STALE_RESOLUTION" || code === "STALE_CATALOG") {
-    return "This screen is out of date and is refreshing. Try the action again.";
-  }
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return "The action could not be completed.";
 }
 
 function isolatedFrontendNonce(): string {

@@ -355,6 +355,98 @@ def test_production_composition_never_promotes_lima_to_direct_vz() -> None:
     assert ManagedLimaPackVMDriver(provisioner).substrate_id == "lima"
 
 
+def test_production_composition_registers_only_verified_direct_vz_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Composition pins each direct VZ constructor input to provisioned facts."""
+
+    from ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner import (
+        MacOSVZProvisionedFacts,
+    )
+    import tobkiri_host.macos_vz_supervisor as macos_vz_supervisor
+    import tobkiri_host.platform_backends as platform_backends
+
+    transport_factory_calls: list[object] = []
+
+    def transport_factory(_allocation: object) -> object:
+        transport_factory_calls.append(_allocation)
+        return object()
+
+    facts = MacOSVZProvisionedFacts(
+        helper_path=Path("/private/var/db/tobkiri/helper"),
+        helper_identity=object(),
+        launch_assets=object(),
+        agent_identity=object(),
+        domain_allocator=object(),
+        instance_root=Path("/private/var/db/tobkiri/instance"),
+        transport_factory=transport_factory,
+        protocol_ready=True,
+        reason=None,
+    )
+
+    class Lifecycle:
+        def production_backend_registration(self) -> MacOSVZProvisionedFacts:
+            return facts
+
+        def prepare_direct_vz(self) -> None:
+            raise AssertionError("lifecycle registration must be preferred")
+
+    class CapturedDriver:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    class CapturedBackend:
+        def __init__(self, driver: CapturedDriver) -> None:
+            self.driver = driver
+
+    monkeypatch.setattr(macos_vz_supervisor, "MacOSVZSupervisorDriver", CapturedDriver)
+    monkeypatch.setattr(platform_backends, "MacOSVZBackend", CapturedBackend)
+
+    backend = _authenticated_packvm_backend(Lifecycle())
+
+    assert isinstance(backend, CapturedBackend)
+    assert transport_factory_calls == []
+    assert backend.driver.kwargs == {
+        "transport_factory": transport_factory,
+        "helper_path": facts.helper_path,
+        "helper_identity": facts.helper_identity,
+        "launch_assets": facts.launch_assets,
+        "agent_identity": facts.agent_identity,
+        "domain_allocator": facts.domain_allocator,
+    }
+
+
+def test_production_composition_rejects_missing_or_failed_direct_vz_facts() -> None:
+    """A missing transport or lifecycle failure never promotes another backend."""
+
+    from ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner import (
+        MacOSVZProvisionedFacts,
+    )
+
+    facts_without_transport = MacOSVZProvisionedFacts(
+        helper_path=Path("/private/var/db/tobkiri/helper"),
+        helper_identity=object(),
+        launch_assets=object(),
+        agent_identity=object(),
+        domain_allocator=object(),
+        instance_root=Path("/private/var/db/tobkiri/instance"),
+        transport_factory=None,
+        protocol_ready=True,
+        reason="transport unavailable",
+    )
+
+    class DirectProvisioner:
+        def prepare_direct_vz(self) -> MacOSVZProvisionedFacts:
+            return facts_without_transport
+
+    class FailingLifecycle:
+        def production_backend_registration(self) -> object:
+            raise RuntimeError("verified fact retrieval failed")
+
+    assert _authenticated_packvm_backend(DirectProvisioner()) is None
+    assert _authenticated_packvm_backend(FailingLifecycle()) is None
+
+
 class RegistrationStore:
     security_epoch = 1
 

@@ -338,7 +338,9 @@ def test_macos_installer_uses_finder_free_verified_dmg_packager():
     assert MACOS_DMG_PACKAGER.is_file()
     packager = MACOS_DMG_PACKAGER.read_text(encoding="utf-8")
     for required in (
-        "codesign --verify --deep --strict",
+        "codesign --verify --strict --all-architectures",
+        "Contents/MacOS/tobkiri-packvm-vz-helper",
+        "dev.tobkiri.launcher.packvm-vz-helper",
         "ditto",
         "command -v plutil",
         "ln -s /Applications",
@@ -365,6 +367,7 @@ def test_macos_installer_uses_finder_free_verified_dmg_packager():
         "unsafe version for a DMG filename",
     ):
         assert required in packager
+    assert "codesign --verify --deep" not in packager
     assert packager.count("hdiutil create") == 1
     assert packager.count('replay_stderr "$create_stderr"') == 2
     packager_lower = packager.lower()
@@ -493,7 +496,7 @@ def test_packaged_python_smoke_is_post_sign_read_only_in_both_workflows():
         assert "--native-smoke" in smoke_section
         assert "Contents/Resources/app/logs" in smoke_section
         assert (
-            "codesign --verify --deep --strict" in tail
+            "/usr/bin/codesign --verify --strict --all-architectures" in tail
             or "scripts/verify_macos_release.sh" in tail
         )
 

@@ -30,6 +30,7 @@ const planPayload = {
   instance: 'tobkiri-packvm-v4',
   limactl: '/Users/haru/.local/bin/limactl',
   launcher_reason: null,
+  runtime_path_status: 'ready',
   architecture: 'arm64',
   image_source: 'https://cloud-images.ubuntu.com/jammy/20260807/jammy-server-cloudimg-arm64.img',
   image_digest: digest('a'),
@@ -91,6 +92,38 @@ test('PackVM plan normalization drops host paths while preserving pinned facts',
   assert.equal(plan.image_size_bytes, 703_594_496);
   assert.equal('limactl' in plan, false);
   assert.doesNotMatch(JSON.stringify(plan), /Users|limactl/);
+});
+
+test('PackVM plan normalization accepts only strict fail-closed unavailable evidence', () => {
+  const unavailablePlan = normalizePackVMPlan({
+    ...planPayload,
+    launcher_reason: 'A production-signed PackVM helper is unavailable.',
+    runtime_path_status: 'unsafe',
+    image_source: 'unavailable',
+    image_digest: digest('0'),
+    image_download_required: false,
+    config_digest: digest('0'),
+    guest_runner_digest: digest('0'),
+    host_build_digest: digest('0'),
+  });
+  assert.equal(unavailablePlan.image_source, 'unavailable');
+  assert.equal(unavailablePlan.runtime_path_status, 'unsafe');
+  assert.match(unavailablePlan.launcher_reason ?? '', /production-signed/);
+
+  for (const invalid of [
+    {runtime_path_status: 'ready'},
+    {launcher_reason: null},
+    {image_download_required: true},
+    {image_digest: digest('a')},
+    {config_digest: digest('b')},
+    {guest_runner_digest: digest('c')},
+    {host_build_digest: digest('d')},
+  ]) {
+    assert.throws(
+      () => normalizePackVMPlan({...unavailablePlan, ...invalid}),
+      /inconsistent PackVM (?:availability|unavailable-plan) evidence/,
+    );
+  }
 });
 
 test('PackVM normalization rejects tampered digests and missing success evidence', () => {

@@ -224,7 +224,7 @@
             {
               "entrypoint_id": "complete",
               "id": "complete",
-              "implementation_digest": "sha256:c53100d459dbf91774dddfe3a266fa33543a1a4f8bc122414343e9bf76a99820"
+              "implementation_digest": "sha256:4a404c7427393f7343d9bc74d19b9f0f5066f7090e93e728e65e6452441242a7"
             }
           ],
           "owner": "defaultspack",
@@ -308,7 +308,7 @@
       ],
       "runtime_artifacts": [
         {
-          "digest": "sha256:c53100d459dbf91774dddfe3a266fa33543a1a4f8bc122414343e9bf76a99820",
+          "digest": "sha256:4a404c7427393f7343d9bc74d19b9f0f5066f7090e93e728e65e6452441242a7",
           "kind": "executable",
           "path": "runtime/conversation.py"
         }
@@ -971,7 +971,7 @@
             {
               "entrypoint_id": "ai-gateway-routing-diagnostics",
               "id": "rumi_ai_gateway_pack.ai-gateway-routing-diagnostics",
-              "implementation_digest": "sha256:3a9d647efa271e4a41cfa108ca02531452b1f3047fa3b6bb2308f0126fe922c2"
+              "implementation_digest": "sha256:1c62e117deedea3af073bf7f244ce5f6e404a7b53b90696cf9a1ea54acafb02d"
             }
           ],
           "owner": "rumi_ai_gateway_pack",
@@ -1004,7 +1004,7 @@
             {
               "entrypoint_id": "ai-gateway-generate",
               "id": "rumi_ai_gateway_pack.ai-gateway.generate",
-              "implementation_digest": "sha256:3a9d647efa271e4a41cfa108ca02531452b1f3047fa3b6bb2308f0126fe922c2"
+              "implementation_digest": "sha256:1c62e117deedea3af073bf7f244ce5f6e404a7b53b90696cf9a1ea54acafb02d"
             }
           ],
           "owner": "rumi_ai_gateway_pack",
@@ -1037,7 +1037,7 @@
             {
               "entrypoint_id": "ai-gateway-stream",
               "id": "rumi_ai_gateway_pack.ai-gateway.stream",
-              "implementation_digest": "sha256:3a9d647efa271e4a41cfa108ca02531452b1f3047fa3b6bb2308f0126fe922c2"
+              "implementation_digest": "sha256:1c62e117deedea3af073bf7f244ce5f6e404a7b53b90696cf9a1ea54acafb02d"
             }
           ],
           "owner": "rumi_ai_gateway_pack",
@@ -1132,7 +1132,7 @@
           "path": "runtime/__init__.py"
         },
         {
-          "digest": "sha256:3a9d647efa271e4a41cfa108ca02531452b1f3047fa3b6bb2308f0126fe922c2",
+          "digest": "sha256:1c62e117deedea3af073bf7f244ce5f6e404a7b53b90696cf9a1ea54acafb02d",
           "kind": "executable",
           "path": "runtime/gateway.py"
         }
@@ -1428,17 +1428,17 @@
             {
               "entrypoint_id": "ai-failover-decide",
               "id": "rumi_ai_pipeline_pack.ai-failover-decide",
-              "implementation_digest": "sha256:dd9e1e9294cc7232bf5764b8c196a8d56139397582ef522faf742e39d142911c"
+              "implementation_digest": "sha256:b1a3104fa7af317958dff3e18a39e4a5f443311ca94d58ae97301d6516303ed4"
             },
             {
               "entrypoint_id": "ai-failover-decide.generate",
               "id": "rumi_ai_pipeline_pack.ai-failover-decide.generate",
-              "implementation_digest": "sha256:dd9e1e9294cc7232bf5764b8c196a8d56139397582ef522faf742e39d142911c"
+              "implementation_digest": "sha256:b1a3104fa7af317958dff3e18a39e4a5f443311ca94d58ae97301d6516303ed4"
             },
             {
               "entrypoint_id": "ai-failover-decide.stream",
               "id": "rumi_ai_pipeline_pack.ai-failover-decide.stream",
-              "implementation_digest": "sha256:dd9e1e9294cc7232bf5764b8c196a8d56139397582ef522faf742e39d142911c"
+              "implementation_digest": "sha256:b1a3104fa7af317958dff3e18a39e4a5f443311ca94d58ae97301d6516303ed4"
             }
           ],
           "owner": "rumi_ai_pipeline_pack",
@@ -1471,17 +1471,17 @@
             {
               "entrypoint_id": "ai-request-prepare",
               "id": "rumi_ai_pipeline_pack.ai-request-prepare",
-              "implementation_digest": "sha256:dd9e1e9294cc7232bf5764b8c196a8d56139397582ef522faf742e39d142911c"
+              "implementation_digest": "sha256:b1a3104fa7af317958dff3e18a39e4a5f443311ca94d58ae97301d6516303ed4"
             },
             {
               "entrypoint_id": "ai-request-prepare.generate",
               "id": "rumi_ai_pipeline_pack.ai-request-prepare.generate",
-              "implementation_digest": "sha256:dd9e1e9294cc7232bf5764b8c196a8d56139397582ef522faf742e39d142911c"
+              "implementation_digest": "sha256:b1a3104fa7af317958dff3e18a39e4a5f443311ca94d58ae97301d6516303ed4"
             },
             {
               "entrypoint_id": "ai-request-prepare.stream",
               "id": "rumi_ai_pipeline_pack.ai-request-prepare.stream",
-              "implementation_digest": "sha256:dd9e1e9294cc7232bf5764b8c196a8d56139397582ef522faf742e39d142911c"
+              "implementation_digest": "sha256:b1a3104fa7af317958dff3e18a39e4a5f443311ca94d58ae97301d6516303ed4"
             }
           ],
           "owner": "rumi_ai_pipeline_pack",
@@ -1509,7 +1509,7 @@
           "path": "runtime/__init__.py"
         },
         {
-          "digest": "sha256:dd9e1e9294cc7232bf5764b8c196a8d56139397582ef522faf742e39d142911c",
+          "digest": "sha256:b1a3104fa7af317958dff3e18a39e4a5f443311ca94d58ae97301d6516303ed4",
           "kind": "executable",
           "path": "runtime/pipeline.py"
         }
@@ -1577,17 +1577,17 @@
             {
               "entrypoint_id": "ai-route",
               "id": "rumi_ai_routing_pack.ai-route",
-              "implementation_digest": "sha256:e0d076c92b7d45707e7ef90b74c922f1461aeec09b1d9eb429f351a0c12a21fa"
+              "implementation_digest": "sha256:99fe1e1a126b8c0df54edb044461ecaf5efe33c55948e722c5216639cc230148"
             },
             {
               "entrypoint_id": "ai-route.generate",
               "id": "rumi_ai_routing_pack.ai-route.generate",
-              "implementation_digest": "sha256:e0d076c92b7d45707e7ef90b74c922f1461aeec09b1d9eb429f351a0c12a21fa"
+              "implementation_digest": "sha256:99fe1e1a126b8c0df54edb044461ecaf5efe33c55948e722c5216639cc230148"
             },
             {
               "entrypoint_id": "ai-route.stream",
               "id": "rumi_ai_routing_pack.ai-route.stream",
-              "implementation_digest": "sha256:e0d076c92b7d45707e7ef90b74c922f1461aeec09b1d9eb429f351a0c12a21fa"
+              "implementation_digest": "sha256:99fe1e1a126b8c0df54edb044461ecaf5efe33c55948e722c5216639cc230148"
             }
           ],
           "owner": "rumi_ai_routing_pack",
@@ -1615,7 +1615,7 @@
           "path": "runtime/__init__.py"
         },
         {
-          "digest": "sha256:e0d076c92b7d45707e7ef90b74c922f1461aeec09b1d9eb429f351a0c12a21fa",
+          "digest": "sha256:99fe1e1a126b8c0df54edb044461ecaf5efe33c55948e722c5216639cc230148",
           "kind": "executable",
           "path": "runtime/router.py"
         }
@@ -1683,7 +1683,7 @@
             {
               "entrypoint_id": "ai-stream-normalize",
               "id": "rumi_ai_stream_pack.ai-stream-normalize",
-              "implementation_digest": "sha256:f79be5b06a11067b796db983762ad268ffcffa774ce34024e3a01ce1457deda0"
+              "implementation_digest": "sha256:ffedc4dc81336ac5e708d7b954af08d83a2c5f0533360e82968699fb096b8a54"
             }
           ],
           "owner": "rumi_ai_stream_pack",
@@ -1711,7 +1711,7 @@
           "path": "runtime/__init__.py"
         },
         {
-          "digest": "sha256:f79be5b06a11067b796db983762ad268ffcffa774ce34024e3a01ce1457deda0",
+          "digest": "sha256:ffedc4dc81336ac5e708d7b954af08d83a2c5f0533360e82968699fb096b8a54",
           "kind": "executable",
           "path": "runtime/normalizer.py"
         }
@@ -1779,17 +1779,17 @@
             {
               "entrypoint_id": "ai-tool-intent-normalize",
               "id": "rumi_ai_tool_bridge_pack.ai-tool-intent-normalize",
-              "implementation_digest": "sha256:92e4d5adfaa75ca8b3ca7756f3e64868dba9db6a788595ed94c9211d842865a1"
+              "implementation_digest": "sha256:27c6d726d1c1db4bb7a67565e4d56c9bddaab875d30824f330e15ec5c3e7e6b0"
             },
             {
               "entrypoint_id": "ai-tool-intent-normalize.generate",
               "id": "rumi_ai_tool_bridge_pack.ai-tool-intent-normalize.generate",
-              "implementation_digest": "sha256:92e4d5adfaa75ca8b3ca7756f3e64868dba9db6a788595ed94c9211d842865a1"
+              "implementation_digest": "sha256:27c6d726d1c1db4bb7a67565e4d56c9bddaab875d30824f330e15ec5c3e7e6b0"
             },
             {
               "entrypoint_id": "ai-tool-intent-normalize.stream",
               "id": "rumi_ai_tool_bridge_pack.ai-tool-intent-normalize.stream",
-              "implementation_digest": "sha256:92e4d5adfaa75ca8b3ca7756f3e64868dba9db6a788595ed94c9211d842865a1"
+              "implementation_digest": "sha256:27c6d726d1c1db4bb7a67565e4d56c9bddaab875d30824f330e15ec5c3e7e6b0"
             }
           ],
           "owner": "rumi_ai_tool_bridge_pack",
@@ -1817,7 +1817,7 @@
           "path": "runtime/__init__.py"
         },
         {
-          "digest": "sha256:92e4d5adfaa75ca8b3ca7756f3e64868dba9db6a788595ed94c9211d842865a1",
+          "digest": "sha256:27c6d726d1c1db4bb7a67565e4d56c9bddaab875d30824f330e15ec5c3e7e6b0",
           "kind": "executable",
           "path": "runtime/bridge.py"
         }
@@ -1887,7 +1887,7 @@
             {
               "entrypoint_id": "ai-tokenize",
               "id": "rumi_ai_usage_pack.ai-tokenize",
-              "implementation_digest": "sha256:9124ba766b36d979c6a00e707b406c55754d57645d7b890824c4bfdfad64d9e6"
+              "implementation_digest": "sha256:16b80027e2859cff8515525ee87e16e4c33a6c222d54168d1f5fa9a145195316"
             }
           ],
           "owner": "rumi_ai_usage_pack",
@@ -1920,17 +1920,17 @@
             {
               "entrypoint_id": "ai-usage-cost",
               "id": "rumi_ai_usage_pack.ai-usage-cost",
-              "implementation_digest": "sha256:9124ba766b36d979c6a00e707b406c55754d57645d7b890824c4bfdfad64d9e6"
+              "implementation_digest": "sha256:16b80027e2859cff8515525ee87e16e4c33a6c222d54168d1f5fa9a145195316"
             },
             {
               "entrypoint_id": "ai-usage-cost.generate",
               "id": "rumi_ai_usage_pack.ai-usage-cost.generate",
-              "implementation_digest": "sha256:9124ba766b36d979c6a00e707b406c55754d57645d7b890824c4bfdfad64d9e6"
+              "implementation_digest": "sha256:16b80027e2859cff8515525ee87e16e4c33a6c222d54168d1f5fa9a145195316"
             },
             {
               "entrypoint_id": "ai-usage-cost.stream",
               "id": "rumi_ai_usage_pack.ai-usage-cost.stream",
-              "implementation_digest": "sha256:9124ba766b36d979c6a00e707b406c55754d57645d7b890824c4bfdfad64d9e6"
+              "implementation_digest": "sha256:16b80027e2859cff8515525ee87e16e4c33a6c222d54168d1f5fa9a145195316"
             }
           ],
           "owner": "rumi_ai_usage_pack",
@@ -1958,7 +1958,7 @@
           "path": "runtime/__init__.py"
         },
         {
-          "digest": "sha256:9124ba766b36d979c6a00e707b406c55754d57645d7b890824c4bfdfad64d9e6",
+          "digest": "sha256:16b80027e2859cff8515525ee87e16e4c33a6c222d54168d1f5fa9a145195316",
           "kind": "executable",
           "path": "runtime/usage.py"
         }
@@ -9375,17 +9375,17 @@
             {
               "entrypoint_id": "bundled-model-catalog",
               "id": "rumi_model_catalog_pack.bundled-model-catalog",
-              "implementation_digest": "sha256:de0973b8ad1da4556587f199a4173c6dfb674f314981e331821026c35d8f12ab"
+              "implementation_digest": "sha256:cf339a1e99524d37d5bec3b3ab721aef8063f532b7873c0bafc253f4cabc780f"
             },
             {
               "entrypoint_id": "bundled-model-catalog.generate",
               "id": "rumi_model_catalog_pack.bundled-model-catalog.generate",
-              "implementation_digest": "sha256:de0973b8ad1da4556587f199a4173c6dfb674f314981e331821026c35d8f12ab"
+              "implementation_digest": "sha256:cf339a1e99524d37d5bec3b3ab721aef8063f532b7873c0bafc253f4cabc780f"
             },
             {
               "entrypoint_id": "bundled-model-catalog.stream",
               "id": "rumi_model_catalog_pack.bundled-model-catalog.stream",
-              "implementation_digest": "sha256:de0973b8ad1da4556587f199a4173c6dfb674f314981e331821026c35d8f12ab"
+              "implementation_digest": "sha256:cf339a1e99524d37d5bec3b3ab721aef8063f532b7873c0bafc253f4cabc780f"
             }
           ],
           "owner": "rumi_model_catalog_pack",
@@ -9413,7 +9413,7 @@
           "path": "runtime/__init__.py"
         },
         {
-          "digest": "sha256:de0973b8ad1da4556587f199a4173c6dfb674f314981e331821026c35d8f12ab",
+          "digest": "sha256:cf339a1e99524d37d5bec3b3ab721aef8063f532b7873c0bafc253f4cabc780f",
           "kind": "executable",
           "path": "runtime/catalog.py"
         }
@@ -9653,7 +9653,7 @@
             {
               "entrypoint_id": "model-profile-manage",
               "id": "rumi_model_registry_pack.model-profile-manage",
-              "implementation_digest": "sha256:a87b27c7ee0f22e45d05aa86db320e75d298f14831276681e935ac453d9c1099"
+              "implementation_digest": "sha256:c6186fd17b9a4a2ae6eba0bdc90687795bfd2aaba869c1131f353085d85bf78f"
             }
           ],
           "owner": "rumi_model_registry_pack",
@@ -9688,7 +9688,7 @@
             {
               "entrypoint_id": "model-registry-migrate",
               "id": "rumi_model_registry_pack.model-registry-migrate",
-              "implementation_digest": "sha256:a87b27c7ee0f22e45d05aa86db320e75d298f14831276681e935ac453d9c1099"
+              "implementation_digest": "sha256:c6186fd17b9a4a2ae6eba0bdc90687795bfd2aaba869c1131f353085d85bf78f"
             }
           ],
           "owner": "rumi_model_registry_pack",
@@ -9723,17 +9723,17 @@
             {
               "entrypoint_id": "model-profile-resource",
               "id": "rumi_model_registry_pack.model-profile-resource",
-              "implementation_digest": "sha256:a87b27c7ee0f22e45d05aa86db320e75d298f14831276681e935ac453d9c1099"
+              "implementation_digest": "sha256:c6186fd17b9a4a2ae6eba0bdc90687795bfd2aaba869c1131f353085d85bf78f"
             },
             {
               "entrypoint_id": "model-profile-resource.generate",
               "id": "rumi_model_registry_pack.model-profile-resource.generate",
-              "implementation_digest": "sha256:a87b27c7ee0f22e45d05aa86db320e75d298f14831276681e935ac453d9c1099"
+              "implementation_digest": "sha256:c6186fd17b9a4a2ae6eba0bdc90687795bfd2aaba869c1131f353085d85bf78f"
             },
             {
               "entrypoint_id": "model-profile-resource.stream",
               "id": "rumi_model_registry_pack.model-profile-resource.stream",
-              "implementation_digest": "sha256:a87b27c7ee0f22e45d05aa86db320e75d298f14831276681e935ac453d9c1099"
+              "implementation_digest": "sha256:c6186fd17b9a4a2ae6eba0bdc90687795bfd2aaba869c1131f353085d85bf78f"
             }
           ],
           "owner": "rumi_model_registry_pack",
@@ -9761,7 +9761,7 @@
           "path": "runtime/__init__.py"
         },
         {
-          "digest": "sha256:a87b27c7ee0f22e45d05aa86db320e75d298f14831276681e935ac453d9c1099",
+          "digest": "sha256:c6186fd17b9a4a2ae6eba0bdc90687795bfd2aaba869c1131f353085d85bf78f",
           "kind": "executable",
           "path": "runtime/process.py"
         },

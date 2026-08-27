@@ -6,7 +6,7 @@
     },
     {
       "path": "runtime/gateway.py",
-      "sha256": "sha256:3a9d647efa271e4a41cfa108ca02531452b1f3047fa3b6bb2308f0126fe922c2"
+      "sha256": "sha256:1c62e117deedea3af073bf7f244ce5f6e404a7b53b90696cf9a1ea54acafb02d"
     }
   ],
   "version": "rumi.pack-artifacts.v1"
