@@ -32,7 +32,7 @@ import {
   hasUnescapedMentionSyntax,
   utf16OffsetToCodePointIndex,
 } from "./mentionContract";
-import type { ComposerExtensionItem } from "../renderers/types";
+import type { ComposerExtensionItem, ComposerSkillItem } from "../renderers/types";
 import {
   initialComposerFieldValues,
   normalizeComposerFields,
@@ -63,6 +63,14 @@ const boundaryFixtures = JSON.parse(readFileSync(
   "utf8",
 )) as BoundaryFixture[];
 
+test("packaged mention fixtures stay identical to the shared contract", () => {
+  if (!existsSync(sharedBoundaryFixturePath)) return;
+  assert.deepEqual(
+    JSON.parse(readFileSync(packagedBoundaryFixturePath, "utf8")),
+    JSON.parse(readFileSync(sharedBoundaryFixturePath, "utf8")),
+  );
+});
+
 test("frontend follows the shared Unicode mention boundary fixtures", () => {
   for (const fixture of boundaryFixtures) {
     assert.deepEqual(
@@ -90,6 +98,42 @@ test("frontend follows the shared Unicode mention boundary fixtures", () => {
       assert.equal(activeMention?.start, fixture.active_start_utf16);
       assert.equal(activeMention?.startCodePoint, fixture.active_start_codepoint);
     }
+  }
+});
+
+test("candidate opening and submit resolution use the same mention boundaries", () => {
+  const tools: ComposerExtensionItem[] = [
+    { id: "web_search", label: "Web Search", category: "tool" },
+  ];
+  const skills: ComposerSkillItem[] = [
+    { id: "project-manager", label: "Project Manager", aliases: ["pm"] },
+  ];
+
+  const adjacentTool = "調べて@web_search";
+  assert.equal(
+    activeMentionAtCursor(adjacentTool, adjacentTool.length, ["web_search"])?.query,
+    "web_search",
+  );
+  assert.deepEqual(toolMentionIdsFromText(adjacentTool, tools), ["web_search"]);
+
+  const punctuatedTool = "調べて @web_search。";
+  const punctuationOffset = punctuatedTool.indexOf("。");
+  assert.equal(
+    activeMentionAtCursor(punctuatedTool, punctuationOffset, ["web_search"])?.query,
+    "web_search",
+  );
+  assert.deepEqual(toolMentionIdsFromText(punctuatedTool, tools), ["web_search"]);
+
+  const adjacentSkill = "お願い@pm";
+  assert.equal(
+    activeMentionAtCursor(adjacentSkill, adjacentSkill.length, ["pm"])?.query,
+    "pm",
+  );
+  assert.deepEqual(skillMentionIdsFromText(adjacentSkill, skills), ["project-manager"]);
+
+  for (const literal of ["mail@example.com", "https://example.com/@web_search", "\\@web_search", "@@web_search"]) {
+    assert.equal(activeMentionAtCursor(literal, literal.length, ["web_search"]), null);
+    assert.deepEqual(toolMentionIdsFromText(literal, tools), []);
   }
 });
 

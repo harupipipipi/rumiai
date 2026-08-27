@@ -12,6 +12,7 @@ from core_runtime.global_contract_dispatch import (
     captured_profile_id,
     invoke_global_contract,
 )
+from domain.mention import extract_mention_values
 from domain.safety import approval
 from domain.tool_policy.internal_context import tool_server_approval_context_is_internal
 
@@ -687,8 +688,16 @@ class CompanyContractFacade:
         if company is None:
             return None
         content = str(self.input.get("content") or self.input.get("message") or "")
-        mentions = _mention_values(content)
         agents = _legacy_agents(company)
+        known_values = {
+            value
+            for agent in agents
+            for value in _agent_mention_keys(agent)
+            if value
+        }
+        known_values.update(_MENTION_ALIASES)
+        known_values.update({"all", "channel", "team"})
+        mentions = _mention_values(content, known_values)
         resolved: list[dict[str, Any]] = []
         unresolved: list[str] = []
         seen: set[str] = set()
@@ -1136,10 +1145,15 @@ def _state_blocker_summary(company: Mapping[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def _mention_values(content: str) -> list[str]:
+def _mention_values(
+    content: str,
+    known_values: set[str] | None = None,
+) -> list[str]:
+    """Return deduplicated values from the shared product mention contract."""
+
     values: list[str] = []
     seen: set[str] = set()
-    for value in re.findall(r"(?<![A-Za-z0-9_])@([A-Za-z0-9_.:-]{1,100})", content):
+    for value in extract_mention_values(content, known_values):
         normalized = value.casefold()
         if normalized not in seen:
             seen.add(normalized)

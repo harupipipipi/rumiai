@@ -1,62 +1,165 @@
 [
   {
-    "name": "plain text has no mention",
-    "text": "plain text",
+    "name": "standalone trigger",
+    "text": "@",
     "tokens": [],
+    "active_query": ""
+  },
+  {
+    "name": "standalone mention",
+    "text": "@web_search",
+    "tokens": ["web_search"],
+    "active_query": "web_search"
+  },
+  {
+    "name": "Japanese adjacency",
+    "text": "調べて@web_search",
+    "tokens": ["web_search"],
+    "active_query": "web_search"
+  },
+  {
+    "name": "Japanese adjacency for an agent",
+    "text": "お願い@pm",
+    "tokens": ["pm"],
+    "active_query": "pm"
+  },
+  {
+    "name": "ASCII terminal punctuation",
+    "text": "Use (@web_search), please",
+    "tokens": ["web_search"],
     "active_query": null
   },
   {
-    "name": "basic active mention",
-    "text": "@tool",
-    "known_values": ["tool"],
-    "tokens": ["tool"],
-    "active_query": "tool"
-  },
-  {
-    "name": "mention after normal text",
-    "text": "Use @tool",
-    "known_values": ["tool"],
-    "tokens": ["tool"],
-    "active_query": "tool"
-  },
-  {
-    "name": "two mentions retain order",
-    "text": "@tool and @skill",
-    "known_values": ["tool", "skill"],
-    "tokens": ["tool", "skill"],
-    "active_query": "skill"
-  },
-  {
-    "name": "escaped mention is inert",
-    "text": "\\@escaped",
-    "known_values": ["escaped"],
-    "tokens": [],
+    "name": "ASCII terminal period",
+    "text": "Use @web_search.",
+    "tokens": ["web_search"],
     "active_query": null
   },
   {
-    "name": "email address is not a mention",
-    "text": "prefix@example.com",
-    "known_values": ["example.com"],
-    "tokens": [],
+    "name": "full width terminal punctuation",
+    "text": "調べて @web_search。次へ",
+    "tokens": ["web_search"],
     "active_query": null
   },
   {
-    "name": "supplementary-plane Unicode mention",
-    "text": "@𐐀tool",
-    "known_values": ["𐐀tool"],
+    "name": "Japanese closing punctuation",
+    "text": "「@pm」へお願い",
+    "tokens": ["pm"],
+    "active_query": null
+  },
+  {
+    "name": "skill path",
+    "text": "@feedback/live-review",
+    "tokens": ["feedback/live-review"],
+    "active_query": "feedback/live-review"
+  },
+  {
+    "name": "namespaced tool",
+    "text": "@mcp:server_tool",
+    "tokens": ["mcp:server_tool"],
+    "active_query": "mcp:server_tool"
+  },
+  {
+    "name": "supplementary-plane letter",
+    "text": "先𐐀 @𐐀tool",
     "tokens": ["𐐀tool"],
-    "active_query": "𐐀tool",
-    "cursor_codepoint": 6,
-    "cursor_utf16": 7,
-    "active_start_codepoint": 0,
-    "active_start_utf16": 0,
-    "token_spans": [[0, 6]]
+    "token_spans": [[3, 9]],
+    "cursor_utf16": 11,
+    "cursor_codepoint": 9,
+    "active_start_utf16": 4,
+    "active_start_codepoint": 3,
+    "active_query": "𐐀tool"
   },
   {
-    "name": "closed punctuation ends active query",
-    "text": "(@tool)",
-    "known_values": ["tool"],
-    "tokens": ["tool"],
+    "name": "email address",
+    "text": "mail@example.com",
+    "tokens": [],
     "active_query": null
+  },
+  {
+    "name": "international email address",
+    "text": "ユーザー@example.com",
+    "tokens": [],
+    "active_query": null
+  },
+  {
+    "name": "URL path",
+    "text": "https://example.com/@name",
+    "tokens": [],
+    "active_query": null
+  },
+  {
+    "name": "URL suffix",
+    "text": "https://example.com/path@name",
+    "tokens": [],
+    "active_query": null
+  },
+  {
+    "name": "Unicode URL path handle",
+    "text": "https://example.com/日本@pm",
+    "tokens": [],
+    "active_query": null
+  },
+  {
+    "name": "mention after URL full width comma",
+    "text": "https://example.com、お願い@pm",
+    "tokens": ["pm"],
+    "active_query": "pm"
+  },
+  {
+    "name": "mention after URL full width period",
+    "text": "https://example.com。@web_search",
+    "tokens": ["web_search"],
+    "active_query": "web_search"
+  },
+  {
+    "name": "mention after URL closing parenthesis",
+    "text": "https://example.com)@pm",
+    "tokens": ["pm"],
+    "active_query": "pm"
+  },
+  {
+    "name": "known dotted file after Japanese text",
+    "text": "確認@README.md",
+    "known_values": ["README.md"],
+    "tokens": ["README.md"],
+    "active_query": "README.md"
+  },
+  {
+    "name": "known dotted tool after Japanese text",
+    "text": "お願い@mcp.server",
+    "known_values": ["mcp.server"],
+    "tokens": ["mcp.server"],
+    "active_query": "mcp.server"
+  },
+  {
+    "name": "unknown dotted value remains domain-like",
+    "text": "お願い@unknown.example",
+    "tokens": [],
+    "active_query": null
+  },
+  {
+    "name": "double at",
+    "text": "@@web_search",
+    "tokens": [],
+    "active_query": null
+  },
+  {
+    "name": "escaped mention",
+    "text": "\\@web_search",
+    "tokens": [],
+    "active_query": null
+  },
+  {
+    "name": "mixed safe mentions",
+    "text": "mail@example.com と https://example.com/@no の後でお願い@pm、調べて@web_search。",
+    "tokens": ["pm", "web_search"],
+    "active_query": null
+  },
+  {
+    "name": "long text",
+    "text": "これは十分に長い日本語の依頼文です。候補境界が文の長さに左右されないことを確認してから、最後に調べて@web_search",
+    "tokens": ["web_search"],
+    "active_query": "web_search"
   }
 ]

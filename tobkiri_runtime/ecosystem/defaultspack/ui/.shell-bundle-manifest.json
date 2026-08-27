@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b42ece2e05b7e89452dd0b2bcef89f6dec5a148be13a2554686f4a0a7edbf8c6",
+    "digest": "41ce91f2f027384900f143dd18eccfa164bae8c5a634b7d6fa8d45369b6a3178",
     "entries": [
       {
         "path": "index.html",
@@ -1285,8 +1285,8 @@
       },
       {
         "path": "src/lib/composerWidgets.test.ts",
-        "size": 12845,
-        "sha256": "ad04fa174aefe19f4d7c8acd894530d33f690c30e9e85e8014ed8cde7116f7b7"
+        "size": 14573,
+        "sha256": "4033d86fe832143081100b80d06c81abfd9141a04c43f557f2afc974e751cf5e"
       },
       {
         "path": "src/lib/composerWidgets.ts",
@@ -1350,8 +1350,8 @@
       },
       {
         "path": "src/lib/fixtures/mention_boundaries.json",
-        "size": 1409,
-        "sha256": "292bd4e96a3904af576adab9145e5fca6c35bcb4a41424f131a32c5d8cf82830"
+        "size": 4009,
+        "sha256": "f7e12a05671384ae7340be11fa053bb423b7f8b5366cd64a6175d32a6ad4626f"
       },
       {
         "path": "src/lib/focusModality.test.ts",

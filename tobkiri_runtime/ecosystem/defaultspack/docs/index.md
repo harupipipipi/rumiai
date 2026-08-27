@@ -35,6 +35,7 @@ For the repo-wide glossary and migration guidance, see
 | RumiTemplate composition platform | [templates.md](templates.md) |
 | UI and layout | [ui_and_layout.md](ui_and_layout.md) |
 | Chat module | [chat.md](chat.md) |
+| `@` mention syntax | [mention-contract.md](mention-contract.md) |
 | Agent runtime | [agent_runtime.md](agent_runtime.md) |
 | Team workspace runtime | [multi-agent.md](multi-agent.md) |
 | Scheduler | [scheduler.md](scheduler.md) |
