@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import {
   fetchDashboard,
+  isDesktopShellAvailable,
+  launchDefaultspackDesktop,
 } from '@/src/lib/api';
 import { useAppStore } from '@/src/store';
 import { TobkiriLoader, TobkiriLoadingMark } from '@/src/components/ui/TobkiriLoader';
@@ -22,6 +24,9 @@ import { transformDashboard } from '@/src/lib/transforms';
 import type { DashboardData } from '@/src/store';
 import { panelRoutes } from '@/src/lib/routes';
 import { ShellLaunchCard } from '@/src/components/presentation/ShellLaunchCard';
+import { ProfileCatalogSelector } from '@/src/components/advanced/ProfileCatalogSelector';
+import { useRuntimeSurface } from '@/src/hooks/useRuntimeSurface';
+import type {RuntimeProfileCatalogEntry, RuntimeProfileCatalogProjection} from '@/src/lib/runtimeSurface';
 
 const defaultDashboard: DashboardData = {
   kernelStatus: 'stopped',
@@ -53,12 +58,16 @@ export function Dashboard() {
   const runtimeReady = useAppStore((state) => state.runtimeReady);
   const runtimeStatus = useAppStore((state) => state.runtimeStatus);
   const runtimeError = useAppStore((state) => state.runtimeError);
+  const packs = useAppStore((state) => state.packs);
+  const packsLoading = useAppStore((state) => state.packsLoading);
+  const loadPacks = useAppStore((state) => state.loadPacks);
   const navigate = useNavigate();
+  const profileSurface = useRuntimeSurface<unknown>('profile');
+  const profileCatalogSurface = useRuntimeSurface<RuntimeProfileCatalogProjection>('profiles');
 
   const [dashboard, setDashboard] = useState<DashboardData>(defaultDashboard);
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
-
   const refreshDashboard = async () => {
     setDashboardLoading(true);
     try {
@@ -80,6 +89,35 @@ export function Dashboard() {
       setDashboardLoading(false);
     }
   }, [runtimeReady]);
+
+  useEffect(() => {
+    void loadPacks();
+  }, [loadPacks]);
+
+  useEffect(() => {
+    if (!runtimeReady) return;
+    void Promise.all([
+      profileSurface.refresh(true),
+      profileCatalogSurface.refresh(true),
+      loadPacks(true),
+    ]);
+  }, [loadPacks, profileCatalogSurface.refresh, profileSurface.refresh, runtimeReady]);
+
+  const refreshProfileSurfaces = useCallback(async () => {
+    await Promise.all([
+      profileSurface.refresh(true),
+      profileCatalogSurface.refresh(true),
+      loadPacks(true),
+    ]);
+  }, [loadPacks, profileCatalogSurface.refresh, profileSurface.refresh]);
+
+  const launchProfile = useCallback(async (entry: RuntimeProfileCatalogEntry) => {
+    if (!isDesktopShellAvailable()) {
+      throw new Error('Profile Shell launch requires the desktop Launcher.');
+    }
+    const result = await launchDefaultspackDesktop();
+    addToast(result || `${entry.display_name} opened in the selected Shell.`, 'success');
+  }, [addToast]);
 
   const copyRuntimeError = async () => {
     const message = runtimeError || 'The control panel opened, but the background runtime startup failed.';
@@ -151,7 +189,7 @@ export function Dashboard() {
         <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-text-main">Home</h1>
-            <p className="mt-1 text-sm text-text-muted">Your workspace summary and active packs.</p>
+            <p className="mt-1 text-sm text-text-muted">Open and configure your active Profile.</p>
           </div>
           <div className="flex items-center gap-3">
             <Button onClick={() => navigate(panelRoutes.packs)}>
@@ -180,7 +218,23 @@ export function Dashboard() {
           </div>
         )}
 
-        <ShellLaunchCard runtimeReady={runtimeReady} />
+        <ProfileCatalogSelector
+          profileSurface={profileSurface}
+          catalogSurface={profileCatalogSurface}
+          packs={packs}
+          packsLoading={packsLoading}
+          loadPacks={loadPacks}
+          onActivated={async () => {
+            await refreshProfileSurfaces();
+            await refreshDashboard();
+          }}
+          onLaunch={runtimeReady && isDesktopShellAvailable() ? launchProfile : undefined}
+        />
+
+        <ShellLaunchCard
+          runtimeReady={runtimeReady}
+          onChooseShell={() => navigate(panelRoutes.setup)}
+        />
 
         {/* Summary tiles */}
         <section className="grid gap-4 sm:grid-cols-3">
@@ -253,7 +307,7 @@ function SupervisorSnapshot({
 
   if (!data) {
     return (
-      <section className="rounded-xl border border-border bg-bg-card p-5">
+      <section className="rounded-xl border border-border bg-bg-card p-5" aria-busy={loading}>
         <div className="flex items-center gap-3">
           <Monitor className="h-4 w-4 text-text-muted" />
           <div className="min-w-0 flex-1">

@@ -90,11 +90,11 @@ export function Flow() {
   return (
     <AdvancedSurfaceFrame
       descriptor={descriptor}
-      state={{status: surface.status, stale: surface.stale, error: surface.error}}
+      state={{status: surface.status, stale: surface.stale, error: surface.error, hasData: Boolean(surface.data)}}
       onRetry={() => void refreshFlow()}
     >
       {surface.data ? <RuntimeEvidenceCard envelope={surface.data} title="Flow catalog provenance" /> : null}
-      {surface.status === 'ready' && hasDeclaredCompositions ? (
+      {surface.data && hasDeclaredCompositions ? (
         <div className="grid gap-5">
           {flows && flows.length > 0 ? (
             <Card>

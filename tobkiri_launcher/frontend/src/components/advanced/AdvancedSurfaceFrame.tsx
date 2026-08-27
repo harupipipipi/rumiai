@@ -3,7 +3,7 @@ import {AlertTriangle, CheckCircle2, Clock3, RefreshCw, ShieldAlert} from 'lucid
 
 import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
-import {TobkiriLoadingMark} from '@/src/components/ui/TobkiriLoader';
+import {TobkiriLoader, TobkiriLoadingMark} from '@/src/components/ui/TobkiriLoader';
 import {
   advancedActionMetadata,
   type LauncherAdvancedAction,
@@ -18,6 +18,8 @@ export interface SurfaceStateNotice {
   status: RuntimeSurfaceLoadStatus;
   stale: boolean;
   error: {code: RuntimeSurfaceErrorCode; message: string} | null;
+  /** Whether accepted runtime data exists for this surface. */
+  hasData?: boolean;
 }
 
 function supportVariant(support: LauncherViewSupport): 'default' | 'secondary' | 'outline' | 'success' | 'warning' {
@@ -66,11 +68,11 @@ function StatusNotice({
   state: SurfaceStateNotice;
   onRetry: () => void;
 }): ReactNode {
-  if (state.status === 'loading' && !state.stale) {
+  if (state.status === 'loading') {
     return (
       <div className="flex items-center gap-3 rounded-xl border border-border bg-bg-card px-4 py-4 text-sm text-text-muted" role="status" aria-live="polite">
         <TobkiriLoadingMark />
-        Loading the canonical v4 projection…
+        Refreshing the canonical v4 projection…
       </div>
     );
   }
@@ -111,7 +113,7 @@ function StatusNotice({
           {state.stale ? <p className="mt-1 text-xs text-text-muted">Showing the last accepted snapshot. Actions are disabled until the authoritative surface is fresh.</p> : null}
         </div>
       </div>
-      <Button type="button" variant="outline" size="sm" onClick={onRetry} disabled={state.status === 'loading'}>
+      <Button type="button" variant="outline" size="sm" onClick={onRetry}>
         <RefreshCw className="h-4 w-4" aria-hidden="true" />
         Retry
       </Button>
@@ -132,6 +134,17 @@ export function AdvancedSurfaceFrame({
   children: ReactNode;
   className?: string;
 }) {
+  const hasAcceptedData = state.hasData ?? state.stale;
+  const isInitialLoad = !hasAcceptedData && state.status === 'loading';
+  const isFailureWithoutData = !hasAcceptedData
+    && state.status !== 'idle'
+    && state.status !== 'loading'
+    && state.status !== 'ready';
+
+  if (isInitialLoad) {
+    return <TobkiriLoader scope="panel" label={`Loading ${descriptor.label}…`} />;
+  }
+
   return (
     <div className={cn('flex-1 overflow-y-auto page-enter', className)}>
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
@@ -143,8 +156,8 @@ export function AdvancedSurfaceFrame({
             </div>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">{descriptor.summary}</p>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={onRetry} disabled={state.status === 'loading'}>
-            {state.status === 'loading' ? <TobkiriLoadingMark /> : <RefreshCw className="h-4 w-4" aria-hidden="true" />}
+          <Button type="button" variant="outline" size="sm" onClick={onRetry} loading={state.status === 'loading'}>
+            {state.status === 'loading' ? null : <RefreshCw className="h-4 w-4" aria-hidden="true" />}
             Refresh
           </Button>
         </header>
@@ -170,7 +183,7 @@ export function AdvancedSurfaceFrame({
             Canonical v4 projection accepted. {actionStateCopy(descriptor.actions, state.status, state.stale)}
           </div>
         ) : null}
-        {children}
+        {isFailureWithoutData ? null : children}
       </div>
     </div>
   );

@@ -1,10 +1,9 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {useNavigate} from 'react-router';
-import {CheckCircle2} from 'lucide-react';
 import {useAppStore} from '@/src/store';
 import {Button} from '@/src/components/ui/Button';
 import {PresentationSelector} from '@/src/components/presentation/PresentationSelector';
-import {TobkiriLoadingMark} from '@/src/components/ui/TobkiriLoader';
+import {TobkiriLoader, TobkiriLoadingMark} from '@/src/components/ui/TobkiriLoader';
 import {panelRoutes} from '@/src/lib/routes';
 import {
   activateDefaultsProfile,
@@ -17,7 +16,9 @@ import {
 } from '@/src/lib/defaultsActivationRecovery';
 import {
   fetchPresentationState,
+  isDesktopShellAvailable,
   launchSelectedPresentation,
+  reconcileDefaultsRuntime,
   selectPresentation,
 } from '@/src/lib/api';
 import {refreshMountedRuntimeSurfaces} from '@/src/lib/runtimeSurfaceRefresh';
@@ -59,10 +60,18 @@ export function Setup() {
   const [complete, setComplete] = useState(false);
   const activationInFlightRef = useRef(false);
   const profileReconfirmationRequired = runtimeStatus === 'profile_reconfirmation_required';
+  const desktopShell = isDesktopShellAvailable();
+
+  const completeBrowserSetup = useCallback(() => {
+    setSetupDone(true);
+    navigate(panelRoutes.home, {replace: true});
+  }, [navigate, setSetupDone]);
 
   const loadPresentation = useCallback(async () => {
     setPresentationLoading(true);
     setPresentationError(null);
+    setPresentation(null);
+    setSelection(null);
     try {
       const next = await fetchPresentationState();
       setPresentation(next);
@@ -71,6 +80,8 @@ export function Setup() {
           ?? defaultPresentationSelection(next.catalog),
       );
     } catch (error) {
+      setPresentation(null);
+      setSelection(null);
       setPresentationError(message(error, 'Presentation catalog could not be loaded.'));
     } finally {
       setPresentationLoading(false);
@@ -84,15 +95,19 @@ export function Setup() {
         if (!live) return;
         setSetup(next);
         setActivationCommitted(next.state === 'active');
-        if (next.state === 'active') void loadPresentation();
+        if (next.state === 'active') {
+          if (desktopShell) void loadPresentation();
+          else completeBrowserSetup();
+        }
       })
       .catch((error) => {
         if (live) setSetupError(message(error, 'Defaults Profile could not be loaded.'));
       });
     return () => { live = false; };
-  }, [loadPresentation]);
+  }, [completeBrowserSetup, desktopShell, loadPresentation]);
 
   const reconcileActiveRuntime = useCallback(async () => {
+    await reconcileDefaultsRuntime();
     await refreshRuntimeHealth();
     const runtimeState = useAppStore.getState();
     if (runtimeState.runtimeStatus !== 'runtime_ready') {
@@ -156,6 +171,8 @@ export function Setup() {
       setReconciliationError(failure);
       if (failure) {
         addToast(failure, 'error');
+      } else if (!desktopShell) {
+        completeBrowserSetup();
       } else {
         await loadPresentation();
       }
@@ -164,7 +181,7 @@ export function Setup() {
     setReconciliationError(null);
     setSetupError(failure);
     if (failure) addToast(failure, 'error');
-  }, [addToast, loadPresentation]);
+  }, [addToast, completeBrowserSetup, desktopShell, loadPresentation]);
 
   const recoverActivation = useCallback(async () => {
     if (activationInFlightRef.current) return;
@@ -210,8 +227,7 @@ export function Setup() {
       setPresentation(next);
       setSelection(next.selection ?? nextSelection);
       setSetupDone(true);
-      setComplete(true);
-      window.setTimeout(() => navigate(panelRoutes.home), 500);
+      addToast('Presentation selection saved. The verified Shell is ready to launch.', 'success');
     } catch (error) {
       setPresentationError(message(error, 'Presentation selection could not be saved.'));
     } finally {
@@ -225,6 +241,8 @@ export function Setup() {
     try {
       const result = await launchSelectedPresentation();
       addToast(result.message || 'Selected Shell launched.', 'success');
+      setComplete(true);
+      window.setTimeout(() => navigate(panelRoutes.home), 500);
     } catch (error) {
       setPresentationError(message(error, 'Selected Shell launch was blocked.'));
     } finally {
@@ -233,11 +251,11 @@ export function Setup() {
   };
 
   if (complete) {
-    return <div className="flex min-h-screen flex-col items-center justify-center gap-5 bg-bg-main text-center">
-      <CheckCircle2 className="h-12 w-12 text-emerald-500" />
-      <h1 className="text-xl font-semibold text-text-main">Runtime Ready</h1>
-      <TobkiriLoadingMark scene="startup" />
-    </div>;
+    return <TobkiriLoader
+      scope="screen"
+      scene="startup"
+      label="Runtime ready. Opening Tobkiri Launcher…"
+    />;
   }
 
   if (setup?.state === 'active') {
@@ -247,6 +265,12 @@ export function Setup() {
         <p className="font-medium text-text-main">Activation is verified; runtime surfaces need reconciliation.</p>
         <p className="mt-2">{reconciliationError}</p>
         <div className="mt-4"><Button variant="outline" onClick={() => void recoverActivation()} loading={activating}>Retry runtime reconciliation</Button></div>
+      </div> : presentationLoading ? <div role="status" aria-busy="true" className="flex items-center gap-2 rounded-xl border border-border bg-bg-card p-6 text-sm text-text-muted">
+        <TobkiriLoadingMark />
+        Loading selected presentation…
+      </div> : presentationError ? <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 p-6 text-sm text-destructive">
+        <p>{presentationError}</p>
+        <div className="mt-4"><Button variant="outline" onClick={() => void loadPresentation()} loading={presentationLoading}>Retry</Button></div>
       </div> : presentation ? <PresentationSelector
         state={presentation}
         selection={selection}
@@ -256,9 +280,9 @@ export function Setup() {
         onSelectionChange={setSelection}
         onSave={savePresentation}
         onLaunch={launchPresentation}
-      /> : <div role={presentationError ? 'alert' : 'status'} className="rounded-xl border border-border bg-bg-card p-6 text-sm text-text-muted">
-        {presentationError ?? 'Loading selected presentation…'}
-        {presentationError && <div className="mt-4"><Button variant="outline" onClick={() => void loadPresentation()} loading={presentationLoading}>Retry</Button></div>}
+      /> : <div role="status" className="rounded-xl border border-border bg-bg-card p-6 text-sm text-text-muted">
+        <p>No presentation catalog is available.</p>
+        <div className="mt-4"><Button variant="outline" onClick={() => void loadPresentation()}>Retry</Button></div>
       </div>}
     </div></div>;
   }

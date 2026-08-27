@@ -7,6 +7,7 @@ import {RuntimeEvidenceCard} from '@/src/components/advanced/RuntimeEvidenceCard
 import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
 import {Card, CardContent, CardHeader, CardTitle} from '@/src/components/ui/Card';
+import {TobkiriLoadingMark} from '@/src/components/ui/TobkiriLoader';
 import {useRuntimeSurface} from '@/src/hooks/useRuntimeSurface';
 import {LAUNCHER_ADVANCED_VIEWS} from '@/src/lib/advancedSurfaces';
 import {extractExactPackDescriptors, type RuntimePackDescriptor} from '@/src/lib/runtimeSurface';
@@ -79,11 +80,11 @@ export function NodeManager() {
   return (
     <AdvancedSurfaceFrame
       descriptor={descriptor}
-      state={{status: surface.status, stale: surface.stale, error: surface.error}}
+      state={{status: surface.status, stale: surface.stale, error: surface.error, hasData: Boolean(surface.data)}}
       onRetry={() => void refresh()}
     >
       {surface.data ? <RuntimeEvidenceCard envelope={surface.data} title="Pack lifecycle provenance" /> : null}
-      {surface.status === 'ready' && packs.length > 0 ? (
+      {surface.data && packs.length > 0 ? (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><Network className="h-4 w-4" aria-hidden="true" />Pack control catalog</CardTitle>
@@ -141,7 +142,10 @@ export function NodeManager() {
           </CardContent>
         </Card>
       ) : packsLoading ? (
-        <div className="rounded-xl border border-border bg-bg-card px-4 py-5 text-sm text-text-muted" role="status">Loading the canonical Pack control catalog…</div>
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-bg-card px-4 py-5 text-sm text-text-muted" role="status" aria-busy="true">
+          <TobkiriLoadingMark />
+          Loading the canonical Pack control catalog…
+        </div>
       ) : (
         <EmptySurfacePanel
           icon={<Network className="size-6" />}
