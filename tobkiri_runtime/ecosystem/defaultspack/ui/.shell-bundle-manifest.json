@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b42ece2e05b7e89452dd0b2bcef89f6dec5a148be13a2554686f4a0a7edbf8c6",
+    "digest": "3e0118a2aa5a3c46184293f9ae22cabc8bfa0f78cf994370acf2ec5ea69d4ccf",
     "entries": [
       {
         "path": "index.html",
@@ -195,8 +195,8 @@
       },
       {
         "path": "src/ambient/AmbientTriggerPanel.tsx",
-        "size": 108179,
-        "sha256": "d5f5234da1857945ad8f9922ead6071304c371ecc005f31c9cd0228a9ad78b8c"
+        "size": 109298,
+        "sha256": "6bd20aba7e481ec064f00dd8ff1bd5b462c6f8aa786b61085b8b81ca33fa6270"
       },
       {
         "path": "src/ambient/AmbientTriggerStatusIcon.tsx",
@@ -215,8 +215,8 @@
       },
       {
         "path": "src/ambient/ambientApprovalBoundary.test.ts",
-        "size": 20952,
-        "sha256": "d34c5116bc7ba63c1324454206a7438fca63c3f124345cc033cf46fc798d3a3f"
+        "size": 21687,
+        "sha256": "dbc5aceb1913474d56db607fcdae2be6f318527000f57dde3dd0fef5c89aed0c"
       },
       {
         "path": "src/ambient/ambientConversationCompletion.ts",
@@ -365,8 +365,8 @@
       },
       {
         "path": "src/components/AuthorityApprovalWindow.tsx",
-        "size": 49549,
-        "sha256": "9bd1f0f2afba23b8227c4055a26d21788477f671070cdc93783510f4e1adeb84"
+        "size": 49528,
+        "sha256": "d71cd6c06f06bd130896cbb6a0265bb6f210e2341020e3f6b0d520262faad9e9"
       },
       {
         "path": "src/components/ConversationSpotlight.tsx",
@@ -1100,8 +1100,8 @@
       },
       {
         "path": "src/lib/api.test.ts",
-        "size": 106048,
-        "sha256": "4a63dee144c1fa3524f76626946de9804f4347c450545067e8bf7bcddda512e4"
+        "size": 106022,
+        "sha256": "a77cfa7d248124a81dc37a07e7facd2935f8ae12ab83ec5c4752f30a42734ba6"
       },
       {
         "path": "src/lib/api.ts",
@@ -1125,8 +1125,8 @@
       },
       {
         "path": "src/lib/authorityApproval.test.ts",
-        "size": 22917,
-        "sha256": "3ff33ea54214804d8841dab627ff0af826455affa9e1068afc63c29e5f664cc4"
+        "size": 22865,
+        "sha256": "a5756150079fad6ea7aeb08767df659ca7958d64d452a303d61f4f316174935f"
       },
       {
         "path": "src/lib/authorityApproval.ts",
@@ -1140,8 +1140,8 @@
       },
       {
         "path": "src/lib/authorityApprovalBrowserSecurity.test.ts",
-        "size": 5945,
-        "sha256": "c1d393790e276a5d6bae49d26fa6c9d1c638ea1be0d8d3c4994196dc7682d36b"
+        "size": 5919,
+        "sha256": "ac9e2e8ab763a225c62e921de950b6168b9c2fab41961c1b3928e6a5caa9570b"
       },
       {
         "path": "src/lib/authorityApprovalBrowserToken.ts",
@@ -1150,13 +1150,13 @@
       },
       {
         "path": "src/lib/authorityApprovalEvents.test.ts",
-        "size": 3238,
-        "sha256": "ef33fc7b11f51b6af90fdf1ecebacf881f756b91243ec055af7f4c7e516bea60"
+        "size": 4829,
+        "sha256": "da85a350cfc97c913baeb2965772bf9a8b6c7288b6678f43e6bef69812f8ff2a"
       },
       {
         "path": "src/lib/authorityApprovalEvents.ts",
-        "size": 6147,
-        "sha256": "0ead13378743612876abd4c986cddf80c669535c664e3196d31c337e48f92c2e"
+        "size": 7810,
+        "sha256": "b0a768142d1661a3f99cdb6ea383c9d469a86e7f61efda0e8a911ca1c8c3d5d3"
       },
       {
         "path": "src/lib/browserApproval.test.ts",
@@ -1851,7 +1851,7 @@
     ]
   },
   "bundle": {
-    "digest": "6452bbd7184eb2fcaf39237cc3aae2ee663a0e8734cab7ac726958b6c71c92ff",
+    "digest": "371ffff2b88b656496284c8ee169c0f9867ded8d0825399348354ae97272e965",
     "entries": [
       {
         "path": "shell-app.css",
@@ -1865,8 +1865,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2208068,
-        "sha256": "3ebb1666ccf5ea40cdb7105b68dbfa5b8a7222cef3cd8d5b570da61f8b67ec25"
+        "size": 2209094,
+        "sha256": "ff65eb30975785d622765d6e3e7c91465b6350c4b85c477afde02ab916453fd2"
       },
       {
         "path": "shell-rolldown-runtime.js",
