@@ -34,7 +34,7 @@ from tobkiri_host.models import (
 )
 from tobkiri_host.errors import BackendUnavailableError
 from tobkiri_host.runtime import ProductionRuntimeV4, V4DispatchSession
-from tobkiri_protocol.canonical import canonical_digest
+from tobkiri_protocol.canonical import canonical_digest, canonical_json
 from tobkiri_protocol.errors import ProtocolError
 from tobkiri_protocol.platform_artifact import verify_platform_artifact
 
@@ -79,6 +79,19 @@ from ..host_provider_hooks_v4 import load_host_provider_factory
 _PACK_CATALOG_KEY = (PACK_CONTROL_CONTRACT, "catalog.read")
 _CONTROL_CONTRACTS = {PACK_CONTROL_CONTRACT, CONTROL_PRESENTATION_CONTRACT}
 _PYTHON_PACK_BACKEND_ID = "tobkiri.python-pack-v4"
+_BASELINE_CONVERSATION_KEY = ("conversation.turn.v1", "complete")
+_BASELINE_CONVERSATION_PACK_ID = "defaultspack"
+_BASELINE_CONVERSATION_FUNCTION_ID = "defaultspack.conversation"
+_BASELINE_CONVERSATION_CALLER_ID = "shell.tauri.default"
+_BRIDGED_AI_GENERATE_KEY = (
+    "tobkiri.service.ai.generate.v1",
+    "rumi_ai_gateway_pack.ai-gateway.generate",
+)
+_BRIDGED_AI_GENERATE_PACK_ID = "rumi_ai_gateway_pack"
+_BRIDGED_AI_GENERATE_FUNCTION_ID = "rumi_ai_gateway_pack.ai-gateway.generate"
+_PACKVM_BRIDGE_PROTOCOL = "io.tobkiri.packvm.bridge.v1"
+_PACKVM_BRIDGE_MAX_REQUEST_BYTES = 64 * 1024
+_PACKVM_BRIDGE_MAX_RESULT_BYTES = 512 * 1024
 
 
 class _UnavailablePythonPackBackend:
@@ -118,13 +131,56 @@ class _UnavailablePythonPackBackend:
 
 
 def _authenticated_packvm_backend(provisioner: Any | None = None) -> ExecutionBackend | None:
-    """Fail closed until a direct VZ supervisor is supplied by the Host."""
+    """Build the PackVM backend only from verified direct-VZ facts.
 
-    # Lima is a development VM manager, not the direct Virtualization.framework
-    # supervisor required by the production PackVM contract.  A healthy Lima
-    # guest must therefore never be promoted to a macos-vz production backend.
-    del provisioner
-    return None
+    The production composition root intentionally accepts neither a generic
+    VM driver nor Lima's development provisioning surface.  A lifecycle may
+    supply its already-authenticated direct-VZ registration; otherwise the
+    direct provisioner itself may do so.  In both cases the result must be the
+    immutable fact type produced by the direct VZ provisioner, and it must
+    yield an allocation-scoped authenticated transport factory before a driver
+    is constructed.
+    """
+
+    if provisioner is None:
+        return None
+
+    try:
+        from ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner import (
+            MacOSVZProvisionedFacts,
+        )
+        from tobkiri_host.macos_vz_supervisor import MacOSVZSupervisorDriver
+        from tobkiri_host.platform_backends import MacOSVZBackend
+
+        registration = getattr(provisioner, "production_backend_registration", None)
+        if callable(registration):
+            facts = registration()
+        else:
+            prepare_direct_vz = getattr(provisioner, "prepare_direct_vz", None)
+            if not callable(prepare_direct_vz):
+                return None
+            facts = prepare_direct_vz()
+        if not isinstance(facts, MacOSVZProvisionedFacts):
+            return None
+
+        transport_factory = facts.transport_or_factory()
+        if transport_factory is None:
+            return None
+
+        driver = MacOSVZSupervisorDriver(
+            transport_factory=transport_factory,
+            helper_path=facts.helper_path,
+            helper_identity=facts.helper_identity,
+            launch_assets=facts.launch_assets,
+            agent_identity=facts.agent_identity,
+            domain_allocator=facts.domain_allocator,
+        )
+        return MacOSVZBackend(driver)
+    except Exception:
+        # This is a capability promotion boundary.  The Host must remain
+        # unavailable when any direct-VZ evidence, identity, or constructor
+        # check cannot be established; no alternate VM substrate is eligible.
+        return None
 
 
 class _NoAdapterExecution:
@@ -592,6 +648,189 @@ def _commit_pack_control_authority(
         raise AuthorityDenied("Pack catalog authority snapshot changed")
 
 
+def _bind_baseline_conversation_authority(
+    *,
+    active: ActiveDefaultProfile,
+    catalog: BundledCatalog,
+    profile: Mapping[str, Any],
+    binding: Mapping[str, Any],
+    resolved_binding: ResolvedOperationBinding,
+    caller: FunctionPrincipal,
+    scope: AuthorityScope,
+    mandatory_pack_ids: set[str],
+    static_edge_keys: set[tuple[str, str]],
+    activation_suffix: str,
+    authority_store: AuthorityStore,
+    authority_control: Any,
+    registered_backends: tuple[ExecutionBackend, ...],
+    target_backend_digests: dict[str, str],
+) -> ExecutionBackend | None:
+    """Commit the exact Defaults Conversation authority only for a live PackVM.
+
+    The Defaults confirmation is the approval source for its required baseline
+    Pack.  Optional Pack approvals are deliberately not consulted here: they
+    cannot authorize, widen, or substitute this fixed Profile edge.
+    """
+
+    key = _BASELINE_CONVERSATION_KEY
+    target = FunctionPrincipal.from_dict(binding["function_principal"])
+    expected_profile_edges = tuple(
+        edge
+        for edge in catalog.profiles["defaults"]["requested_edges"]
+        if (str(edge["contract_id"]), str(edge["operation_id"])) == key
+    )
+    active_profile_edges = tuple(
+        edge
+        for edge in profile["requested_edges"]
+        if (str(edge["contract_id"]), str(edge["operation_id"])) == key
+    )
+    if (
+        key not in static_edge_keys
+        or _BASELINE_CONVERSATION_PACK_ID not in mandatory_pack_ids
+        or str(binding["pack_id"]) != _BASELINE_CONVERSATION_PACK_ID
+        or len(expected_profile_edges) != 1
+        or len(active_profile_edges) != 1
+        or str(expected_profile_edges[0]["caller_function_id"])
+        != _BASELINE_CONVERSATION_CALLER_ID
+        or str(expected_profile_edges[0]["target_provider_id"])
+        != _BASELINE_CONVERSATION_FUNCTION_ID
+        or str(active_profile_edges[0]["caller_function_id"])
+        != _BASELINE_CONVERSATION_CALLER_ID
+        or str(active_profile_edges[0]["target_provider_id"])
+        != _BASELINE_CONVERSATION_FUNCTION_ID
+        or target != _binding_principal(resolved_binding)
+        or target.function_id != _BASELINE_CONVERSATION_FUNCTION_ID
+        or target.operation_id != key[1]
+        or resolved_binding.artifact.pack_id != _BASELINE_CONVERSATION_PACK_ID
+        or resolved_binding.function.function_id
+        != _BASELINE_CONVERSATION_FUNCTION_ID
+        or resolved_binding.operation.contract_id != key[0]
+        or resolved_binding.operation.operation_id != key[1]
+        or resolved_binding.variant.execution_kind is not ExecutionKind.PACK_VM
+        or resolved_binding.variant.backend != _PYTHON_PACK_BACKEND_ID
+    ):
+        raise AuthorityDenied("Defaults baseline Conversation identity changed")
+
+    try:
+        backend = BackendRegistry(registered_backends).select(resolved_binding)
+    except Exception:
+        # A missing, non-production, or otherwise ineligible backend must not
+        # create a domain, approval, ProviderAuthority, or Grant.  The catalog
+        # remains fail-closed and reports the exact backend diagnostic.
+        return None
+    target_domain_binder = getattr(backend, "bind_target_domain_resolver", None)
+    bridge_binder = getattr(backend, "bind_capability_bridge", None)
+    if not callable(target_domain_binder) or not callable(bridge_binder):
+        # A backend which cannot consume the Authority-owned target identity is
+        # not eligible to receive the baseline Grant.  Conversation also
+        # requires the verified Host continuation bridge; a ready descriptor
+        # alone is never enough to expose this capability.
+        return None
+
+    target_suffix = target.principal_id.removeprefix("sha256:")[:24]
+    target_domain = _execution_domain(
+        domain_id=f"domain.provider.{target_suffix}.{activation_suffix}",
+        principal=target,
+        active=active,
+        boundary=DomainBoundary.DEDICATED_PROCESS,
+        channel_seed=f"baseline-packvm-provider:{key[0]}:{key[1]}",
+    )
+    _register_exact_domain(
+        authority_store,
+        authority_control,
+        target_domain,
+        session_id=f"session.provider.baseline-packvm.{target_suffix}.{activation_suffix}",
+        principal=target,
+    )
+    _commit_pack_control_authority(
+        authority_store,
+        authority_control,
+        active=active,
+        caller=caller,
+        target=target,
+        target_domain=target_domain,
+        scope=scope,
+        authority_label="baseline-packvm",
+    )
+    # Context evidence must be locked to the selected, production-ready
+    # backend rather than a caller-supplied stale digest.
+    target_backend_digests[target.principal_id] = backend.status.backend_digest
+    return backend
+
+
+def _validated_conversation_bridge_binding(
+    *,
+    catalog: BundledCatalog,
+    profile: Mapping[str, Any],
+    binding_by_key: Mapping[tuple[str, str], Mapping[str, Any]],
+    resolved_binding_by_key: Mapping[tuple[str, str], ResolvedOperationBinding],
+    static_edge_keys: set[tuple[str, str]],
+) -> ResolvedOperationBinding:
+    """Return the only Host capability reachable from PackVM Conversation.
+
+    The guest can request neither a different Contract target nor a broader
+    provider identity.  This check deliberately uses both the shipped Defaults
+    profile and the active immutable Profile before binding the Host bridge.
+    """
+
+    key = _BRIDGED_AI_GENERATE_KEY
+    binding = binding_by_key.get(key)
+    resolved_binding = resolved_binding_by_key.get(key)
+    expected_edges = tuple(
+        edge
+        for edge in catalog.profiles["defaults"]["requested_edges"]
+        if (str(edge["contract_id"]), str(edge["operation_id"])) == key
+    )
+    active_edges = tuple(
+        edge
+        for edge in profile["requested_edges"]
+        if (str(edge["contract_id"]), str(edge["operation_id"])) == key
+    )
+    if binding is None or resolved_binding is None:
+        raise AuthorityDenied("Defaults Conversation bridge target is unavailable")
+    target = FunctionPrincipal.from_dict(binding["function_principal"])
+    if (
+        key not in static_edge_keys
+        or str(binding["pack_id"]) != _BRIDGED_AI_GENERATE_PACK_ID
+        or len(expected_edges) != 1
+        or len(active_edges) != 1
+        or str(expected_edges[0]["caller_function_id"])
+        != _BASELINE_CONVERSATION_FUNCTION_ID
+        or str(expected_edges[0]["target_provider_id"])
+        != _BRIDGED_AI_GENERATE_FUNCTION_ID
+        or str(active_edges[0]["caller_function_id"])
+        != _BASELINE_CONVERSATION_FUNCTION_ID
+        or str(active_edges[0]["target_provider_id"])
+        != _BRIDGED_AI_GENERATE_FUNCTION_ID
+        or target != _binding_principal(resolved_binding)
+        or target.function_id != _BRIDGED_AI_GENERATE_FUNCTION_ID
+        or target.operation_id != key[1]
+        or resolved_binding.artifact.pack_id != _BRIDGED_AI_GENERATE_PACK_ID
+        or resolved_binding.function.function_id
+        != _BRIDGED_AI_GENERATE_FUNCTION_ID
+        or resolved_binding.operation.contract_id != key[0]
+        or resolved_binding.operation.operation_id != key[1]
+        # Calling PackVM again from this bridge would let a guest-controlled
+        # continuation create a recursive capability boundary.
+        or resolved_binding.variant.execution_kind is ExecutionKind.PACK_VM
+        or resolved_binding.variant.backend == _PYTHON_PACK_BACKEND_ID
+    ):
+        raise AuthorityDenied("Defaults Conversation bridge identity changed")
+    return resolved_binding
+
+
+def _provider_unavailable_bridge_result() -> dict[str, Any]:
+    """Return the fixed error projection allowed across the guest boundary."""
+
+    return {
+        "status": "error",
+        "error": {
+            "code": "PROVIDER_UNAVAILABLE",
+            "message": "The verified AI capability is unavailable.",
+        },
+    }
+
+
 def capture_production_dispatch(
     active: ActiveDefaultProfile,
     *,
@@ -731,6 +970,12 @@ def capture_production_dispatch(
         (binding.operation.contract_id, binding.operation.operation_id): binding
         for binding in catalog_bindings
     }
+    registered_backends = tuple((backends or BackendRegistry(())).registered)
+    if backends is None:
+        authenticated_backend = _authenticated_packvm_backend(packvm_provisioner)
+        if authenticated_backend is not None:
+            registered_backends += (authenticated_backend,)
+    target_backend_digests = dict(target_backend_digests or {})
     authority_control = runtime.composition.authority_adapter(authority_store)
     control_targets: dict[tuple[str, str], tuple[str, str, str]] = {}
     control_backend: PackControlBackendV4 | None = None
@@ -907,6 +1152,13 @@ def capture_production_dispatch(
         )
 
     built_in_host_pack_ids = {
+        "rumi_ai_gateway_pack",
+        "rumi_ai_pipeline_pack",
+        "rumi_ai_routing_pack",
+        "rumi_ai_stream_pack",
+        "rumi_ai_tool_bridge_pack",
+        "rumi_ai_usage_pack",
+        "rumi_model_registry_pack",
         "rumi_provider_adapters_pack",
         "rumi_provider_registry_pack",
     }
@@ -950,6 +1202,40 @@ def capture_production_dispatch(
         )
         approved_host_binding_keys.add(key)
         dynamic_domain_ids[(key[0], key[1], target.principal_id)] = target_domain.domain_id
+
+    baseline_binding = binding_by_key.get(_BASELINE_CONVERSATION_KEY)
+    baseline_resolved_binding = resolved_binding_by_key.get(
+        _BASELINE_CONVERSATION_KEY
+    )
+    if baseline_binding is None or baseline_resolved_binding is None:
+        raise AuthorityDenied("Defaults baseline Conversation binding is unavailable")
+    _validated_conversation_bridge_binding(
+        catalog=catalog,
+        profile=profile,
+        binding_by_key=binding_by_key,
+        resolved_binding_by_key=resolved_binding_by_key,
+        static_edge_keys=static_edge_keys,
+    )
+    baseline_target = _binding_principal(baseline_resolved_binding)
+    if caller_by_operation.get(_BRIDGED_AI_GENERATE_KEY) != baseline_target:
+        raise AuthorityDenied("Defaults Conversation bridge caller identity changed")
+    baseline_backend = _bind_baseline_conversation_authority(
+        active=active,
+        catalog=catalog,
+        profile=profile,
+        binding=baseline_binding,
+        resolved_binding=baseline_resolved_binding,
+        caller=caller_by_operation[_BASELINE_CONVERSATION_KEY],
+        scope=scope_by_operation[_BASELINE_CONVERSATION_KEY],
+        mandatory_pack_ids=mandatory_pack_ids,
+        static_edge_keys=static_edge_keys,
+        activation_suffix=activation_suffix,
+        authority_store=authority_store,
+        authority_control=authority_control,
+        registered_backends=registered_backends,
+        target_backend_digests=target_backend_digests,
+    )
+
     def authority_target_domain(binding: ResolvedOperationBinding) -> str:
         target_suffix = binding.principal_ref.value.removeprefix("sha256:")[:24]
         domain_id = f"domain.provider.{target_suffix}.{activation_suffix}"
@@ -963,11 +1249,176 @@ def capture_production_dispatch(
             )
         return domain_id
 
-    registered_backends = tuple((backends or BackendRegistry(())).registered)
-    if backends is None:
-        authenticated_backend = _authenticated_packvm_backend(packvm_provisioner)
-        if authenticated_backend is not None:
-            registered_backends += (authenticated_backend,)
+    # The bridge is Host-owned and receives only an authenticated outer
+    # RequestEnvelope from the VZ supervisor.  The callback is intentionally
+    # closed over the immutable capture; it never accepts caller, profile,
+    # session, contract, provider, or plan identity from the guest.
+    dispatch_holder: list[V4DispatchSession] = []
+
+    def capability_bridge(
+        outer_request: object,
+        bridge_request: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        outer_context = getattr(outer_request, "context", None)
+        outer_target = getattr(
+            getattr(outer_request, "target_principal", None),
+            "value",
+            None,
+        )
+        outer_domain = getattr(
+            getattr(outer_request, "target_domain", None),
+            "value",
+            None,
+        )
+        expected_target_domain = authority_target_domain(baseline_resolved_binding)
+        if (
+            getattr(outer_request, "contract_id", None)
+            != _BASELINE_CONVERSATION_KEY[0]
+            or getattr(outer_request, "operation_id", None)
+            != _BASELINE_CONVERSATION_KEY[1]
+            or outer_target != baseline_target.principal_id
+            or outer_domain != expected_target_domain
+            or getattr(outer_context, "caller_principal", None)
+            != OpaqueAuthorityRef(
+                caller_by_operation[_BASELINE_CONVERSATION_KEY].principal_id
+            )
+            or getattr(outer_context, "profile_id", None) != profile["profile_id"]
+            or getattr(outer_context, "activation_id", None)
+            != active.activation["activation_id"]
+            or getattr(outer_context, "activation_digest", None)
+            != canonical_digest(active.activation)
+            or getattr(outer_context, "plan_digest", None) != plan["plan_digest"]
+            or getattr(outer_context, "security_epoch", None)
+            != active.activation["security_epoch"]
+            or getattr(outer_context, "fencing_token", None)
+            != active.activation["fencing_token"]
+            or getattr(outer_context, "profile_authority_digest", None)
+            != active.activation["profile_authority_snapshot_digest"]
+            or getattr(outer_context, "target_domain_id", None)
+            != expected_target_domain
+            or getattr(outer_context, "target_backend_digest", None)
+            != target_backend_digests[baseline_target.principal_id]
+        ):
+            raise AuthorityDenied("PackVM capability bridge outer identity is invalid")
+
+        expected_fields = {
+            "kind",
+            "protocol",
+            "version",
+            "target",
+            "request",
+            "request_digest",
+            "continuation",
+        }
+        target = bridge_request.get("target")
+        request = bridge_request.get("request")
+        continuation = bridge_request.get("continuation")
+        expected_bridge_target = {
+            "contract_id": _BRIDGED_AI_GENERATE_KEY[0],
+            "operation_id": _BRIDGED_AI_GENERATE_KEY[1],
+        }
+        if (
+            set(bridge_request) != expected_fields
+            or bridge_request.get("kind") != "tobkiri.packvm.bridge.request.v1"
+            or bridge_request.get("protocol") != _PACKVM_BRIDGE_PROTOCOL
+            or bridge_request.get("version") != 1
+            or not isinstance(target, Mapping)
+            or dict(target) != expected_bridge_target
+            or not isinstance(request, Mapping)
+            or set(request) != {"messages", "requirements"}
+            or not isinstance(request.get("messages"), list)
+            or not request["messages"]
+            or any(not isinstance(item, Mapping) for item in request["messages"])
+            or request.get("requirements")
+            != {"request_surface": "defaultspack.conversation"}
+            or not isinstance(bridge_request.get("request_digest"), str)
+            or not isinstance(continuation, Mapping)
+        ):
+            raise AuthorityDenied("PackVM capability bridge request is invalid")
+
+        requested_payload = {
+            "messages": list(request["messages"]),
+            "requirements": {"request_surface": "defaultspack.conversation"},
+        }
+        try:
+            if (
+                len(canonical_json(requested_payload))
+                > _PACKVM_BRIDGE_MAX_REQUEST_BYTES
+                or bridge_request["request_digest"]
+                != canonical_digest(requested_payload)
+            ):
+                raise AuthorityDenied("PackVM capability bridge request is invalid")
+        except AuthorityDenied:
+            raise
+        except Exception as error:
+            raise AuthorityDenied("PackVM capability bridge request is invalid") from error
+
+        nonce = continuation.get("nonce")
+        expected_continuation = {
+            "kind": "tobkiri.packvm.continuation.v1",
+            "protocol": _PACKVM_BRIDGE_PROTOCOL,
+            "version": 1,
+            "operation_id": _BASELINE_CONVERSATION_KEY[1],
+            "nonce": nonce,
+            "target": expected_bridge_target,
+            "request_digest": bridge_request["request_digest"],
+        }
+        if (
+            dict(continuation) != expected_continuation
+            or not isinstance(nonce, str)
+            or len(nonce) != 48
+            or any(character not in "0123456789abcdef" for character in nonce)
+        ):
+            raise AuthorityDenied("PackVM capability bridge continuation is invalid")
+
+        if not dispatch_holder:
+            raise AuthorityDenied("PackVM capability bridge is not initialized")
+        dispatch = dispatch_holder[0]
+        dispatch.assert_current()
+        request_id = getattr(outer_context, "request_id", None)
+        if not isinstance(request_id, str) or not request_id or len(request_id) > 160:
+            raise AuthorityDenied("PackVM capability bridge request identity is invalid")
+        # This session identity is generated in the Host.  The guest nonce
+        # binds its continuation but never becomes an Authority session id.
+        bridge_session_id = (
+            f"session.packvm-bridge.{request_id}.{secrets.token_hex(16)}"
+        )
+        try:
+            provider_result = dispatch.invoke(
+                _BRIDGED_AI_GENERATE_KEY[0],
+                _BRIDGED_AI_GENERATE_KEY[1],
+                {
+                    "messages": requested_payload["messages"],
+                    "requirements": requested_payload["requirements"],
+                    "_session_id": bridge_session_id,
+                },
+            )
+            if not isinstance(provider_result, Mapping):
+                raise TypeError("verified AI capability returned a non-object")
+            result = {"status": "ok", "value": dict(provider_result)}
+            if len(canonical_json(result)) > _PACKVM_BRIDGE_MAX_RESULT_BYTES:
+                raise ValueError("verified AI capability result is too large")
+        except Exception:
+            # Do not project provider/backend details through the PackVM ABI.
+            # The guest receives a typed, bounded result it can safely render.
+            result = _provider_unavailable_bridge_result()
+
+        response = {
+            "kind": "tobkiri.packvm.bridge.result.v1",
+            "protocol": _PACKVM_BRIDGE_PROTOCOL,
+            "version": 1,
+            "operation_id": _BASELINE_CONVERSATION_KEY[1],
+            "nonce": nonce,
+            "target": expected_bridge_target,
+            "request_digest": bridge_request["request_digest"],
+            "result": result,
+        }
+        response["result_digest"] = canonical_digest(response["result"])
+        if len(canonical_json(response)) > _PACKVM_BRIDGE_MAX_RESULT_BYTES:
+            response["result"] = _provider_unavailable_bridge_result()
+            response["result_digest"] = canonical_digest(response["result"])
+        return response
+
     for registered_backend in registered_backends:
         if registered_backend.status.backend_id != _PYTHON_PACK_BACKEND_ID:
             continue
@@ -982,7 +1433,15 @@ def capture_production_dispatch(
         )
         if domain_binder is not None:
             domain_binder(authority_target_domain)
-    if not any(item.status.backend_id == _PYTHON_PACK_BACKEND_ID for item in registered_backends):
+    if baseline_backend is not None:
+        bridge_binder = getattr(baseline_backend, "bind_capability_bridge", None)
+        if not callable(bridge_binder):
+            raise AuthorityDenied("production PackVM backend cannot bind capability bridge")
+        bridge_binder(capability_bridge)
+    if not any(
+        item.status.backend_id == _PYTHON_PACK_BACKEND_ID
+        for item in registered_backends
+    ):
         # The descriptor remains unavailable unless the composition root
         # supplies a real authenticated supervisor.  Registering the exact
         # disabled identity preserves a stable user-facing diagnostic without
@@ -1003,7 +1462,6 @@ def capture_production_dispatch(
             ).append(resolved_binding)
     host_contributions_by_backend: dict[str, list[Any]] = {}
     close_callbacks: list[Callable[[], None]] = []
-    dispatch_holder: list[V4DispatchSession] = []
     credential_store_binding = (
         credential_store_factory(user_data_root=authority_user_data)
         if credential_store_factory is not None
@@ -1166,7 +1624,6 @@ def capture_production_dispatch(
             ),
         )
     backend_registry = BackendRegistry(registered_backends)
-    target_backend_digests = dict(target_backend_digests or {})
     for binding in plan["bindings"]:
         target = FunctionPrincipal.from_dict(binding["function_principal"])
         if target.principal_id in target_backend_digests:

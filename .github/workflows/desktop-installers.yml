@@ -450,6 +450,21 @@ jobs:
           TOBKIRI_PANEL_BUILD_DIR: ${{ runner.temp }}/tobkiri-panel-build
         run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.macos.dev.conf.json --bundles app --ci ${{ matrix.signing_args }}
 
+      - name: Stage authenticated macOS PackVM VZ helper
+        if: runner.os == 'macOS'
+        working-directory: tobkiri_launcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app"
+          test -d "$app"
+          bash scripts/build_packvm_vz_helper.sh \
+            --target '${{ matrix.target }}' --app-bundle "$app"
+          test -f "$app/Contents/MacOS/tobkiri-packvm-vz-helper"
+          test ! -L "$app/Contents/MacOS/tobkiri-packvm-vz-helper"
+          test -f "$app/Contents/Resources/packvm-vz-provisioning.v1.json"
+          test ! -L "$app/Contents/Resources/packvm-vz-provisioning.v1.json"
+
       - name: Attest and ad-hoc sign macOS CI/E2E application
         if: runner.os == 'macOS'
         shell: bash
@@ -457,13 +472,30 @@ jobs:
           set -euo pipefail
           app="$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app"
           test -d "$app"
+          helper="$app/Contents/MacOS/tobkiri-packvm-vz-helper"
+          /usr/bin/codesign --force --sign - \
+            --identifier dev.tobkiri.launcher.packvm-vz-helper \
+            --options runtime --timestamp=none \
+            --entitlements tobkiri_launcher/packvm-vz-helper/Entitlements/tobkiri-packvm-vz-helper.entitlements \
+            "$helper"
+          /usr/bin/codesign --verify --strict --all-architectures --verbose=2 "$helper"
+          helper_details=$(/usr/bin/codesign -d -r- --verbose=4 "$helper" 2>&1)
+          /usr/bin/grep -Fqx 'Identifier=dev.tobkiri.launcher.packvm-vz-helper' <<<"$helper_details"
+          /usr/bin/grep -Fqx 'Signature=adhoc' <<<"$helper_details"
+          /usr/bin/grep -Eq '^# designated => cdhash H"[0-9a-fA-F]{40}"$' <<<"$helper_details"
+          /usr/bin/codesign -d --entitlements :- "$helper" 2>/dev/null \
+            | /usr/bin/plutil -extract 'com\.apple\.security\.virtualization' raw -o - - \
+            | /usr/bin/grep -qx true
+          python .github/scripts/macos_ci_artifact.py write-packvm-bundle-manifest \
+            --app-bundle "$app" \
+            --expected-signing-mode ad-hoc
           python .github/scripts/macos_ci_artifact.py attest \
             --app-bundle "$app" \
             --private-key "$TOBKIRI_CI_PRIVATE_KEY" \
             --certificate "$TOBKIRI_CI_CERTIFICATE"
-          /usr/bin/codesign --force --deep --options runtime --timestamp=none \
+          /usr/bin/codesign --force --options runtime --timestamp=none \
             --sign - "$app"
-          /usr/bin/codesign --verify --deep --strict --verbose=2 "$app"
+          /usr/bin/codesign --verify --strict --all-architectures --verbose=2 "$app"
           python .github/scripts/macos_ci_artifact.py verify \
             --app-bundle "$app" \
             --expected-certificate-sha256 "$TOBKIRI_MACOS_CI_CERT_SHA256"
@@ -485,8 +517,10 @@ jobs:
             --seal-tauri-directories \
             --native-smoke
           test ! -e "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app/Contents/Resources/app/logs"
-          /usr/bin/codesign --verify --deep --strict --verbose=2 \
+          /usr/bin/codesign --verify --strict --all-architectures --verbose=2 \
             "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app"
+          /usr/bin/codesign --verify --strict --all-architectures --verbose=2 \
+            "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/macos/Tobkiri Launcher CI E2E.app/Contents/MacOS/tobkiri-packvm-vz-helper"
 
       - name: Cold-boot packaged macOS CI/E2E Launcher
         if: runner.os == 'macOS'

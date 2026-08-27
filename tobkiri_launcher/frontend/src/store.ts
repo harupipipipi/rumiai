@@ -336,16 +336,34 @@ async function invalidatePackMutationSurfaces(get: () => AppState): Promise<void
     let handled = 0;
     while (handled < packInvalidationRequested) {
       const requested = packInvalidationRequested;
-      await Promise.all([
+      const packVmExplicitlyUnavailable = get().packVmDoctor?.ready === false;
+      const refreshes: Promise<void>[] = [
         // Operation-status reconciliation owns the current refresh. Do not
         // start a second hydrated-journal reconciliation from that refresh;
         // it would outlive the caller and could issue a later request against
         // a replaced/closed UI context.
         get().loadPacks(true, {skipMutationReconciliation: true}),
-        get().loadFrontendCatalog(true),
-      ]);
+      ];
+      // The dynamic capability catalog is a PackVM-owned surface. An
+      // intentionally unavailable PackVM (for example an ad-hoc signed macOS
+      // build) must not turn a successful Host-owned Pack lifecycle mutation
+      // into an indeterminate result.
+      if (!packVmExplicitlyUnavailable) refreshes.push(get().loadFrontendCatalog(true));
+      await Promise.all(refreshes);
+      // Readiness may become authoritative while the Host catalog refresh is
+      // in flight. In that case the PackVM-owned projection is required after
+      // all and must be refreshed before the mutation can be confirmed.
+      if (packVmExplicitlyUnavailable && get().packVmDoctor?.ready === true) {
+        await get().loadFrontendCatalog(true);
+      }
       const refreshedState = get();
-      if (refreshedState.packsError || refreshedState.frontendCatalogError) {
+      if (
+        refreshedState.packsError
+        || (
+          refreshedState.packVmDoctor?.ready !== false
+          && refreshedState.frontendCatalogError
+        )
+      ) {
         throw new Error('Authoritative Pack projections could not be reconciled.');
       }
       await refreshMountedRuntimeSurfaces();

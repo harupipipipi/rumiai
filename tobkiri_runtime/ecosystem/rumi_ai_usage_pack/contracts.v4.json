@@ -24,7 +24,7 @@
       "provenance": {
         "evidence": [
           {
-            "digest": "sha256:a50e6c29cb7c199355e14207261db0c505b34254b9b573a479dcc859c12e7af4",
+            "digest": "sha256:e9d186ec3c1c0e99fa368d248a8160bb2f76f618c03e0a2069459c8e8aaad3c5",
             "path": "schemas/pack_v4_catalog.v1.json",
             "rule_id": "canonical-pack-v4-source-record"
           }
@@ -35,7 +35,7 @@
         "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
         "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
         "schema": "io.tobkiri.provenance.v1",
-        "source_digest": "sha256:a50e6c29cb7c199355e14207261db0c505b34254b9b573a479dcc859c12e7af4",
+        "source_digest": "sha256:e9d186ec3c1c0e99fa368d248a8160bb2f76f618c03e0a2069459c8e8aaad3c5",
         "source_kind": "migration",
         "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_ai_usage_pack"
       },
@@ -114,7 +114,7 @@
       "provenance": {
         "evidence": [
           {
-            "digest": "sha256:a50e6c29cb7c199355e14207261db0c505b34254b9b573a479dcc859c12e7af4",
+            "digest": "sha256:e9d186ec3c1c0e99fa368d248a8160bb2f76f618c03e0a2069459c8e8aaad3c5",
             "path": "schemas/pack_v4_catalog.v1.json",
             "rule_id": "canonical-pack-v4-source-record"
           }
@@ -125,7 +125,7 @@
         "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
         "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
         "schema": "io.tobkiri.provenance.v1",
-        "source_digest": "sha256:a50e6c29cb7c199355e14207261db0c505b34254b9b573a479dcc859c12e7af4",
+        "source_digest": "sha256:e9d186ec3c1c0e99fa368d248a8160bb2f76f618c03e0a2069459c8e8aaad3c5",
         "source_kind": "migration",
         "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_ai_usage_pack"
       },
@@ -155,5 +155,5 @@
     }
   ],
   "pack_id": "rumi_ai_usage_pack",
-  "source_identity": "sha256:a50e6c29cb7c199355e14207261db0c505b34254b9b573a479dcc859c12e7af4"
+  "source_identity": "sha256:e9d186ec3c1c0e99fa368d248a8160bb2f76f618c03e0a2069459c8e8aaad3c5"
 }
