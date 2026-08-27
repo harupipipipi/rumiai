@@ -1,3 +1,5 @@
+import { Fragment } from 'react';
+
 import { useAppStore } from '@/src/store';
 import { viewerLayers } from '@/src/lib/layers';
 
@@ -11,19 +13,35 @@ interface TobkiriLoaderProps {
 const startupAnimationUrl = '/panel/assets/tobkiri-startup-blade-cut.svg';
 const transitionAnimationUrl = '/panel/assets/tobkiri-startup-blade-cut.svg';
 
+function ReducedMotionWordmark({className = ''}: {className?: string}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`items-center justify-center font-semibold tracking-tight text-text-main ${className}`}
+      data-reduced-motion-wordmark
+    >
+      Tobkiri
+    </span>
+  );
+}
+
 export function TobkiriLoadingMark({
   className = '',
   scene = 'transition',
 }: Pick<TobkiriLoaderProps, 'className' | 'scene'>) {
   const source = scene === 'startup' ? startupAnimationUrl : transitionAnimationUrl;
   return (
-    <img
-      alt=""
-      aria-hidden="true"
-      className={`h-4 w-8 shrink-0 rounded-sm object-contain dark:invert ${className}`}
-      data-loading-scene={scene}
-      src={source}
-    />
+    <Fragment>
+      <img
+        alt=""
+        aria-hidden="true"
+        className={`h-4 w-8 shrink-0 rounded-sm object-contain dark:invert ${className}`}
+        data-loading-scene={scene}
+        data-motion-animation
+        src={source}
+      />
+      <ReducedMotionWordmark className="h-4 shrink-0 text-[10px] leading-none" />
+    </Fragment>
   );
 }
 
@@ -56,8 +74,10 @@ export function TobkiriLoader({
           aria-hidden="true"
           className="aspect-[2/1] w-full animate-pulse object-contain mix-blend-multiply dark:mix-blend-screen dark:invert"
           data-loading-scene={scene}
+          data-motion-animation
           src={source}
         />
+        <ReducedMotionWordmark className="min-h-24 w-full text-3xl" />
         <span className="text-sm text-text-muted">{label}</span>
       </div>
     </div>
