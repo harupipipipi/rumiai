@@ -66,19 +66,9 @@ import { useFinalAnswerBridge } from "./useFinalAnswerBridge";
 import { useAmbientHandTracker } from "./useAmbientHandTracker";
 import { useAmbientRouting } from "./useAmbientRouting";
 
-export type AmbientApprovalTarget = {
-  kind: "browser" | "runtime" | "authority";
-  approveLabel?: string;
-  rejectLabel?: string;
-  canApprove?: boolean;
-  canReject?: boolean;
-};
-
 type Props = {
   conversationId?: string | null;
   onOpenInput?: (text?: string) => void;
-  approvalTarget?: AmbientApprovalTarget | null;
-  onApprovalGesture?: (decision: "approve" | "reject") => void | Promise<void>;
   finalAnswerText?: string | null;
   variant?: "floating" | "window";
   debugMode?: boolean;
@@ -119,8 +109,6 @@ const HAND_LANDMARK_CONNECTIONS = [
 export function AmbientTriggerPanel({
   conversationId,
   onOpenInput,
-  approvalTarget,
-  onApprovalGesture,
   finalAnswerText,
   variant = "floating",
   debugMode = false,
@@ -175,16 +163,12 @@ export function AmbientTriggerPanel({
   const pinchSpeechRecognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const pinchTranscriptRef = useRef("");
   const lastPinchStateRef = useRef<PinchState | null>(null);
-  const choiceHandledAtRef = useRef(0);
-  const approvalGestureBusyRef = useRef(false);
   const rumiApprovalAutoOpenRef = useRef(false);
   const miniAuthorityApprovalAutoOpenedRef = useRef(new Set<string>());
   const miniAuthorityContinuationWaitRef = useRef(new Set<string>());
   const miniAuthorityContinuationErrorRequestRef = useRef<string | null>(null);
   const conversationIdRef = useRef<string | null | undefined>(conversationId);
   const onOpenInputRef = useRef<Props["onOpenInput"]>(onOpenInput);
-  const approvalTargetRef = useRef<Props["approvalTarget"]>(approvalTarget);
-  const onApprovalGestureRef = useRef<Props["onApprovalGesture"]>(onApprovalGesture);
   const miniChatRequestSeqRef = useRef(0);
   const pendingAmbientResponseRef = useRef<{
     conversationId: string;
@@ -351,9 +335,7 @@ export function AmbientTriggerPanel({
   useEffect(() => {
     conversationIdRef.current = conversationId;
     onOpenInputRef.current = onOpenInput;
-    approvalTargetRef.current = approvalTarget;
-    onApprovalGestureRef.current = onApprovalGesture;
-  }, [approvalTarget, conversationId, onApprovalGesture, onOpenInput]);
+  }, [conversationId, onOpenInput]);
 
   const activateMiniConversationFromSubmitResult = useCallback((result: Record<string, unknown>, fallbackConversationId?: string | null) => {
     const targetConversationId = ambientSubmittedConversationIdFromResult(result) || cleanString(fallbackConversationId);
@@ -874,44 +856,8 @@ export function AmbientTriggerPanel({
     }
   }, [allOsPermissionsGranted, allRumiPermissionsGranted, rumiApprovalPending, selectedMicId]);
 
-  const submitFingerChoice = useCallback(async (state: PinchState) => {
-    const choice = state.fingerChoice;
-    if (choice !== 2 && choice !== 3 && choice !== 4) return;
-    const now = performance.now();
-    if (now - choiceHandledAtRef.current < 800) return;
-    const approvalDecision = approvalDecisionForChoice(choice, approvalTargetRef.current);
-    if (!approvalDecision) return;
-    choiceHandledAtRef.current = now;
-    if (pinchRecorderRef.current) {
-      pinchRecorderRef.current.cancel();
-      pinchRecorderRef.current = null;
-      setPinchRecording(false);
-      setRecordingStartedAt(null);
-      stopPinchSpeechRecognition(true);
-      setPinchTranscriptPreview("");
-    }
-    await submitApprovalGesture(approvalDecision, state, `choice_${choice}`);
-  }, []);
-
-  const handleApprovalSwipe = useCallback(async (state: PinchState) => {
-    const decision = state.approvalGesture;
-    if (decision !== "approve" && decision !== "reject") return;
-    if (!approvalTargetRef.current) return;
-    await submitApprovalGesture(decision, state, `swipe_${decision}`);
-  }, []);
-
   const handlePinchState = useCallback((state: PinchState) => {
     lastPinchStateRef.current = state;
-    if (state.approvalGestureCommitted) {
-      void handleApprovalSwipe(state);
-      return;
-    }
-    if (state.choiceCommitted) {
-      if (approvalTargetRef.current) {
-        void submitFingerChoice(state);
-      }
-      return;
-    }
     if (state.triggered) {
       void beginPinchRecording(state);
       return;
@@ -919,10 +865,9 @@ export function AmbientTriggerPanel({
     if (state.reason === "pinch_released" || state.releasedAt) {
       void finishPinchRecording(state);
     }
-  }, [beginPinchRecording, finishPinchRecording, handleApprovalSwipe, submitFingerChoice]);
+  }, [beginPinchRecording, finishPinchRecording]);
 
   useAmbientHandTracker({
-    approvalTargetActive: Boolean(approvalTarget),
     cameraStream,
     monitorEnabled,
     onPinchState: handlePinchState,
@@ -1527,45 +1472,6 @@ export function AmbientTriggerPanel({
     setMiniChatError("Defaultspack本体ウィンドウを開けませんでした。Tobkiri LauncherからDefaultspackを開いてください。");
   }
 
-  async function submitApprovalGesture(decision: "approve" | "reject", state: PinchState, mode: string) {
-    const target = approvalTargetRef.current;
-    if (!target || approvalGestureBusyRef.current) return;
-    if (decision === "approve" && target.canApprove === false) return;
-    if (decision === "reject" && target.canReject === false) {
-      setMessage("この承認では拒否ジェスチャーは使えません。");
-      return;
-    }
-    approvalGestureBusyRef.current = true;
-    setMessage(decision === "approve" ? "承認ジェスチャーを受け取りました。" : "拒否ジェスチャーを受け取りました。");
-    try {
-      const auditResult = await ambientTriggerClient.submitEvent({
-        source: "camera",
-        trigger: "approval_gesture",
-        mode,
-        action_id: "chat.message",
-        confidence: state.confidence,
-        decision,
-        metadata: {
-          panel: "ambient_mini_window",
-          approval_kind: target.kind,
-          hand: state.hand,
-          normalized_distance: state.normalizedDistance,
-          finger_choice: state.fingerChoice,
-        },
-      });
-      if (auditResult.status !== "approval_intent") {
-        throw new Error("承認ジェスチャーを監査に記録できませんでした。もう一度お試しください。");
-      }
-      await onApprovalGestureRef.current?.(decision);
-      await refresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "承認ジェスチャーを処理できませんでした。");
-    } finally {
-      approvalGestureBusyRef.current = false;
-      setPinchDetectorStatus("tracking");
-    }
-  }
-
   async function approvePendingApproval() {
     const requestId = pendingApproval?.request_id;
     if (!requestId) return;
@@ -2094,16 +2000,9 @@ export function AmbientTriggerPanel({
           )}
         </div>
 
-        {expanded && (settingsOpen || (approvalTarget && monitorEnabled) || manualRumiFallbackOpen || visibleMessage) && (
+        {expanded && (settingsOpen || manualRumiFallbackOpen || visibleMessage) && (
           <div className="space-y-2.5 border-t border-zinc-800/80 px-3 py-2.5">
             {settingsOpen && settingsSection}
-
-            {approvalTarget && monitorEnabled && (
-              <div className="border-l border-sky-400/35 pl-2 text-[11px] text-sky-100">
-                {approvalTarget.canReject !== false && <span className="mr-2"><X size={11} className="mr-1 inline" />{approvalTarget.rejectLabel ?? "拒否"}</span>}
-                {approvalTarget.canApprove !== false && <span><Check size={11} className="mr-1 inline" />{approvalTarget.approveLabel ?? "許可"}</span>}
-              </div>
-            )}
 
             {manualRumiFallbackOpen && (
               <section className="space-y-2 border-t border-red-400/25 pt-3 text-[12px] leading-5">
@@ -2452,14 +2351,6 @@ function focusComposer() {
 function ambientParamsWithTranscriptionLanguage(params: AmbientEventPayload["params"] | undefined): AmbientEventPayload["params"] | undefined {
   const next = recordValue(params) ? { ...params } : {};
   return Object.keys(next).length ? next : undefined;
-}
-
-function approvalDecisionForChoice(choice: 2 | 3 | 4, target: AmbientApprovalTarget | null | undefined): "approve" | "reject" | null {
-  if (!target) return null;
-  if (choice === 2 && target.canReject !== false) return "reject";
-  if (choice === 2 && target.canReject === false && target.canApprove !== false) return "approve";
-  if (choice === 3 && target.canApprove !== false) return "approve";
-  return null;
 }
 
 function hasNativeAuthorityApprovalWindow(): boolean {
