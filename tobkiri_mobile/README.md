@@ -14,6 +14,8 @@ canonical control panel at `rumi_ai_1_10/ecosystem/defaultspack/`.
 - Smartphone-local: conversations and API config are stored on-device
   (`shared_preferences` for history, `flutter_secure_storage` for keys).
   No server is required to chat.
+  See [Mobile conversation persistence](CONVERSATION_PERSISTENCE.md) for the
+  versioned snapshot, rollback, recovery, and diagnostics contract.
 - OpenAI-compatible streaming client (`/chat/completions` SSE).
 - QR import:
   - **スマホをペアリング**: scan a `rumi_mobile_pair_v1` QR to claim a PC
@@ -163,6 +165,11 @@ normal pairing tests.
 
 TestFlight and App Store builds are **coming soon**. The **Settings → アプリ**
 panel in the defaultspack control panel reflects this state.
+
+The Kernel also defines authenticated `/api/mobile/v1/conversations` routes
+for future chat UI work. A mobile chat surface must treat their durable success
+response as the save acknowledgement and must not restore the retired local
+`ChatStore` keys.
 
 ## Development
 

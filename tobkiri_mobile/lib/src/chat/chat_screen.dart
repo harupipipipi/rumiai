@@ -77,6 +77,7 @@ class _ChatScreenState extends State<ChatScreen>
   MobileNotificationSettings _notificationSettings =
       MobileNotificationSettings.defaults;
   List<ModelFavoriteConfig> _modelFavorites = [];
+  String? _localStoreMessage;
 
   @override
   void initState() {
@@ -104,21 +105,62 @@ class _ChatScreenState extends State<ChatScreen>
 
   Future<void> _init() async {
     try {
-      await widget.store.load();
+      final storeStatus = await widget.store.load();
+      if (storeStatus.recoveryAvailable) {
+        _localStoreMessage = '保存済みバックアップから履歴を読み込みました。確認して復元してください。';
+      }
+      final active = widget.store.active;
+      if (active == null && !storeStatus.recoveryAvailable) {
+        await widget.store.createAndPersist();
+      }
+    } on ChatStoreException catch (error, stack) {
+      _localStoreMessage = error.userMessage;
+      debugPrint('Tobkiri local chat storage: ${error.code}\n$stack');
+    }
+    try {
       _apiConfig = await widget.configStore.loadApi();
       _modelFavorites = await widget.configStore.loadModelFavorites();
       _notificationSettings =
           await widget.configStore.loadNotificationSettings();
-      final active = widget.store.active;
-      if (active == null) {
-        await widget.store.createAndPersist();
-      }
       await _loadPcConnection();
       await _loadSpaces();
     } catch (error, stack) {
       debugPrint('Rumi init error: $error\n$stack');
     }
     if (mounted) setState(() {});
+  }
+
+  Future<T?> _runLocalStore<T>(Future<T> Function() operation) async {
+    try {
+      final result = await operation();
+      if (mounted &&
+          _localStoreMessage != null &&
+          !widget.store.recoveryAvailable) {
+        setState(() => _localStoreMessage = null);
+      }
+      return result;
+    } on ChatStoreException catch (error) {
+      if (mounted) {
+        setState(() => _localStoreMessage = error.userMessage);
+      }
+      return null;
+    }
+  }
+
+  Future<void> _retryLocalStoreLoad() async {
+    await _runLocalStore(() async {
+      final status = await widget.store.load();
+      if (mounted && status.recoveryAvailable) {
+        setState(() {
+          _localStoreMessage = '保存済みバックアップから履歴を読み込みました。確認して復元してください。';
+        });
+      }
+      return status;
+    });
+  }
+
+  Future<void> _acceptLocalStoreRecovery() async {
+    await _runLocalStore(widget.store.acceptRecoveredData);
   }
 
   Future<void> _loadSpaces() async {
@@ -357,8 +399,8 @@ class _ChatScreenState extends State<ChatScreen>
       }
       return;
     }
-    await widget.store.createAndPersist();
-    if (mounted) setState(() {});
+    final created = await _runLocalStore(widget.store.createAndPersist);
+    if (mounted && created != null) setState(() {});
   }
 
   Future<void> _select(String id) async {
@@ -366,8 +408,8 @@ class _ChatScreenState extends State<ChatScreen>
       await _selectPcConversation(id);
       return;
     }
-    await widget.store.select(id);
-    if (mounted) setState(() {});
+    final saved = await _runLocalStore(() => widget.store.select(id));
+    if (mounted && saved != null) setState(() {});
   }
 
   Future<void> _selectPcConversation(String id) async {
@@ -404,11 +446,15 @@ class _ChatScreenState extends State<ChatScreen>
       ).showSnackBar(const SnackBar(content: Text('コピーできるPC会話がありません')));
       return;
     }
-    final local = await widget.store.createAndPersist();
-    await widget.store.rename(local.id, snapshot.conversation.title);
-    for (final message in snapshot.conversation.messages) {
-      await widget.store.addMessage(local.id, message.copy());
-    }
+    final local = await _runLocalStore(() async {
+      final created = await widget.store.createAndPersist();
+      await widget.store.rename(created.id, snapshot.conversation.title);
+      for (final message in snapshot.conversation.messages) {
+        await widget.store.addMessage(created.id, message.copy());
+      }
+      return created;
+    });
+    if (local == null) return;
     setState(() {
       _activeSpaceId = Space.local.id;
       _activePcSnapshot = null;
@@ -416,13 +462,13 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _delete(String id) async {
-    await widget.store.delete(id);
-    if (mounted) setState(() {});
+    final saved = await _runLocalStore(() => widget.store.delete(id));
+    if (mounted && saved != null) setState(() {});
   }
 
   Future<void> _pin(String id) async {
-    await widget.store.togglePin(id);
-    if (mounted) setState(() {});
+    final saved = await _runLocalStore(() => widget.store.togglePin(id));
+    if (mounted && saved != null) setState(() {});
   }
 
   Future<void> _rename(String id) async {
@@ -450,8 +496,8 @@ class _ChatScreenState extends State<ChatScreen>
       ),
     );
     if (result != null) {
-      await widget.store.rename(id, result);
-      if (mounted) setState(() {});
+      final saved = await _runLocalStore(() => widget.store.rename(id, result));
+      if (mounted && saved != null) setState(() {});
     }
   }
 
@@ -502,7 +548,11 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
-    final convo = widget.store.active ?? await widget.store.createAndPersist();
+    var convo = widget.store.active;
+    if (convo == null) {
+      convo = await _runLocalStore(widget.store.createAndPersist);
+      if (convo == null) return;
+    }
     final locator = ConversationLocator.local(convo.id);
     final clientMessageId = _uuid.v4();
     final expectedRevision = convo.revision;
@@ -550,6 +600,10 @@ class _ChatScreenState extends State<ChatScreen>
             _clearTransientActivityForRun(event);
             break;
         }
+      }
+    } on ChatStoreException catch (error) {
+      if (mounted) {
+        setState(() => _localStoreMessage = error.userMessage);
       }
     } finally {
       if (mounted) {
@@ -1986,6 +2040,22 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _buildBody(AsyncSnapshot<void> snapshot) {
+    final content = _buildBodyContent(snapshot);
+    if (_localStoreMessage == null || _activeSpaceIsPc) return content;
+    return Column(
+      children: [
+        _LocalStoreBanner(
+          message: _localStoreMessage!,
+          recoveryAvailable: widget.store.recoveryAvailable,
+          onRetry: _retryLocalStoreLoad,
+          onRecover: _acceptLocalStoreRecovery,
+        ),
+        Expanded(child: content),
+      ],
+    );
+  }
+
+  Widget _buildBodyContent(AsyncSnapshot<void> snapshot) {
     if (snapshot.connectionState != ConnectionState.done) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -2029,6 +2099,52 @@ class _ChatScreenState extends State<ChatScreen>
           busy: _streaming,
         ),
       ],
+    );
+  }
+}
+
+class _LocalStoreBanner extends StatelessWidget {
+  const _LocalStoreBanner({
+    required this.message,
+    required this.recoveryAvailable,
+    required this.onRetry,
+    required this.onRecover,
+  });
+
+  final String message;
+  final bool recoveryAvailable;
+  final VoidCallback onRetry;
+  final VoidCallback onRecover;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: 'チャット保存エラー。$message',
+      child: Container(
+        width: double.infinity,
+        color: scheme.errorContainer,
+        padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Icon(Icons.sync_problem, color: scheme.onErrorContainer),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(color: scheme.onErrorContainer),
+              ),
+            ),
+            if (recoveryAvailable)
+              TextButton(onPressed: onRecover, child: const Text('復元'))
+            else
+              TextButton(onPressed: onRetry, child: const Text('再読み込み')),
+          ],
+        ),
+      ),
     );
   }
 }
