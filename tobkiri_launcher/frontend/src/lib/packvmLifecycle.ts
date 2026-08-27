@@ -12,6 +12,7 @@ export const PACKVM_OPERATION_STORAGE_KEY = 'tobkiri-launcher-packvm-operation';
 
 const SAFE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/i;
+const ZERO_SHA256_DIGEST = `sha256:${'0'.repeat(64)}`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPERATION_STATES: readonly ApiPackVMOperationState[] = [
   'queued',
@@ -218,18 +219,57 @@ export function isCanonicalPackVMOperationId(value: string): boolean {
 export function normalizePackVMPlan(value: unknown): ApiPackVMProvisioningPlan {
   const payload = record(value);
   const imageDownloadRequired = booleanField(payload, 'image_download_required');
+  const launcherReason = nullableStringField(payload, 'launcher_reason');
+  const runtimePathStatus = stringField(payload, 'runtime_path_status');
+  const imageSource = stringField(payload, 'image_source');
+  const imageDigest = stringField(payload, 'image_digest', {digest: true});
+  const configDigest = stringField(payload, 'config_digest', {digest: true});
+  const guestRunnerDigest = stringField(payload, 'guest_runner_digest', {digest: true});
+  const hostBuildDigest = stringField(payload, 'host_build_digest', {digest: true});
+  if (runtimePathStatus !== 'ready' && runtimePathStatus !== 'unsafe') {
+    throw new PackVMLifecycleProtocolError(
+      'Tobkiri returned an invalid PackVM runtime_path_status.',
+    );
+  }
+  if (
+    (runtimePathStatus === 'ready' && launcherReason !== null)
+    || (runtimePathStatus === 'unsafe' && !launcherReason?.trim())
+  ) {
+    throw new PackVMLifecycleProtocolError(
+      'Tobkiri returned inconsistent PackVM availability evidence.',
+    );
+  }
+
+  let normalizedImageSource: string;
+  if (imageSource === 'unavailable') {
+    const unavailableTupleIsValid = runtimePathStatus === 'unsafe'
+      && !imageDownloadRequired
+      && imageDigest.toLowerCase() === ZERO_SHA256_DIGEST
+      && configDigest.toLowerCase() === ZERO_SHA256_DIGEST
+      && guestRunnerDigest.toLowerCase() === ZERO_SHA256_DIGEST
+      && hostBuildDigest.toLowerCase() === ZERO_SHA256_DIGEST;
+    if (!unavailableTupleIsValid) {
+      throw new PackVMLifecycleProtocolError(
+        'Tobkiri returned inconsistent PackVM unavailable-plan evidence.',
+      );
+    }
+    normalizedImageSource = 'unavailable';
+  } else {
+    normalizedImageSource = safeHttpsUrl(payload, 'image_source');
+  }
   return {
     backend_id: stringField(payload, 'backend_id', {identifier: true}),
     instance: stringField(payload, 'instance', {identifier: true}),
-    launcher_reason: nullableStringField(payload, 'launcher_reason'),
+    launcher_reason: launcherReason,
+    runtime_path_status: runtimePathStatus,
     architecture: stringField(payload, 'architecture', {identifier: true}),
-    image_source: safeHttpsUrl(payload, 'image_source'),
-    image_digest: stringField(payload, 'image_digest', {digest: true}),
+    image_source: normalizedImageSource,
+    image_digest: imageDigest,
     image_size_bytes: positiveIntegerField(payload, 'image_size_bytes'),
     image_download_required: imageDownloadRequired,
-    config_digest: stringField(payload, 'config_digest', {digest: true}),
-    guest_runner_digest: stringField(payload, 'guest_runner_digest', {digest: true}),
-    host_build_digest: stringField(payload, 'host_build_digest', {digest: true}),
+    config_digest: configDigest,
+    guest_runner_digest: guestRunnerDigest,
+    host_build_digest: hostBuildDigest,
     ceremony_nonce: stringField(payload, 'ceremony_nonce'),
     plan_digest: stringField(payload, 'plan_digest', {digest: true}),
     confirmation: stringField(payload, 'confirmation'),

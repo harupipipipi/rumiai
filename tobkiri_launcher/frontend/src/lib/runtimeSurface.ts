@@ -34,12 +34,17 @@ export interface RuntimeSurfaceRecordRef {
 }
 
 export interface RuntimeActivationRecord {
-  activation_api_version: 'io.tobkiri.activation-record.v1';
+  activation_api_version: 'io.tobkiri.activation-record.v2';
   profile_id: string;
+  profile_revision: string;
   activation_id: string;
   state: 'active';
   state_generation: number;
+  catalog_revision: string;
+  bundle_digest: string;
+  lock_digest: string;
   plan_digest: string;
+  closure_digest: string;
   profile_authority_snapshot_digest: string;
   security_epoch: number;
   fencing_token: number;
@@ -464,16 +469,28 @@ function parseRuntimeSurfaceRecords(value: unknown): RuntimeSurfaceRecords | nul
 function parseRuntimeActivationRecord(
   value: unknown,
   profileId: string,
+  profileRevision: string,
+  catalogRevision: string,
+  profileLockDigest: string,
   planDigest: string,
   authoritySnapshotDigest: string,
+  expectedBundleDigest: unknown,
+  expectedClosureDigest: unknown,
+  expectedSecurityEpoch: unknown,
+  expectedFencingToken: unknown,
 ): RuntimeActivationRecord | null {
   if (!isRecord(value)) return null;
   const activationApiVersion = value.activation_api_version;
   const recordProfileId = value.profile_id;
+  const recordProfileRevision = value.profile_revision;
   const activationId = value.activation_id;
   const state = value.state;
   const stateGeneration = value.state_generation;
+  const recordCatalogRevision = value.catalog_revision;
+  const bundleDigest = value.bundle_digest;
+  const lockDigest = value.lock_digest;
   const recordPlanDigest = value.plan_digest;
+  const closureDigest = value.closure_digest;
   const recordAuthoritySnapshotDigest = value.profile_authority_snapshot_digest;
   const securityEpoch = value.security_epoch;
   const fencingToken = value.fencing_token;
@@ -482,10 +499,15 @@ function parseRuntimeActivationRecord(
   const requiredKeys = [
     'activation_api_version',
     'profile_id',
+    'profile_revision',
     'activation_id',
     'state',
     'state_generation',
+    'catalog_revision',
+    'bundle_digest',
+    'lock_digest',
     'plan_digest',
+    'closure_digest',
     'profile_authority_snapshot_digest',
     'security_epoch',
     'fencing_token',
@@ -495,22 +517,31 @@ function parseRuntimeActivationRecord(
   if (
     Object.keys(value).length !== requiredKeys.length + (hasCommittedAt ? 1 : 0)
     || requiredKeys.some((key) => !Object.prototype.hasOwnProperty.call(value, key))
-    || activationApiVersion !== 'io.tobkiri.activation-record.v1'
+    || activationApiVersion !== 'io.tobkiri.activation-record.v2'
     || recordProfileId !== profileId
+    || recordProfileRevision !== profileRevision
     || !validString(activationId)
     || !/^activation:[a-z0-9][a-z0-9._-]{7,127}$/.test(activationId)
     || state !== 'active'
     || typeof stateGeneration !== 'number'
     || !Number.isInteger(stateGeneration)
     || stateGeneration < 0
+    || recordCatalogRevision !== catalogRevision
+    || !isSha256Digest(bundleDigest)
+    || bundleDigest !== expectedBundleDigest
+    || lockDigest !== profileLockDigest
     || recordPlanDigest !== planDigest
+    || !isSha256Digest(closureDigest)
+    || closureDigest !== expectedClosureDigest
     || recordAuthoritySnapshotDigest !== authoritySnapshotDigest
     || typeof securityEpoch !== 'number'
     || !Number.isInteger(securityEpoch)
     || securityEpoch < 0
+    || securityEpoch !== expectedSecurityEpoch
     || typeof fencingToken !== 'number'
     || !Number.isInteger(fencingToken)
     || fencingToken < 0
+    || fencingToken !== expectedFencingToken
     || !isDateTime(createdAt)
   ) {
     return null;
@@ -523,10 +554,15 @@ function parseRuntimeActivationRecord(
   return {
     activation_api_version: activationApiVersion,
     profile_id: recordProfileId,
+    profile_revision: recordProfileRevision,
     activation_id: activationId,
     state: 'active',
     state_generation: stateGeneration,
+    catalog_revision: recordCatalogRevision,
+    bundle_digest: bundleDigest,
+    lock_digest: lockDigest,
     plan_digest: recordPlanDigest,
+    closure_digest: closureDigest,
     profile_authority_snapshot_digest: recordAuthoritySnapshotDigest,
     security_epoch: securityEpoch,
     fencing_token: fencingToken,
@@ -701,8 +737,15 @@ export function validateRuntimeSurfaceEnvelope<T>(
       ? parseRuntimeActivationRecord(
         profileData.activation_record,
         profileId,
+        profileRevision,
+        catalogRevision,
+        acceptedRecords.profile_lock.digest,
         planDigest,
         acceptedRecords.authority_snapshot.digest,
+        resolvedPlan?.bundle_digest,
+        resolvedPlan?.closure_digest,
+        authoritySnapshot?.security_epoch,
+        authoritySnapshot?.fencing_token,
       )
       : null;
     if (
@@ -712,8 +755,16 @@ export function validateRuntimeSurfaceEnvelope<T>(
       || profileSummary.catalog_revision !== catalogRevision
       || !resolvedPlan
       || resolvedPlan.plan_digest !== planDigest
+      || acceptedRecords.resolved_plan.digest !== planDigest
+      || !isSha256Digest(resolvedPlan.bundle_digest)
+      || !isSha256Digest(resolvedPlan.closure_digest)
       || !profileLock
       || profileLock.lock_digest !== acceptedRecords.profile_lock.digest
+      || profileLock.plan_digest !== planDigest
+      || profileLock.bundle_digest !== resolvedPlan.bundle_digest
+      || profileLock.closure_digest !== resolvedPlan.closure_digest
+      || profileLock.security_epoch !== authoritySnapshot?.security_epoch
+      || profileLock.profile_authority_snapshot_digest !== acceptedRecords.authority_snapshot.digest
       || !authoritySnapshot
       || authoritySnapshot.profile_authority_snapshot_digest !== acceptedRecords.authority_snapshot.digest
       || !activationRecord

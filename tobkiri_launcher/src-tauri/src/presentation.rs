@@ -75,7 +75,7 @@ fn validate_presentation_caller_context(
     if window_label != "main" {
         return Err(PresentationCallerDenial::WindowLabel);
     }
-    if configured_port != LAUNCHER_PANEL_PORT {
+    if configured_port == 0 {
         return Err(PresentationCallerDenial::ConfiguredPort);
     }
     if url.scheme() != "http" {
@@ -84,7 +84,7 @@ fn validate_presentation_caller_context(
     if !matches!(url.host_str(), Some("127.0.0.1") | Some("localhost")) {
         return Err(PresentationCallerDenial::Host);
     }
-    if url.port_or_known_default() != Some(LAUNCHER_PANEL_PORT) {
+    if url.port_or_known_default() != Some(configured_port) {
         return Err(PresentationCallerDenial::Port);
     }
     if url.path() != "/panel" && !url.path().starts_with("/panel/") {
@@ -408,13 +408,23 @@ pub fn select_presentation(
 }
 
 #[tauri::command]
-pub fn launch_selected_presentation(
+pub async fn launch_selected_presentation(
     window: WebviewWindow,
     app: AppHandle,
     config: State<'_, AppConfig>,
 ) -> Result<PresentationLaunchResponse, String> {
     validate_presentation_caller(&window, config.inner())?;
-    launch_selected_presentation_impl(&app, config.inner()).map_err(|error| {
+    let app_handle = app.clone();
+    let app_config = config.inner().clone();
+    let launch_result = tauri::async_runtime::spawn_blocking(move || {
+        launch_selected_presentation_impl(&app_handle, &app_config)
+    })
+    .await
+    .map_err(|error| {
+        error!("selected presentation launch task failed: {error}");
+        "selected presentation could not be launched".to_string()
+    })?;
+    launch_result.map_err(|error| {
         error!("selected presentation launch blocked: {error:#}");
         "selected presentation could not be launched".to_string()
     })
@@ -1877,6 +1887,7 @@ mod tests {
         );
 
         let control = presentation_control_capability();
+        assert_eq!(control["local"], false);
         assert_eq!(control["windows"], serde_json::json!(["main"]));
         assert_eq!(
             capability_permissions(&control),
@@ -1888,11 +1899,11 @@ mod tests {
 
         assert_eq!(
             catalog["remote"]["urls"],
-            serde_json::json!(["http://127.0.0.1:8765", "http://localhost:8765"])
+            serde_json::json!(["http://127.0.0.1:*/*", "http://localhost:*/*"])
         );
         assert_eq!(
             control["remote"]["urls"],
-            serde_json::json!(["http://127.0.0.1:8765", "http://localhost:8765"])
+            serde_json::json!(["http://127.0.0.1:*/*", "http://localhost:*/*"])
         );
     }
 
@@ -1903,7 +1914,13 @@ mod tests {
         // caller check, not represented as a misleading ACL URL pattern.
         let catalog = presentation_catalog_capability();
         let control = presentation_control_capability();
-        for origin in ["http://127.0.0.1:8765/", "http://localhost:8765/"] {
+        for origin in [
+            "http://127.0.0.1:8765/",
+            "http://localhost:8765/",
+            "http://127.0.0.1:8767/",
+            "http://127.0.0.1:8767/panel/?code=fallback",
+            "http://localhost:18772/",
+        ] {
             assert!(capability_allows_origin(&catalog, "main", origin));
             assert!(capability_allows_origin(&control, "main", origin));
         }
@@ -1917,6 +1934,19 @@ mod tests {
                 "main",
                 &Url::parse(live_url).unwrap(),
                 LAUNCHER_PANEL_PORT,
+            )
+            .unwrap();
+        }
+
+        for live_url in [
+            "http://127.0.0.1:8767/panel/?code=fallback",
+            "http://localhost:18772/panel/setup?code=restart",
+        ] {
+            let url = Url::parse(live_url).unwrap();
+            validate_presentation_caller_context(
+                "main",
+                &url,
+                url.port_or_known_default().unwrap(),
             )
             .unwrap();
         }
@@ -1942,8 +1972,6 @@ mod tests {
             "tauri://localhost/",
             "https://127.0.0.1:8765/",
             "http://example.invalid:8765/",
-            "http://127.0.0.1:8764/",
-            "http://127.0.0.1:8766/",
         ] {
             assert!(!capability_allows_origin(
                 &presentation_catalog_capability(),
@@ -1951,6 +1979,19 @@ mod tests {
                 origin
             ));
             assert!(!capability_allows_origin(
+                &presentation_control_capability(),
+                "main",
+                origin
+            ));
+        }
+
+        for origin in ["http://127.0.0.1:8764/", "http://localhost:8766/"] {
+            assert!(capability_allows_origin(
+                &presentation_catalog_capability(),
+                "main",
+                origin
+            ));
+            assert!(capability_allows_origin(
                 &presentation_control_capability(),
                 "main",
                 origin
@@ -2061,11 +2102,18 @@ mod tests {
         assert_eq!(
             validate_presentation_caller_context(
                 "main",
-                &Url::parse("http://127.0.0.1:8765/panel/").unwrap(),
-                18772,
+                &Url::parse("http://127.0.0.1:18772/panel/").unwrap(),
+                0,
             ),
             Err(PresentationCallerDenial::ConfiguredPort)
         );
+
+        validate_presentation_caller_context(
+            "main",
+            &Url::parse("http://127.0.0.1:18772/panel/").unwrap(),
+            18772,
+        )
+        .unwrap();
     }
 
     fn sample_catalog() -> PresentationCatalog {

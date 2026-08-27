@@ -13,6 +13,12 @@ from core_runtime.global_contract_dispatch import (
     GlobalContractInvocationError,
     GlobalContractUnavailable,
 )
+from core_runtime.host_provider_backend_v4 import (
+    CapturedHostProviderV4,
+    HostProviderCaptureContextV4,
+    HostProviderContributionV4,
+    HostProviderInvocationContextV4,
+)
 
 CATALOG_CONTRACT = "tobkiri.resource.ai.model.catalog.v1"
 CATALOG_GENERATE_OPERATION = (
@@ -74,6 +80,40 @@ MODEL_PROFILE_OPERATION = MODEL_PROFILE_GENERATE_OPERATION
 _DIAGNOSTIC_LIMIT = 256
 _DIAGNOSTICS: list[dict[str, Any]] = []
 _DIAGNOSTIC_LOCK = threading.Lock()
+
+_GENERATE_FUNCTION_ID = "rumi_ai_gateway_pack.ai-gateway.generate"
+_STREAM_FUNCTION_ID = "rumi_ai_gateway_pack.ai-gateway.stream"
+_ROUTING_DIAGNOSTICS_FUNCTION_ID = (
+    "rumi_ai_gateway_pack.ai-gateway.routing-diagnostics"
+)
+
+_GENERATE_ALLOWED_CONTRACTS = frozenset(
+    {
+        CATALOG_CONTRACT,
+        GENERATE_PROVIDER_CONTRACT,
+        HEALTH_CONTRACT,
+        USAGE_CONTRACT,
+        ROUTING_CONTRACT,
+        TOOL_BRIDGE_CONTRACT,
+        REQUEST_PREPARE_CONTRACT,
+        FAILOVER_CONTRACT,
+        MODEL_PROFILE_CONTRACT,
+    }
+)
+_STREAM_ALLOWED_CONTRACTS = frozenset(
+    {
+        CATALOG_CONTRACT,
+        STREAM_PROVIDER_CONTRACT,
+        HEALTH_CONTRACT,
+        USAGE_CONTRACT,
+        ROUTING_CONTRACT,
+        STREAM_NORMALIZE_CONTRACT,
+        TOOL_BRIDGE_CONTRACT,
+        REQUEST_PREPARE_CONTRACT,
+        FAILOVER_CONTRACT,
+        MODEL_PROFILE_CONTRACT,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -164,6 +204,106 @@ def create_routing_diagnostics_operation(client: GlobalContractClient):
         return {"diagnostics": values, "count": len(values)}
 
     return operation
+
+
+class AIGatewayHostFactoryV4:
+    """Capture one exact AI Gateway Function behind the Host Broker."""
+
+    def __init__(
+        self,
+        function_id: str,
+        *,
+        contract_id: str,
+        operation_id: str,
+        operation_name: str,
+        allowed_contract_ids: frozenset[str],
+        operation_factory: Any,
+    ) -> None:
+        self.function_id = function_id
+        self._contract_id = contract_id
+        self._operation_id = operation_id
+        self._operation_name = operation_name
+        self._allowed_contract_ids = allowed_contract_ids
+        self._operation_factory = operation_factory
+
+    def capture(
+        self,
+        context: HostProviderCaptureContextV4,
+    ) -> CapturedHostProviderV4:
+        """Bind only one Plan-pinned Gateway Function and its dependencies."""
+
+        if not context.provider_bindings or any(
+            binding.function.function_id != self.function_id
+            or binding.operation.contract_id != self._contract_id
+            or binding.operation.operation_id != self._operation_id
+            for binding in context.provider_bindings
+        ):
+            raise PermissionError("AI Gateway provider bindings are incomplete")
+
+        def invoke(
+            operation_id: str,
+            payload: Mapping[str, Any],
+            invocation: HostProviderInvocationContextV4,
+        ) -> Mapping[str, Any]:
+            if operation_id != self._operation_id:
+                raise PermissionError("AI Gateway operation identity is invalid")
+            client = invocation.contract_client(
+                allowed_contract_ids=self._allowed_contract_ids,
+                consumer_pack_id="rumi_ai_gateway_pack",
+            )
+            return self._operation_factory(client)(self._operation_name, payload)
+
+        contributions: list[HostProviderContributionV4] = []
+        for binding in context.provider_bindings:
+            key = (
+                binding.operation.contract_id,
+                binding.operation.operation_id,
+                binding.principal_ref.value,
+            )
+            domain_id = context.domain_ids.get(key)
+            if domain_id is None:
+                raise PermissionError("AI Gateway domain binding is unavailable")
+            contributions.append(
+                HostProviderContributionV4(
+                    contract_id=binding.operation.contract_id,
+                    contract_version=binding.operation.contract_version,
+                    operation_id=binding.operation.operation_id,
+                    principal_id=binding.principal_ref.value,
+                    artifact_digest=binding.artifact.digest,
+                    implementation_digest=binding.function.implementation_digest,
+                    domain_id=domain_id,
+                    invoke=invoke,
+                )
+            )
+        return CapturedHostProviderV4(tuple(contributions), lambda: None)
+
+
+HOST_PROVIDER_FACTORY = {
+    _GENERATE_FUNCTION_ID: AIGatewayHostFactoryV4(
+        _GENERATE_FUNCTION_ID,
+        contract_id="tobkiri.service.ai.generate.v1",
+        operation_id=_GENERATE_FUNCTION_ID,
+        operation_name=_GENERATE_FUNCTION_ID,
+        allowed_contract_ids=_GENERATE_ALLOWED_CONTRACTS,
+        operation_factory=create_generate_operation,
+    ),
+    _STREAM_FUNCTION_ID: AIGatewayHostFactoryV4(
+        _STREAM_FUNCTION_ID,
+        contract_id="tobkiri.service.ai.stream.v1",
+        operation_id=_STREAM_FUNCTION_ID,
+        operation_name=_STREAM_FUNCTION_ID,
+        allowed_contract_ids=_STREAM_ALLOWED_CONTRACTS,
+        operation_factory=create_stream_operation,
+    ),
+    _ROUTING_DIAGNOSTICS_FUNCTION_ID: AIGatewayHostFactoryV4(
+        _ROUTING_DIAGNOSTICS_FUNCTION_ID,
+        contract_id="tobkiri.resource.ai.routing.diagnostics.v1",
+        operation_id="rumi_ai_gateway_pack.ai-gateway-routing-diagnostics",
+        operation_name="get",
+        allowed_contract_ids=frozenset(),
+        operation_factory=create_routing_diagnostics_operation,
+    ),
+}
 
 
 def _invoke(

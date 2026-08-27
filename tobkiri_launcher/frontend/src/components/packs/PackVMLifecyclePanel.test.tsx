@@ -39,6 +39,7 @@ const plan = {
   backend_id: 'tobkiri.python-pack-v4',
   instance: 'tobkiri-packvm-v4',
   launcher_reason: null,
+  runtime_path_status: 'ready' as const,
   architecture: 'arm64',
   image_source: 'https://cloud-images.ubuntu.com/jammy/20260807/jammy-server-cloudimg-arm64.img',
   image_digest: digest('a'),
@@ -238,6 +239,48 @@ test('PackVM GUI completes prepare, consent, provision, doctor, and hides host p
   });
   assert.equal(bodies[2].consent_id, consent.consent_id);
   assert.match(String(bodies[2].operation_id), /^[0-9a-f-]{36}$/i);
+});
+
+test('PackVM GUI displays an unavailable plan reason and keeps provisioning disabled', {concurrency: false}, async () => {
+  configureStore();
+  const unavailableReason = 'A Developer ID signed PackVM helper is required.';
+  const unavailablePlan = {
+    ...plan,
+    launcher_reason: unavailableReason,
+    runtime_path_status: 'unsafe',
+    image_source: 'unavailable',
+    image_digest: digest('0'),
+    image_download_required: false,
+    config_digest: digest('0'),
+    guest_runner_digest: digest('0'),
+    host_build_digest: digest('0'),
+  };
+  const {routes} = installFetch(async (route) => {
+    if (route === '/api/v4/packvm/prepare') return jsonResponse(unavailablePlan);
+    throw new Error(`unexpected route ${route}`);
+  });
+  assert.ok(surface);
+  await renderPanel(surface.root);
+
+  await act(async () => buttonWithText(surface.container, 'Prepare plan').click());
+  await settle();
+
+  assert.match(surface.container.textContent ?? '', new RegExp(unavailableReason));
+  assert.match(surface.container.textContent ?? '', /Image sourceunavailable/);
+  assert.equal(surface.container.querySelector('input[type="checkbox"]'), null);
+  assert.equal(
+    [...surface.container.querySelectorAll('button')].some(
+      (button) => button.textContent?.trim() === 'Record explicit consent',
+    ),
+    false,
+  );
+  assert.equal(
+    [...surface.container.querySelectorAll('button')].some(
+      (button) => button.textContent?.trim() === 'Provision PackVM',
+    ),
+    false,
+  );
+  assert.deepEqual(routes, ['/api/v4/packvm/prepare']);
 });
 
 test('PackVM GUI surfaces consent denial and prevents provisioning fallback', {concurrency: false}, async () => {

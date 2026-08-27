@@ -1762,8 +1762,28 @@ enum StartupRecoveryStage {
     Bootstrap,
 }
 
-fn prepare_defaultspack_guardian_in_background(app: AppHandle, config: AppConfig) {
+fn prepare_defaultspack_guardian_in_background(
+    app: AppHandle,
+    config: AppConfig,
+    panel_bootstrap_secret: String,
+) {
     thread::spawn(move || {
+        match health_check::check_authenticated_runtime_ready(
+            config.kernel_port,
+            &panel_bootstrap_secret,
+        ) {
+            Ok(true) => {}
+            Ok(false) => {
+                info!("Deferring Launcher-owned Defaultspack guardian until runtime activation");
+                return;
+            }
+            Err(error) => {
+                error!(
+                    "Failed to verify runtime readiness before preparing Defaultspack guardian: {error:#}"
+                );
+                return;
+            }
+        }
         if let Err(error) = dock_registration::prepare_defaultspack_guardian_impl(&app, &config) {
             error!("Failed to prepare Launcher-owned Defaultspack guardian: {error:#}");
         }
@@ -2361,6 +2381,7 @@ fn run_launcher(context: tauri::Context<tauri::Wry>) {
                             prepare_defaultspack_guardian_in_background(
                                 handle.clone(),
                                 config.clone(),
+                                panel_bootstrap_secret.clone(),
                             );
                             // Delayed background update check.
                             run_delayed_update_check();
@@ -2407,7 +2428,11 @@ fn run_launcher(context: tauri::Context<tauri::Wry>) {
                     }
                 }
 
-                prepare_defaultspack_guardian_in_background(handle.clone(), config.clone());
+                prepare_defaultspack_guardian_in_background(
+                    handle.clone(),
+                    config.clone(),
+                    panel_bootstrap_secret.clone(),
+                );
 
                 // Delayed background update check.
                 run_delayed_update_check();

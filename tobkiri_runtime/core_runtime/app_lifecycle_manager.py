@@ -101,6 +101,7 @@ class AppLifecycleManager:
     """
 
     base_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parent.parent)
+    packvm_lifecycle: Any | None = field(default=None, repr=False)
     _activation_lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False
     )
@@ -201,6 +202,12 @@ class AppLifecycleManager:
                 ecosystem_root=runtime_root / "ecosystem",
                 authority_store=AuthorityStore(
                     user_data / "authority" / "v4.sqlite3"
+                ),
+                packvm_provisioner=self.packvm_lifecycle,
+                packvm_readiness_reader=(
+                    self.packvm_lifecycle.readiness_snapshot
+                    if self.packvm_lifecycle is not None
+                    else None
                 ),
                 frontend_contract_bindings=bindings,
             )

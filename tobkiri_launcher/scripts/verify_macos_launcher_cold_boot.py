@@ -467,11 +467,14 @@ def _panel_bootstrap_is_reachable(response: Optional[HttpResponse]) -> bool:
     if response is None or response.status != 200:
         return False
     content_type = response.headers.get("content-type", "").lower()
+    cache_control = response.headers.get("cache-control", "").lower()
     body = response.body.lower()
     return (
         "text/html" in content_type
-        and b"<html" in body
-        and b"/panel/assets/" in body
+        and "no-store" in cache_control
+        and b"<!doctype html>" in body
+        and b"/api/panel/auth/exchange" in body
+        and b"tobkiri launcher authentication required" in body
     )
 
 

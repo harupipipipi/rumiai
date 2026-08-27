@@ -13,14 +13,16 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import stat
 import sys
 from pathlib import Path
-from typing import Any, Sequence
+from types import MappingProxyType
+from typing import Any, Mapping, Sequence
 
 from . import SCHEMA
 
-PROTOCOL_SCHEMA = "io.tobkiri.sealed-python-launch.v2"
+PROTOCOL_SCHEMA = "io.tobkiri.sealed-python-launch.v3"
 ATTESTATION_SCHEMA = "io.tobkiri.sealed-python-attestation.v2"
 ATTESTATION_FILE_SCHEMA = "io.tobkiri.sealed-python-attestation-file.v1"
 ROLE_ENTRYPOINTS = {
@@ -42,8 +44,16 @@ ROLE_TARGETS = {
         "computer_host_helper.py",
     ),
 }
+ROLE_APPLICATION_IMPORT_ROOTS = {
+    "typed": (),
+    "defaultspack": ("app/ecosystem/defaultspack",),
+    "host_helper": (),
+}
 MANIFEST_NAME = "sealed-environment.v1.json"
 RUNTIME_OVERLAY_NAME = "app/runtime-resource-manifest.v1.json"
+OUTER_RUNTIME_MANIFEST_NAME = "runtime-resource-manifest.v1.json"
+PACKVM_PROVISIONING_MANIFEST_NAME = "packvm-vz-provisioning.v1.json"
+PACKVM_HELPER_MANIFEST_NAME = "packvm-vz-helper.manifest.v1.json"
 RUNTIME_OVERLAY_SCHEMA = "io.tobkiri.sealed-runtime-overlay.v1"
 DIRECTORY_MODES_NAME = "sealed-directory-modes.v1.json"
 DIRECTORY_MODES_SCHEMA = "io.tobkiri.sealed-python-directory-modes.v1"
@@ -82,6 +92,13 @@ FORBIDDEN_LAUNCH_ENVIRONMENTS = {
     "PYTHONPATH",
     "PYTHONHOME",
 }
+_APPLE_TEAM_ID = re.compile(r"^[A-Z0-9]{10}$")
+_PACKVM_BUNDLE_BINDING_KEYS = (
+    "root",
+    "provisioning_sha256",
+    "helper_manifest_sha256",
+    "helper_team_id",
+)
 
 
 class SealedBootstrapError(RuntimeError):
@@ -107,6 +124,7 @@ class _SealedDispatchScope:
         "_manifest_digest",
         "_environment_digest",
         "_target",
+        "_packvm_bundle_binding",
     )
 
     def __init__(
@@ -117,12 +135,11 @@ class _SealedDispatchScope:
         manifest_digest: str,
         environment_digest: str,
         target: Sequence[str],
+        packvm_bundle_binding: Mapping[str, str] | None,
     ) -> None:
         if constructor_token is not _SCOPE_CONSTRUCTOR_TOKEN:
             raise TypeError("sealed dispatch scope is bootstrap-private")
-        if not _is_sha256_identity(manifest_digest) or not _is_sha256_identity(
-            environment_digest
-        ):
+        if not _is_sha256_identity(manifest_digest) or not _is_sha256_identity(environment_digest):
             raise SealedBootstrapError("sealed dispatch scope identity is invalid")
         self._constructor_token = constructor_token
         self._root = root
@@ -130,6 +147,14 @@ class _SealedDispatchScope:
         self._manifest_digest = manifest_digest
         self._environment_digest = environment_digest
         self._target = tuple(target)
+        if packvm_bundle_binding is not None:
+            if tuple(packvm_bundle_binding) != _PACKVM_BUNDLE_BINDING_KEYS:
+                raise SealedBootstrapError("sealed PackVM bundle binding is invalid")
+            self._packvm_bundle_binding: Mapping[str, str] | None = MappingProxyType(
+                dict(packvm_bundle_binding)
+            )
+        else:
+            self._packvm_bundle_binding = None
 
     def app_root_for(self, module_file: str | os.PathLike[str]) -> Path:
         """Return the app root only for this scope's exact sealed target."""
@@ -158,6 +183,20 @@ class _SealedDispatchScope:
             )
         _assert_regular_file(expected, "sealed dispatch target")
         return app_root
+
+    def packvm_bundle_binding_for(
+        self,
+        module_file: str | os.PathLike[str],
+    ) -> Mapping[str, str] | None:
+        """Return the immutable PackVM bundle binding for one exact target.
+
+        This is intentionally a scope method rather than an environment
+        variable or Host-contract lookup.  A packaged target must first prove
+        it is the role target that the sealed manifest selected.
+        """
+
+        self.app_root_for(module_file)
+        return self._packvm_bundle_binding
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -380,8 +419,7 @@ def _verify_tree(root: Path, document: dict[str, Any]) -> list[dict[str, Any]]:
     """Verify exact files, bytes, permissions, links, and directory closure."""
     actual_files, actual_directories = _actual_tree(root)
     expected_files = sorted(
-        [str(entry["path"]) for entry in document["files"]]
-        + [RUNTIME_OVERLAY_NAME]
+        [str(entry["path"]) for entry in document["files"]] + [RUNTIME_OVERLAY_NAME]
     )
     if actual_files != expected_files:
         raise SealedBootstrapError("sealed environment has missing or extra files")
@@ -405,14 +443,10 @@ def _verify_tree(root: Path, document: dict[str, Any]) -> list[dict[str, Any]]:
         if platform_name != "windows":
             expected_mode = 0o555 if bool(entry["executable"]) else 0o444
             if stat.S_IMODE(path.lstat().st_mode) != expected_mode:
-                raise SealedBootstrapError(
-                    f"sealed file mode changed: {entry['path']}"
-                )
+                raise SealedBootstrapError(f"sealed file mode changed: {entry['path']}")
         records.append(actual)
     try:
-        directory_modes = json.loads(
-            (root / DIRECTORY_MODES_NAME).read_text(encoding="utf-8")
-        )
+        directory_modes = json.loads((root / DIRECTORY_MODES_NAME).read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise SealedBootstrapError("sealed directory mode evidence is malformed") from exc
     expected_mode_entries = [
@@ -429,9 +463,7 @@ def _verify_tree(root: Path, document: dict[str, Any]) -> list[dict[str, Any]]:
             relative = str(entry["path"])
             path = root if relative == "." else root / relative
             if stat.S_IMODE(path.lstat().st_mode) != 0o555:
-                raise SealedBootstrapError(
-                    f"sealed directory mode changed: {relative}"
-                )
+                raise SealedBootstrapError(f"sealed directory mode changed: {relative}")
     compact = json.dumps(records, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if _sha256_bytes(compact) != document["environment_digest"]:
         raise SealedBootstrapError("sealed environment digest changed")
@@ -502,10 +534,157 @@ def _verify_runtime_overlay(
     }
 
 
-def _group_digest(entries: Sequence[dict[str, Any]]) -> str:
-    payload = b"".join(
-        f"{entry['path']}\0{entry['sha256']}\n".encode("utf-8") for entry in entries
+def _read_bound_regular_bytes(path: Path, label: str, maximum_size: int) -> bytes:
+    """Read one digest-bound regular file while detecting path replacement."""
+
+    if not isinstance(maximum_size, int) or maximum_size < 1:
+        raise SealedBootstrapError("sealed bundle read bound is invalid")
+    _assert_regular_file(path, label, require_immutable=False)
+    try:
+        named_before = path.lstat()
+        if named_before.st_size > maximum_size:
+            raise SealedBootstrapError(f"{label} exceeds its read bound")
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except SealedBootstrapError:
+        raise
+    except OSError as exc:
+        raise SealedBootstrapError(f"{label} is unavailable") from exc
+    try:
+        opened_before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened_before.st_mode)
+            or opened_before.st_nlink != 1
+            or opened_before.st_size > maximum_size
+            or _file_identity(opened_before) != _file_identity(named_before)
+        ):
+            raise SealedBootstrapError(f"{label} identity changed before read")
+        with os.fdopen(descriptor, "rb", closefd=True) as stream:
+            payload = stream.read(maximum_size + 1)
+            opened_after = os.fstat(stream.fileno())
+        descriptor = -1
+        named_after = path.lstat()
+    except SealedBootstrapError:
+        raise
+    except OSError as exc:
+        raise SealedBootstrapError(f"{label} is unavailable") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if (
+        len(payload) > maximum_size
+        or _file_identity(opened_before) != _file_identity(opened_after)
+        or _file_identity(opened_before) != _file_identity(named_after)
+    ):
+        raise SealedBootstrapError(f"{label} changed while read")
+    return payload
+
+
+def _file_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    """Return stable metadata needed to detect a manifest path replacement."""
+
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_nlink,
+        metadata.st_size,
+        metadata.st_mtime_ns,
     )
+
+
+def _verify_packvm_bundle_binding(
+    application_bundle_root: str,
+    provisioning_sha256: str,
+    helper_manifest_sha256: str,
+    helper_team_id: str,
+    outer_runtime_manifest_sha256: str,
+) -> Mapping[str, str] | None:
+    """Validate the Launcher-authenticated macOS app PackVM resource domain.
+
+    The sealed snapshot is deliberately separate from the signed application
+    bundle.  Only the Launcher can supply this four-part binding, and it is
+    accepted only for the exact ``.app/Contents/Resources/app`` layout whose
+    outer runtime manifest is already bound by the sealed overlay.
+    """
+
+    supplied = (
+        application_bundle_root,
+        provisioning_sha256,
+        helper_manifest_sha256,
+        helper_team_id,
+    )
+    if not all(isinstance(value, str) for value in supplied):
+        raise SealedBootstrapError("sealed PackVM bundle launch binding is invalid")
+    if all(value == "" for value in supplied):
+        return None
+    if not application_bundle_root or not all(
+        _is_sha256_identity(value) for value in (provisioning_sha256, helper_manifest_sha256)
+    ):
+        raise SealedBootstrapError("sealed PackVM bundle launch binding is invalid")
+    if helper_team_id and _APPLE_TEAM_ID.fullmatch(helper_team_id) is None:
+        raise SealedBootstrapError("sealed PackVM helper team identity is invalid")
+    if not _is_sha256_identity(outer_runtime_manifest_sha256):
+        raise SealedBootstrapError("sealed outer runtime manifest binding is invalid")
+
+    bundle = Path(application_bundle_root)
+    if not bundle.is_absolute() or bundle.suffix != ".app":
+        raise SealedBootstrapError("sealed application bundle root is invalid")
+    bundle = _assert_real_directory(
+        bundle,
+        "sealed application bundle root",
+        require_immutable=False,
+    )
+    contents = _assert_real_directory(
+        bundle / "Contents",
+        "sealed application contents",
+        require_immutable=False,
+    )
+    resources = _assert_real_directory(
+        contents / "Resources",
+        "sealed application resources",
+        require_immutable=False,
+    )
+    application = _assert_real_directory(
+        resources / "app",
+        "sealed application resource root",
+        require_immutable=False,
+    )
+    if contents.parent != bundle or resources.parent != contents or application.parent != resources:
+        raise SealedBootstrapError("sealed application bundle layout is invalid")
+
+    provisioning = _read_bound_regular_bytes(
+        resources / PACKVM_PROVISIONING_MANIFEST_NAME,
+        "sealed PackVM provisioning manifest",
+        2 * 1024 * 1024,
+    )
+    helper_manifest = _read_bound_regular_bytes(
+        resources / PACKVM_HELPER_MANIFEST_NAME,
+        "sealed PackVM helper manifest",
+        256 * 1024,
+    )
+    outer_manifest = _read_bound_regular_bytes(
+        application / OUTER_RUNTIME_MANIFEST_NAME,
+        "sealed outer runtime manifest",
+        4 * 1024 * 1024,
+    )
+    if (
+        _sha256_bytes(provisioning) != provisioning_sha256
+        or _sha256_bytes(helper_manifest) != helper_manifest_sha256
+        or _sha256_bytes(outer_manifest) != outer_runtime_manifest_sha256
+    ):
+        raise SealedBootstrapError("sealed PackVM bundle binding changed")
+    return MappingProxyType(
+        {
+            "root": str(bundle),
+            "provisioning_sha256": f"sha256:{provisioning_sha256}",
+            "helper_manifest_sha256": f"sha256:{helper_manifest_sha256}",
+            "helper_team_id": helper_team_id,
+        }
+    )
+
+
+def _group_digest(entries: Sequence[dict[str, Any]]) -> str:
+    payload = b"".join(f"{entry['path']}\0{entry['sha256']}\n".encode("utf-8") for entry in entries)
     if not payload:
         raise SealedBootstrapError("sealed sentinel group is empty")
     return _sha256_bytes(payload)
@@ -528,20 +707,13 @@ def _recomputed_sentinels(
         f"venv/lib/python{minor}/site-packages/",
         "venv/Lib/site-packages/",
     )
-    stdlib = [
-        entry
-        for entry in records
-        if str(entry["path"]).startswith(stdlib_prefixes)
-    ]
-    site_packages = [
-        entry for entry in records if str(entry["path"]).startswith(site_prefixes)
-    ]
+    stdlib = [entry for entry in records if str(entry["path"]).startswith(stdlib_prefixes)]
+    site_packages = [entry for entry in records if str(entry["path"]).startswith(site_prefixes)]
     native_suffixes = (".so", ".dylib", ".dll", ".pyd", ".exe")
     native = [
         entry
         for entry in records
-        if str(entry["path"]).lower().endswith(native_suffixes)
-        or bool(entry["executable"])
+        if str(entry["path"]).lower().endswith(native_suffixes) or bool(entry["executable"])
     ]
     return {
         "stdlib_sha256": _group_digest(stdlib),
@@ -588,8 +760,7 @@ def _load_manifest(root: Path, value: str) -> dict[str, Any]:
     raw = supplied.read_bytes()
     expected_binding = os.environ.get(MANIFEST_SHA_ENV, "")
     if expected_binding and (
-        not _is_sha256_identity(expected_binding)
-        or _sha256_bytes(raw) != expected_binding
+        not _is_sha256_identity(expected_binding) or _sha256_bytes(raw) != expected_binding
     ):
         raise SealedBootstrapError("sealed Python manifest binding changed")
     try:
@@ -603,6 +774,7 @@ def _new_dispatch_scope(
     root: Path,
     manifest: dict[str, Any],
     role: str,
+    packvm_bundle_binding: Mapping[str, str] | None,
 ) -> _SealedDispatchScope:
     """Create the process-private capability for one verified role target."""
     manifest_path = root / MANIFEST_NAME
@@ -617,6 +789,7 @@ def _new_dispatch_scope(
         manifest_digest,
         str(manifest["environment_digest"]),
         ROLE_TARGETS[role],
+        packvm_bundle_binding,
     )
 
 
@@ -669,13 +842,8 @@ def _publish_attestation(path: Path, evidence: dict[str, Any]) -> None:
                 | getattr(os, "O_NOFOLLOW", 0)
                 | getattr(os, "O_CLOEXEC", 0),
             )
-            if (
-                _attestation_parent_identity(os.fstat(directory_descriptor))
-                != parent_identity
-            ):
-                raise SealedBootstrapError(
-                    "attestation parent identity changed before publication"
-                )
+            if _attestation_parent_identity(os.fstat(directory_descriptor)) != parent_identity:
+                raise SealedBootstrapError("attestation parent identity changed before publication")
         try:
             descriptor = (
                 os.open(temporary.name, flags, 0o600, dir_fd=directory_descriptor)
@@ -683,9 +851,7 @@ def _publish_attestation(path: Path, evidence: dict[str, Any]) -> None:
                 else os.open(temporary, flags, 0o600)
             )
         except FileExistsError as exc:
-            raise SealedBootstrapError(
-                "attestation temporary destination already exists"
-            ) from exc
+            raise SealedBootstrapError("attestation temporary destination already exists") from exc
         with os.fdopen(descriptor, "wb", closefd=True) as handle:
             handle.write(payload)
             handle.flush()
@@ -713,14 +879,8 @@ def _publish_attestation(path: Path, evidence: dict[str, Any]) -> None:
             raise SealedBootstrapError("attestation destination appeared during publish") from exc
         published_descriptor = os.open(
             path.name if directory_descriptor >= 0 else path,
-            os.O_RDONLY
-            | getattr(os, "O_NOFOLLOW", 0)
-            | getattr(os, "O_CLOEXEC", 0),
-            **(
-                {"dir_fd": directory_descriptor}
-                if directory_descriptor >= 0
-                else {}
-            ),
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
+            **({"dir_fd": directory_descriptor} if directory_descriptor >= 0 else {}),
         )
         linked_metadata = os.fstat(published_descriptor)
         _validate_published_attestation_metadata(
@@ -730,18 +890,12 @@ def _publish_attestation(path: Path, evidence: dict[str, Any]) -> None:
         )
         if (
             _attestation_file_identity(linked_metadata) != temporary_identity
-            or _attestation_file_identity(
-                _publication_lstat(path, directory_descriptor)
-            )
+            or _attestation_file_identity(_publication_lstat(path, directory_descriptor))
             != temporary_identity
-            or _attestation_file_identity(
-                _publication_lstat(temporary, directory_descriptor)
-            )
+            or _attestation_file_identity(_publication_lstat(temporary, directory_descriptor))
             != temporary_identity
         ):
-            raise SealedBootstrapError(
-                "published attestation identity changed during publication"
-            )
+            raise SealedBootstrapError("published attestation identity changed during publication")
         # os.replace would permit replacement of a target that appeared during
         # publication. The atomic link is no-replace; unlinking the temporary
         # name is the completion boundary observed by Host readers.
@@ -760,20 +914,15 @@ def _publish_attestation(path: Path, evidence: dict[str, Any]) -> None:
         )
         if (
             _attestation_file_identity(final_metadata) != temporary_identity
-            or _attestation_file_identity(
-                _publication_lstat(path, directory_descriptor)
-            )
+            or _attestation_file_identity(_publication_lstat(path, directory_descriptor))
             != temporary_identity
             or _attestation_parent_identity(path.parent.lstat()) != parent_identity
             or (
                 directory_descriptor >= 0
-                and _attestation_parent_identity(os.fstat(directory_descriptor))
-                != parent_identity
+                and _attestation_parent_identity(os.fstat(directory_descriptor)) != parent_identity
             )
         ):
-            raise SealedBootstrapError(
-                "published attestation identity changed after publication"
-            )
+            raise SealedBootstrapError("published attestation identity changed after publication")
     finally:
         try:
             if published_descriptor >= 0:
@@ -838,9 +987,7 @@ def _publication_unlink_owned(
             return
         raise
     if _attestation_file_identity(metadata) != expected_identity:
-        raise SealedBootstrapError(
-            "attestation temporary identity changed before cleanup"
-        )
+        raise SealedBootstrapError("attestation temporary identity changed before cleanup")
     if directory_descriptor >= 0:
         os.unlink(path.name, dir_fd=directory_descriptor)
     else:
@@ -886,6 +1033,7 @@ def _sys_path_contract(
     document: dict[str, Any],
     *,
     include_application: bool,
+    application_import_roots: Sequence[str] = (),
 ) -> tuple[list[str], str | None]:
     """Return exact manifest-bound import roots and the optional zip spelling."""
     major, minor, *_ = str(document["python_version"]).split(".")
@@ -906,7 +1054,9 @@ def _sys_path_contract(
             f"venv/lib/python{major}.{minor}/site-packages",
         )
     if include_application:
-        directories = (*directories, "app")
+        directories = (*directories, "app", *application_import_roots)
+    elif application_import_roots:
+        raise SealedBootstrapError("role import roots require the sealed application import domain")
 
     manifest_files = {str(entry["path"]) for entry in document["files"]}
     manifest_directories = set(_expected_directories(document["files"]))
@@ -955,12 +1105,14 @@ def _normalize_sys_path(
     document: dict[str, Any],
     *,
     include_application: bool,
+    application_import_roots: Sequence[str] = (),
 ) -> list[str]:
     """Require exactly the manifest-bound import roots in their isolated order."""
     expected, absent_zip = _sys_path_contract(
         root,
         document,
         include_application=include_application,
+        application_import_roots=application_import_roots,
     )
     snapshot: list[str] = []
     for item in sys.path:
@@ -1053,6 +1205,7 @@ class _SealedSysPath(list[str]):
         self._ensure_mutable()
         super().sort(*args, **kwargs)
 
+
 def _validate_python_identity(root: Path) -> tuple[str, str, str]:
     """Validate executable and CPython prefixes against the sealed root."""
     try:
@@ -1076,14 +1229,11 @@ def _reject_launch_environment_injection() -> None:
     offenders = sorted(
         key
         for key in os.environ
-        if key in FORBIDDEN_LAUNCH_ENVIRONMENTS
-        or key.startswith("DYLD_")
-        or key.startswith("LD_")
+        if key in FORBIDDEN_LAUNCH_ENVIRONMENTS or key.startswith("DYLD_") or key.startswith("LD_")
     )
     if offenders:
         raise SealedBootstrapError(
-            "sealed launch environment contains forbidden injection keys: "
-            + ", ".join(offenders)
+            "sealed launch environment contains forbidden injection keys: " + ", ".join(offenders)
         )
 
 
@@ -1092,6 +1242,7 @@ def _validate_runtime_state(
     document: dict[str, Any],
     *,
     include_application: bool,
+    application_import_roots: Sequence[str] = (),
 ) -> list[str]:
     """Validate prefixes, native import roots, and canonical sys.path."""
     _validate_python_identity(root)
@@ -1099,6 +1250,7 @@ def _validate_runtime_state(
         root,
         document,
         include_application=include_application,
+        application_import_roots=application_import_roots,
     )
 
 
@@ -1139,9 +1291,7 @@ def _attestation(
         "site_packages_sha256": sentinels["site_packages_sha256"],
         "native_sha256": sentinels["native_sha256"],
         "runtime_overlay_sha256": overlay_binding["runtime_overlay_sha256"],
-        "outer_runtime_manifest_sha256": overlay_binding[
-            "outer_runtime_manifest_sha256"
-        ],
+        "outer_runtime_manifest_sha256": overlay_binding["outer_runtime_manifest_sha256"],
         "lifetime_lease": True,
     }
 
@@ -1241,6 +1391,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--environment-root", required=True)
     parser.add_argument("--runtime-overlay-sha256", required=True)
     parser.add_argument("--outer-runtime-manifest-sha256", required=True)
+    parser.add_argument("--application-bundle-root", required=True)
+    parser.add_argument("--packvm-provisioning-sha256", required=True)
+    parser.add_argument("--packvm-helper-manifest-sha256", required=True)
+    parser.add_argument("--packvm-helper-team-id", required=True)
     return parser
 
 
@@ -1255,11 +1409,11 @@ def _split_arguments(argv: Sequence[str]) -> tuple[list[str], list[str]]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Preload and verify one role, publish attestation, then dispatch it."""
-    bootstrap_args, role_args = _split_arguments(
-        list(argv) if argv is not None else sys.argv[1:]
-    )
+    bootstrap_args, role_args = _split_arguments(list(argv) if argv is not None else sys.argv[1:])
     args = _parser().parse_args(bootstrap_args)
-    if len(args.nonce) != 64 or any(character not in "0123456789abcdef" for character in args.nonce):
+    if len(args.nonce) != 64 or any(
+        character not in "0123456789abcdef" for character in args.nonce
+    ):
         raise SealedBootstrapError("nonce must be the parent-provided 64-hex identity")
     _reject_launch_environment_injection()
     root = _environment_root(args.environment_root)
@@ -1272,21 +1426,41 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.runtime_overlay_sha256,
             args.outer_runtime_manifest_sha256,
         )
+        packvm_bundle_binding = _verify_packvm_bundle_binding(
+            args.application_bundle_root,
+            args.packvm_provisioning_sha256,
+            args.packvm_helper_manifest_sha256,
+            args.packvm_helper_team_id,
+            args.outer_runtime_manifest_sha256,
+        )
         records = _verify_tree(root, manifest)
         sentinels = _sentinels_match(root, manifest, records)
         _validate_runtime_state(root, manifest, include_application=False)
-        scope = _new_dispatch_scope(root, manifest, args.role)
-        role_module, target = _load_role(root, args.role)
-        role_main = _prepare_role(role_module, scope)
-        sys_path = _validate_runtime_state(root, manifest, include_application=True)
-        sealed_sys_path = _SealedSysPath(root, sys_path)
-        sys.path = sealed_sys_path
-        if _verify_runtime_overlay(
+        scope = _new_dispatch_scope(
             root,
             manifest,
-            args.runtime_overlay_sha256,
-            args.outer_runtime_manifest_sha256,
-        ) != overlay_binding:
+            args.role,
+            packvm_bundle_binding,
+        )
+        role_module, target = _load_role(root, args.role)
+        role_main = _prepare_role(role_module, scope)
+        sys_path = _validate_runtime_state(
+            root,
+            manifest,
+            include_application=True,
+            application_import_roots=ROLE_APPLICATION_IMPORT_ROOTS[args.role],
+        )
+        sealed_sys_path = _SealedSysPath(root, sys_path)
+        sys.path = sealed_sys_path
+        if (
+            _verify_runtime_overlay(
+                root,
+                manifest,
+                args.runtime_overlay_sha256,
+                args.outer_runtime_manifest_sha256,
+            )
+            != overlay_binding
+        ):
             raise SealedBootstrapError("sealed runtime overlay changed before attestation")
         evidence = _attestation(
             root,

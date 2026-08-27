@@ -850,6 +850,7 @@ where
     let attestation_path = prepare_attestation_path(config, &nonce)?;
     let interpreter = fixed_interpreter(&verified.root);
     let mut command = process_utils::isolated_python(&interpreter);
+    let packvm_bundle = packaged_packvm_bundle_binding(config)?;
     append_launch_wire(
         &mut command,
         role,
@@ -859,6 +860,7 @@ where
         &verified.root,
         &verified.runtime_overlay.sha256,
         &verified.runtime_overlay.authority.outer_manifest_sha256,
+        packvm_bundle.as_ref(),
         role_arguments,
     )?;
     {
@@ -933,6 +935,7 @@ fn append_launch_wire(
     environment_root: &Path,
     runtime_overlay_sha256: &str,
     outer_runtime_manifest_sha256: &str,
+    packvm_bundle: Option<&PackVMBundleBinding>,
     role_arguments: RoleArguments,
 ) -> Result<()> {
     if role != PythonRole::Defaultspack && !role_arguments.0.is_empty() {
@@ -947,10 +950,89 @@ fn append_launch_wire(
             environment_root.as_os_str(),
             runtime_overlay_sha256,
             outer_runtime_manifest_sha256,
+            packvm_bundle
+                .map(|binding| binding.root.as_os_str())
+                .unwrap_or_else(|| OsStr::new("")),
+            packvm_bundle
+                .map(|binding| binding.provisioning_sha256.as_str())
+                .unwrap_or(""),
+            packvm_bundle
+                .map(|binding| binding.helper_manifest_sha256.as_str())
+                .unwrap_or(""),
+            packvm_bundle
+                .map(|binding| binding.helper_team_id.as_str())
+                .unwrap_or(""),
         ))
         .arg(protocol::ARG_SEPARATOR)
         .args(role_arguments.0);
     Ok(())
+}
+
+#[derive(Debug)]
+struct PackVMBundleBinding {
+    root: PathBuf,
+    provisioning_sha256: String,
+    helper_manifest_sha256: String,
+    helper_team_id: String,
+}
+
+fn packaged_packvm_bundle_binding(config: &AppConfig) -> Result<Option<PackVMBundleBinding>> {
+    let binding = packaged_packvm_bundle_binding_from_app_dir(&config.app_dir)?;
+    #[cfg(target_os = "macos")]
+    if let Some(binding) = binding.as_ref() {
+        verify_macos_static_code(&binding.root)
+            .context("packaged application binding failed final static-code validation")?;
+    }
+    Ok(binding)
+}
+
+fn packaged_packvm_bundle_binding_from_app_dir(
+    configured_app_dir: &Path,
+) -> Result<Option<PackVMBundleBinding>> {
+    let app_dir = configured_app_dir
+        .canonicalize()
+        .context("packaged application resource root is unavailable")?;
+    let Some(resources) = app_dir.parent() else {
+        return Ok(None);
+    };
+    let Some(contents) = resources.parent() else {
+        return Ok(None);
+    };
+    let Some(bundle) = contents.parent() else {
+        return Ok(None);
+    };
+    if app_dir.file_name() != Some(OsStr::new("app"))
+        || resources.file_name() != Some(OsStr::new("Resources"))
+        || contents.file_name() != Some(OsStr::new("Contents"))
+        || bundle.extension() != Some(OsStr::new("app"))
+    {
+        return Ok(None);
+    }
+    let resources = bundle.join("Contents/Resources");
+    let provisioning = read_bounded_regular(
+        &resources.join("packvm-vz-provisioning.v1.json"),
+        2 * 1024 * 1024,
+    )
+    .context("packaged PackVM provisioning manifest is unavailable")?;
+    let helper_manifest = read_bounded_regular(
+        &resources.join("packvm-vz-helper.manifest.v1.json"),
+        256 * 1024,
+    )
+    .context("packaged PackVM helper manifest is unavailable")?;
+    let policy = option_env!("TOBKIRI_MACOS_ARTIFACT_POLICY").unwrap_or("production-v1");
+    let helper_team_id = if policy == "production-v1" {
+        option_env!("TOBKIRI_MACOS_ARTIFACT_IDENTITY")
+            .unwrap_or_default()
+            .to_owned()
+    } else {
+        String::new()
+    };
+    Ok(Some(PackVMBundleBinding {
+        root: bundle.to_path_buf(),
+        provisioning_sha256: sha256_bytes(&provisioning),
+        helper_manifest_sha256: sha256_bytes(&helper_manifest),
+        helper_team_id,
+    }))
 }
 
 impl VerifiedEnvironment {
@@ -2342,7 +2424,7 @@ fn validate_attestation(
     {
         bail!("[PYTHON_SEALED_ATTESTATION_INVALID] startup identity mismatch");
     }
-    let expected_sys_path = expected_attested_sys_path(verified)?;
+    let expected_sys_path = expected_attested_sys_path(verified, role)?;
     let mut actual_sys_path = HashSet::new();
     for path in &value.sys_path {
         let Ok(path) = fs::canonicalize(path) else {
@@ -2358,14 +2440,17 @@ fn validate_attestation(
     Ok(())
 }
 
-fn expected_attested_sys_path(verified: &VerifiedEnvironment) -> Result<HashSet<PathBuf>> {
+fn expected_attested_sys_path(
+    verified: &VerifiedEnvironment,
+    role: PythonRole,
+) -> Result<HashSet<PathBuf>> {
     let mut version = verified.manifest.python_version.split('.');
     let major = version.next().unwrap_or_default();
     let minor = version.next().unwrap_or_default();
     if major.is_empty() || minor.is_empty() {
         bail!("[PYTHON_SEALED_ATTESTATION_INVALID] Python version is invalid");
     }
-    let (zip, directories) = if cfg!(windows) {
+    let (zip, mut directories) = if cfg!(windows) {
         (
             format!("runtime/python{major}{minor}.zip"),
             vec![
@@ -2387,6 +2472,9 @@ fn expected_attested_sys_path(verified: &VerifiedEnvironment) -> Result<HashSet<
             ],
         )
     };
+    if role == PythonRole::Defaultspack {
+        directories.push("app/ecosystem/defaultspack".to_string());
+    }
     let file_paths = verified
         .manifest
         .files
@@ -2558,17 +2646,32 @@ fn validate_relative_path(value: &str) -> Result<()> {
 }
 
 fn read_bounded_regular(path: &Path, limit: u64) -> Result<Vec<u8>> {
-    let file = open_regular(path)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > limit || has_multiple_links(path, &metadata)? {
+    let before = fs::symlink_metadata(path)?;
+    if before.file_type().is_symlink()
+        || !before.is_file()
+        || before.len() > limit
+        || has_multiple_links(path, &before)?
+    {
         bail!(
             "refusing unsafe or oversized sealed file {}",
             path.display()
         );
     }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.take(limit.saturating_add(1)).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != metadata.len() {
+    let mut file = open_regular(path)?;
+    let opened = file.metadata()?;
+    if !same_attestation_identity(&before, &opened) {
+        bail!("sealed file changed while opened {}", path.display());
+    }
+    let mut bytes = Vec::with_capacity(opened.len() as usize);
+    (&mut file)
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    let after_handle = file.metadata()?;
+    let after_path = fs::symlink_metadata(path)?;
+    if bytes.len() as u64 != opened.len()
+        || !same_attestation_identity(&opened, &after_handle)
+        || !same_attestation_identity(&opened, &after_path)
+    {
         bail!("sealed file changed while reading {}", path.display());
     }
     Ok(bytes)
@@ -2786,16 +2889,27 @@ struct MacosCiAttestedFile {
 }
 
 #[cfg(target_os = "macos")]
+const MACOS_CI_ATTESTED_PATHS: &[&str] = &[
+    "Contents/MacOS/tobkiri-launcher",
+    "Contents/MacOS/tobkiri-packvm-vz-helper",
+    "Contents/Resources/app/python-runtime/sealed-environment.v1.json",
+    "Contents/Resources/app/runtime-resource-manifest.v1.json",
+    "Contents/Resources/ci-e2e-artifact-policy.v1.json",
+    "Contents/Resources/packvm-vz-provisioning.v1.json",
+    "Contents/Resources/packvm-vz-helper.manifest.v1.json",
+    "Contents/Resources/ci-e2e-signing-certificate.der",
+];
+
+#[cfg(target_os = "macos")]
+const MACOS_CI_MACHO_ATTESTED_PATHS: &[&str] = &[
+    "Contents/MacOS/tobkiri-launcher",
+    "Contents/MacOS/tobkiri-packvm-vz-helper",
+];
+
+#[cfg(target_os = "macos")]
 fn verify_macos_ci_attestation(bundle: &Path, certificate_sha256: &str) -> Result<()> {
     const CERTIFICATE_NAME: &str = "ci-e2e-signing-certificate.der";
     const ATTESTATION_NAME: &str = "ci-e2e-startup-attestation.v1.json";
-    const SIGNED_PATHS: &[&str] = &[
-        "Contents/MacOS/tobkiri-launcher",
-        "Contents/Resources/app/python-runtime/sealed-environment.v1.json",
-        "Contents/Resources/app/runtime-resource-manifest.v1.json",
-        "Contents/Resources/ci-e2e-artifact-policy.v1.json",
-        "Contents/Resources/ci-e2e-signing-certificate.der",
-    ];
 
     require_sha256(certificate_sha256)?;
     let resources = bundle.join("Contents/Resources");
@@ -2815,7 +2929,7 @@ fn verify_macos_ci_attestation(bundle: &Path, certificate_sha256: &str) -> Resul
     {
         bail!("[PYTHON_SEALED_PROVENANCE_INVALID] CI attestation domain is invalid");
     }
-    let expected_files = SIGNED_PATHS
+    let expected_files = MACOS_CI_ATTESTED_PATHS
         .iter()
         .map(|relative| {
             let bytes = read_bounded_regular(&bundle.join(relative), 32 * 1024 * 1024)
@@ -2826,7 +2940,7 @@ fn verify_macos_ci_attestation(bundle: &Path, certificate_sha256: &str) -> Resul
                 })?;
             Ok(MacosCiAttestedFile {
                 path: (*relative).to_owned(),
-                sha256: if *relative == SIGNED_PATHS[0] {
+                sha256: if MACOS_CI_MACHO_ATTESTED_PATHS.contains(relative) {
                     macho_code_sha256(&bytes)?
                 } else {
                     sha256_bytes(&bytes)
@@ -3541,6 +3655,61 @@ mod tests {
     }
 
     #[test]
+    fn packaged_packvm_binding_is_derived_from_exact_outer_bundle_bytes() {
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-packvm-bundle-binding-{}-{}",
+            std::process::id(),
+            random_nonce()
+        ));
+        let app_dir = root.join("Tobkiri Launcher.app/Contents/Resources/app");
+        fs::create_dir_all(&app_dir).unwrap();
+        let resources = app_dir.parent().unwrap();
+        let provisioning = br#"{"schema":"io.tobkiri.packvm-vz-provisioning.v1"}"#;
+        let helper = br#"{"schema":"io.tobkiri.packvm-vz-helper-manifest.v1"}"#;
+        fs::write(
+            resources.join("packvm-vz-provisioning.v1.json"),
+            provisioning,
+        )
+        .unwrap();
+        fs::write(resources.join("packvm-vz-helper.manifest.v1.json"), helper).unwrap();
+
+        let binding = packaged_packvm_bundle_binding_from_app_dir(&app_dir)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            binding.root,
+            fs::canonicalize(root.join("Tobkiri Launcher.app")).unwrap()
+        );
+        assert_eq!(binding.provisioning_sha256, sha256_bytes(provisioning));
+        assert_eq!(binding.helper_manifest_sha256, sha256_bytes(helper));
+
+        fs::write(
+            resources.join("packvm-vz-provisioning.v1.json"),
+            b"substituted",
+        )
+        .unwrap();
+        let substituted = packaged_packvm_bundle_binding_from_app_dir(&app_dir)
+            .unwrap()
+            .unwrap();
+        assert_ne!(substituted.provisioning_sha256, binding.provisioning_sha256);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn non_bundle_runtime_has_no_packvm_binding() {
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-packvm-unbundled-{}-{}",
+            std::process::id(),
+            random_nonce()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        assert!(packaged_packvm_bundle_binding_from_app_dir(&root)
+            .unwrap()
+            .is_none());
+        fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
     fn all_roles_use_one_wire_and_only_defaultspack_receives_role_arguments() {
         let mut command = Command::new("python");
         append_launch_wire(
@@ -3552,6 +3721,7 @@ mod tests {
             Path::new("environment"),
             &digest('a'),
             &digest('b'),
+            None,
             RoleArguments::defaultspack([OsString::from("--port=8766")]).unwrap(),
         )
         .unwrap();
@@ -3574,6 +3744,7 @@ mod tests {
             Path::new("environment"),
             &digest('a'),
             &digest('b'),
+            None,
             RoleArguments(vec![OsString::from("unexpected")]),
         )
         .is_err());
@@ -4116,6 +4287,31 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "macos")]
+    fn ci_attestation_binds_the_packvm_helper_and_manifests() {
+        assert_eq!(
+            MACOS_CI_ATTESTED_PATHS,
+            [
+                "Contents/MacOS/tobkiri-launcher",
+                "Contents/MacOS/tobkiri-packvm-vz-helper",
+                "Contents/Resources/app/python-runtime/sealed-environment.v1.json",
+                "Contents/Resources/app/runtime-resource-manifest.v1.json",
+                "Contents/Resources/ci-e2e-artifact-policy.v1.json",
+                "Contents/Resources/packvm-vz-provisioning.v1.json",
+                "Contents/Resources/packvm-vz-helper.manifest.v1.json",
+                "Contents/Resources/ci-e2e-signing-certificate.der",
+            ]
+        );
+        assert_eq!(
+            MACOS_CI_MACHO_ATTESTED_PATHS,
+            [
+                "Contents/MacOS/tobkiri-launcher",
+                "Contents/MacOS/tobkiri-packvm-vz-helper",
+            ]
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
     fn ad_hoc_macos_ci_bundle_is_rejected_without_build_bound_certificate() {
         let path = std::env::temp_dir().join(format!(
             "Tobkiri-CI-AdHoc-{}-{}.app",
@@ -4177,6 +4373,7 @@ mod tests {
         #[cfg(unix)]
         make_test_tree_writable(&root);
         let import_files = [
+            "app/ecosystem/defaultspack/__init__.py",
             "runtime/lib/python3.13/os.py",
             "runtime/lib/python3.13/lib-dynload/_ssl.so",
             "venv/lib/python3.13/site-packages/fixture.py",
@@ -4251,6 +4448,20 @@ mod tests {
             lifetime_lease: true,
         };
         validate_attestation(&attestation, "nonce", PythonRole::Kernel, &verified).unwrap();
+        attestation.role = protocol::ROLE_DEFAULTSPACK.into();
+        attestation.sys_path.push(
+            fs::canonicalize(root.join("app/ecosystem/defaultspack"))
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+        );
+        validate_attestation(&attestation, "nonce", PythonRole::Defaultspack, &verified).unwrap();
+        attestation.sys_path.pop();
+        assert!(
+            validate_attestation(&attestation, "nonce", PythonRole::Defaultspack, &verified)
+                .is_err()
+        );
+        attestation.role = protocol::ROLE_TYPED.into();
         attestation.sys_path.push(attestation.sys_path[0].clone());
         assert!(
             validate_attestation(&attestation, "nonce", PythonRole::Kernel, &verified).is_err()

@@ -5,45 +5,55 @@ import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
 import {Card, CardContent, CardHeader, CardTitle} from '@/src/components/ui/Card';
 import {
+  fetchFrontendCatalog,
   fetchPresentationState,
   isDesktopShellAvailable,
   launchSelectedPresentation,
 } from '@/src/lib/api';
-import type {ApiPresentationState} from '@/src/lib/apiTypes';
-import {launchDisabledReason} from '@/src/lib/presentation';
+import type {ApiDynamicFrontendCatalog, ApiPresentationState} from '@/src/lib/apiTypes';
+import {isConversationCapabilityReady, launchDisabledReason} from '@/src/lib/presentation';
 import {useAppStore} from '@/src/store';
 
 function formatError(error: unknown): string {
   return error instanceof Error && error.message.trim()
     ? error.message
-    : 'Tobkiri could not read the selected Shell state.';
+    : 'Tobkiri could not verify the selected Conversation surface.';
 }
 
 export function ShellLaunchCard({runtimeReady}: {runtimeReady: boolean}) {
   const addToast = useAppStore((state) => state.addToast);
   const [presentation, setPresentation] = useState<ApiPresentationState | null>(null);
+  const [frontendCatalog, setFrontendCatalog] = useState<ApiDynamicFrontendCatalog | null>(null);
   const [loading, setLoading] = useState(false);
   const [launching, setLaunching] = useState(false);
   const launchingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   const desktopShell = isDesktopShellAvailable();
-  const loadPresentation = useCallback(async () => {
+  const loadSurfaceState = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      setPresentation(await fetchPresentationState());
+      const [nextPresentation, nextCatalog] = await Promise.all([
+        fetchPresentationState(),
+        fetchFrontendCatalog(),
+      ]);
+      setPresentation(nextPresentation);
+      setFrontendCatalog(nextCatalog);
     } catch (loadError) {
       setError(formatError(loadError));
       setPresentation(null);
+      setFrontendCatalog(null);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (desktopShell && runtimeReady) void loadPresentation();
-  }, [desktopShell, runtimeReady, loadPresentation]);
+    if (desktopShell && runtimeReady) {
+      void loadSurfaceState();
+    }
+  }, [desktopShell, runtimeReady, loadSurfaceState]);
 
   if (!desktopShell) return null;
 
@@ -53,12 +63,16 @@ export function ShellLaunchCard({runtimeReady}: {runtimeReady: boolean}) {
     )
     : null;
   const materialization = presentation?.materialization ?? null;
+  const capabilityReady = isConversationCapabilityReady(frontendCatalog);
   const blockedReason = !runtimeReady
     ? 'The selected Shell becomes available after Tobkiri runtime readiness.'
     : !presentation?.selection
       ? 'No verified Shell selection is active.'
       : materialization
         ? launchDisabledReason(materialization)
+          ?? (!capabilityReady
+            ? 'The verified Conversation capability is not ready in the active v4 Profile.'
+            : null)
         : 'The selected Shell materialization is unavailable.';
 
   const launch = async () => {
@@ -67,6 +81,12 @@ export function ShellLaunchCard({runtimeReady}: {runtimeReady: boolean}) {
     setLaunching(true);
     setError(null);
     try {
+      const freshCatalog = await fetchFrontendCatalog();
+      setFrontendCatalog(freshCatalog);
+      if (!isConversationCapabilityReady(freshCatalog)) {
+        setError('The verified Conversation capability changed and is no longer ready.');
+        return;
+      }
       const result = await launchSelectedPresentation();
       addToast(result.message || 'Tobkiri Conversation opened in the selected Shell.', 'success');
     } catch (launchError) {
@@ -100,7 +120,7 @@ export function ShellLaunchCard({runtimeReady}: {runtimeReady: boolean}) {
         ) : error ? (
           <div className="flex flex-wrap items-center gap-3" role="alert">
             <p className="flex-1 text-sm text-destructive">{error}</p>
-            <Button variant="outline" size="sm" onClick={() => void loadPresentation()}>
+            <Button variant="outline" size="sm" onClick={() => void loadSurfaceState()}>
               Retry
             </Button>
           </div>

@@ -23,6 +23,8 @@ pub(crate) const SHELL_BUNDLE_IDENTIFIER: &str = "io.tobkiri.shell.tauri";
 pub(crate) const SHELL_PROVIDER_ID: &str = "shell.tauri.default";
 pub(crate) const HANDOFF_ARGUMENT: &str = "--tobkiri-shell-handoff";
 const LAUNCHER_BUNDLE_IDENTIFIER: &str = "dev.tobkiri.launcher";
+const CI_E2E_LAUNCHER_BUNDLE_IDENTIFIER: &str = "dev.tobkiri.launcher.ci-e2e";
+const MACOS_ARTIFACT_POLICY: &str = env!("TOBKIRI_MACOS_ARTIFACT_POLICY");
 const HANDOFF_SCHEMA: &str = "io.tobkiri.shell-handoff.v1";
 const LOCAL_AUTH_PROTOCOL: &str = "io.tobkiri.local-auth.v1";
 const LOCAL_AUTH_AUDIENCE: &str = "runtime-profile";
@@ -200,10 +202,20 @@ fn launcher_handoff_root(config: &AppConfig) -> PathBuf {
 
 fn expected_launcher_handoff_root() -> Result<PathBuf> {
     let data_dir = dirs::data_dir().context("platform data directory is unavailable")?;
+    let launcher_bundle_identifier =
+        launcher_bundle_identifier_for_artifact_policy(MACOS_ARTIFACT_POLICY)?;
     Ok(data_dir
-        .join(LAUNCHER_BUNDLE_IDENTIFIER)
+        .join(launcher_bundle_identifier)
         .join("user_data")
         .join(HANDOFF_DIRECTORY))
+}
+
+fn launcher_bundle_identifier_for_artifact_policy(policy: &str) -> Result<&'static str> {
+    match policy {
+        "production-v1" => Ok(LAUNCHER_BUNDLE_IDENTIFIER),
+        "ci-e2e-v1" => Ok(CI_E2E_LAUNCHER_BUNDLE_IDENTIFIER),
+        _ => bail!("Tobkiri Shell was built with an unsupported artifact policy"),
+    }
 }
 
 fn is_clean_absolute_path(path: &Path) -> bool {
@@ -305,7 +317,7 @@ fn validate_payload(payload: &ShellHandoffPayload, now: u64) -> Result<Validated
         || runtime_url.username() != ""
         || runtime_url.password().is_some()
         || runtime_url.path() != "/chat"
-        || runtime_url.query().is_some()
+        || runtime_url.fragment().is_some()
     {
         bail!("Shell runtime URL is outside the authenticated loopback contract");
     }
@@ -315,14 +327,18 @@ fn validate_payload(payload: &ShellHandoffPayload, now: u64) -> Result<Validated
     if runtime_port == 0 {
         bail!("Shell runtime URL has an invalid port");
     }
-    let fragment = runtime_url
-        .fragment()
-        .context("Shell runtime URL is missing local authentication")?;
-    let token = fragment
-        .strip_prefix("rumi_local_auth=")
-        .context("Shell runtime URL has an invalid local-auth fragment")?;
-    if token.is_empty() || token.len() > 4096 || token.contains('&') {
-        bail!("Shell runtime URL has an invalid local-auth fragment");
+    let mut query = runtime_url.query_pairs();
+    let (key, code) = query
+        .next()
+        .context("Shell runtime URL is missing its one-time panel code")?;
+    if key != "code"
+        || !(32..=256).contains(&code.len())
+        || !code
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        || query.next().is_some()
+    {
+        bail!("Shell runtime URL has an invalid one-time panel code");
     }
     Ok(ValidatedShellHandoff {
         runtime_url,
@@ -949,6 +965,19 @@ mod tests {
     }
 
     #[test]
+    fn launcher_handoff_root_is_bound_to_the_artifact_policy() {
+        assert_eq!(
+            launcher_bundle_identifier_for_artifact_policy("production-v1").unwrap(),
+            LAUNCHER_BUNDLE_IDENTIFIER
+        );
+        assert_eq!(
+            launcher_bundle_identifier_for_artifact_policy("ci-e2e-v1").unwrap(),
+            CI_E2E_LAUNCHER_BUNDLE_IDENTIFIER
+        );
+        assert!(launcher_bundle_identifier_for_artifact_policy("unknown").is_err());
+    }
+
+    #[test]
     fn payload_rejects_wrong_identity_expiry_and_non_loopback_url() {
         let now = epoch_seconds().unwrap();
         let base = ShellHandoffPayload {
@@ -960,7 +989,7 @@ mod tests {
             catalog_revision: format!("sha256:{}", "b".repeat(64)),
             provider_id: SHELL_PROVIDER_ID.into(),
             artifact_id: expected_shell_artifact_id().unwrap().into(),
-            runtime_url: "http://127.0.0.1:8766/chat#rumi_local_auth=token".into(),
+            runtime_url: format!("http://127.0.0.1:8766/chat?code={}", "c".repeat(64)),
             created_at: now,
             expires_at: now + 60,
             nonce: "A".repeat(40),
@@ -971,8 +1000,17 @@ mod tests {
         assert!(validate_payload(&serde_json::from_value(wrong_provider).unwrap(), now).is_err());
         let mut external = serde_json::to_value(&base).unwrap();
         external["runtime_url"] =
-            serde_json::Value::String("https://example.com/chat#rumi_local_auth=token".into());
+            serde_json::Value::String(format!("https://example.com/chat?code={}", "c".repeat(64)));
         assert!(validate_payload(&serde_json::from_value(external).unwrap(), now).is_err());
+        for invalid_url in [
+            "http://127.0.0.1:8766/chat#rumi_local_auth=legacy-token".to_string(),
+            "http://127.0.0.1:8766/chat?code=short".to_string(),
+            format!("http://127.0.0.1:8766/chat?code={}&extra=1", "c".repeat(64)),
+        ] {
+            let mut invalid = serde_json::to_value(&base).unwrap();
+            invalid["runtime_url"] = serde_json::Value::String(invalid_url);
+            assert!(validate_payload(&serde_json::from_value(invalid).unwrap(), now).is_err());
+        }
         let mut expired = serde_json::to_value(&base).unwrap();
         expired["expires_at"] = serde_json::Value::from(now.saturating_sub(1));
         assert!(validate_payload(&serde_json::from_value(expired).unwrap(), now).is_err());
@@ -1020,7 +1058,7 @@ mod tests {
             catalog_revision: format!("sha256:{}", "b".repeat(64)),
             provider_id: SHELL_PROVIDER_ID.into(),
             artifact_id: expected_shell_artifact_id().unwrap().into(),
-            runtime_url: "http://127.0.0.1:8766/chat#rumi_local_auth=token".into(),
+            runtime_url: format!("http://127.0.0.1:8766/chat?code={}", "c".repeat(64)),
             created_at: now,
             expires_at: now + HANDOFF_TTL_SECONDS,
             nonce: "C".repeat(40),

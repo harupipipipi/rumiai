@@ -14,7 +14,7 @@ import urllib.request
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from core_runtime.panel_auth import PanelAuthManager
@@ -76,10 +76,13 @@ def _ensure_import_path() -> None:
     global _IMPORT_PATH_READY
     sealed_app_root = _sealed_app_root()
     if sealed_app_root is not None:
-        if str(sealed_app_root) not in sys.path:
-            sys.path.insert(0, str(sealed_app_root))
+        pack_root = _pack_root()
+        for authorized_root in reversed((sealed_app_root, pack_root)):
+            root = str(authorized_root)
+            if root not in sys.path:
+                sys.path.insert(0, root)
         _install_ecosystem_defaultspack_alias(
-            _pack_root(),
+            pack_root,
             ecosystem_dirs=[sealed_app_root / "ecosystem"],
         )
         _IMPORT_PATH_READY = True
@@ -180,15 +183,23 @@ def _candidate_ecosystem_dirs(pack_root: Path) -> list[Path]:
 
 
 def prepare_for_sealed_dispatch(scope: object) -> None:
-    """Bind import roots to the bootstrap-issued sealed dispatch scope."""
+    """Bind sealed imports and the Launcher-issued PackVM bundle identity."""
     global _SEALED_SCOPE
     if _SEALED_SCOPE is not None and _SEALED_SCOPE is not scope:
         raise RuntimeError("Defaultspack sealed scope was already initialized")
-    sealed_app_root = scope.app_root_for(__file__)
+    app_root_for = getattr(scope, "app_root_for", None)
+    if not callable(app_root_for):
+        raise RuntimeError("Defaultspack sealed scope lacks an application root")
+    sealed_app_root = app_root_for(__file__)
     if not isinstance(sealed_app_root, Path):
         raise RuntimeError("Defaultspack sealed scope returned an invalid app root")
     _SEALED_SCOPE = scope
     _ensure_import_path()
+    from core_runtime.packaged_application_bundle import (
+        install_packvm_bundle_binding_from_sealed_scope,
+    )
+
+    install_packvm_bundle_binding_from_sealed_scope(scope, __file__)
 
 
 def _url() -> str:
@@ -242,7 +253,7 @@ def _surface_url(url: str) -> str:
     return url.partition("#")[0]
 
 
-def _restore_active_profile_contracts():
+def _restore_active_profile_contracts(packvm_lifecycle: Any):
     """Capture and verify the exact persisted Defaults activation and UI map."""
 
     from core_runtime.authority.v4 import AuthorityStore
@@ -278,6 +289,8 @@ def _restore_active_profile_contracts():
         bundle_root=bundle_root,
         ecosystem_root=ecosystem_root,
         authority_store=AuthorityStore(runtime_user_data_root() / "authority" / "v4.sqlite3"),
+        packvm_provisioner=packvm_lifecycle,
+        packvm_readiness_reader=packvm_lifecycle.readiness_snapshot,
         frontend_contract_bindings=bindings,
     )
     install_dispatch_session(get_container(), session)
@@ -320,9 +333,7 @@ def _validate_mutable_diagnostic_path(path: Path) -> Path:
     if sealed_app_root is not None:
         protected = sealed_app_root.resolve(strict=True)
         if candidate == protected or candidate.is_relative_to(protected):
-            raise ValueError(
-                "Defaultspack launch log path must be outside sealed app resources"
-            )
+            raise ValueError("Defaultspack launch log path must be outside sealed app resources")
     return candidate
 
 
@@ -462,11 +473,13 @@ def main(argv: list[str] | None = None) -> int:
     from ecosystem.defaultspack.domain.runtime_v4 import (
         ProfileReconfirmationRequired,
     )
+    from core_runtime.packvm_lifecycle_v4 import PackVMLifecycleV4
 
-    lifecycle = AppLifecycleManager()
+    packvm_lifecycle = PackVMLifecycleV4()
+    lifecycle = AppLifecycleManager(packvm_lifecycle=packvm_lifecycle)
     reconfirmation_error: str | None = None
     try:
-        dispatch_session, contract_bindings = _restore_active_profile_contracts()
+        dispatch_session, contract_bindings = _restore_active_profile_contracts(packvm_lifecycle)
     except ProfileReconfirmationRequired as error:
         dispatch_session, contract_bindings = None, ()
         reconfirmation_error = str(error)
@@ -511,6 +524,7 @@ def main(argv: list[str] | None = None) -> int:
         app_lifecycle_manager=lifecycle,
         contract_bindings=contract_bindings,
         web_mounts=web_mounts,
+        packvm_lifecycle=packvm_lifecycle,
     )
     _write_launch_event("server_start_attempt", port=port, url=url)
     try:
