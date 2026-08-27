@@ -14,6 +14,7 @@ import { publishAmbientFinalAnswer } from "./ambient/finalAnswerBridge";
 import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
 import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { ApprovalDecisionSurface } from "./components/ApprovalDecisionSurface";
+import { CLOSE_RIGHT_SIDEBAR_PANEL_REQUEST } from "./components/RightSidebar";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
@@ -6187,6 +6188,8 @@ function ChatApp() {
       }
       return;
     }
+    setActiveSidebarItemId(CLOSE_RIGHT_SIDEBAR_PANEL_REQUEST);
+    setSidebarSelectionTick((value) => value + 1);
     setIsGenerating(true);
     cancelPendingMentionAttachments();
     setError(null);
