@@ -1053,6 +1053,13 @@
       "executable": false
     },
     {
+      "path": "scripts/agent_eval_harness.py",
+      "type": "regular-file",
+      "size": 13061,
+      "sha256": "f6a67aa92b96f43aa9cbc8fff3a4950cc57bff1bf6cb7fd4cfde7b4a12354675",
+      "executable": false
+    },
+    {
       "path": "scripts/eval_rumi_human_tasks.py",
       "type": "regular-file",
       "size": 22396,
@@ -1147,7 +1154,7 @@
       "path": "scripts/quality/evidence/complete_v4_migration_red_64b2240e.json",
       "type": "regular-file",
       "size": 72746,
-      "sha256": "a9a90e7c158dd919d2f1060bb967d964957fdf93fbba8578c5da4adb1ae45c19",
+      "sha256": "b17a5d440cfbf8f711d17d3c5512cfd640bdeb36c74b2b7dbaad62217595ae35",
       "executable": false
     },
     {
