@@ -103,6 +103,9 @@ function ToastCard({toast}: {toast: Toast}) {
       >
         <span className="font-semibold">{presentation.label}: </span>
         <span>{toast.message}</span>
+        {actionFailed ? (
+          <span className="block font-medium">Action failed. Try again or dismiss.</span>
+        ) : null}
       </div>
       {toast.action ? (
         <button
@@ -111,7 +114,11 @@ function ToastCard({toast}: {toast: Toast}) {
           onClick={() => void runAction()}
           className="shrink-0 rounded px-2 py-1 font-semibold underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:opacity-70"
         >
-          {actionPending ? 'Working…' : toast.action.label}
+          {actionPending
+            ? 'Working…'
+            : actionFailed
+              ? `Retry ${toast.action.label}`
+              : toast.action.label}
         </button>
       ) : null}
       <button
