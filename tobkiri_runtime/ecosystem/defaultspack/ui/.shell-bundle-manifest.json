@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b42ece2e05b7e89452dd0b2bcef89f6dec5a148be13a2554686f4a0a7edbf8c6",
+    "digest": "fa96a4a830e57d28f4633ef412738702fac2a54530ab0a4ad5f0619d8e44bf28",
     "entries": [
       {
         "path": "index.html",
@@ -1040,13 +1040,13 @@
       },
       {
         "path": "src/host/DynamicFrontendHost.test.tsx",
-        "size": 5477,
-        "sha256": "69f1eeb801741ded981224d76b9ec31434be0b2ce950e1159d2bf6e7a5c69dd8"
+        "size": 9930,
+        "sha256": "ffb52ba00264b42af36b07d74bad0099a4fe1d0d9692bddcd186e6355a034b77"
       },
       {
         "path": "src/host/DynamicFrontendHost.tsx",
-        "size": 14240,
-        "sha256": "64c2f67feac56c6012ec0f22d96840790ce83823ea8bf5d8ac2ebb0dae4d2100"
+        "size": 19266,
+        "sha256": "7d5c1ea148832af0603e266d651c8ea8ad58002c76e58a5505a0659d0c693be5"
       },
       {
         "path": "src/host/HostBootstrap.test.tsx",
@@ -1059,9 +1059,14 @@
         "sha256": "dda9589e7fda67fd19f2aa5456b0b50e4aa88566aef0de416740857961d58dd7"
       },
       {
+        "path": "src/host/frontendComponentRegistry.ts",
+        "size": 10627,
+        "sha256": "f509b230d25bdda96c47c99115500275d1d5966a9193a4eaa34fd8bb3b010dc9"
+      },
+      {
         "path": "src/host/frontendContracts.ts",
-        "size": 1969,
-        "sha256": "4c799c9d545654c3180398327f6c60de3c5a0eba5c3c4147c9a6517f298b4b8f"
+        "size": 2201,
+        "sha256": "8210b760ef63963eed02770af36a9e925cecd6c9e5c89550d7cf716e00507cf7"
       },
       {
         "path": "src/hostPermissions/HostPermissionsPage.tsx",
@@ -1851,7 +1856,7 @@
     ]
   },
   "bundle": {
-    "digest": "6452bbd7184eb2fcaf39237cc3aae2ee663a0e8734cab7ac726958b6c71c92ff",
+    "digest": "037dcad1b6abf1a846189c33bd6775787a7f7e075ee70b374d535a078d5e2402",
     "entries": [
       {
         "path": "shell-app.css",
@@ -1860,8 +1865,8 @@
       },
       {
         "path": "shell-app.js",
-        "size": 22380,
-        "sha256": "d2ffbc4b595c4afcd363316e939d272f227b5b394ad8110667428eeae1163ed4"
+        "size": 29718,
+        "sha256": "42e3cb19d67bcd35d553ffd8585f559e982ac76d7fc4dbaf1f2129b806c4d79c"
       },
       {
         "path": "shell-defaultspack-app.js",
