@@ -200,11 +200,23 @@ class CommandProtocolRegistry:
             "commands": commands,
             "states": [
                 {
+                    "state_ref": "defaultspack:models.preferred_model",
+                    "schema_version": "1.0.0",
+                    "value_type": "string",
+                    "authority": "backend_runtime",
+                },
+                {
+                    "state_ref": "defaultspack:models.thinking_level",
+                    "schema_version": "1.0.0",
+                    "value_type": "string",
+                    "authority": "backend_runtime",
+                },
+                {
                     "state_ref": "defaultspack:models.deepthink_enabled",
                     "schema_version": "1.0.0",
                     "value_type": "boolean",
                     "authority": "backend_runtime",
-                }
+                },
             ],
             "datasources": [
                 {
@@ -220,9 +232,7 @@ class CommandProtocolRegistry:
                     "capabilities": ["search", "cursor_paging", "selected_item_retention"],
                 },
             ],
-            "state_snapshots": self.query_states(
-                ["defaultspack:models.deepthink_enabled"]
-            )["states"],
+            "state_snapshots": self.query_states()["states"],
             "diagnostics": diagnostics,
         }
         validate_protocol_document(catalog)
@@ -548,6 +558,8 @@ class CommandProtocolRegistry:
             "conversation_id": payload.get("conversation_id"),
             "mode": payload.get("mode") or "chat",
             "expected_revision": payload.get("expected_revision"),
+            "idempotency_key": payload.get("idempotency_key"),
+            "client_sequence": payload.get("client_sequence"),
             "catalog_revision": payload.get("catalog_revision"),
             "profile_id": payload.get("profile_id"),
         }
@@ -1031,22 +1043,18 @@ class CommandProtocolRegistry:
         }
 
     def query_states(self, state_refs: list[str] | None = None) -> dict[str, Any]:
-        requested = {str(item or "").strip() for item in state_refs or [] if str(item or "").strip()}
-        states: list[dict[str, Any]] = []
-        deepthink_ref = "defaultspack:models.deepthink_enabled"
-        if not requested or deepthink_ref in requested:
-            from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+        """Return one authoritative, document-consistent model-control snapshot."""
+        requested = {
+            str(item or "").strip()
+            for item in state_refs or []
+            if str(item or "").strip()
+        }
+        from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 
-            value = ModelRuntimeSettingsService(self.pack_root).get_deepthink_enabled()
-            states.append(
-                {
-                    "state_ref": deepthink_ref,
-                    "value": bool(value.get("enabled")),
-                    "revision": int(value.get("revision") or 0),
-                    "freshness": "authoritative",
-                }
-            )
-        return {"api_version": API_VERSION, "states": states}
+        snapshot = ModelRuntimeSettingsService(
+            self.pack_root
+        ).authoritative_state_snapshot(requested or None)
+        return {"api_version": API_VERSION, **snapshot}
 
     def enqueue_offline(
         self,
@@ -1670,8 +1678,13 @@ class CommandProtocolRegistry:
         if execution_type == "model_command":
             return {
                 "kind": "state_mutation",
-                "state_ref": "tobkiri:active_model",
+                "state_ref": "defaultspack:models.preferred_model",
                 "mutation": {"argument": "query", "when_present": "set"},
+                "offline": {
+                    "queueable": True,
+                    "semantics": "set",
+                    "backend_authoritative": True,
+                },
             }
         if execution_type == "settings_patch":
             return {
@@ -1697,6 +1710,17 @@ class CommandProtocolRegistry:
                 "kind": "state_mutation",
                 "state_ref": "defaultspack:models.deepthink_enabled",
                 "mutation": {"argument": "enabled", "when_present": "set"},
+                "offline": {
+                    "queueable": True,
+                    "semantics": "set",
+                    "backend_authoritative": True,
+                },
+            }
+        if qualified == "defaultspack:ai_set_thinking_level":
+            return {
+                "kind": "state_mutation",
+                "state_ref": "defaultspack:models.thinking_level",
+                "mutation": {"argument": "level", "when_present": "set"},
                 "offline": {
                     "queueable": True,
                     "semantics": "set",
