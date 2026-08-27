@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import hmac
 from http import cookies
 from typing import Mapping, TYPE_CHECKING
