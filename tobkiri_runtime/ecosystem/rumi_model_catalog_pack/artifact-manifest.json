@@ -6,7 +6,7 @@
     },
     {
       "path": "runtime/catalog.py",
-      "sha256": "sha256:cf339a1e99524d37d5bec3b3ab721aef8063f532b7873c0bafc253f4cabc780f"
+      "sha256": "sha256:6d32152810b1682545f6066e6133942b959de6ef07998162ba7137839b1b06d2"
     }
   ],
   "version": "rumi.pack-artifacts.v1"
