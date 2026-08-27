@@ -12,7 +12,7 @@ from domain.ai_client.capability_tokens import (
 from domain.ai_client.gateway import LLMGateway
 from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
-from domain.ai_client.model_search import get_model_capabilities
+from domain.ai_client.model_search import get_model_capabilities, get_profile_catalog
 from domain.ai_client.secondary_model_policy import (
     ModelPolicyResolutionError,
     resolve_secondary_model_policy,
@@ -55,6 +55,7 @@ def call_model(
     model_requirements = model_requirements_from_tokens(required_capabilities)
     model_service = ModelRuntimeSettingsService()
     model_settings = model_service.get_settings()
+    profiles = get_profile_catalog()
     legacy_model = str(payload.get("model_hint") or payload.get("model") or "").strip()
     explicit_thinking = str(
         payload.get("thinking_level") or payload.get("requested_thinking_level") or ""
@@ -94,7 +95,7 @@ def call_model(
             payload.get("model_policy"),
             payload.get("thinking_policy"),
             context=policy_context,
-            profiles=model_service.list_profile_catalog(),
+            profiles=profiles,
             legacy_model=legacy_model,
             legacy_thinking_level=explicit_thinking,
             required_capabilities=required_capabilities,
@@ -112,26 +113,32 @@ def call_model(
     preferred_model = str(model_policy_receipt["resolved_profile_id"] or "stub/default")
     has_images = _messages_have_images(messages) or model_requirements["image_input"]
     has_audio = _messages_have_audio(messages)
-    decision = route_model_request(
-        ModelRoutingRequest(
-            user_text=_messages_text(messages),
-            has_images=has_images,
-            has_audio=has_audio,
-            requires_tool_calling=model_requirements["tool_calling"],
-            requires_fast=model_requirements["fast"],
-            requested_thinking_level=str(model_policy_receipt["thinking_level"] or "none"),
-            preferred_model=preferred_model,
-            preferred_group=str(model_settings.get("preferred_model_group") or "default"),
-            auto_route_within_group=(
-                model_policy_receipt["requested_model_policy"]["mode"] == "auto_route"
-                and bool(model_settings.get("auto_route_within_group", True))
-            ),
-            task_hints=dict(
-                payload.get("task_hints") if isinstance(payload.get("task_hints"), dict) else {}
-            ),
-            settings=model_settings,
-        )
+    routing_request = ModelRoutingRequest(
+        user_text=_messages_text(messages),
+        has_images=has_images,
+        has_audio=has_audio,
+        requires_tool_calling=model_requirements["tool_calling"],
+        requires_fast=model_requirements["fast"],
+        requested_thinking_level=str(model_policy_receipt["thinking_level"] or "none"),
+        preferred_model=preferred_model,
+        preferred_group=str(model_settings.get("preferred_model_group") or "default"),
+        auto_route_within_group=(
+            model_policy_receipt["requested_model_policy"]["mode"] == "auto_route"
+            and bool(model_settings.get("auto_route_within_group", True))
+        ),
+        task_hints=dict(
+            payload.get("task_hints") if isinstance(payload.get("task_hints"), dict) else {}
+        ),
+        settings=model_settings,
     )
+    try:
+        decision = route_model_request(routing_request, profiles=profiles)
+    except TypeError as exc:
+        # Keep compatibility with injected/legacy routers that still expose
+        # the original request-only callable contract.
+        if "profiles" not in str(exc):
+            raise
+        decision = route_model_request(routing_request)
     model = decision.selected_model
     if model != model_policy_receipt["resolved_profile_id"]:
         model_policy_receipt["router_input_profile_id"] = model_policy_receipt[
@@ -140,7 +147,14 @@ def call_model(
         model_policy_receipt["resolved_profile_id"] = model
         model_policy_receipt["resolution_source"] = "canonical_router"
     model_policy_receipt["routing"] = decision.to_dict()
-    selected_capabilities = get_model_capabilities(model) or {}
+    try:
+        selected_capabilities = get_model_capabilities(model, profiles=profiles) or {}
+    except TypeError as exc:
+        # Keep compatibility with injected/legacy capability resolvers that
+        # still expose the original single-argument callable contract.
+        if "profiles" not in str(exc):
+            raise
+        selected_capabilities = get_model_capabilities(model) or {}
     missing_capabilities = missing_model_capabilities(required_capabilities, selected_capabilities)
     if missing_capabilities:
         return {

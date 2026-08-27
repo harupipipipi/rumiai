@@ -5,6 +5,7 @@ from typing import Any
 
 from domain.ai_client.secondary_model_policy import INHERIT_CONVERSATION_MODEL
 from domain.agent.subagent_roles import get_subagent_role
+from domain.agent.placement_catalog import compile_utility_effective_plan
 
 
 _DELEGATE_CONTEXT_KEYS = (
@@ -83,10 +84,23 @@ class SubagentOrchestrator:
         )
         if output is None:
             output = self._deterministic_output(role_id, payload)
+        effective_plan = compile_utility_effective_plan(
+            role_id,
+            model=selected_model or "default",
+            output_schema=str(role.get("output_schema") or "object"),
+            maximum_tokens=int(role.get("max_tokens") or 800),
+        )
         result = {
             "role_id": role_id,
             "model": resolved_model,
             "role": role,
+            "agent_kind": "subagent",
+            "runtime_kind": "utility_model_call",
+            "subagent_role": str(role.get("subagent_role") or role_id),
+            "placement_id": effective_plan["placement"]["id"],
+            "placement_revision": effective_plan["placement"]["revision"],
+            "effective_plan_hash": effective_plan["plan_hash"],
+            "effective_subagent_plan": effective_plan,
             "output": output,
             "events": [
                 {
@@ -95,6 +109,9 @@ class SubagentOrchestrator:
                     "model": resolved_model,
                     "output_schema": role.get("output_schema"),
                     **({"model_policy_receipt": policy_receipt} if policy_receipt else {}),
+                    "runtime_kind": "utility_model_call",
+                    "placement_id": effective_plan["placement"]["id"],
+                    "effective_plan_hash": effective_plan["plan_hash"],
                 }
             ],
         }
