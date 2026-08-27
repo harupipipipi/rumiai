@@ -1017,6 +1017,13 @@ export type CompanyStatusResponse = {
   company?: CompanyRecord | null;
   runtime?: Record<string, number>;
   storage_file?: string;
+  revision?: number;
+};
+
+export type CompanyMutationRequest = {
+  operation_id: string;
+  idempotency_key?: string;
+  expected_revision?: number;
 };
 
 export type RemoteTaskCreateRequest = {
@@ -4299,7 +4306,7 @@ export const api = {
   },
 
   listCompanies(options?: { limit?: number; offset?: number }) {
-    return request<{ companies: CompanyRecord[]; total: number }>(
+    return request<{ companies: CompanyRecord[]; total: number; revision?: number }>(
       withQuery(defaultspackContractRoute("api/company"), options),
       { cache: "no-store" },
     );
@@ -4378,10 +4385,10 @@ export const api = {
     );
   },
 
-  updateCompanySettings(companyId: string, settings: Record<string, unknown>, replace = false) {
+  updateCompanySettings(companyId: string, settings: Record<string, unknown>, replace = false, mutation?: CompanyMutationRequest) {
     return request<{ settings: Record<string, unknown> }>(defaultspackContractRoute(`api/company/${encodeURIComponent(companyId)}/settings`), {
       method: "POST",
-      body: JSON.stringify({ company_id: companyId, action: "update", settings, replace }),
+      body: JSON.stringify({ company_id: companyId, action: "update", settings, replace, ...mutation }),
     });
   },
 
@@ -4392,10 +4399,10 @@ export const api = {
     );
   },
 
-  upsertCompanyAgent(companyId: string, agent: Partial<CompanyAgent>) {
+  upsertCompanyAgent(companyId: string, agent: Partial<CompanyAgent>, mutation?: CompanyMutationRequest) {
     return request<CompanyAgent>(defaultspackContractRoute(`api/company/${encodeURIComponent(companyId)}/agents`), {
       method: "POST",
-      body: JSON.stringify({ company_id: companyId, action: "upsert", agent }),
+      body: JSON.stringify({ company_id: companyId, action: "upsert", agent, ...mutation }),
     });
   },
 
@@ -4435,10 +4442,10 @@ export const api = {
     mentions?: string[];
     task_ids?: string[];
     metadata?: Record<string, unknown>;
-  }) {
+  }, mutation?: CompanyMutationRequest) {
     return request<CompanyMessage>(defaultspackContractRoute(`api/company/${encodeURIComponent(companyId)}/messages`), {
       method: "POST",
-      body: JSON.stringify({ company_id: companyId, action: "create", ...payload }),
+      body: JSON.stringify({ company_id: companyId, action: "create", ...payload, ...mutation }),
     });
   },
 
@@ -4455,31 +4462,34 @@ export const api = {
     target_agent_ids?: string[];
     source?: string;
     metadata?: Record<string, unknown>;
-  }) {
+  }, mutation?: CompanyMutationRequest) {
     return request<CompanyTask>(defaultspackContractRoute(`api/company/${encodeURIComponent(companyId)}/tasks`), {
       method: "POST",
-      body: JSON.stringify({ company_id: companyId, action: "create", ...payload }),
+      body: JSON.stringify({ company_id: companyId, action: "create", ...payload, ...mutation }),
     });
   },
 
-  updateCompanyTask(companyId: string, taskId: string, updates: Partial<CompanyTask>) {
+  updateCompanyTask(companyId: string, taskId: string, updates: Partial<CompanyTask>, mutation?: CompanyMutationRequest) {
     return request<CompanyTask>(defaultspackContractRoute(`api/company/${encodeURIComponent(companyId)}/tasks`), {
       method: "POST",
-      body: JSON.stringify({ company_id: companyId, action: "update", task_id: taskId, updates }),
+      body: JSON.stringify({ company_id: companyId, action: "update", task_id: taskId, updates, ...mutation }),
     });
   },
 
-  deleteCompanyTask(companyId: string, taskId: string) {
+  deleteCompanyTask(companyId: string, taskId: string, mutation?: CompanyMutationRequest) {
     return request<{ deleted: boolean; task_id: string }>(
       defaultspackContractRoute(`api/company/${encodeURIComponent(companyId)}/tasks/${encodeURIComponent(taskId)}`),
-      { method: "DELETE" },
+      {
+        method: "DELETE",
+        body: JSON.stringify({ company_id: companyId, task_id: taskId, ...mutation }),
+      },
     );
   },
 
-  dispatchCompanyTask(companyId: string, taskId: string, policy?: Record<string, unknown>) {
+  dispatchCompanyTask(companyId: string, taskId: string, policy?: Record<string, unknown>, mutation?: CompanyMutationRequest) {
     return request<Record<string, unknown>>(defaultspackContractRoute(`api/company/${encodeURIComponent(companyId)}/dispatch`), {
       method: "POST",
-      body: JSON.stringify({ company_id: companyId, task_id: taskId, policy }),
+      body: JSON.stringify({ company_id: companyId, task_id: taskId, policy, ...mutation }),
     });
   },
 
@@ -4677,17 +4687,17 @@ export const api = {
     );
   },
 
-  upsertCompanyInboundRoute(companyId: string, route: Partial<CompanyInboundRoute>) {
+  upsertCompanyInboundRoute(companyId: string, route: Partial<CompanyInboundRoute>, mutation?: CompanyMutationRequest) {
     return request<CompanyInboundRoute>(defaultspackContractRoute(`api/company/${encodeURIComponent(companyId)}/inbound-routes`), {
       method: "POST",
-      body: JSON.stringify({ company_id: companyId, action: "upsert", route }),
+      body: JSON.stringify({ company_id: companyId, action: "upsert", route, ...mutation }),
     });
   },
 
-  deleteCompanyInboundRoute(companyId: string, routeId: string) {
+  deleteCompanyInboundRoute(companyId: string, routeId: string, mutation?: CompanyMutationRequest) {
     return request<{ deleted: boolean; route_id: string }>(defaultspackContractRoute(`api/company/${encodeURIComponent(companyId)}/inbound-routes`), {
       method: "POST",
-      body: JSON.stringify({ company_id: companyId, action: "delete", route_id: routeId }),
+      body: JSON.stringify({ company_id: companyId, action: "delete", route_id: routeId, ...mutation }),
     });
   },
 
@@ -4761,10 +4771,10 @@ export const api = {
     ttl_seconds?: number;
     capabilities?: string[];
     allowed_company_ids?: string[];
-  }) {
+  }, mutation?: CompanyMutationRequest) {
     return request<{ pairing: P2PPairing }>(defaultspackContractRoute("api/p2p/pairing/start"), {
       method: "POST",
-      body: JSON.stringify(payload ?? {}),
+      body: JSON.stringify({ ...(payload ?? {}), ...mutation }),
     });
   },
 
@@ -4858,10 +4868,10 @@ export const api = {
     type?: string;
     metadata?: Record<string, unknown>;
     ttl_seconds?: number;
-  }) {
+  }, mutation?: CompanyMutationRequest) {
     return request<{ envelope: Record<string, unknown>; peer: P2PPeer }>(defaultspackContractRoute("api/p2p/messages/send"), {
       method: "POST",
-      body: JSON.stringify({ peer_id: peerId, ...payload }),
+      body: JSON.stringify({ peer_id: peerId, ...payload, ...mutation }),
     });
   },
 
