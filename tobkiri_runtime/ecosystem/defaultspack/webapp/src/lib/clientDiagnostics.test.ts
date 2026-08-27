@@ -219,7 +219,10 @@ test("diagnostic reporting preference fails local-only when storage is unavailab
 
 test("browser preference is authoritative for every diagnostic caller", () => {
   const storage = new PreferenceStorage();
-  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { localStorage: storage },
+  });
   try {
     assert.equal(prepareClientDiagnostic({ message: "not opted in" }), null);
     writeClientDiagnosticPrivacyMode("standard", storage);
@@ -227,7 +230,7 @@ test("browser preference is authoritative for every diagnostic caller", () => {
     writeClientDiagnosticPrivacyMode("disabled", storage);
     assert.equal(prepareClientDiagnostic({ message: "caller requested standard", privacyMode: "standard" }), null);
   } finally {
-    delete (globalThis as { localStorage?: unknown }).localStorage;
+    delete (globalThis as { window?: unknown }).window;
   }
 });
 

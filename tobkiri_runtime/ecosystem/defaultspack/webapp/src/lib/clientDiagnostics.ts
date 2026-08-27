@@ -57,7 +57,7 @@ type DiagnosticPreferenceStorage = Pick<Storage, "getItem" | "setItem">;
 
 function browserPreferenceStorage(): DiagnosticPreferenceStorage | null {
   try {
-    return typeof localStorage === "undefined" ? null : localStorage;
+    return typeof window === "undefined" ? null : window.localStorage;
   } catch {
     return null;
   }
