@@ -198,6 +198,7 @@ class AIClient:
             max_context = 0
             supports_thinking = False
             thinking_levels = []
+            thinking_control = {}
         elif isinstance(raw, dict):
             qualified_model_id = str(raw.get("id", "")).strip()
             model_id = str(raw.get("model_id", "")).strip()
@@ -247,6 +248,12 @@ class AIClient:
             thinking_levels = list(levels_value) if isinstance(levels_value, list) else []
             if supports_thinking and not thinking_levels:
                 thinking_levels = ["low", "medium", "high", "xhigh"]
+            control_value = raw.get("thinking_control")
+            if not isinstance(control_value, dict):
+                control_value = thinking.get("control")
+            thinking_control = (
+                dict(control_value) if isinstance(control_value, dict) else {}
+            )
         else:
             return None
 
@@ -266,6 +273,7 @@ class AIClient:
             "max_context_tokens": max_context,
             "supports_thinking": supports_thinking,
             "thinking_levels": thinking_levels,
+            "thinking_control": thinking_control,
             "default_thinking_level": (
                 raw.get(
                     "default_thinking_level",
@@ -299,6 +307,7 @@ class AIClient:
                 "max_context": max_context,
                 "supports_thinking": supports_thinking,
                 "thinking_levels": thinking_levels,
+                "thinking_control": thinking_control,
                 "routing": normalized.get("routing", {}),
                 "thinking": normalized.get("thinking", {}),
             },
@@ -313,6 +322,7 @@ class AIClient:
                 "max_context": max_context,
                 "supports_thinking": supports_thinking,
                 "thinking_levels": thinking_levels,
+                "thinking_control": thinking_control,
                 "routing": normalized.get("routing", {}),
                 "thinking": normalized.get("thinking", {}),
                 "provider_capabilities": provider_capabilities,
