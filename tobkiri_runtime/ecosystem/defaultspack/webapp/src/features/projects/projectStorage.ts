@@ -11,6 +11,12 @@ export type ProjectInfo = {
 export const PROJECTS_STORAGE_KEY = "rumi-history-custom-groups";
 export const PROJECTS_CHANGED_EVENT = "rumi-projects-changed";
 
+export type ProjectLoadResult =
+  | { status: "empty"; projects: ProjectInfo[] }
+  | { status: "ready"; projects: ProjectInfo[] }
+  | { status: "unavailable"; projects: ProjectInfo[]; message: string }
+  | { status: "corrupt"; projects: ProjectInfo[]; message: string; raw: string };
+
 function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
@@ -31,24 +37,53 @@ export function projectFromStorageItem(item: unknown): ProjectInfo | null {
   };
 }
 
-export function loadProjects(): ProjectInfo[] {
+export function loadProjectsResult(): ProjectLoadResult {
+  let raw: string | null;
   try {
-    const raw = localStorage.getItem(PROJECTS_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed)
-      ? parsed.map(projectFromStorageItem).filter((item): item is ProjectInfo => Boolean(item))
-      : [];
+    raw = localStorage.getItem(PROJECTS_STORAGE_KEY);
   } catch {
-    return [];
+    return { status: "unavailable", projects: [], message: "Project storage is unavailable." };
+  }
+  if (!raw) return { status: "empty", projects: [] };
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error("Stored projects must be a list.");
+    const projects = parsed
+      .map(projectFromStorageItem)
+      .filter((item): item is ProjectInfo => Boolean(item));
+    return { status: "ready", projects };
+  } catch (error) {
+    return {
+      status: "corrupt",
+      projects: [],
+      message: error instanceof Error ? error.message : "Project storage is corrupt.",
+      raw,
+    };
   }
 }
 
-export function saveProjects(projects: ProjectInfo[]): void {
+export function loadProjects(): ProjectInfo[] {
+  return loadProjectsResult().projects;
+}
+
+export function saveProjects(projects: ProjectInfo[]): boolean {
   try {
     localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
     window.dispatchEvent(new CustomEvent(PROJECTS_CHANGED_EVENT, { detail: projects }));
+    return true;
   } catch {
     // Storage and Window can be unavailable in restricted/server-rendered contexts.
+    return false;
+  }
+}
+
+export function resetProjects(): boolean {
+  try {
+    localStorage.removeItem(PROJECTS_STORAGE_KEY);
+    window.dispatchEvent(new CustomEvent(PROJECTS_CHANGED_EVENT, { detail: [] }));
+    return true;
+  } catch {
+    return false;
   }
 }
 

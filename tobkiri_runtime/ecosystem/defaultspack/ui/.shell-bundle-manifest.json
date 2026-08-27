@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b42ece2e05b7e89452dd0b2bcef89f6dec5a148be13a2554686f4a0a7edbf8c6",
+    "digest": "17bb84766ff7f41d40b766c679a0a316013ace6d5f9a3f67fafdc6a7e501c4ed",
     "entries": [
       {
         "path": "index.html",
@@ -380,13 +380,13 @@
       },
       {
         "path": "src/components/HistoryBoard.test.ts",
-        "size": 12864,
-        "sha256": "78425b6cf023e8b9e5c95fec583f48e5994faaba3c61436d145d8669de0cc1c4"
+        "size": 14905,
+        "sha256": "e84652f758da5a37eb7e3a6253ad4edfac23429184bfe74acb6bcb4dff674eaa"
       },
       {
         "path": "src/components/HistoryBoard.tsx",
-        "size": 93164,
-        "sha256": "37f23aeb948564820d3b64dff37f06fff9ef13b9ae1d7307bfc0e8876019ba1c"
+        "size": 106974,
+        "sha256": "121a9a24224a7a1d03c46f1b74d304577b018216fc3763c7e9d58fc2da1d1061"
       },
       {
         "path": "src/components/MobilePairingApproval.tsx",
@@ -824,6 +824,16 @@
         "sha256": "c8f02330d24ad3c30d1f86e954cdc0a3fef4ab7cdaf13fef681cebf70f8460e8"
       },
       {
+        "path": "src/features/history/historyOrganization.test.ts",
+        "size": 4717,
+        "sha256": "e33aa7f28f6f49bd4de15e31bc9b63c5ddc7eb2fedd95633c778595b3580ee33"
+      },
+      {
+        "path": "src/features/history/historyOrganization.ts",
+        "size": 9507,
+        "sha256": "6efd777a4ef7daa6c66de1b3d98d4988fddb77ba064454b7b10e03645dbde605"
+      },
+      {
         "path": "src/features/kanban/resources/kanbanResources.ts",
         "size": 6677,
         "sha256": "4dec50e054a097b34b98165f20c8729b5e6716c3d08dac6a55ea407a2ed8670f"
@@ -885,8 +895,8 @@
       },
       {
         "path": "src/features/projects/projectStorage.ts",
-        "size": 2968,
-        "sha256": "5cf32afd6c99d1e11367f578ea20ad663e913ea8f6b6860c06b408a79790a7a4"
+        "size": 4088,
+        "sha256": "ac2f7ec6bacddc5f0297013cb7c799d1aea9c66bb6b158903108107cebe87e7d"
       },
       {
         "path": "src/features/prompts/resources/promptResources.ts",
@@ -1851,12 +1861,12 @@
     ]
   },
   "bundle": {
-    "digest": "6452bbd7184eb2fcaf39237cc3aae2ee663a0e8734cab7ac726958b6c71c92ff",
+    "digest": "e7ad74edf605d240d56f195de3d7880be151eebb670d337cdac8ced69e295521",
     "entries": [
       {
         "path": "shell-app.css",
-        "size": 233535,
-        "sha256": "caa33736df4d884e02be3248fe28431e7071d81da7e2ab7118ae6a505aafff91"
+        "size": 233701,
+        "sha256": "cdf1c13b2a0e7595175f01daf70e0145d447b92f1dd231c0e49343ba3a5ac9be"
       },
       {
         "path": "shell-app.js",
@@ -1865,8 +1875,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2208068,
-        "sha256": "3ebb1666ccf5ea40cdb7105b68dbfa5b8a7222cef3cd8d5b570da61f8b67ec25"
+        "size": 2218830,
+        "sha256": "fba884c857d920f61276c8a5841481c57ce13ec5e1ddd73c528f93db3783eed0"
       },
       {
         "path": "shell-rolldown-runtime.js",
