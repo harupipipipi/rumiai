@@ -10434,7 +10434,7 @@
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:426a6662841c57452572c886061051506d3a5d3c9a2a37394fd17f93cb637eca",
+        "evidence_digest": "sha256:8a91481625befeef1515531ac657a3e9d40a85b2f028c0d5dfc042046d725968",
         "line": 128,
         "path": "tobkiri_runtime/ecosystem/defaultspack/domain/function_runtime/manifest_factory.py",
         "rule_id": "legacy_host_execution"
@@ -10650,7 +10650,7 @@
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:a8d20cd7b94235f64039ad1c292a945e3673aa06336c1b34c27e7b910e5798e7",
+        "evidence_digest": "sha256:394e5f4c18613c41de3bcae5b8156652f5c25bf349f2ec34c5e66cee56df95ea",
         "line": 13,
         "path": "tobkiri_runtime/ecosystem/defaultspack/functions/adaptive_operating_profiles_update/manifest.json",
         "rule_id": "legacy_host_execution"
@@ -18410,7 +18410,7 @@
     ]
   },
   "repository": {
-    "commit": "d8b41fa9655f5503f1457e5df445558d15f0d603",
+    "commit": "f75aaeaf525ceec164c6e1c8c826f94aabd6078b",
     "tree_digest": "d4525e61c9825f921138e751051a0b5d41b442ad3e2d025f4ffe0a38f4900d0d"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
