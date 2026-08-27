@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import {
   fetchDashboard,
@@ -151,13 +151,13 @@ export function Dashboard() {
         <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-text-main">Home</h1>
-            <p className="mt-1 text-sm text-text-muted">Your workspace summary and active packs.</p>
+            <p className="mt-1 text-sm text-text-muted">Open your active conversation or manage its workspace.</p>
           </div>
           <div className="flex items-center gap-3">
-            <Button onClick={() => navigate(panelRoutes.packs)}>
+            <Button variant="outline" onClick={() => navigate(panelRoutes.packs)}>
               <Package className="h-4 w-4" /> Manage Packs
             </Button>
-            <Button variant="outline" size="icon" title="Refresh" onClick={() => void refreshDashboard()}>
+            <Button aria-label="Refresh Home" variant="outline" size="icon" title="Refresh" onClick={() => void refreshDashboard()}>
               <Route className="h-4 w-4" />
             </Button>
           </div>
@@ -220,7 +220,7 @@ export function Dashboard() {
           </div>
         </section>
 
-        {/* Supervisor Snapshot */}
+        {/* Advanced diagnostics stay subordinate to the task-first Home flow. */}
         <SupervisorSnapshot
           data={dashboard.supervisor}
           loading={dashboardLoading && !dashboard.supervisor}
@@ -231,7 +231,79 @@ export function Dashboard() {
   );
 }
 
-function SupervisorSnapshot({
+export type SupervisorHealthSummary = {
+  state: 'healthy' | 'attention' | 'loading' | 'unavailable';
+  label: string;
+  summary: string;
+  issues: string[];
+};
+
+/** Summarize runtime blockers without exposing raw supervisor internals on Home. */
+export function summarizeSupervisorHealth(
+  data: DashboardData['supervisor'],
+  loading: boolean,
+  error: string | null,
+): SupervisorHealthSummary {
+  if (error) {
+    return {
+      state: 'attention',
+      label: 'Needs attention',
+      summary: 'Tobkiri could not refresh runtime diagnostics.',
+      issues: ['Runtime diagnostics could not be refreshed.'],
+    };
+  }
+  if (!data) {
+    return loading
+      ? {
+          state: 'loading',
+          label: 'Checking',
+          summary: 'Checking runtime health in the background.',
+          issues: [],
+        }
+      : {
+          state: 'unavailable',
+          label: 'Unavailable',
+          summary: 'Advanced runtime diagnostics are unavailable.',
+          issues: [],
+        };
+  }
+
+  const issues: string[] = [];
+  if (data.metrics.failed_runs > 0) {
+    issues.push(`${data.metrics.failed_runs} failed ${data.metrics.failed_runs === 1 ? 'run' : 'runs'}`);
+  }
+  if (data.metrics.stale_runs > 0) {
+    issues.push(`${data.metrics.stale_runs} stale ${data.metrics.stale_runs === 1 ? 'run' : 'runs'}`);
+  }
+  if (data.metrics.waiting_approvals > 0) {
+    issues.push(`${data.metrics.waiting_approvals} ${data.metrics.waiting_approvals === 1 ? 'approval needs' : 'approvals need'} review`);
+  }
+  if (issues.length > 0) {
+    return {
+      state: 'attention',
+      label: 'Needs attention',
+      summary: 'Runtime work needs review before it can continue normally.',
+      issues,
+    };
+  }
+  if (!data.metrics.available) {
+    return {
+      state: 'unavailable',
+      label: 'Limited',
+      summary: 'The runtime is available, but detailed health metrics are not.',
+      issues: [],
+    };
+  }
+  return {
+    state: 'healthy',
+    label: 'Healthy',
+    summary: 'No failed, stale, or approval-blocked runs need attention.',
+    issues: [],
+  };
+}
+
+/** Render concise runtime health with technical details behind a disclosure. */
+export function SupervisorSnapshot({
   data,
   loading,
   error,
@@ -240,6 +312,7 @@ function SupervisorSnapshot({
   loading: boolean;
   error: string | null;
 }) {
+  const detailsRef = useRef<HTMLDetailsElement>(null);
   const router = data?.router ?? null;
   const metrics = data?.metrics ?? null;
   const defaultSandbox = data?.sandbox_providers.find((provider) => provider.default) ?? null;
@@ -250,26 +323,44 @@ function SupervisorSnapshot({
   const macDriverOrder = router?.computer_driver_order.darwin ?? [];
   const routeCount = (router?.operation_layers.length ?? 0) + (router?.fallback_layers.length ?? 0);
   const capabilities = data?.capabilities ?? null;
+  const health = summarizeSupervisorHealth(data, loading, error);
+  const healthBadgeVariant = health.state === 'healthy'
+    ? 'success'
+    : health.state === 'attention'
+      ? 'warning'
+      : 'secondary';
 
-  if (!data) {
-    return (
-      <section className="rounded-xl border border-border bg-bg-card p-5">
-        <div className="flex items-center gap-3">
-          <Monitor className="h-4 w-4 text-text-muted" />
-          <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold text-text-main">Supervisor Snapshot</h2>
-            <p className="text-xs text-text-muted">
-              {loading ? 'Loading runtime snapshot...' : error || 'Runtime snapshot unavailable.'}
-            </p>
-          </div>
-          {loading && <TobkiriLoadingMark />}
-        </div>
-      </section>
-    );
-  }
+  const reviewDiagnostics = () => {
+    if (!detailsRef.current) return;
+    detailsRef.current.open = true;
+    detailsRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    detailsRef.current.querySelector<HTMLElement>('summary')?.focus();
+  };
 
   return (
-    <section className="grid gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)_minmax(0,1fr)]">
+    <section className="space-y-3" aria-labelledby="runtime-diagnostics-title">
+      {health.issues.length > 0 && (
+        <div className="flex flex-col gap-3 rounded-xl border border-amber-300/70 bg-amber-50/70 px-4 py-3 text-amber-950 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-100 sm:flex-row sm:items-center">
+          <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <div className="min-w-0 flex-1" role="alert">
+            <p className="text-sm font-semibold">Runtime needs attention</p>
+            <p className="mt-0.5 text-xs">{health.issues.join(' · ')}</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={reviewDiagnostics}>Review diagnostics</Button>
+        </div>
+      )}
+      <details ref={detailsRef} className="group rounded-xl border border-border bg-bg-card">
+        <summary className="flex min-h-16 cursor-pointer list-none items-center gap-3 rounded-xl px-5 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ring-color)]">
+          <Monitor className="h-4 w-4 shrink-0 text-text-muted" aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <h2 id="runtime-diagnostics-title" className="text-sm font-semibold text-text-main">Advanced runtime diagnostics</h2>
+            <p className="mt-0.5 text-xs text-text-muted">{health.summary}</p>
+          </div>
+          {loading && !data ? <TobkiriLoadingMark /> : null}
+          <Badge variant={healthBadgeVariant} className="shrink-0 text-[10px]">{health.label}</Badge>
+        </summary>
+        {data ? (
+          <div className="grid gap-4 border-t border-border p-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)_minmax(0,1fr)]">
       <article className="min-w-0 rounded-xl border border-border bg-bg-card p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -347,6 +438,13 @@ function SupervisorSnapshot({
           <CapabilityRow label="Replay" enabled={capabilities?.replay === true} />
         </div>
       </article>
+          </div>
+        ) : (
+          <p className="border-t border-border px-5 py-4 text-sm text-text-muted">
+            {error || (loading ? 'Loading runtime diagnostics…' : 'Runtime diagnostics are unavailable.')}
+          </p>
+        )}
+      </details>
     </section>
   );
 }
