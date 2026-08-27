@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b42ece2e05b7e89452dd0b2bcef89f6dec5a148be13a2554686f4a0a7edbf8c6",
+    "digest": "e0ceec91fad8309c673086c87529260c5d9d3478ebcc8b9a48d270add2427de8",
     "entries": [
       {
         "path": "index.html",
@@ -1090,8 +1090,8 @@
       },
       {
         "path": "src/index.css",
-        "size": 37815,
-        "sha256": "9b3daa7bc90f14aa2e1ad8c16b82017efa80e182205d5926b4444ef14fb79a80"
+        "size": 38453,
+        "sha256": "d219047c725c490f6b11271949e209f9f43f403a8d334bf6d2760869aae4db07"
       },
       {
         "path": "src/lib/adaptiveApi.ts",
@@ -1785,8 +1785,8 @@
       },
       {
         "path": "src/subagentTeam/SubagentTeamWorkspace.tsx",
-        "size": 62878,
-        "sha256": "5eec33720315cc4ec8b03dbf2fb5afffffec7e9c821900955f612f2b506fb591"
+        "size": 74884,
+        "sha256": "6112454f39297c6401bba168da82e6f09a002087db6161f32f9dc8334b99c5ab"
       },
       {
         "path": "src/subagentTeam/SubagentTeamWorkspaceApproval.test.ts",
@@ -1800,8 +1800,8 @@
       },
       {
         "path": "src/subagentTeam/subagentTeamData.test.ts",
-        "size": 8772,
-        "sha256": "9371e9cc2fabe9ecc01b12b3c4a811a8be2a70dd95172983112e53c7dc89e3e0"
+        "size": 11872,
+        "sha256": "1c2115effd0f1773c4e69cb650dc95f73232bcaa85091e11a94a8cf1ac137b82"
       },
       {
         "path": "src/subagentTeam/subagentTeamData.ts",
@@ -1851,12 +1851,12 @@
     ]
   },
   "bundle": {
-    "digest": "6452bbd7184eb2fcaf39237cc3aae2ee663a0e8734cab7ac726958b6c71c92ff",
+    "digest": "350d86ef2ccde9d803d84bd2f85a71f8b91378b775f4cb20c6a5e5a5eabb869e",
     "entries": [
       {
         "path": "shell-app.css",
-        "size": 233535,
-        "sha256": "caa33736df4d884e02be3248fe28431e7071d81da7e2ab7118ae6a505aafff91"
+        "size": 234324,
+        "sha256": "aef0fbbafe8250de68e94ab958ef83ddf60de5f4aed07ad59079c5445c9de7e3"
       },
       {
         "path": "shell-app.js",
@@ -1865,8 +1865,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2208068,
-        "sha256": "3ebb1666ccf5ea40cdb7105b68dbfa5b8a7222cef3cd8d5b570da61f8b67ec25"
+        "size": 2215572,
+        "sha256": "294257944be5eade26b2d4b0d6bec5aeb3c2d8b015b4f36ad0cf65d37aa8d3be"
       },
       {
         "path": "shell-rolldown-runtime.js",
