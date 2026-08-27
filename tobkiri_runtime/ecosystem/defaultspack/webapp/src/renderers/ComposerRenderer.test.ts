@@ -1406,6 +1406,67 @@ test("composer renders the current steer above the main input", () => {
   assert.doesNotMatch(html, /フォローアップの変更を求める/);
 });
 
+test("composer renders a durable deferred steer with explicit user actions", () => {
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "",
+      placeholder: "メッセージを入力...",
+      isGenerating: false,
+      selectedProfile: {
+        profile_id: "stub/default",
+        display_name: "Stub Default",
+        provider_id: "stub",
+        model_id: "default",
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [],
+      belowExtensions: [],
+      thinkingLevel: null,
+      contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+      steerPreviewItems: [
+        {
+          id: "deferred-1",
+          deferred: true,
+          title: "永続化を調査",
+          prompt: "現在の修正後にChatStoreの永続化を調査する",
+          instruction: "現在の修正後にChatStoreの永続化を調査する",
+          reason: "別の再起動不具合を検出したため",
+          status: "ready",
+          revision: 2,
+          visible: true,
+        },
+      ],
+      steerHistoryItems: [
+        {
+          id: "deferred-completed-1",
+          deferred: true,
+          title: "完了した調査",
+          prompt: "完了済みの保留指示",
+          status: "completed",
+          visible: true,
+        },
+      ],
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+      onSteerSubmit: () => undefined,
+      onSteerAction: () => undefined,
+    }),
+  );
+
+  assert.match(html, /後で対応/);
+  assert.match(html, /適用可能/);
+  assert.match(html, /永続化を調査/);
+  assert.match(html, /理由: 別の再起動不具合を検出したため/);
+  assert.match(html, /今すぐ適用/);
+  assert.match(html, /編集/);
+  assert.match(html, /保留/);
+  assert.match(html, /新しい会話へ/);
+  assert.match(html, /破棄/);
+  assert.match(html, /履歴 1/);
+});
+
 test("vision unsupported banner appears when image input exists and selected model lacks vision", () => {
   const html = renderToStaticMarkup(
     createElement(ComposerRenderer, {
