@@ -1053,6 +1053,13 @@
       "executable": false
     },
     {
+      "path": "scripts/agent_eval_harness.py",
+      "type": "regular-file",
+      "size": 13045,
+      "sha256": "7fc903c815fa6964eb8e6c6e009479e7a9394b6d37e75ef7d6c292e2b8cc0c7c",
+      "executable": false
+    },
+    {
       "path": "scripts/eval_rumi_human_tasks.py",
       "type": "regular-file",
       "size": 22396,
