@@ -235,6 +235,103 @@ def test_prepare_chat_run_creates_message_chain_ir_and_context(tmp_path, monkeyp
     ChatStore._instance = None
 
 
+def test_side_chat_uses_parent_runtime_context_without_merging_history(
+    tmp_path,
+    monkeypatch,
+):
+    """Side execution shares parent settings but keeps a distinct message chain."""
+    from domain.chat.conversation_channel import SIDE_CHAT_SYSTEM_INSTRUCTION
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    parent = store.create_conversation(
+        model="stub/default",
+        metadata={
+            "workspace_id": "workspace-a",
+            "workspace_root": "/workspace/a",
+            "tool_preferences": {"mode": "manual", "include": ["web_search"]},
+        },
+    )
+    store.add_message(parent["id"], {"role": "user", "content": "main only"})
+    side = store.create_conversation(
+        model="stale/model",
+        parent_conversation_id=parent["id"],
+        conversation_kind="side",
+        metadata={
+            "hidden": True,
+            "conversation_channel": "side",
+            "side_parent_conversation_id": parent["id"],
+        },
+    )
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": side["id"],
+            "params": {"model": "hostile/provider-model"},
+            "message": {
+                "content": "side only",
+                "metadata": {
+                    "workspace_id": "hostile-workspace",
+                    "workspace_root": "/hostile/workspace",
+                },
+            },
+            "metadata": {
+                "workspace_id": "other-hostile-workspace",
+                "workspace_root": "/other/hostile/workspace",
+            },
+        },
+        {},
+    )
+
+    combined = "\n".join(
+        str(message.get("content") or "")
+        for message in prepared.standard_messages
+    )
+    assert SIDE_CHAT_SYSTEM_INSTRUCTION in combined
+    assert "main only" not in combined
+    assert "side only" in combined
+    assert prepared.conversation["model"] == parent["model"]
+    assert prepared.model != "hostile/provider-model"
+    assert prepared.request_context["ignored_side_requested_model"] == (
+        "hostile/provider-model"
+    )
+    assert prepared.request_context["conversation_channel"] == "side"
+    assert prepared.request_context["parent_conversation_id"] == parent["id"]
+    assert prepared.request_context["conversation_tool_preferences"] == {
+        "mode": "manual",
+        "include": ["web_search"],
+    }
+    assert prepared.request_context["workspace_id"] == "workspace-a"
+    assert prepared.request_context["workspace_root"] == "/workspace/a"
+    assert prepared.conversation_id == side["id"]
+    ChatStore._instance = None
+
+
+def test_main_chat_does_not_receive_side_system_instruction(
+    tmp_path,
+    monkeypatch,
+):
+    """The additional context is limited to typed side execution."""
+    from domain.chat.conversation_channel import SIDE_CHAT_SYSTEM_INSTRUCTION
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    main = store.create_conversation(model="stub/default")
+    prepared = prepare_chat_run(
+        {"conversation_id": main["id"], "message": {"content": "main"}},
+        {},
+    )
+
+    assert all(
+        SIDE_CHAT_SYSTEM_INSTRUCTION not in str(message.get("content") or "")
+        for message in prepared.standard_messages
+    )
+    assert prepared.request_context["conversation_channel"] == "main"
+    ChatStore._instance = None
+
+
 def test_prepare_chat_run_persists_semantic_mention_metadata(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore

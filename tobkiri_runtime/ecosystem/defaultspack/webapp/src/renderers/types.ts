@@ -280,6 +280,7 @@ export type RightSidebarRendererProps = {
   selectedToolIds?: string[];
   companyPanel?: ReactNode;
   codingPanel?: ReactNode;
+  sideChatPanel?: ReactNode;
   keyboardButtonNavigation?: boolean;
   attachedFiles?: AttachedFile[];
   selectedProfile?: ModelProfile | null;

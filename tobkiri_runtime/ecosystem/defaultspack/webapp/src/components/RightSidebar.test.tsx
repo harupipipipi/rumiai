@@ -190,6 +190,29 @@ test("right sidebar does not auto-open employees on initial render", () => {
   assert.doesNotMatch(html, /Employee workspace content/);
 });
 
+test("right sidebar exposes and opens the conversation side chat", () => {
+  const html = renderToStaticMarkup(
+    createElement(RightSidebar, {
+      activeItemId: "__side_chat__:1",
+      items: [],
+      settingsValues: {
+        sidebar: { pinned_item_ids: [], starred_item_ids: [], custom_tool_tags: {}, ui_placements: [] },
+        tools: { disabled_tool_ids: [], hidden_tool_ids: [] },
+      },
+      settingsSections: [],
+      selectedToolIds: [],
+      sideChatPanel: createElement("div", { "data-testid": "side-chat-test-panel" }, "Side conversation"),
+      onSettingChange: noop,
+      onOpenSettings: noop,
+    }),
+  );
+
+  assert.match(html, /data-testid="side-chat-toggle"/);
+  assert.match(html, /aria-pressed="true"/);
+  assert.match(html, /data-testid="side-chat-test-panel"/);
+  assert.match(html, />Side conversation</);
+});
+
 test("advanced usage commands can open context token details", () => {
   const html = renderToStaticMarkup(
     createElement(RightSidebar, {

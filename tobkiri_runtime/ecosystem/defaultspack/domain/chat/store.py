@@ -409,7 +409,14 @@ class ChatStore:
         values = (
             [self.get_conversation(conversation_id)]
             if conversation_id
-            else [_legacy_conversation(item) for item in self._snapshot()["conversations"]]
+            else [
+                _legacy_conversation(item)
+                for item in self._snapshot()["conversations"]
+                if not (
+                    isinstance(item.get("metadata"), Mapping)
+                    and item["metadata"].get("hidden") is True
+                )
+            ]
         )
         return [
             copy.deepcopy(message)

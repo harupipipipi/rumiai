@@ -17,6 +17,7 @@ import { ApprovalDecisionSurface } from "./components/ApprovalDecisionSurface";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
+import { SideChatWidget } from "./components/SideChatWidget";
 import { DesktopMonitorWorkspace } from "./components/desktops/DesktopMonitorWorkspace";
 import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
 import {
@@ -2487,6 +2488,9 @@ function ChatApp() {
   const [settingsSections, setSettingsSections] = useState<SettingsSection[]>([]);
   const [settingsValues, setSettingsValues] = useState<Record<string, Record<string, unknown>>>({});
   const settingsValuesRef = useRef(settingsValues);
+  const conversationContextSyncsRef = useRef(
+    new Map<string, Promise<void>>(),
+  );
   const pinnedPlacementSaveRevisionRef = useRef(0);
   const settingsSaveRevisionRef = useRef(0);
   const settingsSaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
@@ -2509,6 +2513,17 @@ function ChatApp() {
     [activeConversationId],
   );
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
+  const [sideChatApprovalState, setSideChatApprovalState] = useState<{
+    conversation: Conversation | null;
+    messages: ChatUiMessage[];
+  }>({ conversation: null, messages: [] });
+  const [sideChatRefreshKey, setSideChatRefreshKey] = useState(0);
+  const handleSideChatConversationStateChange = useCallback((
+    conversation: Conversation | null,
+    sideMessages: ChatUiMessage[],
+  ) => {
+    setSideChatApprovalState({ conversation, messages: sideMessages });
+  }, []);
   const [activeHistoryCompanyId, setActiveHistoryCompanyId] = useState<string | null>(null);
   const [input, setInput] = useLocalStorage("rumi-input", "");
   const [customHomeTitle, setCustomHomeTitle] = useLocalStorage(
@@ -2931,9 +2946,23 @@ function ChatApp() {
   const isConversationPending = Boolean(
     pendingRequest && Date.now() - pendingRequest.startedAt < PENDING_CHAT_REQUEST_TTL_MS,
   );
-  const rawBrowserApproval = pendingBrowserApproval(messages);
-  const rawAuthorityApproval = pendingAuthorityApproval(messages);
-  const rawRuntimeApproval = pendingRuntimeApproval(messages);
+  const sideBrowserApproval = pendingBrowserApproval(sideChatApprovalState.messages);
+  const sideAuthorityApproval = pendingAuthorityApproval(sideChatApprovalState.messages);
+  const sideRuntimeApproval = pendingRuntimeApproval(sideChatApprovalState.messages);
+  const sideStaleRuntimeApproval = staleRuntimeApproval(sideChatApprovalState.messages);
+  const sideApprovalActive = Boolean(
+    sideBrowserApproval
+    || sideAuthorityApproval
+    || sideRuntimeApproval
+    || sideStaleRuntimeApproval,
+  );
+  const approvalConversation = sideApprovalActive
+    ? sideChatApprovalState.conversation
+    : activeConversation;
+  const approvalConversationId = approvalConversation?.id ?? activeConversationId;
+  const rawBrowserApproval = sideBrowserApproval ?? pendingBrowserApproval(messages);
+  const rawAuthorityApproval = sideAuthorityApproval ?? pendingAuthorityApproval(messages);
+  const rawRuntimeApproval = sideRuntimeApproval ?? pendingRuntimeApproval(messages);
   const settledRuntimeApprovalIdSet = useMemo(() => new Set(settledRuntimeApprovalIds), [settledRuntimeApprovalIds]);
   const settledBrowserApprovalKeySet = useMemo(() => new Set(settledBrowserApprovalKeys), [settledBrowserApprovalKeys]);
   const rawBrowserApprovalKey = rawBrowserApproval ? browserApprovalSettlementKey(rawBrowserApproval) : "";
@@ -2946,7 +2975,9 @@ function ChatApp() {
   const runtimeApproval = rawRuntimeApproval && !settledRuntimeApprovalIdSet.has(rawRuntimeApproval.requestId)
     ? rawRuntimeApproval
     : null;
-  const staleRuntimeApprovalNotice = !ultraYoloMode && !rawRuntimeApproval ? staleRuntimeApproval(messages) : null;
+  const staleRuntimeApprovalNotice = !ultraYoloMode && !rawRuntimeApproval
+    ? sideStaleRuntimeApproval ?? staleRuntimeApproval(messages)
+    : null;
   const visibleBrowserApproval = !ultraYoloMode ? browserApproval : null;
   const latestAssistantFinal = useMemo(() => {
     if (isGenerating || isConversationPending) return null;
@@ -4401,10 +4432,23 @@ function ChatApp() {
     // preferred model on the next render.
     setActiveConversation((current) => current ? { ...current, model: profileId } : current);
     if (activeConversationId) {
-      void api.updateConversation(activeConversationId, { model: profileId }).then((conversation) => {
-        setActiveConversation(conversation);
+      const conversationId = activeConversationId;
+      const sync = api.updateConversation(conversationId, { model: profileId }).then((conversation) => {
+        setActiveConversation((current) => (
+          current?.id === conversation.id ? conversation : current
+        ));
         void refreshConversations(conversation.id);
-      }).catch(console.error);
+      });
+      const tracked = sync.then(() => undefined);
+      conversationContextSyncsRef.current.set(conversationId, tracked);
+      void tracked.then(
+        () => {
+          if (conversationContextSyncsRef.current.get(conversationId) === tracked) {
+            conversationContextSyncsRef.current.delete(conversationId);
+          }
+        },
+        console.error,
+      );
     }
   };
 
@@ -4909,7 +4953,12 @@ function ChatApp() {
     }
   };
 
-  const executeComposerCommand = async (commandId: string, rawInput = `/${commandId}`): Promise<boolean | void> => {
+  const executeComposerCommand = async (
+    commandId: string,
+    rawInput = `/${commandId}`,
+    conversationIdOverride?: string,
+  ): Promise<boolean | void> => {
+    const commandConversationId = conversationIdOverride ?? activeConversationId;
     const parsed = parseSlashCommandInput(rawInput, effectiveCommandCatalog) ?? {
       command: effectiveCommandCatalog.find((command) => command.id === commandId || command.name === commandId),
       args: {},
@@ -4953,7 +5002,7 @@ function ChatApp() {
           return api.executeResolvedUiCommand({
             command: resolvedCommandName,
             args: commandArgs,
-            conversation_id: activeConversationId,
+            conversation_id: commandConversationId,
             mode: mode as ComposerCommandMode,
             invocation_id: invocationId,
             idempotency_key: invocationId,
@@ -4976,7 +5025,7 @@ function ChatApp() {
         result = await api.executeResolvedUiCommand({
           command: resolvedCommandName,
           args: commandArgs,
-          conversation_id: activeConversationId,
+          conversation_id: commandConversationId,
           mode: mode as ComposerCommandMode,
           invocation_id: invocationId,
         });
@@ -4991,7 +5040,7 @@ function ChatApp() {
             commandRef: resolvedCommandName,
             command: parsed.command,
             args: commandArgs,
-            conversationId: activeConversationId,
+            conversationId: commandConversationId,
             mode: mode as ComposerCommandMode,
             approvalKind: result.approval_kind === "authority"
               ? "authority"
@@ -5063,9 +5112,13 @@ function ChatApp() {
     }
   };
 
-  const handleComposerCommand = (commandId: string, rawInput?: string) => {
-    if (!slashCommandsEnabled) return;
-    void executeComposerCommand(commandId, rawInput);
+  const handleComposerCommand = (
+    commandId: string,
+    rawInput?: string,
+    conversationId?: string,
+  ): Promise<boolean | void> => {
+    if (!slashCommandsEnabled) return Promise.resolve();
+    return executeComposerCommand(commandId, rawInput, conversationId);
   };
 
   const handleModelCommandCandidateSelect = (candidate: ModelCommandCandidate) => {
@@ -5507,7 +5560,7 @@ function ChatApp() {
 
   const approveBrowserAction = async () => {
     if (!browserApproval) return;
-    if (!activeConversationId) return;
+    if (!approvalConversationId) return;
     const currentApproval = browserApproval;
     setError(null);
     setIsGenerating(true);
@@ -5515,13 +5568,13 @@ function ChatApp() {
       ? selectedToolIds
       : [currentApproval.toolName].filter(Boolean);
     rememberPendingRequest({
-      conversationId: activeConversationId,
+      conversationId: approvalConversationId,
       startedAt: Date.now(),
       status: "ユーザー承認をAIへ伝えています",
       toolNames: approvalToolIds,
     });
     try {
-      const approvalWorkspace = workspaceContextFromConversation(activeConversation);
+      const approvalWorkspace = workspaceContextFromConversation(approvalConversation);
       let approvalToken = currentApproval.token ?? "";
       if (currentApproval.requestId) {
         const decision = await api.approveCodingApproval(currentApproval.requestId);
@@ -5531,7 +5584,7 @@ function ChatApp() {
         approvalToken = decision.token ?? "";
         settleBrowserApproval(currentApproval);
       }
-      await api.streamMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
+      await api.streamMessage(approvalConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
         tool_choice: "required",
         tool_policy: {
           ...templatePolicyReferencePayload,
@@ -5564,12 +5617,16 @@ function ChatApp() {
           selected_tools: approvalToolIds,
         },
       });
-      forgetPendingRequest(activeConversationId);
-      replaceChatIdInUrl(activeConversationId, false);
-      await loadConversation(activeConversationId, false);
-      await refreshConversations(activeConversationId);
+      forgetPendingRequest(approvalConversationId);
+      if (sideApprovalActive) {
+        setSideChatRefreshKey((current) => current + 1);
+      } else {
+        replaceChatIdInUrl(approvalConversationId, false);
+        await loadConversation(approvalConversationId, false);
+        await refreshConversations(approvalConversationId);
+      }
     } catch (approvalError) {
-      forgetPendingRequest(activeConversationId);
+      forgetPendingRequest(approvalConversationId);
       const staleMessage = currentApproval.requestId ? approvalStaleUiMessage(approvalError) : null;
       if (staleMessage) {
         settleBrowserApproval(currentApproval);
@@ -5595,9 +5652,13 @@ function ChatApp() {
         await api.denyCodingApproval(currentApproval.requestId, "User denied the request from the shared approval surface");
       }
       settleBrowserApproval(currentApproval);
-      if (activeConversationId) {
-        await loadConversation(activeConversationId, false);
-        await refreshConversations(activeConversationId);
+      if (approvalConversationId) {
+        if (sideApprovalActive) {
+          setSideChatRefreshKey((current) => current + 1);
+        } else {
+          await loadConversation(approvalConversationId, false);
+          await refreshConversations(approvalConversationId);
+        }
       }
     } catch (approvalError) {
       const staleMessage = currentApproval.requestId ? approvalStaleUiMessage(approvalError) : null;
@@ -5615,20 +5676,20 @@ function ChatApp() {
 
   const approveCodingAction = async () => {
     if (!runtimeApproval) return;
-    if (!activeConversationId) return;
+    if (!approvalConversationId) return;
     if (activeRuntimeApprovalActionRef.current === runtimeApproval.requestId) return;
     activeRuntimeApprovalActionRef.current = runtimeApproval.requestId;
     setError(null);
     setIsGenerating(true);
     rememberPendingRequest({
-      conversationId: activeConversationId,
+      conversationId: approvalConversationId,
       startedAt: Date.now(),
       status: "承認済みの操作を続行しています",
       toolNames: [runtimeApproval.toolName],
       toolStartedAt: { [runtimeApproval.toolName]: Date.now() },
     });
     try {
-      const approvalWorkspace = workspaceContextFromConversation(activeConversation);
+      const approvalWorkspace = workspaceContextFromConversation(approvalConversation);
       const decision = await api.approveCodingApproval(runtimeApproval.requestId);
       if (!decision.approved) {
         throw new Error(decision.reason || "approval failed");
@@ -5636,7 +5697,7 @@ function ChatApp() {
       setSettledRuntimeApprovalIds((ids) => (
         ids.includes(runtimeApproval.requestId) ? ids : [...ids, runtimeApproval.requestId].slice(-50)
       ));
-      await api.streamMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を続行してください。", {
+      await api.streamMessage(approvalConversationId, "ユーザーが許可しました。承認済みの操作を続行してください。", {
         tool_choice: "required",
         tool_policy: {
           ...templatePolicyReferencePayload,
@@ -5668,12 +5729,16 @@ function ChatApp() {
           selected_tools: [runtimeApproval.toolName],
         },
       });
-      forgetPendingRequest(activeConversationId);
-      replaceChatIdInUrl(activeConversationId, false);
-      await loadConversation(activeConversationId, false);
-      await refreshConversations(activeConversationId);
+      forgetPendingRequest(approvalConversationId);
+      if (sideApprovalActive) {
+        setSideChatRefreshKey((current) => current + 1);
+      } else {
+        replaceChatIdInUrl(approvalConversationId, false);
+        await loadConversation(approvalConversationId, false);
+        await refreshConversations(approvalConversationId);
+      }
     } catch (approvalError) {
-      forgetPendingRequest(activeConversationId);
+      forgetPendingRequest(approvalConversationId);
       const staleMessage = approvalStaleUiMessage(approvalError);
       if (staleMessage) {
         setSettledRuntimeApprovalIds((ids) => (
@@ -5789,7 +5854,7 @@ function ChatApp() {
 
   const denyCodingAction = async () => {
     if (!runtimeApproval) return;
-    if (!activeConversationId) return;
+    if (!approvalConversationId) return;
     if (activeRuntimeApprovalActionRef.current === runtimeApproval.requestId) return;
     activeRuntimeApprovalActionRef.current = runtimeApproval.requestId;
     setError(null);
@@ -5798,8 +5863,12 @@ function ChatApp() {
       setSettledRuntimeApprovalIds((ids) => (
         ids.includes(runtimeApproval.requestId) ? ids : [...ids, runtimeApproval.requestId].slice(-50)
       ));
-      await loadConversation(activeConversationId, false);
-      await refreshConversations(activeConversationId);
+      if (sideApprovalActive) {
+        setSideChatRefreshKey((current) => current + 1);
+      } else {
+        await loadConversation(approvalConversationId, false);
+        await refreshConversations(approvalConversationId);
+      }
     } catch (approvalError) {
       console.error(approvalError);
       setError("拒否を保存できませんでした。リクエストの状態を更新して再試行してください。");
@@ -6854,6 +6923,83 @@ function ChatApp() {
       onWorkspacesRefresh={() => void loadCodingWorkspaces()}
     />
   ) : null;
+  const sideChatApprovalSurface = sideApprovalActive ? (
+    <div className="px-2 pt-2" data-testid="side-chat-approval-surface">
+      {visibleBrowserApproval ? (
+        <ApprovalDecisionSurface
+          approval={browserApprovalViewModel(visibleBrowserApproval)}
+          onDeny={() => void denyBrowserAction()}
+          onApprove={() => void approveBrowserAction()}
+          keyboardShortcuts={{ deny: "2", approve: "3" }}
+        />
+      ) : authorityApproval ? (
+        <AuthorityApprovalNotice
+          approval={authorityApproval}
+          title={authorityApprovalTitle(authorityApproval)}
+          onOpen={() => void openAuthorityApprovalWindowAction()}
+        />
+      ) : runtimeApproval ? (
+        <ApprovalDecisionSurface
+          approval={runtimeApprovalViewModel(runtimeApproval)}
+          onDeny={() => void denyCodingAction()}
+          onApprove={() => void approveCodingAction()}
+          keyboardShortcuts={{ deny: "2", approve: "3" }}
+        />
+      ) : staleRuntimeApprovalNotice ? (
+        <div role="status" className="rounded-xl border border-zinc-700 bg-zinc-950 p-3 text-xs text-zinc-300">
+          承認リクエストの有効期限が切れました。再送信して新しい承認を取得してください。
+        </div>
+      ) : null}
+    </div>
+  ) : null;
+  const sideChatPanel = (
+    <SideChatWidget
+      parentConversation={activeConversation}
+      selectedModel={activeModelId}
+      selectedProfile={activeProfile}
+      favoriteProfiles={favoriteProfiles}
+      modelProfiles={selectableModelProfiles}
+      thinkingLevel={activeProfile?.supports_thinking ? selectedThinkingLevel : null}
+      deepthinkEnabled={deepthinkEnabled}
+      contextUsage={contextUsage}
+      inlineExtensions={composerExtensions}
+      skillExtensions={composerSkills}
+      commands={composerCommands}
+      selectedToolIds={selectedToolIds}
+      disabledToolIds={effectiveDisabledToolIds}
+      actionApprovalMode={actionApprovalMode}
+      fullAccess={ultraYoloMode}
+      mode={mode}
+      workspaceId={effectiveWorkspaceId}
+      workspaceLabel={activeConversationWorkspaceContext.workspaceLabel}
+      workspaceRoot={activeConversationWorkspaceContext.workspaceRoot ?? codingContext?.rootFolder}
+      templateParams={templateAiInputParams}
+      templateToolPolicy={{
+        ...templatePolicyReferencePayload,
+        ...(composerInputMetadata?.id ? { composer_input_id: composerInputMetadata.id } : {}),
+      }}
+      unknownBlockStrategy={unknownBlockStrategy}
+      showActivityInMessages={showActivityInMessages}
+      showWidgets={showWidgets}
+      showPromptUsageInMessages={showPromptUsageInMessages}
+      composerRenderer={Renderers.composer}
+      messagesRenderer={Renderers.chatMessages}
+      refreshKey={sideChatRefreshKey}
+      approvalSurface={sideChatApprovalSurface}
+      onConversationStateChange={handleSideChatConversationStateChange}
+      onOpenModelManager={() => openSettingsSection("models")}
+      onOpenToolSettings={() => openSettingsSection("tools")}
+      onActionApprovalModeChange={handleActionApprovalModeChange}
+      onExtensionSelect={handleComposerExtensionSelect}
+      onCommandSelect={handleComposerCommand}
+      onModelProfileSelect={handleModelProfileSelect}
+      onThinkingLevelChange={handleThinkingLevelChange}
+      awaitParentContextSync={(parentConversationId) => (
+        conversationContextSyncsRef.current.get(parentConversationId)
+        ?? Promise.resolve()
+      )}
+    />
+  );
   const isCalendarMode = activeWorkspaceKind === "calendar";
   const isKanbanMode = activeWorkspaceKind === "kanban";
   const calendarSettings = parseCalendarSettings(settingsValues.calendar);
@@ -7290,7 +7436,7 @@ function ChatApp() {
                     onOpen={() => setShowPreview(true)}
                   />
                 )}
-                {visibleBrowserApproval && (
+                {!sideApprovalActive && visibleBrowserApproval && (
                   <ApprovalDecisionSurface
                     approval={browserApprovalViewModel(visibleBrowserApproval)}
                     onDeny={() => void denyBrowserAction()}
@@ -7299,7 +7445,7 @@ function ChatApp() {
                     className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 max-h-[min(70vh,620px)] w-[min(620px,calc(100vw-24px))] -translate-x-1/2 overflow-y-auto"
                   />
                 )}
-                {!visibleBrowserApproval && pendingCommandApproval && (
+                {!sideApprovalActive && !visibleBrowserApproval && pendingCommandApproval && (
                   <ApprovalDecisionSurface
                     approval={commandApprovalViewModel(pendingCommandApproval)}
                     onDeny={() => void denyCommandAction()}
@@ -7333,14 +7479,14 @@ function ChatApp() {
                     </dl>
                   </details>
                 )}
-                {!visibleBrowserApproval && !pendingCommandApproval && authorityApproval && (
+                {!sideApprovalActive && !visibleBrowserApproval && !pendingCommandApproval && authorityApproval && (
                   <AuthorityApprovalNotice
                     approval={authorityApproval}
                     title={authorityApprovalTitle(authorityApproval)}
                     onOpen={() => void openAuthorityApprovalWindowAction()}
                   />
                 )}
-                {!visibleBrowserApproval && !pendingCommandApproval && !authorityApproval && runtimeApproval && (
+                {!sideApprovalActive && !visibleBrowserApproval && !pendingCommandApproval && !authorityApproval && runtimeApproval && (
                   <ApprovalDecisionSurface
                     approval={runtimeApprovalViewModel(runtimeApproval)}
                     onDeny={() => void denyCodingAction()}
@@ -7349,7 +7495,7 @@ function ChatApp() {
                     className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 max-h-[min(70vh,620px)] w-[min(620px,calc(100vw-24px))] -translate-x-1/2 overflow-y-auto"
                   />
                 )}
-                {!visibleBrowserApproval && !pendingCommandApproval && !authorityApproval && !runtimeApproval && staleRuntimeApprovalNotice && (
+                {!sideApprovalActive && !visibleBrowserApproval && !pendingCommandApproval && !authorityApproval && !runtimeApproval && staleRuntimeApprovalNotice && (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-2xl">
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-2">
@@ -7425,6 +7571,7 @@ function ChatApp() {
               />
             )}
             codingPanel={codingSidebarPanel}
+            sideChatPanel={sideChatPanel}
             keyboardButtonNavigation={keyboardButtonNavigation}
             selectedProfile={activeProfile}
             toolFilterEntries={toolFilterEntries}

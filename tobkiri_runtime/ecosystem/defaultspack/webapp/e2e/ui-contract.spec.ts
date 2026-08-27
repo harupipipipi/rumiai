@@ -99,6 +99,10 @@ type ApiMockOptions = {
   codingApprovalAfterTerminal?: boolean;
   codingApprovalAfterRestore?: boolean;
   structuredComposer?: boolean;
+  sideChat?: {
+    failFirstStream?: boolean;
+    onStreamRequest?: (payload: Record<string, unknown>, attempt: number) => void;
+  };
 };
 
 function ok(data: unknown) {
@@ -191,6 +195,29 @@ function smokeConversation() {
         ],
       },
     ],
+  };
+}
+
+function sideConversation(messages: Record<string, unknown>[] = []) {
+  return {
+    id: "c-side",
+    title: "Side Chat",
+    created_at: now,
+    updated_at: now,
+    model: "stub/default",
+    conversation_kind: "side",
+    parent_conversation_id: "c-smoke",
+    child_conversation_ids: [],
+    tags: ["side-chat"],
+    is_starred: false,
+    is_pinned: false,
+    is_archived: false,
+    metadata: {
+      hidden: true,
+      conversation_channel: "side",
+      side_parent_conversation_id: "c-smoke",
+    },
+    messages,
   };
 }
 
@@ -616,6 +643,8 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
   }));
   let conversationToolPreferences: Record<string, unknown> = {};
   let codingApprovalRequest: Record<string, unknown> | null = null;
+  let sideStreamAttempts = 0;
+  let sideMessages: Record<string, unknown>[] = [];
   const settledApprovalRequestIds = new Set<string>();
   const codingCheckpoints: Record<string, unknown>[] = options.codingApprovalAfterRestore
     ? [{ snapshot_id: "checkpoint-1", path: "/repo/.rumi/checkpoints/checkpoint-1" }]
@@ -836,6 +865,50 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
           metadata: {},
         },
       });
+    }
+
+    if (path === routeKey("api/chat/conversations/c-side/stream") && method === "POST") {
+      sideStreamAttempts += 1;
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      options.sideChat?.onStreamRequest?.(payload, sideStreamAttempts);
+      if (options.sideChat?.failFirstStream && sideStreamAttempts === 1) {
+        return route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            status: "error",
+            error: { code: "TEMPORARY", message: "Temporary side failure" },
+          }),
+        });
+      }
+      const assistant = {
+        id: "side-assistant",
+        role: "assistant",
+        content: [{ type: "text", text: "Side response recovered." }],
+        raw_text: "Side response recovered.",
+        created_at: now + 1_000,
+        conversation_id: "c-side",
+        sequence_number: 2,
+        finish_reason: "stop",
+        metadata: {},
+      };
+      sideMessages = [
+        {
+          id: "side-user",
+          role: "user",
+          content: [{ type: "text", text: "Side-only request" }],
+          raw_text: "Side-only request",
+          created_at: now,
+          conversation_id: "c-side",
+          sequence_number: 1,
+        },
+        assistant,
+      ];
+      return fulfillStream(route, assistant);
+    }
+
+    if (path === routeKey("api/chat/conversations/c-side")) {
+      return fulfill(route, sideConversation(sideMessages));
     }
 
     if (path === routeKey("api/chat/conversations") && method === "GET") {
@@ -2666,4 +2739,49 @@ test("checkpoint create selects the new snapshot and approved restore settles su
   await approvals.getByRole("button", { name: /許可|Approve/ }).click();
   await expect(checkpoints).toContainText("Restored checkpoint-2");
   await expect(checkpoints).not.toContainText("Approval required");
+});
+
+test("side chat is keyboard reachable, isolated, and retries a failed stream", async ({ page }) => {
+  test.setTimeout(90_000);
+  let attempts = 0;
+  const streamPayloads: Record<string, unknown>[] = [];
+  await installDefaultspackApiMocks(page, {
+    conversationMutator: (conversation) => {
+      conversation.child_conversation_ids = ["c-side"];
+    },
+    sideChat: {
+      failFirstStream: true,
+      onStreamRequest: (payload, attempt) => {
+        attempts = attempt;
+        streamPayloads.push(payload);
+      },
+    },
+  });
+  await page.goto("/chat");
+  await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible({
+    timeout: 30_000,
+  });
+
+  const toggle = page.getByTestId("side-chat-toggle");
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  const panel = page.getByTestId("side-chat-panel");
+  await expect(panel).toHaveAttribute("aria-label", "サイドチャット");
+  const composer = panel.locator("textarea.rumi-composer-textarea");
+  await composer.fill("Side-only request");
+  await page.keyboard.press("Enter");
+  await expect(panel).toContainText("Temporary side failure");
+  await panel.getByRole("button", { name: /再試行|Retry/ }).click();
+  await expect(panel).toContainText("Side response recovered.");
+  expect(attempts).toBe(2);
+  expect(streamPayloads[1]?.message).toMatchObject({
+    metadata: {
+      conversation_channel: "side",
+      parent_conversation_id: "c-smoke",
+    },
+  });
+  await expect(page.locator(".rumi-messages-scroll").first()).not.toContainText(
+    "Side response recovered.",
+  );
 });
