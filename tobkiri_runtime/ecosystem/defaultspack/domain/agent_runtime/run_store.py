@@ -433,7 +433,15 @@ class AgentRunStore:
         if clean_run_ids == []:
             return []
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max(1, int(stale_after_seconds)))).isoformat().replace("+00:00", "Z")
-        statuses = ("running", "queued", "waiting_approval", "waiting_user_input", "paused", "resumable")
+        statuses = (
+            "running",
+            "queued",
+            "waiting_approval",
+            "waiting_user_input",
+            "waiting_completion_gate",
+            "paused",
+            "resumable",
+        )
         placeholders = ",".join("?" for _ in statuses)
         run_filter = ""
         params: list[Any] = [*statuses, cutoff]

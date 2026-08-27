@@ -14958,7 +14958,7 @@
         "rule_id": "legacy_interface_registry"
       },
       {
-        "evidence_digest": "sha256:51f174321485880a20274a89ce76b96a4edded0ca23af4bd4c911895e7b2a7c5",
+        "evidence_digest": "sha256:84726e95f13af798e915db9b7fd2518c36855c9ac3f053838d3e99964daaf919",
         "line": 5,
         "path": "tobkiri_runtime/ecosystem/defaultspack/blocks/agent/setup.py",
         "rule_id": "legacy_interface_registry"
@@ -15042,31 +15042,31 @@
         "rule_id": "legacy_interface_registry"
       },
       {
-        "evidence_digest": "sha256:1e3baa5152d0c9d93fa6a53a7e3e0fcba6a74619e9aeaa6b055964ffbe34ae4b",
+        "evidence_digest": "sha256:a7ae5c6015dfd42e0000112cf86bfc474bd3cc005fcbae3a612546b13bb7fc6d",
         "line": 149,
         "path": "tobkiri_runtime/ecosystem/defaultspack/transport/http.py",
         "rule_id": "legacy_interface_registry"
       },
       {
-        "evidence_digest": "sha256:1e3baa5152d0c9d93fa6a53a7e3e0fcba6a74619e9aeaa6b055964ffbe34ae4b",
+        "evidence_digest": "sha256:a7ae5c6015dfd42e0000112cf86bfc474bd3cc005fcbae3a612546b13bb7fc6d",
         "line": 173,
         "path": "tobkiri_runtime/ecosystem/defaultspack/transport/http.py",
         "rule_id": "legacy_interface_registry"
       },
       {
-        "evidence_digest": "sha256:1e3baa5152d0c9d93fa6a53a7e3e0fcba6a74619e9aeaa6b055964ffbe34ae4b",
+        "evidence_digest": "sha256:a7ae5c6015dfd42e0000112cf86bfc474bd3cc005fcbae3a612546b13bb7fc6d",
         "line": 186,
         "path": "tobkiri_runtime/ecosystem/defaultspack/transport/http.py",
         "rule_id": "legacy_interface_registry"
       },
       {
-        "evidence_digest": "sha256:1e3baa5152d0c9d93fa6a53a7e3e0fcba6a74619e9aeaa6b055964ffbe34ae4b",
+        "evidence_digest": "sha256:a7ae5c6015dfd42e0000112cf86bfc474bd3cc005fcbae3a612546b13bb7fc6d",
         "line": 363,
         "path": "tobkiri_runtime/ecosystem/defaultspack/transport/http.py",
         "rule_id": "legacy_interface_registry"
       },
       {
-        "evidence_digest": "sha256:1e3baa5152d0c9d93fa6a53a7e3e0fcba6a74619e9aeaa6b055964ffbe34ae4b",
+        "evidence_digest": "sha256:a7ae5c6015dfd42e0000112cf86bfc474bd3cc005fcbae3a612546b13bb7fc6d",
         "line": 371,
         "path": "tobkiri_runtime/ecosystem/defaultspack/transport/http.py",
         "rule_id": "legacy_interface_registry"
@@ -18410,7 +18410,7 @@
     ]
   },
   "repository": {
-    "commit": "29e4087d604705cca77785a04ddd9254b287aa95",
+    "commit": "3a276d38cd81a9403333d3c9e4de88952c61d280",
     "tree_digest": "d4525e61c9825f921138e751051a0b5d41b442ad3e2d025f4ffe0a38f4900d0d"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",

@@ -43,6 +43,12 @@ def run(context):
         ("POST", "/api/agent/{id}/approve", _lazy("blocks.agent.approve"), {"id": "execution_id"}),
         ("POST", "/api/agent/{id}/reject", _lazy("blocks.agent.reject"), {"id": "execution_id"}),
         ("POST", "/api/agent/{id}/cancel", _lazy("blocks.agent.cancel"), {"id": "execution_id"}),
+        (
+            "POST",
+            "/api/agent/{id}/completion-gate/resume",
+            _lazy("blocks.agent.resume_completion_gate"),
+            {"id": "execution_id"},
+        ),
         ("GET", "/api/agent/{id}/status", _lazy("blocks.agent.status"), {"id": "execution_id"}),
         # ---- Multi-agent routes ----
         ("POST", "/api/agent/multi/execute", _lazy("blocks.agent.multi_execute"), {}),

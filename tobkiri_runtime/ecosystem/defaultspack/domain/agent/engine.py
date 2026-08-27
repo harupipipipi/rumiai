@@ -1,13 +1,16 @@
 import json
 import os
 import sys
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import gen_id, timestamp
 from domain.agent.execution import AgentExecution
 from domain.agent.step import AgentStep
 from domain.agent_runtime.policy import session_key_for
+from domain.agent_runtime.completion_gate import (
+    CompletionGateCoordinator,
+    CompletionGatePolicy,
+)
 from domain.agent_runtime.run_store import AgentRunStore
 from domain.agent_runtime.transcript import TranscriptStore
 from domain.agent.placement_catalog import (
@@ -311,6 +314,7 @@ class AgentEngine:
         self._executions = {}
         self._run_store = AgentRunStore()
         self._transcripts = TranscriptStore()
+        self._completion_gates = CompletionGateCoordinator()
 
     def _create_transcript(self, execution_id, context, metadata=None):
         if not isinstance(context, dict):
@@ -779,6 +783,319 @@ class AgentEngine:
         messages.append({"role": "user", "content": _message_content_with_attachments(execution.task, attachments)})
         return messages
 
+    def _record_completion_gate_event(self, execution, event_type, payload):
+        self._persist_execution(execution, event_type, payload)
+        try:
+            self._run_store.add_event(execution.execution_id, event_type, payload)
+        except Exception:
+            pass
+
+    def _commit_completed_response(self, execution, candidate):
+        execution.status = "completed"
+        execution.result = candidate
+        execution.error = None
+        execution.messages.append({"role": "assistant", "content": candidate})
+        self._transcripts.append_message(
+            execution.context["transcript_id"], execution.messages[-1]
+        )
+        execution.add_step("response", {"content": candidate})
+        self._process_conversation_steer(execution)
+        self._record_completion_gate_event(
+            execution,
+            "run_completed",
+            {
+                "result": candidate,
+                "completion_gate": True,
+                "terminal_reason": (
+                    execution.context.get("completion_gate_state", {}).get(
+                        "terminal_reason"
+                    )
+                    if isinstance(execution.context, dict)
+                    else None
+                ),
+            },
+        )
+        return {
+            "execution_id": execution.execution_id,
+            "status": "completed",
+            "result": execution.to_dict(),
+        }
+
+    def _continue_completion_gate_revision(
+        self, execution, instruction, gate_id, *, inject_instruction=True
+    ):
+        if self._is_cancelled(execution):
+            return self._cancelled_result(execution)
+        execution.status = "running"
+        if inject_instruction:
+            revision_message = (
+                "[COMPLETION GATE REVISION] Review the candidate and revise it in the "
+                "same run. Do not change the run identity or approval state.\n\n"
+                + instruction
+            )
+            execution.messages.append({"role": "user", "content": revision_message})
+            self._transcripts.append_message(
+                execution.context["transcript_id"], execution.messages[-1]
+            )
+            execution.add_step(
+                "completion_gate_revision",
+                {"gate_id": gate_id, "instruction": instruction},
+            )
+        self._record_completion_gate_event(
+            execution,
+            (
+                "completion_gate_revision_started"
+                if inject_instruction
+                else "completion_gate_revision_resumed"
+            ),
+            {
+                "gate_id": gate_id,
+                "instruction": instruction,
+                "resumed": not inject_instruction,
+            },
+        )
+        self._touch_execution(
+            execution,
+            "model_call_started",
+            {"phase": "completion_gate_revision", "gate_id": gate_id},
+        )
+        ai_result = self._ai_complete(
+            execution.messages,
+            execution.model,
+            execution.context,
+            execution.tools,
+        )
+        self._touch_execution(
+            execution,
+            "model_call_completed",
+            {"phase": "completion_gate_revision", "gate_id": gate_id},
+        )
+        if self._is_cancelled(execution):
+            return self._cancelled_result(execution)
+        parsed = self._parse_ai_response(ai_result)
+        if parsed["type"] == "authority_approval_required":
+            return self._authority_approval_result(execution, parsed)
+        if parsed["type"] == "error":
+            execution.status = "failed"
+            execution.error = parsed["content"]
+            execution.add_step("error", {"error": parsed["content"]})
+            self._record_completion_gate_event(
+                execution,
+                "completion_gate_revision_failed",
+                {"gate_id": gate_id, "error": parsed["content"]},
+            )
+            return {
+                "execution_id": execution.execution_id,
+                "status": "failed",
+                "result": execution.to_dict(),
+            }
+        if parsed["type"] == "tool_call":
+            if self._reject_unconnected_tool_call(
+                execution, parsed
+            ) or self._reject_policy_violation(execution, parsed):
+                self._persist_execution(
+                    execution, "run_failed", {"error": execution.error}
+                )
+                return {
+                    "execution_id": execution.execution_id,
+                    "status": "error",
+                    "result": execution.to_dict(),
+                }
+            self._set_pending_tool_call(execution, parsed)
+            self._transcripts.append_tool_call(
+                execution.context["transcript_id"], execution.pending_tool_call
+            )
+            auto_result = self._auto_approve_pending_tool_call(execution)
+            if auto_result is not None:
+                return auto_result
+            self._persist_execution(
+                execution, "approval_requested", execution.pending_tool_call
+            )
+            return {
+                "execution_id": execution.execution_id,
+                "status": "waiting_approval",
+                "result": execution.to_dict(),
+            }
+        return self._handle_candidate_completion(execution, parsed["content"])
+
+    def _apply_completion_gate_outcome(self, execution, outcome):
+        action = str(outcome.get("action") or "blocked")
+        candidate = outcome.get("candidate", execution.result)
+        if action == "pass":
+            return self._commit_completed_response(execution, candidate)
+        if action == "cancelled":
+            return self._cancelled_result(execution)
+        if action == "revise":
+            return self._continue_completion_gate_revision(
+                execution,
+                str(outcome.get("instruction") or ""),
+                str(outcome.get("gate_id") or ""),
+            )
+        if action == "failed":
+            execution.status = "failed"
+            execution.result = candidate
+            execution.error = str(outcome.get("summary") or "completion gate failed")
+            execution.add_step(
+                "completion_gate_failed",
+                {
+                    "gate_id": outcome.get("gate_id"),
+                    "summary": execution.error,
+                    "terminal_reason": outcome.get("terminal_reason"),
+                },
+            )
+            self._record_completion_gate_event(
+                execution,
+                "completion_gate_failed",
+                {
+                    "gate_id": outcome.get("gate_id"),
+                    "summary": execution.error,
+                    "terminal_reason": outcome.get("terminal_reason"),
+                },
+            )
+            return {
+                "execution_id": execution.execution_id,
+                "status": "failed",
+                "result": execution.to_dict(),
+            }
+        execution.status = "blocked"
+        execution.result = candidate
+        execution.error = None
+        blocked_payload = {
+            "gate_id": outcome.get("gate_id"),
+            "summary": str(outcome.get("summary") or "completion gate blocked"),
+            "required_user_action": outcome.get("required_user_action"),
+            "terminal_reason": outcome.get("terminal_reason") or "gate_blocked",
+            "candidate": candidate,
+        }
+        execution.add_step("completion_gate_blocked", blocked_payload)
+        self._record_completion_gate_event(
+            execution, "completion_gate_blocked", blocked_payload
+        )
+        return {
+            "execution_id": execution.execution_id,
+            "status": "blocked",
+            "result": execution.to_dict(),
+        }
+
+    def _handle_candidate_completion(self, execution, candidate):
+        execution.status = "candidate_complete"
+        execution.result = candidate
+        candidate_payload = {
+            "candidate": candidate,
+            "receipts": [
+                {
+                    "step_number": step.step_number,
+                    "step_type": step.step_type,
+                    "status": step.status,
+                }
+                for step in execution.steps
+            ],
+        }
+        execution.add_step("candidate_complete", candidate_payload)
+        self._record_completion_gate_event(
+            execution, "candidate_complete", candidate_payload
+        )
+        try:
+            policy = CompletionGatePolicy.from_context(execution.context)
+        except Exception:
+            policy = None
+        if policy is not None and not policy.gate_ids:
+            return self._commit_completed_response(execution, candidate)
+        execution.status = "waiting_completion_gate"
+        self._record_completion_gate_event(
+            execution,
+            "waiting_completion_gate",
+            {"candidate": candidate},
+        )
+        outcome = self._completion_gates.evaluate(
+            execution,
+            candidate,
+            record_event=lambda event_type, payload: self._record_completion_gate_event(
+                execution, event_type, payload
+            ),
+            is_cancelled=lambda: self._is_cancelled(execution),
+        )
+        return self._apply_completion_gate_outcome(execution, outcome)
+
+    def resume_completion_gate(self, execution_id, evidence=None):
+        """Resume a durable gate after external evidence or approval arrives."""
+
+        execution = self._get_execution(execution_id)
+        if not execution:
+            return {
+                "execution_id": execution_id,
+                "status": "error",
+                "result": {"error": "execution not found"},
+            }
+        state = execution.context.get("completion_gate_state")
+        revision_recovery = (
+            execution.status in {"running", "stale", "resumable", "queued"}
+            and isinstance(state, dict)
+            and state.get("phase") == "revising"
+        )
+        if (
+            execution.status not in {"waiting_completion_gate", "blocked"}
+            and not revision_recovery
+        ):
+            return {
+                "execution_id": execution_id,
+                "status": "error",
+                "result": {
+                    "error": "execution is not waiting for a completion gate, current status: "
+                    + execution.status
+                },
+            }
+        if not isinstance(state, dict) or "candidate" not in state:
+            return {
+                "execution_id": execution_id,
+                "status": "error",
+                "result": {"error": "completion gate state is missing"},
+            }
+        if revision_recovery:
+            instruction = str(state.get("revision_instruction") or "")
+            gate_id = str(state.get("revision_gate_id") or "")
+            if not instruction or not gate_id:
+                return {
+                    "execution_id": execution_id,
+                    "status": "error",
+                    "result": {"error": "completion gate revision state is incomplete"},
+                }
+            return self._continue_completion_gate_revision(
+                execution,
+                instruction,
+                gate_id,
+                inject_instruction=False,
+            )
+        prior_status = execution.status
+        state["phase"] = "waiting"
+        state["pending_requirement"] = None
+        if prior_status == "blocked" or evidence is not None:
+            state["resume_count"] = int(state.get("resume_count") or 0) + 1
+        if evidence is not None:
+            resume_evidence = state.setdefault("resume_evidence", [])
+            resume_evidence.append(evidence)
+            if len(resume_evidence) > 50:
+                del resume_evidence[:-50]
+        execution.status = "waiting_completion_gate"
+        self._record_completion_gate_event(
+            execution,
+            "completion_gate_resumed",
+            {
+                "evidence": evidence,
+                "resume_count": int(state.get("resume_count") or 0),
+                "recovered_inflight": prior_status == "waiting_completion_gate",
+            },
+        )
+        outcome = self._completion_gates.evaluate(
+            execution,
+            state["candidate"],
+            record_event=lambda event_type, payload: self._record_completion_gate_event(
+                execution, event_type, payload
+            ),
+            is_cancelled=lambda: self._is_cancelled(execution),
+        )
+        return self._apply_completion_gate_outcome(execution, outcome)
+
     def execute(self, task, tools, model, system_prompt, context):
         execution_id = gen_id("agent_")
         execution_context = dict(context or {}) if isinstance(context, dict) else {}
@@ -949,18 +1266,7 @@ class AgentEngine:
                 "status": "waiting_approval",
                 "result": execution.to_dict(),
             }
-        execution.status = "completed"
-        execution.result = parsed["content"]
-        execution.messages.append({"role": "assistant", "content": parsed["content"]})
-        self._transcripts.append_message(execution.context["transcript_id"], execution.messages[-1])
-        execution.add_step("response", {"content": parsed["content"]})
-        self._process_conversation_steer(execution)
-        self._persist_execution(execution, "run_completed", {"result": parsed["content"]})
-        return {
-            "execution_id": execution_id,
-            "status": "completed",
-            "result": execution.to_dict(),
-        }
+        return self._handle_candidate_completion(execution, parsed["content"])
 
     def approve(self, execution_id, source="agent.approve"):
         execution = self._get_execution(execution_id)
@@ -1103,18 +1409,7 @@ class AgentEngine:
                 "status": "waiting_approval",
                 "result": execution.to_dict(),
             }
-        execution.status = "completed"
-        execution.result = parsed["content"]
-        execution.messages.append({"role": "assistant", "content": parsed["content"]})
-        self._transcripts.append_message(execution.context["transcript_id"], execution.messages[-1])
-        execution.add_step("response", {"content": parsed["content"]})
-        self._process_conversation_steer(execution)
-        self._persist_execution(execution, "run_completed", {"result": parsed["content"]})
-        return {
-            "execution_id": execution_id,
-            "status": "completed",
-            "result": execution.to_dict(),
-        }
+        return self._handle_candidate_completion(execution, parsed["content"])
 
     def reject(self, execution_id, reason):
         execution = self._get_execution(execution_id)
@@ -1186,18 +1481,7 @@ class AgentEngine:
                 "status": "waiting_approval",
                 "result": execution.to_dict(),
             }
-        execution.status = "completed"
-        execution.result = parsed["content"]
-        execution.messages.append({"role": "assistant", "content": parsed["content"]})
-        self._transcripts.append_message(execution.context["transcript_id"], execution.messages[-1])
-        execution.add_step("response", {"content": parsed["content"]})
-        self._process_conversation_steer(execution)
-        self._persist_execution(execution, "run_completed", {"result": parsed["content"]})
-        return {
-            "execution_id": execution_id,
-            "status": "completed",
-            "result": execution.to_dict(),
-        }
+        return self._handle_candidate_completion(execution, parsed["content"])
 
     def cancel(self, execution_id):
         execution = self._get_execution(execution_id)
@@ -1214,11 +1498,19 @@ class AgentEngine:
         execution = self._get_execution(execution_id)
         if not execution:
             return {"execution_id": execution_id, "status": "error", "result": {"error": "execution not found"}}
+        gate_state = (
+            execution.context.get("completion_gate_state")
+            if isinstance(getattr(execution, "context", None), dict)
+            else None
+        )
         return {
             "execution_id": execution_id,
             "status": execution.status,
             "steps": [s.to_dict() for s in execution.steps],
             "current_step": execution.current_step,
+            "result": execution.result,
+            "error": execution.error,
+            "completion_gate": gate_state,
         }
 
     def plan(self, task, tools, model, system_prompt, context):
