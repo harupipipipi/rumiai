@@ -12,6 +12,7 @@ import {
   serializeSlashCommandDrafts,
   slashCommandDraftRowsFromValue,
 } from "./settings/renderers/slashCommandsField";
+import { allowCleartextMobileQr } from "../lib/mobileCleartextQr";
 import { apiKeySetupTargetFieldId } from "./settings/renderers/settingsFieldRendererUtils";
 import type { TemplateSettingsField } from "./template/settingsFieldMetadata";
 import type { SettingsSection } from "../lib/api";
@@ -208,6 +209,12 @@ test("api_key_setup renderer actions target the rendered template field", () => 
     label: "API Setup",
     type: "api_key_setup",
   } as TemplateSettingsField), "api_key_setup_template");
+});
+
+test("cleartext mobile QR flag only enables on explicit opt-in", () => {
+  assert.equal(allowCleartextMobileQr({}), false);
+  assert.equal(allowCleartextMobileQr({ VITE_RUMI_MOBILE_ALLOW_CLEARTEXT_QR: "0" }), false);
+  assert.equal(allowCleartextMobileQr({ VITE_RUMI_MOBILE_ALLOW_CLEARTEXT_QR: "1" }), true);
 });
 
 test("SettingsModalRenderer renders template model_select with searchable model selector surface", () => {
@@ -837,6 +844,23 @@ test("Models places AI API registration before model API connections", () => {
     html.indexOf('data-settings-field="apis.api_keys"')
       < html.indexOf('data-settings-field="models.model_api_routes"'),
   );
+});
+
+test("CredentialTransferModal keeps transfer device-bound and credential-free", () => {
+  const html = renderToStaticMarkup(
+    createElement(CredentialTransferModal, {
+      providerId: "anthropic",
+      providerLabel: "Anthropic",
+      apiId: "main",
+      onClose: () => undefined,
+    }),
+  );
+
+  assert.match(html, /暗号化して端末へ転送/);
+  assert.match(html, /確認した1台だけ/);
+  assert.doesNotMatch(html, /Rumi Mobile QR/);
+  assert.doesNotMatch(html, /sk-ant-test/);
+  assert.match(html, /Anthropic/);
 });
 
 test("SettingsModalRenderer renders template model_api_routes through registered model routing renderer", () => {
