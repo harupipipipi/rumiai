@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:507bdfe00311392f3a0b3018c50ea099c9c850a1de62f0025ad31396170df24a",
+  "catalog_digest": "sha256:42c7c58cb6d57b56b73255c6b3dbb1bbc9305666bb4db013810e587eabf285f6",
   "pack_id": "rumi_company_coordinator_pack",
-  "source_identity": "sha256:517548b669d73830c1425181e987ed41384ef3281b1a45591cd79ce7428ac438",
+  "source_identity": "sha256:c028bab13b138a4e0f07bed703f29aadb1d09bf3e8983ea6a8566b3ac62a955b",
   "variants": [
     {
       "architecture": "any",
@@ -10,7 +10,7 @@
       "execution_domain_profile": "sandbox.default.v1",
       "execution_kind": "pack_vm",
       "function_id": "rumi_company_coordinator_pack.company.coordinator",
-      "implementation_digest": "sha256:fc3a98c75d5d974220d0b113dba59915cc57f20bd1025c6e3d5ed45bd95f6c36",
+      "implementation_digest": "sha256:754b4f2a2cf65349636f5d0ddafce7b3023df886f7fa020c1e868168d8a6856d",
       "implementation_path": "runtime/coordinator.py",
       "materialization_mode": "on_demand",
       "operations": [
@@ -44,7 +44,7 @@
       "execution_domain_profile": "sandbox.default.v1",
       "execution_kind": "pack_vm",
       "function_id": "rumi_company_coordinator_pack.company.runtime",
-      "implementation_digest": "sha256:fc3a98c75d5d974220d0b113dba59915cc57f20bd1025c6e3d5ed45bd95f6c36",
+      "implementation_digest": "sha256:754b4f2a2cf65349636f5d0ddafce7b3023df886f7fa020c1e868168d8a6856d",
       "implementation_path": "runtime/coordinator.py",
       "materialization_mode": "on_demand",
       "operations": [
@@ -78,7 +78,7 @@
       "execution_domain_profile": "sandbox.default.v1",
       "execution_kind": "pack_vm",
       "function_id": "rumi_company_coordinator_pack.job-adapter.company-supervisor",
-      "implementation_digest": "sha256:fc3a98c75d5d974220d0b113dba59915cc57f20bd1025c6e3d5ed45bd95f6c36",
+      "implementation_digest": "sha256:754b4f2a2cf65349636f5d0ddafce7b3023df886f7fa020c1e868168d8a6856d",
       "implementation_path": "runtime/coordinator.py",
       "materialization_mode": "on_demand",
       "operations": [
