@@ -139,7 +139,7 @@ def test_parent_delete_cascades_only_owned_side_conversations(
         },
         expected_revision=side["store_revision"],
     )
-    child = store.create(
+    store.create(
         {
             "id": "subagent",
             "parent_conversation_id": "parent",
