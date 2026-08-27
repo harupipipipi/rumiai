@@ -395,13 +395,13 @@ test('selector keeps one ceremony owner and preserves the separate Defaults edit
     await act(async () => undefined);
     assert.equal(ceremonyOwnerCount(container), 1);
 
-    const defaultsMode = buttonContaining(container, 'Edit Defaults Pack-set');
+    const defaultsMode = buttonContaining(container, 'Edit Defaults Pack set');
     await act(async () => { defaultsMode.click(); });
     assert.equal(defaultsMode.getAttribute('aria-pressed'), 'true');
     assert.equal(ceremonyOwnerCount(container), 1);
     assert.ok(container.querySelector('button[aria-label^="Toggle Defaults Pack"]'));
 
-    await act(async () => { buttonContaining(container, 'Use selected Profile ceremony').click(); });
+    await act(async () => { buttonContaining(container, 'Activate this Profile').click(); });
     assert.equal(ceremonyOwnerCount(container), 1);
     assert.equal(container.querySelectorAll('button[aria-label^="Toggle Defaults Pack"]').length, 0);
 
@@ -465,7 +465,7 @@ test('selector keyboard semantics remain labelled and focusable in a compact vie
     });
     await act(async () => undefined);
     assert.equal(dom.window.innerWidth, 320);
-    const group = container.querySelector<HTMLElement>('[role="group"][aria-label="Select an authoritative Profile definition"]');
+    const group = container.querySelector<HTMLElement>('[role="group"][aria-label="Select a verified Profile"]');
     assert.ok(group);
     const profileButtons = [...group.querySelectorAll<HTMLButtonElement>('button')];
     assert.equal(profileButtons.length, 2);

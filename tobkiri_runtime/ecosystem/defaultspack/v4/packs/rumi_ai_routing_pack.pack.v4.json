@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:6cc55beccdcc06ee1ca42e09e481e8033d5b8f3c5a51e95e06cde06cbd49cb7e",
+      "digest": "sha256:494d74bd8596d90755f413134d24b574fc5102bb481af4cbdaec4e7566077139",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
@@ -20,31 +20,27 @@
     {
       "contract_id": "tobkiri.service.ai.route.v1",
       "operations": [
-        "rumi_ai_routing_pack.ai-route",
-        "rumi_ai_routing_pack.ai-route.generate",
-        "rumi_ai_routing_pack.ai-route.stream"
+        "rumi_ai_routing_pack.ai-route"
       ],
-      "revision_digest": "sha256:4d1d08cfdfacb74c67488e417daf2a56cfa51a981e216d3f1a49c734dd6ced4c"
+      "revision_digest": "sha256:dd2ace27064ee3b156703c9544a50731f664c11c77b563c23be1c784ddc28bfe"
     }
   ],
   "functions": [
     {
-      "contract_revision_digest": "sha256:4d1d08cfdfacb74c67488e417daf2a56cfa51a981e216d3f1a49c734dd6ced4c",
+      "contract_revision_digest": "sha256:dd2ace27064ee3b156703c9544a50731f664c11c77b563c23be1c784ddc28bfe",
       "id": "rumi_ai_routing_pack.ai-routing.default",
       "implementation_digest": "sha256:99fe1e1a126b8c0df54edb044461ecaf5efe33c55948e722c5216639cc230148",
       "isolation": "dedicated_process",
       "operations": [
-        "rumi_ai_routing_pack.ai-route",
-        "rumi_ai_routing_pack.ai-route.generate",
-        "rumi_ai_routing_pack.ai-route.stream"
+        "rumi_ai_routing_pack.ai-route"
       ],
       "role": "host_capability_provider"
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:c5b52e64224aafa9ca9425d53787bd7789d3f37d2b2a8acfbcfb025b8c552cfa",
-    "contract_catalog_digest": "sha256:cf393c1344b57d0c9613d7eb568bace73fbfa2fbb2bd8c8b0814d56c199ed4e5",
-    "source_identity": "sha256:70166fa400a17403e6641c67e59e16492189b58cfe5a2bb1d527e36acef9363b"
+    "artifact_set_digest": "sha256:ca0738cd251581e652574cffcb236fe26e99a4ed002b65dd00d002e622fd4e1d",
+    "contract_catalog_digest": "sha256:40bd6caf9ead6381169addcb5641236ef3d37d36b1a1e9190843bdfa679a432a",
+    "source_identity": "sha256:a408231f7186f2e6ba513118707253bfece00b836b981f1fa24a31de5bea0585"
   },
   "migration": {
     "compatibility": "read_only",
@@ -67,32 +63,10 @@
       "owner": "rumi_ai_routing_pack",
       "provider_id": "rumi_ai_routing_pack.ai-routing.default",
       "source_kind": "canonical_v4_contract"
-    },
-    {
-      "contract_reference": "tobkiri.service.ai.route.v1",
-      "effect_ceiling": [
-        "capability:ai.route",
-        "host:brokered-execution"
-      ],
-      "operation_id": "rumi_ai_routing_pack.ai-route.generate",
-      "owner": "rumi_ai_routing_pack",
-      "provider_id": "rumi_ai_routing_pack.ai-routing.default",
-      "source_kind": "canonical_v4_contract"
-    },
-    {
-      "contract_reference": "tobkiri.service.ai.route.v1",
-      "effect_ceiling": [
-        "capability:ai.route",
-        "host:brokered-execution"
-      ],
-      "operation_id": "rumi_ai_routing_pack.ai-route.stream",
-      "owner": "rumi_ai_routing_pack",
-      "provider_id": "rumi_ai_routing_pack.ai-routing.default",
-      "source_kind": "canonical_v4_contract"
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:c5b52e64224aafa9ca9425d53787bd7789d3f37d2b2a8acfbcfb025b8c552cfa",
+    "artifact_digest": "sha256:ca0738cd251581e652574cffcb236fe26e99a4ed002b65dd00d002e622fd4e1d",
     "display_name": "Rumi AI Routing",
     "id": "rumi_ai_routing_pack",
     "kind": "host_extension",
@@ -102,7 +76,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:70166fa400a17403e6641c67e59e16492189b58cfe5a2bb1d527e36acef9363b",
+        "digest": "sha256:a408231f7186f2e6ba513118707253bfece00b836b981f1fa24a31de5bea0585",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -113,7 +87,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:70166fa400a17403e6641c67e59e16492189b58cfe5a2bb1d527e36acef9363b",
+    "source_digest": "sha256:a408231f7186f2e6ba513118707253bfece00b836b981f1fa24a31de5bea0585",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_ai_routing_pack"
   },
@@ -121,9 +95,7 @@
     {
       "contract_reference": "tobkiri.service.ai.route.v1",
       "operations": [
-        "rumi_ai_routing_pack.ai-route",
-        "rumi_ai_routing_pack.ai-route.generate",
-        "rumi_ai_routing_pack.ai-route.stream"
+        "rumi_ai_routing_pack.ai-route"
       ],
       "owner": "rumi_ai_routing_pack",
       "provider_id": "rumi_ai_routing_pack.ai-routing.default"

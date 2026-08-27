@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:61788f504bf1fa9474dfc0f517aed99de6da0acc002e2b865129e433b32310be",
+  "catalog_digest": "sha256:56ef638bbf4175d1ff72bab344d05ca60bcbcc211f2c2fa464d63b6a21a72121",
   "pack_id": "rumi_provider_registry_pack",
-  "source_identity": "sha256:e39682b8605ff38baae47fdbca59535f481af9942f96ebf2180b246c42a7f7cd",
+  "source_identity": "sha256:864eefff99560b95998fdb286703df7760783e94bc9e10dd6aff524fc3ac3e9e",
   "variants": [
     {
       "architecture": "any",
@@ -29,45 +29,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:5636a93e43b5226774e2add17ae792f15ec4ff53fd6202d5027dfc3a1ea840a4",
-          "timeout_default_ms": 30000,
-          "timeout_hard_max_ms": 300000
-        },
-        {
-          "contract_id": "tobkiri.resource.ai.provider.health.v1",
-          "contract_version": "1.0.0",
-          "effect_class": "privileged",
-          "error_schema": {
-            "type": "object"
-          },
-          "idempotency": "none",
-          "input_schema": {
-            "type": "object"
-          },
-          "operation_id": "rumi_provider_registry_pack.provider-registry-health.generate",
-          "output_schema": {
-            "type": "object"
-          },
-          "revision_digest": "sha256:5636a93e43b5226774e2add17ae792f15ec4ff53fd6202d5027dfc3a1ea840a4",
-          "timeout_default_ms": 30000,
-          "timeout_hard_max_ms": 300000
-        },
-        {
-          "contract_id": "tobkiri.resource.ai.provider.health.v1",
-          "contract_version": "1.0.0",
-          "effect_class": "privileged",
-          "error_schema": {
-            "type": "object"
-          },
-          "idempotency": "none",
-          "input_schema": {
-            "type": "object"
-          },
-          "operation_id": "rumi_provider_registry_pack.provider-registry-health.stream",
-          "output_schema": {
-            "type": "object"
-          },
-          "revision_digest": "sha256:5636a93e43b5226774e2add17ae792f15ec4ff53fd6202d5027dfc3a1ea840a4",
+          "revision_digest": "sha256:a81ca07b769ea4dfa715076ee0389778db91707fb3b4db1e410a9e0f9f7ecceb",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         }
@@ -135,45 +97,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:ae3b4954e4d3ccfce933d44a9fd23409ef9626e5916a280ed304780437088e34",
-          "timeout_default_ms": 30000,
-          "timeout_hard_max_ms": 300000
-        },
-        {
-          "contract_id": "tobkiri.resource.ai.provider.registry.v1",
-          "contract_version": "1.0.0",
-          "effect_class": "privileged",
-          "error_schema": {
-            "type": "object"
-          },
-          "idempotency": "none",
-          "input_schema": {
-            "type": "object"
-          },
-          "operation_id": "rumi_provider_registry_pack.provider-registry-resource.generate",
-          "output_schema": {
-            "type": "object"
-          },
-          "revision_digest": "sha256:ae3b4954e4d3ccfce933d44a9fd23409ef9626e5916a280ed304780437088e34",
-          "timeout_default_ms": 30000,
-          "timeout_hard_max_ms": 300000
-        },
-        {
-          "contract_id": "tobkiri.resource.ai.provider.registry.v1",
-          "contract_version": "1.0.0",
-          "effect_class": "privileged",
-          "error_schema": {
-            "type": "object"
-          },
-          "idempotency": "none",
-          "input_schema": {
-            "type": "object"
-          },
-          "operation_id": "rumi_provider_registry_pack.provider-registry-resource.stream",
-          "output_schema": {
-            "type": "object"
-          },
-          "revision_digest": "sha256:ae3b4954e4d3ccfce933d44a9fd23409ef9626e5916a280ed304780437088e34",
+          "revision_digest": "sha256:a00d0411539cf9f1f7514a54331c1a746f47a0d8ca1c4c88a5123f8f74f0d682",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         }

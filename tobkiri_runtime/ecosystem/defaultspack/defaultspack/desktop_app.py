@@ -508,6 +508,13 @@ def main(argv: list[str] | None = None) -> int:
             "auth_required": True,
         },
         {
+            "path_prefix": "/pack-v4/conversation",
+            "web_root": ui_root,
+            "spa_fallback": True,
+            "index_file": "shell.html",
+            "auth_required": True,
+        },
+        {
             "path_prefix": "/static",
             "web_root": ui_root,
             "spa_fallback": False,

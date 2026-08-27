@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:f2e794d0d72b0245b2d7f5e90d4794882bf5b6d046f93b5424b52dc176902164",
+      "digest": "sha256:244537b4aeb3b718982a6f604f4f1e53efa833801710b286767e6bde8afbaaef",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
@@ -50,9 +50,9 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:0eae94b5571c875c77b04de7135642efda677b8ccdf042601d2d20f43ca2811a",
-    "contract_catalog_digest": "sha256:1ce5e04db94108755808afb18e605ac99b97a9a581b1746cc33583e8799df6c7",
-    "source_identity": "sha256:d54937b9d0981de53d29e74376d53a4272e8c75937349cdb510a94c7bf8f4f28"
+    "artifact_set_digest": "sha256:cde59d0e280c605cfd893a38a22c0740682859f796662ff14c872b8d97acfa10",
+    "contract_catalog_digest": "sha256:9fd3a765b717e70d6661af8c2c4457162a8b55beac88f2f6e7a07abf0ba9b181",
+    "source_identity": "sha256:927a593efac24ff7cd269f4901de510767b36e1a75395ee6c4ef71dde122b183"
   },
   "migration": {
     "compatibility": "read_only",
@@ -90,7 +90,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:0eae94b5571c875c77b04de7135642efda677b8ccdf042601d2d20f43ca2811a",
+    "artifact_digest": "sha256:cde59d0e280c605cfd893a38a22c0740682859f796662ff14c872b8d97acfa10",
     "display_name": "Rumi Workspace Mount",
     "id": "rumi_workspace_mount_pack",
     "kind": "host_extension",
@@ -100,7 +100,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:d54937b9d0981de53d29e74376d53a4272e8c75937349cdb510a94c7bf8f4f28",
+        "digest": "sha256:927a593efac24ff7cd269f4901de510767b36e1a75395ee6c4ef71dde122b183",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -111,7 +111,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:d54937b9d0981de53d29e74376d53a4272e8c75937349cdb510a94c7bf8f4f28",
+    "source_digest": "sha256:927a593efac24ff7cd269f4901de510767b36e1a75395ee6c4ef71dde122b183",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_workspace_mount_pack"
   },

@@ -235,10 +235,12 @@ def test_conversation_capability_is_capture_gated_and_http_brokered(
         )
         assert contribution["kind"] == "route"
         assert contribution["mode"] == "declarative"
-        assert contribution["route"] == "/chat"
+        assert contribution["route"] == "/pack-v4/conversation"
         assert contribution["action_contract"] == _CONVERSATION_CONTRACT
         assert contribution["view"]["type"] == "conversation_v4"
-        assert contribution["view"]["title"] == "Tobkiri Conversation"
+        assert contribution["label"] == "Defaults Profile Conversation"
+        assert contribution["accessibility"]["name"] == "Defaults Profile Conversation"
+        assert contribution["view"]["title"] == "Defaults Profile Conversation"
         assert contribution["view"]["body"]
 
         capability_request = {

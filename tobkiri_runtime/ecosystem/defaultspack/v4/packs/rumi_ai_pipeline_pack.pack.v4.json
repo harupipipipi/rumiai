@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:42a8ec589edbe0eb366385256068f5498e3c917120d911daeb28862c62059415",
+      "digest": "sha256:d7d29b28384a9617a7ff9544f77775086c70b957b474f9782e9df9ff249c1387",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
@@ -20,52 +20,44 @@
     {
       "contract_id": "tobkiri.service.ai.failover.decide.v1",
       "operations": [
-        "rumi_ai_pipeline_pack.ai-failover-decide",
-        "rumi_ai_pipeline_pack.ai-failover-decide.generate",
-        "rumi_ai_pipeline_pack.ai-failover-decide.stream"
+        "rumi_ai_pipeline_pack.ai-failover-decide"
       ],
-      "revision_digest": "sha256:39508895d8bb9105029c246dcefaf063aba8c62f6e498f626d55f03b1d1d063d"
+      "revision_digest": "sha256:49367974156c5735b8e38708a71d87c406f800d9f24d1c291cf4050e1629abe5"
     },
     {
       "contract_id": "tobkiri.service.ai.request.prepare.v1",
       "operations": [
-        "rumi_ai_pipeline_pack.ai-request-prepare",
-        "rumi_ai_pipeline_pack.ai-request-prepare.generate",
-        "rumi_ai_pipeline_pack.ai-request-prepare.stream"
+        "rumi_ai_pipeline_pack.ai-request-prepare"
       ],
-      "revision_digest": "sha256:96fc8b32cf8543c448b07b66c3b47e03e3db113de522debd0f619d0f247b78bc"
+      "revision_digest": "sha256:1ca3405981b27fae8ee2fb10510695855a6317c41c93d22e3fd2aafd6c9c96c7"
     }
   ],
   "functions": [
     {
-      "contract_revision_digest": "sha256:39508895d8bb9105029c246dcefaf063aba8c62f6e498f626d55f03b1d1d063d",
+      "contract_revision_digest": "sha256:49367974156c5735b8e38708a71d87c406f800d9f24d1c291cf4050e1629abe5",
       "id": "rumi_ai_pipeline_pack.ai-pipeline.failover",
       "implementation_digest": "sha256:b1a3104fa7af317958dff3e18a39e4a5f443311ca94d58ae97301d6516303ed4",
       "isolation": "dedicated_process",
       "operations": [
-        "rumi_ai_pipeline_pack.ai-failover-decide",
-        "rumi_ai_pipeline_pack.ai-failover-decide.generate",
-        "rumi_ai_pipeline_pack.ai-failover-decide.stream"
+        "rumi_ai_pipeline_pack.ai-failover-decide"
       ],
       "role": "host_capability_provider"
     },
     {
-      "contract_revision_digest": "sha256:96fc8b32cf8543c448b07b66c3b47e03e3db113de522debd0f619d0f247b78bc",
+      "contract_revision_digest": "sha256:1ca3405981b27fae8ee2fb10510695855a6317c41c93d22e3fd2aafd6c9c96c7",
       "id": "rumi_ai_pipeline_pack.ai-pipeline.prepare",
       "implementation_digest": "sha256:b1a3104fa7af317958dff3e18a39e4a5f443311ca94d58ae97301d6516303ed4",
       "isolation": "dedicated_process",
       "operations": [
-        "rumi_ai_pipeline_pack.ai-request-prepare",
-        "rumi_ai_pipeline_pack.ai-request-prepare.generate",
-        "rumi_ai_pipeline_pack.ai-request-prepare.stream"
+        "rumi_ai_pipeline_pack.ai-request-prepare"
       ],
       "role": "host_capability_provider"
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:8e7776d17dc46d40ce2c87050b44197db5d2003715f764607194462ae29f4df5",
-    "contract_catalog_digest": "sha256:b6f291b595c6eda0207f41084702f800da353b1f9ed20ab91c1efcecc683f436",
-    "source_identity": "sha256:1c4d9ebb82cbe1116f47d205e7ff2283c3760d6cf5f80d2461fee941854e9be5"
+    "artifact_set_digest": "sha256:3d23fcc4730abb18ceda554ce4cb1ac6fc04e5b967e731d4d9e7f659a9e86804",
+    "contract_catalog_digest": "sha256:46a98d81ca16659d3318cc77cf706c76052d506a891bdce3842c230acf99fccc",
+    "source_identity": "sha256:3341257aeaf2a1dc9d9d19bc10cfeee0233287ba579f8ca1c83a0c1f38172474"
   },
   "migration": {
     "compatibility": "read_only",
@@ -91,28 +83,6 @@
       "source_kind": "canonical_v4_contract"
     },
     {
-      "contract_reference": "tobkiri.service.ai.failover.decide.v1",
-      "effect_ceiling": [
-        "capability:ai.failover.decide",
-        "host:brokered-execution"
-      ],
-      "operation_id": "rumi_ai_pipeline_pack.ai-failover-decide.generate",
-      "owner": "rumi_ai_pipeline_pack",
-      "provider_id": "rumi_ai_pipeline_pack.ai-pipeline.failover",
-      "source_kind": "canonical_v4_contract"
-    },
-    {
-      "contract_reference": "tobkiri.service.ai.failover.decide.v1",
-      "effect_ceiling": [
-        "capability:ai.failover.decide",
-        "host:brokered-execution"
-      ],
-      "operation_id": "rumi_ai_pipeline_pack.ai-failover-decide.stream",
-      "owner": "rumi_ai_pipeline_pack",
-      "provider_id": "rumi_ai_pipeline_pack.ai-pipeline.failover",
-      "source_kind": "canonical_v4_contract"
-    },
-    {
       "contract_reference": "tobkiri.service.ai.request.prepare.v1",
       "effect_ceiling": [
         "capability:ai.request.prepare",
@@ -122,32 +92,10 @@
       "owner": "rumi_ai_pipeline_pack",
       "provider_id": "rumi_ai_pipeline_pack.ai-pipeline.prepare",
       "source_kind": "canonical_v4_contract"
-    },
-    {
-      "contract_reference": "tobkiri.service.ai.request.prepare.v1",
-      "effect_ceiling": [
-        "capability:ai.request.prepare",
-        "host:brokered-execution"
-      ],
-      "operation_id": "rumi_ai_pipeline_pack.ai-request-prepare.generate",
-      "owner": "rumi_ai_pipeline_pack",
-      "provider_id": "rumi_ai_pipeline_pack.ai-pipeline.prepare",
-      "source_kind": "canonical_v4_contract"
-    },
-    {
-      "contract_reference": "tobkiri.service.ai.request.prepare.v1",
-      "effect_ceiling": [
-        "capability:ai.request.prepare",
-        "host:brokered-execution"
-      ],
-      "operation_id": "rumi_ai_pipeline_pack.ai-request-prepare.stream",
-      "owner": "rumi_ai_pipeline_pack",
-      "provider_id": "rumi_ai_pipeline_pack.ai-pipeline.prepare",
-      "source_kind": "canonical_v4_contract"
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:8e7776d17dc46d40ce2c87050b44197db5d2003715f764607194462ae29f4df5",
+    "artifact_digest": "sha256:3d23fcc4730abb18ceda554ce4cb1ac6fc04e5b967e731d4d9e7f659a9e86804",
     "display_name": "Rumi AI Pipeline",
     "id": "rumi_ai_pipeline_pack",
     "kind": "host_extension",
@@ -157,7 +105,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:1c4d9ebb82cbe1116f47d205e7ff2283c3760d6cf5f80d2461fee941854e9be5",
+        "digest": "sha256:3341257aeaf2a1dc9d9d19bc10cfeee0233287ba579f8ca1c83a0c1f38172474",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -168,7 +116,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:1c4d9ebb82cbe1116f47d205e7ff2283c3760d6cf5f80d2461fee941854e9be5",
+    "source_digest": "sha256:3341257aeaf2a1dc9d9d19bc10cfeee0233287ba579f8ca1c83a0c1f38172474",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_ai_pipeline_pack"
   },
@@ -176,9 +124,7 @@
     {
       "contract_reference": "tobkiri.service.ai.failover.decide.v1",
       "operations": [
-        "rumi_ai_pipeline_pack.ai-failover-decide",
-        "rumi_ai_pipeline_pack.ai-failover-decide.generate",
-        "rumi_ai_pipeline_pack.ai-failover-decide.stream"
+        "rumi_ai_pipeline_pack.ai-failover-decide"
       ],
       "owner": "rumi_ai_pipeline_pack",
       "provider_id": "rumi_ai_pipeline_pack.ai-pipeline.failover"
@@ -186,9 +132,7 @@
     {
       "contract_reference": "tobkiri.service.ai.request.prepare.v1",
       "operations": [
-        "rumi_ai_pipeline_pack.ai-request-prepare",
-        "rumi_ai_pipeline_pack.ai-request-prepare.generate",
-        "rumi_ai_pipeline_pack.ai-request-prepare.stream"
+        "rumi_ai_pipeline_pack.ai-request-prepare"
       ],
       "owner": "rumi_ai_pipeline_pack",
       "provider_id": "rumi_ai_pipeline_pack.ai-pipeline.prepare"

@@ -1,23 +1,23 @@
 {
-  "artifact_set_digest": "sha256:6776cec2583ef3ffe10c2258b9a5c33c4283642f6495c9846761f3e37a1ccae3",
+  "artifact_set_digest": "sha256:d0f050e5c132dbb0f0136d2cd66e854d05ff92c782d6e41bc92dc5e4971167be",
   "artifacts": [
     {
-      "digest": "sha256:a6caba7e06584a9813a7d8cab62ad555ee2bd4389dd737ec75617fe36ed1f4d2",
+      "digest": "sha256:4a0033efb4ce0cfcf63937089dcd30ace6d474a2b613f34510de31f160028cf3",
       "path": "contracts.v4.json",
       "role": "contract_catalog"
     },
     {
-      "digest": "sha256:62de60365a0208e8b1648cb60239870243b4bd7772d12ccd1ab97b20f1ef4011",
+      "digest": "sha256:a0aa57d3a47ee73d9554031b3024dca25d590f6e41559da31ed9f0132496c3c4",
       "path": "executables.v4.json",
       "role": "sidecar"
     },
     {
-      "digest": "sha256:5e2f74830566e7205145902e53cd755a53dbece1a9fe3539297c5f2eed4beb80",
+      "digest": "sha256:88e4001ab5715da62ae79176887b0e8391a436083d67f018a1b809e0d5c943ef",
       "path": "frontend/contributions/kanban.json",
       "role": "runtime"
     },
     {
-      "digest": "sha256:0bb5a4cd36bb4131de4a9c0f2a9bcfc356e5a96d400cee1d7e585e3ac22d8c37",
+      "digest": "sha256:1c41d56c480933706ac16d832dd859cea89ba8c77ac1e43f31c31007a8c669db",
       "path": "pack.v4.json",
       "role": "canonical_manifest"
     },
@@ -40,8 +40,8 @@
   "index_api_version": "io.tobkiri.pack-artifact-index.v4",
   "integrity_seal": {
     "algorithm": "sha256-canonical-v1",
-    "signed_digest": "sha256:97f20ba261a2fff7e6a8c18e9e188b969357774cfb27c4db959d88969c8eec3c"
+    "signed_digest": "sha256:1461a77332422fa68cbdd1c803a12c8b962c66c52977c51da38459e3891cf5a7"
   },
   "pack_id": "rumi_kanban_surface_pack",
-  "source_identity": "sha256:74e0ccd856ee27de9d8544dcb7303656b4dcecbf88c6406eb8a090afd7215741"
+  "source_identity": "sha256:d783ea83db57761098482907353d48a8f07d8f8eb652998862ea628065bb73ab"
 }

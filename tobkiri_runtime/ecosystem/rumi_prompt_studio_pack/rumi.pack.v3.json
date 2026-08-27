@@ -206,7 +206,7 @@
         },
         "dependencies": {},
         "description": "Authoritative local prompt authoring, versioning, migration, and isolated UI.",
-        "display_name": "Rumi Prompt Studio",
+        "display_name": "Tobkiri Prompt Studio",
         "host_execution": true,
         "metadata": {
           "asset_index": {
@@ -379,7 +379,7 @@
   },
   "pack": {
     "description": "Authoritative local prompt authoring, versioning, migration, and isolated UI.",
-    "display_name": "Rumi Prompt Studio",
+    "display_name": "Tobkiri Prompt Studio",
     "id": "rumi.prompt_studio",
     "kind": "service",
     "version": "1.0.0"

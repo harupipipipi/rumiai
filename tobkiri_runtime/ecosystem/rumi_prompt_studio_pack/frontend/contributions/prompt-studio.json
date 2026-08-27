@@ -1,5 +1,5 @@
 {
-  "version": "rumi.ui.contribution.v1",
+  "version": "tobkiri.ui.contribution.v1",
   "id": "rumi.prompt_studio.route",
   "kind": "route",
   "mode": "isolated",
@@ -11,10 +11,10 @@
   "isolated": {
     "path": "/isolated/packs/rumi_prompt_studio_pack/index.html",
     "rpc_contracts": [
-      "rumi.resource.prompt.studio.v1",
-      "rumi.action.prompt.author.v1",
-      "rumi.action.prompt.version.v1",
-      "rumi.action.prompt.test.v1"
+      "tobkiri.resource.prompt.studio.v1",
+      "tobkiri.action.prompt.author.v1",
+      "tobkiri.action.prompt.version.v1",
+      "tobkiri.action.prompt.test.v1"
     ]
   },
   "localization": {

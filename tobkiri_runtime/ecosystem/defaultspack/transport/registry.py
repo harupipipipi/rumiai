@@ -880,6 +880,7 @@ _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/desktop-system-info", handler_name="_handle_desktop_system_info"),
     HttpRouteSpec("GET", "/", handler_name="_handle_chat_redirect"),
     HttpRouteSpec("GET", "/chat", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/pack-v4/conversation", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/defaultspack", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/pack/defaultspack", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/coding", handler_name="_handle_static"),

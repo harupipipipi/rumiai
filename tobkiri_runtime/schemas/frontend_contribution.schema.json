@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.rumi.local/rumi.ui.contribution.v1.json",
-  "title": "Rumi frontend contribution",
+  "$id": "https://schemas.tobkiri.local/tobkiri.ui.contribution.v1.json",
+  "title": "Tobkiri frontend contribution",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -14,7 +14,7 @@
     "accessibility"
   ],
   "properties": {
-    "version": {"const": "rumi.ui.contribution.v1"},
+    "version": {"enum": ["tobkiri.ui.contribution.v1", "rumi.ui.contribution.v1"]},
     "id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$"},
     "kind": {
       "enum": [
@@ -38,11 +38,11 @@
     "view": {"type": "object"},
     "action_contract": {
       "type": "string",
-      "pattern": "^rumi\\.action\\.[a-z0-9]+(?:[._-][a-z0-9]+)*\\.v[1-9][0-9]*$"
+      "pattern": "^(?:tobkiri|rumi)\\.action\\.[a-z0-9]+(?:[._-][a-z0-9]+)*\\.v[1-9][0-9]*$"
     },
     "data_source_contract": {
       "type": "string",
-      "pattern": "^rumi\\.resource\\.[a-z0-9]+(?:[._-][a-z0-9]+)*\\.v[1-9][0-9]*$"
+      "pattern": "^(?:tobkiri|rumi)\\.resource\\.[a-z0-9]+(?:[._-][a-z0-9]+)*\\.v[1-9][0-9]*$"
     },
     "module": {
       "type": "object",
@@ -51,7 +51,7 @@
       "properties": {
         "path": {"type": "string", "pattern": "^/static/packs/[a-zA-Z0-9._/-]+\\.js$"},
         "export": {"type": "string", "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$"},
-        "content_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+        "content_hash": {"$ref": "#/$defs/sha256Digest"}
       }
     },
     "isolated": {
@@ -62,7 +62,7 @@
         "path": {"type": "string", "pattern": "^/isolated/packs/[a-zA-Z0-9._/-]+$"},
         "rpc_contracts": {
           "type": "array",
-          "items": {"type": "string", "pattern": "^rumi\\.(action|resource)\\."},
+          "items": {"type": "string", "pattern": "^(?:tobkiri|rumi)\\.(action|resource)\\."},
           "uniqueItems": true
         }
       }
@@ -80,6 +80,12 @@
         "keyboard": {"type": "boolean"},
         "live": {"enum": ["off", "polite", "assertive"]}
       }
+    }
+  },
+  "$defs": {
+    "sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
     }
   },
   "allOf": [
@@ -121,4 +127,3 @@
     }
   ]
 }
-

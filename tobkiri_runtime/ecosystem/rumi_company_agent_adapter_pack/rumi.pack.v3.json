@@ -98,7 +98,7 @@
           "rumi_job_action_broker_pack": ">=1.0.0,<2.0.0"
         },
         "description": "Company task projection into conversation and agent job contracts.",
-        "display_name": "Rumi Company Agent Adapter",
+        "display_name": "Tobkiri Company Agent Adapter",
         "host_execution": false,
         "metadata": {
           "authoritative_owner": false,
@@ -162,7 +162,7 @@
   },
   "pack": {
     "description": "Company task projection into conversation and agent job contracts.",
-    "display_name": "Rumi Company Agent Adapter",
+    "display_name": "Tobkiri Company Agent Adapter",
     "id": "rumi.company_agent_adapter",
     "kind": "adapter",
     "version": "1.0.0"

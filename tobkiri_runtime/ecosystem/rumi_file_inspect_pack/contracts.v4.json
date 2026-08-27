@@ -18,27 +18,13 @@
           "operation_id": "rumi_file_inspect_pack.file-inspect",
           "output_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
           "scope_semantics": "host_broker"
-        },
-        {
-          "effect_ceiling": [
-            "capability:file.inspect",
-            "host:brokered-execution"
-          ],
-          "error_schema_digest": "sha256:d2c0d03b1db2ba4a62bc179015423a9ac6a3fdcb9ddb903b830e8768da8fdb44",
-          "idempotency": {
-            "mode": "none"
-          },
-          "input_schema_digest": "sha256:536252f880a79e8ed450c511c710d25d45d74d983153dd178f539727ea65dbca",
-          "operation_id": "rumi_file_inspect_pack.file-inspect.for-media",
-          "output_schema_digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
-          "scope_semantics": "host_broker"
         }
       ],
       "owner": "rumi_file_inspect_pack",
       "provenance": {
         "evidence": [
           {
-            "digest": "sha256:b8f75ee1c64e26e7853a7b0babd0654a3d4b7aeb8f8dcd14addda0490f4dec7b",
+            "digest": "sha256:e299cb7bf3aa207a5af3891cc76553f2d6d825b78fdbb7fd826f81e7b2492a67",
             "path": "schemas/pack_v4_catalog.v1.json",
             "rule_id": "canonical-pack-v4-source-record"
           }
@@ -49,7 +35,7 @@
         "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
         "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
         "schema": "io.tobkiri.provenance.v1",
-        "source_digest": "sha256:b8f75ee1c64e26e7853a7b0babd0654a3d4b7aeb8f8dcd14addda0490f4dec7b",
+        "source_digest": "sha256:e299cb7bf3aa207a5af3891cc76553f2d6d825b78fdbb7fd826f81e7b2492a67",
         "source_kind": "migration",
         "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_file_inspect_pack"
       },
@@ -68,7 +54,7 @@
         ],
         "security": "sensitive"
       },
-      "revision_digest": "sha256:120000de7f447efd8b7973c23cf293a22ec144fe49d8a1eb08c9aea73d30345b",
+      "revision_digest": "sha256:020a5171ab05ff6459c6d5d506281b620ff54418e9482d5e049e9a7bf23280cb",
       "schema_catalog": {
         "sha256:536252f880a79e8ed450c511c710d25d45d74d983153dd178f539727ea65dbca": {
           "additionalProperties": true,
@@ -156,5 +142,5 @@
     }
   ],
   "pack_id": "rumi_file_inspect_pack",
-  "source_identity": "sha256:b8f75ee1c64e26e7853a7b0babd0654a3d4b7aeb8f8dcd14addda0490f4dec7b"
+  "source_identity": "sha256:e299cb7bf3aa207a5af3891cc76553f2d6d825b78fdbb7fd826f81e7b2492a67"
 }

@@ -56,14 +56,27 @@ export function Profile() {
       state={{status: surface.status, stale: surface.stale, error: surface.error}}
       onRetry={() => void refreshAdvanced()}
     >
+      <ProfileCatalogSelector
+        profileSurface={surface}
+        catalogSurface={catalogSurface}
+        packs={packs}
+        packsLoading={packsLoading}
+        loadPacks={loadPacks}
+        onActivated={async () => {
+          await Promise.all([
+            catalogSurface.refresh(true),
+            loadFrontendCatalog(),
+          ]);
+        }}
+      />
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)]">
         <Card>
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <CardTitle>Launcher profile</CardTitle>
-              <Badge variant="warning">source: launcher_local</Badge>
+              <CardTitle>Personal profile</CardTitle>
+              <Badge variant="outline">This device</Badge>
             </div>
-            <CardDescription>These presentation preferences stay in this Launcher and are not runtime authority.</CardDescription>
+            <CardDescription>Your display name, role, and avatar for this Launcher. These do not change the active runtime Profile above.</CardDescription>
           </CardHeader>
           <CardContent>
             <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
@@ -104,7 +117,7 @@ export function Profile() {
                 autoComplete="organization-title"
               />
               <Button type="submit" className="min-h-11 self-start">
-                Save local profile
+                Save personal profile
               </Button>
             </form>
           </CardContent>
@@ -112,8 +125,8 @@ export function Profile() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2"><UserRound className="h-4 w-4" aria-hidden="true" />Runtime profile</CardTitle>
-            <CardDescription>Canonical runtime state is evidence-bound. Runtime Pack closure changes use the staged v4 ceremony below.</CardDescription>
+            <CardTitle className="flex items-center gap-2"><UserRound className="h-4 w-4" aria-hidden="true" />Runtime evidence</CardTitle>
+            <CardDescription>The accepted Profile revision and activation records behind the active selection.</CardDescription>
           </CardHeader>
           <CardContent>
             {surface.data ? (
@@ -126,19 +139,6 @@ export function Profile() {
           </CardContent>
         </Card>
       </div>
-      <ProfileCatalogSelector
-        profileSurface={surface}
-        catalogSurface={catalogSurface}
-        packs={packs}
-        packsLoading={packsLoading}
-        loadPacks={loadPacks}
-        onActivated={async () => {
-          await Promise.all([
-            catalogSurface.refresh(true),
-            loadFrontendCatalog(),
-          ]);
-        }}
-      />
     </AdvancedSurfaceFrame>
   );
 }

@@ -18,7 +18,7 @@ from .pack_artifact_integrity import verify_declared_artifacts
 from .paths import PackLocation, resolve_pack_locations
 from .resolved_profile import ResolvedProfile
 
-CONTRIBUTION_VERSION = "rumi.ui.contribution.v1"
+CONTRIBUTION_VERSION = "tobkiri.ui.contribution.v1"
 _PACK_QUARANTINE_CODES = {
     "frontend_manifest_invalid",
     "frontend_build_identity_missing",
@@ -423,17 +423,31 @@ def _declared_descriptors(
     manifest: Mapping[str, Any], pack_root: Path
 ) -> list[tuple[Path, str]]:
     descriptors: list[tuple[Path, str]] = []
-    resources = manifest.get("resources")
+    is_pack_v4 = manifest.get("pack_api_version") == "io.tobkiri.pack.v4"
+    if is_pack_v4:
+        resources = manifest.get("artifacts")
+        path_field = "path"
+        digest_field = "digest"
+    else:
+        resources = manifest.get("resources")
+        path_field = "id"
+        digest_field = "content_hash"
     if not isinstance(resources, list):
         return descriptors
     for resource in resources:
         if not isinstance(resource, dict):
             continue
-        if resource.get("kind") != "ui.contribution":
-            continue
-        resource_id = str(resource.get("id") or "").strip()
-        content_hash = str(resource.get("content_hash") or "").strip()
+        resource_id = str(resource.get(path_field) or "").strip()
+        content_hash = str(resource.get(digest_field) or "").strip()
         if not resource_id or not content_hash:
+            continue
+        if is_pack_v4:
+            if not (
+                resource_id.startswith("frontend/contributions/")
+                and resource_id.endswith(".json")
+            ):
+                continue
+        elif resource.get("kind") != "ui.contribution":
             continue
         descriptors.append((pack_root / resource_id, content_hash))
     return sorted(descriptors, key=lambda item: item[0].as_posix())

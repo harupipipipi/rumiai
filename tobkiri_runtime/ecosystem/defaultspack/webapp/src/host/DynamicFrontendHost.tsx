@@ -13,13 +13,16 @@ import {
 import type {
   FrontendCapabilityClient,
   FrontendCatalog,
+  Sha256Digest,
   VerifiedFrontendContribution,
 } from "./frontendContracts";
+import { isSha256Digest } from "./frontendContracts";
 import {
   ConversationV4View,
   frontendActionErrorMessage,
   isConversationV4Contribution,
 } from "./ConversationV4View";
+import { normalizeFrontendRoute } from "../lib/frontendRoute";
 
 export { frontendActionErrorMessage } from "./ConversationV4View";
 
@@ -63,12 +66,13 @@ export function synchronizeFrontendHostQuarantine(
 export function contributionsForRoute(
   catalog: FrontendCatalog,
   route: string,
-  activePlanHash: string,
+  activePlanHash: Sha256Digest,
 ): VerifiedFrontendContribution[] {
   if (catalog.plan_hash !== activePlanHash) return [];
+  const normalizedRoute = normalizeFrontendRoute(route);
   return catalog.contributions.filter((item) => (
     item.kind === "route"
-    && item.route === route
+    && normalizeFrontendRoute(item.route ?? "") === normalizedRoute
     && item.resolved_plan_hash === activePlanHash
     && !catalog.quarantined_pack_ids.includes(item.owner_pack_id)
     && !quarantined.has(quarantineKey(item))
@@ -83,7 +87,7 @@ export function DynamicFrontendHost({
 }: {
   catalog: FrontendCatalog;
   route: string;
-  activePlanHash: string;
+  activePlanHash: Sha256Digest;
   capabilities: FrontendCapabilityClient;
 }) {
   useEffect(() => {
@@ -127,7 +131,7 @@ function ContributionView({
 }: {
   item: VerifiedFrontendContribution;
   profileId: string;
-  catalogHash: string;
+  catalogHash: Sha256Digest;
   capabilities: FrontendCapabilityClient;
 }) {
   if (isConversationV4Contribution(item)) {
@@ -167,7 +171,7 @@ function DeclarativeView({
   capabilities,
 }: {
   item: VerifiedFrontendContribution;
-  catalogHash: string;
+  catalogHash: Sha256Digest;
   capabilities: FrontendCapabilityClient;
 }) {
   const view = item.view ?? {};
@@ -235,7 +239,7 @@ function IsolatedView({
 }: {
   item: VerifiedFrontendContribution;
   profileId: string;
-  catalogHash: string;
+  catalogHash: Sha256Digest;
   capabilities: FrontendCapabilityClient;
 }) {
   const frameRef = useRef<HTMLIFrameElement>(null);
@@ -274,7 +278,8 @@ function IsolatedView({
         // frame nonce, and declared contract check above bind this response.
         frame.postMessage(response, ISOLATED_FRAME_RESPONSE_TARGET_ORIGIN);
       };
-      const invoke = request.contractId.startsWith("rumi.action.")
+      const invoke = request.contractId.startsWith("tobkiri.action.")
+        || request.contractId.startsWith("rumi.action.")
         ? capabilities.invokeAction
         : capabilities.readDataSource;
       void invoke({
@@ -435,8 +440,8 @@ function VerifiedBuiltinModule({
 export function isBackendVerifiedBuiltinModule(item: VerifiedFrontendContribution): boolean {
   if (item.mode !== "same_origin_builtin" || !item.module) return false;
   if (typeof window === "undefined") return false;
-  if (!item.build_identity || !item.owner_pack_hash.startsWith("sha256:")) return false;
-  if (!item.descriptor_hash.startsWith("sha256:")) return false;
+  if (!item.build_identity || !isSha256Digest(item.owner_pack_hash)) return false;
+  if (!isSha256Digest(item.descriptor_hash)) return false;
   try {
     const url = new URL(item.module.path, window.location.origin);
     return url.origin === window.location.origin

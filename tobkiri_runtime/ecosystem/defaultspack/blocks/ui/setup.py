@@ -125,6 +125,7 @@ def run(context):
         ),
         ("POST", "/api/ui/select-directory", _lazy("blocks.ui.select_directory"), {}),
         ("GET", "/chat", _static_shell, {}),
+        ("GET", "/pack-v4/conversation", _static_shell, {}),
         ("GET", "/defaultspack", _static_shell, {}),
         ("GET", "/pack/defaultspack", _static_shell, {}),
         ("GET", "/desktops", _static_shell, {}),

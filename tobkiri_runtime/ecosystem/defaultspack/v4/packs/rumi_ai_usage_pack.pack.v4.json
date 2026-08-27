@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:a4392ed29609957ed9aff5ab855e5fa19339ae6af295a19c1c379dbe94ac47f0",
+      "digest": "sha256:85382a5d923e212b772c7801542e470e6d409d1ec8cd1a7aac605b09a4636f03",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
@@ -27,23 +27,19 @@
     {
       "contract_id": "tobkiri.service.ai.usage.cost.v1",
       "operations": [
-        "rumi_ai_usage_pack.ai-usage-cost",
-        "rumi_ai_usage_pack.ai-usage-cost.generate",
-        "rumi_ai_usage_pack.ai-usage-cost.stream"
+        "rumi_ai_usage_pack.ai-usage-cost"
       ],
-      "revision_digest": "sha256:04a8f126370dafe88c38fe8b465b97e666097e515823d55921d98f0c588d68fc"
+      "revision_digest": "sha256:3bdab3d4923051aaf458ed3a023c31afc5730e4da977140ad0263a77369117c5"
     }
   ],
   "functions": [
     {
-      "contract_revision_digest": "sha256:04a8f126370dafe88c38fe8b465b97e666097e515823d55921d98f0c588d68fc",
+      "contract_revision_digest": "sha256:3bdab3d4923051aaf458ed3a023c31afc5730e4da977140ad0263a77369117c5",
       "id": "rumi_ai_usage_pack.ai-usage.cost",
       "implementation_digest": "sha256:16b80027e2859cff8515525ee87e16e4c33a6c222d54168d1f5fa9a145195316",
       "isolation": "dedicated_process",
       "operations": [
-        "rumi_ai_usage_pack.ai-usage-cost",
-        "rumi_ai_usage_pack.ai-usage-cost.generate",
-        "rumi_ai_usage_pack.ai-usage-cost.stream"
+        "rumi_ai_usage_pack.ai-usage-cost"
       ],
       "role": "host_capability_provider"
     },
@@ -59,9 +55,9 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:ed8f91da4b22cae647640fae3952bcf9816006506bdb694774f2c30cef986981",
-    "contract_catalog_digest": "sha256:6c0f9031258f23d5c8d62b057d879f334c35db679094d0217993aa6e3bee43e1",
-    "source_identity": "sha256:e9d186ec3c1c0e99fa368d248a8160bb2f76f618c03e0a2069459c8e8aaad3c5"
+    "artifact_set_digest": "sha256:76d969a7265d948a0d2d209870da164f3b7d1cc9549e41047ccde9e71862e777",
+    "contract_catalog_digest": "sha256:eed1eafbdf30af916dc580018dd5184ee5983643571c9f2de3b8470b7f339d37",
+    "source_identity": "sha256:b90f152501a59f8fbb9d970c7140a540ad9a70090880d87b6ffd09e453aea02f"
   },
   "migration": {
     "compatibility": "read_only",
@@ -96,32 +92,10 @@
       "owner": "rumi_ai_usage_pack",
       "provider_id": "rumi_ai_usage_pack.ai-usage.cost",
       "source_kind": "canonical_v4_contract"
-    },
-    {
-      "contract_reference": "tobkiri.service.ai.usage.cost.v1",
-      "effect_ceiling": [
-        "capability:ai.usage.cost",
-        "host:brokered-execution"
-      ],
-      "operation_id": "rumi_ai_usage_pack.ai-usage-cost.generate",
-      "owner": "rumi_ai_usage_pack",
-      "provider_id": "rumi_ai_usage_pack.ai-usage.cost",
-      "source_kind": "canonical_v4_contract"
-    },
-    {
-      "contract_reference": "tobkiri.service.ai.usage.cost.v1",
-      "effect_ceiling": [
-        "capability:ai.usage.cost",
-        "host:brokered-execution"
-      ],
-      "operation_id": "rumi_ai_usage_pack.ai-usage-cost.stream",
-      "owner": "rumi_ai_usage_pack",
-      "provider_id": "rumi_ai_usage_pack.ai-usage.cost",
-      "source_kind": "canonical_v4_contract"
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:ed8f91da4b22cae647640fae3952bcf9816006506bdb694774f2c30cef986981",
+    "artifact_digest": "sha256:76d969a7265d948a0d2d209870da164f3b7d1cc9549e41047ccde9e71862e777",
     "display_name": "Rumi AI Usage",
     "id": "rumi_ai_usage_pack",
     "kind": "host_extension",
@@ -131,7 +105,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:e9d186ec3c1c0e99fa368d248a8160bb2f76f618c03e0a2069459c8e8aaad3c5",
+        "digest": "sha256:b90f152501a59f8fbb9d970c7140a540ad9a70090880d87b6ffd09e453aea02f",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -142,7 +116,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:e9d186ec3c1c0e99fa368d248a8160bb2f76f618c03e0a2069459c8e8aaad3c5",
+    "source_digest": "sha256:b90f152501a59f8fbb9d970c7140a540ad9a70090880d87b6ffd09e453aea02f",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_ai_usage_pack"
   },
@@ -150,9 +124,7 @@
     {
       "contract_reference": "tobkiri.service.ai.usage.cost.v1",
       "operations": [
-        "rumi_ai_usage_pack.ai-usage-cost",
-        "rumi_ai_usage_pack.ai-usage-cost.generate",
-        "rumi_ai_usage_pack.ai-usage-cost.stream"
+        "rumi_ai_usage_pack.ai-usage-cost"
       ],
       "owner": "rumi_ai_usage_pack",
       "provider_id": "rumi_ai_usage_pack.ai-usage.cost"

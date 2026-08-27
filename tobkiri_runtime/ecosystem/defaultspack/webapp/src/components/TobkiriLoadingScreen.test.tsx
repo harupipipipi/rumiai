@@ -68,7 +68,7 @@ test("keeps failures inside the startup boundary and offers a retry", () => {
 
 test("uses the branded loading screen while the dynamic interface catalog loads", () => {
   const markup = renderToStaticMarkup(
-    <HostBootstrap route="/chat" fallback={<div>Fallback</div>} />,
+    <HostBootstrap route="/pack-v4/conversation" fallback={<div>Fallback</div>} />,
   );
 
   assert.match(markup, /data-tobkiri-loading-screen=""/);
@@ -76,7 +76,23 @@ test("uses the branded loading screen while the dynamic interface catalog loads"
   assert.doesNotMatch(markup, /Loading selected interface/);
 });
 
-test("keeps /chat on the scoped Pack v4 unavailable screen instead of the legacy fallback", () => {
+test("keeps the canonical Pack v4 conversation on its scoped unavailable screen", () => {
+  const markup = renderToStaticMarkup(
+    <HostBootstrapFallback
+      route="/pack-v4/conversation/"
+      reason="The active profile does not provide a Pack v4 conversation."
+      onRetry={() => undefined}
+      fallback={<div data-legacy-chat-app="">Legacy ChatApp</div>}
+    />,
+  );
+
+  assert.match(markup, /data-conversation-surface="v4-unavailable"/);
+  assert.match(markup, /Defaults Profile Conversation is unavailable/);
+  assert.match(markup, />Retry</);
+  assert.doesNotMatch(markup, /Legacy ChatApp|data-legacy-chat-app/);
+});
+
+test("keeps legacy /chat on the full Defaults App fallback", () => {
   const markup = renderToStaticMarkup(
     <HostBootstrapFallback
       route="/chat"
@@ -86,10 +102,8 @@ test("keeps /chat on the scoped Pack v4 unavailable screen instead of the legacy
     />,
   );
 
-  assert.match(markup, /data-conversation-surface="v4-unavailable"/);
-  assert.match(markup, /Tobkiri Conversation is unavailable/);
-  assert.match(markup, />Retry</);
-  assert.doesNotMatch(markup, /Legacy ChatApp|data-legacy-chat-app/);
+  assert.match(markup, /Legacy ChatApp/);
+  assert.doesNotMatch(markup, /v4-unavailable/);
 });
 
 test("vendors the exact local animation shipped by Tobkiri Launcher", async () => {

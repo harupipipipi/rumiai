@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import core_runtime.frontend_host as frontend_host_module
-from core_runtime.frontend_host import FrontendHostRegistry
+from core_runtime.frontend_host import FrontendHostRegistry, _declared_descriptors
 from core_runtime.pack_artifact_integrity import write_host_install_record
 from core_runtime.resolved_profile import ResolutionInput, resolve_profile
 
@@ -96,6 +96,30 @@ def _route(
         "view": {"type": "status_card", "title": contribution_id},
         "accessibility": {"name": contribution_id, "keyboard": True},
     }
+
+
+def test_v4_frontend_artifacts_are_declared_contributions() -> None:
+    """Recognize canonical v4 contribution artifacts without trusting kind labels."""
+
+    root = Path("/sealed/pack")
+    assert _declared_descriptors(
+        {
+            "pack_api_version": "io.tobkiri.pack.v4",
+            "artifacts": [
+                {
+                    "path": "frontend/contributions/route.json",
+                    "digest": _sha256(b"route"),
+                    "kind": "executable",
+                },
+                {
+                    "path": "runtime/service.py",
+                    "digest": _sha256(b"service"),
+                    "kind": "executable",
+                },
+            ],
+        },
+        root,
+    ) == [(root / "frontend/contributions/route.json", _sha256(b"route"))]
 
 
 def _plan(

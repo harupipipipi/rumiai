@@ -37,7 +37,7 @@
           "rumi_kanban_state_store_pack": ">=1.0.0,<2.0.0"
         },
         "description": "Removable read-only Kanban content projection.",
-        "display_name": "Rumi Kanban Surface",
+        "display_name": "Tobkiri Kanban Surface",
         "host_execution": false,
         "metadata": {
           "authoritative_owner": false,
@@ -107,7 +107,7 @@
   },
   "pack": {
     "description": "Removable read-only Kanban content projection.",
-    "display_name": "Rumi Kanban Surface",
+    "display_name": "Tobkiri Kanban Surface",
     "id": "rumi.kanban_surface",
     "kind": "content",
     "version": "1.0.0"
