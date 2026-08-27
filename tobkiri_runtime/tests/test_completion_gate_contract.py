@@ -494,6 +494,9 @@ def test_agent_http_blocks_attach_status_and_resume_completion_gate(
         def __init__(self) -> None:
             self.entries: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
 
+        def get(self, _key: str) -> None:
+            return None
+
         def register(
             self, key: str, value: dict[str, Any], meta: dict[str, Any] | None = None
         ) -> None:
@@ -511,7 +514,7 @@ def test_agent_http_blocks_attach_status_and_resume_completion_gate(
     assert route["path_inject"] == {"id": "execution_id"}
     missing = route["handler"]({"execution_id": "missing"}, {})
     assert missing["status"] == "error"
-    assert missing["error"] == "execution not found"
+    assert missing["error"]["message"] == "execution not found"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="soon imports fcntl in frontend settings")
