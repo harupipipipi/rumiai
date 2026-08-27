@@ -7994,6 +7994,7 @@
       "tobkiri_runtime/ecosystem/search_home_pack/ecosystem.json",
       "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/ecosystem.json",
       "tobkiri_runtime/ecosystem/tobkiri_workflow_pack/ecosystem.json",
+      "tobkiri_runtime/tobkiri_protocol/README.md",
       "tobkiri_runtime/tobkiri_protocol/__init__.py",
       "tobkiri_runtime/tobkiri_protocol/canonical.py",
       "tobkiri_runtime/tobkiri_protocol/composition.py",
@@ -8015,7 +8016,6 @@
       "tobkiri_runtime/tobkiri_protocol/platform_paths.py",
       "tobkiri_runtime/tobkiri_protocol/profile_scope.py",
       "tobkiri_runtime/tobkiri_protocol/provenance.py",
-      "tobkiri_runtime/tobkiri_protocol/README.md",
       "tobkiri_runtime/tobkiri_protocol/scanners.py",
       "tobkiri_runtime/tobkiri_protocol/schema_hashes.json",
       "tobkiri_runtime/tobkiri_protocol/schemas/activation_record_v1.schema.json",
@@ -18410,7 +18410,7 @@
     ]
   },
   "repository": {
-    "commit": "29e4087d604705cca77785a04ddd9254b287aa95",
+    "commit": "db40448b8d3382343126430900ccd7a0d00d8668",
     "tree_digest": "d4525e61c9825f921138e751051a0b5d41b442ad3e2d025f4ffe0a38f4900d0d"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
